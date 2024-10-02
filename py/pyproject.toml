@@ -1,0 +1,10 @@
+[project]
+name = "lol"
+description = "one venv to rule them all"
+version = "0.0.0"
+requires-python = "==3.12"
+dependencies = [
+    "yt-dlp",
+    "gallery-dl",
+    "spotdl",
+]
