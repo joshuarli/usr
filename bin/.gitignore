@@ -15,3 +15,8 @@ srv
 syncthing
 uv
 zstd
+
+ffmpeg
+ffprobe
+git
+btm
