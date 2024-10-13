@@ -7,4 +7,9 @@ dependencies = [
     "yt-dlp",
     "gallery-dl",
     "spotdl",
+    "mangadex-downloader",
+    # "mangadex-downloader@git+https://github.com/joshuarli/mangadex-dl@v3.0.0",
 ]
+
+[tool.uv.sources]
+mangadex-downloader = { path = "../src/mangadex-dl", editable = true }
