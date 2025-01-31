@@ -1,5 +1,10 @@
 HandBrakeCLI
 delta
+dua
+fd
+
+# btm
+htop
 
 # duf
 du
@@ -7,6 +12,7 @@ du
 fastmod
 micro
 oxipng
+jpegoptim
 rg
 rga
 rga-preproc
