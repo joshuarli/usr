@@ -1,9 +1,23 @@
 tmux
 detox
 editorconfig
+just
 fish
 git
-luajit-openresty
-mpv
+tree
 pstree
 wakeonlan
+
+pkgconf
+
+jpegoptim
+handbrake
+
+# ocrmypdf
+
+# hyperfine
+# shellcheck
+# rustup
+
+# mpv
+# luajit-openresty
