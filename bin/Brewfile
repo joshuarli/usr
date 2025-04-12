@@ -1,17 +1,16 @@
-tmux
-detox
-editorconfig
-just
-fish
-git
-tree
-pstree
-wakeonlan
+brew "tmux"
+brew "detox"
+brew "editorconfig"
+brew "fish"
+brew "git"
+brew "tree"
+brew "pstree"
+brew "wakeonlan"
 
-pkgconf
+brew "pkgconf"
 
-jpegoptim
-handbrake
+brew "jpegoptim"
+brew "handbrake"
 
 # ocrmypdf
 
