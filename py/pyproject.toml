@@ -2,14 +2,15 @@
 name = "lol"
 description = "one venv to rule them all"
 version = "0.0.0"
-requires-python = "==3.12.6"
+requires-python = "==3.13.3"
 dependencies = [
     "yt-dlp",
-    "gallery-dl",
-    "spotdl",
-    "mangadex-downloader",
+    "instaloader",
+    "browser-cookie3",
+    # "spotdl",
+    # "mangadex-downloader",
     # "mangadex-downloader@git+https://github.com/joshuarli/mangadex-dl@v3.0.0",
 ]
 
-[tool.uv.sources]
-mangadex-downloader = { path = "../src/mangadex-dl", editable = true }
+# [tool.uv.sources]
+# mangadex-downloader = { path = "../src/mangadex-dl", editable = true }

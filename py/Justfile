@@ -1,0 +1,4 @@
+# --no-cache: ssd use is precious on macos
+
+sync:
+  uv sync --no-cache --upgrade --managed-python --no-build --compile-bytecode
