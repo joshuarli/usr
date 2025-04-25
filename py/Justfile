@@ -1,4 +1,5 @@
 # --no-cache: ssd use is precious on macos
 
 sync:
+  # git -C ../src/yt-dlp pull origin master
   ./uv sync --no-cache --upgrade --managed-python --no-build --compile-bytecode
