@@ -4,14 +4,14 @@ description = "one venv to rule them all"
 version = "0.0.0"
 requires-python = "==3.13.3"
 dependencies = [
-    "pip",
-    # "yt-dlp",
+    "yt-dlp",
     "instaloader",
-    "browser-cookie3",
-    # "spotdl",
+    "browser-cookie3",  # for instaloader
+    "spotdl",
     # "mangadex-downloader",
 ]
 
 [tool.uv.sources]
-# yt-dlp = { path = "../src/yt-dlp", editable = true }
+yt-dlp = { path = "../src/yt-dlp", editable = true }
+instaloader = { path = "../src/instaloader", editable = true }
 # mangadex-downloader = { path = "../src/mangadex-dl", editable = true }
