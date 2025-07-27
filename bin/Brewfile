@@ -6,6 +6,7 @@ brew "git"
 brew "tree"
 brew "pstree"
 brew "wakeonlan"
+brew "smartmontools"
 
 brew "pkgconf"
 
