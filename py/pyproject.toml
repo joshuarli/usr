@@ -8,10 +8,11 @@ dependencies = [
     "instaloader",
     "browser-cookie3",  # for instaloader
     "spotdl",
-    # "mangadex-downloader",
+    "beets[fetchart]",
+    "mangadex-downloader",
 ]
 
 [tool.uv.sources]
 yt-dlp = { path = "../src/yt-dlp", editable = true }
 instaloader = { path = "../src/instaloader", editable = true }
-# mangadex-downloader = { path = "../src/mangadex-dl", editable = true }
+mangadex-downloader = { path = "../src/mangadex-downloader", editable = true }
