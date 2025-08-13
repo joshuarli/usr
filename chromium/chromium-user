@@ -1,0 +1,116 @@
+#!/bin/sh
+
+echo "hmm this clears all cookies on exit lol"
+
+exit
+
+exec /Applications/Chromium.app/Contents/MacOS/Chromium \
+--user-data-dir=/Users/josh/usr/chromium/profile-user  \
+--no-first-run \
+--load-extension=\
+/Users/josh/usr/chromium/extensions/SingleFile-MV3-main,\
+/Users/josh/usr/chromium/extensions/uBOLite_2025.728.1406 \
+\
+# consistent headless behavior
+# --headless=new \
+# --disable-gpu \
+# --disable-software-rasterizer \
+\
+# disabling security
+# --no-sandbox \
+# --disable-web-security \
+# --disable-site-isolation-trials \
+# --disable-features=IsolateOrigins,site-per-process \
+# --disable-client-side-phishing-detection \
+--disable-component-update \
+--allow-running-insecure-content \
+# --ignore-certificate-errors \
+\
+# no background workers
+--disable-background-networking \
+--disable-background-timer-throttling \
+--disable-renderer-backgrounding \
+--disable-backgrounding-occluded-windows \
+\
+# google
+--disable-gcm-registration \
+--disable-gcm-channel \
+--disable-google-apis \
+\
+# audio and more
+--disable-speech-api \
+--disable-remote-playback-api \
+--disable-battery-sensor \
+--disable-web-bluetooth \
+--disable-webrtc \
+--disable-device-orientation \
+--disable-device-motion \
+--disable-web-share \
+--disable-notifications \
+--disable-file-system \
+--disable-geolocation \
+--disable-gamepad \
+--disable-hid \
+--disable-serial \
+--disable-webusb \
+--disable-audio-input \
+--disable-audio-output \
+--disable-webaudio \
+# --disable-features=WASAPIRawAudioCapture \
+\
+# unnecessary UX
+--disable-search-engine-choice-screen \
+--no-default-browser-check \
+--disable-infobars \
+--disable-translate \
+--disable-save-password-bubble \
+--disable-notifications \
+--use-mock-keychain \
+--disable-password-manager-reauthentication \
+--disable-autofill-keyboard-accessory-view \
+\
+# logging and telemetry
+--disable-crash-reporter \
+--disable-breakpad \
+--disable-crashpad-for-testing \
+--disable-component-update \
+--disable-client-side-phishing-detection \
+--disable-default-apps \
+# --disable-features=MetricsService,NetworkErrorLogging,Reporting \
+--disable-hang-monitor \
+--disable-crashpad-handler \
+--metrics-recording-only \
+--disable-metrics-upload \
+\
+# profile sync
+--disable-sync \
+--disable-sync-app-settings \
+--disable-sync-apps \
+--disable-sync-autofill \
+--disable-sync-autofill-profile \
+--disable-sync-bookmarks \
+--disable-sync-dictionary \
+--disable-sync-extension-settings \
+--disable-sync-extensions \
+--disable-sync-history \
+--disable-sync-passwords \
+--disable-sync-synced-notifications \
+--disable-sync-tabs \
+\
+# screenshots
+--hide-scrollbars \
+\
+# misc
+--disable-field-trial-config \
+--disable-ipc-flooding-protection \
+--autoplay-policy=user-required \
+--disable-prompt-on-repost \
+--disable-pdf-extension \
+--disable-smooth-scrolling \
+\
+--disable-features=IsolateOrigins,site-per-process,WASAPIRawAudioCapture,MetricsService,NetworkErrorLogging,Reporting,OverlayScrollbar,TouchpadAndWheelScrollLatching,DialogBeforeUnload
+
+# automation
+# --disable-popup-blocking
+
+# --single-process very slow and unstable
