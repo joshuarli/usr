@@ -1,23 +1,26 @@
-brew "tmux"
-brew "detox"
-brew "editorconfig"
 brew "fish"
-brew "git"
+brew "tmux"
+brew "wakeonlan"
+
+brew "editorconfig"
+
 brew "tree"
 brew "pstree"
-brew "wakeonlan"
+brew "detox"
+
 brew "smartmontools"
+# brew "f3"
 
-brew "pkgconf"
+brew "dua-cli"
+brew "hyperfine"
+# brew "jq"
+# brew "yq"
 
+# brew "darktable"
+# brew "handbrake"
 brew "jpegoptim"
-brew "handbrake"
+brew "pngquant"
+# brew "graphicsmagick"
 
-# ocrmypdf
-
-# hyperfine
-# shellcheck
-# rustup
-
-# mpv
-# luajit-openresty
+# brew "docker"
+# brew "dive"
