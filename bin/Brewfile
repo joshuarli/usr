@@ -1,3 +1,5 @@
+# ~/usr/bin/git from cosmopolitan cosmos-4.0.2
+
 brew "fish"
 brew "tmux"
 brew "wakeonlan"
