@@ -3,15 +3,17 @@ brew "tmux"
 brew "wakeonlan"
 
 brew "editorconfig"
+brew "detox"
 
 brew "tree"
 brew "pstree"
-brew "detox"
 
 brew "smartmontools"
 # brew "f3"
 
+brew "duf"
 brew "dua-cli"
+brew "ripgrep"
 brew "hyperfine"
 # brew "jq"
 # brew "yq"
@@ -19,7 +21,8 @@ brew "hyperfine"
 # brew "darktable"
 # brew "handbrake"
 brew "jpegoptim"
-brew "pngquant"
+brew "oxipng"
+# brew "pngquant"
 # brew "graphicsmagick"
 
 # brew "docker"

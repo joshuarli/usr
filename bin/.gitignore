@@ -1,36 +1,15 @@
-HandBrakeCLI
 delta
-dua
-fd
+micro
 
-# btm
-htop
-
-# duf
-du
+srv
 
 fastmod
-micro
-oxipng
-jpegoptim
 just
-rg
-rga
-rga-preproc
-scc
-srv
+
 syncthing
-uv
-zstd
 
+# https://github.com/eugeneware/ffmpeg-static
 ffmpeg
-ffprobe
-git
-btm
 
-yt-dlp
+# for yt-dlp
 deno
-
-gallery-dl
-
-beet
