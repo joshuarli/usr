@@ -1,17 +1,17 @@
-HandBrakeCLI
 delta
+micro
 
-# duf
-du
+srv
 
 fastmod
-micro
-oxipng
-rg
-rga
-rga-preproc
-scc
-srv
+just
+
 syncthing
-uv
-zstd
+
+# https://github.com/eugeneware/ffmpeg-static
+ffmpeg
+
+# for yt-dlp
+deno
+
+wol

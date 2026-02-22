@@ -1,0 +1,6 @@
+sync: yt-dlp
+  @# --no-cache: ssd use is precious on macos
+  ./uv sync --no-cache --upgrade --managed-python --compile-bytecode
+
+yt-dlp:
+  git -C ../src/yt-dlp pull origin master

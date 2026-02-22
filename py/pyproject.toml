@@ -2,9 +2,14 @@
 name = "lol"
 description = "one venv to rule them all"
 version = "0.0.0"
-requires-python = "==3.12.6"
+requires-python = "==3.13.3"
 dependencies = [
     "yt-dlp",
-    "gallery-dl",
+    "instaloader",
+    "browser-cookie3",  # for instaloader
     "spotdl",
+    "beets[fetchart]",
 ]
+
+[tool.uv.sources]
+yt-dlp = { path = "../src/yt-dlp", editable = true }
