@@ -23,6 +23,7 @@
 #   - iCloud: mail agent, Photos sync (Drive + Keychain preserved)
 #   - Mail: maild, mail extensions, iCloud mail agent
 #   - Safari browser: history, bookmarks sync, notifications, web inspector
+#   - App Store: storefront, commerce, StoreKit, update notifications
 #   - Focus/DND: donotdisturbd
 #   - Accessibility: motion tracking, hearing, voice banking
 #   - Misc: Time Machine, translation, avatars/Memoji, content caching,
@@ -44,7 +45,6 @@
 #   - Text input (IMK, keyboard services, spell check)
 #   - Disk management, APFS, file systems
 #   - Login/auth: loginwindow, SecurityAgent, opendirectoryd
-#   - App Store (downloads, updates)
 #   - iCloud Drive (bird, cloudd, FileProvider, nsurlsessiond)
 #   - iCloud Keychain / Apple Passwords (swcd, accountsd, akd, autofill)
 #   - Calendar.app (calaccessd)
@@ -384,6 +384,16 @@ for s in \
   com.apple.webinspectord \
 ; do disable_user "$s"; done
 
+section "App Store"
+for s in \
+  com.apple.appstoreagent \
+  com.apple.appstorecomponentsd \
+  com.apple.commerce \
+  com.apple.storekitagent \
+  com.apple.storeassetd \
+  com.apple.SoftwareUpdateNotificationManager \
+; do disable_user "$s"; done
+
 section "Focus & Misc"
 for s in \
   com.apple.donotdisturbd \
@@ -416,6 +426,11 @@ for s in \
   com.apple.analyticsd \
   com.apple.wifianalyticsd \
   com.apple.triald.system \
+; do disable_system "$s"; done
+
+section "System — App Store"
+for s in \
+  com.apple.appstored \
 ; do disable_system "$s"; done
 
 section "System — Unused Services"
@@ -488,6 +503,25 @@ else
   defaults write com.apple.lookup.shared LookupSuggestionsDisabled -bool true
   echo "  Siri fully disabled (assistant, menu bar, voice trigger)"
   echo "  Spotlight suggestions disabled"
+fi
+
+section "App Store Preferences"
+if $DRY_RUN; then
+  echo "  would disable App Store auto-check, auto-download, auto-update"
+elif $REVERT; then
+  defaults delete com.apple.commerce AutoUpdate 2>/dev/null || true
+  defaults delete com.apple.commerce AutoUpdateRestartRequired 2>/dev/null || true
+  defaults delete com.apple.SoftwareUpdate AutomaticCheckEnabled 2>/dev/null || true
+  defaults delete com.apple.SoftwareUpdate AutomaticDownload 2>/dev/null || true
+  echo "  App Store preferences restored to defaults"
+else
+  # Disable App Store auto-update
+  defaults write com.apple.commerce AutoUpdate -bool false
+  defaults write com.apple.commerce AutoUpdateRestartRequired -bool false
+  # Disable automatic update checks and downloads
+  defaults write com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
+  defaults write com.apple.SoftwareUpdate AutomaticDownload -bool false
+  echo "  App Store auto-check, auto-download, auto-update disabled"
 fi
 
 # ============================================================================
