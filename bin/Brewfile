@@ -20,3 +20,6 @@ brew "jq"
 # brew "darktable"
 # brew "handbrake"
 # brew "graphicsmagick"
+
+brew "bun"
+brew "rustup"
