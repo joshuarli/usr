@@ -19,6 +19,7 @@ brew "yq"
 brew "ast-grep"
 brew "watchexec"
 brew "eza"
+brew "jaq"
 
 brew "shellcheck"
 

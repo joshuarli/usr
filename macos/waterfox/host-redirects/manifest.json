@@ -1,0 +1,15 @@
+{
+  "manifest_version": 2,
+  "name": "Host Redirects",
+  "version": "1.0",
+  "browser_specific_settings": {
+    "gecko": { "id": "host-redirects@local" }
+  },
+  "permissions": [
+    "webRequest",
+    "webRequestBlocking",
+    "*://www.reddit.com/*",
+    "*://new.reddit.com/*"
+  ],
+  "background": { "scripts": ["background.js"] }
+}

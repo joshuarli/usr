@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Options Page :: Allow Right-Click</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" type="text/css" href="index.css">
+  <link rel="icon" type="image/x-icon" href="/data/icons/48.png">
+</head>
+<body>
+  <p>
+    <a data-href="faq8" target="_blank">Automatically activate</a> the extension on the following hostnames. If the box is disabled, use the "Allow Host Permission" button to grant the permission.
+  </p>
+  <textarea id="whitelist" rows="12" placeholder="Comma-separated list of hostnames. Supported Formats:
+
+example.com
+www.example.com
+http://example.com
+*.example.com
+*://*.example.com/*
+" disabled></textarea>
+
+  <p>
+    <input type="button" id="hostaccess-add" value="Allow Host Permission"/>
+    <input type="button" id="hostaccess-remove" value="Remove Host Permission"/>
+    <div class="note">Allow the extension to use the "host" permission to monitor and inject unblocker script automatically, and to unblock the right-click access on cross-origin frames.</div>
+  </p>
+  <p>
+    <input type="button" id="support" value="Support Development">
+    <input type="button" id="reset" value="Factory Reset"/>
+  </p>
+  <p class="table">
+    <input type="checkbox" id="faqs">
+    <label for="faqs">Open the FAQs page after updates to get notified of the new changes.</label>
+  </p>
+  <p>
+    <input type="button" id="home" value="Homepage"/>
+    <input type="button" id="save" value="Save Options"/>
+    <span id="toast"></span>
+  </p>
+  <script type="text/javascript" src="index.js"></script>
+</body>
+</html>
