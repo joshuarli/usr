@@ -1,15 +1,15 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/dash
+set -eu
 
-info() { printf '\e[1;32m==> \e[0m%s\n' "$*"; }
-warn() { printf '\e[1;33mwarn:\e[0m %s\n' "$*"; }
-die()  { printf '\e[1;31merr:\e[0m %s\n' "$*" >&2; exit 1; }
+info() { printf '\033[1;32m==> \033[0m%s\n' "$*"; }
+warn() { printf '\033[1;33mwarn:\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31merr:\033[0m %s\n' "$*" >&2; exit 1; }
 
 FIREFOX_DIR="$HOME/Library/Application Support/Waterfox"
 PROFILES_INI="$FIREFOX_DIR/profiles.ini"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-[[ -f "$PROFILES_INI" ]] || die "profiles.ini not found — is Firefox installed?"
+[ -f "$PROFILES_INI" ] || die "profiles.ini not found — is Firefox installed?"
 
 # ── Detect default profile ─────────────────────────────────────────────────────
 # Firefox 67+: [Install*] section has the authoritative default
@@ -20,7 +20,7 @@ DEFAULT_PATH=$(awk '
 ' "$PROFILES_INI")
 
 # Fallback: [Profile*] section with Default=1
-if [[ -z "$DEFAULT_PATH" ]]; then
+if [ -z "$DEFAULT_PATH" ]; then
     DEFAULT_PATH=$(awk '
         /^\[Profile/ { in_p=1; path=""; rel=1; def=0; next }
         /^\[/        { if (in_p && def) { print path; exit } in_p=0 }
@@ -31,15 +31,14 @@ if [[ -z "$DEFAULT_PATH" ]]; then
     ' "$PROFILES_INI")
 fi
 
-[[ -z "$DEFAULT_PATH" ]] && die "Could not detect default Firefox profile"
+[ -z "$DEFAULT_PATH" ] && die "Could not detect default Firefox profile"
 
-if [[ "$DEFAULT_PATH" = /* ]]; then
-    PROFILE_DIR="$DEFAULT_PATH"
-else
-    PROFILE_DIR="$FIREFOX_DIR/$DEFAULT_PATH"
-fi
+case "$DEFAULT_PATH" in
+    /*) PROFILE_DIR="$DEFAULT_PATH" ;;
+    *)  PROFILE_DIR="$FIREFOX_DIR/$DEFAULT_PATH" ;;
+esac
 
-[[ -d "$PROFILE_DIR" ]] || die "Profile directory does not exist: $PROFILE_DIR"
+[ -d "$PROFILE_DIR" ] || die "Profile directory does not exist: $PROFILE_DIR"
 info "Profile: $PROFILE_DIR"
 
 # ── Warn if Firefox is running ─────────────────────────────────────────────────
@@ -49,7 +48,7 @@ fi
 
 # ── Back up existing user.js if present ───────────────────────────────────────
 USER_JS="$PROFILE_DIR/user.js"
-if [[ -f "$USER_JS" ]]; then
+if [ -f "$USER_JS" ]; then
     BACKUP="${USER_JS}.bak.$(date +%Y%m%d-%H%M%S)"
     cp "$USER_JS" "$BACKUP"
     info "Backed up existing user.js → $BACKUP"
@@ -66,10 +65,10 @@ info "Writing $USER_JS"
 
 # ── Install extensions ─────────────────────────────────────────────────────
 install_ext() {
-    local name="$1" ext_id="$2"
+    _ext_name="$1" _ext_id="$2"
     mkdir -p "$PROFILE_DIR/extensions"
-    (cd "$SCRIPT_DIR/$name" && zip -r -q -FS "$PROFILE_DIR/extensions/$ext_id.xpi" .)
-    info "Installed extension: $name"
+    (cd "$SCRIPT_DIR/$_ext_name" && zip -r -q -FS "$PROFILE_DIR/extensions/$_ext_id.xpi" .)
+    info "Installed extension: $_ext_name"
 }
 
 install_ext "host-redirects" "host-redirects@local"

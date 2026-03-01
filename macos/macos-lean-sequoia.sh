@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/dash
 # ============================================================================
 # macos-lean-sequoia.sh — Make macOS 15.7 (Sequoia) lean
 # ============================================================================
@@ -72,12 +72,12 @@
 #         sudo launchctl print-disabled system
 # ============================================================================
 
-set -uo pipefail
+set -u
 
 DRY_RUN=false
 REVERT=false
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --revert)  REVERT=true; shift ;;
@@ -109,7 +109,7 @@ fi
 # --- Helpers ---
 
 disable_user() {
-  local label=$1
+  label=$1
   if $DRY_RUN; then
     echo "  ${label}"
   elif $REVERT; then
@@ -123,7 +123,7 @@ disable_user() {
 }
 
 disable_system() {
-  local label=$1
+  label=$1
   if $DRY_RUN; then
     echo "  ${label}"
   elif $REVERT; then
@@ -141,8 +141,8 @@ section() { echo ""; echo "=== $1 ==="; }
 VERIFY_FAIL=0
 
 ensure_user() {
-  local label=$1
-  local desc=$2
+  label=$1
+  desc=$2
   if $DRY_RUN; then
     echo "  --  ${desc} (${label})"
     return
@@ -151,17 +151,17 @@ ensure_user() {
   if ! $REVERT; then
     launchctl enable "gui/${UID_NUM}/${label}" 2>/dev/null
   fi
-  if launchctl print "gui/${UID_NUM}/${label}" &>/dev/null; then
+  if launchctl print "gui/${UID_NUM}/${label}" >/dev/null 2>&1; then
     echo "  OK  ${desc}"
   else
     echo "  FAIL ${desc} — not loaded (${label})"
-    ((VERIFY_FAIL++)) || true
+    VERIFY_FAIL=$((VERIFY_FAIL + 1))
   fi
 }
 
 ensure_system() {
-  local label=$1
-  local desc=$2
+  label=$1
+  desc=$2
   if $DRY_RUN; then
     echo "  --  ${desc} (${label})"
     return
@@ -169,11 +169,11 @@ ensure_system() {
   if ! $REVERT; then
     sudo launchctl enable "system/${label}" 2>/dev/null
   fi
-  if sudo launchctl print "system/${label}" &>/dev/null; then
+  if sudo launchctl print "system/${label}" >/dev/null 2>&1; then
     echo "  OK  ${desc}"
   else
     echo "  FAIL ${desc} — not loaded (${label})"
-    ((VERIFY_FAIL++)) || true
+    VERIFY_FAIL=$((VERIFY_FAIL + 1))
   fi
 }
 
@@ -417,9 +417,7 @@ for s in \
 # ============================================================================
 
 section "System — Siri"
-for s in \
-  com.apple.corespeechd.system \
-; do disable_system "$s"; done
+disable_system com.apple.corespeechd.system
 
 section "System — Analytics"
 for s in \
@@ -429,9 +427,7 @@ for s in \
 ; do disable_system "$s"; done
 
 section "System — App Store"
-for s in \
-  com.apple.appstored \
-; do disable_system "$s"; done
+disable_system com.apple.appstored
 
 section "System — Unused Services"
 for s in \
@@ -693,7 +689,7 @@ if $DRY_RUN; then
 elif $REVERT; then
   echo "All services re-enabled. Reboot required."
 else
-  if [[ $VERIFY_FAIL -gt 0 ]]; then
+  if [ "$VERIFY_FAIL" -gt 0 ]; then
     echo "WARNING: ${VERIFY_FAIL} preserved service(s) not loaded."
     echo "Review FAIL lines above. May need reboot or"
     echo "manual investigation."

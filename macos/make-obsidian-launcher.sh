@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/dash
 
 # 1. Compile the AppleScript launcher app into ~/Applications/Obsidian.app
 # 2. Swap in Obsidian's real icon

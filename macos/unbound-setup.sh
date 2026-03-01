@@ -1,20 +1,20 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/dash
+set -eu
 
 # ── helpers ────────────────────────────────────────────────────────────────────
-info() { printf '\e[1;32m==> \e[0m%s\n' "$*"; }
-warn() { printf '\e[1;33mwarn:\e[0m %s\n' "$*"; }
-die()  { printf '\e[1;31merr:\e[0m %s\n' "$*" >&2; exit 1; }
+info() { printf '\033[1;32m==> \033[0m%s\n' "$*"; }
+warn() { printf '\033[1;33mwarn:\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31merr:\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ── preflight ──────────────────────────────────────────────────────────────────
-command -v brew &>/dev/null || die "Homebrew not found"
+command -v brew >/dev/null 2>&1 || die "Homebrew not found"
 
 BREW_PREFIX=$(brew --prefix)
 CONF_DIR="$BREW_PREFIX/etc/unbound"
 CONF="$CONF_DIR/unbound.conf"
 
 # ── install ────────────────────────────────────────────────────────────────────
-if brew list unbound &>/dev/null; then
+if brew list unbound >/dev/null 2>&1; then
     info "unbound already installed"
 else
     info "Installing unbound..."
@@ -24,7 +24,7 @@ fi
 # ── tuning: auto-detect cores and compute cache slabs ─────────────────────────
 NUM_THREADS=$(sysctl -n hw.physicalcpu)
 SLABS=1
-while (( SLABS < NUM_THREADS )); do (( SLABS *= 2 )); done
+while [ "$SLABS" -lt "$NUM_THREADS" ]; do SLABS=$((SLABS * 2)); done
 
 info "Detected $NUM_THREADS physical cores → $SLABS cache slabs"
 
@@ -125,11 +125,11 @@ sudo brew services list | grep -q 'unbound.*started' \
 # ── system DNS ────────────────────────────────────────────────────────────────
 # 1.1.1.1 is the fallback in case unbound goes down — remove if you prefer hard failure
 info "Setting DNS on all active network services..."
-while IFS= read -r svc; do
-    [[ -z "$svc" ]] && continue
+networksetup -listallnetworkservices | grep -v '^\*' | tail -n +2 | while IFS= read -r svc; do
+    [ -z "$svc" ] && continue
     printf '   %-35s → 127.0.0.1 (fallback: 1.1.1.1)\n' "$svc"
     sudo networksetup -setdnsservers "$svc" 127.0.0.1 1.1.1.1
-done < <(networksetup -listallnetworkservices | grep -v '^\*' | tail -n +2)
+done
 
 # ── verify ────────────────────────────────────────────────────────────────────
 info "Verifying..."
