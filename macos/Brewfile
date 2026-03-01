@@ -29,6 +29,8 @@ brew "graphicsmagick"
 # brew "f3"
 
 brew "just"
+brew "prek"
+
 brew "bun"
 brew "rustup"
 

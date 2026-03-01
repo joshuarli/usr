@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly GIT=/opt/homebrew/bin/git
+
+die()    { printf "error: %s\n" "$1" >&2; exit 1; }
+header() { printf "\n\033[1m━━━ %s ━━━\033[0m\n\n" "$1"; }
+
+main() {
+  command -v hyperfine &>/dev/null || die "hyperfine not found (brew install hyperfine)"
+  [[ -x "$GIT" ]] || die "$GIT not found"
+  "$GIT" rev-parse --is-inside-work-tree &>/dev/null || die "not in a git repository"
+
+  local repo commit_count
+  repo=$("$GIT" rev-parse --show-toplevel)
+  commit_count=$("$GIT" rev-list --count HEAD)
+  (( commit_count < 100 )) && die "repo has $commit_count commits — need 100+ for meaningful benchmarks"
+
+  # Ensure commit-graph exists (required for A/B comparison)
+  "$GIT" commit-graph write --reachable --changed-paths 2>/dev/null || true
+
+  # Most frequently modified file in recent history
+  local hot_path hot_count
+  local hot_all
+  hot_all=$("$GIT" log --pretty=format: --name-only -1000 2>/dev/null \
+    | grep -v '^$' | sort | uniq -c | sort -rn)
+  hot_count=$(awk 'NR==1 {print $1}' <<< "$hot_all")
+  hot_path=$(awk 'NR==1 {print $2}' <<< "$hot_all")
+  [[ -z "$hot_path" ]] && die "could not find a frequently modified file"
+
+  # Shell-escape the path for safe embedding in hyperfine command strings
+  local hot_path_q
+  printf -v hot_path_q '%q' "$hot_path"
+
+  # Depth for graph tests
+  local depth=1000
+  (( commit_count < depth * 2 )) && depth=$((commit_count / 2))
+
+  printf "\033[1mgit-gc-bench\033[0m\n"
+  printf "repo:     %s\n" "$repo"
+  printf "commits:  %s\n" "$commit_count"
+  printf "hot path: %s (%s edits in last 1000 commits)\n" "$hot_path" "$hot_count"
+  printf "depth:    %s commits\n" "$depth"
+
+  # 1. Bloom filters — the biggest single win
+  # Without: git must diff every commit's tree to check if <path> changed
+  # With: Bloom filter rules out non-matching commits without tree access
+  header "Bloom filters · git log -- <path>"
+  hyperfine --warmup 1 --min-runs 3 \
+    -n 'without' "$GIT -c commitGraph.readChangedPaths=false log --oneline -- $hot_path_q > /dev/null" \
+    -n 'with'    "$GIT log --oneline -- $hot_path_q > /dev/null"
+
+  # 2. Commit-graph — accelerates all commit traversal
+  # Without: read each commit object individually from pack
+  # With: flat-file lookup with generation numbers for topology
+  header "Commit-graph · git log --graph -$depth"
+  hyperfine --warmup 1 --min-runs 3 \
+    -n 'without' "$GIT -c core.commitGraph=false log --oneline --graph -$depth > /dev/null" \
+    -n 'with'    "$GIT log --oneline --graph -$depth > /dev/null"
+
+  # 3. Bitmaps — fast object enumeration
+  # Without: walk all reachable objects to count them
+  # With: bitwise OR over pre-computed reachability bitmaps
+  header "Bitmaps · git rev-list --count --all"
+  hyperfine --warmup 1 --min-runs 5 \
+    -n 'without' "$GIT rev-list --count --no-use-bitmap-index --all > /dev/null" \
+    -n 'with'    "$GIT rev-list --count --all > /dev/null"
+
+  # 4. Fsmonitor — OS-level file change tracking
+  # Without: stat() every file in the working tree
+  # With: kernel notifies git which files changed since last query
+  header "Fsmonitor + untracked cache · git status"
+  hyperfine --warmup 2 --min-runs 5 \
+    -n 'without' "$GIT -c core.fsmonitor=false -c core.untrackedCache=false status > /dev/null" \
+    -n 'with'    "$GIT status > /dev/null"
+}
+
+main "$@"

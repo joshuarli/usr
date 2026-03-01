@@ -1,0 +1,362 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly VERSION="1.0.0"
+readonly GIT=/opt/homebrew/bin/git
+readonly MIN_GIT_VERSION="2.53.0"
+
+# --- Colors (respect NO_COLOR / non-TTY) ---
+
+if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+  readonly BOLD=$'\033[1m' DIM=$'\033[2m'
+  readonly RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m' BLUE=$'\033[34m'
+  readonly RESET=$'\033[0m'
+else
+  readonly BOLD="" DIM="" RED="" GREEN="" YELLOW="" BLUE="" RESET=""
+fi
+
+# --- Globals ---
+
+DRY_RUN=false
+
+# --- Helpers ---
+
+info()    { printf "\n%s==>%s %s%s\n" "$BLUE" "$BOLD" "$1" "$RESET"; }
+success() { printf "  %s✓%s %s\n" "$GREEN" "$RESET" "$1"; }
+warn()    { printf "  %s⚠%s %s\n" "$YELLOW" "$RESET" "$1"; }
+error()   { printf "%serror:%s %s\n" "$RED" "$RESET" "$1" >&2; }
+dim()     { printf "  %s%s%s\n" "$DIM" "$1" "$RESET"; }
+die()     { error "$1"; exit 1; }
+
+git_dir_size() {
+  local git_dir
+  git_dir=$("$GIT" rev-parse --git-dir)
+  du -sh "$git_dir" 2>/dev/null | awk '{print $1}'
+}
+
+dry_run_print() {
+  # Replace full git path with just "git" for readability
+  local cmd="${*/$GIT/git}"
+  dim "[dry-run] $cmd"
+}
+
+run() {
+  if [[ "$DRY_RUN" == true ]]; then
+    dry_run_print "$@"
+    return 0
+  fi
+  "$@"
+}
+
+run_quiet() {
+  if [[ "$DRY_RUN" == true ]]; then
+    dry_run_print "$@"
+    return 0
+  fi
+  "$@" 2>/dev/null || true
+}
+
+check_git_version() {
+  [[ -x "$GIT" ]] || die "$GIT not found — install git via Homebrew"
+
+  local raw
+  raw=$("$GIT" --version | awk '{print $3}')
+
+  # Compare major.minor.patch numerically
+  local -a got want
+  IFS=. read -ra got <<< "$raw"
+  IFS=. read -ra want <<< "$MIN_GIT_VERSION"
+  for i in 0 1 2; do
+    local g=${got[$i]:-0} w=${want[$i]:-0}
+    if (( g < w )); then
+      die "Git ${MIN_GIT_VERSION}+ required (found ${raw})"
+    elif (( g > w )); then
+      return 0
+    fi
+  done
+}
+
+default_branch() {
+  # Try remote HEAD first
+  local branch
+  branch=$("$GIT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null) || true
+  branch=${branch#refs/remotes/origin/}
+  if [[ -n "$branch" ]]; then echo "$branch"; return; fi
+  # Fall back to common names
+  for name in main master; do
+    if "$GIT" show-ref --verify --quiet "refs/heads/$name" 2>/dev/null; then
+      echo "$name"; return
+    fi
+  done
+  # Last resort
+  "$GIT" branch --show-current
+}
+
+# --- Global Config ---
+
+set_config() {
+  local key="$1" value="$2"
+  local current
+  current=$("$GIT" config --global "$key" 2>/dev/null) || true
+  if [[ "$current" == "$value" ]]; then
+    success "$key = $value ${DIM}(already set)${RESET}"
+  else
+    run "$GIT" config --global "$key" "$value"
+    success "$key = $value"
+  fi
+}
+
+set_global_config() {
+  info "Setting optimal global git configuration"
+
+  # Commit-graph acceleration
+  set_config core.commitGraph true
+  set_config gc.writeCommitGraph true
+  set_config fetch.writeCommitGraph true
+  set_config commitGraph.readChangedPaths true
+
+  # Filesystem performance
+  set_config core.fsmonitor true
+  set_config core.untrackedCache true
+  set_config core.preloadIndex true
+  set_config feature.manyFiles true
+
+  # Index format (prefix-compressed, smaller/faster for deep trees)
+  set_config index.version 4
+
+  # Pack & repack performance
+  set_config pack.threads 0
+  set_config core.multiPackIndex true
+  set_config repack.writeBitmaps true
+  set_config pack.writeBitmapHashCache true
+
+  # Parallel checkout
+  set_config checkout.workers 0
+
+  # Diff
+  set_config diff.algorithm histogram
+
+  # Reuse recorded conflict resolutions
+  set_config rerere.enabled true
+
+  # Validate objects on fetch/push
+  set_config transfer.fsckObjects true
+
+  # Network
+  set_config protocol.version 2
+  set_config fetch.parallel 0
+}
+
+# --- Repo Optimization ---
+
+cleanup_common() {
+  info "Pruning stale references"
+
+  local remotes
+  remotes=$("$GIT" remote 2>/dev/null) || true
+  if [[ -n "$remotes" ]]; then
+    while IFS= read -r remote; do
+      run "$GIT" remote prune "$remote"
+      success "Pruned remote: $remote"
+    done <<< "$remotes"
+  else
+    dim "No remotes configured"
+  fi
+
+  run "$GIT" pack-refs --all
+  success "Packed refs"
+
+  run_quiet "$GIT" rerere gc
+  success "Cleaned rerere cache"
+
+  run_quiet "$GIT" worktree prune
+  success "Pruned stale worktrees"
+}
+
+delete_merged_branches() {
+  info "Deleting fully merged branches"
+
+  local default current count=0
+  default=$(default_branch)
+  current=$("$GIT" branch --show-current 2>/dev/null) || current=""
+
+  is_protected() {
+    case "$1" in
+      main|master|develop|development) return 0 ;;
+    esac
+    [[ -n "$current" && "$1" == "$current" ]] && return 0
+    return 1
+  }
+
+  while IFS= read -r line; do
+    # Skip current branch marker
+    [[ "$line" == \** ]] && continue
+    # Strip leading whitespace
+    local branch=${line#"${line%%[![:space:]]*}"}
+    [[ -z "$branch" ]] && continue
+    is_protected "$branch" && continue
+    run "$GIT" branch -d -- "$branch" >/dev/null
+    success "Deleted: $branch"
+    ((count++)) || true
+  done < <("$GIT" branch --merged "$default" 2>/dev/null) || true
+
+  if [[ $count -eq 0 ]]; then
+    dim "No merged branches to delete"
+  else
+    success "Removed $count merged branch(es) total"
+  fi
+}
+
+optimize_safe() {
+  info "Checking repository integrity"
+  run "$GIT" fsck --no-dangling --no-progress
+  success "Repository integrity verified"
+
+  cleanup_common
+
+  info "Running garbage collection (safe)"
+  run "$GIT" gc --quiet
+  success "Garbage collection complete"
+}
+
+optimize_lossy() {
+  info "Checking repository integrity"
+  run "$GIT" fsck --no-dangling --no-progress
+  success "Repository integrity verified"
+
+  info "Expiring old reflogs (30-day threshold)"
+  run "$GIT" reflog expire --expire=30.days --expire-unreachable=30.days --all
+  success "Reflogs expired"
+
+  delete_merged_branches
+  cleanup_common
+
+  info "Geometric repack"
+  run "$GIT" repack -d --geometric=2 --no-write-bitmap-index --quiet
+  success "Geometric repack complete"
+
+  info "Pruning unreachable objects"
+  run "$GIT" prune
+  success "Unreachable objects pruned"
+}
+
+optimize_aggressive() {
+  warn "Aggressive mode: this will purge all expendable data"
+
+  info "Checking repository integrity"
+  run "$GIT" fsck --no-dangling --no-progress
+  success "Repository integrity verified"
+
+  info "Expiring all reflogs"
+  run "$GIT" reflog expire --expire=now --expire-unreachable=now --all
+  success "All reflogs expired"
+
+  delete_merged_branches
+  cleanup_common
+
+  info "Aggressive repack (depth=250, window=250 — may take a while)"
+  run "$GIT" repack -Ad -f --depth=250 --window=250 --write-bitmap-index --quiet
+  success "Aggressive repack complete"
+
+  info "Pruning all unreachable objects"
+  run "$GIT" prune --expire=now
+  success "Unreachable objects pruned"
+}
+
+finalize() {
+  info "Writing performance indexes"
+  run "$GIT" commit-graph write --reachable --changed-paths
+  success "Commit-graph written (with Bloom filters)"
+
+  run_quiet "$GIT" multi-pack-index write
+  success "Multi-pack-index written"
+}
+
+# --- Main ---
+
+usage() {
+  cat <<'EOF'
+git-tune — Optimize git repositories and configure global settings
+
+Usage: git-tune [OPTIONS]
+
+Tiers:
+  --safe          Safe optimizations, no data loss (default)
+  --lossy         Expire old reflogs (30d), delete merged branches
+  --aggressive    Maximum compression, purge all expendable data
+
+Options:
+  --dry-run       Show what would be done without executing
+  --globals-only  Only set global git config, skip repo optimization
+  --no-globals    Skip global config, only optimize repo
+  -h, --help      Show this help message
+  --version       Show version
+EOF
+}
+
+main() {
+  local tier="safe"
+  local globals=true
+  local repo=true
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --safe)         tier="safe"; shift ;;
+      --lossy)        tier="lossy"; shift ;;
+      --aggressive)   tier="aggressive"; shift ;;
+      --dry-run)      DRY_RUN=true; shift ;;
+      --globals-only) globals=true; repo=false; shift ;;
+      --no-globals)   globals=false; repo=true; shift ;;
+      --version)      echo "git-tune $VERSION"; exit 0 ;;
+      -h|--help)      usage; exit 0 ;;
+      *)              die "Unknown option: $1" ;;
+    esac
+  done
+
+  check_git_version
+
+  local start=$SECONDS
+
+  if [[ "$DRY_RUN" == true ]]; then
+    printf "\n%s[dry-run mode]%s\n" "$YELLOW" "$RESET"
+  fi
+
+  # Global config
+  if [[ "$globals" == true ]]; then
+    set_global_config
+  fi
+
+  # Repo optimization
+  if [[ "$repo" == true ]]; then
+    if ! "$GIT" rev-parse --is-inside-work-tree &>/dev/null; then
+      if [[ "$globals" == true ]]; then
+        warn "Not in a git repository — skipping repo optimization"
+        printf "\n%sDone in %ds%s\n" "$GREEN" "$(( SECONDS - start ))" "$RESET"
+        return 0
+      else
+        die "Not in a git repository"
+      fi
+    fi
+
+    local repo_root size_before size_after
+    repo_root=$("$GIT" rev-parse --show-toplevel)
+    size_before=$(git_dir_size)
+    printf "\n%sgit-tune:%s optimizing %s %s(%s, %s)%s\n" \
+      "$BOLD" "$RESET" "$repo_root" "$DIM" "$tier" "$size_before" "$RESET"
+
+    case "$tier" in
+      safe)       optimize_safe ;;
+      lossy)      optimize_lossy ;;
+      aggressive) optimize_aggressive ;;
+    esac
+
+    finalize
+
+    size_after=$(git_dir_size)
+    printf "\n%s.git:%s %s → %s\n" "$BOLD" "$RESET" "$size_before" "$size_after"
+  fi
+
+  printf "%sDone in %ds%s\n" "$GREEN" "$(( SECONDS - start ))" "$RESET"
+}
+
+main "$@"
