@@ -97,24 +97,22 @@
     }
   });
 }
+// user-select (JS) [intrusive; enable on selected hostnames]
+window.pointers.inject(`
+  try {
+    let active = true;
 
-// Unblocked elements on mouse down event that are protected by remote stylesheets
-{
-  const mousedown = e => {
-    const es = document.elementsFromPoint(e.clientX, e.clientY);
-    for (const e of es) {
-      const style = getComputedStyle(e);
-      if (style.userSelect === 'none') {
-        e.style['user-select'] = 'initial';
+    Selection.prototype.removeAllRanges = new Proxy(Selection.prototype.removeAllRanges, {
+      apply(target, self, args) {
+        if (active) {
+          return undefined;
+        }
+        return Reflect.apply(target, self, args);
       }
-    }
-  };
+    });
 
-  document.addEventListener('mousedown', mousedown, true);
-  window.pointers.run.add(() => {
-    document.removeEventListener('mousedown', mousedown, true);
-  });
-}
-
-// eslint-disable-next-line semi
-''
+    document.currentScript.addEventListener('remove', () => active = false);
+    document.currentScript.addEventListener('install', () => active = true);
+  }
+  catch (e) {}
+`);

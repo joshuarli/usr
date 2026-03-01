@@ -12,13 +12,10 @@
 // https://www.skidrowreloaded.com/ -> text selection
 // http://www.ciberespaciotv.com/p/ver-antena-3-en-directo-online.html -> context menu & text selection
 // https://soap2day.film/movie/a-special-lady-92zon/1-full -> right-click on movie (requires sub-frame access)
-// https://www.taiwanratings.com/portal/front/listSpRating -> Ctrl + C on Windows
-// https://www.yuanta.com.tw/eYuanta/securities/Node/Index?MainId=00412&C1=2018040407582803&C2=2018040401231916&ID=2018040401231916&Level=2&rnd=28994 -> select a large portion of the table
-// https://brickset.com/signup -> no paste context menu on email address
-// https://www.zhihu.com/market/pub/120050855/manuscript/1289617973419298816 -> user-select is blocked with remote stylesheet
 
 window.pointers = window.pointers || {
   run: new Set(),
+  scripts: new Set(),
   cache: new Map(),
   status: ''
 };
@@ -27,26 +24,44 @@ window.pointers.record = (e, name, value) => {
   window.pointers.cache.set(e, {name, value});
 };
 
+window.pointers.inject = code => {
+  const script = document.createElement('script');
+  script.textContent = 'document.currentScript.dataset.injected = true;' + code;
+  document.documentElement.appendChild(script);
+  script.remove();
+  if (script.dataset.injected !== 'true') {
+    const s = document.createElement('script');
+    s.src = 'data:text/javascript;charset=utf-8;base64,' + btoa(code);
+    s.onload = () => s.remove();
+    document.documentElement.appendChild(s);
+
+    window.pointers.scripts.add(s);
+    return s;
+  }
+  else {
+    window.pointers.scripts.add(script);
+    return script;
+  }
+};
+
 {
   const next = () => {
     if (window.pointers.status === '' || window.pointers.status === 'removed') {
       window.pointers.status = 'ready';
 
+      for (const script of window.pointers.scripts) {
+        script.dispatchEvent(new Event('install'));
+      }
+
       chrome.runtime.sendMessage({
         method: 'inject',
-        automated: self.automated,
-        protected: [
-          'user-select/isolated.js',
+        files: [
+          'user-select.js',
           'styles.js',
           'mouse.js',
-          'listen/isolated.js'
-        ],
-        unprotected: [
-          'user-select/main.js',
-          'listen/main.js'
+          'listen.js'
         ]
       });
-      delete self.automated;
     }
     else {
       window.pointers.status = 'removed';
@@ -60,12 +75,14 @@ window.pointers.record = (e, name, value) => {
       }
       window.pointers.run = new Set();
 
-      document.documentElement.dispatchEvent(new Event('arc-remove'));
+      for (const script of window.pointers.scripts) {
+        script.dispatchEvent(new Event('remove'));
+      }
 
       for (const [e, {name, value}] of window.pointers.cache) {
         e.style[name] = value;
       }
-      window.pointers.cache = new Map();
+      window.pointers.cache = new Set();
     }
   };
 
@@ -83,6 +100,3 @@ window.pointers.record = (e, name, value) => {
     });
   }
 }
-
-// eslint-disable-next-line semi
-''

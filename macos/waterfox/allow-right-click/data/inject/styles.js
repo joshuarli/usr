@@ -15,7 +15,6 @@
         color: #000 !important;
         background: #accef7 !important;
       }
-
       @layer allow-right-click {
         ::-moz-selection {
           color: #000 !important;
@@ -38,6 +37,3 @@
     document.addEventListener('DOMContentLoaded', next);
   }
 }
-
-// eslint-disable-next-line semi
-''

@@ -72,7 +72,14 @@ install_ext() {
     info "Installed extension: $name"
 }
 
-install_ext "host-redirects"  "host-redirects@local"
+install_ext "host-redirects" "host-redirects@local"
+
 install_ext "allow-right-click" "{278b0ae0-da9d-4cc6-be81-5aa7f3202672}"
+
+# ── Clean up extension caches ──────────────────────────────────────────────
+# addonStartup.json.lz4 caches extension state; stale entries cause silent failures.
+rm -f "$PROFILE_DIR/addonStartup.json.lz4"
+# Empty staged dirs confuse Firefox into treating them as pending installs.
+find "$PROFILE_DIR/extensions/staged" -mindepth 1 -maxdepth 1 -type d -empty -exec rm -rf {} + 2>/dev/null || true
 
 info "Done. Restart Firefox to apply changes."

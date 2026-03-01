@@ -1,32 +1,25 @@
-html {
-  color-scheme: light dark;
-}
 body {
-  font-size: 14px;
+  font-size: 13px;
   font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-  background-color: light-dark(#fff, #272727);
-  color: light-dark(#4d5156, #bfbfbf);
-  margin: auto;
-  width: min(100% - 2rem, 70rem);
+  background-color: #fff;
+  color: #4d5156;
+  margin: 10px;
 }
 select,
 button,
 input[type=submit],
 input[type=button] {
+  height: 28px;
   color: #444;
   background-image: linear-gradient(rgb(237, 237, 237), rgb(237, 237, 237) 38%, rgb(222, 222, 222));
   box-shadow: rgba(0, 0, 0, 0.08) 0 1px 0, rgba(255, 255, 255, 0.75) 0 1px 2px inset;
   text-shadow: rgb(240, 240, 240) 0 1px 0;
-  padding: 5px 10px;
-  cursor: pointer;
 }
 select,
 button,
 textarea,
-input[type=submit],
-input[type=button] {
+input {
   border: solid 1px rgba(0, 0, 0, 0.25);
-  font-size: inherit;
 }
 textarea {
   width: 100%;
@@ -44,15 +37,14 @@ input[type=number] {
 textarea:focus,
 input[type=text]:focus,
 input[type=number]:focus {
-  background-color: light-dark(#e5f8ff, #2d2e31);
+  background-color: #e5f8ff;
 }
 a,
 a:visited {
   color: #07c;
-  text-decoration: none;
 }
 textarea:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
 }
 input[type=button]:disabled {
   opacity: 0.5;
@@ -62,16 +54,15 @@ input[type=button]:disabled {
   display: grid;
   grid-template-columns: min-content 1fr;
   grid-gap: 5px;
-  align-items: center;
-}
-.note {
-  border: solid 1px light-dark(#fcdc9e, #5a5017);
-  padding: 1ch;
-  background-color: light-dark(#fff3dc, #3a382a);
+  align-items: start;
 }
 
-@supports (-webkit-hyphens: none) and (not (-moz-appearance: none)) {
-  #support {
-    display: none;
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #23222b;
+    color: #bfbfbf;
+  }
+  textarea {
+    color: #bfbfbf;
   }
 }
