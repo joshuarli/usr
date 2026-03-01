@@ -1,0 +1,34 @@
+brew "tmux"
+
+brew "git"
+brew "delta"
+
+# brew "detox"
+
+brew "duf"
+brew "dua-cli"
+brew "tree"
+brew "pstree"
+brew "procs"
+
+brew "fd"
+brew "ripgrep"
+brew "hyperfine"
+brew "jq"
+brew "yq"
+brew "ast-grep"
+brew "watchexec"
+brew "eza"
+
+brew "shellcheck"
+
+brew "handbrake"
+brew "graphicsmagick"
+
+# brew "smartmontools"
+# brew "f3"
+
+brew "just"
+brew "bun"
+brew "rustup"
+
