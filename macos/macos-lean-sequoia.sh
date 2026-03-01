@@ -10,10 +10,11 @@
 #   - Siri, Dictation, "Hey Siri", all assistant/speech services
 #   - Apple Intelligence, on-device ML, generative AI, Private Cloud Compute
 #   - Spotlight indexing (mdutil + all workers/scanners/knowledge agents)
-#   - Telemetry: analytics, diagnostics, biome, ad tracking, A/B trials
+#   - Telemetry: analytics, diagnostics, biome, ad tracking, A/B trials,
+#     sysmond, tailspind
 #   - Apple apps: Music, News, Weather, Sports, Shazam, Voice Memos,
 #     TV/video subscriptions, Game Center, Wallet/Pay, Reminders, Maps,
-#     Home/HomeKit, Tips, Books, Stickers
+#     Home/HomeKit, Tips, Stickers, Podcasts, Health
 #   - iMessage, FaceTime, phone call relay, CommCenter
 #   - Continuity: Handoff, Sidecar, Universal Clipboard (NOT AirDrop/AirPlay)
 #   - Family Sharing, parental controls, Screen Time
@@ -22,15 +23,27 @@
 #   - Location: routine tracking, Find My, geo services
 #   - iCloud: mail agent, Photos sync (Drive + Keychain preserved)
 #   - Mail: maild, mail extensions, iCloud mail agent
-#   - Safari browser: history, bookmarks sync, notifications, web inspector
+#   - Safari: history, bookmarks sync, notifications, web inspector,
+#     cloud history push
 #   - App Store: storefront, commerce, StoreKit, update notifications
 #   - Focus/DND: donotdisturbd
 #   - Accessibility: motion tracking, hearing, voice banking
-#   - Misc: Time Machine, translation, avatars/Memoji, content caching,
-#     accessory firmware updates, app placeholders, settings sync,
-#     Continuity Camera, Thread/smart home, DND/Focus
+#   - Misc: Time Machine + APFS local snapshots, translation, avatars/Memoji,
+#     content caching, accessory firmware updates, app placeholders,
+#     settings sync, Continuity Camera, Thread/smart home, DND/Focus,
+#     recent items, NFC
+#   - Crash reporting: ReportCrash, ReportPanic, crash dialogs suppressed
+#   - Wireless/network diagnostics: awdd, symptomsd, spindump
 #   - Performance: window/scroll animations, Dock bounce, transparency,
-#     Mission Control animation speed, window resize delay
+#     Mission Control animation speed, window resize delay, screensaver
+#   - App state: window state not saved on quit, new docs default to local
+#   - Power management (battery): Power Nap, TCP keepalive, proximity wake,
+#     Wake on LAN, TTY keepawake, aggressive standby (10 min),
+#     hibernatemode 0 (no sleepimage), display sleep 2 min, system sleep 10 min,
+#     auto power-off after 30 min standby
+#   - Network: IPv6 off on all non-VPN interfaces, mDNS multicast ads off,
+#     captive network detection off
+#   - Logging: unified log system disabled
 #
 # PRESERVED:
 #   - QuickLook (spacebar preview, thumbnails)
@@ -286,6 +299,8 @@ for s in \
   com.apple.avatarsd \
   com.apple.mobiletimerd \
   com.apple.appplaceholdersyncd \
+  com.apple.podcastsd \
+  com.apple.healthd \
 ; do disable_user "$s"; done
 
 section "iMessage, FaceTime & Phone"
@@ -382,6 +397,7 @@ for s in \
   com.apple.SafariLaunchAgent \
   com.apple.Safari.History \
   com.apple.webinspectord \
+  com.apple.SafariCloudHistoryPushAgent \
 ; do disable_user "$s"; done
 
 section "App Store"
@@ -410,6 +426,9 @@ for s in \
   com.apple.AssetCacheLocatorService \
   com.apple.MobileAccessoryUpdater.fudHelperAgent \
   com.apple.syncdefaultsd \
+  com.apple.recentsd \
+  com.apple.ReportCrash \
+  com.apple.ReportPanic \
 ; do disable_user "$s"; done
 
 # ============================================================================
@@ -424,6 +443,8 @@ for s in \
   com.apple.analyticsd \
   com.apple.wifianalyticsd \
   com.apple.triald.system \
+  com.apple.sysmond \
+  com.apple.tailspind \
 ; do disable_system "$s"; done
 
 section "System — App Store"
@@ -442,6 +463,14 @@ for s in \
   com.apple.netbiosd \
   com.apple.screensharing \
   com.apple.dhcp6d \
+; do disable_system "$s"; done
+
+section "System — Wireless & Network Diagnostics"
+for s in \
+  com.apple.awdd \
+  com.apple.symptomsd \
+  com.apple.spindump \
+  com.apple.nfcd \
 ; do disable_system "$s"; done
 
 section "System — Find My"
@@ -474,6 +503,22 @@ else
   sudo mdutil -a -i off 2>/dev/null
   sudo mdutil -aE 2>/dev/null
   echo "  Indexing disabled, indexes deleted"
+fi
+
+section "Time Machine & Local Snapshots"
+if $DRY_RUN; then
+  echo "  would disable Time Machine"
+  echo "  would disable APFS local snapshot creation"
+elif $REVERT; then
+  sudo tmutil enable 2>/dev/null || true
+  sudo tmutil enablelocal 2>/dev/null || true
+  echo "  Time Machine and local snapshots re-enabled"
+else
+  # Belt-and-suspenders alongside backupd/backupd-helper being disabled
+  sudo tmutil disable 2>/dev/null || true
+  # Stop APFS from creating local Time Machine snapshots (significant write traffic)
+  sudo tmutil disablelocal 2>/dev/null || true
+  echo "  Time Machine disabled, APFS local snapshots disabled"
 fi
 
 # ============================================================================
@@ -518,6 +563,38 @@ else
   defaults write com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
   defaults write com.apple.SoftwareUpdate AutomaticDownload -bool false
   echo "  App Store auto-check, auto-download, auto-update disabled"
+fi
+
+section "CrashReporter Preferences"
+if $DRY_RUN; then
+  echo "  would suppress crash dialogs"
+elif $REVERT; then
+  defaults delete com.apple.CrashReporter DialogType 2>/dev/null || true
+  echo "  CrashReporter preferences restored to defaults"
+else
+  # Suppress crash dialog pop-ups; crashes still logged to ~/Library/Logs/DiagnosticReports
+  defaults write com.apple.CrashReporter DialogType none
+  echo "  Crash dialogs suppressed"
+fi
+
+section "App Quit & Screensaver Preferences"
+if $DRY_RUN; then
+  echo "  would disable window state save on quit"
+  echo "  would disable screensaver (direct to display sleep)"
+  echo "  would default new document save location to local (not iCloud)"
+elif $REVERT; then
+  defaults delete NSGlobalDomain NSQuitAlwaysKeepsWindows 2>/dev/null || true
+  defaults delete com.apple.screensaver idleTime 2>/dev/null || true
+  defaults delete NSGlobalDomain NSDocumentSaveNewDocumentsToCloud 2>/dev/null || true
+  echo "  App quit and screensaver preferences restored to defaults"
+else
+  # Don't write window/document state to disk on every app quit
+  defaults write NSGlobalDomain NSQuitAlwaysKeepsWindows -bool false
+  # Disable screensaver — go straight to display sleep, no GPU spinning
+  defaults write com.apple.screensaver idleTime -int 0
+  # New documents default to local disk, not iCloud (iCloud Drive sync unaffected)
+  defaults write NSGlobalDomain NSDocumentSaveNewDocumentsToCloud -bool false
+  echo "  Window state on quit disabled, screensaver disabled, new docs default to local"
 fi
 
 # ============================================================================
@@ -567,6 +644,156 @@ else
   # Restart Dock to pick up changes
   killall Dock 2>/dev/null || true
   echo "  Animations disabled, transparency reduced (Dock restarted)"
+fi
+
+# ============================================================================
+# POWER MANAGEMENT — pmset (battery profile)
+# ============================================================================
+
+section "Power Management (pmset — battery)"
+if $DRY_RUN; then
+  echo "  would disable Power Nap on battery"
+  echo "  would disable TCP keepalive during sleep"
+  echo "  would disable proximity wake (iPhone/Watch)"
+  echo "  would disable Wake on LAN"
+  echo "  would disable TTY keepawake"
+  echo "  would set standby delay to 600s (default: up to 86400s)"
+  echo "  would set hibernatemode 0 on battery (no sleepimage writes)"
+  echo "  would set hibernatemode 3 on AC (safe sleep preserved)"
+  echo "  would delete existing sleepimage to reclaim disk space"
+  echo "  would set display sleep to 2 min on battery"
+  echo "  would set system sleep to 10 min on battery"
+  echo "  would enable auto power-off after 30 min standby"
+elif $REVERT; then
+  sudo pmset -b powernap 1
+  sudo pmset -b tcpkeepalive 1
+  sudo pmset -b proximitywake 1
+  sudo pmset -b womp 1
+  sudo pmset -b ttyskeepawake 1
+  sudo pmset -b standbydelayhigh 86400
+  sudo pmset -b standbydelaylow 10800
+  sudo pmset -b highstandbythreshold 50
+  sudo pmset -b hibernatemode 3
+  sudo pmset -c hibernatemode 3
+  sudo pmset -b displaysleep 5
+  sudo pmset -b sleep 10
+  sudo pmset -b autopoweroff 1
+  sudo pmset -b autopoweroffdelay 28800
+  echo "  pmset battery defaults restored"
+else
+  # Power Nap: no background iCloud/mail fetch during sleep (syncs fine when awake)
+  sudo pmset -b powernap 0
+  # TCP keepalive: eliminates dark wakes every ~2h to maintain TCP connections
+  sudo pmset -b tcpkeepalive 0
+  # Proximity wake: prevents iPhone/Watch from waking the Mac
+  sudo pmset -b proximitywake 0
+  # Wake on LAN
+  sudo pmset -b womp 0
+  # TTY keepawake: open SSH/terminal connections won't prevent sleep
+  sudo pmset -b ttyskeepawake 0
+  # Aggressive standby: enter deep hibernate after 10 min sleep (default: up to 24h)
+  sudo pmset -b standbydelayhigh 600
+  sudo pmset -b standbydelaylow 600
+  sudo pmset -b highstandbythreshold 50
+  # hibernatemode 0 on battery: skip writing RAM to disk on sleep (saves RAM-sized SSD
+  # writes per sleep cycle). Risk: unsaved work lost if battery fully exhausts during sleep.
+  # hibernatemode 3 on AC: keep safe sleep when plugged in (writes are free there).
+  sudo pmset -b hibernatemode 0
+  sudo pmset -c hibernatemode 3
+  # Remove existing sleepimage — no longer needed on battery, reclaims RAM-sized disk space
+  sudo rm -f /private/var/vm/sleepimage
+  # Sleep timers: display off at 2 min, system sleep at 10 min on battery
+  sudo pmset -b displaysleep 2
+  sudo pmset -b sleep 10
+  # Auto power-off: fully cut power after 30 min of standby (saves more than standby alone)
+  sudo pmset -b autopoweroff 1
+  sudo pmset -b autopoweroffdelay 1800
+  echo "  Power Nap, TCP keepalive, proximity wake, WoL, TTY keepawake disabled"
+  echo "  Standby: 600s / auto power-off: 1800s"
+  echo "  hibernatemode 0 (battery) / 3 (AC), sleepimage removed"
+  echo "  Display sleep: 2 min, system sleep: 10 min"
+fi
+
+# ============================================================================
+# NETWORK — IPv6
+# ============================================================================
+
+section "IPv6 (all interfaces except VPN/Tailscale)"
+# Enumerates all network services, skips VPN/Tailscale, applies to the rest
+_ipv6_each() {
+  cmd=$1
+  networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
+    svc="${svc#\* }"  # strip leading asterisk from disabled services
+    case "$svc" in
+      *[Tt]ailscale*|*VPN*|*[Vv]pn*|*utun*) echo "  skip $svc" ;;
+      *) sudo networksetup "$cmd" "$svc" 2>/dev/null && echo "  $svc" ;;
+    esac
+  done
+}
+if $DRY_RUN; then
+  echo "  would disable IPv6 on all non-VPN interfaces:"
+  networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
+    svc="${svc#\* }"
+    case "$svc" in
+      *[Tt]ailscale*|*VPN*|*[Vv]pn*|*utun*) echo "    skip: $svc" ;;
+      *) echo "    off:  $svc" ;;
+    esac
+  done
+elif $REVERT; then
+  _ipv6_each -setv6automatic
+  echo "  IPv6 restored to automatic on all interfaces"
+else
+  _ipv6_each -setv6off
+  echo "  IPv6 disabled on all non-VPN interfaces"
+fi
+
+# ============================================================================
+# NETWORK — mDNS & Captive Portal
+# ============================================================================
+
+section "mDNS Multicast Advertisements"
+if $DRY_RUN; then
+  echo "  would stop Mac advertising its own services via mDNS"
+elif $REVERT; then
+  sudo defaults delete /Library/Preferences/com.apple.mDNSResponder.plist NoMulticastAdvertisements 2>/dev/null || true
+  sudo killall mDNSResponder 2>/dev/null || true
+  echo "  mDNS multicast advertisements restored"
+else
+  # Stops Mac broadcasting its own services (AFP, SMB, AirPlay receiver, etc.)
+  # Mac can still discover other devices. Note: breaks this Mac as an AirPlay receiver target.
+  sudo defaults write /Library/Preferences/com.apple.mDNSResponder.plist NoMulticastAdvertisements -bool YES
+  sudo killall mDNSResponder 2>/dev/null || true
+  echo "  mDNS multicast advertisements disabled (mDNSResponder restarted)"
+fi
+
+section "Captive Network Detection"
+if $DRY_RUN; then
+  echo "  would disable captive portal HTTP probing"
+elif $REVERT; then
+  sudo defaults delete /Library/Preferences/SystemConfiguration/com.apple.captive.control Active 2>/dev/null || true
+  echo "  Captive network detection restored"
+else
+  # Stops background HTTP probes to detect hotel/airport captive portals
+  # Side effect: no auto-popup on captive networks — open browser manually to trigger login
+  sudo defaults write /Library/Preferences/SystemConfiguration/com.apple.captive.control Active -bool false
+  echo "  Captive network detection disabled"
+fi
+
+# ============================================================================
+# LOGGING — Unified log system
+# ============================================================================
+
+section "Unified Logging"
+if $DRY_RUN; then
+  echo "  would disable unified log system (no Console.app data, no log show)"
+elif $REVERT; then
+  sudo log config --mode "level:default"
+  echo "  Unified logging restored to default"
+else
+  # Shuts down the log subsystem entirely — eliminates constant SSD writes to /var/db/diagnostics
+  # Trade-off: Console.app goes dark, 'log show' returns nothing, crash diagnosis is harder
+  sudo log config --mode "level:off"
+  echo "  Unified logging disabled"
 fi
 
 # ============================================================================
