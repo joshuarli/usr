@@ -8,6 +8,13 @@ die()  { printf '\e[1;31merr:\e[0m %s\n' "$*" >&2; exit 1; }
 FIREFOX_DIR="$HOME/Library/Application Support/Waterfox"
 PROFILES_INI="$FIREFOX_DIR/profiles.ini"
 
+# ── Redirects ──────────────────────────────────────────────────────────────
+# Format: "from.host:to.host" — add as many as you like
+REDIRECTS=(
+    "www.reddit.com:old.reddit.com"
+    "new.reddit.com:old.reddit.com"
+)
+
 [[ -f "$PROFILES_INI" ]] || die "profiles.ini not found — is Firefox installed?"
 
 # ── Detect default profile ─────────────────────────────────────────────────────
@@ -127,7 +134,62 @@ user_pref("browser.newtabpage.activity-stream.showSponsoredTopSites", false);
 user_pref("dom.serviceWorkers.enabled", true);             // keep: needed for SW caching
 user_pref("dom.webnotifications.enabled", false);          // no push notifications
 user_pref("dom.push.enabled", false);                      // no background push API
+
+// ── Extensions ────────────────────────────────────────────────────────────────
+user_pref("extensions.autoDisableScopes", 0);              // allow sideloaded extensions (profile/extensions/) to auto-enable
 PREFS
 } > "$USER_JS"
+
+# ── Install redirect extension ─────────────────────────────────────────────
+EXT_ID="host-redirects@local"
+TMP_EXT=$(mktemp -d)
+trap 'rm -rf "$TMP_EXT"' EXIT
+
+permissions=""
+redirects_obj="{"
+sep=""
+for pair in "${REDIRECTS[@]}"; do
+    src="${pair%%:*}"
+    dst="${pair##*:}"
+    permissions+="${sep}\"*://${src}/*\""
+    redirects_obj+="${sep}\"${src}\":\"${dst}\""
+    sep=","
+done
+redirects_obj+="}"
+
+cat > "$TMP_EXT/manifest.json" <<EOF
+{
+  "manifest_version": 2,
+  "name": "Host Redirects",
+  "version": "1.0",
+  "browser_specific_settings": {
+    "gecko": { "id": "$EXT_ID" }
+  },
+  "permissions": ["webRequest", "webRequestBlocking", $permissions],
+  "background": { "scripts": ["background.js"] }
+}
+EOF
+
+cat > "$TMP_EXT/background.js" <<EOF
+const REDIRECTS = $redirects_obj;
+const PATTERNS = Object.keys(REDIRECTS).map(h => "*://" + h + "/*");
+
+browser.webRequest.onBeforeRequest.addListener(
+    function(details) {
+        const url = new URL(details.url);
+        const dest = REDIRECTS[url.hostname];
+        if (dest) {
+            url.hostname = dest;
+            return { redirectUrl: url.href };
+        }
+    },
+    { urls: PATTERNS, types: ["main_frame"] },
+    ["blocking"]
+);
+EOF
+
+mkdir -p "$PROFILE_DIR/extensions"
+(cd "$TMP_EXT" && zip -qr - manifest.json background.js) > "$PROFILE_DIR/extensions/$EXT_ID.xpi"
+info "Redirect extension installed (${#REDIRECTS[@]} rules)"
 
 info "Done. Restart Firefox to apply changes."
