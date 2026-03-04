@@ -1,7 +1,9 @@
-lz
+# self-build
+fd
+rg
+
 srv
 
-micro
 syncthing
 
 # https://github.com/eugeneware/ffmpeg-static

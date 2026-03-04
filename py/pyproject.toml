@@ -5,10 +5,10 @@ version = "0.0.0"
 requires-python = "==3.13.3"
 dependencies = [
     "yt-dlp",
-    "instaloader",
-    "browser-cookie3",  # for instaloader
-    "spotdl",
-    "beets[fetchart]",
+    #"instaloader",
+    #"browser-cookie3",  # for instaloader
+    #"spotdl",
+    #"beets[fetchart]",
 ]
 
 [tool.uv.sources]
