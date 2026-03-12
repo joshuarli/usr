@@ -1,0 +1,55 @@
+#!/bin/sh
+set -eu
+
+ARCH=$(uname -m | sed 's/arm64/aarch64/')
+OS=$(uname -s)
+case "$OS" in
+    Darwin) TARGET="${ARCH}-apple-darwin" ;;
+    Linux)  TARGET="${ARCH}-unknown-linux-gnu" ;;
+    *)      printf '%s\n' "Unsupported OS: ${OS}" >&2; exit 1 ;;
+esac
+DEST="${HOME}/usr/bin"
+
+PROGS="e lz denv"
+
+for prog in $PROGS; do
+    tag=$(curl -fsSL "https://api.github.com/repos/joshuarli/${prog}/releases/latest" \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') || true
+    if [ -z "$tag" ]; then
+        printf '%s\n' "Skipping ${prog}: no release found"
+        continue
+    fi
+    version=$(printf '%s' "$tag" | sed 's|^release/||')
+    asset="${prog}-${version}-${TARGET}"
+    url="https://github.com/joshuarli/${prog}/releases/download/${tag}/${asset}"
+    printf '%s\n' "Downloading ${asset} ..."
+    curl -fsSL -o "${DEST}/${prog}" "${url}"
+    chmod +x "${DEST}/${prog}"
+    printf '%s\n' "Installed ${DEST}/${prog}"
+done
+
+if [ "$TARGET" = "aarch64-apple-darwin" ]; then
+    for app in tty.app play; do
+        case "$app" in
+            tty.app) repo="tty.app"; zip="tty.app.zip"; appdir="tty.app" ;;
+            play)    repo="play";    zip="Play.app.zip"; appdir="Play.app" ;;
+        esac
+        tag=$(curl -fsSL "https://api.github.com/repos/joshuarli/${repo}/releases/latest" \
+            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') || true
+        if [ -z "$tag" ]; then
+            printf '%s\n' "Skipping ${app}: no release found"
+            continue
+        fi
+        url="https://github.com/joshuarli/${repo}/releases/download/${tag}/${zip}"
+        printf '%s\n' "Downloading ${zip} (${tag}) ..."
+        tmpdir=$(mktemp -d)
+        curl -fsSL -o "${tmpdir}/${zip}" "${url}"
+        unzip -qo "${tmpdir}/${zip}" -d "${tmpdir}"
+        rm -rf "/Applications/${appdir}"
+        mv "${tmpdir}/${appdir}" /Applications/
+        rm -rf "$tmpdir"
+        printf '%s\n' "Installed ${appdir} to /Applications"
+    done
+fi
+
+printf '%s\n' "Done."

@@ -1,13 +1,9 @@
-CC := unknown-unknown-cosmo-cc
-CFLAGS := -Wall -Werror -g
-LDFLAGS := -Wl,--as-needed
+su-exec:
+	clang -O3 -march=native -pipe -flto \
+	-Wall -Wextra -Wpedantic \
+	-Wl,-dead_strip \
+	-Wl,-dead_strip_dylibs \
+	-Wl,-x \
+	-o su-exec \
+	su-exec.c
 
-SRCS := $(PROG).c
-
-all: $(PROG)
-
-su-exec: $(SRCS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
-clean:
-	rm -f $(PROG)

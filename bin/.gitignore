@@ -1,17 +1,22 @@
 # self-build
 fd
 rg
-
+fish-shell
+tmux
+e
+lz
+denv
 srv
+play
+
+# https://github.com/aspect-build/zstd-prebuilt/releases
+zstd_*
+
+# https://ffmpeg.martin-riedl.de/
+ffmpeg
 
 syncthing
-
-# https://github.com/eugeneware/ffmpeg-static
-ffmpeg
 
 # for yt-dlp
 deno
 
-wol
-
-llama*

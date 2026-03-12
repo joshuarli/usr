@@ -1,5 +1,3 @@
-brew "tmux"
-
 brew "git"
 brew "delta"
 
@@ -11,8 +9,6 @@ brew "tree"
 brew "pstree"
 brew "procs"
 
-brew "fd"
-brew "ripgrep"
 brew "hyperfine"
 brew "sd"
 brew "jq"
@@ -21,14 +17,15 @@ brew "ast-grep"
 brew "watchexec"
 brew "eza"
 brew "jaq"
+brew "xh"
 
 brew "shellcheck"
 
 brew "handbrake"
 brew "graphicsmagick"
 
-# brew "smartmontools"
-# brew "f3"
+brew "smartmontools"
+brew "f3"
 
 brew "just"
 brew "prek"
