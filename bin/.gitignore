@@ -1,13 +1,13 @@
 # self-build
 fd
 rg
-fish-shell
 tmux
+ish
 e
 lz
 denv
 srv
-play
+smtp-server
 
 # https://github.com/aspect-build/zstd-prebuilt/releases
 zstd_*
