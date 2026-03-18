@@ -1,0 +1,143 @@
+#!/bin/sh
+# sym - batch symlinker for dotfiles
+
+die()   { printf '%s\n' "$*" >&2; exit 1; }
+usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] [--exclude PATTERN]... SOURCE\n' >&2; exit 1; }
+log()   { if "$verbose"; then printf '%s\n' "$1"; fi; }
+
+# relpath DEST BASE
+# Relative path from directory BASE to file DEST (both absolute, no trailing /).
+relpath() {
+    _d="$1" _b="$2" _up=''
+    while [ "$_b" != / ]; do
+        case $_d in "$_b"/* | "$_b") break ;; esac
+        _up="../$_up"
+        _b="${_b%/*}"; [ -z "$_b" ] && _b=/
+    done
+    if [ "$_b" = / ]; then _r="${_d#/}"; else _r="${_d#"$_b"/}"; fi
+    [ -n "$_r" ] && printf '%s%s' "$_up" "$_r" || printf '%s' "${_up%/}"
+}
+
+# Defaults
+target="$HOME"; delete=false; dry_run=false; verbose=false; excludes=''
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--target)  [ $# -ge 2 ] || usage; shift; target="$1" ;;
+        -d|--delete)  delete=true ;;
+        --dry-run)    dry_run=true; verbose=true ;;
+        -v|--verbose) verbose=true ;;
+        --exclude)    [ $# -ge 2 ] || usage; shift
+                      excludes="${excludes:+${excludes}
+}$1" ;;
+        --) shift; break ;;
+        -*) usage ;;
+        *)  break ;;
+    esac
+    shift
+done
+
+[ $# -eq 1 ] || usage
+
+[ -d "$1" ]      || die "source directory $1 is not a directory or does not exist"
+[ -d "$target" ] || die "target directory $target is not a directory or does not exist"
+
+# src/tgt: user-supplied strings, used for output paths
+# src_abs/tgt_abs: canonical absolute paths, used only for relpath computation
+src="${1%/}"
+tgt="${target%/}"
+src_abs="$(cd "$src" && pwd)"
+tgt_abs="$(cd "$tgt" && pwd)"
+
+tmp="${TMPDIR:-/tmp}/sym.$$"
+mkdir "$tmp" || die 'failed to create temp directory'
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# Enumerate all regular files under src (paths will share the $src prefix)
+find "$src" -type f > "$tmp/files"
+
+# Pass 1: compute jobs and detect conflicts
+while IFS= read -r fp; do
+    # Filter excluded paths
+    if [ -n "$excludes" ]; then
+        _skip=false
+        while IFS= read -r pat; do
+            [ -z "$pat" ] && continue
+            # shellcheck disable=SC2254
+            case $fp in $pat) _skip=true; break ;; esac
+        done << PATS
+$excludes
+PATS
+        if $_skip; then log "IGNORE: $fp"; continue; fi
+    fi
+
+    rel="${fp#"$src/"}"
+    name="$tgt/$rel"
+    # Absolute versions for relpath computation only
+    fp_abs="$src_abs/$rel"
+    name_abs="$tgt_abs/$rel"
+    dir_abs="${name_abs%/*}"
+    dest="$(relpath "$fp_abs" "$dir_abs")"
+
+    if $delete; then
+        { [ -e "$name" ] || [ -L "$name" ]; } || continue
+        if [ ! -L "$name" ]; then
+            printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+            continue
+        fi
+        if ! [ "$name" -ef "$fp_abs" ]; then
+            printf 'CONFLICT: %s does not point to the expected destination, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+            continue
+        fi
+    else
+        if [ -L "$name" ]; then
+            [ "$name" -ef "$fp_abs" ] && continue  # already correct, idempotent
+            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
+            continue
+        elif [ -e "$name" ]; then
+            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
+            continue
+        fi
+    fi
+
+    printf '%s\n' "$name" >> "$tmp/names"
+    printf '%s\n' "$dest" >> "$tmp/dests"
+
+done < "$tmp/files"
+
+# Report conflicts
+if [ -s "$tmp/conflicts" ]; then
+    cat "$tmp/conflicts" >&2
+    $dry_run || die "sym will not start until all conflicts are resolved."
+fi
+
+$dry_run && printf 'dry-run; the following operations are what would have been executed.\n'
+
+[ -s "$tmp/names" ] || exit 0
+
+# Pass 2: execute
+if $delete; then
+    while IFS= read -r name; do
+        log "UNLINK: $name"
+        $dry_run || rm "$name"
+        if ! $dry_run; then
+            dir="${name%/*}"
+            while [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
+                log "RMDIR: $dir"
+                rmdir "$dir"
+                dir="${dir%/*}"
+            done
+        fi
+    done < "$tmp/names"
+else
+    paste "$tmp/names" "$tmp/dests" > "$tmp/jobs"
+    while IFS="$(printf '\t')" read -r name dest; do
+        dir="${name%/*}"
+        if [ ! -d "$dir" ]; then
+            log "MKDIRS: $dir"
+            $dry_run || mkdir -p "$dir"
+        fi
+        log "LINK: $name -> $dest"
+        $dry_run || ln -s "$dest" "$name"
+    done < "$tmp/jobs"
+fi
