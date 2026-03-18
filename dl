@@ -22,6 +22,7 @@ for prog in ish e denv lz srv smtp-server; do
     url="https://github.com/joshuarli/${prog}/releases/download/${tag}/${asset}"
     printf '%s\n' "Downloading ${asset} ..."
     curl -fsSL -o "${DEST}/${prog}" "${url}"
+    xattr -d com.apple.quarantine "${DEST}/${prog}" 2>/dev/null || true
     chmod +x "${DEST}/${prog}"
     printf '%s\n' "Installed ${DEST}/${prog}"
 done
@@ -43,6 +44,7 @@ if [ "$TARGET" = "aarch64-apple-darwin" ]; then
         tmpdir=$(mktemp -d)
         curl -fsSL -o "${tmpdir}/${zip}" "${url}"
         unzip -qo "${tmpdir}/${zip}" -d "${tmpdir}"
+        xattr -rd com.apple.quarantine "${tmpdir}/${appdir}" 2>/dev/null || true
         rm -rf "/Applications/${appdir}"
         mv "${tmpdir}/${appdir}" /Applications/
         rm -rf "$tmpdir"

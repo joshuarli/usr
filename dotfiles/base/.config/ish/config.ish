@@ -1,4 +1,4 @@
-set PATH "$HOME/usr/bin:$HOME/dev/tools/bin:$HOME/.local/bin"$HOME/.cache/.bun/bin"$HOME/go/bin:/opt/homebrew/bin:$PATH"
+set PATH "$HOME/usr/bin:$HOME/dev/tools/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.cache/.bun/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH"
 set EDITOR $HOME/usr/bin/e
 set PAGER $HOME/usr/bin/lz
 
