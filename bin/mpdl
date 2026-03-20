@@ -1,0 +1,7 @@
+#!/bin/sh
+"$HOME/usr/py/.venv/bin/python" -m yt_dlp --ignore-config --ignore-errors \
+    --remote-components 'ejs:npm' \
+    --js-runtimes bun:/opt/homebrew/bin/bun \
+    -f 'ba' \
+    --add-metadata \
+    -o '%(playlist_title)s/%(playlist_index)02d - %(title)s [%(id)s].%(ext)s' "$1"

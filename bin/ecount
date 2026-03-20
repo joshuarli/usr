@@ -1,0 +1,2 @@
+#!/bin/sh
+fd --color=never -tf | awk -F. 'NF > 1 {print tolower($NF)}' | sort | uniq -c | sort -n

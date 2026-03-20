@@ -39,6 +39,7 @@
 
 [push]
     default = current
+    autoSetupRemote = true
 
 [branch]
     autoSetupMerge = always
@@ -107,3 +108,4 @@
 
 [protocol]
     version = 2
+

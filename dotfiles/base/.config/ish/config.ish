@@ -45,8 +45,13 @@ alias grv /opt/homebrew/bin/git remote -v
 alias gs  /opt/homebrew/bin/git status -sb
 alias gss /opt/homebrew/bin/git status -sb -uall
 
-alias tl tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" ls
-alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
-alias ta tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
-alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
+alias tl tm ls
+alias tn tm new
+alias ta tm attach
+alias tk tm kill
 
+alias tnn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
+alias taa tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
+
+# work
+set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"

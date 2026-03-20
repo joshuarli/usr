@@ -1,0 +1,6 @@
+#!/bin/sh
+if [ -n "$1" ]; then
+    /opt/homebrew/bin/git reset HEAD~"$1"
+else
+    /opt/homebrew/bin/git reset
+fi
