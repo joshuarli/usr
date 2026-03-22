@@ -34,6 +34,8 @@ alias wol "$HOME/usr/bin/wol" '7c:83:34:bd:05:c4'
 alias tu '/Applications/Tailscale.app/Contents/MacOS/Tailscale' up
 alias td '/Applications/Tailscale.app/Contents/MacOS/Tailscale' down
 
+alias grt cd "$(git rev-parse --show-toplevel)"
+
 alias gaa /opt/homebrew/bin/git add --all
 alias gcm /opt/homebrew/bin/git commit -m
 alias gd  /opt/homebrew/bin/git d
