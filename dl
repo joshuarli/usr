@@ -24,6 +24,7 @@ for prog in tm ish e denv lz srv smtp-server; do
     curl -fsSL -o "${DEST}/${prog}" "${url}"
     xattr -d com.apple.quarantine "${DEST}/${prog}" 2>/dev/null || true
     chmod +x "${DEST}/${prog}"
+    codesign -fs - "${DEST}/${prog}"
     printf '%s\n' "Installed ${DEST}/${prog}"
 done
 

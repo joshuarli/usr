@@ -20,6 +20,8 @@ Formatting and linting enforced by pre-commit hooks.
 
 **When an agent has built-in search/glob tools, prefer those for basic queries.**
 
+Only use the Explore agent when you genuinely don't know where to look. When prior context (commit diffs, earlier reads, user hints) already identifies the relevant files, use Read/Grep directly.
+
 Use modern tools instead of POSIX equivalents. No exceptions. For detailed usage, see `~/d/library/tools/`.
 
 | Instead of | Use |
