@@ -21,11 +21,27 @@ Formatting and linting enforced by pre-commit hooks.
 
 # CLI Tools
 
-**When an agent has built-in search/glob tools, prefer those for basic queries.**
-
-Only use the Explore agent when you genuinely don't know where to look. When prior context (commit diffs, earlier reads, user hints) already identifies the relevant files, use Read/Grep directly.
-
 Use modern tools instead of POSIX equivalents. No exceptions. For detailed usage, see `~/d/library/tools/`.
+
+# Search & Exploration — TOKEN BUDGET IS CRITICAL
+
+**NEVER spawn an Explore agent as a first resort.** Explore agents are expensive (thousands of tokens). Before spawning one, you MUST first try at least two direct searches using Grep/Glob. Only escalate to Explore if those searches returned nothing useful AND you have no other leads.
+
+**Search recipes — use these directly, not via agents:**
+- Find a file: `Glob "**/*partial_name*"`
+- Find a symbol (function/class/type): `Grep "(def|class|function|fn|type|interface)\s+Name"`
+- Find usage/imports: `Grep "import.*Name|from.*Name|require.*Name"`
+- Map a directory: `Bash "eza --tree -L 2 path/"`
+- Find config files: `Glob "**/*.{toml,yaml,yml,json,cfg,ini}"`
+- Find entry points: `Grep "^(func main|if __name__|def main)" --type py,go,rs`
+
+**Before ANY agent spawn, ask yourself:**
+1. Do I already know which files are involved? → Read them directly.
+2. Can I name the symbol/string I'm looking for? → Grep for it.
+3. Can I guess the filename pattern? → Glob for it.
+4. Did the user or git history already point me to the right area? → Go there directly.
+
+If all four answers are "no", THEN an Explore agent is justified — but use `model: "haiku"` to minimize cost.
 
 | Instead of | Use |
 |---|---|
