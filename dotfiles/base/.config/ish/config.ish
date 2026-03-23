@@ -19,7 +19,7 @@ set CARGO_NET_GIT_FETCH_WITH_CLI true
 
 alias e $HOME/usr/bin/e
 
-alias codx codex --model gpt-5.3-codex --no-alt-screen --ask-for-approval never --sandbox workspace-write
+alias codx  codex --model gpt-5.4 --ask-for-approval never --sandbox workspace-write
 
 alias p   /Applications/Play.app/Contents/MacOS/play
 

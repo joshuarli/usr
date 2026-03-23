@@ -33,3 +33,5 @@ brew "prek"
 brew "bun"
 brew "rustup"
 
+brew "dropbear"
+brew "git-lfs"
