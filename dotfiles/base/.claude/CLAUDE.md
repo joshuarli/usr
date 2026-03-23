@@ -1,14 +1,17 @@
 # Reference Library
 
-A curated coding reference lives at **`~/d/library`**. Read the relevant files before writing code.
+A curated coding reference lives at **`~/d/library`**. Consult it selectively — don't read files speculatively.
 
-- **Before coding in any language**: read `~/d/library/languages/{lang}/style.md`
-- **Before choosing a language**: read `~/d/library/languages/USAGE.md`
-- **Before adding a dependency**: read `~/d/library/philosophy/dependencies.md`
-- **For CLI tool usage** (search, git, processes, etc.): read `~/d/library/tools/`
-- **Full index**: `~/d/library/INDEX.md`
+- **When writing a new file or doing substantial work in a language**: read `~/d/library/languages/{lang}/style.md`
+- **When choosing a language for a new project**: read `~/d/library/languages/USAGE.md`
+- **When adding a dependency**: read `~/d/library/philosophy/dependencies.md`
+- **When using an unfamiliar CLI tool**: check `~/d/library/tools/{tool}.md`
+- **For anything else**: start at `~/d/library/INDEX.md`
 
-Start with `~/d/library/WORKFLOW.md` — minimize output, fail fast, read before writing.
+Key workflow rules (from `~/d/library/WORKFLOW.md` — don't re-read the file):
+- Use quiet/silent flags for builds (`make -s`, `--quiet`, `--bail`). Fail fast.
+- Verify incrementally: type check → specific failing test → full suite.
+- Cap noisy output with `head`/`tail` rather than flooding context.
 
 # Coding Style
 
