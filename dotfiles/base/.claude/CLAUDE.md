@@ -28,6 +28,11 @@ The UI already shows tool results — just state your interpretation or next ste
 Prefer the simplest correct solution. No premature abstraction, no unnecessary dependencies.
 Vet every dependency before adding — fewer is always better.
 Formatting and linting enforced by pre-commit hooks.
+No banner/section-divider comments (e.g. `# ---- Section ----`). Use whitespace and
+function ordering to convey structure. If a file needs section headers, it's too long — split it.
+Never remove useful comments during refactors. Comments that explain *why* something
+exists, document non-obvious constants, or clarify tricky behavior must be preserved.
+Update them if the code changes, but don't silently drop them.
 
 # CLI Tools
 
