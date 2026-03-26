@@ -67,6 +67,11 @@ Use these directly — never via agents:
 | `ps` | `procs` |
 | `du` | `dua` (never `dua i`) |
 
+# Building
+
+Never build release binaries (`cargo build --release`, `--release`). Always use debug builds.
+The user manages release builds themselves.
+
 # Committing
 
 - All changes must pass pre-commit hooks. Never bypass with `--no-verify`.
