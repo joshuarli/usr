@@ -1,20 +1,10 @@
 {
-  "custom_providers": [
-    {
-      "name": "local",
-      "base_url": "http://localhost:1234/v1",
-      "api_key": null,
-      "models": [
-        {
-          "id": "Qwen3.5-9B.Q5_K_M.gguf",
-          "name": "Qwen3.5-9B.Q5_K_M.gguf",
-          "context_window": 128000,
-          "reasoning": null
-        }
-      ]
-    }
-  ],
-  "default_model": null,
-  "default_thinking_level": null,
-  "auto_compact": null
+  "auto_compact": true,
+  "compaction_model": "claude-haiku-4-5",
+  "custom_providers": [],
+  "default_effort_level": "medium",
+  "default_model": "claude-sonnet-4-6",
+  "default_thinking_level": true,
+  "headers": {},
+  "notifications": []
 }

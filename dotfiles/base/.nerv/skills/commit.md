@@ -3,22 +3,18 @@ name: commit
 description: Create a well-formed git commit from staged/unstaged changes
 ---
 
-Review the current git state and create a commit:
+2 bash calls total.
 
-1. Run `git status` to see all changes (staged and unstaged).
-2. Run `git diff` to see unstaged changes and `git diff --cached` to see staged changes.
-3. Run `git log --oneline -5` to understand the recent commit style.
-4. Stage appropriate files with `git add` (prefer specific files over `git add -A`).
-5. Write a concise commit message:
-   - First line: imperative mood, under 72 chars, summarizes the "why"
-   - If needed, blank line then details
-   - Do not include file lists — the diff speaks for itself
-6. Commit with `git commit -m "message"`.
-7. Run `git status` to verify the commit succeeded.
+**Call 1** — everything at once:
+```
+git status --short && git log --oneline -5 && git diff HEAD
+```
+If the diff is huge, replace `git diff HEAD` with `git diff --stat HEAD`.
 
-Rules:
-- Never use `--no-verify` or skip hooks.
-- Never use `--amend` unless explicitly asked.
-- Never push to remote unless explicitly asked.
-- Do not commit .env, credentials, or secrets.
-- If pre-commit hooks fail, fix the issue and create a new commit.
+**Call 2** — stage and commit:
+```
+git add <files> && git commit -m "subject"
+```
+Or for a body: `git commit -F - <<'EOF'\nsubject\n\nbody\nEOF`
+
+Rules: imperative mood, ≤72 chars, no trailing period. Stage only files belonging to this change. Never `--no-verify`, `--amend`, `git add -A`, or push.
