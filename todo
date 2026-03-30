@@ -1,0 +1,4 @@
+/etc/shells
+chsh
+
+sym dotfiles

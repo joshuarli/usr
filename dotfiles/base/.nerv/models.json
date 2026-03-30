@@ -1,8 +1,8 @@
 [
   {
-    "alias": "qwen3.5-9b-iq4_xs",
-    "path": "/Users/josh/.nerv/models/Qwen3.5-9B-IQ4_XS.gguf",
-    "hf_repo": "unsloth/Qwen3.5-9B-GGUF",
+    "alias": "qwen3-coder-next-ud-q4_k_m",
+    "path": "/Users/josh/.nerv/models/Qwen3-Coder-Next-UD-Q4_K_M.gguf",
+    "hf_repo": "unsloth/Qwen3-Coder-Next-GGUF",
     "context_length": 131072,
     "gpu_layers": 99,
     "extra_args": [
@@ -23,16 +23,26 @@
       "127.0.0.1",
       "--jinja",
       "-ctk",
-      "q8_0",
+      "q5_1",
       "-ctv",
-      "q8_0",
+      "q5_1",
       "--no-context-shift",
       "--cache-reuse",
-      "256",
+      "4096",
       "--poll",
       "0",
       "--prio",
-      "2"
+      "2",
+      "--temp",
+      "1.0",
+      "--top-p",
+      "0.95",
+      "--top-k",
+      "40",
+      "--min-p",
+      "0.01",
+      "--repeat-penalty",
+      "1.0"
     ],
     "port": 1234
   }

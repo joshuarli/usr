@@ -1,3 +1,5 @@
+cask "font-hack"
+
 brew "git"
 brew "delta"
 
@@ -30,8 +32,11 @@ brew "f3"
 brew "just"
 brew "prek"
 
+# brew tap oven-sh/bun
 brew "bun"
 brew "rustup"
 
 brew "dropbear"
 brew "git-lfs"
+
+brew "unbound"
