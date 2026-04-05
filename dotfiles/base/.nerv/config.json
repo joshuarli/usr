@@ -4,7 +4,13 @@
   "custom_providers": [],
   "default_effort_level": "medium",
   "default_model": "claude-sonnet-4-6",
-  "default_thinking_level": true,
-  "headers": {},
+  "default_thinking": true,
+  "headers": {
+    "anthropic": {
+      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+      "user-agent": "claude-cli/1.0.0",
+      "x-app": "cli"
+    }
+  },
   "notifications": []
 }

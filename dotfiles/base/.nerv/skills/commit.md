@@ -1,20 +1,13 @@
 ---
 name: commit
-description: Create a well-formed git commit from staged/unstaged changes
+description: Create a commit
 ---
 
-2 bash calls total.
+Create a commit efficiently:
 
-**Call 1** — everything at once:
-```
-git status --short && git log --oneline -5 && git diff HEAD
-```
-If the diff is huge, replace `git diff HEAD` with `git diff --stat HEAD`.
+**First assess:** `git status && git diff --cached --stat && git log --oneline -3`
 
-**Call 2** — stage and commit:
-```
-git add <files> && git commit -m "subject"
-```
-Or for a body: `git commit -F - <<'EOF'\nsubject\n\nbody\nEOF`
+**Then stage and commit:** `git add <specific files> && git commit -m` with a Conventional Commits subject (`feat:`, `fix:`, `ref:`, `chore:`, etc.), under 72 chars, imperative mood. Add a body when the change needs explanation — what changed and why, not a rehash of the diff.
 
-Rules: imperative mood, ≤72 chars, no trailing period. Stage only files belonging to this change. Never `--no-verify`, `--amend`, `git add -A`, or push.
+Never use `--no-verify` or `--amend`.
+Never `git add -A`.

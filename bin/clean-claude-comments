@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+find . -type f -name '*.rs' -print0 | while IFS= read -r -d '' f; do
+  perl -0777 -i -pe '
+    my $has_final_newline = ($_ =~ /\n\z/);
+
+    my @lines = split /\n/, $_;
+    my @out;
+
+    for (my $i = 0; $i < @lines; $i++) {
+      my $a = $lines[$i-1] // "";
+      my $b = $lines[$i];
+      my $c = $lines[$i+1] // "";
+
+      if (
+        $b =~ /^\s*\/\/\s*-+.*-+\s*$/ &&
+        $a =~ /^\s*$/ &&
+        $c =~ /^\s*$/
+      ) {
+        next;
+      }
+
+      push @out, $b;
+    }
+
+    $_ = join("\n", @out);
+
+    # restore trailing newline if it originally existed
+    $_ .= "\n" if $has_final_newline && $_ !~ /\n\z/;
+  ' "$f"
+done
