@@ -65,20 +65,21 @@
 [delta]
     features = line-numbers decorations
     syntax-theme = none
-    plus-style = green
-    plus-emph-style = green bold
+
     minus-style = red
-    minus-emph-style = red bold
+    plus-style  = green
+
+    minus-emph-style = "red bold reverse"
+    plus-emph-style  = "green bold reverse"
+
     line-numbers-left-format  = {nm:^4}
     line-numbers-right-format = {np:^4}
     navigate = true  # use n and N to move between diff sections
+    word-diff-regex = \\w+
 
 [delta "decorations"]
-    file-style = magenta bold
     commit-decoration-style = none
-    file-decoration-style = white box
     hunk-header-style = none
-    hunk-header-decoration-style = white ul
 
 [gc]
     writeCommitGraph = true
