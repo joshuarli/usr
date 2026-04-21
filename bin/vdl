@@ -1,7 +1,7 @@
 #!/bin/sh
 "$HOME/usr/py/.venv/bin/python" -m yt_dlp --ignore-config --ignore-errors \
-    --remote-components 'ejs:npm' \
-    --js-runtimes bun:/opt/homebrew/bin/bun \
+    --remote-components 'ejs:github' \
+    --js-runtimes node:/opt/homebrew/bin/node \
     -f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' \
     --write-sub --sub-lang=en --sub-format=srt --convert-subs=srt \
     --add-metadata \

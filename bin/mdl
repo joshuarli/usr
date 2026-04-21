@@ -2,8 +2,8 @@
 case $1 in *playlist*) echo "Use mpdl for playlists." ;; esac
 
 "$HOME/usr/py/.venv/bin/python" -m yt_dlp --ignore-config \
-    --remote-components 'ejs:npm' \
-    --js-runtimes bun:/opt/homebrew/bin/bun \
+    --remote-components 'ejs:github' \
+    --js-runtimes node:/opt/homebrew/bin/node \
     -f 'ba' \
     --add-metadata \
     -o '%(title)s [%(id)s].%(ext)s' "$@"

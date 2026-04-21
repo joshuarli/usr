@@ -2,7 +2,7 @@
 name = "lol"
 description = "one venv to rule them all"
 version = "0.0.0"
-requires-python = "==3.13.3"
+requires-python = "==3.14.4"
 dependencies = [
     "yt-dlp",
     #"instaloader",

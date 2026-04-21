@@ -1,4 +1,4 @@
-set PATH "$HOME/usr/bin:/opt/homebrew/opt/rustup/bin:$HOME/dev/tools/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.cache/.bun/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH"
+set PATH "$HOME/usr/bin:/opt/homebrew/opt/rustup/bin:$HOME/dev/tools/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH"
 set EDITOR $HOME/usr/bin/e
 set PAGER less
 
@@ -59,3 +59,4 @@ alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 
 # work
 # set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
+set PATH "/opt/homebrew/share/google-cloud-sdk/bin:$PATH"
