@@ -11,6 +11,9 @@ lz
 denv
 srv
 smtp-server
+gh
+
+defuddle.js
 
 # https://github.com/aspect-build/zstd-prebuilt/releases
 zstd_*
@@ -22,4 +25,5 @@ syncthing
 
 # for yt-dlp
 deno
+
 

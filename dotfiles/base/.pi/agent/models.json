@@ -1,11 +1,25 @@
 {
   "providers": {
     "llamacpp": {
-      "baseUrl": "http://localhost:1234/v1",
+      "baseUrl": "http://localhost:8080/v1",
       "api": "openai-completions",
       "apiKey": "foo",
       "models": [
-        { "id": "qwen3-coder-next-ud-q4_k_m" }
+        { "id": "Qwen3.6-27B-GGUF-UD-Q4_K_XL" }
+      ]
+    },
+    "google": {
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "api": "google-generative-ai",
+      "apiKey": "GEMINI_API_KEY",
+      "models": [
+        {
+          "id": "gemma-4-31b-it",
+          "name": "Gemma 4 31B",
+          "input": ["text", "image"],
+          "contextWindow": 262144,
+          "reasoning": true
+        }
       ]
     }
   }
