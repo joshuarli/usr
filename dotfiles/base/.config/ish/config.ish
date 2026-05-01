@@ -1,3 +1,5 @@
+set TERM screen
+
 set PATH "$HOME/usr/bin:/opt/homebrew/opt/rustup/bin:$HOME/dev/tools/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/go/bin:/opt/homebrew/bin:$PATH"
 set EDITOR $HOME/usr/bin/e
 set PAGER less
@@ -39,18 +41,18 @@ alias td '/Applications/Tailscale.app/Contents/MacOS/Tailscale' down
 alias grt cd "$(git rev-parse --show-toplevel)"
 
 # git's diff (+delta) is way better than /usr/bin/diff
-alias d   /opt/homebrew/bin/git diff --no-index
+alias d   git diff --no-index
 
-alias gaa /opt/homebrew/bin/git add --all
-alias gcm /opt/homebrew/bin/git commit -m
-alias gd  /opt/homebrew/bin/git d
-alias gdd /opt/homebrew/bin/git diff --name-only --diff-filter=U
-alias gdc /opt/homebrew/bin/git dc
-alias gl  /opt/homebrew/bin/git l
-alias gp  /opt/homebrew/bin/git push -u
-alias grv /opt/homebrew/bin/git remote -v
-alias gs  /opt/homebrew/bin/git status -sb
-alias gss /opt/homebrew/bin/git status -sb -uall
+alias gaa git add --all
+alias gcm git commit -m
+alias gd  git d
+alias gdd git diff --name-only --diff-filter=U
+alias gdc git dc
+alias gl  git l
+alias gp  git push -u
+alias grv git remote -v
+alias gs  git status -sb
+alias gss git status -sb -uall
 
 alias tl tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" ls
 alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
