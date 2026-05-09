@@ -1,0 +1,89 @@
+#!/bin/bash
+
+set -e
+
+profile="$1"
+input="$2"
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: encode <profile> <file>
+
+Profiles:
+  archive-720p-cq52    HEVC/VideoToolbox 720p CQ 52, AAC-LC 128k stereo — space-efficient archival
+  archive-1080p-cq52   HEVC/VideoToolbox 1080p CQ 52, AAC-LC 128k stereo — higher-res archival
+EOF
+    exit 1
+}
+
+if [ -z "$profile" ] || [ -z "$input" ]; then
+    usage
+fi
+
+if [ ! -f "$input" ]; then
+    echo "Error: file not found: $input" >&2
+    exit 1
+fi
+
+# reject files that were already produced by this script
+case "$input" in
+    *-encoded-*.mp4)
+        echo "Error: input appears to already be an encoded file" >&2
+        exit 1
+        ;;
+esac
+
+base="${input%.*}"
+output="${base}-encoded-${profile}.mp4"
+
+# shared helper: build args for the archive-HEVC profile at a given resolution cap
+archive_hevc_args() {
+    local cap="$1"
+    args=(
+        # first video stream, first audio stream; ? = skip silently if no subtitles
+        -map "0:V:0" -map "0:a:0" -map "0:s?"
+
+        -c:v hevc_videotoolbox      # Apple GPU H.265 encoder
+        -pix_fmt yuv420p            # enforce 8-bit output; reliable VT mechanism, -profile:v main is not
+        # tag output as BT.709 SDR; without this, HDR sources keep their original color metadata
+        # despite being resampled to 8-bit, causing players to misinterpret the signal
+        -colorspace bt709
+        -color_primaries bt709
+        -color_trc bt709
+        -q:v 52                     # constant quality 0–100 (lower = better quality)
+        -tag:v hvc1                 # Apple's preferred HEVC tag; QuickTime/iOS expect hvc1, not the default hev1
+
+        # cap to target resolution for both orientations: landscape caps height, portrait caps width
+        # -2 = auto-calculate the other dimension, rounded to even for codec alignment
+        -vf "scale='if(gt(iw,ih),-2,min(iw,$cap))':'if(gt(iw,ih),min(ih,$cap),-2)'"
+
+        -r 25                       # max 25 fps
+        -fps_mode vfr               # variable frame rate: drop excess frames, never duplicate
+
+        -c:a aac_at                 # CoreAudio AAC-LC encoder
+        -ac 2                       # downmix to stereo
+        -b:a 128k
+
+        -c:s mov_text               # transcode subtitles to MP4-compatible text format
+
+        -map_metadata -1            # strip all global metadata tags
+        -map_chapters -1            # strip chapter markers
+        -movflags +faststart        # move moov atom to front so the file is seekable before fully downloaded
+    )
+}
+
+case "$profile" in
+    archive-720p-cq52)
+        archive_hevc_args 720
+        ;;
+    archive-1080p-cq52)
+        archive_hevc_args 1080
+        ;;
+    *)
+        echo "Error: unknown profile '$profile'" >&2
+        echo >&2
+        usage
+        ;;
+esac
+
+ffmpeg -i "$input" "${args[@]}" "$output"
