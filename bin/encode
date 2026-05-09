@@ -8,6 +8,7 @@ input="$2"
 usage() {
     cat >&2 <<'EOF'
 Usage: encode <profile> <file>
+       encode <profile> <directory>
 
 Profiles:
   archive-720p-cq52    HEVC/VideoToolbox 720p CQ 52, AAC-LC 128k stereo — space-efficient archival
@@ -20,21 +21,15 @@ if [ -z "$profile" ] || [ -z "$input" ]; then
     usage
 fi
 
-if [ ! -f "$input" ]; then
-    echo "Error: file not found: $input" >&2
+if [ ! -e "$input" ]; then
+    echo "Error: path not found: $input" >&2
     exit 1
 fi
 
-# reject files that were already produced by this script
-case "$input" in
-    *-encoded-*.mp4)
-        echo "Error: input appears to already be an encoded file" >&2
-        exit 1
-        ;;
-esac
-
-base="${input%.*}"
-output="${base}-encoded-${profile}.mp4"
+if ! command -v trash >/dev/null 2>&1; then
+    echo "Error: required command not found: trash" >&2
+    exit 1
+fi
 
 # shared helper: build args for the archive-HEVC profile at a given resolution cap
 archive_hevc_args() {
@@ -56,9 +51,7 @@ archive_hevc_args() {
         # cap to target resolution for both orientations: landscape caps height, portrait caps width
         # -2 = auto-calculate the other dimension, rounded to even for codec alignment
         -vf "scale='if(gt(iw,ih),-2,min(iw,$cap))':'if(gt(iw,ih),min(ih,$cap),-2)'"
-
-        -r 25                       # max 25 fps
-        -fps_mode vfr               # variable frame rate: drop excess frames, never duplicate
+        -fps_mode passthrough       # preserve source-native frame timing
 
         -c:a aac_at                 # CoreAudio AAC-LC encoder
         -ac 2                       # downmix to stereo
@@ -70,6 +63,89 @@ archive_hevc_args() {
         -map_chapters -1            # strip chapter markers
         -movflags +faststart        # move moov atom to front so the file is seekable before fully downloaded
     )
+}
+
+is_video_file() {
+    local path="$1"
+    local lower
+    local name
+    name=$(basename "$path")
+    case "$name" in
+        .*|._*)
+            return 1
+            ;;
+    esac
+    lower=$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')
+    case "$lower" in
+        *.mp4|*.m4v|*.mov|*.qt|*.mkv|*.webm|*.avi|*.wmv|*.flv|*.mpg|*.mpeg|*.m2v|*.m2ts|*.mts|*.ts|*.3gp|*.3g2|*.ogv|*.vob|*.asf|*.f4v|*.rm|*.rmvb)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+abs_path() {
+    local p="$1"
+    if [ -d "$p" ]; then
+        (cd "$p" && pwd -P)
+    else
+        local d b
+        d=$(dirname "$p")
+        b=$(basename "$p")
+        (cd "$d" && printf '%s/%s\n' "$(pwd -P)" "$b")
+    fi
+}
+
+encode_one() {
+    local src="$1"
+    local base output src_size out_size pct_change
+
+    # reject files that were already produced by this script
+    case "$src" in
+        *-encoded-*.mp4)
+            echo "Skipping already-encoded file: $src"
+            return 0
+            ;;
+    esac
+
+    if [ ! -f "$src" ] || [ ! -r "$src" ]; then
+        echo "Skipping unreadable/missing file: $src" >&2
+        return 1
+    fi
+
+    base="${src%.*}"
+    output="${base}-encoded-${profile}.mp4"
+
+    if [ -e "$output" ]; then
+        echo "Skipping (output exists): $output"
+        return 0
+    fi
+
+    echo "Encoding: $src"
+    if ! ffmpeg -nostdin -hide_banner -loglevel error -i "$src" "${args[@]}" "$output"; then
+        echo "Encode failed: $src" >&2
+        rm -f "$output"
+        return 1
+    fi
+
+    src_size=$(stat -f%z "$src")
+    out_size=$(stat -f%z "$output")
+    echo "Size before: ${src_size} bytes"
+    echo "Size after:  ${out_size} bytes"
+    pct_change=$(awk -v s="$src_size" -v o="$out_size" 'BEGIN { if (s == 0) { print "0.00" } else { printf "%.2f", ((o - s) * 100.0) / s } }')
+    echo "Size change: ${pct_change}%"
+
+    if [ "$out_size" -lt "$src_size" ]; then
+        trash "$src"
+        echo "Trashed original (smaller output): $src"
+    elif [ "$out_size" -gt "$src_size" ]; then
+        rm -f "$output"
+        echo "Deleted processed file (larger output): $output"
+    else
+        echo "Kept both files (same size): $src"
+    fi
 }
 
 case "$profile" in
@@ -86,4 +162,37 @@ case "$profile" in
         ;;
 esac
 
-ffmpeg -i "$input" "${args[@]}" "$output"
+if [ -f "$input" ]; then
+    input=$(abs_path "$input")
+    if ! is_video_file "$input"; then
+        echo "Error: not a supported video file: $input" >&2
+        exit 1
+    fi
+    encode_one "$input"
+    exit $?
+fi
+
+if [ ! -d "$input" ]; then
+    echo "Error: path is neither file nor directory: $input" >&2
+    exit 1
+fi
+
+had_error=0
+processed=0
+
+while IFS= read -r -d '' file; do
+    file=$(abs_path "$file")
+    if ! is_video_file "$file"; then
+        continue
+    fi
+    processed=1
+    if ! encode_one "$file"; then
+        had_error=1
+    fi
+done < <(find "$input" \( -mindepth 1 -type d -name '.*' -prune \) -o \( -type f -print0 \))
+
+if [ "$processed" -eq 0 ]; then
+    echo "No supported video files found under: $input"
+fi
+
+exit "$had_error"
