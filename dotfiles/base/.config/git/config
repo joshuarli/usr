@@ -16,7 +16,9 @@
     untrackedCache = true
 
     # use built-in filesystem watcher so git knows what changed without full scan
-    fsmonitor = true
+    #fsmonitor = true
+    #fsmonitorHookVersion = 2
+    #splitIndex = true
 
     # parallel index stat() calls
     preloadIndex = true

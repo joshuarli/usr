@@ -1,7 +1,1 @@
-{
-  "defaultProvider": "google",
-  "defaultModel": "gemma-4-31b-it",
-  "defaultThinkingLevel": "medium",
-  "hideThinkingBlock": false,
-  "lastChangelogVersion": "0.70.2"
-}
+
