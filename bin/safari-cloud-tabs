@@ -1,0 +1,4 @@
+#!/bin/sh
+
+sqlite3 "$HOME/Library/Containers/com.apple.Safari/Data/Library/Safari/CloudTabs.db" \
+'SELECT c.url FROM cloud_tabs c LEFT JOIN cloud_tab_devices d ON c.device_uuid = d.device_uuid WHERE c.url LIKE "http%" GROUP BY c.url ORDER BY d.device_name, c.position DESC;'
