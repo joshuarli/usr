@@ -57,6 +57,8 @@ alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
 alias ta tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
 alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 
+alias mpv /Applications/mpv.app/Contents/MacOS/mpv
+
 # work
-# set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
+set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
 set PATH "/opt/homebrew/share/google-cloud-sdk/bin:$PATH"

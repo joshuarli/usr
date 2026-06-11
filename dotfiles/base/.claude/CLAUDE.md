@@ -10,10 +10,6 @@
 - Never add banner/separator comments (`// ---`, `# ====`, `// ── Section ──`, etc.). No exceptions.
 - Never remove useful comments during refactors. Comments that explain *why* something exists, document non-obvious constants, or clarify tricky behavior must be preserved. Update them if the code changes, but don't silently drop them.
 
-# Building
-
-- Never build release binaries (`cargo build --release`).
-
 # Committing
 
 - Do NOT run pre-commit hooks. User verifies commits independently.

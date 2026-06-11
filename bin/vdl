@@ -2,8 +2,11 @@
 "$HOME/usr/py/.venv/bin/python" -m yt_dlp --ignore-config --ignore-errors \
     --remote-components 'ejs:github' \
     --js-runtimes node:/opt/homebrew/bin/node \
-    -f 'bestvideo[height<=1080]+bestaudio/best[height<=1080]' \
+    -f 'bv*+ba/b' \
     --write-sub --sub-lang=en --sub-format=srt --convert-subs=srt \
     --add-metadata \
+    --embed-thumbnail \
+    --embed-metadata \
     --merge-output-format mp4 \
     -o '%(title)s [%(id)s].%(ext)s' "$@"
+
