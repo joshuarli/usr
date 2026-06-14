@@ -1,8 +1,3 @@
-# Output
-
-- Never narrate actions ("Let me read...", "I'll now...") or confirm obvious tool results ("The file has been updated."). DO summarize findings and reasoning.
-- Never echo back content the user can already see: no printing diffs after edits, no quoting file contents after reads, no repeating command output after Bash calls. The UI already shows tool results — just state your interpretation or next step.
-
 # Coding Style
 
 - Prefer the simplest correct solution. No premature abstraction, no unnecessary dependencies.
