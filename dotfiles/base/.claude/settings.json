@@ -17,5 +17,6 @@
     "command": "jaq -r '(.model.display_name // \"Unknown\") as $m | (.context_window.used_percentage // 0) as $pct | \"\\($m) \\($pct)% ctx\"'"
   },
   "effortLevel": "high",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "model": "opus[1m]"
 }
