@@ -3,7 +3,7 @@
     --remote-components 'ejs:github' \
     --js-runtimes node:/opt/homebrew/bin/node \
     -f 'bv*+ba/b' \
-    --write-sub --sub-lang=en --sub-format=srt --convert-subs=srt \
+    --write-subs --write-auto-subs --sub-langs "orig" --sub-format srt --convert-subs srt \
     --add-metadata \
     --embed-thumbnail \
     --embed-metadata \

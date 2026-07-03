@@ -1,4 +1,5 @@
 {
+  "model": "sonnet",
   "hooks": {
     "Notification": [
       {
@@ -17,6 +18,8 @@
     "command": "jaq -r '(.model.display_name // \"Unknown\") as $m | (.context_window.used_percentage // 0) as $pct | \"\\($m) \\($pct)% ctx\"'"
   },
   "effortLevel": "high",
+  "awaySummaryEnabled": false,
+  "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
-  "model": "opus[1m]"
+  "autoCompactEnabled": true
 }

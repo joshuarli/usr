@@ -1,0 +1,24 @@
+personality = "pragmatic"
+
+notify = [
+  "/bin/bash",
+  "-lc",
+  "osascript -e 'display notification \"Task finished\" with title \"Codex\"'; /usr/bin/afplay /System/Library/Sounds/Glass.aiff",
+]
+
+[analytics]
+enabled = false
+
+[features]
+goals = true
+js_repl = false
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
+status_line_use_colors = true
+session_picker_view = "comfortable"
+
+[notice]
+fast_default_opt_out = true
+hide_rate_limit_model_nudge = true
+

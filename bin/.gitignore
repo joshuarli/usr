@@ -15,6 +15,7 @@ denv
 srv
 smtp-server
 gh
+vault
 
 defuddle.js
 
