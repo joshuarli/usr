@@ -53,8 +53,8 @@ tmp="${TMPDIR:-/tmp}/sym.$$"
 mkdir "$tmp" || die 'failed to create temp directory'
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-# Enumerate all regular files under src (paths will share the $src prefix)
-find "$src" -type f > "$tmp/files"
+# Enumerate all regular files and symlinks under src (paths will share the $src prefix)
+find "$src" \( -type f -o -type l \) > "$tmp/files"
 
 # Pass 1: compute jobs and detect conflicts
 while IFS= read -r fp; do
@@ -77,7 +77,16 @@ PATS
     fp_abs="$src_abs/$rel"
     name_abs="$tgt_abs/$rel"
     dir_abs="${name_abs%/*}"
-    dest="$(relpath "$fp_abs" "$dir_abs")"
+
+    if [ -L "$fp" ]; then
+        dest_abs="$(readlink "$fp")"
+        case "$dest_abs" in
+            /*) dest="$(relpath "$dest_abs" "$dir_abs")" ;;
+            *)  dest="$dest_abs" ;;  # already relative
+        esac
+    else
+        dest="$(relpath "$fp_abs" "$dir_abs")"
+    fi
 
     if $delete; then
         { [ -e "$name" ] || [ -L "$name" ]; } || continue
