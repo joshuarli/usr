@@ -1,13 +1,14 @@
 {
-  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "default"
+  },
   "hooks": {
     "Notification": [
       {
-        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "terminal-notifier -title 'claude needs input!' -execute \"open -a tty.app; /opt/homebrew/bin/tmux select-window -t $TMUX_PANE; /opt/homebrew/bin/tmux select-pane -t $TMUX_PANE\" < /dev/null"
+            "command": "/usr/bin/afplay /System/Library/Sounds/Glass.aiff"
           }
         ]
       }
@@ -17,9 +18,12 @@
     "type": "command",
     "command": "jaq -r '(.model.display_name // \"Unknown\") as $m | (.context_window.used_percentage // 0) as $pct | \"\\($m) \\($pct)% ctx\"'"
   },
-  "effortLevel": "high",
+  "enableWorkflows": false,
+  "workflowKeywordTriggerEnabled": false,
   "awaySummaryEnabled": false,
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
-  "autoCompactEnabled": true
+  "preferredNotifChannel": "notifications_disabled",
+  "autoCompactEnabled": true,
+  "remoteControlAtStartup": false
 }
