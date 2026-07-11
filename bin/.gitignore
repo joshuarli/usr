@@ -16,6 +16,7 @@ srv
 smtp-server
 gh
 vault
+fastmod
 
 defuddle.js
 
