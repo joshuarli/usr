@@ -1,12 +1,16 @@
-personality = "pragmatic"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 
 notify = [
   "/bin/bash",
   "-lc",
   "osascript -e 'display notification \"Task finished\" with title \"Codex\"'; /usr/bin/afplay /System/Library/Sounds/Glass.aiff",
 ]
+
 model = "gpt-5.6-luna"
+personality = "pragmatic"
 model_reasoning_effort = "high"
+model_verbosity = "low"
 
 [analytics]
 enabled = false
