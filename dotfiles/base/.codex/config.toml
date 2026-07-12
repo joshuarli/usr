@@ -4,7 +4,7 @@ sandbox_mode = "danger-full-access"
 notify = [
   "/bin/bash",
   "-lc",
-  "osascript -e 'display notification \"Task finished\" with title \"Codex\"'; /usr/bin/afplay /System/Library/Sounds/Glass.aiff",
+  "/usr/bin/afplay /System/Library/Sounds/Glass.aiff",
 ]
 
 model = "gpt-5.6-luna"
@@ -19,10 +19,16 @@ enabled = false
 goals = true
 js_repl = false
 
+[mcp]
+enabled = false
+
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
 status_line_use_colors = true
 session_picker_view = "comfortable"
+
+[tui.model_availability_nux]
+"gpt-5.6-sol" = 2
 
 [notice]
 fast_default_opt_out = true
