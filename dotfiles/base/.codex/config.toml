@@ -11,6 +11,7 @@ model = "gpt-5.6-luna"
 personality = "pragmatic"
 model_reasoning_effort = "high"
 model_verbosity = "low"
+plan_mode_reasoning_effort = "high"
 
 [analytics]
 enabled = false
@@ -18,6 +19,7 @@ enabled = false
 [features]
 goals = true
 js_repl = false
+apps = false
 
 [mcp]
 enabled = false
@@ -28,7 +30,7 @@ status_line_use_colors = true
 session_picker_view = "comfortable"
 
 [tui.model_availability_nux]
-"gpt-5.6-sol" = 2
+"gpt-5.6-sol" = 4
 
 [notice]
 fast_default_opt_out = true
