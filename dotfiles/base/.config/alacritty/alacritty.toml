@@ -1,0 +1,17 @@
+[terminal.shell]
+program = "/Users/josh/usr/bin/ish"
+
+[window]
+startup_mode = "Fullscreen"
+
+[font]
+size = 16
+
+[font.normal]
+family = "Hack"
+style = "Regular"
+
+[font.bold]
+family = "Hack"
+style = "Bold"
+
