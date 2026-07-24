@@ -28,7 +28,7 @@
   "workflowKeywordTriggerEnabled": false,
   "statusLine": {
     "type": "command",
-    "command": "jaq -r '(.model.display_name // \"Unknown\") as $m | (.context_window.used_percentage // 0) as $pct | \"\\($m) \\($pct)% ctx\"'"
+    "command": "jaq -r '(.model.display_name // \"Unknown\") as $m | (.effort.level // \"n/a\") as $e | (.context_window.used_percentage // 0) as $pct | \"\\($m) \\($e) \\($pct)% ctx\"'"
   },
   "effortLevel": "high",
   "emojiCompletionEnabled": false,

@@ -1,3 +1,4 @@
+# model = "openai/gpt-5.6-luna"
 model = "gpt-5.6-luna"
 personality = "pragmatic"
 model_reasoning_effort = "medium"
@@ -13,6 +14,7 @@ notify = [
   "/usr/bin/afplay /System/Library/Sounds/Glass.aiff",
 ]
 
+
 [analytics]
 enabled = false
 
@@ -26,6 +28,9 @@ apps = false
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
 status_line_use_colors = true
+
+[tui.model_availability_nux]
+"gpt-5.6-sol" = 4
 
 [notice]
 fast_default_opt_out = true
