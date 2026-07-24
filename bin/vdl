@@ -1,8 +1,8 @@
 #!/bin/sh
 "$HOME/usr/py/.venv/bin/python" -m yt_dlp --ignore-config --ignore-errors \
     --remote-components 'ejs:github' \
-    --js-runtimes node:/opt/homebrew/bin/node \
-    -f 'bv*+ba/b' \
+    --js-runtimes node \
+    -f 'bv*[height<=1080]+ba/b[height<=1080]' \
     --write-subs --write-auto-subs --sub-langs "orig" --sub-format srt --convert-subs srt \
     --add-metadata \
     --embed-thumbnail \
