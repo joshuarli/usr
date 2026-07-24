@@ -21,7 +21,10 @@ set CARGO_NET_GIT_FETCH_WITH_CLI true
 
 alias e $HOME/usr/bin/e
 
-alias p   /Applications/Play.app/Contents/MacOS/play
+alias mpv /Applications/mpv.app/Contents/MacOS/mpv
+alias p   /Applications/mpv.app/Contents/MacOS/mpv -vo null
+
+alias sshnew ssh-keygen -t ed25519 -N ""
 
 alias fd  fd --prune
 alias fdh fd --prune --no-ignore-vcs -H -E '.git/'
@@ -56,8 +59,6 @@ alias tl tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" ls
 alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
 alias ta tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
 alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
-
-alias mpv /Applications/mpv.app/Contents/MacOS/mpv
 
 # work
 set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
