@@ -1,0 +1,14 @@
+{
+  "lastChangelogVersion": "0.82.1",
+  "theme": "dark",
+  "defaultProvider": "openrouter",
+  "defaultModel": "deepseek/deepseek-v4-flash",
+  "defaultThinkingLevel": "high",
+  "showCacheMissNotices": true,
+  "collapseChangelog": true,
+  "quietStartup": true,
+  "enableInstallTelemetry": false,
+  "hideThinkingBlock": true,
+  "defaultProjectTrust": "always",
+  "packages": []
+}
