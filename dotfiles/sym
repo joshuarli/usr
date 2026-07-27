@@ -51,10 +51,38 @@ tgt_abs="$(cd "$tgt" && pwd)"
 
 tmp="${TMPDIR:-/tmp}/sym.$$"
 mkdir "$tmp" || die 'failed to create temp directory'
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' 0 1 2 3 15
 
-# Enumerate all regular files and symlinks under src (paths will share the $src prefix)
-find "$src" \( -type f -o -type l \) > "$tmp/files"
+# Enumerate files using Git's ignore rules when src is inside a Git worktree.
+# Exclude .sym-dir marker files themselves (their parent dirs are handled in pass 1b).
+: > "$tmp/files"
+: > "$tmp/symlink-dirs"
+if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$src" ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
+    while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        case "$rel" in
+            .sym-dir)
+                printf '%s\n' "$src" >> "$tmp/symlink-dirs"
+                ;;
+            */.sym-dir)
+                dir="${rel%/.sym-dir}"
+                printf '%s/%s\n' "$src" "$dir" >> "$tmp/symlink-dirs"
+                ;;
+            *)
+                printf '%s/%s\n' "$src" "$rel" >> "$tmp/files"
+                ;;
+        esac
+    done < "$tmp/file-relpaths"
+else
+    find "$src" -name '.sym-dir' -type f > "$tmp/sym-dirs"
+    while IFS= read -r marker; do
+        [ -z "$marker" ] && continue
+        dir="${marker%/.sym-dir}"
+        printf '%s\n' "$dir" >> "$tmp/symlink-dirs"
+    done < "$tmp/sym-dirs"
+    find "$src" \( -type f -o -type l \) ! -name '.sym-dir' > "$tmp/files"
+fi
 
 # Pass 1: compute jobs and detect conflicts
 while IFS= read -r fp; do
@@ -69,6 +97,15 @@ while IFS= read -r fp; do
 $excludes
 PATS
         if $_skip; then log "IGNORE: $fp"; continue; fi
+    fi
+
+    # Skip files inside whole-symlink directories
+    if [ -s "$tmp/symlink-dirs" ]; then
+        _in_sd=false
+        while IFS= read -r sd; do
+            case "$fp" in "$sd"/*) _in_sd=true; break ;; esac
+        done < "$tmp/symlink-dirs"
+        if $_in_sd; then continue; fi
     fi
 
     rel="${fp#"$src/"}"
@@ -113,6 +150,61 @@ PATS
     printf '%s\n' "$dest" >> "$tmp/dests"
 
 done < "$tmp/files"
+
+# Pass 1b: process whole-directory symlinks
+while IFS= read -r sd; do
+    [ -z "$sd" ] && continue
+
+    # Skip directories that are nested inside another symlink-dir
+    _nested=false
+    while IFS= read -r sd2; do
+        [ "$sd2" = "$sd" ] && continue
+        case "$sd" in "$sd2"/*) _nested=true; break ;; esac
+    done < "$tmp/symlink-dirs"
+    if $_nested; then log "SKIP (nested in another symlink-dir): $sd"; continue; fi
+
+    rel="${sd#"$src/"}"
+    name="$tgt/$rel"
+    fp_abs="$src_abs/$rel"
+    name_abs="$tgt_abs/$rel"
+
+    # Filter excluded paths
+    if [ -n "$excludes" ]; then
+        _skip=false
+        while IFS= read -r pat; do
+            [ -z "$pat" ] && continue
+            case $sd in $pat) _skip=true; break ;; esac
+        done <<- PATS
+$excludes
+		PATS
+        if $_skip; then log "IGNORE: $sd"; continue; fi
+    fi
+
+    if $delete; then
+        { [ -e "$name" ] || [ -L "$name" ]; } || continue
+        if [ ! -L "$name" ]; then
+            printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+            continue
+        fi
+        if ! [ "$name" -ef "$fp_abs" ]; then
+            printf 'CONFLICT: %s does not point to the expected destination, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+            continue
+        fi
+    else
+        if [ -L "$name" ]; then
+            [ "$name" -ef "$fp_abs" ] && continue
+            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
+            continue
+        elif [ -e "$name" ]; then
+            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
+            continue
+        fi
+    fi
+
+    dest="$(relpath "$fp_abs" "${name_abs%/*}")"
+    printf '%s\n' "$name" >> "$tmp/names"
+    printf '%s\n' "$dest" >> "$tmp/dests"
+done < "$tmp/symlink-dirs"
 
 # Report conflicts
 if [ -s "$tmp/conflicts" ]; then
