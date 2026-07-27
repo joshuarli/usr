@@ -37,7 +37,7 @@ Supported row operations:
 @INS.POST N      insert following + rows after 1-based line N
 @INS.BEFORE      insert + rows before the located - anchor block using pi's edit matcher
 @INS.AFTER       insert + rows after the located - anchor block using pi's edit matcher
-@REPLACE         replace deleted-row blocks with inserted-row blocks using pi's edit matcher; - then + and + then - are both accepted. Space-prefixed context rows are allowed for unified-diff style hunks, including context-anchored insertions. Use @@ inside @REPLACE to separate multiple context hunks.
+@REPLACE         replace deleted-row blocks with inserted-row blocks using pi's edit matcher; always requires at least one - block and one + block (use context rows with @@ for insertion-only hunks). Space-prefixed context rows are allowed for unified-diff style hunks. Use @@ inside @REPLACE to separate multiple hunks.
 @APPEND          append following + rows at the end of the file
 @DEL N-M         delete lines N through M inclusive; @DEL N also deletes one line; @DEL N..M, @DEL N..=M, and @DEL N.=M are accepted aliases
 
@@ -66,12 +66,14 @@ const TOOL_PROMPT_GUIDELINES = [
 	"For edit row scripts, start each file section with [path/to/file], then use operation lines like @REPLACE, @INS.PRE N, @INS.POST N, @INS.BEFORE, @INS.AFTER, @DEL N-M, or @APPEND.",
 	"For edit row scripts, every content row must have a marker: use + for inserted rows and - for deleted rows. To insert a literal line that starts with +, -, or @, keep the + row marker and put the literal character after it.",
 	"Do not add unnecessary context lines to row scripts; only include the - rows needed to uniquely locate a replacement or insertion anchor and the + rows to insert.",
-	"In @REPLACE, space-prefixed context rows are supported for unified-diff style hunks and context-anchored insertions; use @@ inside @REPLACE to separate multiple context hunks.",
+	"In @REPLACE, space-prefixed context rows are supported for unified-diff style hunks and context-anchored insertions; @REPLACE always needs at least one - block and one + block (use @@-separated context hunks for insertion-only changes).",
 	"Prefer @REPLACE with the smallest unique deleted block plus replacement rows for precise changes. @REPLACE uses pi's edit matcher: fuzzy normalization, uniqueness checks, and overlap checks all apply.",
 	"Consecutive + rows or - rows form one block; for multiple replacements, use separate @REPLACE operations, alternating +/- block pairs, or @@-separated context hunks.",
 	"Use @INS.BEFORE/@INS.AFTER with - rows for the anchor to avoid brittle line numbers when there is a unique nearby line or block.",
 	"Use @INS.PRE/@INS.POST or @DEL only when line numbers are reliable from a recent read; line-number operations are applied sequentially in script order.",
 	"Use @DEL N-M for inclusive line ranges. @DEL N deletes one line. Multiple [file] sections are allowed in one edit call.",
+	"Plan all changes across files before editing. Combine changes to the same file into a single edit call using multiple operations or @@-separated hunks under one [file] header.",
+	"Prefer a single well-planned edit call over multiple sequential edits to the same file.",
 ];
 
 const unifiedEditSchema = {
