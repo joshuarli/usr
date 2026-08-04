@@ -7,6 +7,7 @@
 
 [core]
     ignorecase = true
+    # pager = /Users/josh/d/diff-pretty/target/debug/diff-pretty
     pager = delta
 
     # commit-graph for fast traversal
