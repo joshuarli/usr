@@ -7,8 +7,7 @@
 
 [core]
     ignorecase = true
-    # pager = /Users/josh/d/diff-pretty/target/debug/diff-pretty
-    pager = delta
+    pager = diff-pretty
 
     # commit-graph for fast traversal
     commitGraph = true
@@ -37,9 +36,6 @@
     l = log
     unstage = reset --
 
-[interactive]
-    diffFilter = delta --color-only
-
 [push]
     default = current
     autoSetupRemote = true
@@ -64,25 +60,6 @@
 
 [transfer]
     fsckObjects = true
-
-[delta]
-    features = line-numbers decorations
-    syntax-theme = none
-
-    minus-style = red
-    plus-style  = green
-
-    minus-emph-style = "red bold reverse"
-    plus-emph-style  = "green bold reverse"
-
-    line-numbers-left-format  = {nm:^4}
-    line-numbers-right-format = {np:^4}
-    navigate = true  # use n and N to move between diff sections
-    word-diff-regex = \\w+
-
-[delta "decorations"]
-    commit-decoration-style = none
-    hunk-header-style = none
 
 [gc]
     writeCommitGraph = true

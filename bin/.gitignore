@@ -1,24 +1,23 @@
-# self-build
 xshi
 xsht
 xsh
-xsh-multicall
-llama-server
 fd
 rg
-tmux
-tm
 ish
 e
-lz
-denv
 srv
 smtp-server
 gh
+diff-pretty
 vault
 fastmod
-
-defuddle.js
+claude-work
+codex-work
+opencode*
+pi-bun*
+pi-deno*
+bun
+deno
 
 # https://github.com/aspect-build/zstd-prebuilt/releases
 zstd_*
@@ -28,16 +27,5 @@ ffmpeg
 
 syncthing
 
-# for yt-dlp
-deno
-
-delta
 soulseek
 
-claude
-claude-ds
-claude-work
-codex-work
-opencode*
-pi-bun*
-bun

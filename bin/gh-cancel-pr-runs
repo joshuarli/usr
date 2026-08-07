@@ -1,0 +1,98 @@
+#!/bin/sh
+
+# Cancel all active CI runs for a pull request. With no branch, use the
+# current branch; with no repository, use the repository in the current
+# working tree.
+
+repo=
+repo_option=0
+branch=
+branch_set=0
+
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -r|--repo)
+            if [ "$#" -lt 2 ]; then
+                echo "error: --repo requires owner/name" >&2
+                exit 1
+            fi
+            repo=$2
+            repo_option=1
+            shift 2
+            ;;
+        --repo=*)
+            repo=${1#--repo=}
+            repo_option=1
+            shift
+            ;;
+        --)
+            shift
+            if [ "$#" -gt 0 ]; then
+                branch=$1
+                branch_set=1
+                shift
+            fi
+            ;;
+        -*)
+            echo "error: unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            if [ "$branch_set" -eq 1 ]; then
+                echo "error: expected at most one branch" >&2
+                exit 1
+            fi
+            branch=$1
+            branch_set=1
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$repo" ]; then
+    repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null) || repo=
+    if [ -z "$repo" ]; then
+        echo "error: could not detect repo; pass --repo owner/name" >&2
+        exit 1
+    fi
+fi
+
+if [ "$branch_set" -eq 1 ]; then
+    if [ "$repo_option" -eq 1 ]; then
+        sha=$(gh pr view "$branch" --repo "$repo" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+    else
+        sha=$(gh pr view "$branch" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+    fi
+else
+    if [ "$repo_option" -eq 1 ]; then
+        sha=$(gh pr view --repo "$repo" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+    else
+        sha=$(gh pr view --json headRefOid --jq '.headRefOid' 2>/dev/null)
+    fi
+fi
+
+if [ -z "$sha" ]; then
+    if [ "$branch_set" -eq 1 ]; then
+        branch_description=$branch
+    else
+        branch_description="current branch"
+    fi
+    echo "error: no PR found for $branch_description in $repo" >&2
+    exit 1
+fi
+
+run_ids=$(gh run list \
+    --repo "$repo" \
+    --commit "$sha" \
+    --json databaseId,status \
+    --jq '.[] | select(.status != "completed") | .databaseId')
+
+if [ -z "$run_ids" ]; then
+    echo "no active runs found for $sha"
+    exit 0
+fi
+
+for id in $run_ids; do
+    echo "cancelling run $id..."
+    gh run cancel "$id" --repo "$repo"
+done
