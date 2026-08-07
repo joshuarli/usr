@@ -1,23 +1,12 @@
 xshi
 xsht
 xsh
-fd
-rg
-ish
-e
-srv
-smtp-server
-gh
-diff-pretty
-vault
-fastmod
+
 claude-work
 codex-work
 opencode*
 pi-bun*
 pi-deno*
-bun
-deno
 
 # https://github.com/aspect-build/zstd-prebuilt/releases
 zstd_*
@@ -25,7 +14,21 @@ zstd_*
 # https://ffmpeg.martin-riedl.de/
 ffmpeg
 
-syncthing
-
 soulseek
+
+smtp-server
+
+# TODO: download prebuilts for these
+fd
+rg
+fastmod
+ish
+e
+srv
+vault
+diff-pretty
+gh
+syncthing
+bun
+deno
 

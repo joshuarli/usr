@@ -15,3 +15,10 @@ style = "Regular"
 family = "Hack"
 style = "Bold"
 
+[bell]
+duration = 0
+
+[bell.command]
+program = "/usr/bin/afplay"
+args = ["/System/Library/Sounds/Glass.aiff"]
+

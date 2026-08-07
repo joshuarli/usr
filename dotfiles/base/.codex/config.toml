@@ -9,13 +9,6 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 
-notify = [
-  "/bin/bash",
-  "-lc",
-  "/usr/bin/afplay /System/Library/Sounds/Glass.aiff",
-]
-
-
 [analytics]
 enabled = false
 
