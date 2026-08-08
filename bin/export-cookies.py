@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Export cookies from Helium or Safari in Netscape format."""
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import sqlite3
 import struct
+import subprocess
 import sys
 import tempfile
 
@@ -85,6 +87,87 @@ SAFARI_PATHS = [
 ]
 
 CHROME_BASE = os.path.expanduser("~/Library/Application Support/net.imput.helium")
+HELIUM_STORAGE_SERVICE = "Helium Storage Key"
+HELIUM_STORAGE_ACCOUNT = "Helium"
+_HELIUM_ENCRYPTION_KEY = None
+
+
+def chrome_encryption_key():
+    """Return Helium's Chromium cookie-encryption key derived from Keychain."""
+    global _HELIUM_ENCRYPTION_KEY
+    if _HELIUM_ENCRYPTION_KEY is not None:
+        return _HELIUM_ENCRYPTION_KEY
+
+    try:
+        result = subprocess.run(
+            [
+                "security",
+                "find-generic-password",
+                "-s",
+                HELIUM_STORAGE_SERVICE,
+                "-a",
+                HELIUM_STORAGE_ACCOUNT,
+                "-w",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(
+            "timed out reading Helium Storage Key from Keychain; "
+            "allow Terminal when macOS asks"
+        ) from error
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(
+            "could not read Helium Storage Key from Keychain; "
+            "allow Terminal when macOS asks"
+        ) from error
+
+    secret = result.stdout.rstrip("\n").encode()
+    if not secret:
+        raise RuntimeError("Helium Storage Key entry is empty")
+    _HELIUM_ENCRYPTION_KEY = hashlib.pbkdf2_hmac(
+        "sha1", secret, b"saltysalt", 1003, 16
+    )
+    return _HELIUM_ENCRYPTION_KEY
+
+
+def decrypt_chrome_value(encrypted_value, key, host_key=None):
+    """Decrypt a macOS Chromium v10/v11 cookie value."""
+    if not encrypted_value:
+        return ""
+    if not encrypted_value.startswith((b"v10", b"v11")):
+        raise ValueError("unsupported Chromium cookie encryption format")
+
+    try:
+        result = subprocess.run(
+            [
+                "openssl",
+                "enc",
+                "-aes-128-cbc",
+                "-d",
+                "-K",
+                key.hex(),
+                "-iv",
+                (b" " * 16).hex(),
+            ],
+            input=encrypted_value[3:],
+            capture_output=True,
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("could not decrypt Chromium cookie value") from error
+    except subprocess.TimeoutExpired as error:
+        raise ValueError("timed out decrypting Chromium cookie value") from error
+    plaintext = result.stdout
+    if host_key is not None:
+        host_hash = hashlib.sha256(host_key.encode()).digest()
+        if plaintext.startswith(host_hash):
+            plaintext = plaintext[len(host_hash) :]
+    return plaintext.decode("utf-8")
 
 
 def find_chrome_cookies():
@@ -111,38 +194,62 @@ def find_safari_cookies():
     return None
 
 
-def query_chrome(db_path, hostname):
+def query_chrome(db_path, hostnames):
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".cookies")
     try:
         shutil.copy2(db_path, tmp.name)
         tmp.close()
         con = sqlite3.connect(tmp.name)
+        conditions = []
+        params = []
+        for hostname in hostnames:
+            conditions.append("(lower(host_key) = ? OR lower(host_key) LIKE ?)")
+            params.extend((hostname, f"%.{hostname}"))
         rows = con.execute(
-            """SELECT host_key, 'TRUE', path,
+            f"""SELECT host_key, 'TRUE', path,
                       CASE WHEN is_secure THEN 'TRUE' ELSE 'FALSE' END,
                       CASE WHEN expires_utc = 0 THEN 0
                            ELSE CAST(expires_utc / 1000000 - 11644473600 AS INTEGER)
-                      END,
-                      name, value
+                       END,
+                      name, value, encrypted_value
                FROM cookies
-               WHERE lower(host_key) = ? OR lower(host_key) LIKE ?
+               WHERE {' OR '.join(conditions)}
                ORDER BY host_key, name""",
-            (hostname, f"%.{hostname}"),
+            params,
         ).fetchall()
         con.close()
     finally:
         os.unlink(tmp.name)
-    return rows
+
+    key = None
+    decrypted_rows = []
+    for row in rows:
+        encrypted_value = row[7]
+        value = row[6]
+        if not value and encrypted_value:
+            if key is None:
+                key = chrome_encryption_key()
+            try:
+                value = decrypt_chrome_value(encrypted_value, key, row[0])
+            except ValueError:
+                print(
+                    f"Warning: skipping undecryptable Helium cookie {row[5]} "
+                    f"for {row[0]}",
+                    file=sys.stderr,
+                )
+                continue
+        decrypted_rows.append((*row[:6], value))
+    return decrypted_rows
 
 
-def query_safari(db_path, hostname):
+def query_safari(db_path, hostnames):
     try:
         rows = list(parse_binary_cookies(db_path))
     except PermissionError:
         print("Cannot read Safari cookies — grant Full Disk Access to Terminal in"
               " System Settings > Privacy & Security > Full Disk Access", file=sys.stderr)
         return []
-    return [r for r in rows if host_matches(r[0], hostname)]
+    return [r for r in rows if any(host_matches(r[0], h) for h in hostnames)]
 
 
 def host_matches(cookie_host, hostname):
@@ -152,34 +259,38 @@ def host_matches(cookie_host, hostname):
 
 if __name__ == "__main__":
     args = [a.lower() for a in sys.argv[1:]]
-    if len(args) != 2 or args[0] not in {"safari", "helium"}:
-        print("Usage: export-cookies.py [safari|helium] hostname", file=sys.stderr)
+    if len(args) < 2 or args[0] not in {"safari", "helium"}:
+        print("Usage: export-cookies.py [safari|helium] hostname [hostname ...]", file=sys.stderr)
         sys.exit(1)
 
-    target, hostname = args
-    if not re.fullmatch(
-        r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*",
-        hostname,
-    ):
-        print(f"Invalid hostname: {hostname}", file=sys.stderr)
-        sys.exit(1)
+    target, *hostnames = args
+    hostname_pattern = (
+        r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*"
+    )
+    for hostname in hostnames:
+        if not re.fullmatch(hostname_pattern, hostname):
+            print(f"Invalid hostname: {hostname}", file=sys.stderr)
+            sys.exit(1)
+
+    hostnames = list(dict.fromkeys(hostnames))
 
     all_rows = []
     if target == "helium":
         db = find_chrome_cookies()
         if db:
-            all_rows.extend(query_chrome(db, hostname))
+            all_rows.extend(query_chrome(db, hostnames))
     else:
         db = find_safari_cookies()
         if db:
-            all_rows.extend(query_safari(db, hostname))
+            all_rows.extend(query_safari(db, hostnames))
 
     if not all_rows:
         print("No cookies found", file=sys.stderr)
         sys.exit(1)
 
     all_rows.sort(key=lambda r: (r[0], r[5]))
-    with open(f"cookies-{hostname}.txt", "w") as out:
+    output_name = f"cookies-{hostnames[0]}.txt" if len(hostnames) == 1 else "cookies.txt"
+    with open(output_name, "w") as out:
         out.write("# Netscape HTTP Cookie File\n")
         for row in all_rows:
             out.write("\t".join(str(v) for v in row) + "\n")

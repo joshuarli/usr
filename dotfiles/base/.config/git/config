@@ -7,7 +7,7 @@
 
 [core]
     ignorecase = true
-    pager = diff-pretty
+    pager = builtin:diff-pretty
 
     # commit-graph for fast traversal
     commitGraph = true

@@ -21,7 +21,7 @@ smtp-server
 # TODO: download prebuilts for these
 fd
 rg
-fastmod
+fastermod
 ish
 e
 srv
@@ -31,4 +31,6 @@ gh
 syncthing
 bun
 deno
-
+git*
+!git-bench
+!git-tune
