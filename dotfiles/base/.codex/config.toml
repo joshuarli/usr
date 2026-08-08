@@ -9,15 +9,25 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 
+[features]
+multi_agent = true
+multi_agent_v2 = false
+goals = true
+apps = false
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 8
+max_depth = 1
+# default_subagent_model = "openai/gpt-5.6-luna"
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "xhigh"
+
 [analytics]
 enabled = false
 
 [feedback]
 enabled = false
-
-[features]
-goals = true
-apps = false
 
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
@@ -29,7 +39,4 @@ status_line_use_colors = true
 [notice]
 fast_default_opt_out = true
 hide_rate_limit_model_nudge = true
-
-[projects."/Users/josh/usr"]
-trust_level = "trusted"
 
