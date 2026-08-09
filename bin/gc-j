@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec git -c user.name='Joshua Li' -c user.email='joshuarli98@gmail.com' commit "$@"

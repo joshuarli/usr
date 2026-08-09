@@ -1,0 +1,12 @@
+#!/bin/sh
+
+key="$HOME/.ssh/github"
+
+if [ ! -r "$key" ]; then
+  printf '%s\n' "gp-j: SSH key is not readable: $key" >&2
+  exit 1
+fi
+
+# Do not reuse an existing multiplexed connection authenticated with another key.
+export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o ControlMaster=no -o ControlPath=none"
+exec git push -u "$@"
