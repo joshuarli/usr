@@ -1,0 +1,62 @@
+#!/bin/sh
+#
+# Kill, unmount, and delete all iOS simulators, optionally wiping the
+# shared runtime data (root-owned) too.
+#
+# Usage:
+#   macos-kill-simulators          # shut down + delete user simulators
+#   macos-kill-simulators --wipe   # also wipe /Library/Developer/CoreSimulator
+#
+# --wipe unmounts runtime disk images, kills simdiskimaged (root daemon) and
+# removes /Library/Developer/CoreSimulator. Requires sudo. Xcode will
+# re-download the iOS runtimes (~GB each) before new simulators can be made.
+
+set -u
+
+log() { printf '%s\n' "$*"; }
+die() { log "$*" >&2; exit 1; }
+
+command -v xcrun >/dev/null 2>&1 || die "xcrun not found; is Xcode installed?"
+
+WIPE=0
+for arg in "$@"; do
+    case "$arg" in
+        --wipe) WIPE=1 ;;
+        *) die "unknown argument: $arg (expected: --wipe)" ;;
+    esac
+done
+
+log "== Shutting down all simulators =="
+xcrun simctl shutdown all 2>/dev/null
+
+log "== Killing Simulator app and CoreSimulator daemons =="
+killall Simulator 2>/dev/null
+killall -9 SimulatorTrampoline 2>/dev/null
+killall -9 SimLaunchHost 2>/dev/null
+killall -9 SimLaunchHost.arm64 2>/dev/null
+killall -9 com.apple.CoreSimulator.CoreSimulatorService 2>/dev/null
+pkill -9 -x simdiskimaged 2>/dev/null
+
+log "== Deleting all user simulators =="
+xcrun simctl delete all || true
+
+if [ "$WIPE" -eq 1 ]; then
+    log "== Unmounting runtime disk images =="
+    for vol in /Library/Developer/CoreSimulator/Volumes/*/ \
+               /Library/Developer/CoreSimulator/Cryptex/Images/bundle/*/; do
+        case "$vol" in
+            *\*) continue ;;
+        esac
+        hdiutil detach "$vol" >/dev/null 2>&1 ||
+            diskutil unmount force "$vol" >/dev/null 2>&1
+    done
+
+    log "== Wiping /Library/Developer/CoreSimulator (23G) =="
+    sudo pkill -9 -x simdiskimaged 2>/dev/null
+    sudo rm -rf /Library/Developer/CoreSimulator || die "wipe failed (use sudo?)"
+
+    log "== Recreating base directory =="
+    sudo mkdir -p /Library/Developer/CoreSimulator
+fi
+
+log "== Done =="
