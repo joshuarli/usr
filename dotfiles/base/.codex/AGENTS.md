@@ -41,4 +41,12 @@ Changes to APIs, types, schemas, permissions, state transitions, invariants, tra
 boundaries, or dependencies deserve explicit attention. Reflect contract changes in code,
 tests, and docs.
 
-Do not run pre-commit hooks; the user verifies commits independently. Never push to a remote.
+## Workflow Rules
+
+- Do not run formatters or linters; the user does that independently.
+- Do not run pre-commit hooks; the user verifies commits independently.
+- Never push to a remote unless explicitly told to.
+
+## Subagents
+
+If you are Codex: when spawning subagents, NEVER use Terra or Sol agents, unless explicitly instructed to do so by the user.
