@@ -254,6 +254,38 @@ When a public rename, file move, type change, or module split is necessary:
 Do not leave a repository in a half-migrated state where both spellings look equally
 canonical or where the only explanation of ownership lives in an external tool.
 
+### 10. Apply the vocabulary across the repository
+
+Greppability is a repository property, not a local-module property. When the requested
+scope is a repository or product, inspect and reconcile all relevant surfaces before
+stopping:
+
+- source modules, binaries, public exports, feature gates, migrations, configuration,
+  generated inputs, fixtures, tests, and operational scripts
+- user-facing documentation, architecture maps, examples, diagnostics, and compatibility
+  notes
+- duplicate or parallel implementations that live in different boundaries but answer the
+  same task vocabulary
+
+For Rust repositories, a method or function named `parse`, `new`, `validate`, `run`,
+`execute`, `context`, `result`, or `value` is acceptable when its receiver or enclosing
+module makes the domain unmistakable. Do not mechanically repeat that context in the
+symbol: `runner_runtime::main` and `web::run` are clearer than a verb that repeats the
+enclosing module when each is the module's sole entry point. Qualify a name only when it
+adds information that search would otherwise lose,
+such as `parse_workflow_source`, `validate_command_spec_tree`, `render_command_help`,
+`read_leased_job_spec`, or `job_expression_context`. A module-owned validator can stay
+short when its enclosing module is the domain boundary: `workflow_validation::validate`
+is clearer than a validator name that repeats `workflow`. Apply the same vocabulary to
+associated methods, error variants, fixtures, test names, docs, and examples; a precise
+top-level function does not compensate for ambiguous methods or a stale alias elsewhere.
+
+Before declaring a repository-wide migration complete, search each canonical term and
+each retired synonym across the full tree. Remaining old spellings must be either removed
+or visibly deprecated at their definition, documented with the replacement, and covered by
+the compatibility contract. A focused module test is necessary but not sufficient when a
+rename crosses exports, binaries, persistence names, wire fields, or documentation.
+
 ## Explicit anti-patterns
 
 Do not:
@@ -272,6 +304,9 @@ Do not:
 - leave deprecated and canonical implementations with equal status
 - change runtime behavior under cover of a discoverability refactor
 - skip the baseline or focused compiler and test checks
+- improve only one convenient module when the requested scope is repository-wide
+- repeat an enclosing module or receiver name in a symbol when that context already
+  makes the symbol unique
 
 ## Acceptance criteria
 
@@ -303,6 +338,9 @@ The work is complete only when all of the following are true:
 - Existing behavior, public contracts, output, side effects, permissions, and state
   transitions are preserved unless explicitly changed.
 - No unrelated dependencies, formatting churn, or refactors were introduced.
+- Repository-wide requests have an explicit inventory and search audit covering source,
+  tests, docs, configuration, generated artifacts, and legacy paths—not only the files
+  that were easiest to rename.
 
 The architectural principle is: **make the words in the source good search terms**.
 A greppable codebase gives an agent a short, reliable path from task vocabulary to the
