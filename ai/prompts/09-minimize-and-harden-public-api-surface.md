@@ -1,10 +1,19 @@
 # Minimize and Harden the Public API Surface
 
-You are improving an existing codebase so its public API exposes only intentional, stable contracts and keeps implementation details private.
+You are improving this codebase so its public API exposes only intentional, stable contracts and keeps implementation details private.
 
-The goal is not to hide everything. The goal is to make the externally usable surface small, coherent, documented, and difficult to misuse.
+The goal is to make the externally usable surface small, coherent, documented, and difficult to misuse.
 
-Preserve existing public behavior unless this request explicitly permits breaking changes.
+Scope: public/exported APIs, constructors, fields, feature-gated surface, dependency leakage, and compatibility shims.
+
+Applicability: Apply this prompt only when the codebase exposes an API surface whose intentionality, stability, privacy, or misuse resistance needs audit. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -19,7 +28,19 @@ Before editing:
 - inspect tests and downstream examples that rely on the current surface
 - run narrow baseline checks
 
-## 1. Treat every public symbol as a compatibility commitment
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Treat the public surface as an intentional compatibility commitment
+
+#### Treat every public symbol as a compatibility commitment
+
 
 For each public symbol, ask:
 
@@ -31,7 +52,8 @@ For each public symbol, ask:
 
 Prefer the narrowest surface that supports real use cases.
 
-## 2. Hide implementation details
+#### Hide implementation details
+
 
 Keep internal:
 
@@ -47,7 +69,10 @@ Do not make something public merely because another internal module needs it.
 
 Use crate/package/module visibility appropriately.
 
-## 3. Prefer cohesive operations over public field mutation
+### 2. Protect invariants and avoid leaking implementation dependencies
+
+#### Prefer cohesive operations over public field mutation
+
 
 Avoid public structures whose callers must mutate fields into a valid combination.
 
@@ -55,7 +80,8 @@ Prefer constructors and methods that preserve invariants.
 
 If fields are intentionally data-only, keep that choice explicit.
 
-## 4. Avoid leaking dependency types
+#### Avoid leaking dependency types
+
 
 A library should not expose arbitrary third-party types through its public API unless interoperability requires it.
 
@@ -63,19 +89,26 @@ Prefer domain-owned wrappers or standard-library types when they keep the contra
 
 Do not wrap mature standard ecosystem types merely for aesthetic purity.
 
-## 5. Remove duplicate entry points
+### 3. Provide one canonical operation with deliberate result/error types
+
+#### Remove duplicate entry points
+
 
 If several APIs perform the same conceptual operation, choose one canonical path.
 
 Keep aliases only when compatibility requires them, and mark them clearly as deprecated or transitional.
 
-## 6. Make error and result types deliberate
+#### Make error and result types deliberate
+
 
 Public functions should expose failure semantics that callers can actually reason about.
 
 Avoid leaking giant internal error enums or unstructured strings.
 
-## 7. Keep feature-gated API coherent
+### 4. Keep feature-gated construction coherent
+
+#### Keep feature-gated API coherent
+
 
 If features alter public surface:
 
@@ -84,13 +117,17 @@ If features alter public surface:
 - test representative feature sets
 - avoid exporting half-initialized abstractions when a feature is disabled
 
-## 8. Audit constructors
+#### Audit constructors
+
 
 Identify public constructors that bypass validation or permit inconsistent state.
 
 Prefer one clear construction path for invariant-bearing types.
 
-## 9. Make compatibility policy visible
+### 5. Make compatibility secondary and prove the public contract
+
+#### Make compatibility policy visible
+
 
 If a public symbol cannot yet be removed:
 
@@ -99,7 +136,8 @@ If a public symbol cannot yet be removed:
 - route it through the canonical implementation
 - prevent new internal code and examples from using it
 
-## 10. Test the public surface as a contract
+#### Test the public surface as a contract
+
 
 Where practical, test:
 
@@ -109,6 +147,7 @@ Where practical, test:
 - feature combinations
 - deprecation forwarding
 - documented examples
+
 
 ## Explicit anti-patterns
 
@@ -121,6 +160,16 @@ Do not:
 - add wrapper types that provide no stability or semantic value
 - make breaking changes without explicit permission
 - retain deprecated APIs as independent implementations
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for public/exported APIs, constructors, fields, feature-gated surface, dependency leakage, and compatibility shims: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit exports, public mutation, dependency-specific types, duplicate entry points, deprecations, and feature-gated contracts; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

@@ -1,10 +1,19 @@
 # Dependency and Abstraction Diet
 
-You are improving an existing codebase by removing dependencies and abstractions whose complexity cost exceeds the capability they provide.
+You are improving this codebase so dependencies and abstractions remain only where their real capability, contract, or boundary value justifies their complexity cost.
 
-The goal is not minimalism for its own sake. The goal is to maximize **capability per unit of complexity** while preserving readability, correctness, maintainability, and interoperability.
+The goal is to maximize **capability per unit of complexity** while preserving readability, correctness, maintainability, and interoperability.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: direct/transitive dependencies, enabled features, internal abstractions, wrappers, factories, traits/interfaces, and extension points.
+
+Applicability: Apply this prompt only when dependency or abstraction cost is plausibly larger than the real capability, policy, or compatibility value it provides. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -22,7 +31,19 @@ Before editing:
 
 For Rust, inspect `Cargo.toml`, resolved feature graphs, and meaningful crate usage rather than judging dependencies only by count.
 
-## 1. Evaluate each dependency by consumed capability
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Justify dependencies by consumed capability and feature cost
+
+#### Evaluate each dependency by consumed capability
+
 
 For every suspicious dependency, answer:
 
@@ -35,7 +56,8 @@ For every suspicious dependency, answer:
 
 Do not remove mature parsing, cryptographic, protocol, compression, Unicode, or other correctness-heavy libraries merely because a local implementation would have fewer lines.
 
-## 2. Disable gratuitous features
+#### Disable gratuitous features
+
 
 Prefer the minimum dependency feature set that supports actual usage.
 
@@ -45,7 +67,10 @@ Remove unused features and obsolete optional dependencies.
 
 Do not make feature configuration so granular that it becomes difficult to understand.
 
-## 3. Consolidate overlapping dependencies
+### 2. Consolidate overlapping dependencies and replace only truly tiny ones
+
+#### Consolidate overlapping dependencies
+
 
 If multiple crates/libraries provide substantially the same capability, determine whether one can cover the required surface cleanly.
 
@@ -60,7 +85,8 @@ Examples:
 
 Do not force consolidation when platform-specific or semantic differences justify separate choices.
 
-## 4. Replace tiny dependencies selectively
+#### Replace tiny dependencies selectively
+
 
 A dependency may be replaceable when the consumed behavior is:
 
@@ -75,7 +101,10 @@ If replacing it, implement only the behavior the project actually needs and add 
 
 Do not grow a bespoke mini-framework.
 
-## 5. Audit abstraction value
+### 3. Keep abstractions only when they express a real boundary or policy
+
+#### Audit abstraction value
+
 
 For each abstraction, ask what it buys:
 
@@ -90,7 +119,8 @@ For each abstraction, ask what it buys:
 
 If the answer is merely "future flexibility," consider collapsing it.
 
-## 6. Collapse forwarding layers
+#### Collapse forwarding layers
+
 
 Remove classes/modules/functions that only forward arguments and return values without adding:
 
@@ -105,7 +135,8 @@ Remove classes/modules/functions that only forward arguments and return values w
 
 A direct call is usually clearer than a wrapper whose existence must be rediscovered.
 
-## 7. Treat single-implementation interfaces skeptically, not dogmatically
+#### Treat single-implementation interfaces skeptically, not dogmatically
+
 
 A one-implementation trait/interface may still be justified when it isolates:
 
@@ -120,7 +151,10 @@ Otherwise prefer the concrete type until substitution is real.
 
 Do not preserve an interface merely because mocking frameworks prefer it.
 
-## 8. Remove speculative extension points
+### 4. Remove speculative extension points and internal mini-frameworks
+
+#### Remove speculative extension points
+
 
 Search for:
 
@@ -133,7 +167,8 @@ Search for:
 
 Collapse speculative flexibility unless there is an actual compatibility promise or imminent concrete need.
 
-## 9. Prefer explicit code over tiny internal frameworks
+#### Prefer explicit code over tiny internal frameworks
+
 
 Do not replace a dependency with a homegrown framework.
 
@@ -141,7 +176,10 @@ Do not replace three explicit call sites with a generic abstraction that require
 
 Duplication can be cheaper than the wrong abstraction when the duplicated code does not encode shared evolving knowledge.
 
-## 10. Measure performance-related claims
+### 5. Measure claimed costs while preserving ecosystem compatibility
+
+#### Measure performance-related claims
+
 
 If dependency or abstraction removal is justified by:
 
@@ -154,7 +192,8 @@ measure before and after where practical.
 
 Do not cite hypothetical performance as the reason for churn.
 
-## 11. Preserve important ecosystem compatibility
+#### Preserve important ecosystem compatibility
+
 
 Dependencies can provide compatibility value beyond LOC.
 
@@ -170,6 +209,7 @@ Consider:
 
 Keep a dependency when these benefits dominate its cost.
 
+
 ## Explicit anti-patterns
 
 Do not:
@@ -184,6 +224,7 @@ Do not:
 - collapse genuinely distinct platform/semantic implementations into one awkward abstraction
 - make public API changes solely to simplify internals unless explicitly requested
 
+
 ## Verification
 
 After editing:
@@ -194,6 +235,9 @@ After editing:
 - run focused and broader tests
 - compare build/binary/runtime metrics when those motivated the change
 - verify public APIs and observable behavior remain stable
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

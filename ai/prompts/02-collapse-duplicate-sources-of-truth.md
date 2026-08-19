@@ -1,10 +1,19 @@
 # Collapse Duplicate Sources of Truth
 
-You are improving an existing codebase by finding concepts that are represented, maintained, or validated independently in more than one place and replacing accidental duplication with one authoritative representation.
+You are improving this codebase so concepts represented in multiple places converge on one authoritative representation instead of drifting independently.
 
-The goal is not maximal code reuse. The goal is **semantic singularity**: one fact should have one source of truth, with other representations derived from it or mechanically checked against it.
+The goal is **semantic singularity**: one fact should have one source of truth, with other representations derived from it or mechanically checked against it.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: repository-wide facts represented by multiple parsers, registries, schemas, tables, validators, docs, or generated views.
+
+Applicability: Apply this prompt only when the same semantic fact or closed set is maintained independently in more than one place. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -17,7 +26,19 @@ Before editing:
 - identify tests whose primary purpose is catching drift between duplicate declarations
 - run the narrowest useful baseline checks before editing
 
-## 1. Inventory semantic duplication
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Identify duplicated knowledge and name one authority
+
+#### Inventory semantic duplication
+
 
 Distinguish ordinary repeated code from duplicated knowledge.
 
@@ -35,7 +56,8 @@ High-value targets include:
 
 Do not merge code merely because it looks similar. Merge **facts that must evolve together**.
 
-## 2. Choose the authoritative representation
+#### Choose the authoritative representation
+
 
 For each duplicated concept, explicitly decide which representation owns the truth.
 
@@ -50,7 +72,10 @@ Good authoritative sources are usually:
 
 Avoid choosing generated output as the source when a more fundamental declaration exists.
 
-## 3. Derive consumers mechanically
+### 2. Derive secondary representations in one direction
+
+#### Derive consumers mechanically
+
 
 Where practical, make all secondary representations consume or derive from the authoritative declaration.
 
@@ -76,7 +101,8 @@ Prefer straightforward iteration, explicit metadata, code generation, macros, de
 
 Do not introduce a sophisticated generator merely to remove three harmless lines of duplication.
 
-## 4. Keep transformations one-way
+#### Keep transformations one-way
+
 
 Avoid circular authority.
 
@@ -98,7 +124,10 @@ C = g(A)
 
 The direction of truth should be obvious to a reader.
 
-## 5. Remove synchronization comments by removing synchronization work
+### 3. Eliminate manual synchronization or enforce irreducible drift
+
+#### Remove synchronization comments by removing synchronization work
+
 
 Comments such as:
 
@@ -112,7 +141,8 @@ Whenever feasible, restructure the code so synchronization is impossible to forg
 
 If duplication is unavoidable because of an external boundary, document why and add a targeted invariant test.
 
-## 6. Use invariant tests for irreducible duplication
+#### Use invariant tests for irreducible duplication
+
 
 Some representations cannot directly share a source because they live across:
 
@@ -133,7 +163,10 @@ When duplication is intentional:
 
 Do not leave intentional duplication indistinguishable from accidental duplication.
 
-## 7. Prefer explicit schemas over clever metaprogramming
+### 4. Keep authority explicit without collapsing distinct boundary models
+
+#### Prefer explicit schemas over clever metaprogramming
+
 
 A declarative source of truth should be easier to inspect than the duplication it replaces.
 
@@ -147,7 +180,8 @@ Avoid:
 
 The authoritative declaration must remain readable and searchable.
 
-## 8. Preserve boundary-specific representations when useful
+#### Preserve boundary-specific representations when useful
+
 
 A domain model and wire model may intentionally differ.
 
@@ -157,7 +191,8 @@ Do not collapse representations that encode different contracts merely because t
 
 Instead, centralize the mapping and make the distinction explicit.
 
-## 9. Audit all consumers after consolidation
+### 5. Audit every consumer after consolidation
+
 
 For each canonical source:
 
@@ -173,6 +208,7 @@ Remove obsolete independent copies.
 
 Search for retired spellings and values after the migration.
 
+
 ## Explicit anti-patterns
 
 Do not:
@@ -187,6 +223,7 @@ Do not:
 - create bidirectional derivation between representations
 - silently choose one duplicate when existing copies disagree; investigate the discrepancy
 
+
 ## Verification
 
 After editing:
@@ -196,6 +233,9 @@ After editing:
 - confirm all relevant consumers derive from it
 - confirm intentional external copies have drift tests or explicit documentation
 - run focused tests and broader checks when the source crosses module/public boundaries
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

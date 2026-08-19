@@ -1,10 +1,19 @@
 # Background Job, Retry, and Idempotency Semantics
 
-You are improving an existing codebase so queued/background work has explicit claim, retry, deduplication, idempotency, lease, completion, and failure semantics.
+You are improving this codebase so queued/background work has explicit claim, retry, deduplication, idempotency, lease, completion, and failure semantics.
 
 The goal is to prevent duplicate side effects, lost work, zombie leases, retry storms, and jobs whose lifecycle is implicit.
 
-Preserve intended processing semantics unless explicitly changing them.
+Scope: queues, workers, schedulers, retries, leases, heartbeats, dedupe, acknowledgements, results, and dead-letter behavior.
+
+Applicability: Apply this prompt only when the repository has background/queued work that may be retried, duplicated, leased, cancelled, or recovered after crashes. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,7 +29,19 @@ Before editing:
 - inspect tests around retry and crash behavior
 - run baseline checks
 
-## 1. Define delivery semantics
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Define delivery, job state, and lease ownership semantics
+
+#### Define delivery semantics
+
 
 State whether the system provides:
 
@@ -30,7 +51,8 @@ State whether the system provides:
 
 Avoid claiming true exactly-once unless the transactional boundary actually provides it.
 
-## 2. Make job state explicit
+#### Make job state explicit
+
 
 Typical states may include:
 
@@ -46,7 +68,8 @@ cancelled
 
 Use the states that match the real system.
 
-## 3. Define claim/lease semantics
+#### Define claim/lease semantics
+
 
 For leases, specify:
 
@@ -59,7 +82,10 @@ For leases, specify:
 
 A worker should not complete a job it no longer owns.
 
-## 4. Make side effects idempotent where retries can duplicate execution
+### 2. Make retryable side effects duplicate-safe across crash windows
+
+#### Make side effects idempotent where retries can duplicate execution
+
 
 Use:
 
@@ -72,7 +98,8 @@ as appropriate.
 
 Do not rely on in-memory "already did this" flags for durable guarantees.
 
-## 5. Define crash windows
+#### Define crash windows
+
 
 For each durable transition, reason about crashes:
 
@@ -84,7 +111,10 @@ after result persisted but before status update
 
 Make recovery behavior explicit.
 
-## 6. Bound retries
+### 3. Bound retries and prevent synchronized retry storms
+
+#### Bound retries
+
 
 Define:
 
@@ -94,11 +124,15 @@ Define:
 - jitter
 - dead-letter/final failure
 
-## 7. Avoid synchronized retry storms
+#### Avoid synchronized retry storms
+
 
 Spread retries where appropriate and integrate with global backpressure.
 
-## 8. Make cancellation semantics explicit
+### 4. Define cancellation and deduplication scope
+
+#### Make cancellation semantics explicit
+
 
 Decide whether cancellation affects:
 
@@ -107,7 +141,8 @@ Decide whether cancellation affects:
 - external side effects already started
 - retries
 
-## 9. Define deduplication scope
+#### Define deduplication scope
+
 
 A dedupe key must state:
 
@@ -116,7 +151,8 @@ A dedupe key must state:
 - tenant/account scope
 - payload identity
 
-## 10. Test failure windows
+### 5. Test the dangerous failure windows
+
 
 Use focused tests for:
 
@@ -129,6 +165,13 @@ Use focused tests for:
 - cancellation
 - dead-letter transition
 
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
+
 ## Explicit anti-patterns
 
 Do not:
@@ -140,6 +183,16 @@ Do not:
 - use process-local dedupe for durable guarantees
 - hide job lifecycle in booleans
 - ignore crash windows
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for queues, workers, schedulers, retries, leases, heartbeats, dedupe, acknowledgements, results, and dead-letter behavior: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit delivery semantics, job states, lease ownership, idempotency, crash windows, bounded retries, dedupe, cancellation, and failure-window tests; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

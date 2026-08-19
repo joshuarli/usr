@@ -1,10 +1,19 @@
 # Observability and Diagnostic Quality
 
-You are improving an existing codebase so failures, state transitions, external operations, and performance-relevant behavior are diagnosable without reading source code or attaching a debugger.
+You are improving this codebase so failures, state transitions, external operations, and performance-relevant behavior are diagnosable without reading source code or attaching a debugger.
 
-The goal is not more logging. The goal is **high-signal observability**: the right information, at the right boundary, with stable semantics and low noise.
+The goal is **high-signal observability**: the right information, at the right boundary, with stable semantics and low noise.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: logging, tracing, metrics, diagnostics, debug modes, status surfaces, error reporting, and operational state transitions.
+
+Applicability: Apply this prompt only when the system has non-trivial runtime behavior that users/operators must diagnose without source-level debugging. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,7 +29,19 @@ Before editing:
 - inspect test coverage for diagnostics where text/structure is part of the contract
 - run the narrowest useful baseline checks
 
-## 1. Define observability by question
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Define observability around operational questions and semantic boundaries
+
+#### Define observability by question
+
 
 For each important operation, ensure the system can answer questions such as:
 
@@ -35,7 +56,8 @@ For each important operation, ensure the system can answer questions such as:
 
 Do not emit data merely because it is available.
 
-## 2. Log at semantic boundaries
+#### Log at semantic boundaries
+
 
 Prefer logging where mechanism becomes application meaning.
 
@@ -51,7 +73,8 @@ worker shutting down after cancellation
 
 Avoid logging every internal helper call.
 
-## 3. Avoid duplicate error reporting
+#### Avoid duplicate error reporting
+
 
 If an error is logged at a lower layer and then propagated to a boundary that logs it again, determine which layer owns presentation.
 
@@ -64,7 +87,10 @@ boundary: render/log once
 
 Add lower-level logs only when they capture information that would otherwise be lost.
 
-## 4. Make context structured
+### 2. Use structured context, deliberate severity, and meaningful correlation
+
+#### Make context structured
+
 
 Use structured fields where supported:
 
@@ -82,7 +108,8 @@ Prefer stable semantic fields over embedding everything in prose.
 
 Do not over-structure tiny tools when simple diagnostics are clearer.
 
-## 5. Distinguish severity deliberately
+#### Distinguish severity deliberately
+
 
 Define consistent semantics for:
 
@@ -94,7 +121,8 @@ Define consistent semantics for:
 
 Do not label ordinary expected conditions as warnings or errors merely to make them visible.
 
-## 6. Make identifiers useful
+#### Make identifiers useful
+
 
 Use stable, meaningful correlation identifiers for operations that span:
 
@@ -107,7 +135,10 @@ Use stable, meaningful correlation identifiers for operations that span:
 
 Do not generate IDs when the domain already has an appropriate identifier.
 
-## 7. Measure meaningful latency and counts
+### 3. Measure actionable behavior while preserving causal context
+
+#### Measure meaningful latency and counts
+
 
 Metrics should answer operational questions.
 
@@ -123,7 +154,8 @@ Good candidates include:
 
 Avoid vanity metrics with no operational decision attached.
 
-## 8. Make diagnostics actionable
+#### Make diagnostics actionable
+
 
 A diagnostic should tell the operator/user what failed and, where appropriate, what they can do next.
 
@@ -141,13 +173,17 @@ IO error
 
 Avoid giant stack traces for ordinary user mistakes.
 
-## 9. Preserve causal chains
+#### Preserve causal chains
+
 
 Do not lose the underlying cause while adding application context.
 
 Operator-facing diagnostics should be concise while debug/trace modes may expose deeper chains according to project conventions.
 
-## 10. Keep secrets and payloads out of observability
+### 4. Keep secrets out and make debug behavior intentional
+
+#### Keep secrets and payloads out of observability
+
 
 Audit:
 
@@ -161,7 +197,8 @@ Audit:
 
 Redact or omit sensitive data by default.
 
-## 11. Make debug modes intentional
+#### Make debug modes intentional
+
 
 If verbose/debug logging exists:
 
@@ -170,7 +207,8 @@ If verbose/debug logging exists:
 - avoid changing program semantics
 - prevent accidental secret disclosure
 
-## 12. Test stable diagnostic contracts
+### 5. Test stable user/operator diagnostic contracts
+
 
 Where diagnostics are a user-facing API, test:
 
@@ -181,6 +219,7 @@ Where diagnostics are a user-facing API, test:
 - stable structure
 
 Avoid overspecifying incidental punctuation unless exact text is intentionally stable.
+
 
 ## Explicit anti-patterns
 
@@ -196,6 +235,7 @@ Do not:
 - hide useful causal context behind a generic failure message
 - make debug mode alter correctness semantics
 
+
 ## Verification
 
 After editing:
@@ -207,6 +247,9 @@ After editing:
 - verify metrics/log fields have stable names
 - verify error presentation happens at deliberate boundaries
 - run focused diagnostic tests
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

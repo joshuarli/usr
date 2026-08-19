@@ -1,10 +1,19 @@
 # Cache Correctness and Invalidation
 
-You are improving an existing codebase so caches are clearly derived, bounded, invalidated deliberately, and incapable of silently becoming alternate sources of truth.
+You are improving this codebase so caches are clearly derived, bounded, invalidated deliberately, and incapable of silently becoming alternate sources of truth.
 
-The goal is not to maximize cache hit rate. The goal is to preserve correctness while making freshness, eviction, and failure semantics explicit.
+The goal is to preserve correctness while making freshness, eviction, and failure semantics explicit.
 
-Preserve externally visible semantics unless stale behavior is itself a defect.
+Scope: in-memory/disk/query/build/HTTP caches, memoization, cache keys, TTLs, invalidation, capacity, negative/stale behavior, and concurrent misses.
+
+Applicability: Apply this prompt only when the repository contains a meaningful cache or memoized derived state. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -22,13 +31,26 @@ Before editing:
 - inspect tests around freshness and mutation
 - run baseline checks
 
-## 1. Name the authority
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Name cache authority and define complete keys
+
+#### Name the authority
+
 
 For every cache, identify the authoritative source.
 
 A cache must never become the only place where durable truth lives unless it is intentionally a datastore rather than a cache.
 
-## 2. Define key semantics
+#### Define key semantics
+
 
 Keys should include every input that affects the cached result.
 
@@ -42,7 +64,10 @@ Audit for missing dimensions such as:
 - environment
 - normalization
 
-## 3. Define freshness
+### 2. Define freshness and bound growth
+
+#### Define freshness
+
 
 Choose intentionally among:
 
@@ -55,7 +80,8 @@ Choose intentionally among:
 
 Do not combine multiple freshness schemes accidentally.
 
-## 4. Bound cache growth
+#### Bound cache growth
+
 
 Define:
 
@@ -66,7 +92,10 @@ Define:
 
 Unbounded process-lifetime maps are caches whether or not they are called caches.
 
-## 5. Handle concurrent misses
+### 3. Handle concurrent, stale, and negative outcomes deliberately
+
+#### Handle concurrent misses
+
 
 Prevent expensive duplicate work where needed via:
 
@@ -76,25 +105,31 @@ Prevent expensive duplicate work where needed via:
 
 Do not serialize unrelated cache keys globally.
 
-## 6. Define stale-on-error behavior
+#### Define stale-on-error behavior
+
 
 Decide whether a stale value may be used when refresh fails.
 
 Make the policy visible and testable.
 
-## 7. Define negative caching
+#### Define negative caching
+
 
 Caching "not found" or errors can be useful but dangerous.
 
 Specify which negative outcomes are cacheable and for how long.
 
-## 8. Keep invalidation close to mutation
+### 4. Align invalidation with mutation and expose useful cache signals
+
+#### Keep invalidation close to mutation
+
 
 When authoritative state changes, the code that owns the mutation should make cache consequences obvious.
 
 Avoid distant hidden invalidation hooks.
 
-## 9. Instrument useful cache behavior
+#### Instrument useful cache behavior
+
 
 Where operationally relevant, expose:
 
@@ -106,7 +141,8 @@ Where operationally relevant, expose:
 
 Do not instrument trivial local memoization unnecessarily.
 
-## 10. Test freshness semantics
+### 5. Test the complete freshness contract
+
 
 Cover:
 
@@ -120,6 +156,13 @@ Cover:
 
 as relevant.
 
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
+
 ## Explicit anti-patterns
 
 Do not:
@@ -131,6 +174,16 @@ Do not:
 - hide stale behavior
 - let invalidation depend on unrelated callers
 - add cache layers before measuring the underlying cost
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for in-memory/disk/query/build/HTTP caches, memoization, cache keys, TTLs, invalidation, capacity, negative/stale behavior, and concurrent misses: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit authority, key dimensions, freshness, bounds, concurrent misses, stale/negative policy, invalidation ownership, and cache tests; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

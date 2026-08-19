@@ -1,10 +1,19 @@
 # Build, Release, and Code Generation Hygiene
 
-You are improving an existing codebase so builds, generated artifacts, version metadata, feature combinations, and release outputs are reproducible, inspectable, and owned by clear inputs.
+You are improving this codebase so builds, generated artifacts, version metadata, feature combinations, and release outputs are reproducible, inspectable, and owned by clear inputs.
 
 The goal is to eliminate build-script magic, stale generated files, hidden environment dependencies, and release-only behavior that ordinary development does not exercise.
 
-Preserve artifact compatibility unless explicitly changing release behavior.
+Scope: build scripts, code generation, embedded assets, feature sets, version metadata, packaging, release profiles, and artifact provenance.
+
+Applicability: Apply this prompt only when the repository has generated artifacts, build-time logic, release packaging, or environment-sensitive builds worth making reproducible. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,7 +29,19 @@ Before editing:
 - identify differences between local and CI/release builds
 - run representative baseline builds
 
-## 1. Make build inputs explicit
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Make build inputs explicit and avoid undeclared network dependence
+
+#### Make build inputs explicit
+
 
 A build should depend on identifiable inputs:
 
@@ -34,13 +55,17 @@ A build should depend on identifiable inputs:
 
 Avoid ambient machine state.
 
-## 2. Keep builds offline-capable where practical
+#### Keep builds offline-capable where practical
+
 
 Do not fetch arbitrary network resources during compilation unless the build contract explicitly requires it.
 
 Prefer vendored/pinned/generated inputs established before compile time.
 
-## 3. Make code generation reproducible
+### 2. Make generation reproducible, drift-detectable, and build scripts narrow
+
+#### Make code generation reproducible
+
 
 For every generated artifact, define:
 
@@ -53,13 +78,15 @@ For every generated artifact, define:
 
 Generated files should say they are generated and where from.
 
-## 4. Detect stale generated output
+#### Detect stale generated output
+
 
 If generated files are committed, CI should be able to regenerate and detect diffs.
 
 Do not rely on maintainers remembering to rerun generators.
 
-## 5. Keep build scripts narrow
+#### Keep build scripts narrow
+
 
 Build scripts should perform only tasks that genuinely belong at build time.
 
@@ -67,7 +94,10 @@ Avoid turning build scripts into general-purpose orchestration engines.
 
 For Rust, use precise Cargo rerun directives rather than rerunning on every build.
 
-## 6. Make version metadata deterministic
+### 3. Make version metadata and feature combinations deterministic
+
+#### Make version metadata deterministic
+
 
 Define policy for:
 
@@ -81,7 +111,8 @@ Do not execute source-control commands at runtime merely to report version.
 
 Avoid nondeterministic timestamps unless intentionally part of the artifact.
 
-## 7. Audit feature combinations
+#### Audit feature combinations
+
 
 For feature-gated builds:
 
@@ -90,11 +121,15 @@ For feature-gated builds:
 - test representative/minimal/maximal sets
 - avoid features silently changing unrelated semantics
 
-## 8. Keep release behavior close to development behavior
+### 4. Keep release behavior close to development and artifacts inspectable
+
+#### Keep release behavior close to development behavior
+
 
 Release builds may optimize differently, but should not enable major untested logic paths solely in release environments.
 
-## 9. Make artifacts inspectable
+#### Make artifacts inspectable
+
 
 A release artifact should make it possible to determine:
 
@@ -105,7 +140,10 @@ A release artifact should make it possible to determine:
 
 without relying on network access.
 
-## 10. Minimize toolchain sprawl
+### 5. Minimize toolchain sprawl and prevent secret leakage
+
+#### Minimize toolchain sprawl
+
 
 Avoid requiring multiple overlapping build orchestrators for ordinary workflows.
 
@@ -116,13 +154,16 @@ Document one canonical path for:
 - generate
 - package/release
 
-## 11. Keep secrets out of build artifacts
+#### Keep secrets out of build artifacts
+
 
 Audit environment substitution and generated files to ensure CI secrets are not embedded accidentally.
 
-## 12. Test clean builds
+### 6. Prove the build from clean state
+
 
 Validate from a clean checkout/worktree or equivalent to catch hidden generated/local dependencies.
+
 
 ## Explicit anti-patterns
 
@@ -138,6 +179,7 @@ Do not:
 - require multiple task runners for the same operation
 - embed CI secrets
 
+
 ## Verification
 
 After editing:
@@ -149,6 +191,9 @@ After editing:
 - verify precise build-script rerun behavior
 - verify offline build assumptions where applicable
 - inspect artifacts for accidental secrets/host paths
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

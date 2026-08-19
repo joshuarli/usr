@@ -1,10 +1,19 @@
 # Serialization, Versioning, and Compatibility
 
-You are improving an existing codebase so persisted and wire formats have explicit compatibility, validation, evolution, and round-trip semantics.
+You are improving this codebase so persisted and wire formats have explicit compatibility, validation, evolution, and round-trip semantics.
 
 The goal is to prevent accidental protocol changes and long-lived data debt caused by treating serialization as an implementation detail.
 
-Preserve existing external and persisted formats unless this request explicitly permits a compatibility change.
+Scope: wire and persisted formats, versioning, field semantics, readers/writers, migrations, unknown values, and compatibility fixtures.
+
+Applicability: Apply this prompt only when serialized data crosses a persistence or external compatibility boundary. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,13 +29,26 @@ Before editing:
 - inspect golden fixtures and compatibility tests
 - run narrow baseline checks
 
-## 1. Treat serialized formats as contracts
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Treat serialized formats as contracts distinct from internal representation when needed
+
+#### Treat serialized formats as contracts
+
 
 Once persisted or consumed externally, field names, discriminants, defaults, omission behavior, and null semantics may be compatibility commitments.
 
 Do not change them casually during internal refactors.
 
-## 2. Separate wire/persistence models from domain models when contracts diverge
+#### Separate wire/persistence models from domain models when contracts diverge
+
 
 Use distinct types when:
 
@@ -37,7 +59,10 @@ Use distinct types when:
 
 Do not create duplicate models when the structures genuinely have the same contract.
 
-## 3. Define versioning strategy
+### 2. Define version, unknown-field, and absent/null/default semantics
+
+#### Define versioning strategy
+
 
 For evolving formats, decide whether compatibility uses:
 
@@ -50,7 +75,8 @@ For evolving formats, decide whether compatibility uses:
 
 Avoid ad hoc "try parsing old shape, then new shape" behavior without documented policy.
 
-## 4. Define unknown-field behavior
+#### Define unknown-field behavior
+
 
 Decide intentionally whether unknown fields are:
 
@@ -60,23 +86,31 @@ Decide intentionally whether unknown fields are:
 
 Forward compatibility may require preserving opaque data.
 
-## 5. Distinguish absent, null, empty, and default
+#### Distinguish absent, null, empty, and default
+
 
 Do not conflate these unless the format contract explicitly does so.
 
-## 6. Keep canonical writing behavior
+### 3. Use one canonical writer and validate after parsing
+
+#### Keep canonical writing behavior
+
 
 If old formats must still be read, new writes should usually emit one canonical current format.
 
 Avoid multiple equally canonical writers.
 
-## 7. Validate after parsing
+#### Validate after parsing
+
 
 Syntactic deserialization does not establish semantic validity.
 
 Convert raw wire/persisted forms into validated internal domain values.
 
-## 8. Make round-trip expectations explicit
+### 4. Define round-trip and deterministic-output expectations
+
+#### Make round-trip expectations explicit
+
 
 Determine whether the contract requires:
 
@@ -88,11 +122,15 @@ or stronger preservation such as unknown fields or formatting.
 
 Do not assume structural round-trip when canonicalization is intended.
 
-## 9. Stabilize output
+#### Stabilize output
+
 
 Where serialized output is checked into repositories, cached, hashed, diffed, or consumed by humans, use deterministic ordering and formatting when semantics permit.
 
-## 10. Maintain compatibility fixtures
+### 5. Keep compatibility fixtures and migration direction explicit
+
+#### Maintain compatibility fixtures
+
 
 Keep representative fixtures for:
 
@@ -104,15 +142,18 @@ Keep representative fixtures for:
 
 Golden files should be small enough to review.
 
-## 11. Make migrations one-way and explicit
+#### Make migrations one-way and explicit
+
 
 Migration logic should identify source and target versions.
 
 Avoid repeatedly re-migrating already current data.
 
-## 12. Audit serialization of sensitive data
+### 6. Exclude sensitive internal data from serialization
+
 
 Ensure secrets/internal fields are not serialized merely because a domain struct derives serialization.
+
 
 ## Explicit anti-patterns
 
@@ -127,6 +168,7 @@ Do not:
 - trust deserialized data without semantic validation
 - serialize secrets because they happen to be fields
 
+
 ## Verification
 
 After editing:
@@ -138,6 +180,9 @@ After editing:
 - verify malformed semantic states are rejected
 - inspect serialized output for accidental field exposure
 - run compatibility tests across supported versions
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

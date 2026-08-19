@@ -1,10 +1,19 @@
 # Platform Portability and OS Boundary Audit
 
-You are improving an existing multi-platform codebase so platform differences are isolated, explicit, and tested instead of leaking through scattered conditionals.
+You are improving this codebase so platform differences are isolated, explicit, and tested instead of leaking through scattered conditionals.
 
-The goal is not universal portability. The goal is clean, deliberate support for the platforms the project actually claims to support.
+The goal is clean, deliberate support for the platforms the project actually claims to support.
 
-Preserve supported-platform behavior and contracts unless explicitly changing support policy.
+Scope: claimed OS/architecture support, platform conditionals, syscalls, path/process/terminal/filesystem semantics, fallbacks, and target dependencies.
+
+Applicability: Apply this prompt only when the project supports or intentionally targets more than one OS/architecture/platform mechanism. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -18,7 +27,19 @@ Before editing:
 - inspect CI matrix and platform-specific tests
 - run baseline checks on available supported targets
 
-## 1. State the support matrix
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. State the support matrix and isolate platform mechanisms
+
+#### State the support matrix
+
 
 Make explicit which combinations are supported:
 
@@ -31,7 +52,8 @@ filesystem/terminal assumptions where material
 
 Do not imply support merely because code happens to compile.
 
-## 2. Isolate platform mechanisms
+#### Isolate platform mechanisms
+
 
 Prefer:
 
@@ -47,23 +69,29 @@ or the repository's equivalent where meaningful.
 
 Keep high-level domain logic platform-neutral when semantics are actually shared.
 
-## 3. Keep platform policy separate from platform mechanism
+#### Keep platform policy separate from platform mechanism
+
 
 A macOS implementation may use a different syscall than Linux while preserving the same application-level contract.
 
 Do not duplicate entire workflows when only one mechanism differs.
 
-## 4. Avoid scattered conditional compilation
+#### Avoid scattered conditional compilation
+
 
 If the same platform distinction appears in many files, establish a narrow platform abstraction.
 
 Do not create an elaborate portability layer for one tiny conditional.
 
-## 5. Fail unsupported combinations clearly
+### 2. Reject unsupported combinations while normalizing shared semantics
+
+#### Fail unsupported combinations clearly
+
 
 If a target is unsupported, prefer an explicit compile/configuration failure over a partially working binary with hidden missing behavior.
 
-## 6. Normalize semantics at the boundary
+#### Normalize semantics at the boundary
+
 
 Where platforms expose different mechanism-level behavior, define the application contract explicitly.
 
@@ -76,17 +104,22 @@ Examples:
 - path encoding
 - clock behavior
 
-## 7. Preserve platform-native values
+#### Preserve platform-native values
+
 
 Do not force Unix paths, process arguments, identifiers, or metadata through portable-looking UTF-8/string abstractions when that loses information.
 
-## 8. Test platform-specific behavior
+### 3. Test real platform behavior and make fallbacks explicit
+
+#### Test platform-specific behavior
+
 
 Use real platform integration tests for semantics that cannot be faithfully mocked.
 
 CI should exercise every claimed supported platform when practical.
 
-## 9. Keep fallback behavior intentional
+#### Keep fallback behavior intentional
+
 
 Fallbacks should identify:
 
@@ -97,7 +130,10 @@ Fallbacks should identify:
 
 Do not silently fall back to weaker correctness semantics.
 
-## 10. Audit architecture assumptions
+### 4. Audit architecture assumptions and scope target-specific dependencies
+
+#### Audit architecture assumptions
+
 
 Look for:
 
@@ -110,11 +146,19 @@ Look for:
 
 when low-level code depends on them.
 
-## 11. Keep conditional dependency graphs coherent
+#### Keep conditional dependency graphs coherent
+
 
 Platform-specific dependencies should be scoped to relevant targets/features.
 
 Avoid pulling every platform backend into every build.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -128,6 +172,7 @@ Do not:
 - keep unsupported targets half-working
 - add a portability framework for one simple branch
 
+
 ## Verification
 
 After editing:
@@ -138,6 +183,9 @@ After editing:
 - verify platform-specific dependencies are properly scoped
 - test semantics rather than only compilation
 - document unavoidable platform differences
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

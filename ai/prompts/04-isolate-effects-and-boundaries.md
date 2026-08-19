@@ -1,10 +1,19 @@
 # Isolate Effects and Make Boundaries Explicit
 
-You are improving an existing codebase so filesystem, network, database, process, clock, randomness, environment, terminal, and other external effects enter the program through deliberate boundaries instead of leaking throughout domain logic.
+You are improving this codebase so filesystem, network, database, process, clock, randomness, environment, terminal, and other external effects enter the program through deliberate boundaries instead of leaking throughout domain logic.
 
-The goal is not dependency-injection ceremony. The goal is to make side effects visible, ownership clear, and core logic easy to test and reason about.
+The goal is to make side effects visible, ownership clear, and core logic easy to test and reason about.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: filesystem, process, network, database, clock, randomness, environment, terminal, and other effectful boundaries.
+
+Applicability: Apply this prompt only when external effects or process-global inputs are entangled with domain decisions or scattered through unrelated code. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -23,7 +32,19 @@ Before editing:
 - identify tests forced to use real time, real processes, real filesystems, or network services unnecessarily
 - run narrow baseline checks
 
-## 1. Identify the true effect boundaries
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Identify effect boundaries and separate decisions from execution
+
+#### Identify the true effect boundaries
+
 
 Classify operations such as:
 
@@ -48,7 +69,8 @@ The codebase should make it easy to answer:
 - what failures can cross the boundary?
 - who owns cleanup and lifecycle?
 
-## 2. Separate decision logic from execution
+#### Separate decision logic from execution
+
 
 Prefer this shape:
 
@@ -69,7 +91,10 @@ Examples:
 
 Do not hide domain policy inside low-level I/O helpers.
 
-## 3. Read process-global inputs once
+### 2. Acquire ambient inputs once and keep adapters narrow
+
+#### Read process-global inputs once
+
 
 Environment variables, current directory, process arguments, locale, platform state, and similar process-global inputs should be acquired near startup or at an explicit boundary.
 
@@ -77,7 +102,8 @@ Do not let arbitrary deep modules call global APIs when the value is really conf
 
 Convert raw inputs into typed values and pass only what downstream code needs.
 
-## 4. Keep adapters thin
+#### Keep adapters thin
+
 
 Effect adapters should translate between the domain and an external mechanism.
 
@@ -104,7 +130,8 @@ Context
 EverythingProvider
 ```
 
-## 5. Avoid fake abstraction
+#### Avoid fake abstraction
+
 
 Do not introduce a trait/interface solely because "everything should be injectable."
 
@@ -118,7 +145,10 @@ Abstract an effect when at least one is true:
 
 A small function parameter or explicit helper may be better than a trait hierarchy.
 
-## 6. Make time explicit
+### 3. Make time and randomness explicit dependencies where behavior depends on them
+
+#### Make time explicit
+
 
 Avoid hidden calls to "now" in domain logic.
 
@@ -131,7 +161,8 @@ If behavior depends on time:
 
 This should enable deterministic tests without sleeps.
 
-## 7. Make randomness explicit
+#### Make randomness explicit
+
 
 If randomness affects observable behavior or testing:
 
@@ -141,7 +172,10 @@ If randomness affects observable behavior or testing:
 
 Cryptographic randomness may require a stricter dedicated boundary.
 
-## 8. Make process execution explicit
+### 4. Keep process and filesystem effects at deliberate execution boundaries
+
+#### Make process execution explicit
+
 
 For spawned processes:
 
@@ -154,7 +188,8 @@ For spawned processes:
 
 Avoid shell invocation unless shell syntax is intentionally required.
 
-## 9. Make filesystem effects explicit
+#### Make filesystem effects explicit
+
 
 Separate path/operation planning from mutation where practical.
 
@@ -170,7 +205,10 @@ Define semantics for:
 
 Do not scatter filesystem mutation through unrelated domain code.
 
-## 10. Define error translation at boundaries
+### 5. Translate failures and own resource lifecycle at the boundary
+
+#### Define error translation at boundaries
+
 
 External libraries and OS APIs expose mechanism-specific errors.
 
@@ -180,7 +218,8 @@ Preserve the underlying source/context.
 
 Avoid turning every error into an opaque string.
 
-## 11. Keep lifecycle ownership obvious
+#### Keep lifecycle ownership obvious
+
 
 For every effectful resource, make clear:
 
@@ -192,6 +231,13 @@ For every effectful resource, make clear:
 - what happens during shutdown
 
 Prefer language-native structured ownership and RAII where available.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -208,6 +254,7 @@ Do not:
 - add abstraction layers that merely forward calls
 - change behavior while moving boundaries
 
+
 ## Verification
 
 After editing:
@@ -218,6 +265,9 @@ After editing:
 - verify resource cleanup on errors/cancellation
 - verify error sources remain inspectable
 - run focused tests and integration tests for real adapters
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

@@ -1,12 +1,23 @@
-You are improving an existing codebase so coding agents can reliably discover the
-definitions, callers, contracts, tests, and documentation relevant to a task using
-ordinary filename and text search.
+# Make Code Search a Reliable Navigation Boundary
 
-The goal is a codebase whose names, paths, types, boundaries, and explanations make
-the shortest useful path from a task description to the right code. Preserve runtime
-behavior and public contracts unless this request explicitly changes them.
+You are improving this codebase so coding agents can reliably reach the right definitions, callers, contracts, tests, and documentation through ordinary filename and text search.
 
-First inspect the repository before editing:
+The goal is to make names, paths, types, boundaries, and explanations form the shortest useful path from task vocabulary to the correct code.
+
+Scope: repository-wide naming, paths, symbols, methods, types, modules, tests, docs, exports, aliases, and legacy implementations as navigated by ordinary filename/text search.
+
+Applicability: Apply this prompt only when coding agents or humans must reliably locate important concepts using ordinary filename and text search, and current naming/structure produces unnecessary search hops or ambiguity. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Discoverability-driven renames, moves, type tightening, module splits, and legacy cleanup only where required by the contract and compatible with the invoking request.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
+
+## First inspect the repository
+
+Before editing:
 
 - Inventory the important domain concepts and their definitions, callers, methods,
   types, file paths, tests, fixtures, documentation, configuration, exports, aliases,
@@ -17,10 +28,13 @@ First inspect the repository before editing:
   implicit contracts, duplicated implementations, and stale paths.
 - Run the narrowest useful baseline compiler, type checker, and focused tests before
   changing code. Record failures that predate the work.
-- Preserve existing valid behavior, APIs, output, side effects, permissions, and
-  state transitions unless an intentional change is part of the request.
 
 ## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
 
 ### 1. Treat text search as a navigation boundary
 
@@ -307,6 +321,16 @@ Do not:
 - improve only one convenient module when the requested scope is repository-wide
 - repeat an enclosing module or receiver name in a symbol when that context already
   makes the symbol unique
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for repository-wide naming, paths, symbols, methods, types, modules, tests, docs, exports, aliases, and legacy implementations as navigated by ordinary filename/text search: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit canonical vocabulary, search hits, module ownership, type contracts, local rationale, reverse references, legacy paths, repository-wide old/new spellings, and search-based verification; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

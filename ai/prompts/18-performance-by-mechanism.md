@@ -1,12 +1,23 @@
 # Performance by Mechanism, Not Folklore
 
-You are improving an existing codebase by identifying unnecessary work and performance costs from first principles rather than applying generic optimization tricks.
+You are improving this codebase so performance-sensitive paths are improved by identifying and removing measurable unnecessary work from first principles.
 
 The goal is to make performance-sensitive paths simpler, more measurable, and cheaper without sacrificing correctness or readability.
 
-Do not change semantics unless explicitly required.
+Scope: measurable hot paths and costs from allocation, copying, parsing, serialization, syscalls, I/O round trips, locking, task creation, and buffering.
+
+Applicability: Apply this prompt only when performance is a material concern or inspection reveals repeated/unnecessary work worth measuring. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
+
+Before editing:
 
 Identify likely hot paths and cost centers involving:
 
@@ -28,13 +39,26 @@ Identify likely hot paths and cost centers involving:
 
 Use existing benchmarks/profiling if available.
 
-## 1. Measure before changing
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Measure representative cost and remove work before optimizing it
+
+#### Measure before changing
+
 
 Establish a representative baseline when performance is the reason for a change.
 
 Prefer wall-clock, throughput, allocation, syscall, query-count, or profile data relevant to the actual mechanism.
 
-## 2. Remove work first
+#### Remove work first
+
 
 Prefer:
 
@@ -48,11 +72,15 @@ Prefer:
 
 over micro-optimizing unavoidable work.
 
-## 3. Keep data in useful form
+### 2. Keep data useful and batch expensive boundary crossings
+
+#### Keep data in useful form
+
 
 Avoid parse -> stringify -> parse cycles, repeated conversions, and unnecessary intermediate representations.
 
-## 4. Batch across expensive boundaries
+#### Batch across expensive boundaries
+
 
 Where semantics permit, batch:
 
@@ -64,17 +92,24 @@ Where semantics permit, batch:
 
 Do not batch so aggressively that latency, memory, or failure semantics become worse.
 
-## 5. Reduce allocation/copy churn
+### 3. Reduce allocation/copy and synchronization cost
+
+#### Reduce allocation/copy churn
+
 
 Inspect ownership and lifetime opportunities before introducing pools or unsafe code.
 
 Prefer borrowing/reuse where it remains readable.
 
-## 6. Audit synchronization costs
+#### Audit synchronization costs
+
 
 Find lock contention, oversized critical sections, unnecessary atomics, and excessive task/thread handoff.
 
-## 7. Avoid speculative caches
+### 4. Treat caches and fast-path abstraction as measured choices
+
+#### Avoid speculative caches
+
 
 A cache adds:
 
@@ -86,15 +121,20 @@ A cache adds:
 
 Introduce or preserve one only when measurement justifies it.
 
-## 8. Keep fast paths obvious
+#### Keep fast paths obvious
+
 
 Do not bury critical paths under generic abstraction layers that make cost invisible.
 
-## 9. Benchmark replacements
+### 5. Benchmark replacements and protect material performance contracts
+
+#### Benchmark replacements
+
 
 If replacing a dependency or algorithm for performance, compare representative before/after behavior.
 
-## 10. Protect performance contracts
+#### Protect performance contracts
+
 
 For important regressions, add:
 
@@ -105,6 +145,13 @@ For important regressions, add:
 - size limits
 
 where maintainable.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -117,6 +164,16 @@ Do not:
 - micro-optimize code dominated by I/O
 - trade large readability losses for negligible gains
 - hide regressions behind noisy benchmarks
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for measurable hot paths and costs from allocation, copying, parsing, serialization, syscalls, I/O round trips, locking, task creation, and buffering: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit baseline metrics, repeated work, boundary crossings, copies/allocations, synchronization, caches, and benchmark evidence; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

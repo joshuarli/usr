@@ -1,12 +1,23 @@
 # Security and Trust Boundary Audit
 
-You are improving an existing codebase so trust transitions are explicit and untrusted input cannot silently acquire authority.
+You are improving this codebase so trust transitions are explicit and untrusted input cannot silently acquire authority.
 
 The goal is practical boundary hardening, not speculative security theater.
 
-Preserve intended capabilities and compatibility unless fixing a concrete vulnerability.
+Scope: trust boundaries involving input, paths, subprocesses, secrets, deserialization, temporary resources, privileges, unsafe/native code, and resource limits.
+
+Applicability: Apply this prompt only when untrusted data can influence authority, resource consumption, filesystem/process behavior, or secret handling. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
+
+Before editing:
 
 Inventory trust boundaries involving:
 
@@ -28,7 +39,19 @@ Inventory trust boundaries involving:
 
 Identify where untrusted data becomes trusted.
 
-## 1. Mark trust transitions
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Identify trust transitions and preserve structural subprocess safety
+
+#### Mark trust transitions
+
 
 For each external input, identify:
 
@@ -37,13 +60,17 @@ For each external input, identify:
 - authority granted
 - side effects it can trigger
 
-## 2. Avoid shell reinterpretation
+#### Avoid shell reinterpretation
+
 
 Pass subprocess arguments structurally.
 
 Use a shell only when shell semantics are intentionally required.
 
-## 3. Harden path handling
+### 2. Harden path and secret handling at authority boundaries
+
+#### Harden path handling
+
 
 Consider:
 
@@ -57,7 +84,8 @@ Consider:
 
 Do not assume lexical normalization provides filesystem security.
 
-## 4. Handle secrets deliberately
+#### Handle secrets deliberately
+
 
 Avoid secrets in:
 
@@ -69,21 +97,29 @@ Avoid secrets in:
 
 Keep secret lifetime and scope narrow.
 
-## 5. Validate deserialization boundaries
+### 3. Validate deserialized data and isolate privilege transitions
+
+#### Validate deserialization boundaries
+
 
 Treat parsed external data as untrusted even when syntax is valid.
 
 Apply semantic validation before use.
 
-## 6. Make privilege transitions explicit
+#### Make privilege transitions explicit
+
 
 If code runs with elevated privileges or acts on behalf of another identity, isolate the privileged operations and minimize their surface.
 
-## 7. Secure temporary resources
+### 4. Secure temporary/native boundaries and bound attacker-controlled resource use
+
+#### Secure temporary resources
+
 
 Use safe creation APIs, restrictive permissions where appropriate, unpredictable names when required, and cleanup.
 
-## 8. Audit unsafe/native boundaries
+#### Audit unsafe/native boundaries
+
 
 For unsafe code, FFI, mmap, raw pointers, syscalls:
 
@@ -92,7 +128,8 @@ For unsafe code, FFI, mmap, raw pointers, syscalls:
 - validate inputs before crossing
 - add tests around the safe wrapper
 
-## 9. Avoid denial-of-service footguns
+#### Avoid denial-of-service footguns
+
 
 Bound:
 
@@ -105,6 +142,13 @@ Bound:
 
 where external input can control resource consumption.
 
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
+
 ## Explicit anti-patterns
 
 Do not:
@@ -116,6 +160,16 @@ Do not:
 - broaden privileges for convenience
 - use unsafe code without documented preconditions
 - add arbitrary limits without understanding real workloads
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for trust boundaries involving input, paths, subprocesses, secrets, deserialization, temporary resources, privileges, unsafe/native code, and resource limits: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit trust transitions, shell/path handling, secrets, deserialization, privileges, temp resources, unsafe boundaries, and DoS limits; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

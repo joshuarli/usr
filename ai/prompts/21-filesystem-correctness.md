@@ -1,10 +1,19 @@
 # Filesystem Correctness and Path Semantics
 
-You are improving an existing codebase so filesystem operations have explicit semantics for paths, symlinks, atomicity, durability, permissions, races, partial failure, and non-UTF-8 names.
+You are improving this codebase so filesystem operations have explicit semantics for paths, symlinks, atomicity, durability, permissions, races, partial failure, and non-UTF-8 names.
 
 The goal is to stop treating the filesystem like an in-memory map of string keys.
 
-Preserve existing behavior unless this request explicitly changes filesystem semantics.
+Scope: path handling, file mutation, symlinks, traversal, metadata, temp files, atomic replacement, durability, and platform filesystem semantics.
+
+Applicability: Apply this prompt only when the codebase performs non-trivial filesystem operations where path fidelity, races, symlinks, partial failure, or metadata matter. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -21,7 +30,19 @@ Before editing:
 - identify assumptions about filesystem timestamp precision, case sensitivity, or rename behavior
 - run focused baseline tests on supported platforms
 
-## 1. Use path-native representations
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Preserve native paths and define secure resolution semantics
+
+#### Use path-native representations
+
 
 Use `Path`/`PathBuf`, `OsStr`/`OsString`, or equivalent native path types.
 
@@ -29,7 +50,8 @@ Do not lossy-convert paths to UTF-8 merely for convenience.
 
 Convert to text only at presentation or protocol boundaries that genuinely require it.
 
-## 2. Define symlink semantics explicitly
+#### Define symlink semantics explicitly
+
 
 For each operation, decide whether to:
 
@@ -41,7 +63,8 @@ For each operation, decide whether to:
 
 Do not inherit behavior accidentally from convenience APIs.
 
-## 3. Avoid TOCTOU where correctness/security matters
+#### Avoid TOCTOU where correctness/security matters
+
 
 Be skeptical of:
 
@@ -54,7 +77,10 @@ when the path can change between operations.
 
 Prefer descriptor/handle-relative operations or atomic primitives where appropriate.
 
-## 4. Define replacement semantics
+### 2. Define replacement, atomicity, durability, and interrupted-write behavior
+
+#### Define replacement semantics
+
 
 For writes/copies/moves, decide:
 
@@ -66,7 +92,8 @@ For writes/copies/moves, decide:
 
 Do not let platform defaults silently choose policy.
 
-## 5. Use atomic update patterns where needed
+#### Use atomic update patterns where needed
+
 
 For important file replacement:
 
@@ -81,7 +108,8 @@ cleanup on failure
 
 Understand which guarantees actually hold on supported filesystems/platforms.
 
-## 6. Distinguish atomicity from durability
+#### Distinguish atomicity from durability
+
 
 A successful rename does not necessarily mean data survives power loss.
 
@@ -89,13 +117,17 @@ Use fsync/sync semantics only where the product contract requires durability.
 
 Do not add expensive durability barriers everywhere without need.
 
-## 7. Handle partial writes and interrupted operations
+#### Handle partial writes and interrupted operations
+
 
 Do not assume one write call writes everything.
 
 Make partial state and cleanup semantics explicit.
 
-## 8. Define recursive traversal behavior
+### 3. Make traversal, metadata, and filesystem precision explicit
+
+#### Define recursive traversal behavior
+
 
 For tree operations:
 
@@ -108,7 +140,8 @@ For tree operations:
 - concurrent mutation
 - error aggregation
 
-## 9. Preserve metadata deliberately
+#### Preserve metadata deliberately
+
 
 For copy/sync tools, decide which metadata is part of the contract:
 
@@ -123,7 +156,8 @@ For copy/sync tools, decide which metadata is part of the contract:
 
 Do not partially preserve metadata accidentally.
 
-## 10. Account for filesystem precision and normalization
+#### Account for filesystem precision and normalization
+
 
 Consider:
 
@@ -137,13 +171,17 @@ Consider:
 
 Do not compare metadata in ways that make idempotent operations perpetually detect false differences.
 
-## 11. Treat temp files as filesystem operations, not strings
+### 4. Use safe temporary-file patterns and real filesystem tests
+
+#### Treat temp files as filesystem operations, not strings
+
 
 Use safe creation primitives.
 
 Prefer same-directory/same-filesystem placement when atomic rename is required.
 
-## 12. Test real filesystem semantics
+#### Test real filesystem semantics
+
 
 Use integration tests for:
 
@@ -156,6 +194,13 @@ Use integration tests for:
 - cross-platform differences
 
 Do not mock the filesystem when the filesystem behavior itself is the contract.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -171,6 +216,7 @@ Do not:
 - preserve metadata accidentally rather than by policy
 - fake filesystem correctness with mocks
 
+
 ## Verification
 
 After editing:
@@ -181,6 +227,9 @@ After editing:
 - test supported-platform edge cases
 - verify temp-file and cleanup semantics
 - verify idempotence across filesystem metadata precision where relevant
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

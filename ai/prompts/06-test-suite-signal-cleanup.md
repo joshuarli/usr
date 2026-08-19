@@ -1,10 +1,19 @@
 # Improve Test-Suite Signal and Contract Coverage
 
-You are improving an existing test suite so it clearly states what behavior the codebase guarantees, fails for meaningful reasons, and avoids redundant or implementation-coupled coverage.
+You are improving this codebase so it clearly states what behavior the codebase guarantees, fails for meaningful reasons, and avoids redundant or implementation-coupled coverage.
 
 The goal is not "more tests." The goal is a test suite with high signal: each test should protect a useful behavior, invariant, compatibility contract, or failure mode.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: the test suite and its unit, integration, property, snapshot, fixture, timing, and external-boundary behavior.
+
+Applicability: Apply this prompt only when tests exist whose signal, determinism, naming, boundary choice, or contract coverage can be materially improved. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,7 +29,18 @@ Before editing:
 - identify skipped/ignored/flaky tests and their rationale
 - run the narrowest useful baseline suite and record pre-existing failures
 
-## 1. Make every test answer "what contract does this protect?"
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Make tests state observable contracts
+
+#### Make every test answer "what contract does this protect?"
+
 
 A good test name should expose:
 
@@ -44,7 +64,8 @@ works
 test_case_3
 ```
 
-## 2. Test observable behavior, not incidental implementation
+#### Test observable behavior, not incidental implementation
+
 
 Prefer assertions on:
 
@@ -66,7 +87,10 @@ Avoid testing:
 
 A refactor that preserves behavior should not require rewriting large portions of the test suite.
 
-## 3. Remove redundant tests
+### 2. Keep only distinct coverage at the narrowest useful boundary
+
+#### Remove redundant tests
+
 
 Identify tests that protect the same behavior through nearly identical inputs.
 
@@ -74,7 +98,8 @@ Keep the smallest set that provides distinct semantic coverage.
 
 Do not delete tests simply because they look similar; identify what failure each one would uniquely detect.
 
-## 4. Put tests at the narrowest useful boundary
+#### Put tests at the narrowest useful boundary
+
 
 Use unit tests for pure logic and local invariants.
 
@@ -89,7 +114,10 @@ Use integration tests when the contract depends on real boundaries such as:
 
 Do not mock a boundary whose real semantics are precisely what the test is supposed to protect.
 
-## 5. Eliminate nondeterminism
+### 3. Eliminate timing and scheduling nondeterminism
+
+#### Eliminate nondeterminism
+
 
 Replace avoidable nondeterminism from:
 
@@ -106,7 +134,8 @@ with explicit control.
 
 Prefer deterministic clocks, seeded randomness, stable ordering, temporary resources, and synchronization on observable conditions.
 
-## 6. Remove sleep-driven synchronization
+#### Remove sleep-driven synchronization
+
 
 Tests should not use arbitrary sleeps to "give something time."
 
@@ -120,7 +149,10 @@ Prefer:
 
 A timeout may bound a test, but it should not be the mechanism that makes the test correct.
 
-## 7. Make fixtures local and comprehensible
+### 4. Keep fixtures comprehensible and errors contract-focused
+
+#### Make fixtures local and comprehensible
+
 
 Avoid giant shared fixtures whose hidden setup makes tests difficult to understand.
 
@@ -130,7 +162,8 @@ Use builders/factories when they reduce noise, but keep significant values visib
 
 Do not hide the behavior under test behind a generic "create everything" fixture.
 
-## 8. Test errors as contracts
+#### Test errors as contracts
+
 
 For important failure paths, verify:
 
@@ -142,7 +175,10 @@ For important failure paths, verify:
 
 Avoid brittle full-string assertions unless exact text is a user-facing compatibility contract.
 
-## 9. Use snapshots selectively
+### 5. Use snapshots and property tests only where they add signal
+
+#### Use snapshots selectively
+
 
 Snapshots are useful for broad stable output such as:
 
@@ -155,7 +191,8 @@ Do not snapshot huge structures when a few semantic assertions would better iden
 
 If snapshots are used, keep them deterministic and reviewable.
 
-## 10. Add property tests only where they buy state-space coverage
+#### Add property tests only where they buy state-space coverage
+
 
 Good candidates:
 
@@ -169,19 +206,24 @@ Good candidates:
 
 Do not add generative testing because it sounds rigorous.
 
-## 11. Make regression tests first-class
+### 6. Make regressions first-class and slow layers intentional
+
+#### Make regression tests first-class
+
 
 When fixing a bug, add the smallest test that fails before the fix and demonstrates the actual user-visible or invariant violation.
 
 Name the behavior, not the issue number alone.
 
-## 12. Keep slow layers intentional
+#### Keep slow layers intentional
+
 
 Clearly distinguish fast local tests from expensive integration/end-to-end tests.
 
 A developer or coding agent should know the narrowest useful command for validating a change.
 
 Document relevant test commands in the repository conventions file when not obvious.
+
 
 ## Explicit anti-patterns
 
@@ -199,6 +241,7 @@ Do not:
 - delete failing tests merely because they expose existing bugs
 - weaken assertions to reduce flakiness instead of fixing nondeterminism
 
+
 ## Verification
 
 After editing:
@@ -209,6 +252,9 @@ After editing:
 - verify slow/external tests are clearly separated
 - verify regression tests reproduce their pre-fix failure
 - run broader checks appropriate to changed boundaries
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

@@ -1,10 +1,19 @@
 # Unsafe, FFI, and Syscall Boundary Audit
 
-You are improving an existing systems codebase so unsafe operations, FFI, raw syscalls, pointer manipulation, memory mapping, and platform-native interfaces are narrow, documented, and wrapped by safe contracts.
+You are improving this codebase so unsafe operations, FFI, raw syscalls, pointer manipulation, memory mapping, and platform-native interfaces are narrow, documented, and wrapped by safe contracts.
 
-The goal is not to eliminate unsafe code categorically. The goal is to ensure every unsafe boundary has explicit preconditions and the rest of the codebase does not need to reason about them.
+The goal is to ensure every unsafe boundary has explicit preconditions and the rest of the codebase does not need to reason about them.
 
-Preserve low-level semantics and performance unless fixing a correctness bug.
+Scope: unsafe blocks/functions, FFI declarations, raw pointers, native handles, manual memory, casts, mmap, syscalls, callbacks, and ABI boundaries.
+
+Applicability: Apply this prompt only when the codebase contains unsafe/native/FFI operations. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -24,13 +33,26 @@ Before editing:
 - run sanitizer/Miri/Valgrind/platform tools where available and appropriate
 - run baseline tests
 
-## 1. Make unsafe blocks minimal
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Keep unsafe proof obligations narrow, documented, and safely wrapped
+
+#### Make unsafe blocks minimal
+
 
 Keep only the operations requiring unsafe inside the block.
 
 Move validation, arithmetic, and ordinary control flow outside.
 
-## 2. Document safety preconditions
+#### Document safety preconditions
+
 
 Every unsafe function/block should make relevant assumptions clear:
 
@@ -46,13 +68,17 @@ Every unsafe function/block should make relevant assumptions clear:
 
 Use language conventions such as `# Safety` documentation where applicable.
 
-## 3. Build safe wrappers
+#### Build safe wrappers
+
 
 Convert raw external contracts into safe domain/API types as close to the boundary as possible.
 
 The rest of the codebase should not repeatedly uphold FFI/syscall invariants.
 
-## 4. Audit ownership transfer
+### 2. Make native ownership, conversions, and ABI layout explicit
+
+#### Audit ownership transfer
+
 
 For every native resource/pointer, identify:
 
@@ -64,7 +90,8 @@ For every native resource/pointer, identify:
 
 Avoid double-close, leaks, and use-after-free.
 
-## 5. Check integer and pointer conversions
+#### Check integer and pointer conversions
+
 
 Validate:
 
@@ -77,13 +104,17 @@ Validate:
 
 Do not rely on unchecked casts when external values control them.
 
-## 6. Keep ABI representations explicit
+#### Keep ABI representations explicit
+
 
 Use correct representation/layout annotations and types.
 
 Do not assume Rust/C/etc. enum, struct, boolean, or string layouts match without a contract.
 
-## 7. Handle callbacks carefully
+### 3. Define callback lifecycle and native error capture correctly
+
+#### Handle callbacks carefully
+
 
 For callbacks crossing FFI:
 
@@ -95,13 +126,17 @@ For callbacks crossing FFI:
 
 Never unwind across an ABI that forbids it.
 
-## 8. Audit errno/last-error semantics
+#### Audit errno/last-error semantics
+
 
 Capture mechanism-specific error state at the correct moment.
 
 Do not call unrelated APIs before reading thread-local/native error state where that would destroy it.
 
-## 9. Test edge conditions
+### 4. Test edge conditions and apply targeted dynamic analysis
+
+#### Test edge conditions
+
 
 Cover:
 
@@ -113,7 +148,8 @@ Cover:
 - callback teardown
 - concurrent use
 
-## 10. Use dynamic analysis where practical
+#### Use dynamic analysis where practical
+
 
 For Rust/system code, consider tools appropriate to the boundary:
 
@@ -124,6 +160,13 @@ For Rust/system code, consider tools appropriate to the boundary:
 - fuzzing
 
 Do not add heavyweight tooling without a meaningful target.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -137,6 +180,16 @@ Do not:
 - expose raw pointers/handles to unrelated modules
 - unwind across unsupported FFI boundaries
 - assume ABI layouts
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for unsafe blocks/functions, FFI declarations, raw pointers, native handles, manual memory, casts, mmap, syscalls, callbacks, and ABI boundaries: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit unsafe scope, safety preconditions, safe wrappers, ownership transfer, numeric/pointer conversions, ABI layout, callbacks, native errors, and dynamic-analysis targets; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

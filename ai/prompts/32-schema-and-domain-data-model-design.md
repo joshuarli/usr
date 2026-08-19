@@ -1,10 +1,19 @@
 # Schema and Domain Data Model Design
 
-You are improving an existing codebase so persisted/domain data models represent real entities, relationships, cardinality, ownership, and invariants instead of accidental implementation shapes.
+You are improving this codebase so persisted/domain data models represent real entities, relationships, cardinality, ownership, and invariants instead of accidental implementation shapes.
 
-The goal is not normalization for its own sake. The goal is a model that makes important facts easy to state, query, constrain, and evolve.
+The goal is a model that makes important facts easy to state, query, constrain, and evolve.
 
-Preserve persisted compatibility unless explicitly changing schema semantics.
+Scope: domain/persistence entities, keys, relationships, cardinality, nullability, blobs, state fields, timestamps, constraints, tenancy, queries, and migrations.
+
+Applicability: Apply this prompt only when the repository has a persisted schema or durable domain model whose relationships and invariants materially affect correctness. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -24,13 +33,26 @@ Before editing:
 - inspect migrations and old schema versions
 - run baseline checks
 
-## 1. Model entities by stable identity
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Model identity, cardinality, and absence explicitly
+
+#### Model entities by stable identity
+
 
 Determine which concepts have independent identity and lifecycle.
 
 Do not create entities for transient implementation details.
 
-## 2. Make cardinality explicit
+#### Make cardinality explicit
+
 
 Represent:
 
@@ -40,13 +62,17 @@ Represent:
 
 with schema structures that enforce intended cardinality.
 
-## 3. Use null only for real absence
+#### Use null only for real absence
+
 
 A nullable field should mean something specific.
 
 Avoid null as a generic placeholder for "not initialized yet", "wrong state", or "legacy".
 
-## 4. Avoid opaque blobs for queryable domain facts
+### 2. Keep queryable truth structured, singular, and constrained
+
+#### Avoid opaque blobs for queryable domain facts
+
 
 JSON/blob columns are appropriate for:
 
@@ -56,11 +82,13 @@ JSON/blob columns are appropriate for:
 
 Do not hide core relational/domain facts in blobs merely to avoid schema work.
 
-## 5. Avoid duplicate authoritative fields
+#### Avoid duplicate authoritative fields
+
 
 If the same fact is stored in multiple places, define ownership and synchronization or eliminate duplication.
 
-## 6. Encode uniqueness and ownership
+#### Encode uniqueness and ownership
+
 
 Use schema constraints for identities such as:
 
@@ -72,13 +100,17 @@ one active lease per job
 
 where the datastore can enforce them.
 
-## 7. Model state transitions deliberately
+### 3. Give lifecycle states and timestamps precise meaning
+
+#### Model state transitions deliberately
+
 
 If fields are only valid in particular states, consider whether schema constraints or separate tables/variants better express the lifecycle.
 
 Do not overcomplicate simple status models.
 
-## 8. Keep timestamps semantically named
+#### Keep timestamps semantically named
+
 
 Prefer:
 
@@ -93,21 +125,27 @@ over generic `timestamp`.
 
 Distinguish event time from update bookkeeping.
 
-## 9. Design from real queries
+### 4. Design for real queries and explicit tenant ownership
+
+#### Design from real queries
+
 
 A model should support important access patterns without pathological joins/scans or duplicated truth.
 
 Do not denormalize preemptively without workload evidence.
 
-## 10. Keep tenant/security boundaries visible
+#### Keep tenant/security boundaries visible
+
 
 For multi-tenant data, ownership should be explicit enough that queries cannot casually omit tenant scope.
 
-## 11. Evolve schema coherently
+### 5. Evolve toward one canonical schema
+
 
 Migrations should move toward one canonical model.
 
 Avoid permanent half-migrations with multiple equally authoritative representations.
+
 
 ## Explicit anti-patterns
 
@@ -120,6 +158,16 @@ Do not:
 - rely only on application code for uniqueness/ownership
 - denormalize without measured need
 - use generic field names that hide semantic time/state
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for domain/persistence entities, keys, relationships, cardinality, nullability, blobs, state fields, timestamps, constraints, tenancy, queries, and migrations: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit identity, cardinality, null semantics, opaque blobs, duplicate fields, uniqueness/ownership, lifecycle fields, query fit, tenancy, and schema evolution; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

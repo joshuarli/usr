@@ -1,10 +1,19 @@
 # Make Invalid States Unrepresentable
 
-You are improving an existing codebase so its types encode the real domain constraints instead of relying on comments, boolean combinations, magic values, nullable-field conventions, or caller discipline.
+You are improving this codebase so its types encode the real domain constraints instead of relying on comments, boolean combinations, magic values, nullable-field conventions, or caller discipline.
 
-The goal is not type-level cleverness. The goal is to make valid code naturally express valid states and make common classes of bugs impossible or difficult to construct.
+The goal is to make valid code naturally express valid states and make common classes of bugs impossible or difficult to construct.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: domain types, constructors, state representations, identifiers, units, and lifecycle transitions.
+
+Applicability: Apply this prompt only when invalid domain states can currently be constructed through primitive values, option soups, magic strings, boolean combinations, or caller discipline. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -18,7 +27,19 @@ Before editing:
 - identify state transitions encoded indirectly through mutation
 - run the narrowest useful baseline checks
 
-## 1. Replace primitive obsession where semantics differ
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Give primitive and finite domain values precise representations
+
+#### Replace primitive obsession where semantics differ
+
 
 Semantically distinct values should not be interchangeable merely because both are strings or integers.
 
@@ -44,7 +65,8 @@ Use newtypes/branded types/value objects selectively for:
 
 Do not wrap primitives when the wrapper adds no safety, semantics, or discoverability.
 
-## 2. Replace stringly typed finite sets
+#### Replace stringly typed finite sets
+
 
 If a value has a closed set of states, represent it as an enum/tagged union/algebraic data type rather than arbitrary strings.
 
@@ -52,7 +74,10 @@ Prefer exhaustive matching where it improves correctness.
 
 Keep wire-format conversion at the boundary.
 
-## 3. Replace boolean state combinations with explicit states
+### 2. Model mutually exclusive state explicitly
+
+#### Replace boolean state combinations with explicit states
+
 
 Look for structures such as:
 
@@ -81,7 +106,8 @@ when that reflects the actual domain.
 
 Do not mechanically replace independent booleans that genuinely represent independent properties.
 
-## 4. Replace optional-field soups with variants
+#### Replace optional-field soups with variants
+
 
 Look for types where validity depends on which optional fields happen to be populated.
 
@@ -107,7 +133,10 @@ Successful with an error
 
 unless those combinations are genuinely valid.
 
-## 5. Make validated construction explicit
+### 3. Establish validated construction and unit-safe values
+
+#### Make validated construction explicit
+
 
 If a value has invariants, avoid unrestricted public construction.
 
@@ -125,7 +154,8 @@ Examples:
 
 Do not repeatedly revalidate trusted domain values after construction.
 
-## 6. Encode units
+#### Encode units
+
 
 Avoid interchangeable scalar values when unit confusion is plausible.
 
@@ -139,7 +169,10 @@ Prefer:
 
 At minimum, include units in names when the language lacks better options.
 
-## 7. Recover latent state machines
+### 4. Recover lifecycle state machines and trusted stages
+
+#### Recover latent state machines
+
 
 Search for operations such as:
 
@@ -170,7 +203,8 @@ Make invalid transitions explicit errors or impossible APIs.
 
 Do not scatter lifecycle legality checks across callers.
 
-## 8. Distinguish parsed, validated, and active forms when useful
+#### Distinguish parsed, validated, and active forms when useful
+
 
 Sometimes one type is being asked to represent multiple lifecycle stages.
 
@@ -191,7 +225,10 @@ AuthenticatedSession
 
 Use this only when the distinction removes real checks or invalid states. Avoid typestate ceremony for trivial workflows.
 
-## 9. Keep boundary compatibility separate
+### 5. Keep boundary compatibility outside the strict domain model
+
+#### Keep boundary compatibility separate
+
 
 External APIs, JSON, databases, and CLI inputs may require permissive primitive representations.
 
@@ -201,11 +238,13 @@ Convert them into stricter domain types after validation.
 
 Do not weaken the internal model merely because an external format is loose.
 
-## 10. Prefer readable type safety
+#### Prefer readable type safety
+
 
 Reject designs that require substantial generic gymnastics to understand ordinary control flow.
 
 The best model is usually the simplest type structure that makes the invalid case difficult to express.
+
 
 ## Explicit anti-patterns
 
@@ -221,6 +260,7 @@ Do not:
 - change wire/public representations unnecessarily
 - use `Option` to represent mutually exclusive variants when an enum is clearer
 
+
 ## Verification
 
 After editing:
@@ -232,6 +272,9 @@ After editing:
 - ensure boundary parsing rejects malformed values
 - ensure serialization/wire compatibility remains unchanged where required
 - run the nearest compiler/type checker and focused tests
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

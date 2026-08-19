@@ -1,12 +1,23 @@
 # Determinism and Reproducibility Audit
 
-You are improving an existing codebase so identical inputs produce stable, reproducible behavior wherever semantics do not require nondeterminism.
+You are improving this codebase so identical inputs produce stable, reproducible behavior wherever semantics do not require nondeterminism.
 
 The goal is to eliminate accidental variance that makes tests flaky, output unstable, caches ineffective, builds irreproducible, and debugging harder.
 
-Preserve behavior unless nondeterministic behavior is itself an accidental defect.
+Scope: observable ordering, time, randomness, environment dependence, generated output, concurrency ordering, and build metadata.
+
+Applicability: Apply this prompt only when identical inputs can produce accidental variance or tests/builds depend on uncontrolled nondeterminism. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
+
+Before editing:
 
 Inventory sources of nondeterminism:
 
@@ -29,7 +40,19 @@ Inventory sources of nondeterminism:
 
 Run representative operations more than once and compare observable output where useful.
 
-## 1. Stabilize ordering
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Stabilize observable ordering, time, and randomness
+
+#### Stabilize ordering
+
 
 If output order is not semantically meaningful, make it deterministic.
 
@@ -42,7 +65,8 @@ Examples:
 
 Do not impose ordering on hot paths when it has no observable value.
 
-## 2. Make time an explicit input
+#### Make time an explicit input
+
 
 Do not let timestamps appear unpredictably in logic or output unless required.
 
@@ -55,7 +79,8 @@ Separate:
 
 Inject or pass explicit time values where tests need deterministic behavior.
 
-## 3. Control randomness
+#### Control randomness
+
 
 Use explicit seeds in tests.
 
@@ -63,7 +88,10 @@ Keep cryptographic randomness separate from reproducibility-oriented randomness.
 
 Do not weaken security merely to make tests deterministic.
 
-## 4. Normalize environment dependence
+### 2. Make environment-dependent and generated output reproducible
+
+#### Normalize environment dependence
+
 
 Inventory behavior influenced by:
 
@@ -78,7 +106,8 @@ Inventory behavior influenced by:
 
 Make required inputs explicit and test default behavior.
 
-## 5. Stabilize generated output
+#### Stabilize generated output
+
 
 Generated files, diagnostics, help, manifests, snapshots, and machine-readable output should avoid incidental differences.
 
@@ -91,7 +120,10 @@ Exclude or isolate:
 
 unless they are part of the intended contract.
 
-## 6. Make concurrency deterministic where semantics permit
+### 3. Remove scheduler and build variance where semantics do not require it
+
+#### Make concurrency deterministic where semantics permit
+
 
 Do not assert accidental task completion order.
 
@@ -99,7 +131,8 @@ Where ordering matters, encode it.
 
 Where ordering does not matter, compare sets/multisets or normalize output rather than relying on scheduler behavior.
 
-## 7. Make builds reproducible where practical
+#### Make builds reproducible where practical
+
 
 Audit:
 
@@ -111,7 +144,8 @@ Audit:
 
 Prefer explicit build inputs.
 
-## 8. Preserve nondeterminism where required
+### 4. Preserve intentional nondeterminism explicitly
+
 
 Do not remove:
 
@@ -121,6 +155,13 @@ Do not remove:
 - unique IDs
 
 Instead isolate and test the policy around them.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -133,6 +174,16 @@ Do not:
 - rely on hash iteration order
 - assume filesystem order
 - hide environment dependence
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for observable ordering, time, randomness, environment dependence, generated output, concurrency ordering, and build metadata: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit unordered iteration, filesystem order, clock/random sources, environment inputs, generated output, and scheduler-dependent assertions; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

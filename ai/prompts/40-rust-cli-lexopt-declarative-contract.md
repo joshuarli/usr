@@ -1,6 +1,23 @@
-You are refactoring an existing Rust CLI into a mature, explicit command-line design.
+# Make the Rust CLI Declarative, Lexopt-Only, and Self-Describing
 
-First inspect the repository before editing:
+You are improving this codebase so the command-line surface is explicit, declarative, lexopt-only, self-describing, and tested as an observable contract.
+
+The goal is to establish one authoritative command schema that drives parsing, validation, help, version/error behavior, and testable CLI semantics without changing business logic.
+
+Scope: the complete Rust CLI surface: parser, dispatcher, command modules, metadata schema, help, version, errors, tests, docs, and build-time version metadata.
+
+Applicability: Apply this prompt only when an existing Rust CLI is being migrated to the explicitly mandated lexopt-based declarative command architecture described by this prompt. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Replace the CLI parser with lexopt exclusively; remove obsolete Clap parser/dependency surface; centralize CLI behavior under the mandated schema/modules; add generated help/version metadata and associated tests. Do not change business logic or other CLI semantics beyond those explicit architectural changes.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
+
+## First inspect the repository
+
+Before editing:
 
 - Read Cargo.toml, Cargo.lock, src/main.rs, src/lib.rs if present, all CLI-related modules, tests, README/docs, build scripts, and every current argument consumer.
 - Inventory the complete existing CLI surface:
@@ -17,9 +34,15 @@ First inspect the repository before editing:
   - exit-code behavior
   - existing help/version behavior
 - Run the narrowest useful baseline tests before changing code.
-- Preserve existing command semantics unless this request explicitly changes them.
+
+- Record failures that predate the work.
 
 ## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
 
 ### 1. Use lexopt exclusively
 
@@ -420,6 +443,29 @@ Update relevant README/docs so the documented CLI matches generated help.
 
 Do not introduce unrelated dependencies or unrelated refactors.
 
+
+## Explicit anti-patterns
+
+Do not:
+
+- use Clap, clap derive, structopt, argh, pico-args, another parser library, or ad hoc per-command parsing instead of lexopt
+- hide lexopt behind manual index arithmetic or a generic parser that repeats option spellings outside the command schema
+- use glob imports under `src/cli` or lossy UTF-8 conversion for paths, arguments, or opaque command tails
+- hardcode duplicate usage/help blobs or maintain parser/help/default metadata as competing sources of truth
+- execute Git at runtime for version output or silently emit an unknown/non-hexadecimal SHA
+- panic on user input, weaken parser/help tests, or change business logic under cover of the CLI migration
+- introduce unrelated dependencies, formatting churn, or refactors
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for the complete Rust CLI surface: parser, dispatcher, command modules, metadata schema, help, version, errors, tests, docs, and build-time version metadata: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit all CLI spellings/semantics, lexopt-only parsing, main.rs boundary, command schema, recursive help, version SHA, typed errors, parser/help tests, docs, and migration completeness; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
+
 ## Acceptance criteria
 
 The refactor is complete only when all of the following are true:
@@ -443,8 +489,4 @@ The refactor is complete only when all of the following are true:
 - Existing behavior is preserved unless explicitly changed.
 - The project compiles and its relevant tests pass.
 
-The architectural principle I would insist on is: **one command schema, three
-consumers—parsing, validation, and help rendering**. The second principle is
-that the lexopt boundary should remain visible in the source: explicit imports,
-explicit `Arg` matching, and no manual parser hidden behind generic helpers.
-That is what makes the lexopt design mature rather than merely lightweight.
+The architectural principle is: **one command schema must drive parsing, validation, and help rendering while the lexopt boundary remains explicit and visible in the source.**

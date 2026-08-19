@@ -1,10 +1,19 @@
 # Make the Error Model Explicit
 
-You are improving an existing codebase so failures have deliberate semantics instead of collapsing into strings, panics, generic catch-all errors, or inconsistent ad hoc handling.
+You are improving this codebase so failures have deliberate semantics instead of collapsing into strings, panics, generic catch-all errors, or inconsistent ad hoc handling.
 
 The goal is to make it obvious which failures are user mistakes, environmental failures, external-service failures, transient conditions, cancellation, violated invariants, or partial outcomes—and to preserve useful context across boundaries.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: error types, propagation, context, panic paths, retryability, cancellation, partial success, presentation, and exit/status mapping.
+
+Applicability: Apply this prompt only when failure behavior is fragmented, stringly typed, over-wrapped, panic-prone, or semantically ambiguous. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,7 +29,19 @@ Before editing:
 - inspect cleanup behavior on errors
 - run narrow baseline checks
 
-## 1. Define an error taxonomy
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Define failure categories without conflating programmer bugs and runtime errors
+
+#### Define an error taxonomy
+
 
 Classify meaningful failures into categories such as:
 
@@ -38,7 +59,8 @@ Classify meaningful failures into categories such as:
 
 Use the taxonomy that fits the project; do not create categories merely for symmetry.
 
-## 2. Keep programmer bugs distinct from runtime errors
+#### Keep programmer bugs distinct from runtime errors
+
 
 Malformed user input should not panic.
 
@@ -48,7 +70,10 @@ Conversely, a violated internal invariant should not always be disguised as an o
 
 Use assertions/panics for genuine programmer-impossible conditions according to project conventions.
 
-## 3. Preserve structured errors
+### 2. Preserve structured causes and translate only where meaning changes
+
+#### Preserve structured errors
+
 
 Do not stringify errors prematurely.
 
@@ -62,7 +87,8 @@ Keep:
 
 Render human-readable diagnostics only at presentation boundaries.
 
-## 4. Add context once, where meaning changes
+#### Add context once, where meaning changes
+
 
 Context should explain what the application was trying to do.
 
@@ -76,7 +102,8 @@ Bad chains repeat the same wording at every layer.
 
 Add context at boundaries where a low-level mechanism gains domain meaning.
 
-## 5. Keep external mechanism errors behind boundaries
+#### Keep external mechanism errors behind boundaries
+
 
 A domain API should not expose an arbitrary HTTP/SQL/filesystem library error when callers care about domain semantics.
 
@@ -84,7 +111,10 @@ Translate at the boundary while preserving the underlying source.
 
 Do not erase useful mechanism details that operators need for diagnosis.
 
-## 6. Make retryability explicit
+### 3. Represent retryability and cancellation explicitly
+
+#### Make retryability explicit
+
 
 If behavior retries only certain failures, encode that decision structurally.
 
@@ -92,13 +122,17 @@ Do not parse error strings to decide whether a failure is transient.
 
 Keep retry policy separate from error presentation.
 
-## 7. Model cancellation separately
+#### Model cancellation separately
+
 
 Cancellation is often not an error in the same sense as failure.
 
 Where the project has asynchronous/long-running operations, make cancellation distinguishable so callers can avoid noisy diagnostics or inappropriate retries.
 
-## 8. Define partial-success semantics
+### 4. Define partial outcomes and centralize final presentation
+
+#### Define partial-success semantics
+
 
 For batch or multi-step operations, decide whether failure means:
 
@@ -111,7 +145,8 @@ Represent that contract explicitly.
 
 Do not silently discard successful work or failed items.
 
-## 9. Centralize presentation/exit conversion
+#### Centralize presentation/exit conversion
+
 
 For CLIs and services, convert structured errors to:
 
@@ -124,7 +159,10 @@ at a narrow boundary.
 
 Avoid arbitrary deep code calling `exit()` or formatting final user-facing diagnostics.
 
-## 10. Audit ignored errors
+### 5. Handle ignored/cleanup failures deliberately and test failure contracts
+
+#### Audit ignored errors
+
 
 Every intentionally ignored error should have a reason.
 
@@ -140,7 +178,8 @@ Particularly inspect failures during:
 
 Do not overwrite a primary failure with a secondary cleanup failure without deliberate policy.
 
-## 11. Test failure behavior
+#### Test failure behavior
+
 
 For important failure paths, test:
 
@@ -153,6 +192,13 @@ For important failure paths, test:
 - partial completion
 
 Avoid brittle full-string assertions unless exact diagnostics are part of the public contract.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -169,6 +215,7 @@ Do not:
 - create a giant catch-all error enum containing implementation trivia
 - change observable exit/status behavior accidentally
 
+
 ## Verification
 
 After editing:
@@ -180,6 +227,9 @@ After editing:
 - verify external error sources remain inspectable
 - verify final presentation happens at clear boundaries
 - run focused failure-path tests and broader checks
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

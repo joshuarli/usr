@@ -1,10 +1,19 @@
 # Consolidate Settings, Constants, and Tunable Policy
 
-You are improving an existing codebase so its tunable behavior, fixed constants, defaults, limits, thresholds, timeouts, feature switches, environment-controlled values, and other policy knobs are easy to discover and reason about.
+You are improving this codebase so its tunable behavior, fixed constants, defaults, limits, thresholds, timeouts, feature switches, environment-controlled values, and other policy knobs are easy to discover and reason about.
 
-The goal is **not** to dump every literal into one giant constants file. The goal is to make configuration and policy explicit, typed, centralized at the correct ownership boundary, and distinguishable from implementation details.
+The goal is to make configuration and policy explicit, typed, centralized at the correct ownership boundary, and distinguishable from implementation details.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: repository-wide configuration, defaults, constants, limits, thresholds, timeouts, feature switches, and tunable policy.
+
+Applicability: Apply this prompt only when the repository contains meaningful runtime configuration, application policy knobs, duplicated defaults, or magic values whose ownership is unclear. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,11 +29,23 @@ Before editing:
 
 Do not mechanically hoist every literal.
 
-## 1. Establish a clear taxonomy
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Classify policy values and give configuration one authoritative boundary
+
+#### Establish a clear taxonomy
+
 
 Classify values before moving them.
 
-### Runtime settings
+##### Runtime settings
 
 Values intentionally configurable by the user, deployment, environment, config file, or CLI.
 
@@ -40,7 +61,7 @@ Examples:
 
 These should flow through a typed runtime settings/configuration model.
 
-### Application policy
+##### Application policy
 
 Values chosen by the application that may reasonably be tuned by maintainers but are not currently user-configurable.
 
@@ -54,7 +75,7 @@ Examples:
 
 Collect these in a clearly named settings/policy module or in domain-specific settings structures.
 
-### Domain/protocol constants
+##### Domain/protocol constants
 
 Values fixed by an external protocol, file format, ABI, mathematical definition, wire contract, or hard invariant.
 
@@ -68,13 +89,14 @@ Examples:
 
 Keep these near the domain/protocol implementation that owns them. Do not pretend they are configurable.
 
-### Local implementation constants
+##### Local implementation constants
 
 Values meaningful only to one small implementation unit.
 
 Keep them local when locality improves understanding. Do not create a global junk drawer.
 
-## 2. Create one obvious settings boundary
+#### Create one obvious settings boundary
+
 
 Establish one obvious location for application-wide configuration and policy, using the conventions of the language and repository.
 
@@ -122,7 +144,10 @@ pub struct RetryPolicy {
 
 Prefer domain-specific nested settings over dozens of unrelated top-level constants.
 
-## 3. Centralize defaults
+### 2. Resolve defaults and raw configuration sources once
+
+#### Centralize defaults
+
 
 A setting must have one authoritative default.
 
@@ -139,7 +164,8 @@ Define the default once and have the relevant consumers derive behavior from it.
 
 If documentation cannot be generated from the same source, add tests that detect drift where practical.
 
-## 4. Normalize configuration once
+#### Normalize configuration once
+
 
 Raw configuration sources should be read at a narrow boundary.
 
@@ -170,7 +196,10 @@ CLI > environment > project config > user config > defaults
 
 Preserve the project's existing precedence unless intentionally changing it.
 
-## 5. Make units and semantics explicit
+### 3. Make policy values typed and singular
+
+#### Make units and semantics explicit
+
 
 Do not expose ambiguous scalar constants such as:
 
@@ -192,7 +221,8 @@ Use `Duration`, path types, byte-size types, enums, newtypes, or validated domai
 
 Avoid storing parsed values as strings after the configuration boundary.
 
-## 6. Eliminate duplicated magic values
+#### Eliminate duplicated magic values
+
 
 Search for repeated literals that encode one policy.
 
@@ -210,7 +240,10 @@ If multiple occurrences represent the same policy, replace them with the canonic
 
 Do not combine values merely because their literals happen to be equal. Two unrelated `30` values are not necessarily one concept.
 
-## 7. Keep ownership visible
+### 4. Keep ownership visible without mutable global configuration
+
+#### Keep ownership visible
+
 
 Centralization does not mean one enormous global file.
 
@@ -238,7 +271,8 @@ constants::MAGIC
 
 The question is: **where would a maintainer naturally look to change or understand this value?**
 
-## 8. Avoid mutable global configuration
+#### Avoid mutable global configuration
+
 
 Do not introduce mutable process-wide globals merely to centralize configuration.
 
@@ -246,7 +280,10 @@ Prefer constructing immutable typed settings and passing the relevant subset to 
 
 Where global initialization is unavoidable, make initialization order and mutation semantics explicit and constrained.
 
-## 9. Validate settings at construction
+### 5. Validate configuration and make every knob discoverable
+
+#### Validate settings at construction
+
 
 Reject invalid combinations once, near the configuration boundary.
 
@@ -260,7 +297,8 @@ Examples:
 
 Downstream code should be able to rely on the invariants of the typed settings model instead of repeatedly defending against malformed configuration.
 
-## 10. Make settings discoverable
+#### Make settings discoverable
+
 
 A search for terms such as:
 
@@ -279,6 +317,13 @@ should lead quickly to the authoritative setting or policy definition.
 
 Document non-obvious policy choices immediately next to the setting definition, especially when a value exists because of an external constraint or measured tradeoff.
 
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
+
 ## Explicit anti-patterns
 
 Do not:
@@ -296,6 +341,7 @@ Do not:
 - create dozens of one-line constants that make code harder to read
 - centralize domain-owned constants so aggressively that ownership becomes obscure
 
+
 ## Verification
 
 After editing:
@@ -307,6 +353,9 @@ After editing:
 - verify domain/protocol constants remain fixed and locally understandable
 - run focused tests and the nearest compiler/type checker
 - add tests for default values and precedence where those contracts matter
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

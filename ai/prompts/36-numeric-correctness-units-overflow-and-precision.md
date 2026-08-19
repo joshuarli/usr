@@ -1,10 +1,19 @@
 # Numeric Correctness: Units, Overflow, and Precision
 
-You are improving an existing codebase so numeric calculations have explicit units, ranges, overflow behavior, rounding semantics, and precision appropriate to the domain.
+You are improving this codebase so numeric calculations have explicit units, ranges, overflow behavior, rounding semantics, and precision appropriate to the domain.
 
 The goal is to prevent subtle bugs caused by unit confusion, integer truncation, floating-point assumptions, unchecked arithmetic, and ambiguous rounding.
 
-Preserve numerical behavior unless correcting a demonstrated defect.
+Scope: numeric values and calculations involving units, widths/signs, overflow, rounding, money/decimals, floating point, ranges, and thresholds.
+
+Applicability: Apply this prompt only when numeric semantics are material enough that unit, range, precision, overflow, or rounding mistakes could affect correctness. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -24,7 +33,19 @@ Before editing:
 - identify parsing boundaries and serialized numeric ranges
 - run baseline tests
 
-## 1. Make units explicit
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Make units, numeric ranges, and overflow semantics explicit
+
+#### Make units explicit
+
 
 Use domain/unit types where practical.
 
@@ -38,7 +59,8 @@ rate_per_second
 
 Prefer standard `Duration`/quantity types where available.
 
-## 2. Audit integer width and sign
+#### Audit integer width and sign
+
 
 Choose types based on valid domain range, not habit.
 
@@ -50,7 +72,8 @@ Be careful with:
 - database width
 - FFI width
 
-## 3. Define overflow behavior
+#### Define overflow behavior
+
 
 For arithmetic that can exceed range, choose deliberately:
 
@@ -62,7 +85,10 @@ For arithmetic that can exceed range, choose deliberately:
 
 Do not rely on debug-vs-release differences.
 
-## 4. Define rounding
+### 2. Define rounding and exact-versus-approximate representation
+
+#### Define rounding
+
 
 For division/conversion, specify:
 
@@ -80,29 +106,36 @@ Especially for:
 - rate limiting
 - allocation/sharding
 
-## 5. Avoid floating point where exact decimal semantics matter
+#### Avoid floating point where exact decimal semantics matter
+
 
 Money and exact decimal quantities may require integer minor units or decimal representations.
 
 Do not replace floating point categorically where approximate real-valued computation is appropriate.
 
-## 6. Avoid direct float equality when semantics are approximate
+#### Avoid direct float equality when semantics are approximate
+
 
 Use domain-appropriate tolerances or exact representations.
 
 Do not use arbitrary epsilon without understanding scale.
 
-## 7. Validate numeric input ranges
+### 3. Validate domain ranges and account for cumulative numerical error
+
+#### Validate numeric input ranges
+
 
 Parsing success does not mean domain validity.
 
 Reject negative counts, impossible percentages, zero denominators, and out-of-range values at boundaries.
 
-## 8. Watch cumulative error
+#### Watch cumulative error
+
 
 For repeated addition/integration/statistics, consider numerical stability when it materially affects results.
 
-## 9. Test boundaries
+### 4. Test numeric boundaries and thresholds
+
 
 Cover:
 
@@ -113,6 +146,13 @@ Cover:
 - overflow edges
 - rounding boundaries
 - negative values where relevant
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -125,6 +165,16 @@ Do not:
 - use arbitrary epsilon constants
 - use floating point for exact money without a deliberate model
 - hide rounding in integer division
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for numeric values and calculations involving units, widths/signs, overflow, rounding, money/decimals, floating point, ranges, and thresholds: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit units, integer widths/signs, overflow, rounding, exact/approximate representations, range validation, cumulative error, and boundary tests; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

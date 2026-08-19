@@ -1,10 +1,19 @@
 # Algorithmic Complexity and Data Structure Fit
 
-You are improving an existing codebase so algorithms and data structures match the actual operations, scale characteristics, and invariants of the workload.
+You are improving this codebase so algorithms and data structures match the actual operations, scale characteristics, and invariants of the workload.
 
-The goal is not clever algorithms. The goal is to eliminate accidental quadratic work, repeated scans, inappropriate collections, and complexity hidden behind convenient APIs.
+The goal is to eliminate accidental quadratic work, repeated scans, inappropriate collections, and complexity hidden behind convenient APIs.
 
-Preserve observable behavior unless explicitly changing semantics.
+Scope: important algorithms, collection choices, lookup patterns, sorting, traversal, indexing, and asymptotic behavior.
+
+Applicability: Apply this prompt only when input size or operation frequency makes accidental scans, sorting, recursion, or data-structure mismatch materially relevant. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -21,7 +30,19 @@ Before editing:
 - inspect benchmarks/profiles where available
 - run baseline correctness and performance checks
 
-## 1. State the operation profile
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Choose structures from the workload and remove accidental quadratic behavior
+
+#### State the operation profile
+
 
 For each important collection, identify dominant operations:
 
@@ -38,7 +59,8 @@ For each important collection, identify dominant operations:
 
 Choose the structure for those operations rather than habit.
 
-## 2. Find accidental quadratic behavior
+#### Find accidental quadratic behavior
+
 
 Look for patterns such as:
 
@@ -51,7 +73,10 @@ or repeated list membership inside loops.
 
 Replace with indexed/set/map structures when input size makes it material.
 
-## 3. Avoid repeated sorting
+### 2. Avoid repeated sorting and whole-collection work
+
+#### Avoid repeated sorting
+
 
 If data is sorted repeatedly with unchanged ordering semantics, consider:
 
@@ -62,25 +87,31 @@ If data is sorted repeatedly with unchanged ordering semantics, consider:
 
 Do not maintain sorted structures when writes dominate and ordering is rarely needed.
 
-## 4. Avoid repeated whole-collection passes
+#### Avoid repeated whole-collection passes
+
 
 Combine passes only when it improves cost without making logic opaque.
 
 Do not fuse unrelated loops into unreadable mega-loops solely to reduce iteration count.
 
-## 5. Cache derived indexes, not truth
+### 3. Use derived indexes, set semantics, and ordering deliberately
+
+#### Cache derived indexes, not truth
+
 
 When repeated queries justify an index, make its ownership and invalidation explicit.
 
 Do not introduce hidden duplicate sources of truth.
 
-## 6. Use sets for set semantics
+#### Use sets for set semantics
+
 
 If code conceptually performs membership/deduplication/intersection, use a set-like representation when appropriate.
 
 Do not preserve accidental duplicates merely because a vector/list was the original container.
 
-## 7. Make ordering requirements explicit
+#### Make ordering requirements explicit
+
 
 Distinguish:
 
@@ -91,7 +122,10 @@ Distinguish:
 
 Do not pay for ordering that no consumer requires.
 
-## 8. Bound recursion and traversal
+### 4. Bound traversal and justify asymptotic tradeoffs
+
+#### Bound recursion and traversal
+
 
 For graphs/trees/filesystems, consider:
 
@@ -101,15 +135,24 @@ For graphs/trees/filesystems, consider:
 - visited sets
 - adversarial input
 
-## 9. Be explicit about asymptotic tradeoffs
+#### Be explicit about asymptotic tradeoffs
+
 
 When choosing a non-obvious structure, document the operation pattern that justifies it.
 
 Do not explain standard obvious choices.
 
-## 10. Measure before large rewrites
+### 5. Measure before replacing clear algorithms
+
 
 If complexity only matters at large N, reproduce representative N before replacing clear code with sophisticated structures.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -122,6 +165,16 @@ Do not:
 - fuse loops until control flow becomes obscure
 - assume hash structures are always faster
 - optimize complexity while worsening determinism or memory dramatically without reason
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for important algorithms, collection choices, lookup patterns, sorting, traversal, indexing, and asymptotic behavior: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit operation profiles, nested/repeated scans, sorting, collection passes, derived indexes, ordering, recursion/cycles, and representative measurements; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

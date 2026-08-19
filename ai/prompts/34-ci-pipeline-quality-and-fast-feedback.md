@@ -1,10 +1,19 @@
 # CI Pipeline Quality and Fast Feedback
 
-You are improving an existing CI system so failures are fast, deterministic, attributable, and representative of real release quality.
+You are improving this codebase so failures are fast, deterministic, attributable, and representative of real release quality.
 
-The goal is not more CI jobs. The goal is a pipeline that gives developers and coding agents the earliest useful signal with minimal redundant work.
+The goal is a pipeline that gives developers and coding agents the earliest useful signal with minimal redundant work.
 
-Preserve required quality gates and release semantics.
+Scope: CI workflows/jobs/steps, matrices, caches, artifacts, permissions, flaky checks, critical path, release gates, and local reproducibility.
+
+Applicability: Apply this prompt only when the repository uses CI and its feedback latency, determinism, attribution, or release confidence can be materially improved. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -24,7 +33,19 @@ Before editing:
 - inspect historical durations/failure modes when available
 - run/validate workflow syntax
 
-## 1. Order checks by signal-per-time
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Order checks for fast signal and avoid redundant work
+
+#### Order checks by signal-per-time
+
 
 Run cheap high-signal failures early:
 
@@ -39,7 +60,8 @@ packaging/release
 
 Adapt to the repository; do not enforce this exact sequence mechanically.
 
-## 2. Avoid repeated work
+#### Avoid repeated work
+
 
 Reuse:
 
@@ -52,19 +74,26 @@ when safe.
 
 Do not cache nondeterministic or incorrectly keyed outputs.
 
-## 3. Make failures attributable
+### 2. Make failures attributable through cohesive jobs
+
+#### Make failures attributable
+
 
 A failing job should identify the contract that failed.
 
 Avoid giant jobs containing unrelated checks whose logs are difficult to navigate.
 
-## 4. Keep jobs cohesive
+#### Keep jobs cohesive
+
 
 Split by meaningful failure domain, not arbitrary file count.
 
 Avoid hundreds of tiny jobs whose scheduling overhead dominates.
 
-## 5. Make matrices intentional
+### 3. Keep matrices intentional and treat flakiness as correctness
+
+#### Make matrices intentional
+
 
 Test only supported:
 
@@ -75,19 +104,24 @@ Test only supported:
 
 Use representative coverage rather than combinatorial explosion unless compatibility requires it.
 
-## 6. Attack flakiness as a correctness bug
+#### Attack flakiness as a correctness bug
+
 
 Do not add retries around flaky tests as the primary fix.
 
 Identify nondeterminism, environment leakage, timing races, and shared-resource collisions.
 
-## 7. Keep CI close to local workflows
+### 4. Keep CI reproducible locally with correctly keyed caches
+
+#### Keep CI close to local workflows
+
 
 A developer should be able to reproduce important CI checks locally with canonical commands.
 
 Avoid CI-only magic.
 
-## 8. Use cache keys from real inputs
+#### Use cache keys from real inputs
+
 
 Cache keys should account for:
 
@@ -99,13 +133,17 @@ Cache keys should account for:
 
 Do not cache stale outputs under broad branch-only keys.
 
-## 9. Bound permissions
+### 5. Minimize permissions and make artifact flow explicit
+
+#### Bound permissions
+
 
 Jobs should receive only required credentials and repository permissions.
 
 Untrusted code paths should not inherit release secrets.
 
-## 10. Make artifacts explicit
+#### Make artifacts explicit
+
 
 When jobs pass artifacts, define:
 
@@ -115,13 +153,17 @@ When jobs pass artifacts, define:
 - provenance
 - integrity expectations
 
-## 11. Separate merge confidence from release assurance
+### 6. Separate merge/release assurance and observe pipeline health
+
+#### Separate merge confidence from release assurance
+
 
 Some expensive checks may run post-merge/nightly/release if they do not materially improve PR feedback.
 
 Do not defer essential correctness checks merely to make PR CI fast.
 
-## 12. Track pipeline health
+#### Track pipeline health
+
 
 Where useful, observe:
 
@@ -130,6 +172,7 @@ Where useful, observe:
 - flake rate
 - cache hit rate
 - failure frequency by job
+
 
 ## Explicit anti-patterns
 
@@ -143,6 +186,16 @@ Do not:
 - expose broad secrets/permissions
 - split into tiny jobs solely for visual parallelism
 - optimize duration by removing meaningful quality gates
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for CI workflows/jobs/steps, matrices, caches, artifacts, permissions, flaky checks, critical path, release gates, and local reproducibility: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit signal ordering, duplicate work, job cohesion, matrices, flakiness, local parity, cache keys, permissions, artifact flow, and pipeline health; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

@@ -1,10 +1,19 @@
 # Enforce Architectural Dependency Direction
 
-You are improving an existing codebase so dependencies flow in deliberate directions instead of forming cycles, layer leaks, and arbitrary cross-module reach.
+You are improving this codebase so dependencies flow in deliberate directions instead of forming cycles, layer leaks, and arbitrary cross-module reach.
 
-The goal is not textbook layering. The goal is to make ownership and dependency direction obvious enough that local changes stay local.
+The goal is to make ownership and dependency direction obvious enough that local changes stay local.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: module/package/crate dependency relationships, cycles, shared modules, reach-through imports, and policy/mechanism layering.
+
+Applicability: Apply this prompt only when the repository has multiple architectural units whose dependency direction or ownership can drift. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -20,7 +29,19 @@ Before editing:
 - inspect feature flags and build dependencies that create hidden directionality
 - run narrow baseline checks
 
-## 1. Define the actual architectural units
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Define architectural units and allowed dependency directions
+
+#### Define the actual architectural units
+
 
 Identify coherent units such as:
 
@@ -37,7 +58,8 @@ or whatever matches the repository.
 
 Do not impose a generic architecture template when the codebase has simpler natural boundaries.
 
-## 2. State allowed dependency directions
+#### State allowed dependency directions
+
 
 For example:
 
@@ -51,7 +73,10 @@ The exact graph should follow project needs.
 
 A reader should be able to explain why each dependency direction exists.
 
-## 3. Break cycles at ownership boundaries
+### 2. Break cycles without letting mechanism own policy
+
+#### Break cycles at ownership boundaries
+
 
 When two modules depend on each other, determine which concept owns the shared contract.
 
@@ -64,7 +89,8 @@ Possible fixes:
 
 Do not create an "interfaces" package as a dumping ground merely to break cycles.
 
-## 4. Keep policy above mechanism
+#### Keep policy above mechanism
+
 
 Low-level mechanism code should not import high-level workflow policy.
 
@@ -74,11 +100,15 @@ Examples:
 - database layer should not know CLI argument semantics
 - serializer should not decide retry policy
 
-## 5. Prevent lateral reach-through
+### 3. Prevent reach-through and shared-module gravity wells
+
+#### Prevent lateral reach-through
+
 
 If module A owns concept X, other modules should use A's intentional API rather than reaching into A's internal submodules or representation.
 
-## 6. Treat shared modules skeptically
+#### Treat shared modules skeptically
+
 
 A module depended on by nearly everything can become an architectural gravity well.
 
@@ -86,23 +116,31 @@ Split shared code by actual ownership where possible.
 
 Keep truly cross-cutting primitives small.
 
-## 7. Avoid dependency inversion theater
+### 4. Keep inversion and types with their semantic owners
+
+#### Avoid dependency inversion theater
+
 
 Do not add traits/interfaces just to satisfy a diagram.
 
 Invert a dependency when it protects a real stable boundary or testable effect.
 
-## 8. Keep data types with their semantic owner
+#### Keep data types with their semantic owner
+
 
 Do not place all DTOs/models/types into one global package if that obscures who owns their meaning.
 
-## 9. Make architecture visible in the tree
+### 5. Make dependency direction visible and enforceable
+
+#### Make architecture visible in the tree
+
 
 File/module layout should reinforce dependency direction.
 
 Important domain boundaries should be apparent from names and paths.
 
-## 10. Enforce important direction mechanically
+#### Enforce important direction mechanically
+
 
 Where the ecosystem supports it, use:
 
@@ -113,6 +151,13 @@ Where the ecosystem supports it, use:
 - architectural tests
 
 Do not add heavy tooling if ordinary package boundaries already enforce the rule.
+
+### Migration and compatibility policy
+
+Do not create parallel legacy and canonical implementations as part of this work.
+If a rename, move, replacement, or contract change becomes necessary, inventory all
+references first, keep one canonical path, and retain compatibility only when the
+invoking request or an existing external contract requires it.
 
 ## Explicit anti-patterns
 
@@ -126,6 +171,7 @@ Do not:
 - permit arbitrary reach-through into internal modules
 - centralize all types away from their semantic owners
 
+
 ## Verification
 
 After editing:
@@ -135,6 +181,9 @@ After editing:
 - verify removed cycles stay removed
 - verify domain/application code is not importing mechanism-specific implementation details
 - run focused and broader tests
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

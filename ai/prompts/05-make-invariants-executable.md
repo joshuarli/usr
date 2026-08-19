@@ -1,10 +1,19 @@
 # Make Invariants Executable
 
-You are improving an existing codebase so important assumptions are enforced by types, constructors, assertions, validation, database constraints, protocol checks, or tests rather than existing only in comments and caller discipline.
+You are improving this codebase so important assumptions are enforced by types, constructors, assertions, validation, database constraints, protocol checks, or tests rather than existing only in comments and caller discipline.
 
 The goal is to identify statements of the form "this must always be true" and give each one a machine-enforced home.
 
-Preserve runtime behavior and public contracts unless this request explicitly changes them.
+Scope: repository invariants currently enforced by comments, repeated guards, caller discipline, weak validation, or tests alone.
+
+Applicability: Apply this prompt only when important assumptions exist that can be violated without a machine-enforced rejection. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
 
@@ -19,7 +28,19 @@ Before editing:
 - identify bugs that are only prevented by call ordering or convention
 - run narrow baseline checks
 
-## 1. Inventory invariants explicitly
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Inventory invariants and choose the strongest practical enforcement
+
+#### Inventory invariants explicitly
+
 
 Create a working inventory of important invariants such as:
 
@@ -39,7 +60,8 @@ For each invariant, identify:
 - whether it can be violated by user input, external state, or programmer error
 - the narrowest enforcement point
 
-## 2. Choose the strongest practical enforcement mechanism
+#### Choose the strongest practical enforcement mechanism
+
 
 Prefer, roughly in this order when appropriate:
 
@@ -52,7 +74,10 @@ Prefer, roughly in this order when appropriate:
 
 Do not force an invariant into the type system if doing so makes the code substantially harder to understand.
 
-## 3. Distinguish user errors from programmer errors
+### 2. Distinguish invalid external input from programmer-impossible states
+
+#### Distinguish user errors from programmer errors
+
 
 User-controlled or environmental invalid input must return explicit errors.
 
@@ -64,7 +89,8 @@ Do not:
 - silently recover from an internal invariant violation that indicates corruption
 - turn programmer bugs into vague runtime errors merely to avoid assertions
 
-## 4. Validate once at the ownership boundary
+#### Validate once at the ownership boundary
+
 
 If a constructor or parser establishes an invariant, downstream code should rely on the resulting type.
 
@@ -72,7 +98,10 @@ Avoid repeated defensive checks scattered throughout consumers.
 
 If repeated checks remain necessary, reconsider whether the invariant truly belongs to the type.
 
-## 5. Use database constraints for persisted invariants
+### 3. Protect persisted and internal structural invariants
+
+#### Use database constraints for persisted invariants
+
 
 If an invariant must hold regardless of which code path writes data, application validation alone may be insufficient.
 
@@ -89,7 +118,8 @@ Application code should still provide useful errors where needed, but the persis
 
 Do not add schema constraints without considering existing data and migration behavior.
 
-## 6. Assert internal structural assumptions
+#### Assert internal structural assumptions
+
 
 Assertions are appropriate for assumptions that indicate a bug if violated and cannot reasonably be caused by ordinary external input.
 
@@ -97,7 +127,10 @@ Make the assertion message identify the violated invariant.
 
 Avoid assertions that merely duplicate type guarantees.
 
-## 7. Add property tests where the invariant spans many cases
+### 4. Use generative and regression tests where enforcement needs behavioral evidence
+
+#### Add property tests where the invariant spans many cases
+
 
 Use property-based or generative testing when it materially improves coverage for things such as:
 
@@ -111,7 +144,8 @@ Use property-based or generative testing when it materially improves coverage fo
 
 Do not add a property-test dependency when a small deterministic table covers the meaningful state space.
 
-## 8. Add regression tests before fixing behavioral bugs
+#### Add regression tests before fixing behavioral bugs
+
 
 When the cleanup exposes an actual bug:
 
@@ -121,7 +155,10 @@ When the cleanup exposes an actual bug:
 
 Do not silently change behavior under the guise of architectural cleanup.
 
-## 9. Keep rationale next to enforcement
+### 5. Keep rationale local and remove redundant defensive checks
+
+#### Keep rationale next to enforcement
+
 
 A non-obvious invariant should be documented near the mechanism that enforces it.
 
@@ -136,11 +173,13 @@ Explain **why** the invariant exists, especially when it comes from:
 
 Do not leave the only explanation in a distant architecture document.
 
-## 10. Remove redundant defensive code after enforcement
+#### Remove redundant defensive code after enforcement
+
 
 Once an invariant is structurally guaranteed, simplify consumers that still defensively re-check it.
 
 Do not retain stale comments warning about impossible states that can no longer occur.
+
 
 ## Explicit anti-patterns
 
@@ -156,6 +195,7 @@ Do not:
 - weaken or remove constraints to make tests pass
 - change public behavior without documenting the intentional change
 
+
 ## Verification
 
 After editing:
@@ -167,6 +207,9 @@ After editing:
 - test persistence constraints
 - run property/regression tests where introduced
 - run focused compiler/type-checker and broader checks as needed
+
+
+- Distinguish failures that predate the work from regressions introduced by this change.
 
 ## Acceptance criteria
 

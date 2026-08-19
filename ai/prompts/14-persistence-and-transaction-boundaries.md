@@ -1,12 +1,23 @@
 # Persistence and Transaction Boundary Audit
 
-You are improving an existing codebase so durable state has clear ownership, transactional semantics, schema invariants, and failure behavior.
+You are improving this codebase so durable state has clear ownership, transactional semantics, schema invariants, and failure behavior.
 
 The goal is to prevent partial updates, inconsistent read-modify-write sequences, hidden N+1 behavior, and persistence logic leaking across the codebase.
 
-Preserve data compatibility unless explicitly permitted otherwise.
+Scope: database/durable-file access, transactions, constraints, migrations, read-modify-write paths, query shape, and cache interaction.
+
+Applicability: Apply this prompt only when the codebase has durable state whose atomicity, consistency, concurrency, or query behavior needs an explicit contract. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
+
+Before editing:
 
 Inventory:
 
@@ -23,13 +34,26 @@ Inventory:
 - serialization to durable files
 - cache/persistence interactions
 
-## 1. Define transaction boundaries by invariant
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Align transactions and persistence boundaries with durable invariants
+
+#### Define transaction boundaries by invariant
+
 
 A transaction should correspond to a set of changes that must succeed or fail together.
 
 Do not wrap arbitrary layers in transactions merely because they touch the database.
 
-## 2. Keep persistence mechanics at a boundary
+#### Keep persistence mechanics at a boundary
+
 
 Domain logic may decide what should change.
 
@@ -37,11 +61,15 @@ Persistence code should translate that decision into durable operations.
 
 Avoid SQL/ORM calls scattered through unrelated business logic.
 
-## 3. Protect durable invariants in the datastore
+### 2. Protect durable truth against invalid and concurrent writes
+
+#### Protect durable invariants in the datastore
+
 
 Use appropriate constraints for facts that must remain true regardless of application code path.
 
-## 4. Avoid read-modify-write races
+#### Avoid read-modify-write races
+
 
 Where concurrent writers matter, use:
 
@@ -52,7 +80,10 @@ Where concurrent writers matter, use:
 
 rather than hoping a prior read remains current.
 
-## 5. Make consistency assumptions explicit
+### 3. State consistency and query-shape expectations explicitly
+
+#### Make consistency assumptions explicit
+
 
 Document whether reads require:
 
@@ -61,7 +92,8 @@ Document whether reads require:
 - eventual consistency
 - stale-cache tolerance
 
-## 6. Audit query shape
+#### Audit query shape
+
 
 Look for:
 
@@ -73,7 +105,10 @@ Look for:
 
 Measure before broad optimization.
 
-## 7. Keep migrations coherent
+### 4. Keep schema evolution, durable formats, and caches coherent
+
+#### Keep migrations coherent
+
 
 Migrations should:
 
@@ -82,7 +117,8 @@ Migrations should:
 - preserve compatibility policy
 - avoid relying on application code that may not run atomically with deployment
 
-## 8. Make serialization/versioning explicit
+#### Make serialization/versioning explicit
+
 
 For durable files/blobs:
 
@@ -91,11 +127,13 @@ For durable files/blobs:
 - validate before mutation
 - write atomically where required
 
-## 9. Keep cache authority subordinate
+#### Keep cache authority subordinate
+
 
 Caches should never silently override durable truth.
 
 Define invalidation and stale-read behavior.
+
 
 ## Explicit anti-patterns
 
@@ -108,6 +146,16 @@ Do not:
 - hide N+1 behavior behind abstractions
 - let cache state become authoritative accidentally
 - mutate durable files non-atomically when corruption matters
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for database/durable-file access, transactions, constraints, migrations, read-modify-write paths, query shape, and cache interaction: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit transaction boundaries, durable constraints, races, consistency assumptions, N+1/round trips, migrations, formats, and cache authority; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 

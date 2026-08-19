@@ -1,12 +1,23 @@
 # Parse, Validate, and Normalize at Boundaries
 
-You are improving an existing codebase so untrusted or loosely structured input is converted into trusted internal representations exactly once, near the boundary where it enters the system.
+You are improving this codebase so untrusted or loosely structured input is converted into trusted internal representations exactly once, near the boundary where it enters the system.
 
 The goal is to stop raw strings, wire values, optional blobs, and partially parsed input from leaking deep into business logic.
 
-Preserve external formats and compatibility unless explicitly changing them.
+Scope: CLI, environment, config, wire, database, filesystem, subprocess, IPC, and other untrusted input boundaries.
+
+Applicability: Apply this prompt only when raw or loosely structured input reaches internal logic before parsing, validation, defaulting, or normalization is complete. If the condition is materially absent, report that evidence and make no speculative changes.
+
+Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+
+Intentional changes: Only changes explicitly authorized by the invoking request; otherwise none.
+
+If inspection shows that the relevant contract already holds, do not manufacture
+changes. Verify it, correct only concrete gaps, and report the evidence.
 
 ## First inspect the repository
+
+Before editing:
 
 Inventory inputs from:
 
@@ -23,7 +34,19 @@ Inventory inputs from:
 
 Trace where parsing, validation, defaulting, normalization, and error reporting occur.
 
-## 1. Separate raw and trusted forms
+- Record failures that predate the work.
+
+## Non-negotiable design
+
+Each numbered requirement defines an invariant or observable behavior, its
+authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
+and the evidence that proves it. Do not prescribe incidental implementation
+structure unless that structure is itself part of the contract.
+
+### 1. Separate raw boundary values from trusted internal representations
+
+#### Separate raw and trusted forms
+
 
 Prefer a pipeline such as:
 
@@ -37,7 +60,8 @@ raw input
 
 Downstream logic should not repeatedly ask whether raw input is valid.
 
-## 2. Preserve raw boundary semantics
+#### Preserve raw boundary semantics
+
 
 Paths and process arguments may not be UTF-8.
 
@@ -45,7 +69,10 @@ Wire values may distinguish absent from null.
 
 Do not lossy-convert merely for convenience.
 
-## 3. Normalize once
+### 2. Normalize once and validate cross-field invariants together
+
+#### Normalize once
+
 
 Examples:
 
@@ -57,21 +84,29 @@ Examples:
 
 Do not normalize inconsistently at multiple call sites.
 
-## 4. Validate cross-field invariants together
+#### Validate cross-field invariants together
+
 
 If validity depends on multiple fields, validate them in one authoritative place.
 
-## 5. Keep defaults at the boundary
+### 3. Resolve defaults while preserving opaque compatibility values
+
+#### Keep defaults at the boundary
+
 
 Do not let downstream code independently reinterpret missing values.
 
 Resolve defaults once into the trusted representation.
 
-## 6. Preserve unknown/opaque values intentionally
+#### Preserve unknown/opaque values intentionally
+
 
 When forward compatibility requires unknown fields or tokens to survive round trips, model that explicitly rather than rejecting or stringifying indiscriminately.
 
-## 7. Keep error location useful
+### 4. Report precise boundary errors without over-normalizing meaningful representation
+
+#### Keep error location useful
+
 
 Boundary validation errors should identify:
 
@@ -81,7 +116,8 @@ Boundary validation errors should identify:
 
 without dumping sensitive values unnecessarily.
 
-## 8. Avoid over-normalization
+#### Avoid over-normalization
+
 
 Do not canonicalize values when representation itself is meaningful.
 
@@ -91,6 +127,7 @@ Examples may include:
 - opaque tokens
 - exact filenames
 - cryptographic material
+
 
 ## Explicit anti-patterns
 
@@ -103,6 +140,16 @@ Do not:
 - conflate absent, null, empty, and default unless the contract says so
 - discard unknown values needed for compatibility
 - validate only individual fields when the invariant is cross-field
+
+
+## Verification
+
+After editing:
+
+- Run the nearest hard judge for CLI, environment, config, wire, database, filesystem, subprocess, IPC, and other untrusted input boundaries: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
+- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
+- Audit raw/trusted representations, normalization rules, defaults, opaque values, UTF-8 assumptions, and cross-field validation; classify every remaining exception rather than assuming it is harmless.
+- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
 
 ## Acceptance criteria
 
