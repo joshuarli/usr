@@ -1,5 +1,3 @@
-NOTE: skills don't work if they're symlinks they need to be copied over
-
 ---
 name: orchestrate
 description: Coordinate multiple agents on large-scope tasks. Use whenever the work is substantial; trivial tasks do not require this skill.
@@ -11,5 +9,5 @@ Remain available to the user while delegating substantive work. Run narrow, read
 
 Delegate very clear, bounded work to Luna high with fork turns: none.
 
-NEVER use Terra or Sol agents.
+NEVER use Terra or Sol agents unless explicitly instructed to do so by the user.
 

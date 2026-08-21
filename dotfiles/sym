@@ -2,7 +2,7 @@
 # sym - batch symlinker for dotfiles
 
 die()   { printf '%s\n' "$*" >&2; exit 1; }
-usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] [--exclude PATTERN]... SOURCE\n' >&2; exit 1; }
+usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] [--exclude PATTERN] [--copy PATTERN]... SOURCE\n' >&2; exit 1; }
 log()   { if "$verbose"; then printf '%s\n' "$1"; fi; }
 
 # relpath DEST BASE
@@ -18,8 +18,21 @@ relpath() {
     [ -n "$_r" ] && printf '%s%s' "$_up" "$_r" || printf '%s' "${_up%/}"
 }
 
+# match_paths < PATTERNS [PATH]...
+# Succeed if any PATH matches one of the newline-separated glob patterns on stdin.
+match_paths() {
+    while IFS= read -r _pat; do
+        [ -z "$_pat" ] && continue
+        for _p do
+            # shellcheck disable=SC2254
+            case $_p in $_pat) return 0 ;; esac
+        done
+    done
+    return 1
+}
+
 # Defaults
-target="$HOME"; delete=false; dry_run=false; verbose=false; excludes=''
+target="$HOME"; delete=false; dry_run=false; verbose=false; excludes=''; copies=''
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -29,6 +42,9 @@ while [ $# -gt 0 ]; do
         -v|--verbose) verbose=true ;;
         --exclude)    [ $# -ge 2 ] || usage; shift
                       excludes="${excludes:+${excludes}
+}$1" ;;
+        --copy)       [ $# -ge 2 ] || usage; shift
+                      copies="${copies:+${copies}
 }$1" ;;
         --) shift; break ;;
         -*) usage ;;
@@ -53,10 +69,20 @@ tmp="${TMPDIR:-/tmp}/sym.$$"
 mkdir "$tmp" || die 'failed to create temp directory'
 trap 'rm -rf "$tmp"' 0 1 2 3 15
 
+# TEMPORARY EXCEPTIONS: destination paths that are always copied into place
+# instead of symlinked, because agent skills are not followed through symlinks.
+# Remove entries here when they no longer need to be managed as copies.
+copies="${copies:+$copies
+}*/.agents/skills/*"
+
 # Enumerate files using Git's ignore rules when src is inside a Git worktree.
 # Exclude .sym-dir marker files themselves (their parent dirs are handled in pass 1b).
 : > "$tmp/files"
 : > "$tmp/symlink-dirs"
+: > "$tmp/names"
+: > "$tmp/dests"
+: > "$tmp/copy-names"
+: > "$tmp/copy-srcs"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$src" ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
     while IFS= read -r rel; do
@@ -87,16 +113,9 @@ fi
 # Pass 1: compute jobs and detect conflicts
 while IFS= read -r fp; do
     # Filter excluded paths
-    if [ -n "$excludes" ]; then
-        _skip=false
-        while IFS= read -r pat; do
-            [ -z "$pat" ] && continue
-            # shellcheck disable=SC2254
-            case $fp in $pat) _skip=true; break ;; esac
-        done << PATS
-$excludes
-PATS
-        if $_skip; then log "IGNORE: $fp"; continue; fi
+    if [ -n "$excludes" ] && printf '%s\n' "$excludes" | match_paths "$fp"; then
+        log "IGNORE: $fp"
+        continue
     fi
 
     # Skip files inside whole-symlink directories
@@ -115,6 +134,13 @@ PATS
     name_abs="$tgt_abs/$rel"
     dir_abs="${name_abs%/*}"
 
+    # Copy exception: matching paths are copied instead of symlinked, so the
+    # usual "existing file" conflicts do not apply.
+    is_copy=false
+    if [ -n "$copies" ] && printf '%s\n' "$copies" | match_paths "$fp_abs" "$name_abs"; then
+        is_copy=true
+    fi
+
     if [ -L "$fp" ]; then
         dest_abs="$(readlink "$fp")"
         case "$dest_abs" in
@@ -126,16 +152,36 @@ PATS
     fi
 
     if $delete; then
-        { [ -e "$name" ] || [ -L "$name" ]; } || continue
-        if [ ! -L "$name" ]; then
-            printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
-            continue
-        fi
-        if ! [ "$name" -ef "$fp_abs" ]; then
-            printf 'CONFLICT: %s does not point to the expected destination, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+        if $is_copy; then
+            { [ -e "$name" ] || [ -L "$name" ]; } || continue
+            if [ -L "$name" ] || [ ! -f "$name" ] || ! cmp -s "$name" "$fp_abs"; then
+                printf 'CONFLICT: %s is not an identical copy of %s, so refusing to remove.\n' "$name" "$fp_abs" >> "$tmp/conflicts"
+                continue
+            fi
+        elif { [ -e "$name" ] || [ -L "$name" ]; }; then
+            if [ ! -L "$name" ]; then
+                printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+                continue
+            fi
+            if ! [ "$name" -ef "$fp_abs" ]; then
+                printf 'CONFLICT: %s does not point to the expected destination, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
+                continue
+            fi
+        else
             continue
         fi
     else
+        if $is_copy; then
+            if [ -d "$name" ] && [ ! -L "$name" ]; then
+                printf 'CONFLICT: %s is a directory, so refusing to replace it with a copy.\n' "$name" >> "$tmp/conflicts"
+                continue
+            fi
+            # Already an identical copy; idempotent no-op.
+            [ -f "$name" ] && [ ! -L "$name" ] && cmp -s "$name" "$fp_abs" && continue
+            printf '%s\n' "$name" >> "$tmp/copy-names"
+            printf '%s\n' "$fp_abs" >> "$tmp/copy-srcs"
+            continue
+        fi
         if [ -L "$name" ]; then
             [ "$name" -ef "$fp_abs" ] && continue  # already correct, idempotent
             printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
@@ -169,15 +215,16 @@ while IFS= read -r sd; do
     name_abs="$tgt_abs/$rel"
 
     # Filter excluded paths
-    if [ -n "$excludes" ]; then
-        _skip=false
-        while IFS= read -r pat; do
-            [ -z "$pat" ] && continue
-            case $sd in $pat) _skip=true; break ;; esac
-        done <<- PATS
-$excludes
-		PATS
-        if $_skip; then log "IGNORE: $sd"; continue; fi
+    if [ -n "$excludes" ] && printf '%s\n' "$excludes" | match_paths "$sd"; then
+        log "IGNORE: $sd"
+        continue
+    fi
+
+    # --copy applies to individual files only, not whole-directory symlinks.
+    rel="${sd#"$src/"}"
+    if [ -n "$copies" ] && printf '%s\n' "$copies" | match_paths "$src_abs/$rel" "$tgt_abs/$rel"; then
+        printf 'CONFLICT: %s is a whole-directory symlink; --copy supports individual files only.\n' "$tgt/$rel" >> "$tmp/conflicts"
+        continue
     fi
 
     if $delete; then
@@ -214,7 +261,7 @@ fi
 
 $dry_run && printf 'dry-run; the following operations are what would have been executed.\n'
 
-[ -s "$tmp/names" ] || exit 0
+[ -s "$tmp/names" ] || [ -s "$tmp/copy-names" ] || exit 0
 
 # Pass 2: execute
 if $delete; then
@@ -241,4 +288,19 @@ else
         log "LINK: $name -> $dest"
         $dry_run || ln -s "$dest" "$name"
     done < "$tmp/jobs"
+fi
+
+# Copy jobs: overwrite the destination with the source contents.
+if [ -s "$tmp/copy-names" ]; then
+    paste "$tmp/copy-names" "$tmp/copy-srcs" > "$tmp/copy-jobs"
+    while IFS="$(printf '\t')" read -r name src; do
+        dir="${name%/*}"
+        if [ ! -d "$dir" ]; then
+            log "MKDIRS: $dir"
+            $dry_run || mkdir -p "$dir"
+        fi
+        log "COPY: $name <- $src"
+        # rm first so an existing symlink is replaced, not written through.
+        $dry_run || { rm -f "$name"; cp "$src" "$name"; }
+    done < "$tmp/copy-jobs"
 fi
