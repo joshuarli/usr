@@ -1,12 +1,28 @@
-xshi
-xsht
-xsh
+fd
+rg
+fastermod
+tm
+ish
+e
+fs
+srv
+tea
 
-claude-work
-codex-work
-opencode*
-pi-bun*
-pi-deno*
+cargo
+wild
+
+# https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault
+vault
+
+# https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm
+gh
+
+git*
+!git-bench
+!git-tune
+
+# wip
+diff-pretty
 
 # https://github.com/aspect-build/zstd-prebuilt/releases
 zstd_*
@@ -14,28 +30,15 @@ zstd_*
 # https://ffmpeg.martin-riedl.de/
 ffmpeg
 
-soulseek
-
-smtp-server
-
-# TODO: download prebuilts for these
-fd
-rg
-fastermod
-ish
-e
-srv
-vault
-diff-pretty
-gh
-syncthing
-bun
-deno
-git*
-!git-bench
-!git-tune
-wild*
-
 gc-e
 gp-e
+smtp-server
+
+xshi
+xsht
+xsh
+
+claude-work
+codex-work
+opencode-*
 

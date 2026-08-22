@@ -83,29 +83,4 @@ if [ "$OS" = Darwin ]; then
         "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm"
 fi
 
-if [ "$TARGET" = "aarch64-apple-darwin" ]; then
-    for app in tty.app play; do
-        case "$app" in
-            tty.app) repo="tty.app"; zip="tty.app.zip"; appdir="tty.app" ;;
-            play)    repo="play";    zip="Play.app.zip"; appdir="Play.app" ;;
-        esac
-        tag=$(curl -fsSL "https://api.github.com/repos/joshuarli/${repo}/releases/latest" \
-            | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') || true
-        if [ -z "$tag" ]; then
-            printf '%s\n' "Skipping ${app}: no release found"
-            continue
-        fi
-        url="https://github.com/joshuarli/${repo}/releases/download/${tag}/${zip}"
-        printf '%s\n' "Downloading ${zip} (${tag}) ..."
-        tmpdir=$(mktemp -d)
-        curl -fsSL -o "${tmpdir}/${zip}" "${url}"
-        unzip -qo "${tmpdir}/${zip}" -d "${tmpdir}"
-        xattr -rd com.apple.quarantine "${tmpdir}/${appdir}" 2>/dev/null || true
-        rm -rf "/Applications/${appdir}"
-        mv "${tmpdir}/${appdir}" /Applications/
-        rm -rf "$tmpdir"
-        printf '%s\n' "Installed ${appdir} to /Applications"
-    done
-fi
-
 printf '%s\n' "Done."
