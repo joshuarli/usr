@@ -11,11 +11,10 @@ esac
 DEST="${HOME}/usr/bin"
 mkdir -p "$DEST"
 
-for prog in fd rg fastermod tm ish e fs srv cargo wild; do
+for prog in fd rg fastermod tm ish e fs srv cargo wild tea; do
     case "$prog" in
-        fd|rg|fastermod|fs|cargo|wild) owner="laputa-systems" ;;
+        fd|rg|fastermod|tm|fs|cargo|wild|tea) owner="laputa-systems" ;;
         ish|e|srv) owner="joshuarli" ;;
-        tm) owner="laputa-systems" ;;
     esac
     # The release workflows publish prereleases, which GitHub's /latest endpoint
     # intentionally excludes. The releases collection is newest-first, so its
