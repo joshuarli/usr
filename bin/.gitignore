@@ -34,6 +34,8 @@ deno
 git*
 !git-bench
 !git-tune
+wild*
 
 gc-e
 gp-e
+
