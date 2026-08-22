@@ -9,24 +9,80 @@ case "$OS" in
     *)      printf '%s\n' "Unsupported OS: ${OS}" >&2; exit 1 ;;
 esac
 DEST="${HOME}/usr/bin"
+mkdir -p "$DEST"
 
-for prog in tm ish e denv lz srv smtp-server; do
-    tag=$(curl -fsSL "https://api.github.com/repos/joshuarli/${prog}/releases/latest" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p') || true
+for prog in fd rg fastermod tm ish e fs srv cargo wild; do
+    case "$prog" in
+        fd|rg|fastermod|fs|cargo|wild) owner="laputa-systems" ;;
+        ish|e|srv) owner="joshuarli" ;;
+        tm) owner="laputa-systems" ;;
+    esac
+    # The release workflows publish prereleases, which GitHub's /latest endpoint
+    # intentionally excludes. The releases collection is newest-first, so its
+    # first tag is the artifact set produced by the most recent dispatch.
+    tag=$(curl -fsSL "https://api.github.com/repos/${owner}/${prog}/releases?per_page=1" \
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || true
     if [ -z "$tag" ]; then
         printf '%s\n' "Skipping ${prog}: no release found"
         continue
     fi
-    version=$(printf '%s' "$tag" | sed 's|^release/||')
-    asset="${prog}-${version}-${TARGET}"
-    url="https://github.com/joshuarli/${prog}/releases/download/${tag}/${asset}"
-    printf '%s\n' "Downloading ${asset} ..."
-    curl -fsSL -o "${DEST}/${prog}" "${url}"
-    xattr -d com.apple.quarantine "${DEST}/${prog}" 2>/dev/null || true
+    case "${OS}:${prog}" in
+        Linux:e|Linux:ish) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
+        *) artifact_target="${ARCH}-apple-darwin" ;;
+    esac
+    asset="${prog}-${artifact_target}"
+    zip="${asset}.zip"
+    url="https://github.com/${owner}/${prog}/releases/download/${tag}/${zip}"
+    printf '%s\n' "Downloading ${zip} ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        printf '%s\n' "Skipping ${prog}: ${zip} is not available in ${tag}" >&2
+        continue
+    fi
+    tmpbin=$(mktemp "${DEST}/.${prog}.XXXXXX")
+    if ! unzip -p "$tmpzip" "$asset" > "$tmpbin"; then
+        rm -f "$tmpzip"
+        rm -f "$tmpbin"
+        printf '%s\n' "Skipping ${prog}: ${zip} does not contain ${asset}" >&2
+        continue
+    fi
+    rm -f "$tmpzip"
+    mv "$tmpbin" "${DEST}/${prog}"
+    if [ "$OS" = Darwin ]; then
+        xattr -d com.apple.quarantine "${DEST}/${prog}" 2>/dev/null || true
+    fi
     chmod +x "${DEST}/${prog}"
-    codesign -fs - "${DEST}/${prog}"
+    if [ "$OS" = Darwin ]; then
+        codesign -fs - "${DEST}/${prog}"
+    fi
     printf '%s\n' "Installed ${DEST}/${prog}"
 done
+
+install_direct_macos_binary() {
+    name="$1"
+    url="$2"
+    printf '%s\n' "Downloading ${name} ..."
+    tmpbin=$(mktemp "${DEST}/.${name}.XXXXXX")
+    if ! curl -fsSL -o "$tmpbin" "$url"; then
+        rm -f "$tmpbin"
+        printf '%s\n' "Failed to download ${name}" >&2
+        return 1
+    fi
+    mv "$tmpbin" "${DEST}/${name}"
+    xattr -d com.apple.quarantine "${DEST}/${name}" 2>/dev/null || true
+    chmod +x "${DEST}/${name}"
+    codesign -fs - "${DEST}/${name}"
+    printf '%s\n' "Installed ${DEST}/${name}"
+}
+
+if [ "$OS" = Darwin ]; then
+    install_direct_macos_binary vault \
+        "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault"
+    install_direct_macos_binary gh \
+        "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm"
+fi
 
 if [ "$TARGET" = "aarch64-apple-darwin" ]; then
     for app in tty.app play; do
