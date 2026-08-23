@@ -17,6 +17,8 @@ vault
 # https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm
 gh
 
+pinact
+
 git*
 !git-bench
 !git-tune
