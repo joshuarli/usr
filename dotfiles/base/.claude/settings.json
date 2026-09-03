@@ -9,7 +9,7 @@
     "defaultMode": "bypassPermissions",
     "skipDangerousModePermissionPrompt": true
   },
-  "model": "sonnet[1m]",
+  "model": "opus",
   "hooks": {
     "Notification": [
       {
@@ -30,13 +30,24 @@
     "type": "command",
     "command": "jaq -r '(.model.display_name // \"Unknown\") as $m | (.effort.level // \"n/a\") as $e | (.context_window.used_percentage // 0) as $pct | \"\\($m) \\($e) \\($pct)% ctx\"'"
   },
+  "enabledPlugins": {
+    "slack@claude-plugins-official": true
+  },
   "effortLevel": "high",
+  "modelSettings": {
+    "claude-sonnet-5": {
+      "effortLevel": "xhigh"
+    },
+    "claude-opus-5": {
+      "effortLevel": "xhigh"
+    }
+  },
   "emojiCompletionEnabled": false,
   "awaySummaryEnabled": false,
   "tui": "fullscreen",
   "autoMemoryEnabled": false,
+  "skipDangerousModePermissionPrompt": true,
   "theme": "dark-ansi",
   "autoCompactEnabled": true,
-  "disableDeepLinkRegistration": "disable",
-  "skipDangerousModePermissionPrompt": true
+  "disableDeepLinkRegistration": "disable"
 }

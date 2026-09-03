@@ -1,8 +1,11 @@
-model = "gpt-5.6-terra"
+#:schema https://developers.openai.com/codex/config-schema.json
+
+model = "gpt-6-astra"
 personality = "pragmatic"
 model_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "max"
+
 model_verbosity = "low"
-plan_mode_reasoning_effort = "xhigh"
 hide_agent_reasoning = true
 
 approval_policy = "never"
@@ -10,14 +13,20 @@ sandbox_mode = "danger-full-access"
 service_tier = "default"
 
 [features]
-multi_agent = false
 goals = true
 apps = false
 plugins = false
+remote_plugin = false
 
-[features.multi_agent_v2]
+# Experimental, useful for long-running local tasks.
+prevent_idle_sleep = true
+
+[features.context_management]
+experimental_mode = true
+
+[agents]
 enabled = true
-max_concurrent_threads_per_session = 16
+max_concurrent_threads_per_session = 8
 
 [analytics]
 enabled = false
@@ -25,14 +34,13 @@ enabled = false
 [feedback]
 enabled = false
 
+# Optional “full-send” experiment. This is unrelated to Astra's async
+# function calling and may change between releases.
+#
+# [features.code_mode]
+# enabled = true
+
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
 status_line_use_colors = true
-
-[tui.model_availability_nux]
-"gpt-5.6-sol" = 4
-
-[notice]
-fast_default_opt_out = true
-hide_rate_limit_model_nudge = true
 
