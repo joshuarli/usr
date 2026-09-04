@@ -5,62 +5,44 @@ description: Route substantial, routine, mechanical, exploratory, or context-hea
 
 # Orchestrate
 
-Remain available to the user. Let Astra plan, coordinate, and integrate while applying this routing policy to every subagent spawn.
+Balance total cost and progress, including delegation overhead, retries, and integration. Keep the parent available to the user and apply this policy to every subagent spawn.
 
 ## Cost routing
 
-Always specify `model`, `reasoning_effort`, and `fork_turns` explicitly. Never let a child implicitly inherit the Astra parent.
+Use only the following models. Sol (`gpt-5.6-sol`) and GPT-5.5 (`gpt-5.5`) are banned, including as fallbacks.
 
-### Scout
+| Work | Model | Reasoning effort |
+| --- | --- | --- |
+| Read-only scouts: repository mapping, searches, inventories, documentation lookup, log triage, and fact gathering | `gpt-5.6-luna` | `low` |
+| Trivial implementation, mechanical edits, straightforward documentation updates, and small bounded tasks with clear acceptance criteria | `gpt-5.6-luna` | `medium` |
+| Normal implementation, debugging, tests, and review | `gpt-5.6-terra` | `xhigh` by default; `max` for more demanding work |
+| Complex design, cross-cutting contracts, difficult reasoning, or problems beyond the normal implementation lane | `gpt-6-astra` | `medium` by default; `high` for the hardest work |
 
-- `model: "gpt-5.6-luna"`
-- `reasoning_effort: "low"`
-- `fork_turns: "none"`
-- Read-only.
-- Use for repository mapping, searches, inventories, documentation lookup, log and test-output triage, and independent fact gathering.
+Terra and Astra subagents are authorized under this policy; no additional model-specific permission is needed. Model authorization does not expand the task's scope or action permissions.
 
-### Routine worker
+Route by reasoning difficulty and risk, not file count alone. A small unsafe or semantic change may need Terra or Astra. Keep ordinary read-only scouting on Luna; delegate difficult interpretation of its findings separately when needed.
 
-- `model: "gpt-5.6-luna"`
-- `reasoning_effort: "medium"`
-- `fork_turns: "none"` or the smallest positive turn count necessary.
-- Use for mechanical edits, repetitive tests, straightforward migrations, formatting, linting, documentation cleanup, and other narrowly bounded grunt work.
+Always specify `model`, `reasoning_effort`, and `fork_turns` explicitly. Prefer `fork_turns: "none"` with a self-contained brief, or the smallest positive turn count needed. Do not use a full-history fork that implicitly inherits the parent's model and effort.
 
-### Implementer
-
-- `model: "gpt-5.6-terra"`
-- `reasoning_effort: "xhigh"`
-- Use the minimum context necessary.
-- Use for bounded implementation where requirements, design, and ownership are clear.
-
-### Critical implementer or reviewer
-
-- `model: "gpt-5.6-terra"`
-- `reasoning_effort: "max"`
-- Use the minimum context necessary.
-- Reserve for difficult or high-risk implementation, independent verification, or escalation after a cheaper lane fails because of reasoning difficulty.
-
-Never use a Sol model. Never use Astra as a subagent unless the user explicitly requests it.
+If a selected model is unavailable, use another allowed model appropriate to the task and budget, or report the limitation. Never substitute a banned model.
 
 ## Delegation policy
 
-Delegate routine, mechanical, exploratory, or context-heavy work to Luna whenever it has a clear scope and stopping condition.
+Delegate work when it is economical to specify and verify and can run independently alongside useful parent work. Choose the lane above; do not funnel all implementation through Luna merely because it is cheaper per call.
 
 Do not spawn a child for a one-command or one-edit task when describing and integrating the delegation would cost more than performing it directly.
 
-Tightly sequential work may still be delegated. Assign the complete sequence to one child rather than splitting dependent steps across parallel agents.
-
-Batch related trivial operations into one bounded Luna assignment.
+Assign coherent component-sized tasks, including their dependent steps and focused validation, to one child. Batch related trivial operations into one Luna assignment instead of spawning a child per edit. Avoid fragmented handoffs and repeated status or validation rituals.
 
 Use parallel agents only for genuinely independent branches. Use the smallest useful fan-out; the configured concurrency limit is a ceiling, not a target.
 
 Give every child:
 
-- Distinct ownership.
-- A concrete deliverable.
-- A stopping condition.
-- Instructions not to delegate further.
+- Distinct ownership and any read-only or file-write boundary.
+- A concrete deliverable and the minimum relevant context and constraints.
+- Proportionate acceptance checks and a stopping condition.
+- Instructions not to delegate further unless the parent explicitly assigns a nested delegation budget and scope.
 
-Prefer parallel read-only investigation. Avoid overlapping file writes. Keep integration, cross-cutting decisions, and final verification in the Astra parent.
+Parallelize independent investigation and implementation. Avoid overlapping file writes. Keep integration, cross-cutting decisions, and final verification under parent ownership, using delegated analysis or checks where useful.
 
-If a cheaper agent is blocked by reasoning difficulty, retry once in the next capability lane. Do not escalate merely because a command or test failed; first return the failure evidence to the parent.
+Escalate when evidence shows reasoning difficulty: Luna to Terra, or Terra to Astra, carrying forward findings and failed approaches. Start complex work on Astra when warranted; do not pay for predictable failures in cheaper lanes first. A failed command, missing dependency, or unavailable environment is not by itself a reason to escalate models.

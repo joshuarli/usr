@@ -1,8 +1,8 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-model = "gpt-5.6-terra"
+model = "gpt-6-astra"
 personality = "pragmatic"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 plan_mode_reasoning_effort = "max"
 
 model_verbosity = "low"
@@ -51,4 +51,7 @@ enabled = false
 [tui]
 status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
 status_line_use_colors = true
+
+[projects."/home/josh/d/crabc"]
+trust_level = "trusted"
 
