@@ -1,0 +1,93 @@
+#!/bin/sh
+
+set -eu
+
+tailnet_domain=${TAILSCALE_DOMAIN:-tailcf741.ts.net}
+test_host=${TAILSCALE_HOST:-box}
+tailscale_dns_ip=${TAILSCALE_DNS_IP:-100.100.100.100}
+resolver_file="/etc/resolver/$tailnet_domain"
+
+case "$tailnet_domain" in
+	''|*[!A-Za-z0-9.-]*)
+		echo "fix-tailscale-magicdns: invalid tailnet domain: $tailnet_domain" >&2
+		exit 1
+		;;
+esac
+
+if [ -n "${TAILSCALE_CLI:-}" ]; then
+	tailscale_command=$TAILSCALE_CLI
+elif command -v tailscale >/dev/null 2>&1; then
+	tailscale_command=$(command -v tailscale)
+elif [ -x /Applications/Tailscale.app/Contents/MacOS/tailscale ]; then
+	tailscale_command=/Applications/Tailscale.app/Contents/MacOS/tailscale
+elif [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
+	tailscale_command=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+else
+	echo "fix-tailscale-magicdns: Tailscale CLI was not found" >&2
+	exit 1
+fi
+
+if ! "$tailscale_command" dns query "$test_host.$tailnet_domain" >/dev/null 2>&1; then
+	echo "fix-tailscale-magicdns: Tailscale cannot resolve $test_host.$tailnet_domain" >&2
+	echo "Check that Tailscale is connected and MagicDNS is enabled." >&2
+	exit 1
+fi
+
+"$tailscale_command" set --accept-dns=true
+
+if [ "$(id -u)" -eq 0 ]; then
+	run_as_root() {
+		"$@"
+	}
+elif command -v doas >/dev/null 2>&1; then
+	run_as_root() {
+		doas "$@"
+	}
+elif command -v sudo >/dev/null 2>&1; then
+	run_as_root() {
+		sudo "$@"
+	}
+else
+	echo "fix-tailscale-magicdns: need doas or sudo to update $resolver_file" >&2
+	exit 1
+fi
+
+resolver_changed=false
+if [ -f "$resolver_file" ]; then
+	if grep -Eq "^[[:space:]]*nameserver[[:space:]]+$tailscale_dns_ip([[:space:]]|$)" "$resolver_file"; then
+		echo "fix-tailscale-magicdns: resolver already points to $tailscale_dns_ip"
+	elif grep -Fq '# Managed by fix-tailscale-magicdns' "$resolver_file"; then
+		resolver_changed=true
+	else
+		echo "fix-tailscale-magicdns: refusing to overwrite existing $resolver_file" >&2
+		echo "Add nameserver $tailscale_dns_ip there manually, or remove the conflicting file." >&2
+		exit 1
+	fi
+else
+	resolver_changed=true
+fi
+
+if [ "$resolver_changed" = true ]; then
+	temporary_file=$(mktemp "${TMPDIR:-/tmp}/fix-tailscale-magicdns.XXXXXX")
+	trap 'rm -f "$temporary_file"' EXIT HUP INT TERM
+	{
+		printf '%s\n' '# Managed by fix-tailscale-magicdns'
+		printf 'nameserver %s\n' "$tailscale_dns_ip"
+	} >"$temporary_file"
+	run_as_root /bin/mkdir -p /etc/resolver
+	run_as_root /usr/bin/install -m 644 "$temporary_file" "$resolver_file"
+	echo "fix-tailscale-magicdns: installed $resolver_file"
+fi
+
+/usr/bin/dscacheutil -flushcache
+run_as_root /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true
+
+fqdn="$test_host.$tailnet_domain"
+if /usr/bin/dscacheutil -q host -a name "$fqdn" | grep -q '^ip_address:' &&
+   /usr/bin/dscacheutil -q host -a name "$test_host" | grep -q '^ip_address:'; then
+	echo "fix-tailscale-magicdns: $test_host and $fqdn now resolve"
+else
+	echo "fix-tailscale-magicdns: resolver configured; $test_host may need a new shell or DNS retry" >&2
+	echo "Try: dscacheutil -q host -a name $fqdn" >&2
+	exit 1
+fi

@@ -1,0 +1,119 @@
+#!/bin/sh
+
+set -eu
+
+stream_root=${STREAM_URL:-http://box:8080}
+stream_ssh_target=${STREAM_SSH_TARGET:-box}
+
+if [ -n "${MPV:-}" ]; then
+	mpv_command=$MPV
+elif [ -x /Applications/mpv.app/Contents/MacOS/mpv ]; then
+	mpv_command=/Applications/mpv.app/Contents/MacOS/mpv
+elif command -v mpv >/dev/null 2>&1; then
+	mpv_command=$(command -v mpv)
+else
+	echo "stream: mpv was not found" >&2
+	exit 1
+fi
+
+listing_file=$(mktemp "${TMPDIR:-/tmp}/stream-listing.XXXXXX")
+links_file=$(mktemp "${TMPDIR:-/tmp}/stream-links.XXXXXX")
+trap 'rm -f "$listing_file" "$links_file"' EXIT HUP INT TERM
+
+listing_url=${stream_root%/}/
+if ! curl -sS --max-time 3 -- "$listing_url" >/dev/null 2>&1; then
+	echo "stream: starting media server"
+	if ! ssh -q -tt "$stream_ssh_target" 'doas tailscale serve --bg --http=8080 /home/josh/Movies/Library >/dev/null 2>&1'; then
+		echo "stream: could not start remote Tailscale Serve" >&2
+		exit 1
+	fi
+
+	attempt=1
+	while [ "$attempt" -le 15 ]; do
+		if curl -sS --max-time 3 -- "$listing_url" >/dev/null 2>&1; then
+			break
+		fi
+		sleep 1
+		attempt=$((attempt + 1))
+	done
+	if [ "$attempt" -gt 15 ]; then
+		echo "stream: remote Serve did not become reachable at $listing_url" >&2
+		exit 1
+	fi
+fi
+
+if ! curl -fsSL -- "$listing_url" >"$listing_file"; then
+	echo "stream: could not fetch $listing_url" >&2
+	exit 1
+fi
+
+awk '
+{
+	line = $0
+	while (match(line, /href="[^"]+"/)) {
+		link = substr(line, RSTART + 6, RLENGTH - 7)
+		print link
+		line = substr(line, RSTART + RLENGTH)
+	}
+}' "$listing_file" |
+awk 'tolower($0) !~ /(^|\/)\._/ && tolower($0) ~ /\.(avi|m2ts|m4v|mkv|mov|mp4|ts|webm|wmv)(\?.*)?$/ { print }' >"$links_file"
+
+if [ ! -s "$links_file" ]; then
+	echo "stream: no movie files found at $listing_url" >&2
+	exit 1
+fi
+
+display_name() {
+	printf '%s\n' "$1" |
+		sed \
+			-e 's#^/##' \
+			-e 's/%20/ /g' \
+			-e 's/%28/(/g' \
+			-e 's/%29/)/g' \
+			-e 's/%5B/[/g' \
+			-e 's/%5D/]/g'
+}
+
+if command -v fzf >/dev/null 2>&1; then
+	choices_file=$(mktemp "${TMPDIR:-/tmp}/stream-choices.XXXXXX")
+	trap 'rm -f "$listing_file" "$links_file" "$choices_file"' EXIT HUP INT TERM
+	number=1
+	while IFS= read -r link; do
+		printf '%s\t%s\n' "$number" "$(display_name "$link")" >>"$choices_file"
+		number=$((number + 1))
+	done <"$links_file"
+
+	if ! selected_line=$(fzf --height=80% --layout=reverse --delimiter='\t' --with-nth=2.. <"$choices_file"); then
+		exit 0
+	fi
+	selected_number=$(printf '%s\n' "$selected_line" | awk -F '\t' '{ print $1 }')
+	selected_link=$(sed -n "${selected_number}p" "$links_file")
+else
+	number=1
+	while IFS= read -r link; do
+		printf '%s) %s\n' "$number" "$(display_name "$link")"
+		number=$((number + 1))
+	done <"$links_file"
+
+	printf 'Select a movie [1-%s]: ' $((number - 1)) >&2
+	IFS= read -r selected_number
+	case "$selected_number" in
+		''|*[!0-9]*)
+			echo "stream: invalid selection" >&2
+			exit 1
+			;;
+	esac
+	selected_link=$(sed -n "${selected_number}p" "$links_file")
+	if [ -z "$selected_link" ]; then
+		echo "stream: selection out of range" >&2
+		exit 1
+	fi
+fi
+
+case "$selected_link" in
+	http://*|https://*) movie_url=$selected_link ;;
+	/*) movie_url=${stream_root%/}$selected_link ;;
+	*) movie_url=${stream_root%/}/$selected_link ;;
+esac
+
+exec "$mpv_command" "$movie_url"
