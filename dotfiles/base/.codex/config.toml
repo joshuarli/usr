@@ -1,6 +1,6 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-model = "gpt-6-astra"
+model = "gpt-5.6-terra"
 personality = "pragmatic"
 model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "max"
@@ -21,8 +21,8 @@ remote_plugin = false
 # Experimental, useful for long-running local tasks.
 prevent_idle_sleep = true
 
-[features.context_management]
-experimental_mode = true
+# [features.context_management]
+# experimental_mode = true
 
 [agents]
 enabled = true
