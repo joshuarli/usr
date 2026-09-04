@@ -47,6 +47,3 @@ tests, and docs.
 - Do not run pre-commit hooks; the user verifies commits independently.
 - Never push to a remote unless explicitly told to.
 
-## Subagents
-
-If you are Codex: when spawning subagents, NEVER use Terra or Sol agents, unless explicitly instructed to do so by the user.
