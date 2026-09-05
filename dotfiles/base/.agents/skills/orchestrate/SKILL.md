@@ -14,9 +14,9 @@ Use only the following models. Sol (`gpt-5.6-sol`) and GPT-5.5 (`gpt-5.5`) are b
 | Work | Model | Reasoning effort |
 | --- | --- | --- |
 | Read-only scouts: repository mapping, searches, inventories, documentation lookup, log triage, and fact gathering | `gpt-5.6-luna` | `low` |
-| Trivial implementation, mechanical edits, straightforward documentation updates, and small bounded tasks with clear acceptance criteria | `gpt-5.6-luna` | `medium` |
+| Trivial implementation, mechanical edits, straightforward documentation updates, and small bounded tasks with clear acceptance criteria | `gpt-5.6-luna` | `xhigh` |
 | Normal implementation, debugging, tests, and review | `gpt-5.6-terra` | `xhigh` by default; `max` for more demanding work |
-| Complex design, cross-cutting contracts, difficult reasoning, or problems beyond the normal implementation lane | `gpt-6-astra` | `medium` by default; `high` for the hardest work |
+| Complex design, cross-cutting contracts, difficult reasoning, or problems beyond the normal implementation lane | `gpt-6-astra` | `low` by default; `medium` for the hardest work |
 
 Terra and Astra subagents are authorized under this policy; no additional model-specific permission is needed. Model authorization does not expand the task's scope or action permissions.
 
