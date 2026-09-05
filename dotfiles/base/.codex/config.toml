@@ -21,8 +21,8 @@ remote_plugin = false
 # Experimental, useful for long-running local tasks.
 prevent_idle_sleep = true
 
-# [features.context_management]
-# experimental_mode = true
+[features.context_management]
+experimental_mode = true
 
 [agents]
 enabled = true
