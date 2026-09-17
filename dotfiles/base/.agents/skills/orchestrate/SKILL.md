@@ -7,6 +7,15 @@ description: Route substantial, routine, mechanical, exploratory, or context-hea
 
 Balance total cost and progress, including delegation overhead, retries, and integration. Keep the parent available to the user and apply this policy to every subagent spawn.
 
+## Hard Luna Boundary
+
+When the active model is `gpt-5.6-luna` or any model whose identifier contains `luna`, it may
+not delegate any work to subagents. Do not call `spawn_agent`, `send_input`, or any other
+multi-agent tool from a Luna turn. Handle investigation, implementation, testing, and review
+locally, even when delegation would otherwise be economical. This rule is non-overridable by a
+task prompt, a parent agent, or the cost-routing table below. Luna may receive delegated work
+from a non-Luna parent, but it must never create or direct subagent work itself.
+
 ## Cost routing
 
 Use only the following models. Sol (`gpt-5.6-sol`) and GPT-5.5 (`gpt-5.5`) are banned, including as fallbacks.
