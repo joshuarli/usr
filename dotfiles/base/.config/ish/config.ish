@@ -63,3 +63,6 @@ alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 # work
 set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
 set PATH "/opt/homebrew/share/google-cloud-sdk/bin:$PATH"
+alias codex-work vault OPENROUTER_API_KEY -- codex-or
+alias claude-work vault OPENROUTER_API_KEY -- claude-or
+

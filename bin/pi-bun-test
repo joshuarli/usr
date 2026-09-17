@@ -1,0 +1,7 @@
+#!/bin/sh
+# Self-contained pi: no --api-key needed.
+# Isolate ALL of pi's user config into a fresh temp dir.
+# pi's getAgentDir() honors PI_CODING_AGENT_DIR (defaults to ~/.pi/agent).
+# With no stored credential, resolveProviderAuth falls through to the env key.
+export PI_CODING_AGENT_DIR="$(mktemp -d)"
+exec pi --offline --no-tools --no-extensions --no-skills --no-themes --no-session --no-context-files --approve --thinking low --provider openrouter --model 'poolside/laguna-xs-2.1:free' -p "just say hi"
