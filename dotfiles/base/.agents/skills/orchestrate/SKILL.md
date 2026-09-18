@@ -7,14 +7,13 @@ description: Route substantial, routine, mechanical, exploratory, or context-hea
 
 Balance total cost and progress, including delegation overhead, retries, and integration. Keep the parent available to the user and apply this policy to every subagent spawn.
 
-## Hard Luna Boundary
+## Parent Intelligence Boundary
 
-When the active model is `gpt-5.6-luna` or any model whose identifier contains `luna`, it may
-not delegate any work to subagents. Do not call `spawn_agent`, `send_input`, or any other
-multi-agent tool from a Luna turn. Handle investigation, implementation, testing, and review
-locally, even when delegation would otherwise be economical. This rule is non-overridable by a
-task prompt, a parent agent, or the cost-routing table below. Luna may receive delegated work
-from a non-Luna parent, but it must never create or direct subagent work itself.
+Parents must be the highest-intelligence agents in their descendant tree. The known ordering is
+Astra > Terra > Luna, so a parent may spawn only agents at its own level or lower. Never select a
+higher-intelligence model or alias as a child, including as an escalation or fallback. If either
+model's identity or ranking is unclear, do not delegate to it. This rule overrides the cost-routing
+table below.
 
 ## Cost routing
 
@@ -27,9 +26,12 @@ Use only the following models. Sol (`gpt-5.6-sol`) and GPT-5.5 (`gpt-5.5`) are b
 | Normal implementation, debugging, tests, and review | `gpt-5.6-terra` | `xhigh` by default; `max` for more demanding work |
 | Complex design, cross-cutting contracts, difficult reasoning, or problems beyond the normal implementation lane | `gpt-6-astra` | `low` by default; `medium` for the hardest work |
 
-Terra and Astra subagents are authorized under this policy; no additional model-specific permission is needed. Model authorization does not expand the task's scope or action permissions.
+The parent intelligence boundary applies to every selection. Model authorization does not expand
+the task's scope or action permissions.
 
-Route by reasoning difficulty and risk, not file count alone. A small unsafe or semantic change may need Terra or Astra. Keep ordinary read-only scouting on Luna; delegate difficult interpretation of its findings separately when needed.
+Route by reasoning difficulty and risk, not file count alone, while respecting the parent
+intelligence boundary. Keep ordinary read-only scouting on Luna; delegate difficult interpretation
+of its findings separately when needed.
 
 Always specify `model`, `reasoning_effort`, and `fork_turns` explicitly. Prefer `fork_turns: "none"` with a self-contained brief, or the smallest positive turn count needed. Do not use a full-history fork that implicitly inherits the parent's model and effort.
 
@@ -54,4 +56,6 @@ Give every child:
 
 Parallelize independent investigation and implementation. Avoid overlapping file writes. Keep integration, cross-cutting decisions, and final verification under parent ownership, using delegated analysis or checks where useful.
 
-Escalate when evidence shows reasoning difficulty: Luna to Terra, or Terra to Astra, carrying forward findings and failed approaches. Start complex work on Astra when warranted; do not pay for predictable failures in cheaper lanes first. A failed command, missing dependency, or unavailable environment is not by itself a reason to escalate models.
+Do not escalate a child above its parent. If a task needs higher capability than the parent can
+delegate, keep it local. Carry forward findings and failed approaches. A failed command, missing
+dependency, or unavailable environment is not by itself a reason to escalate models.

@@ -1,13 +1,15 @@
 #!/bin/sh
 
-# ANTHROPIC_AUTH_TOKEN
+export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
 
-export ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-export ANTHROPIC_MODEL=deepseek-v4-pro[1m]
-export ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]
-export ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
-export CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
-export CLAUDE_CODE_EFFORT_LEVEL=max
+export ANTHROPIC_MODEL="deepseek-flash[1m]"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="deepseek-flash[1m]"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="deepseek-flash[1m]"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="deepseek-flash"
 
-exec claude --dangerously-skip-permissions
+export CLAUDE_CODE_SUBAGENT_MODEL="deepseek-flash"
+export CLAUDE_CODE_EFFORT_LEVEL="max"
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW="786432"
+
+exec vault ANTHROPIC_AUTH_TOKEN -- claude --dangerously-skip-permissions
+
