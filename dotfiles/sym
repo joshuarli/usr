@@ -172,12 +172,8 @@ while IFS= read -r fp; do
         fi
     else
         if $is_copy; then
-            if [ -d "$name" ] && [ ! -L "$name" ]; then
-                printf 'CONFLICT: %s is a directory, so refusing to replace it with a copy.\n' "$name" >> "$tmp/conflicts"
-                continue
-            fi
-            # Already an identical copy; idempotent no-op.
-            [ -f "$name" ] && [ ! -L "$name" ] && cmp -s "$name" "$fp_abs" && continue
+            # Copy mode is forceful: the destination is replaced regardless of
+            # its current type or contents.
             printf '%s\n' "$name" >> "$tmp/copy-names"
             printf '%s\n' "$fp_abs" >> "$tmp/copy-srcs"
             continue
@@ -300,7 +296,8 @@ if [ -s "$tmp/copy-names" ]; then
             $dry_run || mkdir -p "$dir"
         fi
         log "COPY: $name <- $src"
-        # rm first so an existing symlink is replaced, not written through.
-        $dry_run || { rm -f "$name"; cp "$src" "$name"; }
+        # Remove first so an existing symlink or directory is replaced, not
+        # written through or treated as a copy destination.
+        $dry_run || { rm -rf "$name"; cp "$src" "$name"; }
     done < "$tmp/copy-jobs"
 fi

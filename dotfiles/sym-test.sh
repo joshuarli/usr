@@ -163,7 +163,7 @@ echo "  assertion 4: second run is a no-op"
 rm -r home; mkdir home
 
 
-printf '\n12: --copy overwrites an existing differing file, then is idempotent\n'
+printf '\n12: --copy overwrites an existing file, including an identical copy\n'
 mkdir -p dotfiles/copytest
 echo v1 > dotfiles/copytest/app.conf
 echo local-edit > home/app.conf
@@ -176,8 +176,8 @@ cmp -s home/app.conf dotfiles/copytest/app.conf || nfailed=$((nfailed + 1))
 echo "  assertion 3: result is a regular file, not a symlink"
 [ -f home/app.conf ] && [ ! -L home/app.conf ] || nfailed=$((nfailed + 1))
 $sym -t home -v --copy '*/app.conf' dotfiles/copytest > log 2>&1
-echo "  assertion 4: second run is a no-op (identical copy)"
-[ ! -s log ] || nfailed=$((nfailed + 1))
+expected="COPY: home/app.conf <- $src_abs"
+echo "  assertion 4: second run forcefully copies the identical file"; assert_output "$expected"
 
 
 printf '\n13: --copy in delete mode refuses non-identical files, removes identical ones\n'
@@ -194,6 +194,19 @@ expected="UNLINK: home/app.conf
 RMDIR: home"
 echo "  assertion 3: expected output for identical copy"; assert_output "$expected"
 [ ! -e home/app.conf ] || nfailed=$((nfailed + 1))
+rm dotfiles/copytest/app.conf
+
+
+printf '\n14: --copy replaces an existing directory\n'
+echo v1 > dotfiles/copytest/app.conf
+mkdir -p home/app.conf
+echo local-edit > home/app.conf/old
+src_abs="$(cd dotfiles/copytest && pwd)/app.conf"
+$sym -t home -v --copy '*/app.conf' dotfiles/copytest > log 2>&1
+expected="COPY: home/app.conf <- $src_abs"
+echo "  assertion 1: expected output"; assert_output "$expected"
+echo "  assertion 2: directory was replaced with the source copy"
+[ -f home/app.conf ] && [ ! -e home/app.conf/old ] && cmp -s home/app.conf dotfiles/copytest/app.conf || nfailed=$((nfailed + 1))
 rm dotfiles/copytest/app.conf
 
 

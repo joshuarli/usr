@@ -1,8 +1,8 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-model = "~openai/gpt-luna-latest"
+model = "gpt-5.6-luna"
 personality = "pragmatic"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 plan_mode_reasoning_effort = "max"
 
 model_verbosity = "low"
@@ -53,5 +53,17 @@ status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode
 status_line_use_colors = true
 
 [tui.model_availability_nux]
-gpt-6-astra = 1
+gpt-6-astra = 4
+
+[projects."/Users/josh/d/ferrisearch"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/extension-loupe"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/obsidian-webp-paste"]
+trust_level = "trusted"
+
+[projects."/Users/josh/usr"]
+trust_level = "trusted"
 
