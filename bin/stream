@@ -23,7 +23,7 @@ trap 'rm -f "$listing_file" "$links_file"' EXIT HUP INT TERM
 listing_url=${stream_root%/}/
 if ! curl -sS --max-time 3 -- "$listing_url" >/dev/null 2>&1; then
 	echo "stream: starting media server"
-	if ! ssh -q -tt "$stream_ssh_target" 'doas tailscale serve --bg --http=8080 /home/josh/Movies/Library >/dev/null 2>&1'; then
+	if ! ssh -q -tt "$stream_ssh_target" '/bin/sh -c "doas tailscale serve --bg --http=8080 /home/josh/Movies/Library >/dev/null 2>&1"'; then
 		echo "stream: could not start remote Tailscale Serve" >&2
 		exit 1
 	fi

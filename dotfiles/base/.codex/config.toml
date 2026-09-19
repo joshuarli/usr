@@ -55,9 +55,3 @@ status_line_use_colors = true
 [tui.model_availability_nux]
 gpt-6-astra = 1
 
-[projects."/Users/josh/d/memories"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr"]
-trust_level = "trusted"
-
