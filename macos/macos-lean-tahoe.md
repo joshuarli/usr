@@ -201,3 +201,48 @@ comm -23 /tmp/script-labels.txt /tmp/all-real-labels.txt
 
 Run `dash -n macos-lean-tahoe.sh` for syntax, and `--dry-run` to review the
 full list before applying.
+
+## macOS 27 (Golden Gate) readiness — macos-lean.sh
+
+`macos-lean.sh` is the canonical script; the versioned scripts are frozen.
+It was built while still on Tahoe (27 labels unverifiable without booting
+27), so it contains **no hardcoded 27-only labels**. Instead it is
+version-tolerant:
+
+- Every label is validated against a live index (cached per OS build in
+  `/tmp/macos-lean-index-<build>.txt`). Unknown labels print `STALE` and
+  are skipped in apply mode — never silent no-ops. Revert still attempts
+  them, to clear orphaned `disabled.plist` entries from older releases.
+- `--audit` runs the Steps 3–5 workflow built in: stale targets, stale
+  preserve checks, and candidate new services. No sudo, no changes.
+- Apply snapshots `print-disabled` state to `~/.local/state/macos-lean/`.
+- Fixed dead check: `com.apple.Passwords.MenuBarExtra` is a LoginItem, not
+  a launchd job — removed from preserve checks.
+- Added from Tahoe `--audit` findings: `InstallerDiagnostics.installerdiagd`
+  and `installerdiagwatcher` (installer telemetry, system daemons).
+
+### Trap 6: sort/comm locale must agree
+
+`comm` compares using the current locale, so files sorted under different
+collations produce false uniques. The first `--audit` mixed a `LC_ALL=C`
+sort with a locale-aware `comm` and reported dozens of bogus STALE/NEW
+lines. Rule: force one locale for the whole pipeline (`export LC_ALL=C`),
+or at minimum sort both inputs and run `comm` under the same one.
+
+### Tahoe audit dispositions (keep-list, do not disable)
+
+- `backgroundtaskmanagement.agent` / `backgroundtaskmanagementd` — Login
+  Items infrastructure and background-task consent; 27's Background App
+  Activity UI sits on top. Disabling breaks login items.
+- `sysdiagnose` / `sysdiagnose_agent` / `sysdiagnose_helper` — on-demand
+  manual diagnostic collection. Keep; you want it when things break.
+
+### After upgrading to 27
+
+1. `./macos-lean.sh --audit` — review STALE and NEW? lines.
+2. For each NEW? label, read the plist's `ProgramArguments` before touching
+   it (names lie — see Trap 4).
+3. `./macos-lean.sh --dry-run`, then apply, then reboot.
+4. Manual 27 items no script can cover: Settings > General > Login Items &
+   Extensions > Background App Activity; MDM restriction profiles for Siri /
+   Apple Intelligence policy (survive upgrades, unlike `disabled.plist`).

@@ -1,8 +1,23 @@
 #!/bin/dash
-# LEGACY — frozen reference. Use macos-lean.sh (validates labels, --audit).
 # ============================================================================
-# macos-lean-tahoe.sh — Make macOS 26 (Tahoe) lean
+# macos-lean.sh — Make macOS lean (26 Tahoe → 27 Golden Gate)
 # ============================================================================
+#
+# Canonical script. Supersedes macos-lean-sequoia.sh and macos-lean-tahoe.sh,
+# which are frozen references — do not extend them.
+#
+# Design: validate-then-act. Every launchd label is checked against a live
+# index of labels installed on THIS Mac (built at startup from the plist
+# files' Label keys, cached per OS build). Unknown labels are reported as
+# STALE and skipped, never silently no-op'd. Run --audit after any OS upgrade
+# to surface renamed/added services before applying.
+#
+# macOS 27 (Golden Gate) note: no 27-only labels are hardcoded here, because
+# the 27 label set cannot be verified without booting 27 (filename ≠ label,
+# see macos-lean-tahoe.md). On 27 this script applies the validated subset and
+# --audit surfaces candidates (Siri app, rebuilt Spotlight indexing, Background
+# App Activity). No documented pmset/mdutil/tmutil/defaults syntax changes in
+# 27 beta notes; tmutil disablelocal stays removed (dead since Tahoe).
 #
 # Disables ~170 unnecessary services via launchctl disable (persists across
 # reboots) and launchctl bootout (immediate effect). Organized by category.
@@ -14,7 +29,7 @@
 #   - Spotlight indexing (mdutil + all workers/scanners/knowledge agents)
 #   - Telemetry: analytics, diagnostics, biome, ad tracking, A/B trials,
 #     sysmond, tailspind, ecosystem analytics, USB-C telemetry,
-#     web privacy, OS analytics
+#     web privacy, OS analytics, installer diagnostics
 #   - Apple apps: Music, News, Weather, Sports, Shazam, Voice Memos,
 #     TV/video subscriptions, Game Center, Wallet/Pay, Reminders, Maps,
 #     Home/HomeKit, Tips, Stickers
@@ -70,15 +85,32 @@
 #   - AirPort base station support
 #   - Kandji MDM agent, CrowdStrike Falcon
 #
+# AUDITED AND DELIBERATELY KEPT (see --audit; do not "fix" by disabling):
+#   - BackgroundTaskManagement (agent + daemon): Login Items infrastructure
+#     and background-task consent prompts; 27's Background App Activity UI
+#     sits on top of it. Disabling breaks login items.
+#   - sysdiagnose agent/helper: on-demand manual diagnostic collection.
+#     Keep — you want this when something breaks (logging is already off).
+#
 # Usage:
-#   ./macos-lean-tahoe.sh              # Apply changes (requires sudo)
-#   ./macos-lean-tahoe.sh --dry-run    # Preview changes only
-#   ./macos-lean-tahoe.sh --revert     # Re-enable everything
+#   ./macos-lean.sh              # Apply changes (requires sudo)
+#   ./macos-lean.sh --dry-run    # Preview changes only (stale labels flagged)
+#   ./macos-lean.sh --audit      # Validate labels vs live OS, no sudo, no changes
+#   ./macos-lean.sh --revert     # Re-enable everything
+#
+# Always run --audit first after an OS upgrade, then --dry-run, then apply.
+# Apply snapshots pre-change state to ~/.local/state/macos-lean/.
 #
 # SIP note: bootout is blocked by SIP (error 150). This script uses
 #           launchctl disable (persists across reboots) + kill (immediate
 #           effect) instead. The disabled flag prevents MachService/XPC
 #           respawns even with SIP on.
+#
+# 27 note: disables live in /private/var/db/com.apple.xpc.launchd/disabled*.plist
+#          and may reset on major upgrades — re-run --audit + apply after
+#          upgrading. Policy items (Siri, Apple Intelligence, analytics) are
+#          better enforced via MDM restriction profiles, which survive upgrades;
+#          launchctl covers what profiles can't express.
 #
 # Nuclear revert:
 #   sudo rm /private/var/db/com.apple.xpc.launchd/disabled.501.plist
@@ -93,48 +125,168 @@ set -u
 
 DRY_RUN=false
 REVERT=false
+AUDIT=false
+
+print_usage() {
+  echo "Usage: $0 [--dry-run] [--audit] [--revert]"
+  echo "  (no flags)  apply changes (requires sudo)"
+  echo "  --dry-run   preview; stale labels flagged, no changes"
+  echo "  --audit     validate labels vs live OS; no sudo, no changes"
+  echo "  --revert    re-enable everything this script manages"
+}
 
 while [ $# -gt 0 ]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
+    --audit) AUDIT=true; shift ;;
     --revert)  REVERT=true; shift ;;
-    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
-    *) echo "Usage: $0 [--dry-run] [--revert]"; exit 1 ;;
+    -h|--help) print_usage; exit 0 ;;
+    *) print_usage; exit 1 ;;
   esac
 done
 
+if $AUDIT && { $DRY_RUN || $REVERT; }; then
+  echo "Error: --audit is mutually exclusive with --dry-run/--revert"
+  exit 1
+fi
+
 UID_NUM=$(id -u)
 MACOS_VERSION=$(sw_vers -productVersion 2>/dev/null || echo "unknown")
+# Fixed collation: sort/comm/grep must agree, otherwise comm reports false
+# uniques (this bit the first version of --audit).
+export LC_ALL=C
+OS_MAJOR=$(printf '%s' "$MACOS_VERSION" | cut -d. -f1)
+case "$OS_MAJOR" in
+  15) OS_NAME="Sequoia" ;;
+  26) OS_NAME="Tahoe" ;;
+  27) OS_NAME="Golden Gate" ;;
+  *) OS_NAME="unvalidated (lists verified on 15/26; 27 by --audit)" ;;
+esac
 
-if $REVERT; then
-  echo "macOS Lean — REVERT mode (Tahoe ${MACOS_VERSION})"
-elif $DRY_RUN; then
-  echo "macOS Lean — DRY RUN (Tahoe ${MACOS_VERSION}, no changes)"
+if $AUDIT; then
+  echo "macOS Lean — AUDIT (${OS_NAME} ${MACOS_VERSION}, no changes, no sudo)"
+elif $REVERT; then
+  echo "macOS Lean — REVERT mode (${OS_NAME} ${MACOS_VERSION})"
+elif $DRY_RUN || $AUDIT; then
+  echo "macOS Lean — DRY RUN (${OS_NAME} ${MACOS_VERSION}, no changes)"
 else
-  echo "macOS Lean — Tahoe ${MACOS_VERSION}"
+  echo "macOS Lean — ${OS_NAME} ${MACOS_VERSION}"
 fi
 echo "User UID: ${UID_NUM}"
 echo ""
 
-# --- Sudo keepalive (unless dry-run) ---
-if ! $DRY_RUN; then
+# --- Temp state (label index, audit records) ---
+_REAL_LABELS=$(mktemp /tmp/macos-lean-labels.XXXXXX)
+_AUDIT_TARGETS=$(mktemp /tmp/macos-lean-targets.XXXXXX)
+_AUDIT_PRESERVE=$(mktemp /tmp/macos-lean-preserve.XXXXXX)
+trap 'rm -f "$_REAL_LABELS" "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE"' EXIT
+
+N_APPLIED=0
+N_SKIPPED=0
+
+# --- Live label index (cached per OS build; plutil per-file is slow) ---
+BUILD_VER=$(sw_vers -buildVersion 2>/dev/null || echo "unknown")
+_INDEX_CACHE="/tmp/macos-lean-index-${BUILD_VER}.txt"
+build_label_index() {
+  if [ -f "$_INDEX_CACHE" ]; then
+    cp "$_INDEX_CACHE" "$_REAL_LABELS"
+    return
+  fi
+  for f in /System/Library/LaunchAgents/*.plist /System/Library/LaunchDaemons/*.plist \
+           /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist; do
+    [ -f "$f" ] || continue
+    plutil -extract Label raw "$f" 2>/dev/null
+  done | LC_ALL=C sort -u > "$_REAL_LABELS"
+  cp "$_REAL_LABELS" "$_INDEX_CACHE" 2>/dev/null || true
+}
+build_label_index
+
+is_known_label() { grep -Fxq "$1" "$_REAL_LABELS" 2>/dev/null; }
+
+# --- Pre-change snapshot (apply/revert only) ---
+snapshot_state() {
+  if $DRY_RUN || $AUDIT; then return; fi
+  SNAPDIR="${HOME}/.local/state/macos-lean"
+  mkdir -p "$SNAPDIR" 2>/dev/null || return
+  SNAP="${SNAPDIR}/snapshot-$(date +%Y%m%d-%H%M%S)"
+  {
+    echo "# macOS ${MACOS_VERSION} $(date)"
+    echo "## launchctl print-disabled gui/${UID_NUM}"
+    launchctl print-disabled "gui/${UID_NUM}" 2>/dev/null || true
+    echo "## sudo launchctl print-disabled system"
+    sudo launchctl print-disabled system 2>/dev/null || true
+  } > "$SNAP" 2>/dev/null
+  echo "Snapshot: ${SNAP}"
+  echo ""
+}
+
+# --- Audit report (macos-lean-tahoe.md workflow, built in) ---
+audit_report() {
+  LC_ALL=C sort -u "$_AUDIT_TARGETS" -o "$_AUDIT_TARGETS"
+  LC_ALL=C sort -u "$_AUDIT_PRESERVE" -o "$_AUDIT_PRESERVE"
+  _AUDIT_ALL=$(mktemp /tmp/macos-lean-all.XXXXXX)
+  cat "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE" | LC_ALL=C sort -u > "$_AUDIT_ALL"
+  echo ""
+  echo "=== Audit: stale disable targets (in script, NOT on this OS) ==="
+  comm -23 "$_AUDIT_TARGETS" "$_REAL_LABELS" | sed 's/^/  STALE  /'
+  echo ""
+  echo "=== Audit: stale preserve checks (in script, NOT on this OS) ==="
+  comm -23 "$_AUDIT_PRESERVE" "$_REAL_LABELS" | sed 's/^/  STALE  /'
+  echo ""
+  echo "=== Audit: candidate new services (on OS, not in script) ==="
+  comm -23 "$_REAL_LABELS" "$_AUDIT_ALL" \
+    | grep -i -E 'intellig|siri|analytic|telemetry|biome|trial|diagnos|genmoji|playground|writing.tool|backgroundtask|background.task' \
+    | sed 's/^/  NEW?   /'
+  echo ""
+  echo "Review NEW? lines before disabling: check the plist's ProgramArguments"
+  echo "— names lie (e.g. avconferenced.plist hosts videoconference.camera)."
+  rm -f "$_AUDIT_ALL"
+}
+
+# --- Sudo keepalive (apply/revert only) ---
+if ! $DRY_RUN && ! $AUDIT; then
   sudo -v || { echo "Error: sudo required"; exit 1; }
   while true; do sudo -n true; sleep 50; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_PID=$!
-  trap 'kill $SUDO_PID 2>/dev/null' EXIT
+  trap 'kill $SUDO_PID 2>/dev/null; rm -f "$_REAL_LABELS" "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE"' EXIT
 fi
 
 # --- Helpers ---
 
 disable_user() {
   label=$1
-  if $DRY_RUN; then
-    echo "  ${label}"
+  if $AUDIT; then
+    printf '%s\n' "$label" >> "$_AUDIT_TARGETS"
+    if is_known_label "$label"; then
+      echo "  ${label}"
+    else
+      echo "  STALE ${label}"
+    fi
+  elif $DRY_RUN || $AUDIT; then
+    if is_known_label "$label"; then
+      echo "  ${label}"
+    else
+      echo "  STALE ${label} (not on ${OS_NAME} ${MACOS_VERSION} — would skip)"
+    fi
   elif $REVERT; then
+    # Attempt even stale labels: clears orphaned disabled.plist entries
+    # left by older OS releases.
     launchctl enable "gui/${UID_NUM}/${label}" 2>/dev/null
     echo "  + ${label}"
+    N_APPLIED=$((N_APPLIED + 1))
   else
-    launchctl disable "gui/${UID_NUM}/${label}" 2>/dev/null
+    if ! is_known_label "$label"; then
+      echo "  STALE ${label} (skipped)"
+      N_SKIPPED=$((N_SKIPPED + 1))
+      return
+    fi
+    if launchctl disable "gui/${UID_NUM}/${label}" 2>/dev/null; then
+      N_APPLIED=$((N_APPLIED + 1))
+    else
+      echo "  FAIL ${label} (disable rejected)"
+      N_SKIPPED=$((N_SKIPPED + 1))
+      return
+    fi
     # bootout is blocked by SIP; kill the process directly instead.
     # The disabled flag prevents MachService/LaunchEvent respawns.
     pid=$(launchctl print "gui/${UID_NUM}/${label}" 2>/dev/null | sed -n 's/.*pid = \([0-9]*\).*/\1/p')
@@ -149,12 +301,28 @@ SYSTEM_LABELS=""
 
 disable_system() {
   label=$1
-  if $DRY_RUN; then
-    echo "  ${label}"
+  if $AUDIT; then
+    printf '%s\n' "$label" >> "$_AUDIT_TARGETS"
+    if is_known_label "$label"; then
+      echo "  ${label}"
+    else
+      echo "  STALE ${label}"
+    fi
+  elif $DRY_RUN || $AUDIT; then
+    if is_known_label "$label"; then
+      echo "  ${label}"
+    else
+      echo "  STALE ${label} (not on ${OS_NAME} ${MACOS_VERSION} — would skip)"
+    fi
   elif $REVERT; then
     SYSTEM_LABELS="${SYSTEM_LABELS} ${label}"
     echo "  + ${label}"
   else
+    if ! is_known_label "$label"; then
+      echo "  STALE ${label} (skipped)"
+      N_SKIPPED=$((N_SKIPPED + 1))
+      return
+    fi
     SYSTEM_LABELS="${SYSTEM_LABELS} ${label}"
     echo "  - ${label}"
   fi
@@ -162,14 +330,21 @@ disable_system() {
 
 # Called once after all disable_system calls to apply in a single sudo.
 flush_system() {
+  if $AUDIT; then SYSTEM_LABELS=""; return; fi
   [ -z "$SYSTEM_LABELS" ] && return
   if $REVERT; then
     for label in $SYSTEM_LABELS; do
       sudo launchctl enable "system/${label}" 2>/dev/null
+      N_APPLIED=$((N_APPLIED + 1))
     done
   else
     for label in $SYSTEM_LABELS; do
-      sudo launchctl disable "system/${label}" 2>/dev/null
+      if sudo launchctl disable "system/${label}" 2>/dev/null; then
+        N_APPLIED=$((N_APPLIED + 1))
+      else
+        echo "  FAIL ${label} (disable rejected)"
+        N_SKIPPED=$((N_SKIPPED + 1))
+      fi
     done
     # Kill any that are still running
     for label in $SYSTEM_LABELS; do
@@ -190,7 +365,16 @@ VERIFY_FAIL=0
 ensure_user() {
   label=$1
   desc=$2
-  if $DRY_RUN; then
+  if $AUDIT; then
+    printf '%s\n' "$label" >> "$_AUDIT_PRESERVE"
+    if is_known_label "$label"; then
+      echo "  --  ${desc} (${label})"
+    else
+      echo "  STALE  ${desc} (${label}) — preserve check can never pass"
+    fi
+    return
+  fi
+  if $DRY_RUN || $AUDIT; then
     echo "  --  ${desc} (${label})"
     return
   fi
@@ -209,7 +393,16 @@ ensure_user() {
 ensure_system() {
   label=$1
   desc=$2
-  if $DRY_RUN; then
+  if $AUDIT; then
+    printf '%s\n' "$label" >> "$_AUDIT_PRESERVE"
+    if is_known_label "$label"; then
+      echo "  --  ${desc} (${label})"
+    else
+      echo "  STALE  ${desc} (${label}) — preserve check can never pass"
+    fi
+    return
+  fi
+  if $DRY_RUN || $AUDIT; then
     echo "  --  ${desc} (${label})"
     return
   fi
@@ -227,6 +420,8 @@ ensure_system() {
 # ============================================================================
 # USER AGENTS
 # ============================================================================
+
+snapshot_state
 
 section "Siri & Assistant"
 for s in \
@@ -489,6 +684,8 @@ for s in \
   com.apple.ecosystemd \
   com.apple.osanalytics.osanalyticshelper \
   com.apple.usbctelemetryd \
+  com.apple.InstallerDiagnostics.installerdiagd \
+  com.apple.InstallerDiagnostics.installerdiagwatcher \
   com.apple.wifianalyticsd \
   com.apple.triald.system \
   com.apple.sysmond \
@@ -549,7 +746,7 @@ flush_system
 # ============================================================================
 
 section "Spotlight Indexing (mdutil)"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would run: sudo mdutil -a -i off"
   echo "  would run: sudo mdutil -aE"
 elif $REVERT; then
@@ -562,7 +759,7 @@ else
 fi
 
 section "Time Machine"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable Time Machine"
 elif $REVERT; then
   sudo tmutil enable 2>/dev/null || true
@@ -578,7 +775,7 @@ fi
 # ============================================================================
 
 section "System Preferences"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable Siri (assistant, menu bar, voice trigger)"
   echo "  would disable Spotlight suggestions"
 elif $REVERT; then
@@ -599,7 +796,7 @@ else
 fi
 
 section "App Store Preferences"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable App Store auto-check, auto-download, auto-update"
 elif $REVERT; then
   defaults delete com.apple.commerce AutoUpdate 2>/dev/null || true
@@ -618,7 +815,7 @@ else
 fi
 
 section "CrashReporter Preferences"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would suppress crash dialogs"
 elif $REVERT; then
   defaults delete com.apple.CrashReporter DialogType 2>/dev/null || true
@@ -630,7 +827,7 @@ else
 fi
 
 section "App Quit & Screensaver Preferences"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable window state save on quit"
   echo "  would disable screensaver (direct to display sleep)"
   echo "  would default new document save location to local (not iCloud)"
@@ -654,7 +851,7 @@ fi
 # ============================================================================
 
 section "Performance Defaults"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable window open/close animations"
   echo "  would set window resize time to 0.001s"
   echo "  would disable Dock launch bounce animation"
@@ -703,7 +900,7 @@ fi
 # ============================================================================
 
 section "Power Management (pmset — battery)"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable Power Nap on battery"
   echo "  would disable TCP keepalive during sleep"
   echo "  would disable proximity wake (iPhone/Watch)"
@@ -782,7 +979,7 @@ _ipv6_each() {
     esac
   done
 }
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable IPv6 on all non-VPN interfaces:"
   networksetup -listallnetworkservices 2>/dev/null | tail -n +2 | while IFS= read -r svc; do
     svc="${svc#\* }"
@@ -804,7 +1001,7 @@ fi
 # ============================================================================
 
 section "mDNS Multicast Advertisements"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would stop Mac advertising its own services via mDNS"
 elif $REVERT; then
   sudo defaults delete /Library/Preferences/com.apple.mDNSResponder.plist NoMulticastAdvertisements 2>/dev/null || true
@@ -819,7 +1016,7 @@ else
 fi
 
 section "Captive Network Detection"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable captive portal HTTP probing"
 elif $REVERT; then
   sudo defaults delete /Library/Preferences/SystemConfiguration/com.apple.captive.control Active 2>/dev/null || true
@@ -836,7 +1033,7 @@ fi
 # ============================================================================
 
 section "Unified Logging"
-if $DRY_RUN; then
+if $DRY_RUN || $AUDIT; then
   echo "  would disable unified log system (no Console.app data, no log show)"
 elif $REVERT; then
   sudo log config --mode "level:default"
@@ -878,7 +1075,9 @@ ensure_system com.apple.cloudd "iCloud system daemon"
 ensure_system com.apple.nsurlsessiond "Network transfers (system)"
 
 section "Verify: Apple Passwords"
-ensure_user com.apple.Passwords.MenuBarExtra "Passwords menu bar"
+# NOTE: no com.apple.Passwords.MenuBarExtra here — it is a LoginItem, not a
+# launchd job, so a launchctl preserve-check could never pass. Its companion
+# PasswordBreachAgent below IS a real agent and is verified instead.
 ensure_user com.apple.AuthenticationServicesCore.AuthenticationServicesAgent "Authentication services"
 ensure_user com.apple.LocalAuthentication.UIAgent "Local auth UI (Touch ID prompts)"
 ensure_user com.apple.swcd "Shared Web Credentials"
@@ -962,18 +1161,33 @@ ensure_user com.apple.naturallanguaged "Natural language processing"
 
 echo ""
 echo "============================================"
-if $DRY_RUN; then
+if $AUDIT; then
+  audit_report
+  echo "Audit complete. No changes made."
+  echo "Next: ./${0##*/} --dry-run, then apply."
+elif $DRY_RUN || $AUDIT; then
   echo "Dry run complete. No changes made."
+  echo "STALE lines above would be skipped on ${OS_NAME} ${MACOS_VERSION}."
   echo "Run without --dry-run to apply."
 elif $REVERT; then
-  echo "All services re-enabled. Reboot required."
+  echo "Re-enabled ${N_APPLIED} service(s). Reboot required."
 else
+  echo "Changed: ${N_APPLIED} disabled, ${N_SKIPPED} skipped (stale/rejected)."
   if [ "$VERIFY_FAIL" -gt 0 ]; then
     echo "WARNING: ${VERIFY_FAIL} preserved service(s) not loaded."
     echo "Review FAIL lines above. May need reboot or"
     echo "manual investigation."
   else
     echo "All preserved services verified OK."
+  fi
+  echo ""
+  if [ "$OS_MAJOR" -ge 27 ] 2>/dev/null; then
+    echo "27 reminders: check Settings > General > Login Items & Extensions >"
+    echo "Background App Activity (new per-app kill switch), and re-run --audit"
+    echo "after every OS update — disabled.plist may reset."
+  else
+    echo "After upgrading macOS: re-run --audit, then --dry-run, then apply."
+    echo "(Major upgrades may reset disabled.plist and rename labels.)"
   fi
   echo ""
   echo "Reboot to finalize."

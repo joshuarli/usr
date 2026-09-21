@@ -1,4 +1,5 @@
 #!/bin/dash
+# LEGACY — frozen reference. Use macos-lean.sh (validates labels, --audit).
 # ============================================================================
 # macos-lean-sequoia.sh — Make macOS 15.7 (Sequoia) lean
 # ============================================================================
