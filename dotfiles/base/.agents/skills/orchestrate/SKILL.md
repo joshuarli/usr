@@ -17,8 +17,8 @@ A child must be at or below its parent. If the parent is outside this ordering, 
 | --- | --- | --- |
 | Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna` | `low` |
 | Mechanical edits, small bounded implementations, straightforward documentation, crisp acceptance criteria | `gpt-6-luna` | `medium` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6-luna` | `high`; `xhigh` for elevated risk or ambiguity |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6-sol` | `xhigh` |
+| Normal implementation, debugging, tests, ordinary review | `gpt-6-luna` | `xhigh`; `max` for elevated risk or ambiguity |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6-sol` | `high` |
 | Frontier design or synthesis where Sol is insufficient; use sparingly | `gpt-6-astra` | `medium`; `high` when justified |
 
 Route by difficulty, uncertainty, and risk. Prefer raising effort before moving up a tier. If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent; a Sol parent may use `max`. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation.
