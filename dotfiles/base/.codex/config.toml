@@ -1,11 +1,6 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-# GPT-6 Sol/Luna require Codex 0.155.0 or newer.
-model = "gpt-6-sol"
 personality = "pragmatic"
-model_reasoning_effort = "medium"
-plan_mode_reasoning_effort = "max"
-
 model_verbosity = "low"
 hide_agent_reasoning = true
 
@@ -31,7 +26,7 @@ max_concurrent_threads_per_session = 16
 
 # Cost-safe GPT-6 fallback for every unspecified child.
 default_subagent_model = "gpt-6-luna"
-default_subagent_reasoning_effort = "low"
+default_subagent_reasoning_effort = "medium"
 
 [features.multi_agent_v2]
 # Expose per-spawn model and reasoning controls when V2 is active.
@@ -51,7 +46,7 @@ enabled = false
 # enabled = true
 
 [tui]
-status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "five-hour-limit", "weekly-limit"]
+status_line = ["model-with-reasoning", "current-dir", "context-used", "fast-mode", "weekly-limit"]
 status_line_use_colors = true
 
 [tui.model_availability_nux]
@@ -67,5 +62,8 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects."/Users/josh/usr"]
+trust_level = "trusted"
+
+[projects."/private/tmp"]
 trust_level = "trusted"
 
