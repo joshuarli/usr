@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+codex_dir=$HOME/.codex
+
+[ -d "$codex_dir" ] || exit 0
+
+for path in "$codex_dir"/* "$codex_dir"/.[!.]* "$codex_dir"/..?*; do
+    case $path in
+        "$codex_dir/AGENTS.md"|"$codex_dir/config.toml")
+            ;;
+        *)
+            rm -rf "$path"
+            ;;
+    esac
+done
