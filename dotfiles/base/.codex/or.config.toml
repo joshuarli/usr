@@ -1,0 +1,2 @@
+model_provider = "openrouter"
+model = "openai/gpt-6-sol"
