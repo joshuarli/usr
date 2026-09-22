@@ -10,11 +10,7 @@ Balance total cost and progress, including delegation overhead, retries, and int
 ## Parent Intelligence Boundary
 
 Parents must be the highest-intelligence agents in their descendant tree. The known ordering is
-Astra > Sol > Luna:
-
-- `gpt-6-astra`
-- `gpt-6-sol`
-- `gpt-6-luna`
+`gpt-6-astra` > `gpt-6-sol` > `gpt-6-luna`.
 
 A parent may spawn only agents at its own level or lower. Never select a higher-intelligence model
 or alias as a child, including as an escalation or fallback. If the parent model is outside this
@@ -22,20 +18,19 @@ known ordering, do not delegate under this skill. This rule overrides the routin
 
 ## Model routing
 
-Use only the exact GPT-6 model IDs above. GPT-5.x models and Terra are banned, including as
-fallbacks.
+Use only the exact GPT-6 model IDs above. GPT-5.x models and Terra are banned.
 
-Do not use `ultra` reasoning inside this skill. Astra and Sol expose `ultra` as an automatic
+Never use `ultra` reasoning. Astra and Sol expose `ultra` as an automatic
 delegation mode; this skill already owns delegation, fan-out, model selection, and nesting.
 Explicit orchestration keeps cost, ownership, and concurrency predictable.
 
 | Work | Model | Reasoning effort |
 | --- | --- | --- |
 | Read-only scouts: repository mapping, searches, inventories, documentation lookup, log triage, and straightforward fact gathering | `gpt-6-luna` | `low` |
-| Mechanical edits, small bounded implementations, straightforward documentation, and narrow tasks with crisp acceptance criteria | `gpt-6-luna` | `high` by default; `max` when the bounded task is unusually subtle |
-| Normal implementation, debugging, tests, and ordinary review | `gpt-6-sol` | `medium` by default; `high` when correctness risk or ambiguity is elevated |
-| Difficult debugging, cross-cutting implementation, architecture, integration, or demanding review | `gpt-6-sol` | `max` |
-| Frontier design or synthesis where Sol is not enough | `gpt-6-astra` | `medium` by default; `high` or `max` only when the extra depth is justified |
+| Mechanical edits, small bounded implementations, straightforward documentation, and narrow tasks with crisp acceptance criteria | `gpt-6-luna` | `medium` by default, |
+| Normal implementation, debugging, tests, and ordinary review | `gpt-6-luna` | `high` by default; `xhigh` when correctness risk or ambiguity is elevated |
+| Difficult debugging, cross-cutting implementation, architecture, integration, or demanding review | `gpt-6-sol` | `xhigh` |
+| Frontier design or synthesis where Sol is not enough - use sparingly | `gpt-6-astra` | `medium` by default; `high` only when the extra depth is justified |
 
 The Astra lane is available only when the parent itself is Astra. A Sol parent must not spawn Astra;
 keep work local at Sol `max` if the task exceeds what it can safely delegate.
