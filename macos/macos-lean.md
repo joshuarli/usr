@@ -1,4 +1,4 @@
-# Updating macos-lean scripts across macOS versions
+# Maintaining macos-lean across macOS versions
 
 How to correctly audit and update a launchd service-disabling script when
 moving to a new macOS release. Written after updating from Sequoia (15) to
@@ -190,7 +190,7 @@ done
 ' | sort -u > /tmp/all-real-labels.txt
 
 # Extract effective script labels
-./macos-lean-tahoe.sh --dry-run \
+./macos-lean.sh --dry-run \
   | rg -o '(com|io)\.[A-Za-z0-9._-]+' \
   | sort -u > /tmp/script-labels.txt
 
@@ -199,15 +199,14 @@ comm -23 /tmp/script-labels.txt /tmp/all-real-labels.txt
 # Empty output = all labels valid
 ```
 
-Run `dash -n macos-lean-tahoe.sh` for syntax, and `--dry-run` to review the
+Run `dash -n macos-lean.sh` for syntax, and `--dry-run` to review the
 full list before applying.
 
 ## macOS 27 (Golden Gate) readiness — macos-lean.sh
 
 `macos-lean.sh` is the canonical script; the versioned scripts are frozen.
-It was built while still on Tahoe (27 labels unverifiable without booting
-27), so it contains **no hardcoded 27-only labels**. Instead it is
-version-tolerant:
+Golden Gate labels were live-audited on 27.0 build `26A428`, so its managed
+lists now contain the verified 27 additions. It remains version-tolerant:
 
 - Every label is validated against a live index (cached per OS build in
   `/tmp/macos-lean-index-<build>.txt`). Unknown labels print `STALE` and
@@ -216,10 +215,19 @@ version-tolerant:
 - `--audit` runs the Steps 3–5 workflow built in: stale targets, stale
   preserve checks, and candidate new services. No sudo, no changes.
 - Apply snapshots `print-disabled` state to `~/.local/state/macos-lean/`.
+- Apply caches disabled launchd state before changing anything: jobs already
+  disabled are left alone, including their running processes. Repeated applies
+  therefore converge instead of repeatedly disabling and killing the same job.
+- Preference writes compare the current value first. Dock and mDNSResponder
+  restart only when one of their managed preferences actually changed.
 - Fixed dead check: `com.apple.Passwords.MenuBarExtra` is a LoginItem, not
   a launchd job — removed from preserve checks.
 - Added from Tahoe `--audit` findings: `InstallerDiagnostics.installerdiagd`
   and `installerdiagwatcher` (installer telemetry, system daemons).
+- Added from Golden Gate `--audit` findings: `siriappintentsd`,
+  `imageplaygroundd`, and `visualintelligenced` (user agents), plus
+  `cloudtelemetryd` and `libsqlite3.dbtelemetryd` (system daemons). Their
+  plists were read before categorizing them; see the live audit below.
 
 ### Trap 6: sort/comm locale must agree
 
@@ -246,3 +254,61 @@ or at minimum sort both inputs and run `comm` under the same one.
 4. Manual 27 items no script can cover: Settings > General > Login Items &
    Extensions > Background App Activity; MDM restriction profiles for Siri /
    Apple Intelligence policy (survive upgrades, unlike `disabled.plist`).
+
+## macOS 27 (Golden Gate) live audit
+
+Audited `macos-lean.sh --audit` on macOS 27.0, build `26A428` (Apple silicon).
+The complete no-change transcript is retained on that machine at
+`/tmp/macos-lean-audit-26A428.txt`. It reported no stale disable targets.
+
+### 27 label renames and removals
+
+| 27 plist filename | Actual Label or disposition |
+|---|---|
+| `com.apple.sysdiagnose.darwinos.plist` | `com.apple.sysdiagnose` (the same label is also in `com.apple.sysdiagnose.plist`) |
+| _None_ | `com.apple.AirPortBaseStationAgent` is removed; the live 27 index has only `com.apple.airportd`, which remains the Wi-Fi daemon. No replacement preserve check exists. |
+
+The AirPort base-station preserve check was removed. It was neither a renamed
+label nor a service that `macos-lean.sh` disables, so retaining it could only
+produce a false audit failure.
+
+### Candidate dispositions
+
+Each candidate was located by extracting its plist `Label`, then its
+`Program`/`ProgramArguments` and `MachServices` were read. The launchd domain
+below was confirmed with `launchctl print`, not inferred from the filename.
+
+| Label | Plist program and domain | Disposition |
+|---|---|---|
+| `com.apple.backgroundtaskmanagement.agent` | `BackgroundTaskManagementAgent`, `gui/501` | Preserve. It owns Login Items/background-task notifications and consent. |
+| `com.apple.backgroundtaskmanagementd` | `BackgroundTaskManagement.framework/.../backgroundtaskmanagementd -daemon`, `system` | Preserve. It registers and responds to background-task requests; disabling it breaks Login Items. |
+| `com.apple.cloudtelemetryd` | `CloudTelemetry.framework/Support/cloudtelemetryd`, `system` | Disable as `disable_system`. Its Mach service and repeating `submit`/database-maintenance activities are CloudTelemetry. |
+| `com.apple.imageplaygroundd` | `SuggestedImage.framework/Support/imageplaygroundd`, `gui/501` | Disable as `disable_user`. It serves Generative Playground and runs recurring background image-personalization work. |
+| `com.apple.libsqlite3.dbtelemetryd` | `/usr/libexec/dbtelemetryd`, `system` | Disable as `disable_system`. Its only declared job collects logs daily while on external power. |
+| `com.apple.siriappintentsd` | `SiriAppIntentsRuntime.framework/siriappintentsd`, `gui/501` | Disable as `disable_user`. It is Siri App Intents orchestration. |
+| `com.apple.sysdiagnose` | `/usr/libexec/sysdiagnosed`, `system` | Preserve. It is the interactive, on-demand diagnostic service. |
+| `com.apple.sysdiagnose_agent` | `/usr/libexec/sysdiagnose_helper`, `gui/501` | Preserve. It is the per-user on-demand diagnostic helper. |
+| `com.apple.sysdiagnose_helper` | `/usr/libexec/sysdiagnose_helper`, `system` | Preserve. It is the system diagnostic helper. |
+| `com.apple.visualintelligenced` | `VisualIntelligenceServices.framework/visualintelligenced`, `gui/501` | Disable as `disable_user`. It exposes visual-action prediction and daemon-status services, with a background prewarm task. |
+
+### New traps and interface checks
+
+- A filename may duplicate another plist's label: both sysdiagnose plists use
+  `com.apple.sysdiagnose`. Index labels, not filenames, before deciding a
+  service exists twice.
+- Kandji and CrowdStrike are optional third-party agents. An audit machine
+  without their `/Library/LaunchAgents` plists must report them as not
+  installed, not stale. `ensure_optional_user` records them only when present.
+- `pmset` documents every setting used here on 27, including `powernap`,
+  `tcpkeepalive`, `proximitywake`, both standby delays, `hibernatemode`, and
+  `autopoweroff`. `mdutil` retains `-a -i on|off` and `-aE`; the script uses
+  only `-a -i off`, because `-E` erases and rebuilds indexes on every apply.
+  `tmutil` retains `enable` and `disable` while `disablelocal` remains absent.
+- `networksetup` retains `-setv6off` and `-setv6automatic`; `defaults` retains
+  the `write`/`delete` forms; and `/usr/bin/log config` retains
+  `--mode level:off|default`. The zsh `log` builtin is unrelated, so command
+  checks must invoke `/usr/bin/log` when run interactively from zsh.
+- The 27 unified-log archive format change does not affect this script: it
+  configures live logging only and never reads prior archives. The deprecated
+  `com.apple.AssetCache.managed` label is not referenced; the script manages
+  `com.apple.AssetCacheLocatorService` instead.

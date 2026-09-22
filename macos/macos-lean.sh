@@ -1,23 +1,23 @@
 #!/bin/dash
 # ============================================================================
-# macos-lean.sh — Make macOS lean (26 Tahoe → 27 Golden Gate)
+# macos-lean.sh — Make macOS lean (27 Golden Gate)
 # ============================================================================
 #
-# Canonical script. Supersedes macos-lean-sequoia.sh and macos-lean-tahoe.sh,
-# which are frozen references — do not extend them.
+# Canonical script. Legacy versioned scripts have been retired.
 #
 # Design: validate-then-act. Every launchd label is checked against a live
 # index of labels installed on THIS Mac (built at startup from the plist
 # files' Label keys, cached per OS build). Unknown labels are reported as
 # STALE and skipped, never silently no-op'd. Run --audit after any OS upgrade
-# to surface renamed/added services before applying.
+# to surface renamed/added services before applying. Apply converges: existing
+# disabled jobs and matching preferences are left alone.
 #
-# macOS 27 (Golden Gate) note: no 27-only labels are hardcoded here, because
-# the 27 label set cannot be verified without booting 27 (filename ≠ label,
-# see macos-lean-tahoe.md). On 27 this script applies the validated subset and
-# --audit surfaces candidates (Siri app, rebuilt Spotlight indexing, Background
-# App Activity). No documented pmset/mdutil/tmutil/defaults syntax changes in
-# 27 beta notes; tmutil disablelocal stays removed (dead since Tahoe).
+# macOS 27 (Golden Gate) verification: live-audited on 27.0 build 26A428.
+# Every non-optional managed label below exists on that build. The 27 additions
+# were read from their plists' ProgramArguments/MachServices before being
+# categorized; see the Golden Gate audit record in macos-lean.md.
+# pmset, mdutil, tmutil, defaults, networksetup, and log command syntax remains
+# valid; tmutil disablelocal stays removed (dead since Tahoe).
 #
 # Disables ~170 unnecessary services via launchctl disable (persists across
 # reboots) and launchctl bootout (immediate effect). Organized by category.
@@ -26,6 +26,8 @@
 #   - Siri, Dictation, "Hey Siri", all assistant/speech services
 #   - Apple Intelligence, on-device ML, generative AI, Private Cloud Compute,
 #     call intelligence, cipher ML, intelligence tasks
+#   - Golden Gate additions: Siri App Intents, Image Playground, Visual
+#     Intelligence, CloudTelemetry, and SQLite maintenance-log telemetry
 #   - Spotlight indexing (mdutil + all workers/scanners/knowledge agents)
 #   - Telemetry: analytics, diagnostics, biome, ad tracking, A/B trials,
 #     sysmond, tailspind, ecosystem analytics, USB-C telemetry,
@@ -82,8 +84,7 @@
 #   - Notes.app (synapse content linking, back-links)
 #   - Camera & video calls (videoconference.camera, CMIO extensions)
 #   - AirPods (Bluetooth LE audio, cloud pairing)
-#   - AirPort base station support
-#   - Kandji MDM agent, CrowdStrike Falcon
+#   - Kandji MDM agent and CrowdStrike Falcon when installed
 #
 # AUDITED AND DELIBERATELY KEPT (see --audit; do not "fix" by disabling):
 #   - BackgroundTaskManagement (agent + daemon): Login Items infrastructure
@@ -91,6 +92,10 @@
 #     sits on top of it. Disabling breaks login items.
 #   - sysdiagnose agent/helper: on-demand manual diagnostic collection.
 #     Keep — you want this when something breaks (logging is already off).
+#   - Golden Gate candidates: BackgroundTaskManagement is Login Items
+#     infrastructure; sysdiagnose remains on-demand diagnostics. Both stay
+#     preserved. The remaining candidates were added to the disable lists only
+#     after their plist programs established their Siri, AI, or telemetry role.
 #
 # Usage:
 #   ./macos-lean.sh              # Apply changes (requires sudo)
@@ -179,10 +184,13 @@ echo ""
 _REAL_LABELS=$(mktemp /tmp/macos-lean-labels.XXXXXX)
 _AUDIT_TARGETS=$(mktemp /tmp/macos-lean-targets.XXXXXX)
 _AUDIT_PRESERVE=$(mktemp /tmp/macos-lean-preserve.XXXXXX)
-trap 'rm -f "$_REAL_LABELS" "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE"' EXIT
+_DISABLED_USER=$(mktemp /tmp/macos-lean-disabled-user.XXXXXX)
+_DISABLED_SYSTEM=$(mktemp /tmp/macos-lean-disabled-system.XXXXXX)
+trap 'rm -f "$_REAL_LABELS" "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE" "$_DISABLED_USER" "$_DISABLED_SYSTEM"' EXIT
 
 N_APPLIED=0
 N_SKIPPED=0
+N_UNCHANGED=0
 
 # --- Live label index (cached per OS build; plutil per-file is slow) ---
 BUILD_VER=$(sw_vers -buildVersion 2>/dev/null || echo "unknown")
@@ -220,7 +228,21 @@ snapshot_state() {
   echo ""
 }
 
-# --- Audit report (macos-lean-tahoe.md workflow, built in) ---
+# Cache disabled state before applying anything. A repeated apply must leave
+# already-disabled jobs alone, including their running processes.
+load_disabled_state() {
+  if $DRY_RUN || $AUDIT || $REVERT; then return; fi
+  if ! launchctl print-disabled "gui/${UID_NUM}" > "$_DISABLED_USER" 2>/dev/null; then
+    echo "Error: unable to read disabled user services"
+    exit 1
+  fi
+  if ! sudo launchctl print-disabled system > "$_DISABLED_SYSTEM" 2>/dev/null; then
+    echo "Error: unable to read disabled system services"
+    exit 1
+  fi
+}
+
+# --- Audit report (macos-lean.md workflow, built in) ---
 audit_report() {
   LC_ALL=C sort -u "$_AUDIT_TARGETS" -o "$_AUDIT_TARGETS"
   LC_ALL=C sort -u "$_AUDIT_PRESERVE" -o "$_AUDIT_PRESERVE"
@@ -248,10 +270,62 @@ if ! $DRY_RUN && ! $AUDIT; then
   sudo -v || { echo "Error: sudo required"; exit 1; }
   while true; do sudo -n true; sleep 50; kill -0 "$$" || exit; done 2>/dev/null &
   SUDO_PID=$!
-  trap 'kill $SUDO_PID 2>/dev/null; rm -f "$_REAL_LABELS" "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE"' EXIT
+  trap 'kill $SUDO_PID 2>/dev/null; rm -f "$_REAL_LABELS" "$_AUDIT_TARGETS" "$_AUDIT_PRESERVE" "$_DISABLED_USER" "$_DISABLED_SYSTEM"' EXIT
 fi
 
 # --- Helpers ---
+
+is_disabled() {
+  _disabled_label=$1
+  _disabled_state=$2
+  grep -Fq "\"${_disabled_label}\" => disabled" "$_disabled_state" 2>/dev/null || \
+    grep -Fq "\"${_disabled_label}\" => true" "$_disabled_state" 2>/dev/null
+}
+
+is_user_disabled() { is_disabled "$1" "$_DISABLED_USER"; }
+is_system_disabled() { is_disabled "$1" "$_DISABLED_SYSTEM"; }
+
+mark_disabled() {
+  printf '\t"%s" => disabled\n' "$1" >> "$2"
+}
+
+# Write a preference only when it differs. This keeps repeated applies from
+# rewriting plist files or restarting consumers of an unchanged preference.
+DEFAULT_CHANGED=false
+ensure_default() {
+  DEFAULT_CHANGED=false
+  _default_domain=$1
+  _default_key=$2
+  _default_expected=$3
+  _default_type=$4
+  _default_value=$5
+  _default_current=$(defaults read "$_default_domain" "$_default_key" 2>/dev/null || true)
+  [ "$_default_current" = "$_default_expected" ] && return
+  if defaults write "$_default_domain" "$_default_key" "$_default_type" "$_default_value"; then
+    DEFAULT_CHANGED=true
+  else
+    echo "FAIL defaults ${_default_domain} ${_default_key}"
+    return 1
+  fi
+}
+
+SYSTEM_DEFAULT_CHANGED=false
+ensure_system_default() {
+  SYSTEM_DEFAULT_CHANGED=false
+  _system_default_domain=$1
+  _system_default_key=$2
+  _system_default_expected=$3
+  _system_default_type=$4
+  _system_default_value=$5
+  _system_default_current=$(sudo defaults read "$_system_default_domain" "$_system_default_key" 2>/dev/null || true)
+  [ "$_system_default_current" = "$_system_default_expected" ] && return
+  if sudo defaults write "$_system_default_domain" "$_system_default_key" "$_system_default_type" "$_system_default_value"; then
+    SYSTEM_DEFAULT_CHANGED=true
+  else
+    echo "FAIL defaults ${_system_default_domain} ${_system_default_key}"
+    return 1
+  fi
+}
 
 disable_user() {
   label=$1
@@ -280,8 +354,14 @@ disable_user() {
       N_SKIPPED=$((N_SKIPPED + 1))
       return
     fi
+    if is_user_disabled "$label"; then
+      echo "  = ${label} (already disabled)"
+      N_UNCHANGED=$((N_UNCHANGED + 1))
+      return
+    fi
     if launchctl disable "gui/${UID_NUM}/${label}" 2>/dev/null; then
       N_APPLIED=$((N_APPLIED + 1))
+      mark_disabled "$label" "$_DISABLED_USER"
     else
       echo "  FAIL ${label} (disable rejected)"
       N_SKIPPED=$((N_SKIPPED + 1))
@@ -323,6 +403,11 @@ disable_system() {
       N_SKIPPED=$((N_SKIPPED + 1))
       return
     fi
+    if is_system_disabled "$label"; then
+      echo "  = ${label} (already disabled)"
+      N_UNCHANGED=$((N_UNCHANGED + 1))
+      return
+    fi
     SYSTEM_LABELS="${SYSTEM_LABELS} ${label}"
     echo "  - ${label}"
   fi
@@ -341,6 +426,7 @@ flush_system() {
     for label in $SYSTEM_LABELS; do
       if sudo launchctl disable "system/${label}" 2>/dev/null; then
         N_APPLIED=$((N_APPLIED + 1))
+        mark_disabled "$label" "$_DISABLED_SYSTEM"
       else
         echo "  FAIL ${label} (disable rejected)"
         N_SKIPPED=$((N_SKIPPED + 1))
@@ -390,6 +476,19 @@ ensure_user() {
   fi
 }
 
+# Endpoint-security software is optional. Only audit or verify it when its
+# launchd plist is installed; an absent third-party product is not a stale
+# macOS label and must not make the audit fail.
+ensure_optional_user() {
+  label=$1
+  desc=$2
+  if ! is_known_label "$label"; then
+    echo "  --  ${desc} not installed (${label})"
+    return
+  fi
+  ensure_user "$label" "$desc"
+}
+
 ensure_system() {
   label=$1
   desc=$2
@@ -422,8 +521,11 @@ ensure_system() {
 # ============================================================================
 
 snapshot_state
+load_disabled_state
 
 section "Siri & Assistant"
+# Golden Gate 27: SiriAppIntentsRuntime's siriappintentsd serves Siri app
+# intents, so it belongs with the existing Siri disable set.
 for s in \
   com.apple.assistant_service \
   com.apple.assistant_cdmd \
@@ -444,9 +546,13 @@ for s in \
   com.apple.proactiveeventtrackerd \
   com.apple.ContextStoreAgent \
   com.apple.duetexpertd \
+  com.apple.siriappintentsd \
 ; do disable_user "$s"; done
 
 section "Apple Intelligence & ML"
+# Golden Gate 27: imageplaygroundd (SuggestedImage.framework) and
+# visualintelligenced (VisualIntelligenceServices.framework) are generative
+# image and visual-intelligence agents, including background maintenance work.
 for s in \
   com.apple.intelligenceplatformd \
   com.apple.intelligenceflowd \
@@ -462,6 +568,8 @@ for s in \
   com.apple.mlhostd \
   com.apple.mlruntimed \
   com.apple.ModelCatalogAgent \
+  com.apple.imageplaygroundd \
+  com.apple.visualintelligenced \
 ; do disable_user "$s"; done
 
 section "Telemetry & Analytics"
@@ -674,6 +782,8 @@ section "System — Siri"
 disable_system com.apple.corespeechd_system
 
 section "System — Analytics"
+# Golden Gate 27: CloudTelemetry.framework submits/maintains telemetry, and
+# dbtelemetryd collects SQLite logs daily while on external power.
 for s in \
   com.apple.analyticsd \
   com.apple.audioanalyticsd \
@@ -690,6 +800,8 @@ for s in \
   com.apple.triald.system \
   com.apple.sysmond \
   com.apple.tailspind \
+  com.apple.cloudtelemetryd \
+  com.apple.libsqlite3.dbtelemetryd \
 ; do disable_system "$s"; done
 
 section "System — App Store"
@@ -748,14 +860,14 @@ flush_system
 section "Spotlight Indexing (mdutil)"
 if $DRY_RUN || $AUDIT; then
   echo "  would run: sudo mdutil -a -i off"
-  echo "  would run: sudo mdutil -aE"
 elif $REVERT; then
   sudo mdutil -a -i on 2>/dev/null
   echo "  Spotlight indexing re-enabled"
 else
+  # mdutil -E erases and rebuilds indexes, creating work on every apply.
+  # Disabling indexing is the desired steady state and is repeat-safe.
   sudo mdutil -a -i off 2>/dev/null
-  sudo mdutil -aE 2>/dev/null
-  echo "  Indexing disabled, indexes deleted"
+  echo "  Indexing disabled"
 fi
 
 section "Time Machine"
@@ -786,11 +898,11 @@ elif $REVERT; then
   defaults delete com.apple.lookup.shared LookupSuggestionsDisabled 2>/dev/null || true
   echo "  Preferences restored to defaults"
 else
-  defaults write com.apple.assistant.support 'Assistant Enabled' -bool false
-  defaults write com.apple.Siri StatusMenuVisible -bool false
-  defaults write com.apple.Siri UserHasDeclinedEnable -bool true
-  defaults write com.apple.Siri VoiceTriggerUserEnabled -bool false
-  defaults write com.apple.lookup.shared LookupSuggestionsDisabled -bool true
+  ensure_default com.apple.assistant.support 'Assistant Enabled' 0 -bool false || exit 1
+  ensure_default com.apple.Siri StatusMenuVisible 0 -bool false || exit 1
+  ensure_default com.apple.Siri UserHasDeclinedEnable 1 -bool true || exit 1
+  ensure_default com.apple.Siri VoiceTriggerUserEnabled 0 -bool false || exit 1
+  ensure_default com.apple.lookup.shared LookupSuggestionsDisabled 1 -bool true || exit 1
   echo "  Siri fully disabled (assistant, menu bar, voice trigger)"
   echo "  Spotlight suggestions disabled"
 fi
@@ -806,11 +918,11 @@ elif $REVERT; then
   echo "  App Store preferences restored to defaults"
 else
   # Disable App Store auto-update
-  defaults write com.apple.commerce AutoUpdate -bool false
-  defaults write com.apple.commerce AutoUpdateRestartRequired -bool false
+  ensure_default com.apple.commerce AutoUpdate 0 -bool false || exit 1
+  ensure_default com.apple.commerce AutoUpdateRestartRequired 0 -bool false || exit 1
   # Disable automatic update checks and downloads
-  defaults write com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
-  defaults write com.apple.SoftwareUpdate AutomaticDownload -bool false
+  ensure_default com.apple.SoftwareUpdate AutomaticCheckEnabled 0 -bool false || exit 1
+  ensure_default com.apple.SoftwareUpdate AutomaticDownload 0 -bool false || exit 1
   echo "  App Store auto-check, auto-download, auto-update disabled"
 fi
 
@@ -822,7 +934,7 @@ elif $REVERT; then
   echo "  CrashReporter preferences restored to defaults"
 else
   # Suppress crash dialog pop-ups; crashes still logged to ~/Library/Logs/DiagnosticReports
-  defaults write com.apple.CrashReporter DialogType none
+  ensure_default com.apple.CrashReporter DialogType none -string none || exit 1
   echo "  Crash dialogs suppressed"
 fi
 
@@ -838,11 +950,11 @@ elif $REVERT; then
   echo "  App quit and screensaver preferences restored to defaults"
 else
   # Don't write window/document state to disk on every app quit
-  defaults write NSGlobalDomain NSQuitAlwaysKeepsWindows -bool false
+  ensure_default NSGlobalDomain NSQuitAlwaysKeepsWindows 0 -bool false || exit 1
   # Disable screensaver — go straight to display sleep, no GPU spinning
-  defaults write com.apple.screensaver idleTime -int 0
+  ensure_default com.apple.screensaver idleTime 0 -int 0 || exit 1
   # New documents default to local disk, not iCloud (iCloud Drive sync unaffected)
-  defaults write NSGlobalDomain NSDocumentSaveNewDocumentsToCloud -bool false
+  ensure_default NSGlobalDomain NSDocumentSaveNewDocumentsToCloud 0 -bool false || exit 1
   echo "  Window state on quit disabled, screensaver disabled, new docs default to local"
 fi
 
@@ -873,26 +985,40 @@ elif $REVERT; then
   killall Dock 2>/dev/null || true
   echo "  Performance defaults restored (Dock restarted)"
 else
+  PERFORMANCE_CHANGED=false
   # Disable window open/close animations
-  defaults write NSGlobalDomain NSAutomaticWindowAnimationsEnabled -bool false
+  ensure_default NSGlobalDomain NSAutomaticWindowAnimationsEnabled 0 -bool false || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Near-instant window resize
-  defaults write NSGlobalDomain NSWindowResizeTime -float 0.001
+  ensure_default NSGlobalDomain NSWindowResizeTime 0.001 -float 0.001 || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Disable Dock launch bounce
-  defaults write com.apple.dock launchanim -bool false
+  ensure_default com.apple.dock launchanim 0 -bool false || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Instant Dock autohide (no delay, fast animation)
-  defaults write com.apple.dock autohide-delay -float 0
-  defaults write com.apple.dock autohide-time-modifier -float 0.1
+  ensure_default com.apple.dock autohide-delay 0 -float 0 || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
+  ensure_default com.apple.dock autohide-time-modifier 0.1 -float 0.1 || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Fast Mission Control animation
-  defaults write com.apple.dock expose-animation-duration -float 0.1
+  ensure_default com.apple.dock expose-animation-duration 0.1 -float 0.1 || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Disable scroll view animations
-  defaults write NSGlobalDomain NSScrollAnimationEnabled -bool false
+  ensure_default NSGlobalDomain NSScrollAnimationEnabled 0 -bool false || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Reduce transparency (less compositing work for WindowServer)
-  defaults write com.apple.universalaccess reduceTransparency -bool true
+  ensure_default com.apple.universalaccess reduceTransparency 1 -bool true || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Reduce motion (system-wide animation reduction)
-  defaults write com.apple.universalaccess reduceMotion -bool true
+  ensure_default com.apple.universalaccess reduceMotion 1 -bool true || exit 1
+  if $DEFAULT_CHANGED; then PERFORMANCE_CHANGED=true; fi
   # Restart Dock to pick up changes
-  killall Dock 2>/dev/null || true
-  echo "  Animations disabled, transparency reduced (Dock restarted)"
+  if $PERFORMANCE_CHANGED; then
+    killall Dock 2>/dev/null || true
+    echo "  Animations disabled, transparency reduced (Dock restarted)"
+  else
+    echo "  Performance defaults already set"
+  fi
 fi
 
 # ============================================================================
@@ -1010,9 +1136,13 @@ elif $REVERT; then
 else
   # Stops Mac broadcasting its own services (AFP, SMB, AirPlay receiver, etc.)
   # Mac can still discover other devices. Note: breaks this Mac as an AirPlay receiver target.
-  sudo defaults write /Library/Preferences/com.apple.mDNSResponder.plist NoMulticastAdvertisements -bool YES
-  sudo killall mDNSResponder 2>/dev/null || true
-  echo "  mDNS multicast advertisements disabled (mDNSResponder restarted)"
+  ensure_system_default /Library/Preferences/com.apple.mDNSResponder.plist NoMulticastAdvertisements 1 -bool YES || exit 1
+  if $SYSTEM_DEFAULT_CHANGED; then
+    sudo killall mDNSResponder 2>/dev/null || true
+    echo "  mDNS multicast advertisements disabled (mDNSResponder restarted)"
+  else
+    echo "  mDNS multicast advertisements already disabled"
+  fi
 fi
 
 section "Captive Network Detection"
@@ -1024,8 +1154,12 @@ elif $REVERT; then
 else
   # Stops background HTTP probes to detect hotel/airport captive portals
   # Side effect: no auto-popup on captive networks — open browser manually to trigger login
-  sudo defaults write /Library/Preferences/SystemConfiguration/com.apple.captive.control Active -bool false
-  echo "  Captive network detection disabled"
+  ensure_system_default /Library/Preferences/SystemConfiguration/com.apple.captive.control Active 0 -bool false || exit 1
+  if $SYSTEM_DEFAULT_CHANGED; then
+    echo "  Captive network detection disabled"
+  else
+    echo "  Captive network detection already disabled"
+  fi
 fi
 
 # ============================================================================
@@ -1144,12 +1278,9 @@ ensure_user com.apple.calaccessd "Calendar access"
 section "Verify: Photos"
 ensure_user com.apple.photolibraryd "Photos library"
 
-section "Verify: AirPort"
-ensure_user com.apple.AirPortBaseStationAgent "AirPort base station"
-
 section "Verify: MDM & Endpoint Security"
-ensure_user io.kandji.Kandji "Kandji MDM"
-ensure_user com.crowdstrike.falcon.UserAgent "CrowdStrike Falcon"
+ensure_optional_user io.kandji.Kandji "Kandji MDM"
+ensure_optional_user com.crowdstrike.falcon.UserAgent "CrowdStrike Falcon"
 
 section "Verify: Spell Check & Language"
 ensure_user com.apple.applespell "Spell checking"
@@ -1167,12 +1298,12 @@ if $AUDIT; then
   echo "Next: ./${0##*/} --dry-run, then apply."
 elif $DRY_RUN || $AUDIT; then
   echo "Dry run complete. No changes made."
-  echo "STALE lines above would be skipped on ${OS_NAME} ${MACOS_VERSION}."
+  echo "Any STALE lines above would be skipped on ${OS_NAME} ${MACOS_VERSION}."
   echo "Run without --dry-run to apply."
 elif $REVERT; then
   echo "Re-enabled ${N_APPLIED} service(s). Reboot required."
 else
-  echo "Changed: ${N_APPLIED} disabled, ${N_SKIPPED} skipped (stale/rejected)."
+  echo "Changed: ${N_APPLIED} disabled, ${N_UNCHANGED} already disabled, ${N_SKIPPED} skipped (stale/rejected)."
   if [ "$VERIFY_FAIL" -gt 0 ]; then
     echo "WARNING: ${VERIFY_FAIL} preserved service(s) not loaded."
     echo "Review FAIL lines above. May need reboot or"
