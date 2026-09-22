@@ -1,8 +1,9 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-model = "gpt-5.6-luna"
+# GPT-6 Sol/Luna require Codex 0.155.0 or newer.
+model = "gpt-6-sol"
 personality = "pragmatic"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "medium"
 plan_mode_reasoning_effort = "max"
 
 model_verbosity = "low"
@@ -26,10 +27,10 @@ experimental_mode = true
 
 [agents]
 enabled = true
-max_concurrent_threads_per_session = 8
+max_concurrent_threads_per_session = 16
 
-# Cost-safe fallback for every unspecified child.
-default_subagent_model = "gpt-5.6-luna"
+# Cost-safe GPT-6 fallback for every unspecified child.
+default_subagent_model = "gpt-6-luna"
 default_subagent_reasoning_effort = "low"
 
 [features.multi_agent_v2]
@@ -42,8 +43,9 @@ enabled = false
 [feedback]
 enabled = false
 
-# Optional “full-send” experiment. This is unrelated to Astra's async
-# function calling and may change between releases.
+# Optional "full-send" experiment. Leave this off while the explicit
+# orchestrate skill owns delegation; GPT-6 Astra/Sol ultra effort can also
+# trigger automatic delegation.
 #
 # [features.code_mode]
 # enabled = true
