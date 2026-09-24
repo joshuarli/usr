@@ -1,0 +1,130 @@
+#!/bin/sh
+# freeport - show what is listening on a port (macOS) and offer to kill it.
+#
+# Usage:
+#   freeport <port>
+#
+# Finds TCP listeners on <port> via lsof, prints PID plus full command line
+# via ps, then prompts [y/N] (default N) to send SIGTERM (escalating to
+# SIGKILL if the process survives). After the kill, polls lsof until the
+# port is actually free (or times out) before exiting.
+
+set -u
+
+prog=${0##*/}
+
+die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+usage() { printf 'usage: %s <port>\n' "$prog" >&2; exit 2; }
+
+[ "$#" -eq 1 ] || usage
+port=$1
+
+case "$port" in
+    ''|*[!0-9]*) die "invalid port: $port (expected 1-65535)" ;;
+esac
+# Numeric range check (port is all digits here, so no octal gotcha in test).
+if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    die "invalid port: $port (expected 1-65535)"
+fi
+
+command -v lsof >/dev/null 2>&1 || die "lsof not found"
+command -v ps >/dev/null 2>&1 || die "ps not found"
+
+# Prefer TCP listeners (matches "listen tcp ... bind: address already in use").
+# Fall back to any socket on the port (e.g. UDP) if nothing is listening.
+pids=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | sort -n -u) || pids=""
+if [ -z "$pids" ]; then
+    pids=$(lsof -nP -i :"$port" -t 2>/dev/null | sort -n -u) || pids=""
+fi
+
+if [ -z "$pids" ]; then
+    printf 'Nothing listening on port %s.\n' "$port"
+    printf 'If you still get EADDRINUSE, try: sudo lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$port" >&2
+    exit 0
+fi
+
+# Show one line per PID: PID + full command line.
+# (lsof -t output can repeat a PID for v4/v6; sort -u above dedupes.)
+printf '%s\n' "PID COMMAND"
+# shellcheck disable=SC2086
+for pid in $pids; do
+    case "$pid" in
+        ''|*[!0-9]*) continue ;;
+    esac
+    if ! ps -p "$pid" -o pid=,args= 2>/dev/null; then
+        printf '%s (exited before ps could read it)\n' "$pid"
+    fi
+done
+
+# Collapse newlines so "1 2 3" prompts cleanly.
+# shellcheck disable=SC2086
+pid_list=$(printf '%s ' $pids)
+
+printf 'Kill %s on port %s? [y/N] ' "${pid_list% }" "$port"
+if [ -t 0 ] && [ -r /dev/tty ]; then
+    IFS= read -r reply < /dev/tty || reply=""
+else
+    IFS= read -r reply || reply=""
+fi
+case "$reply" in
+    [yY]|[yY][eE][sS]) ;;
+    *) printf 'Aborted.\n'; exit 0 ;;
+esac
+
+# shellcheck disable=SC2086
+kill $pids 2>/dev/null || die "kill failed (try sudo?)"
+
+# Give it a moment, then escalate survivors to SIGKILL.
+sleep 1
+still=""
+# shellcheck disable=SC2086
+for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+        still="$still $pid"
+    else
+        printf 'Killed %s.\n' "$pid"
+    fi
+done
+still=${still# }
+if [ -n "$still" ]; then
+    # shellcheck disable=SC2086
+    kill -9 $still 2>/dev/null || die "kill -9 failed (try sudo?)"
+    sleep 1
+    # shellcheck disable=SC2086
+    for pid in $still; do
+        if kill -0 "$pid" 2>/dev/null; then
+            printf 'Still running: %s (try sudo kill -9 %s).\n' "$pid" "$pid" >&2
+        else
+            printf 'Killed %s.\n' "$pid"
+        fi
+    done
+fi
+
+# Poll until the port is actually free (up to ~5s), then verify before exit.
+# A dead PID does not guarantee the listen socket is gone (shutdown can lag,
+# a child may have inherited it, or another process may have grabbed it).
+tries=0
+remaining=""
+while [ "$tries" -lt 5 ]; do
+    remaining=$(lsof -nP -i :"$port" -t 2>/dev/null | sort -n -u) || remaining=""
+    if [ -z "$remaining" ]; then
+        break
+    fi
+    sleep 1
+    tries=$((tries + 1))
+done
+remaining=$(lsof -nP -i :"$port" -t 2>/dev/null | sort -n -u) || remaining=""
+if [ -z "$remaining" ]; then
+    printf 'Port %s is free.\n' "$port"
+else
+    printf 'Port %s still in use by:\n' "$port" >&2
+    # shellcheck disable=SC2086
+    for pid in $remaining; do
+        case "$pid" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        ps -p "$pid" -o pid=,args= >&2 2>/dev/null || printf '%s (ps lookup failed)\n' "$pid" >&2
+    done
+    printf 'Port %s is NOT free (try sudo kill -9).\n' "$port" >&2
+    exit 1
+fi
