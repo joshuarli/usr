@@ -1,0 +1,3 @@
+interface:
+  display_name: "Comment Cleanup"
+  short_description: "Audit comments for stale documentation references"

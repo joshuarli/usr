@@ -7,8 +7,8 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6-sol"
-model_reasoning_effort = "xhigh"
+model = "gpt-6-luna"
+model_reasoning_effort = "high"
 
 [features]
 goals = true
@@ -60,22 +60,4 @@ name = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 wire_api = "responses"
-
-[projects."/Users/josh/d/ferrisearch"]
-trust_level = "trusted"
-
-[projects."/Users/josh/d/extension-loupe"]
-trust_level = "trusted"
-
-[projects."/Users/josh/d/obsidian-webp-paste"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr"]
-trust_level = "trusted"
-
-[projects."/private/tmp"]
-trust_level = "trusted"
-
-[projects."/home/josh/d/crabc"]
-trust_level = "trusted"
 

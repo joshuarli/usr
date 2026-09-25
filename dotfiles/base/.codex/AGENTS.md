@@ -47,3 +47,9 @@ tests, and docs.
 - Do not run pre-commit hooks; the user verifies commits independently.
 - Never push to a remote unless explicitly told to.
 
+## Keep code comments self-contained
+
+- Never use code comments or docstrings to point to planning or other documentation. Do not cite document names, paths, links, sections, numbered clauses, milestones (such as `M1`), phases, roadmap items, issues, PRs, or acceptance-criterion labels.
+- Comments must remain useful if every planning and documentation file is renamed or deleted. State the local reason, invariant, constraint, or behavior directly in domain terms.
+- If a comment only points elsewhere, remove it. If it carries durable technical meaning, rewrite that meaning in the comment itself; keep broader explanation in documentation, without making the comment depend on that document.
+- Before finishing code changes, search touched source files for document names and planning identifiers, including section-like and milestone-like labels.
