@@ -7,8 +7,8 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6-luna"
-model_reasoning_effort = "max"
+model = "gpt-6-sol"
+model_reasoning_effort = "high"
 
 [features]
 goals = true
@@ -28,7 +28,7 @@ max_concurrent_threads_per_session = 16
 
 # Cost-safe GPT-6 fallback for every unspecified child.
 default_subagent_model = "gpt-6-luna"
-default_subagent_reasoning_effort = "medium"
+default_subagent_reasoning_effort = "high"
 
 [features.multi_agent_v2]
 # Expose per-spawn model and reasoning controls when V2 is active.
@@ -61,17 +61,8 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 wire_api = "responses"
 
-[projects."/Users/josh/d/laputa-systems/xsh"]
-trust_level = "trusted"
-
-[projects."/Users/josh/d/grab"]
-trust_level = "trusted"
-
-[projects."/Users/josh/d/shadowdriver"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr"]
-trust_level = "trusted"
+[notice]
+hide_rate_limit_model_nudge = true
 
 [projects."/home/josh/d/crabc"]
 trust_level = "trusted"

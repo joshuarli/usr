@@ -10,6 +10,7 @@
     "defaultMode": "bypassPermissions",
     "skipDangerousModePermissionPrompt": true
   },
+  "model": "sonnet",
   "hooks": {
     "Notification": [
       {
@@ -42,7 +43,10 @@
       "effortLevel": "high"
     },
     "claude-opus-5-5": {
-      "effortLevel": "xhigh"
+      "effortLevel": "high"
+    },
+    "claude-sonnet-5-5": {
+      "effortLevel": "high"
     }
   },
   "emojiCompletionEnabled": false,

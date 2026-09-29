@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""Report macOS memory pressure and list safe kill / removal candidates.
+
+Reads system state with vm_stat, top, ps, and app-specific checks
+(OrbStack, containers, background services), then prints a
+summary with concrete PIDs and commands. Processes whose command line
+mentions python-build, perf.py, bench.py, or stage-perf are always
+treated as protected and never suggested as kill candidates.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+PAGE = 16384
+PROTECTED_HINTS = ("python-build", "perf.py", "bench.py", "stage-perf")
+
+for _p in ("/opt/homebrew/bin", "/usr/local/bin"):
+    if _p not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = _p + ":" + os.environ.get("PATH", "")
+del _p
+
+
+def run(cmd: list[str], timeout: int = 15) -> str:
+    try:
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+    if out.returncode != 0:
+        return out.stdout or ""
+    return out.stdout
+
+
+def parse_size(token: str) -> float:
+    token = token.strip()
+    if token in ("0B", "0", "-", "N/A"):
+        return 0.0
+    m = re.fullmatch(r"([\d.]+)([KMG])", token)
+    if not m:
+        return 0.0
+    value, unit = float(m.group(1)), m.group(2)
+    return value * {"K": 1 / 1024, "M": 1.0, "G": 1024.0}[unit]
+
+
+def is_protected(args: str) -> bool:
+    lowered = args.lower()
+    return any(h in lowered for h in PROTECTED_HINTS)
+
+
+def vm_summary() -> dict[str, float]:
+    stats: dict[str, float] = {}
+    for line in run(["vm_stat"]).splitlines():
+        m = re.match(r"(.+?):\s+(\d+)", line)
+        if m:
+            stats[m.group(1).strip().strip('"')] = float(m.group(2))
+    page_mb = PAGE / (1024 * 1024)
+    get = stats.get
+    total_mb = 0.0
+    m = re.search(r"hw\.memsize:\s*(\d+)", run(["sysctl", "hw.memsize"]))
+    if m:
+        total_mb = int(m.group(1)) / (1024 * 1024)
+    return {
+        "total_mb": total_mb,
+        "free_mb": get("Pages free", 0) * page_mb,
+        "wired_mb": get("Pages wired down", 0) * page_mb,
+        "active_mb": get("Pages active", 0) * page_mb,
+        "inactive_mb": get("Pages inactive", 0) * page_mb,
+        "compressor_mb": get("Pages occupied by compressor", 0) * page_mb,
+        "stored_mb": get("Pages stored in compressor", 0) * page_mb,
+    }
+
+
+def top_table(sort_key: str, count: int) -> list[dict]:
+    out = run(["top", "-l", "1", "-s", "0", "-o", sort_key, "-n", str(count)])
+    rows = []
+    for line in out.splitlines():
+        if not re.match(r"\s*\d+\s+\S+", line):
+            continue
+        parts = line.split()
+        if len(parts) < 12:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        sizes = [p for p in parts if re.fullmatch(r"(0B|\d+(?:\.\d+)?[KMG])", p)]
+        if len(sizes) < 3:
+            continue
+        rows.append(
+            {
+                "pid": pid,
+                "cmd": parts[1],
+                "mem_mb": parse_size(sizes[0]),
+                "cmprs_mb": parse_size(sizes[2]),
+                "line": line.strip()[:160],
+            }
+        )
+    return rows
+
+
+def ps_table() -> list[dict]:
+    out = run(["ps", "ax", "-o", "pid=,rss=,etime=,args="])
+    rows = []
+    for line in out.splitlines():
+        m = re.match(r"\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)", line)
+        if not m:
+            continue
+        pid, rss_kb, etime, args = (
+            int(m.group(1)),
+            int(m.group(2)),
+            m.group(3),
+            m.group(4),
+        )
+        rows.append(
+            {
+                "pid": pid,
+                "rss_mb": rss_kb / 1024,
+                "etime": etime,
+                "args": args[:300],
+                "protected": is_protected(args),
+            }
+        )
+    rows.sort(key=lambda r: r["rss_mb"], reverse=True)
+    return rows
+
+
+def find_procs(rows: list[dict], *needles: str) -> list[dict]:
+    out = []
+    for r in rows:
+        lowered = r["args"].lower()
+        if all(n in lowered for n in needles):
+            out.append(r)
+    return out
+
+
+def own_chain() -> set[int]:
+    chain = {os.getpid()}
+    pid = os.getpid()
+    for _ in range(16):
+        try:
+            ppid = int(run(["ps", "-o", "ppid=", "-p", str(pid)]).strip())
+        except (ValueError, AttributeError):
+            break
+        if ppid <= 1 or ppid in chain:
+            break
+        chain.add(ppid)
+        pid = ppid
+    return chain
+
+
+def live_args(pid: int) -> str:
+    return run(["ps", "-o", "args=", "-p", str(pid)]).strip()
+
+
+def sigint_one(pid: int, expect: str) -> str:
+    current = live_args(pid)
+    if not current:
+        return f"PID {pid}: already gone"
+    if expect not in current.lower():
+        return f"PID {pid}: skipped, command changed ({current[:80]})"
+    if is_protected(current):
+        return f"PID {pid}: skipped, protected ({current[:80]})"
+    try:
+        os.kill(pid, signal.SIGINT)
+    except (ProcessLookupError, PermissionError) as e:
+        return f"PID {pid}: signal failed ({e})"
+    time.sleep(2)
+    if live_args(pid):
+        return f"PID {pid}: SIGINT sent, still running (left alone)"
+    return f"PID {pid}: SIGINT sent, exited"
+
+
+def apply_targets(procs: list[dict]) -> tuple[list[dict], list[dict]]:
+    own = own_chain()
+    late: list[dict] = []
+    first: list[dict] = []
+    for p in find_procs(procs, "opencode", "serve"):
+        (late if p["pid"] in own else first).append(
+            {**p, "expect": "opencode", "label": "opencode serve"}
+        )
+    for p in find_procs(procs, "opencode2"):
+        if p["pid"] in own:
+            continue
+        first.append({**p, "expect": "opencode2", "label": "opencode2"})
+    if not shutil.which("watchman"):
+        for p in procs:
+            if "watchman --foreground" in p["args"] and p["pid"] not in own:
+                first.append({**p, "expect": "watchman", "label": "stale watchman"})
+    return first, late
+
+
+def orbstack_status(procs: list[dict], total_mb: float) -> str:
+    lines = []
+    cfg = os.path.expanduser("~/.orbstack/vmconfig.json")
+    mib: float | None = None
+    if os.path.exists(cfg):
+        try:
+            with open(cfg) as f:
+                mib = json.load(f).get("memory_mib")
+            lines.append(f"vmconfig memory_mib={mib} (~{mib / 1024:.0f} GB)")
+            if mib and total_mb and mib / total_mb > 0.5:
+                lines.append(
+                    f"WARN: allocation is >50% of {total_mb / 1024:.0f}G phys; "
+                    "lower in OrbStack Settings > Resources"
+                )
+        except (OSError, ValueError):
+            lines.append("vmconfig unreadable")
+    else:
+        lines.append("vmconfig absent (OrbStack may be uninstalled)")
+    matched = [
+        p
+        for p in procs
+        if "orbstack" in p["args"].lower()
+        and "macos-free-memory" not in p["args"]
+    ]
+    if matched:
+        rss = sum(p["rss_mb"] for p in matched)
+        lines.append(f"procs: {len(matched)} holding {rss:.0f}M RSS")
+        for p in sorted(matched, key=lambda r: r["rss_mb"], reverse=True)[:5]:
+            lines.append(f"  PID {p['pid']} {p['rss_mb']:.0f}M {p['args'][:120]}")
+    else:
+        lines.append("procs: none running")
+    machines = run(["orbctl", "list"]).strip()
+    lines.append("machines:\n" + machines if machines else "machines: none")
+    running = run(["docker", "ps", "--format", "{{.Names}} {{.Image}}"]).strip()
+    stopped = run(
+        ["docker", "ps", "-a", "--filter", "status=exited",
+         "--format", "{{.Names}} {{.Image}}"]
+    ).strip()
+    lines.append("containers (running): " + (running or "none"))
+    if stopped:
+        lines.append("containers (stopped): " + stopped.replace("\n", ", "))
+    return "\n".join("  " + ln for ln in lines)
+
+
+def brew_services_status(procs: list[dict]) -> str:
+    if not shutil.which("brew"):
+        return "  brew not found"
+    raw = run(["brew", "services", "list"]).strip()
+    if not raw:
+        return "  no output from `brew services list`"
+    lines = ["  " + ln for ln in raw.splitlines()]
+    started: list[str] = []
+    for ln in raw.splitlines()[1:]:
+        parts = ln.split()
+        if len(parts) >= 2 and parts[1] in ("started", "running"):
+            started.append(parts[0])
+    for name in started:
+        base = re.split(r"[@\s]", name)[0]
+        matched = [p for p in procs if base in p["args"].lower()]
+        rss = sum(p["rss_mb"] for p in matched)
+        lines.append(
+            f"  {name}: {len(matched)} procs, {rss:.0f}M RSS "
+            f"# brew services stop {name}"
+        )
+        for p in sorted(matched, key=lambda r: r["rss_mb"], reverse=True)[:3]:
+            lines.append(f"    PID {p['pid']} {p['rss_mb']:.0f}M {p['args'][:110]}")
+    return "\n".join(lines)
+
+
+def watchman_status(procs: list[dict]) -> str:
+    daemons = [p for p in procs if p["args"].endswith("/watchman")
+               or "watchman --foreground" in p["args"]]
+    if not daemons and not run(["pgrep", "-x", "watchman"]).strip():
+        return "  not running"
+    if not shutil.which("watchman"):
+        pids = ", ".join(str(p["pid"]) for p in daemons) or "unknown"
+        return (
+            f"  stale daemon still alive (PID {pids}) but client binary "
+            f"is gone; kill {pids}"
+        )
+    raw = run(["watchman", "watch-list"])
+    try:
+        roots = json.loads(raw).get("roots", [])
+        return f"  running, watches: {', '.join(roots) or 'none'}"
+    except (ValueError, AttributeError):
+        return "  running (watch-list unreadable)"
+
+
+def main() -> int:
+    top_n = 12
+    apply = "--apply" in sys.argv
+    if "--top" in sys.argv:
+        try:
+            top_n = int(sys.argv[sys.argv.index("--top") + 1])
+        except (IndexError, ValueError):
+            print("usage: macos-free-memory [--top N] [--apply]", file=sys.stderr)
+            return 2
+
+    vm = vm_summary()
+    print("== System ==")
+    print(f"  uptime: {run(['uptime']).strip()}")
+    print(f"  swap: {run(['sysctl', '-n', 'vm.swapusage']).strip()}")
+    if vm["total_mb"]:
+        print(
+            f"  phys {vm['total_mb'] / 1024:.0f}G: "
+            f"compressor {vm['compressor_mb'] / 1024:.1f}G "
+            f"(stores {vm['stored_mb'] / 1024:.1f}G), "
+            f"wired {vm['wired_mb'] / 1024:.1f}G, "
+            f"active {vm['active_mb'] / 1024:.1f}G, "
+            f"inactive {vm['inactive_mb'] / 1024:.1f}G, "
+            f"free {vm['free_mb'] / 1024:.1f}G"
+        )
+
+    print(f"\n== Top {top_n} by MEM (top -o mem) ==")
+    for r in top_table("mem", max(top_n, 30))[:top_n]:
+        print(f"  {r['pid']:>7} {r['mem_mb']:>7.0f}M cmprs={r['cmprs_mb']:.0f}M {r['cmd']}")
+
+    print(f"\n== Top {top_n} by compressed (top -o cmprs) ==")
+    for r in top_table("cmprs", max(top_n, 30))[:top_n]:
+        print(f"  {r['pid']:>7} cmprs={r['cmprs_mb']:>7.0f}M mem={r['mem_mb']:.0f}M {r['cmd']}")
+
+    procs = ps_table()
+    total_rss = sum(r["rss_mb"] for r in procs)
+    print(f"\n== Total RSS across {len(procs)} procs: {total_rss / 1024:.1f}G ==")
+
+    print("\n== OrbStack ==")
+    print(orbstack_status(procs, vm["total_mb"]))
+
+    print("\n== brew services ==")
+    print(brew_services_status(procs))
+
+    print("\n== watchman ==")
+    print(watchman_status(procs))
+
+    print("\n== Kill candidates (never python-build) ==")
+    cands: list[tuple[str, str]] = []
+
+    serve = find_procs(procs, "opencode", "serve")
+    for p in serve:
+        cands.append(
+            (
+                f"opencode serve PID {p['pid']} "
+                f"({p['rss_mb']:.0f}M RSS, elapsed {p['etime']})",
+                f"kill {p['pid']}  # stop unused `opencode serve --service`, restart on demand",
+            )
+        )
+    for p in find_procs(procs, "opencode2"):
+        if not any(str(p["pid"]) in c for c, _ in cands):
+            cands.append(
+                (
+                    f"opencode2 PID {p['pid']} ({p['rss_mb']:.0f}M, {p['etime']})",
+                    f"kill {p['pid']}",
+                )
+            )
+    claude = find_procs(procs, "claude")
+    claude = [p for p in claude if "shell-snapshots" not in p["args"]]
+    if len(claude) > 1:
+        for p in sorted(claude, key=lambda r: r["rss_mb"])[1:]:
+            cands.append(
+                (
+                    f"duplicate claude PID {p['pid']} ({p['rss_mb']:.0f}M, {p['etime']})",
+                    f"kill {p['pid']}  # keep one session, drop the stale one",
+                )
+            )
+    elif claude:
+        p = claude[0]
+        cands.append(
+            (
+                f"claude PID {p['pid']} ({p['rss_mb']:.0f}M, {p['etime']})",
+                f"kill {p['pid']}  # only if that session is idle",
+            )
+        )
+    for p in find_procs(procs, "codex", "app-server"):
+        cands.append(
+            (f"codex app-server PID {p['pid']} ({p['rss_mb']:.0f}M)", f"kill {p['pid']}")
+        )
+    if run(["pgrep", "-x", "watchman"]).strip():
+        cands.append(
+            ("watchman daemon", "watchman shutdown-server  # respawns on demand")
+        )
+    if find_procs(procs, "postgres:"):
+        cands.append(
+            (
+                "postgres idle backends",
+                "brew services stop postgresql@18  # only if the DB is unused",
+            )
+        )
+    if find_procs(procs, "orbstack helper"):
+        cands.append(
+            (
+                "OrbStack Helper (VM host)",
+                "osascript -e 'quit app \"OrbStack\"'  # only with no containers/machines",
+            )
+        )
+
+    if not cands:
+        print("  none found — pressure is diffuse (long uptime compressor).")
+    for i, (what, fix) in enumerate(cands, 1):
+        print(f"  {i}. {what}\n     {fix}")
+
+    guarded = [p for p in procs if p["protected"]][:8]
+    if guarded:
+        print("\n== Protected (python-build — do not kill) ==")
+        for p in guarded:
+            print(f"  {p['pid']:>7} {p['rss_mb']:>6.0f}M {p['etime']:>14} {p['args'][:120]}")
+
+    if apply:
+        first, late = apply_targets(procs)
+        print("\n== Apply (SIGINT, high-confidence only) ==")
+        if not first and not late:
+            print("  nothing safe to signal")
+        for p in first:
+            print(f"  {p['label']} " + sigint_one(p["pid"], p["expect"]))
+        for p in late:
+            print(
+                f"  {p['label']} PID {p['pid']} is this session's server; "
+                "signaling last"
+            )
+            print(f"  {p['label']} " + sigint_one(p["pid"], p["expect"]))
+        print("  done (re-run without --apply to confirm)")
+
+    print("\nNote: after ~14d uptime only a reboot fully clears the compressor.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
