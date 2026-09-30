@@ -7,8 +7,8 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6-sol"
-model_reasoning_effort = "high"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
 
 [features]
 goals = true
@@ -24,7 +24,7 @@ experimental_mode = true
 
 [agents]
 enabled = true
-max_concurrent_threads_per_session = 16
+max_concurrent_threads_per_session = 32
 
 # Cost-safe GPT-6 fallback for every unspecified child.
 default_subagent_model = "gpt-6-luna"
@@ -54,6 +54,7 @@ screen_reader_detection_done = true
 
 [tui.model_availability_nux]
 gpt-6-astra = 4
+"gpt-6.1-sol" = 4
 
 [model_providers.openrouter]
 name = "openrouter"
@@ -65,5 +66,14 @@ wire_api = "responses"
 hide_rate_limit_model_nudge = true
 
 [projects."/home/josh/d/crabc"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/xsh"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/getsentry"]
+trust_level = "trusted"
+
+[projects."/private/tmp/lol"]
 trust_level = "trusted"
 

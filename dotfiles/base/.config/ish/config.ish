@@ -60,8 +60,7 @@ alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
 alias ta tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
 alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 
-# alias o    opencode2 --auto --standalone
-alias o    opencode2 mini --standalone
+alias o    opencode2 --auto --standalone
 alias codx codex --no-daemon
 
 # work
