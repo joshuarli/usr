@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VERSION="1.0.0"
-readonly GIT=/opt/homebrew/bin/git
-readonly MIN_GIT_VERSION="2.53.0"
+readonly VERSION="2.0.0"
+readonly MIN_GIT_VERSION="2.56.0"
 
-# --- Colors (respect NO_COLOR / non-TTY) ---
+if [[ -n "${GIT:-}" ]]; then
+  GIT_BIN="$GIT"
+elif [[ -x /opt/homebrew/bin/git ]]; then
+  GIT_BIN=/opt/homebrew/bin/git
+elif [[ -x /usr/local/bin/git ]]; then
+  GIT_BIN=/usr/local/bin/git
+else
+  GIT_BIN=git
+fi
 
-if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+if [[ -z "${NO_COLOR:-}" && -t 1 ]]; then
   readonly BOLD=$'\033[1m' DIM=$'\033[2m'
   readonly RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m' BLUE=$'\033[34m'
   readonly RESET=$'\033[0m'
@@ -15,485 +22,523 @@ else
   readonly BOLD="" DIM="" RED="" GREEN="" YELLOW="" BLUE="" RESET=""
 fi
 
-# --- Globals ---
-
 DRY_RUN=false
-
-# --- Helpers ---
+YES=false
+VERIFY=false
+CONFIGURE_ONLY=false
+GLOBALS_ONLY=false
+INCREMENTAL_MIDX=false
+MODE=geometric
+REPO_PATH=""
+REPO_ROOT=""
+IS_BARE=false
+IS_SHALLOW=false
+IS_PARTIAL=false
+HAS_ALTERNATES=false
+WORKTREE_CONFIG=false
+IS_LINKED_WORKTREE=false
+REPO_CONFIG_SCOPE=--local
+HAS_COMMITS=false
+MIDX_MODE=default
 
 info()    { printf "\n%s==>%s %s%s\n" "$BLUE" "$BOLD" "$1" "$RESET"; }
 success() { printf "  %s✓%s %s\n" "$GREEN" "$RESET" "$1"; }
-warn()    { printf "  %s⚠%s %s\n" "$YELLOW" "$RESET" "$1"; }
+warn()    { printf "  %s⚠%s %s\n" "$YELLOW" "$RESET" "$1" >&2; }
 error()   { printf "%serror:%s %s\n" "$RED" "$RESET" "$1" >&2; }
 dim()     { printf "  %s%s%s\n" "$DIM" "$1" "$RESET"; }
 die()     { error "$1"; exit 1; }
 
-
-dry_run_print() {
-  # Replace full git path with just "git" for readability
-  local cmd="${*/$GIT/git}"
-  dim "[dry-run] $cmd"
+resolve_git() {
+  if [[ "$GIT_BIN" == */* ]]; then
+    [[ -x "$GIT_BIN" ]] || die "Git executable not found: $GIT_BIN"
+  else
+    GIT_BIN=$(command -v "$GIT_BIN") || die "Git executable not found"
+  fi
 }
 
-run() {
+git_cmd() {
+  if [[ -n "$REPO_PATH" ]]; then
+    "$GIT_BIN" -C "$REPO_PATH" "$@"
+  else
+    "$GIT_BIN" "$@"
+  fi
+}
+
+print_command() {
+  local arg
+  printf "  %s[dry-run]%s git" "$DIM" "$RESET"
+  if [[ -n "$REPO_PATH" ]]; then printf " -C %q" "$REPO_PATH"; fi
+  for arg in "$@"; do printf " %q" "$arg"; done
+  printf "\n"
+}
+
+git_do() {
   if [[ "$DRY_RUN" == true ]]; then
-    dry_run_print "$@"
+    print_command "$@"
     return 0
   fi
-  "$@"
+  git_cmd "$@"
 }
 
-run_quiet() {
+git_do_stdout_quiet() {
   if [[ "$DRY_RUN" == true ]]; then
-    dry_run_print "$@"
+    print_command "$@"
     return 0
   fi
-  "$@" 2>/dev/null || true
+  git_cmd "$@" >/dev/null
 }
 
-prompt_brew_install() {
-  if [[ "$(uname)" == "Darwin" ]]; then
-    if command -v brew &>/dev/null; then
-      printf "  Install/upgrade via Homebrew? [y/N] "
-      local answer
-      IFS= read -r answer
-      if [[ "$answer" =~ ^[Yy] ]]; then
-        brew install git
-        printf "\n%s✓%s Installed — please re-run git-tune\n" "$GREEN" "$RESET"
-      else
-        printf "  Run manually: brew install git\n"
-      fi
-    else
-      printf "  Install: brew install git\n"
-    fi
-  fi
-  exit 1
+git_value() {
+  git_cmd "$@" 2>/dev/null
 }
 
-check_git_version() {
-  if [[ ! -x "$GIT" ]]; then
-    error "$GIT not found"
-    prompt_brew_install
-  fi
-
-  local raw
-  raw=$("$GIT" --version | awk '{print $3}')
-
-  # Compare major.minor.patch numerically
-  local -a got want
-  IFS=. read -ra got <<< "$raw"
-  IFS=. read -ra want <<< "$MIN_GIT_VERSION"
-  for i in 0 1 2; do
-    local g=${got[$i]:-0} w=${want[$i]:-0}
-    if (( g < w )); then
-      error "Git ${MIN_GIT_VERSION}+ required (found ${raw})"
-      prompt_brew_install
-    elif (( g > w )); then
-      return 0
-    fi
-  done
+config_value() {
+  local scope="$1" key="$2"
+  git_value config "$scope" --get "$key"
 }
-
-default_branch() {
-  # Try remote HEAD first
-  local branch
-  branch=$("$GIT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null) || true
-  branch=${branch#refs/remotes/origin/}
-  if [[ -n "$branch" ]]; then echo "$branch"; return; fi
-  # Fall back to common names
-  for name in main master; do
-    if "$GIT" show-ref --verify --quiet "refs/heads/$name" 2>/dev/null; then
-      echo "$name"; return
-    fi
-  done
-  # Cannot determine default branch safely
-  return 1
-}
-
-# --- Global Config ---
 
 set_config() {
-  local key="$1" value="$2"
-  local current
-  current=$("$GIT" config --global "$key" 2>/dev/null) || true
+  local scope="$1" key="$2" value="$3" current
+  current=$(config_value "$scope" "$key") || current=""
   if [[ "$current" == "$value" ]]; then
-    success "$key = $value ${DIM}(already set)${RESET}"
+    success "$key = $value (already set)"
   else
-    run "$GIT" config --global "$key" "$value"
+    git_do config "$scope" --replace-all "$key" "$value"
     success "$key = $value"
   fi
 }
 
-# apply_group LABEL DESCRIPTION key value [key value ...]
-# In dry-run: displays the group without prompting.
-# Otherwise: prompts y/N, applies on yes, skips on no.
-apply_group() {
-  local label="$1" desc="$2"
-  shift 2
-  local args=("$@")
-  local i current all_set=true
-  for (( i=0; i<${#args[@]}; i+=2 )); do
-    current=$("$GIT" config --global "${args[i]}" 2>/dev/null) || true
-    if [[ "$current" != "${args[i+1]}" ]]; then
-      all_set=false
+check_git_version() {
+  local raw version
+  raw=$("$GIT_BIN" --version | awk '{print $3}')
+  version=${raw%%[-+]*}
+  local -a got want
+  IFS=. read -r -a got <<< "$version"
+  IFS=. read -r -a want <<< "$MIN_GIT_VERSION"
+  local i g w
+  for i in 0 1 2; do
+    g=${got[$i]:-0}
+    w=${want[$i]:-0}
+    if (( g < w )); then
+      die "Git $MIN_GIT_VERSION or newer is required (found $raw); upgrade with: brew upgrade git"
+    elif (( g > w )); then
       break
     fi
   done
-  if [[ "$all_set" == true ]]; then
-    success "$label — already configured"
-    return 0
-  fi
-  printf "\n  %s%s%s\n" "$BOLD" "$label" "$RESET"
-  printf "  %s\n" "$desc"
-  for (( i=0; i<${#args[@]}; i+=2 )); do
-    dim "    ${args[i]} = ${args[i+1]}"
-  done
-  if [[ "$DRY_RUN" == true ]]; then
-    return 0
-  fi
-  printf "  Apply? [y/N] "
-  local answer
-  IFS= read -r answer
-  if [[ "$answer" =~ ^[Yy] ]]; then
-    for (( i=0; i<${#args[@]}; i+=2 )); do
-      set_config "${args[i]}" "${args[i+1]}"
-    done
-  else
-    dim "  Skipped"
-  fi
-}
-
-set_global_config() {
-  info "Global git configuration"
-
-  apply_group \
-    "Commit graph" \
-    "Caches commit metadata so git log, blame, and reachability queries skip object traversal. Updated automatically after gc and fetch." \
-    core.commitGraph       true \
-    gc.writeCommitGraph    true \
-    fetch.writeCommitGraph true
-
-  apply_group \
-    "Filesystem performance" \
-    "fsmonitor hooks into OS file-change notifications so git status only checks files the kernel flagged dirty. untrackedCache persists untracked-file scans between runs. preloadIndex and manyFiles enable threaded index loading. index v4 uses prefix compression." \
-    core.fsmonitor      true \
-    core.untrackedCache true \
-    core.preloadIndex   true \
-    feature.manyFiles   true \
-    index.version       4
-
-  apply_group \
-    "Pack / repack" \
-    "pack.threads 0 uses all CPU cores when packing. multiPackIndex maintains multiple pack files under one index. Bitmap indexes (writeBitmaps, writeBitmapHashCache) answer object reachability with bitwise ops, accelerating clone and fetch." \
-    pack.threads              0 \
-    core.multiPackIndex       true \
-    repack.writeBitmaps       true \
-    pack.writeBitmapHashCache true
-
-  apply_group \
-    "Parallel checkout" \
-    "Writes working-tree files using a thread pool (0 = all cores) instead of serially. Noticeably faster on large checkouts, especially over network-backed storage." \
-    checkout.workers 0
-
-  apply_group \
-    "Diff algorithm" \
-    "Histogram diff (an improvement on patience) produces more readable hunks by preferring unique lines as split points. Usually better than Myers for source code." \
-    diff.algorithm histogram
-
-  apply_group \
-    "Rerere" \
-    "Records how you resolved each merge conflict. On future merges that produce the same conflict, git rerere reapplies the recorded resolution automatically." \
-    rerere.enabled true
-
-  apply_group \
-    "Transfer safety" \
-    "Validates every received object during fetch and push, catching corruption or malformed history early. May reject fetches from repos that already have fsck issues." \
-    transfer.fsckObjects true
-
-  apply_group \
-    "Network" \
-    "protocol.version 2 uses the faster Git wire protocol (server-side ref filtering, fewer round-trips). fetch.parallel 0 fetches all remotes simultaneously." \
-    protocol.version 2 \
-    fetch.parallel   0
-}
-
-# --- Repo Optimization ---
-
-cleanup_common() {
-  info "Pruning stale references"
-
-  local remotes
-  remotes=$("$GIT" remote 2>/dev/null) || true
-  if [[ -n "$remotes" ]]; then
-    while IFS= read -r remote; do
-      run "$GIT" remote prune "$remote"
-      success "Pruned remote: $remote"
-    done <<< "$remotes"
-  else
-    dim "No remotes configured"
-  fi
-
-  run "$GIT" pack-refs --all
-  success "Packed refs"
-
-  run_quiet "$GIT" rerere gc
-  success "Cleaned rerere cache"
-
-  run_quiet "$GIT" worktree prune
-  success "Pruned stale worktrees"
-}
-
-delete_merged_branches() {
-  info "Deleting fully merged branches"
-
-  local default current count=0
-  default=$(default_branch) || { dim "Cannot determine default branch — skipping merged branch deletion"; return; }
-  current=$("$GIT" branch --show-current 2>/dev/null) || current=""
-
-  is_protected() {
-    case "$1" in
-      main|master|develop|development) return 0 ;;
-    esac
-    [[ -n "$current" && "$1" == "$current" ]] && return 0
-    return 1
-  }
-
-  while IFS= read -r line; do
-    # Skip current branch marker
-    [[ "$line" == \** ]] && continue
-    # Strip leading whitespace
-    local branch=${line#"${line%%[![:space:]]*}"}
-    [[ -z "$branch" ]] && continue
-    is_protected "$branch" && continue
-    run "$GIT" branch -d -- "$branch" >/dev/null
-    success "Deleted: $branch"
-    ((count++)) || true
-  done < <("$GIT" branch --merged "$default" 2>/dev/null) || true
-
-  if [[ $count -eq 0 ]]; then
-    dim "No merged branches to delete"
-  else
-    success "Removed $count merged branch(es) total"
-  fi
-}
-
-optimize_safe() {
-  info "Checking repository integrity"
-  run "$GIT" fsck --no-dangling --no-progress
-  success "Repository integrity verified"
-
-  cleanup_common
-
-  info "Running garbage collection (safe)"
-  run "$GIT" gc --quiet
-  success "Garbage collection complete"
-}
-
-optimize_lossy() {
-  info "Checking repository integrity"
-  run "$GIT" fsck --no-dangling --no-progress
-  success "Repository integrity verified"
-
-  info "Expiring old reflogs (90-day threshold)"
-  run "$GIT" reflog expire --expire=90.days --expire-unreachable=90.days --all
-  success "Reflogs expired"
-
-  delete_merged_branches
-  cleanup_common
-
-  info "Geometric repack"
-  run "$GIT" repack -d --geometric=2 --no-write-bitmap-index --quiet
-  success "Geometric repack complete"
-
-  info "Pruning unreachable objects"
-  run "$GIT" prune
-  success "Unreachable objects pruned"
-}
-
-optimize_aggressive() {
-  warn "Aggressive mode: this will purge all expendable data"
-
-  info "Checking repository integrity"
-  run "$GIT" fsck --no-dangling --no-progress
-  success "Repository integrity verified"
-
-  info "Expiring all reflogs"
-  run "$GIT" reflog expire --expire=now --expire-unreachable=now --all
-  success "All reflogs expired"
-
-  delete_merged_branches
-  cleanup_common
-
-  info "Aggressive repack (depth=250, window=250 — may take a while)"
-  run "$GIT" repack -Ad -f --depth=250 --window=250 --write-bitmap-index --quiet
-  success "Aggressive repack complete"
-
-  info "Pruning all unreachable objects"
-  run "$GIT" prune --expire=now
-  success "Unreachable objects pruned"
-}
-
-finalize() {
-  info "Writing performance indexes"
-  run "$GIT" commit-graph write --reachable --changed-paths
-  success "Commit-graph written (with Bloom filters)"
-
-  run_quiet "$GIT" multi-pack-index write --bitmap
-  success "Multi-pack-index written (with bitmaps)"
-}
-
-# --- Plan & Confirm ---
-
-print_plan() {
-  local tier="$1" repo_root="$2"
-
-  printf "\n%sgit-tune — %s mode%s\n" "$BOLD" "$tier" "$RESET"
-  case "$tier" in
-    safe)
-      printf "Packs objects and runs standard gc. Nothing is permanently deleted unless\n"
-      printf "it was already unreachable for more than 2 weeks.\n"
-      ;;
-    lossy)
-      printf "Expires reflogs older than 90 days, deletes merged branches, and immediately\n"
-      printf "prunes any objects that become unreachable as a result. Permanent.\n"
-      ;;
-    aggressive)
-      printf "%sExpires the entire reflog immediately and purges all unreachable objects.\n"
-      printf "Maximum compression, maximum data loss. Irreversible.%s\n" "$YELLOW" "$RESET"
-      ;;
-  esac
-
-  if [[ -n "$repo_root" ]]; then
-    printf "\n  %sRepository:%s %s\n" "$BOLD" "$RESET" "$repo_root"
-    case "$tier" in
-      safe)
-        printf "    - fsck --no-dangling: verify object integrity (read-only)\n"
-        printf "    - remote prune: drop tracking refs for deleted upstream branches\n"
-        printf "    - pack-refs --all: consolidate loose refs into packed-refs\n"
-        printf "    - rerere gc / worktree prune: clear stale resolution and worktree records\n"
-        printf "    - gc: expire reflogs >90d reachable / >30d unreachable,\n"
-        printf "          pack loose objects, prune unreachable objects older than 2 weeks\n"
-        ;;
-      lossy)
-        printf "    - fsck --no-dangling: verify object integrity (read-only)\n"
-        printf "    - reflog expire --expire=90.days: drop reflog entries older than 90 days\n"
-        printf "    - branch -d: delete local branches fully merged into default branch\n"
-        printf "    - remote prune / pack-refs --all / rerere gc / worktree prune\n"
-        printf "    - repack -d --geometric=2: incrementally repack without a full rewrite\n"
-        printf "    - prune: immediately remove all objects unreachable after reflog expiry\n"
-        ;;
-      aggressive)
-        printf "    - fsck --no-dangling: verify object integrity (read-only)\n"
-        printf "    %s- reflog expire --expire=now: discard the entire reflog immediately%s\n" "$YELLOW" "$RESET"
-        printf "    - branch -d: delete local branches fully merged into default branch\n"
-        printf "    - remote prune / pack-refs --all / rerere gc / worktree prune\n"
-        printf "    %s- repack -Ad --depth=250 --window=250: full repack, may take a while%s\n" "$YELLOW" "$RESET"
-        printf "    %s- prune --expire=now: discard all unreachable objects immediately%s\n" "$YELLOW" "$RESET"
-        ;;
-    esac
-    printf "    - commit-graph write --changed-paths: build Bloom-filter traversal cache\n"
-    printf "    - multi-pack-index write --bitmap: unified index + bitmaps across all packs\n"
-  else
-    printf "\n  %sRepository:%s (not inside a git repo — will be skipped)\n" "$BOLD" "$RESET"
-  fi
 }
 
 confirm() {
+  if [[ "$YES" == true || "$DRY_RUN" == true ]]; then return 0; fi
   printf "\n  Proceed? [y/N] "
   local answer
   IFS= read -r answer
-  [[ "$answer" =~ ^[Yy] ]] || { printf "Aborted.\n"; exit 0; }
+  [[ "$answer" =~ ^[Yy]$ ]] || { printf "Aborted.\n"; exit 0; }
 }
 
-# --- Main ---
-
 usage() {
-  cat <<'EOF'
-git-tune — Optimize git repositories and configure global settings
+  cat <<'HELP'
+git-tune — Configure Git for responsive daily use and maintain repository indexes
 
-Usage: git-tune [OPTIONS]
+Usage: git-tune [-C REPO] [OPTIONS]
 
-Tiers:
-  --safe          Safe optimizations, no data loss (default)
-  --lossy         Expire old reflogs (90d), delete merged branches
-  --aggressive    Maximum compression, purge all expendable data
+Repository modes:
+  (default)          Apply repository-local settings and geometric repacking
+  --full             Repack reachable objects and preserve unreachable objects in cruft packs
+  --redelta          Full repack with fresh deltas at depth 50 and window 10
+  --configure-only   Configure and warm working-tree caches without repacking
 
-Options:
-  --dry-run       Show what would be done without executing
-  --globals-only  Only set global git config, skip repo optimization
-  --no-globals    Skip global config, only optimize repo
-  -h, --help      Show this help message
-  --version       Show version
-EOF
+Other options:
+  --verify           Run a full object check before work and verify written indexes
+  --incremental-midx Write layered MIDX output during geometric repacks; existing chains are preserved
+  --globals-only     Apply shared performance settings without repository maintenance
+  --no-globals       Keep the run repository-local (the default)
+  --dry-run          Print planned commands without changing files or starting daemons
+  --yes              Skip the confirmation prompt
+  -C, --directory    Repository to tune (default: current directory)
+  -h, --help         Show this help message
+  --version          Show version
+
+The tuner does not expire reflogs, prune unreachable objects, delete branches,
+prune remotes, or clean worktree and rerere records.
+HELP
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -C|--directory)
+        [[ $# -ge 2 ]] || die "$1 requires a repository path"
+        REPO_PATH=$2
+        shift 2
+        ;;
+      --dry-run) DRY_RUN=true; shift ;;
+      --yes) YES=true; shift ;;
+      --verify) VERIFY=true; shift ;;
+      --full)
+        [[ "$MODE" == geometric ]] || die "--full and --redelta cannot be combined"
+        MODE=full
+        shift
+        ;;
+      --redelta)
+        [[ "$MODE" == geometric ]] || die "--full and --redelta cannot be combined"
+        MODE=redelta
+        shift
+        ;;
+      --configure-only) CONFIGURE_ONLY=true; shift ;;
+      --incremental-midx) INCREMENTAL_MIDX=true; shift ;;
+      --globals-only) GLOBALS_ONLY=true; shift ;;
+      --no-globals) shift ;;
+      --version) printf "git-tune %s\n" "$VERSION"; exit 0 ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "Unknown option: $1" ;;
+    esac
+  done
+  if [[ "$GLOBALS_ONLY" == true && "$CONFIGURE_ONLY" == true ]]; then
+    die "--globals-only and --configure-only cannot be combined"
+  fi
+  if [[ "$GLOBALS_ONLY" == true && "$MODE" != geometric ]]; then
+    die "--full and --redelta require a repository"
+  fi
+  if [[ "$GLOBALS_ONLY" == true && "$INCREMENTAL_MIDX" == true ]]; then
+    die "--incremental-midx requires a repository"
+  fi
+  if [[ "$GLOBALS_ONLY" == true && "$VERIFY" == true ]]; then
+    die "--verify requires a repository"
+  fi
+  if [[ "$CONFIGURE_ONLY" == true && ( "$MODE" != geometric || "$INCREMENTAL_MIDX" == true ) ]]; then
+    die "--configure-only cannot be combined with repack mode options"
+  fi
+  if [[ "$MODE" != geometric && "$INCREMENTAL_MIDX" == true ]]; then
+    die "--incremental-midx is available with geometric repacks; --full and --redelta rebuild a flat MIDX"
+  fi
+}
+
+load_repository_context() {
+  git_cmd rev-parse --git-dir >/dev/null 2>&1 || die "No Git repository found; use -C REPO or --globals-only"
+
+  local bare shallow partial refs alternates_path midx_chain git_dir common_dir
+  bare=$(git_value rev-parse --is-bare-repository)
+  [[ "$bare" == true ]] && IS_BARE=true
+  git_dir=$(git_value rev-parse --path-format=absolute --git-dir)
+  common_dir=$(git_value rev-parse --path-format=absolute --git-common-dir)
+  if [[ "$git_dir" != "$common_dir" ]]; then
+    IS_LINKED_WORKTREE=true
+  fi
+  if [[ "$IS_BARE" == true ]]; then
+    REPO_ROOT=$git_dir
+  else
+    REPO_ROOT=$(git_value rev-parse --show-toplevel)
+  fi
+
+  shallow=$(git_value rev-parse --is-shallow-repository) || shallow=false
+  [[ "$shallow" == true ]] && IS_SHALLOW=true
+  partial=$(git_value config --get extensions.partialClone) || partial=""
+  if [[ -n "$partial" ]] || git_value config --get-regexp '^remote\..*\.promisor$' >/dev/null; then
+    IS_PARTIAL=true
+  fi
+  if [[ "$(git_value config --bool --get extensions.worktreeConfig || true)" == true ]]; then
+    WORKTREE_CONFIG=true
+  fi
+
+  alternates_path=$(git_value rev-parse --path-format=absolute --git-path objects/info/alternates)
+  if [[ -s "$alternates_path" ]]; then HAS_ALTERNATES=true; fi
+
+  refs=$(git_value rev-list --all --max-count=1) || refs=""
+  if [[ -n "$refs" ]] || git_value rev-parse --verify --quiet HEAD >/dev/null; then
+    HAS_COMMITS=true
+  fi
+
+  if [[ "$IS_LINKED_WORKTREE" == true && "$WORKTREE_CONFIG" == true ]]; then
+    REPO_CONFIG_SCOPE=--worktree
+  fi
+
+  midx_chain=$(git_value rev-parse --path-format=absolute --git-path objects/pack/multi-pack-index.d)
+  if [[ "$MODE" == geometric && ( "$INCREMENTAL_MIDX" == true || -d "$midx_chain" ) ]]; then
+    MIDX_MODE=incremental
+  fi
+
+  local maintenance_strategy maintenance_repack
+  maintenance_strategy=$(git_value config --get maintenance.strategy) || maintenance_strategy=""
+  maintenance_repack=$(git_value config --bool --get maintenance.incremental-repack.enabled) || maintenance_repack=""
+  if [[ "$MIDX_MODE" == incremental ]] && { [[ "$maintenance_repack" == true ]] || { [[ "$maintenance_strategy" == incremental ]] && [[ "$maintenance_repack" != false ]]; }; }; then
+    die "Layered MIDX cannot be combined with the maintenance.incremental-repack task; disable that task before using this tuner"
+  fi
+}
+
+set_repository_settings() {
+  info "Applying repository-local performance settings"
+  set_config "$REPO_CONFIG_SCOPE" core.commitGraph true
+  set_config "$REPO_CONFIG_SCOPE" commitGraph.changedPaths true
+  set_config "$REPO_CONFIG_SCOPE" commitGraph.changedPathsVersion 2
+  set_config "$REPO_CONFIG_SCOPE" index.threads true
+  set_config "$REPO_CONFIG_SCOPE" index.version 4
+  set_config "$REPO_CONFIG_SCOPE" fetch.negotiationAlgorithm skipping
+  set_config "$REPO_CONFIG_SCOPE" pack.allowPackReuse multi
+  set_config "$REPO_CONFIG_SCOPE" pack.writeBitmapLookupTable true
+  set_config "$REPO_CONFIG_SCOPE" core.multiPackIndex true
+
+  if [[ "$IS_BARE" == true ]]; then
+    dim "Bare repository: skipping working-tree cache setup"
+    return
+  fi
+
+  local sparse sparse_checkout index_path index_version index_hex
+  sparse=$(git_value config --bool --get index.sparse || true)
+  sparse_checkout=$(git_value config --bool --get core.sparseCheckout || true)
+  if [[ "$DRY_RUN" == true ]]; then
+    local untracked
+    untracked=$(config_value "$REPO_CONFIG_SCOPE" core.untrackedCache) || untracked=""
+    if [[ "$untracked" == true ]]; then
+      success "core.untrackedCache = true (already set)"
+    else
+      dim "Would probe the filesystem for untracked-cache support"
+    fi
+  else
+    local untracked
+    untracked=$(config_value "$REPO_CONFIG_SCOPE" core.untrackedCache) || untracked=""
+    if [[ "$untracked" == true ]] || git_cmd update-index --test-untracked-cache >/dev/null 2>&1; then
+      set_config "$REPO_CONFIG_SCOPE" core.untrackedCache true
+    else
+      set_config "$REPO_CONFIG_SCOPE" core.untrackedCache false
+      warn "Filesystem does not support Git's untracked cache; continuing without it"
+    fi
+  fi
+
+  if [[ "$sparse" == true || "$sparse_checkout" == true ]]; then
+    dim "Sparse checkout detected: leaving the existing index format untouched"
+    return
+  fi
+
+  index_path=$(git_value rev-parse --path-format=absolute --git-path index)
+  if [[ -f "$index_path" ]]; then
+    index_hex=$(/usr/bin/od -An -tx1 -j4 -N4 "$index_path" 2>/dev/null | tr -d ' \n') || index_hex=""
+    index_version=${index_hex:6:2}
+    if [[ "$index_version" != 04 ]]; then
+      git_do update-index --index-version=4
+      success "Converted the ordinary index to version 4"
+    else
+      success "Index is already version 4"
+    fi
+  fi
+}
+
+fsmonitor_scope() {
+  printf '%s' "$REPO_CONFIG_SCOPE"
+}
+
+configure_fsmonitor() {
+  [[ "$IS_BARE" == true ]] && return 0
+
+  local current scope
+  current=$(git_value config --get core.fsmonitor) || current=""
+  case "$current" in
+    ""|false|False|FALSE|0|no|off|NO|OFF|true|True|TRUE|1|yes|on|YES|ON) ;;
+    *)
+      success "Preserving custom core.fsmonitor hook: $current"
+      return 0
+      ;;
+  esac
+  scope=$(fsmonitor_scope)
+  if [[ "$IS_LINKED_WORKTREE" == true && "$WORKTREE_CONFIG" != true ]]; then
+    dim "Linked worktrees share repository-local FSMonitor settings because extensions.worktreeConfig is disabled"
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    print_command fsmonitor--daemon start
+    git_do config "$scope" --replace-all core.fsmonitor true
+    return 0
+  fi
+
+  if [[ "$(uname)" != Darwin ]]; then
+    warn "Built-in FSMonitor setup is only enabled automatically on macOS"
+    git_do config "$scope" --replace-all core.fsmonitor false
+    return 0
+  fi
+
+  if git_cmd fsmonitor--daemon status >/dev/null 2>&1 || git_cmd fsmonitor--daemon start >/dev/null 2>&1; then
+    git_do config "$scope" --replace-all core.fsmonitor true
+    success "Built-in FSMonitor daemon is ready"
+  else
+    git_do config "$scope" --replace-all core.fsmonitor false
+    warn "Could not start FSMonitor; disabled it for this repository and continuing"
+  fi
+}
+
+warm_working_tree() {
+  [[ "$IS_BARE" == true ]] && return 0
+  info "Warming working-tree caches"
+  git_do_stdout_quiet status --porcelain=v1 --untracked-files=normal
+  success "Working-tree caches initialized"
+}
+
+verify_objects() {
+  info "Checking repository object integrity"
+  git_do fsck --full --no-dangling --no-progress
+  success "Repository object check passed"
+}
+
+write_pack_indexes() {
+  local midx_arg
+  if [[ "$MIDX_MODE" == incremental ]]; then
+    midx_arg=--write-midx=incremental
+  else
+    midx_arg=--write-midx
+  fi
+
+  info "Repacking objects ($MODE mode)"
+  if [[ "$MODE" == geometric ]]; then
+    git_do repack --local -d --geometric=2 "$midx_arg" --write-bitmap-index --quiet
+  elif [[ "$MODE" == full ]]; then
+    git_do repack --local -a -d --cruft "$midx_arg" --write-bitmap-index --quiet
+  else
+    git_do repack --local -a -d --cruft -f --depth=50 --window=10 "$midx_arg" --write-bitmap-index --quiet
+  fi
+  success "Object packs and bitmap index written"
+
+  if [[ "$HAS_COMMITS" == true ]]; then
+    info "Writing commit-graph"
+    if [[ "$MODE" == geometric ]]; then
+      git_do commit-graph write --reachable --split --changed-paths
+      success "Incremental commit-graph layer written"
+    else
+      git_do commit-graph write --reachable --split=replace --changed-paths
+      success "Complete reachable commit-graph rebuilt"
+    fi
+  else
+    dim "No commits are reachable from refs; skipping commit-graph writing"
+  fi
+
+  info "Packing refs when Git's automatic threshold is met"
+  git_do pack-refs --auto
+  success "Reference packing checked"
+}
+
+verify_indexes() {
+  [[ "$VERIFY" == true ]] || return 0
+  info "Verifying written indexes"
+
+  local midx graph split_graph
+  if [[ "$DRY_RUN" == true && "$CONFIGURE_ONLY" != true ]]; then
+    git_do multi-pack-index verify
+    if [[ "$HAS_COMMITS" == true ]]; then
+      git_do commit-graph verify
+    fi
+    return 0
+  fi
+
+  midx=$(git_value rev-parse --path-format=absolute --git-path objects/pack/multi-pack-index)
+  if [[ -f "$midx" || -d "${midx}.d" ]]; then
+    git_do multi-pack-index verify
+    success "Multi-pack index verified"
+  fi
+
+  graph=$(git_value rev-parse --path-format=absolute --git-path objects/info/commit-graph)
+  split_graph=$(git_value rev-parse --path-format=absolute --git-path objects/info/commit-graphs/commit-graph-chain)
+  if [[ -f "$graph" || -f "$split_graph" ]]; then
+    git_do commit-graph verify
+    success "Commit-graph verified"
+  fi
+}
+
+apply_global_settings() {
+  info "Applying shared performance settings"
+  set_config --global core.commitGraph true
+  set_config --global core.untrackedCache true
+  set_config --global core.preloadIndex true
+  set_config --global feature.manyFiles true
+  set_config --global index.version 4
+  set_config --global index.threads true
+  set_config --global commitGraph.changedPaths true
+  set_config --global commitGraph.changedPathsVersion 2
+  set_config --global fetch.negotiationAlgorithm skipping
+  set_config --global core.multiPackIndex true
+  set_config --global pack.allowPackReuse multi
+  set_config --global pack.writeBitmapLookupTable true
+}
+
+print_plan() {
+  info "Plan"
+  if [[ "$GLOBALS_ONLY" == true ]]; then
+    dim "Apply shared performance settings; repository settings and data will not be changed"
+    dim "core.commitGraph = true"
+    dim "core.untrackedCache = true"
+    dim "core.preloadIndex = true"
+    dim "feature.manyFiles = true"
+    dim "index.version = 4; index.threads = true"
+    dim "commitGraph.changedPaths = true; commitGraph.changedPathsVersion = 2"
+    dim "fetch.negotiationAlgorithm = skipping"
+    dim "core.multiPackIndex = true"
+    dim "pack.allowPackReuse = multi; pack.writeBitmapLookupTable = true"
+    return
+  fi
+
+  printf "  Repository: %s\n" "$REPO_ROOT"
+  if [[ "$IS_LINKED_WORKTREE" == true ]]; then
+    if [[ "$REPO_CONFIG_SCOPE" == --worktree ]]; then
+      dim "Linked worktree: repository settings use worktree-specific config"
+    else
+      dim "Linked worktree: repository settings use shared config because extensions.worktreeConfig is disabled"
+    fi
+  fi
+  if [[ "$HAS_ALTERNATES" == true ]]; then
+    dim "Alternate object store detected: repack will only write objects owned by this repository"
+  fi
+  if [[ "$IS_PARTIAL" == true ]]; then
+    dim "Partial clone detected: Git's promisor-aware repack keeps promised objects recoverable"
+  fi
+  if [[ "$IS_SHALLOW" == true ]]; then
+    dim "Shallow repository detected: repacking and graph traversal respect its shallow history boundary"
+  fi
+  dim "Apply repository-local graph, index, negotiation, pack, and working-tree cache settings"
+  if [[ "$CONFIGURE_ONLY" == true ]]; then
+    dim "Warm working-tree caches and stop before repacking"
+    return
+  fi
+  case "$MODE" in
+    geometric) dim "Geometrically repack the smaller packs and refresh MIDX bitmap indexes" ;;
+    full) dim "Repack reachable objects and store unreachable objects in cruft packs" ;;
+    redelta) dim "Full cruft-preserving repack with fresh deltas at depth 50 and window 10" ;;
+  esac
+  dim "Write split commit-graph data and check automatic ref packing"
+  dim "No reflogs, unreachable objects, branches, remotes, worktree records, or rerere data will be expired or removed"
+  if [[ "$VERIFY" == true ]]; then
+    dim "Run a full object check before work and verify written indexes afterward"
+  fi
+  if [[ "$MIDX_MODE" == incremental ]]; then
+    dim "Write layered MIDX output"
+  fi
 }
 
 main() {
-  local tier="safe"
-  local globals=true
-  local repo=true
-
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --safe)         tier="safe"; shift ;;
-      --lossy)        tier="lossy"; shift ;;
-      --aggressive)   tier="aggressive"; shift ;;
-      --dry-run)      DRY_RUN=true; shift ;;
-      --globals-only) globals=true; repo=false; shift ;;
-      --no-globals)   globals=false; repo=true; shift ;;
-      --version)      echo "git-tune $VERSION"; exit 0 ;;
-      -h|--help)      usage; exit 0 ;;
-      *)              die "Unknown option: $1" ;;
-    esac
-  done
-
+  parse_args "$@"
+  resolve_git
   check_git_version
 
-  # Determine repo context up front so the plan can reference it
-  local repo_root=""
-  if [[ "$repo" == true ]]; then
-    if "$GIT" rev-parse --is-inside-work-tree &>/dev/null; then
-      repo_root=$("$GIT" rev-parse --show-toplevel)
-    elif [[ "$globals" == false ]]; then
-      die "Not in a git repository"
-    fi
+  if [[ "$GLOBALS_ONLY" != true ]]; then
+    load_repository_context
   fi
 
-  if [[ "$repo" == true ]]; then
-    if [[ "$DRY_RUN" == true ]]; then
-      printf "\n%s[dry-run mode — no changes will be made]%s\n" "$YELLOW" "$RESET"
-      print_plan "$tier" "$repo_root"
-    else
-      print_plan "$tier" "$repo_root"
-      confirm
-    fi
+  print_plan
+  confirm
+
+  if [[ "$GLOBALS_ONLY" == true ]]; then
+    apply_global_settings
+    return 0
   fi
 
-  local start=$SECONDS
+  set_repository_settings
+  configure_fsmonitor
+  warm_working_tree
 
-  # Repo optimization first
-  if [[ "$repo" == true ]]; then
-    if [[ -z "$repo_root" ]]; then
-      warn "Not in a git repository — skipping repo optimization"
-    else
-      printf "\n%sgit-tune:%s optimizing %s %s(%s)%s\n" \
-        "$BOLD" "$RESET" "$repo_root" "$DIM" "$tier" "$RESET"
-
-      case "$tier" in
-        safe)       optimize_safe ;;
-        lossy)      optimize_lossy ;;
-        aggressive) optimize_aggressive ;;
-      esac
-
-      finalize
-    fi
+  if [[ "$VERIFY" == true ]]; then verify_objects; fi
+  if [[ "$CONFIGURE_ONLY" == true ]]; then
+    verify_indexes
+    success "Configuration complete"
+    return 0
   fi
-
-  # Global config last (interactive, so repo work runs uninterrupted)
-  if [[ "$globals" == true ]]; then
-    set_global_config
-  fi
-
-  printf "%sDone in %ds%s\n" "$GREEN" "$(( SECONDS - start ))" "$RESET"
+  write_pack_indexes
+  verify_indexes
+  success "git-tune completed"
 }
 
 main "$@"

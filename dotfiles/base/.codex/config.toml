@@ -77,3 +77,12 @@ trust_level = "trusted"
 [projects."/private/tmp/lol"]
 trust_level = "trusted"
 
+[projects."/Users/josh/usr"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/sentry-infra-tools"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/ops"]
+trust_level = "trusted"
+
