@@ -43,13 +43,11 @@ tests, and docs.
 
 ## Workflow Rules
 
-- Do not run formatters or linters; the user does that independently.
-- Do not run pre-commit hooks; the user verifies commits independently.
-- Never push to a remote unless explicitly told to.
+- Do not run formatters. It's a waste of tokens and unnecessary churn.
+- Do not git push.
+- Reserve release builds for final verification, or when performance is the primary concern.
 
 ## Keep code comments self-contained
 
-- Never use code comments or docstrings to point to planning or other documentation. Do not cite document names, paths, links, sections, numbered clauses, milestones (such as `M1`), phases, roadmap items, issues, PRs, or acceptance-criterion labels.
+- Never use code comments or docstrings to point to planning documentation. Do not cite document names, paths, links, sections, numbered clauses, milestones (such as `M1`), phases, roadmap items, issues, PRs, or acceptance-criterion labels.
 - Comments must remain useful if every planning and documentation file is renamed or deleted. State the local reason, invariant, constraint, or behavior directly in domain terms.
-- If a comment only points elsewhere, remove it. If it carries durable technical meaning, rewrite that meaning in the comment itself; keep broader explanation in documentation, without making the comment depend on that document.
-- Before finishing code changes, search touched source files for document names and planning identifiers, including section-like and milestone-like labels.
