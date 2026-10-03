@@ -3,20 +3,15 @@
 ## Before editing
 
 - Read the relevant code, callers, tests, and local instructions. Follow existing conventions.
-- Resolve ordinary ambiguity with the smallest reversible assumption. Ask only when a choice
-  changes the contract, the user's intent, or carries real risk.
+- Resolve ordinary ambiguity with the smallest reversible assumption. Ask only when a choice changes the contract, the user's intent, or carries real risk.
 
 ## Code
 
 - Name things for the domain, one name per concept. Mark legacy paths as legacy.
-- Prefer precise types and narrow interfaces that make invalid states hard to represent.
-  Don't loosen a contract or hide a fallback to make a patch fit.
-- Comment the why, constraints, and non-obvious behavior above the definition. Keep existing
-  comments that do this. In docs, explain in domain terms and cite code in backticks.
-- Keep changes focused. Add no dependency without asking. Temporary workarounds must say why
-  they exist and what removes them.
-- No speculative abstractions, config knobs, or backward-compat shims unless asked. Delete dead
-  code instead of deprecating it.
+- Prefer precise types and narrow interfaces that make invalid states hard to represent. Don't loosen a contract or hide a fallback to make a patch fit.
+- Comment the why, constraints, and non-obvious behavior above the definition. Keep existing comments that do this.
+- Keep changes focused. Add no dependency without asking. Temporary workarounds must say why they exist and what removes them.
+- No speculative abstractions, config knobs, or backward-compat shims unless asked. Delete dead code instead of deprecating it.
 - Fail loudly. Don't swallow errors or add silent defaults.
 
 ## Tests and verification
@@ -24,13 +19,11 @@
 - Test observable behavior and invariants, not trivia. Write tests first when behavior is clear.
 - Bug fixes: reproduce with a minimal failing test, then fix the root cause. Keep the test.
 - Never weaken or delete a test to make it pass unless the test is wrong, and say so.
-- Verify with the narrowest hard check (compiler, type checker, focused test), then widen as
-  needed.
+- Verify with the narrowest hard check (compiler, type checker, focused test), then widen as needed.
 
 ## Contract changes
 
-Always surface changes to APIs, types, schemas, permissions, invariants, or transaction
-boundaries to the user. Update code, tests, and docs together.
+Always surface changes to APIs, types, schemas, permissions, invariants, or transaction boundaries to the user. Update code, tests, and docs together.
 
 ## Replies
 
