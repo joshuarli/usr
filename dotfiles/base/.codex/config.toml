@@ -8,7 +8,7 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
 model = "gpt-6-luna"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "max"
 
 [features]
 goals = true
@@ -64,4 +64,28 @@ wire_api = "responses"
 
 [notice]
 hide_rate_limit_model_nudge = true
+
+[projects."/Users/josh/d/discover"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/xsh"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/extensions"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/nanoshop"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/shadowdriver"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/sentry-options-automator"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/sentry"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/fdu"]
+trust_level = "trusted"
 

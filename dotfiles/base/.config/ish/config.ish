@@ -62,6 +62,7 @@ alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 
 alias o    opencode2 --auto --standalone
 alias codx codex --no-daemon
+alias pi   vault OPENROUTER_API_KEY -- pi
 
 # work
 set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
