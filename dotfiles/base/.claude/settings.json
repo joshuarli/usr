@@ -7,10 +7,10 @@
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "64"
   },
   "permissions": {
-    "defaultMode": "bypassPermissions",
+    "defaultMode": "auto",
     "skipDangerousModePermissionPrompt": true
   },
-  "model": "opus",
+  "model": "sonnet",
   "hooks": {
     "Notification": [
       {
@@ -46,7 +46,7 @@
       "effortLevel": "medium"
     },
     "claude-sonnet-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
     }
   },
   "emojiCompletionEnabled": false,

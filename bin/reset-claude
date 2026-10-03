@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+claude_dir=$HOME/.claude
+
+[ -d "$claude_dir" ] || exit 0
+
+for path in "$claude_dir"/* "$claude_dir"/.[!.]* "$claude_dir"/..?*; do
+    case $path in
+        "$claude_dir/CLAUDE.md"|"$claude_dir/settings.json"|"$claude_dir/skills")
+            ;;
+        *)
+            rm -rf "$path"
+            ;;
+    esac
+done
