@@ -8,7 +8,10 @@ Preserve externally observable behavior and public APIs unless changing them is 
 
 Use this stack where applicable:
 
-- **Deno, latest stable** — canonical runtime, package manager, task runner, script runner, and lockfile owner.
+- **Deno, latest stable** — canonical runtime, task runner, script runner, and execution environment.
+- **pnpm, latest stable** — canonical package manager, dependency resolver, global content-addressed package store, and lockfile owner.
+- **`package.json`** — canonical dependency manifest for npm/JSR ecosystem dependencies.
+- **`pnpm-lock.yaml`** — canonical dependency lockfile.
 - **TypeScript 7 stable** — strict TypeScript and the native compiler.
 - **Vite 8** — frontend dev/build system, using its native Rolldown/Oxc pipeline.
 - **Solid 2 RC** — UI/reactivity layer for browser applications.
@@ -25,35 +28,229 @@ Use this stack where applicable:
 
 Apply only layers that make sense for the repository. A server-only TypeScript service does not need Solid or Vite. A library does not need an application server. A frontend application should use the complete relevant frontend stack.
 
-## Deno is canonical
+## Deno runs the project; pnpm owns dependencies
 
 Do **not** introduce Bun.
 
 Do **not** introduce Vite+ / `vp`.
 
-Vite+ currently assumes a Node-based tooling environment and one of npm/pnpm/Yarn/Bun as package manager. We want Deno instead.
+The division of responsibility is deliberate:
 
-Run Vite, Vitest, Oxc tooling, TypeScript tooling, and other npm ecosystem packages through Deno's npm compatibility.
+```text
+pnpm
+  dependency resolution
+  package installation
+  package.json
+  pnpm-lock.yaml
+  global content-addressed store
+  node_modules materialization
 
-The normal developer interface should be:
+Deno
+  runtime
+  task execution
+  script execution
+  application/server execution
+  permissions
+  Deno-native tests where appropriate
+```
+
+Do not make Deno and pnpm competing package managers.
+
+For a repository using Vite or the npm ecosystem, **pnpm is the sole package-management authority**. Deno consumes the resulting dependency tree but does not own or recreate it.
+
+The normal fresh-checkout developer interface should be:
 
 ```sh
-deno install
+pnpm install
 deno task dev
 deno task build
 deno task test
 deno task check
 ```
 
-Use `deno.json` / `deno.jsonc` for canonical tasks and Deno configuration. Commit `deno.lock` and use frozen-lockfile behavior in CI.
+Dependency changes should likewise go through pnpm:
 
-A `package.json` may remain when it is genuinely useful for npm package metadata, publishing, Vite ecosystem compatibility, or dependency metadata. Its existence does not make npm the package manager: dependency installation and task execution still go through Deno.
+```sh
+pnpm add <package>
+pnpm add -D <package>
+pnpm remove <package>
+pnpm update
+```
 
-Delete `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `bun.lockb`, Bun configuration, package-manager shims, and package-manager-specific scripts once they are no longer required.
+Do not use `deno add`, `deno remove`, or `deno install` to mutate the project dependency graph in a pnpm-owned repository.
 
-Allow Deno to create `node_modules` when npm/Vite tooling needs it; it is generated state, not the package-management authority.
+### Canonical configuration
 
-Do not add Node as a required user-facing runtime merely because an npm package historically assumed Node. Deno's Node/npm compatibility should be the default. Keep a Node dependency only if an actual incompatibility requires it and there is no reasonable Deno-compatible solution.
+Use `package.json` as the dependency manifest.
+
+Commit:
+
+```text
+package.json
+pnpm-lock.yaml
+deno.json / deno.jsonc
+```
+
+For workspaces, use `pnpm-workspace.yaml` when actually needed.
+
+Pin the expected pnpm release through the appropriate project metadata where practical so developers and CI use the same major/toolchain generation.
+
+Use `deno.json` / `deno.jsonc` for canonical tasks and Deno runtime configuration.
+
+For normal Vite/npm projects, configure Deno explicitly along these lines:
+
+```json
+{
+  "nodeModulesDir": "manual",
+  "lock": false
+}
+```
+
+`nodeModulesDir: "manual"` is intentional: **pnpm creates and owns `node_modules`; Deno only consumes it.**
+
+Do not use Deno's automatic npm installer or its `.deno` node_modules layout in a pnpm-owned project.
+
+Do not configure Deno's node-modules linker merely to reproduce what pnpm already manages.
+
+With this arrangement:
+
+```text
+pnpm global CAS
+      │
+      ▼
+project/node_modules/.pnpm
+      │
+      ▼
+project/node_modules
+      │
+      ├── vite
+      ├── vitest
+      ├── oxlint
+      ├── tsc
+      └── application dependencies
+             │
+             ▼
+        deno task ...
+```
+
+Deno tasks should invoke the installed package binaries normally:
+
+```json
+{
+  "nodeModulesDir": "manual",
+  "lock": false,
+  "tasks": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}
+```
+
+Do not route these through `pnpm exec` merely because pnpm installed them. `deno task` can execute the binaries exposed in `node_modules/.bin`, keeping Deno as the developer-facing task runner.
+
+### One dependency graph, one lockfile
+
+For a normal application repository:
+
+```text
+package.json
+    ↓
+pnpm
+    ↓
+pnpm-lock.yaml
+    ↓
+node_modules
+    ↓
+Deno / Vite / application
+```
+
+There should **not** simultaneously be:
+
+```text
+pnpm-lock.yaml
+deno.lock
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
+```
+
+Choose one dependency authority.
+
+For this stack, that authority is pnpm.
+
+Set Deno locking off for the pnpm-managed graph rather than maintaining a redundant `deno.lock`.
+
+Delete obsolete:
+
+```text
+deno.lock
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
+```
+
+once pnpm owns the complete dependency graph.
+
+Keep `pnpm-lock.yaml`.
+
+Do not run both `pnpm install` and `deno install` in CI.
+
+### JSR dependencies
+
+pnpm has first-class JSR support. Prefer keeping JSR dependencies inside the same package-management graph rather than creating a second Deno-specific graph.
+
+Use:
+
+```sh
+pnpm add jsr:@scope/package
+```
+
+and import through the dependency name recorded in `package.json`.
+
+This keeps:
+
+```text
+npm packages
+JSR packages
+workspace packages
+```
+
+under one resolver and one `pnpm-lock.yaml`.
+
+Avoid direct versioned `jsr:` or remote HTTP imports in an otherwise pnpm-owned application when the same dependency can cleanly be represented in `package.json`.
+
+Do not introduce a second lockfile merely for a handful of Deno-native imports.
+
+If the repository is genuinely a Deno-native program whose architecture intentionally depends on direct Deno/JSR/URL module resolution and has no meaningful npm/Vite dependency graph, it may remain Deno-managed instead. Do not add pnpm merely for ideological uniformity to a repository that has nothing for pnpm to manage.
+
+But once a repository substantially depends on Vite/npm tooling, prefer the pnpm-owned model consistently.
+
+### Node is not the application runtime
+
+Do not add Node as the required application runtime merely because npm packages historically assume Node.
+
+Deno's Node/npm compatibility should remain the execution environment wherever it works correctly.
+
+The fact that pnpm manages dependencies does **not** imply:
+
+```text
+pnpm -> Node runtime -> application
+```
+
+The intended architecture remains:
+
+```text
+pnpm -> dependencies
+
+Deno -> application/tool execution
+```
+
+If a specific tool has a genuine Deno incompatibility and actually requires Node execution, isolate and document that exception rather than silently converting the repository back into a Node-first project.
 
 For production Deno programs, use explicit permissions rather than blanket `-A` when practical.
 
@@ -65,16 +262,26 @@ Use strict typing. Remove configuration and syntax deprecated or removed by Type
 
 For normal Vite/browser/library TypeScript, use the stable TypeScript 7 compiler as the authoritative static checker.
 
-For source that specifically relies on Deno module resolution, `jsr:` imports, Deno globals, or other Deno-only semantics, also use `deno check`.
+Because TypeScript is installed through pnpm, the normal task can simply invoke the local compiler:
+
+```text
+tsc --noEmit
+```
+
+through `deno task typecheck`.
+
+For source that specifically relies on Deno module resolution, Deno globals, or other Deno-only semantics, also use `deno check`.
 
 A mixed full-stack repository may therefore legitimately have both checks:
 
 ```text
 TypeScript 7 -> browser/shared/package graph
-deno check   -> Deno-native graph
+deno check   -> genuinely Deno-specific source
 ```
 
-Do not make Deno's currently unstable `--unstable-tsgo` integration a CI or release requirement. The standalone TypeScript 7 compiler is already the production-ready native compiler.
+Do not duplicate checking without a reason.
+
+Do not make Deno's unstable compiler integrations a CI or release requirement when the standalone TypeScript 7 compiler is already the authoritative production compiler.
 
 Prefer clean ESM throughout. Remove CommonJS glue unless compatibility absolutely requires it.
 
@@ -90,15 +297,25 @@ Vite 8 already uses Rolldown as its unified bundler and Oxc throughout its nativ
 
 Do not add Babel for Solid. Solid 2's `@solidjs/vite-plugin` uses its native Oxc-based compiler by default.
 
+Install frontend/build tooling through pnpm and run it through Deno tasks.
+
+For example:
+
+```sh
+pnpm add -D vite vitest oxlint typescript
+```
+
+with the appropriate Solid packages added to the proper dependency sections.
+
 Replace ESLint with **Oxlint** unless a small, concrete rule/plugin requirement cannot yet be represented. Enable type-aware linting through `oxlint-tsgolint`.
 
-Prefer JSON/JSONC Oxlint configuration so it works cleanly in the Deno environment.
+Prefer JSON/JSONC Oxlint configuration.
 
 Do not set up, install, or configure Oxfmt; formatting is a waste of time.
 
 Remove obsolete ESLint configuration, adapters, dependencies, ignores, and duplicated editor settings after parity is achieved.
 
-Provide simple canonical tasks along the lines of:
+Provide simple canonical Deno tasks along the lines of:
 
 ```text
 dev
@@ -110,19 +327,39 @@ test:browser       # when applicable
 check
 ```
 
-`check` should be the single fast repository-quality gate: linting, authoritative type checks, and the normal test suite. CI may additionally perform production builds and broader browser/E2E suites.
+`check` should be the single fast repository-quality gate: linting, authoritative type checks, and the normal test suite.
+
+CI may additionally perform production builds and broader browser/E2E suites.
 
 Do not rely on Oxlint's experimental combined type-check mode as the sole type checker. Use TypeScript 7 and/or `deno check` as appropriate.
+
+Do not put ordinary developer commands primarily in `package.json` scripts simply because pnpm is present. `package.json` owns dependencies; `deno.json` owns the canonical task interface.
+
+Avoid parallel interfaces such as:
+
+```text
+pnpm dev
+npm run dev
+deno task dev
+```
+
+unless compatibility with external tooling genuinely requires a package script.
+
+The preferred human/agent interface after dependency installation is:
+
+```text
+deno task <name>
+```
 
 ## Solid 2
 
 If this repository contains a frontend, migrate it to **Solid 2**, not Solid 1 compatibility patterns and not React-compatible abstractions.
 
-Use the current Solid 2 release-candidate package family and lock the resolved compatible versions in `deno.lock`.
+Use the current Solid 2 release-candidate package family and lock the resolved compatible versions in `pnpm-lock.yaml`.
 
 Use:
 
-```ts
+```text
 solid-js
 @solidjs/web
 @solidjs/vite-plugin
@@ -288,9 +525,20 @@ OpenAPI/reflection
 
 Do not force a heavyweight API abstraction onto trivial one-off endpoints, but eliminate duplicated contract definitions where the application already has a real API layer.
 
-Keep the deployment boundary based on standard `Request`, `Response`, `fetch`, `Headers`, `URL`, `AbortSignal`, and streams.
+Keep the deployment boundary based on standard:
 
-Deno should remain the actual runtime.
+```text
+Request
+Response
+fetch
+Headers
+URL
+AbortSignal
+ReadableStream
+WritableStream
+```
+
+Deno should remain the actual application runtime.
 
 ## Prefer the web platform
 
@@ -358,7 +606,9 @@ Move Jest tests to Vitest and remove Jest, ts-jest, Babel-Jest, and duplicate Je
 
 For pure logic, use fast ordinary Vitest tests.
 
-For browser-dependent UI/component behavior, prefer **Vitest Browser Mode backed by Playwright** rather than jsdom/happy-dom simulation. We want tests to exercise the real platform when DOM, layout, events, forms, navigation, focus, browser APIs, or rendering semantics matter.
+For browser-dependent UI/component behavior, prefer **Vitest Browser Mode backed by Playwright** rather than jsdom/happy-dom simulation.
+
+We want tests to exercise the real platform when DOM, layout, events, forms, navigation, focus, browser APIs, or rendering semantics matter.
 
 Use standalone Playwright tests for broader end-to-end user journeys when appropriate.
 
@@ -377,6 +627,18 @@ Preserve accessibility behavior and test important keyboard/focus/form semantics
 ## Dependencies
 
 Treat this migration as an opportunity to simplify the dependency graph aggressively.
+
+All dependencies should be declared through `package.json` and resolved by pnpm in a pnpm-owned repository.
+
+Prefer:
+
+```sh
+pnpm add ...
+pnpm add -D ...
+pnpm add jsr:...
+```
+
+rather than mixing package-management commands.
 
 Remove dependencies superseded by:
 
@@ -398,9 +660,29 @@ Avoid barrel-file-heavy architectures where direct imports produce clearer bound
 
 Avoid unnecessary code generation when ordinary TypeScript inference or Effect Schema can express the same contract.
 
+### pnpm discipline
+
+Preserve pnpm's strict dependency boundaries.
+
+Do not work around undeclared-dependency failures by hoisting the world or flattening `node_modules` unless a concrete incompatible tool forces it.
+
+Fix phantom dependencies by declaring them.
+
+Avoid broad hoisting configuration unless required.
+
+Do not switch to npm's traditional flat `node_modules` model merely because an old package accidentally depended on undeclared siblings.
+
+Use pnpm overrides, patches, workspace protocols, catalog/configuration facilities, or other package-manager mechanisms where they provide a clean solution to dependency-graph problems.
+
+Do not manually edit generated `node_modules` contents.
+
+`node_modules` remains generated state and must not be committed.
+
+The fact that it exists is a Vite/npm ecosystem compatibility boundary, not evidence that Node should become the runtime.
+
 ## Migration procedure
 
-First inspect the repository thoroughly. Understand its runtime targets, build system, application entrypoints, routes, persistence/network boundaries, existing tests, CI, deployment assumptions, and public APIs.
+First inspect the repository thoroughly. Understand its runtime targets, build system, application entrypoints, routes, persistence/network boundaries, existing tests, CI, deployment assumptions, dependency-management state, and public APIs.
 
 Before invasive changes, establish whatever existing build/test baseline is possible. If something is already broken, distinguish that clearly from migration regressions.
 
@@ -408,18 +690,36 @@ Then migrate the system coherently rather than accumulating compatibility layers
 
 A sensible order is:
 
-1. Establish Deno as package/task/runtime authority and clean up dependency management.
-2. Move to TypeScript 7 and resolve all new compiler diagnostics properly.
-3. Replace the old lint/build tooling with Oxlint and Vite 8.
-4. If there is a frontend, port it completely to Solid 2 and the new `@solidjs/vite-plugin`.
-5. For an application, move serving/routing/SSR needs onto the plugin's Start mode rather than the old SolidStart architecture.
-6. Introduce Effect 4 at meaningful I/O/domain boundaries and replace duplicated runtime validation with Schema.
-7. Replace obsolete Node/browser utility packages with Deno or Web Platform facilities where this genuinely simplifies things.
-8. Port the tests to the appropriate Vitest 5 Browser Mode / Vitest / Deno test layers.
-9. Delete obsolete compatibility code, packages, configs, scripts, entrypoints, generated artifacts, and documentation.
-10. Run the complete final verification suite and inspect the production artifact.
+1. Establish **pnpm as the sole package/dependency authority** and `pnpm-lock.yaml` as the sole dependency lockfile.
+2. Establish **Deno as the canonical runtime and task runner**, consuming pnpm's `node_modules` with `nodeModulesDir: "manual"`.
+3. Move to TypeScript 7 and resolve all new compiler diagnostics properly.
+4. Replace the old lint/build tooling with Oxlint and Vite 8.
+5. If there is a frontend, port it completely to Solid 2 and the new `@solidjs/vite-plugin`.
+6. For an application, move serving/routing/SSR needs onto the plugin's Start mode rather than the old SolidStart architecture.
+7. Introduce Effect 4 at meaningful I/O/domain boundaries and replace duplicated runtime validation with Schema.
+8. Replace obsolete Node/browser utility packages with Deno or Web Platform facilities where this genuinely simplifies things.
+9. Port the tests to the appropriate Vitest 5 Browser Mode / Vitest / Deno test layers.
+10. Delete obsolete compatibility code, packages, configs, scripts, entrypoints, generated artifacts, duplicate lockfiles, and documentation.
+11. Run the complete final verification suite and inspect the production artifact.
 
 Do not stop halfway with both old and new stacks operational unless an external compatibility requirement makes that unavoidable.
+
+In particular, do not leave both:
+
+```text
+deno install
+pnpm install
+```
+
+as competing supported installation workflows.
+
+For a Vite/npm repository, the answer is:
+
+```text
+pnpm install
+```
+
+followed by Deno tasks.
 
 ## Agent-friendly repository ergonomics
 
@@ -433,20 +733,53 @@ Prefer deterministic configuration and explicit types/contracts over magic.
 
 Do not disable Vite's useful agent-facing diagnostics or browser-console forwarding.
 
+A coding agent should be able to infer the repository model immediately:
+
+```text
+dependencies -> package.json + pnpm-lock.yaml + pnpm
+tasks       -> deno.json
+runtime     -> Deno
+frontend    -> Vite + Solid
+effects     -> Effect
+```
+
 If the repository does not already have clear agent instructions, add a concise `AGENTS.md` explaining:
 
 ```text
-runtime/package manager: Deno
+runtime: Deno
+task runner: Deno
+package manager: pnpm
+dependency manifest: package.json
+dependency lockfile: pnpm-lock.yaml
+node_modules owner: pnpm
+Deno node_modules mode: manual
 frontend: Solid 2
 app serving: @solidjs/vite-plugin Start mode
 effects/domain I/O: Effect 4
 build: Vite 8
 lint: Oxlint
 tests: Vitest 5 / Browser Mode, plus deno test where runtime-specific
+install: pnpm install
 canonical verification command: deno task check
 ```
 
-Keep that document terse. It should prevent a future agent from accidentally reintroducing React, Node-first tooling, SolidStart, Vite+, Jest, ESLint, or another package manager.
+Keep that document terse.
+
+It should prevent a future agent from accidentally reintroducing:
+
+```text
+React
+Node-first execution
+SolidStart
+Vite+
+Jest
+ESLint
+npm
+Yarn
+Bun
+Deno-owned npm installation
+a second dependency lockfile
+```
 
 ## Cleanup expectations
 
@@ -475,28 +808,99 @@ ts-jest
 eslint
 prettier
 npm commands
-pnpm commands
 yarn commands
 bun commands
+deno install used as project dependency installation
+deno add used for package.json-managed dependencies
 Node-only bootstrap code
 CommonJS require/module.exports
-old lockfiles
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
+deno.lock in a pnpm-owned repository
 obsolete tsconfig workarounds
 legacy polyfills
 ```
 
 Remove them when they are no longer required.
 
+Do **not** remove:
+
+```text
+package.json
+pnpm-lock.yaml
+pnpm configuration that serves a real purpose
+```
+
+merely because Deno is the runtime.
+
 Do not remove a dependency merely because its name appears in this list if the repository has a legitimate compatibility surface that still requires it. The goal is architectural cleanliness, not blind search-and-delete.
+
+## CI
+
+CI should reproduce the same ownership model as local development.
+
+For a pnpm-owned repository, dependency installation begins with:
+
+```sh
+pnpm install --frozen-lockfile
+```
+
+Do not run `deno install` afterward.
+
+Then execute repository operations through Deno:
+
+```sh
+deno task lint
+deno task typecheck
+deno task test
+deno task build
+deno task check
+```
+
+Include Browser Mode/E2E tasks where applicable.
+
+The conceptual CI pipeline is:
+
+```text
+checkout
+   │
+   ▼
+pnpm install --frozen-lockfile
+   │
+   ▼
+node_modules backed by pnpm CAS
+   │
+   ▼
+deno task check
+   │
+   ├── oxlint
+   ├── tsc / deno check
+   ├── vitest
+   └── other fast checks
+   │
+   ▼
+deno task build
+   │
+   ▼
+browser / E2E verification
+```
+
+Do not regenerate the lockfile in CI.
+
+Do not permit a dirty dependency graph to succeed by silently updating `pnpm-lock.yaml`.
+
+Cache pnpm's store where the CI environment makes that worthwhile, but correctness must not depend on a warm cache.
 
 ## Verification
 
-The finished repository must have a clean fresh-checkout workflow driven by Deno.
+The finished repository must have a clean fresh-checkout workflow with **pnpm installing dependencies and Deno driving the repository afterward**.
 
 At minimum, verify all applicable cases:
 
 ```sh
-deno install --frozen
+pnpm install --frozen-lockfile
 deno task lint
 deno task typecheck
 deno task test
@@ -505,7 +909,13 @@ deno task build
 deno task check
 ```
 
-Use the exact supported frozen-lockfile spelling for the installed Deno release.
+Do not include `deno install --frozen` in this workflow.
+
+Verify that deleting `node_modules` and reinstalling solely through pnpm recreates a functioning repository.
+
+Verify that running the normal development/build/test commands does not cause Deno to rewrite or independently repopulate the dependency tree.
+
+Verify that no unexpected `deno.lock`, `package-lock.json`, `yarn.lock`, or Bun lockfile appears.
 
 Start the actual application under Deno and exercise representative functionality, not merely static compilation.
 
@@ -521,7 +931,22 @@ Ensure server-only dependencies and secrets do not leak into client chunks.
 
 Ensure the final dependency graph has one coherent Solid 2 package family rather than accidentally mixing Solid 1 and Solid 2.
 
-Run tests from a clean install, not from stale local dependency state.
+Run tests from a clean pnpm install, not from stale local dependency state.
+
+Verify dependency ownership explicitly:
+
+```text
+package.json          exists
+pnpm-lock.yaml        exists
+node_modules          generated by pnpm
+deno.json             owns tasks/runtime configuration
+
+deno.lock             absent in ordinary pnpm-owned app
+package-lock.json     absent
+yarn.lock             absent
+bun.lock              absent
+bun.lockb             absent
+```
 
 ## Definition of done
 
@@ -541,17 +966,62 @@ This is complete when the repository behaves as before, but its applicable archi
                   │                       │
                   └───────────┬───────────┘
                               │
-                    Web platform APIs
+                     Web platform APIs
                               │
-                         Vite 8
-                    Rolldown + Oxc
+                           Vite 8
+                      Rolldown + Oxc
                               │
-                           Deno
-                runtime / packages / tasks
+                    executed by Deno
+                              │
+             runtime / tasks / permissions
+
+
+ package.json
+      │
+      ▼
+    pnpm ───────────────► pnpm global CAS
+      │
+      ▼
+ pnpm-lock.yaml
+      │
+      ▼
+ node_modules
+      │
+      └──────────────► consumed by Deno / Vite
 ```
 
-The resulting system should feel intentionally designed around this stack, not like the previous architecture with new dependencies bolted onto it.
+The resulting system should feel intentionally designed around this division:
 
-Favor deletion, directness, native platform primitives, strong contracts, fine-grained reactivity, typed effects, and fast machine-verifiable feedback loops.
+```text
+pnpm owns packages.
+Deno owns execution.
+Vite owns frontend compilation/dev.
+Solid owns UI reactivity.
+Effect owns meaningful effects/domain I/O.
+TypeScript owns static types.
+Oxlint owns linting.
+```
 
-Complete the migration, fix all resulting failures, update documentation and CI, and leave the repository in a clean state where `deno task check` is green.
+Do not blur those ownership boundaries without a concrete technical reason.
+
+The presence of `node_modules` is accepted as a compatibility layer for the Vite/npm ecosystem. pnpm's shared content-addressed store should provide the centralized package storage and disk efficiency; do not contort Deno into simultaneously managing the same packages.
+
+The goal is not a superficially "Deno-only" repository.
+
+The goal is the cleanest current architecture:
+
+```text
+pnpm for the part Vite still expects to look like Node package management,
+Deno for everything that actually needs to execute.
+```
+
+Favor deletion, directness, native platform primitives, strong contracts, fine-grained reactivity, typed effects, strict package ownership, and fast machine-verifiable feedback loops.
+
+Complete the migration, fix all resulting failures, update documentation and CI, and leave the repository in a clean state where:
+
+```sh
+pnpm install --frozen-lockfile
+deno task check
+```
+
+are green from a fresh checkout.
