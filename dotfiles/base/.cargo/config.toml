@@ -1,11 +1,10 @@
-# [target.aarch64-apple-darwin]
-# linker = "clang"
-# rustflags = ["-Clink-arg=--ld-path=wild-aarch64-apple-darwin"]
 
-# [target.x86_64-unknown-linux-gnu]
-# linker = "clang"
-# rustflags = ["-Clink-arg=--ld-path=wild-x86_64-unknown-linux-gnu"]
 
-# [target.aarch64-unknown-linux-gnu]
-# linker = "clang"
-# rustflags = ["-Clink-arg=--ld-path=wild-aarch64-unknown-linux-gnu"]
+[build]
+rustdoc = "/Users/josh/.local/lib/kache/shims/rustdoc"
+rustc-wrapper = "kache"
+
+[env]
+CC_KNOWN_WRAPPER_CUSTOM = "kache"
+HOST_CXX = "kache c++"
+HOST_CC = "kache cc"

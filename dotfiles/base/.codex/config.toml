@@ -113,3 +113,21 @@ trust_level = "trusted"
 [projects."/Users/josh/d/laputa-systems/laputa"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/ish"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/gocd-mcp"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/ops"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/reload"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/service-registry"]
+trust_level = "trusted"
+
+[mcp_servers.sentry]
+url = "https://mcp.sentry.dev/mcp"
+

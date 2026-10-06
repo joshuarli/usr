@@ -1,0 +1,325 @@
+#!/bin/sh
+# setup-kache - install kache v1.0.0 from GitHub releases and set it up.
+#
+# Usage:
+#   setup-kache [--version 1.0.0] [--nightly nightly-2026-09-15] [--force]
+#   setup-kache uninstall [--purge]
+#
+# Detects macOS/Linux on aarch64/x86_64, downloads the matching
+# kache-*.tar.gz plus its .sha256, verifies the checksum, installs to
+# ${CARGO_HOME:-~/.cargo}/bin/kache, idempotently ensures
+# ~/.cargo/config.toml carries the kache-managed keys, then runs kache init,
+# installs compiler shims, verifies the setup under the preferred nightly
+# toolchain (rust-toolchain.toml style: nightly-2026-09-15), and finally
+# runs kache config when interactive.
+#
+# `setup-kache uninstall` reverses it: stops the daemon, removes the login
+# service, empties the cache with --purge, removes the shims, strips the
+# kache-managed keys from ~/.cargo/config.toml, and deletes the binary.
+#
+# Env overrides: KACHE_VERSION, KACHE_NIGHTLY.
+# Only linux and macos on aarch64/x86_64 are supported.
+
+set -eu
+
+prog=${0##*/}
+version="${KACHE_VERSION:-1.0.0}"
+nightly="${KACHE_NIGHTLY:-nightly-2026-09-15}"
+force=0
+mode=install
+purge=0
+
+die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+usage() {
+    printf 'usage: %s [--version 1.0.0] [--nightly nightly-2026-09-15] [--force]\n' "$prog" >&2
+    printf '       %s uninstall [--purge]\n' "$prog" >&2
+    exit 2
+}
+log() { printf '%s: %s\n' "$prog" "$*"; }
+
+# Ensure a `key = value` line exists under a [section] header in a TOML file.
+# Idempotent: does nothing when the key is already present anywhere in the
+# file, preserves comments and all other content, creates the file/section
+# when missing.
+ensure_toml_key() {
+    file=$1; section=$2; key=$3; value=$4
+    if [ ! -f "$file" ]; then
+        printf '\n[%s]\n%s = %s\n' "$section" "$key" "$value" >> "$file"
+        return 0
+    fi
+    if grep -Eq "^[[:space:]]*${key}[[:space:]]*=" "$file"; then
+        return 0
+    fi
+    if grep -Eq "^[[:space:]]*\\[${section}\\][[:space:]]*$" "$file"; then
+        tmp=$(mktemp "${TMPDIR:-/tmp}/setup-kache.toml.XXXXXX")
+        awk -v line="$key = $value" '
+            { print }
+            !done && /^[[:space:]]*\['"$section"'\][[:space:]]*$/ { print line; done = 1 }
+        ' "$file" > "$tmp" && cat "$tmp" > "$file"
+        rm -f "$tmp"
+    else
+        printf '\n[%s]\n%s = %s\n' "$section" "$key" "$value" >> "$file"
+    fi
+}
+
+# Idempotently ensure ~/.cargo/config.toml carries the kache-managed keys.
+# Never overwrites a value the user already set: a conflicting rustc-wrapper
+# (e.g. sccache) is left for `kache init` to resolve with its own prompt.
+ensure_cargo_config() {
+    cfg="${CARGO_HOME:-$HOME/.cargo}/config.toml"
+    if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*rustc-wrapper[[:space:]]*=' "$cfg" \
+        && ! grep -Eq '^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"kache"' "$cfg"; then
+        log "warning: $cfg already sets rustc-wrapper to something else; leaving it for kache init"
+    else
+        ensure_toml_key "$cfg" build rustc-wrapper '"kache"'
+    fi
+    ensure_toml_key "$cfg" env HOST_CC '"kache cc"'
+    ensure_toml_key "$cfg" env HOST_CXX '"kache c++"'
+    ensure_toml_key "$cfg" env CC_KNOWN_WRAPPER_CUSTOM '"kache"'
+    log "cargo config ok: $cfg"
+}
+
+# Remove the kache-managed keys from ~/.cargo/config.toml, preserving
+# everything else. Drops a [build]/[env] header left with no keys. Only
+# removes values that point at kache (a foreign rustdoc or wrapper is kept).
+strip_cargo_config() {
+    cfg="${CARGO_HOME:-$HOME/.cargo}/config.toml"
+    [ -f "$cfg" ] || { log "no cargo config, nothing to strip"; return 0; }
+    tmp=$(mktemp "${TMPDIR:-/tmp}/setup-kache.toml.XXXXXX")
+    grep -Ev '^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"kache"' "$cfg" | \
+    grep -Ev '^[[:space:]]*rustdoc[[:space:]]*=[[:space:]]*"[^"]*kache' | \
+    grep -Ev '^[[:space:]]*HOST_CC[[:space:]]*=[[:space:]]*"kache' | \
+    grep -Ev '^[[:space:]]*HOST_CXX[[:space:]]*=[[:space:]]*"kache' | \
+    grep -Ev '^[[:space:]]*CC_KNOWN_WRAPPER_CUSTOM[[:space:]]*=[[:space:]]*"kache' | \
+    awk '
+        function flush() {
+            if (!pending) return
+            if (has_key) { print header; printf "%s", buf }
+            pending = 0; buf = ""
+        }
+        /^[[:space:]]*\[(build|env)\][[:space:]]*$/ {
+            flush(); header = $0; pending = 1; has_key = 0; next
+        }
+        pending && /^[[:space:]]*\[.*\][[:space:]]*$/ { flush(); print; next }
+        pending { if ($0 ~ /=/) has_key = 1; buf = buf $0 "\n"; next }
+        { flush(); print }
+        END { flush() }
+    ' > "$tmp" && cat "$tmp" > "$cfg"
+    rm -f "$tmp"
+    if grep -Eq 'kache' "$cfg"; then
+        log "warning: $cfg still mentions kache, left in place:"
+        grep -En 'kache' "$cfg" || true
+    else
+        log "cargo config clean: $cfg"
+    fi
+}
+
+if [ "${1:-}" = "uninstall" ]; then
+    mode=uninstall; shift
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --purge) purge=1; shift ;;
+            -h|--help) usage ;;
+            *) usage ;;
+        esac
+    done
+else
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
+            --nightly) [ "$#" -ge 2 ] || usage; nightly=$2; shift 2 ;;
+            --force) force=1; shift ;;
+            -h|--help) usage ;;
+            --*) usage ;;
+            *) usage ;;
+        esac
+    done
+fi
+
+if [ "$mode" = "uninstall" ]; then
+    cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+    dest="${cargo_bin}/kache"
+    export PATH="$cargo_bin:$PATH"
+    if [ -x "$dest" ]; then
+        kache daemon stop || log "daemon not running, continuing"
+        kache daemon uninstall || log "no daemon service, continuing"
+        if [ "$purge" -eq 1 ]; then
+            kache clean --cache --yes || log "cache clean reported an issue, continuing"
+        fi
+    else
+        log "no kache binary at $dest, skipping daemon/cache steps"
+        if [ "$purge" -eq 1 ]; then
+            log "cannot purge cache without the kache binary; remove the cache dir by hand"
+        fi
+    fi
+    shims="$HOME/.local/lib/kache/shims"
+    if [ -d "$shims" ]; then
+        rm -rf "$shims"
+        log "removed shims: $shims"
+    else
+        log "no shims dir, nothing to remove"
+    fi
+    strip_cargo_config
+    if [ -e "$dest" ]; then
+        if [ -x "$dest" ] && "$dest" --version 2>/dev/null | grep -q "kache "; then
+            rm -f "$dest"
+            log "removed $dest"
+        else
+            die "refusing: $dest does not look like kache"
+        fi
+    else
+        log "no binary at $dest"
+    fi
+    # NB: this shell hashed kache's path while stopping the daemon, so clear
+    # the hash before asking where kache is now.
+    hash -r 2>/dev/null || true
+    kache_path=$(command -v kache 2>/dev/null || true)
+    case "$kache_path" in
+        "") log "kache off PATH" ;;
+        */*)
+            if [ -e "$kache_path" ]; then
+                die "kache still on PATH: $kache_path"
+            else
+                log "kache off PATH"
+            fi
+            ;;
+        *) die "kache still on PATH ($kache_path)" ;;
+    esac
+    log "uninstalled. Left in place (if any): ~/.cargo/.kache-cargo-backup-*, logs,"
+    if [ "$purge" -eq 0 ]; then
+        log "and the cache dir (rerun with --purge to empty it)"
+    fi
+    log "cargo builds now run without the wrapper"
+    exit 0
+fi
+
+[ -n "$version" ] || die "empty version"
+[ -n "$nightly" ] || die "empty nightly toolchain"
+case "$version" in
+    *[!0-9A-Za-z.\-]*) die "invalid version: $version" ;;
+esac
+
+# Detect platform. Linux and macOS on aarch64/x86_64 only.
+os=$(uname -s)
+arch=$(uname -m)
+case "$os" in
+    Darwin) os_tag="apple-darwin" ;;
+    Linux) os_tag="unknown-linux-musl" ;;
+    *) die "unsupported OS: $os (linux and macos only)" ;;
+esac
+case "$arch" in
+    arm64|aarch64) arch_tag="aarch64" ;;
+    x86_64|amd64) arch_tag="x86_64" ;;
+    *) die "unsupported arch: $arch (aarch64 and x86-64 only)" ;;
+esac
+triple="${arch_tag}-${os_tag}"
+asset="kache-${triple}.tar.gz"
+base_url="https://github.com/kunobi-ninja/kache/releases/download/v${version}"
+
+cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+dest="${cargo_bin}/kache"
+
+# Skip re-download when the installed binary already reports the version.
+if [ "$force" -eq 0 ] && [ -x "$dest" ]; then
+    if "$dest" --version 2>/dev/null | grep -q "kache ${version}"; then
+        log "$dest already at kache $version, continuing to setup"
+        asset=""
+    fi
+fi
+
+if [ -n "$asset" ]; then
+    command -v curl >/dev/null 2>&1 || die "curl not found"
+    command -v tar >/dev/null 2>&1 || die "tar not found"
+    tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/setup-kache.XXXXXX")
+    trap 'rm -rf "$tmpdir"' EXIT INT TERM
+
+    log "downloading $asset"
+    curl -fsSL -o "$tmpdir/$asset" "$base_url/$asset"
+    curl -fsSL -o "$tmpdir/$asset.sha256" "$base_url/$asset.sha256"
+
+    # Verify checksum. The .sha256 file holds "<hash>  <filename>".
+    want=$(awk '{print $1}' "$tmpdir/$asset.sha256")
+    [ -n "$want" ] || die "could not read checksum from $asset.sha256"
+    if command -v shasum >/dev/null 2>&1; then
+        got=$(shasum -a 256 "$tmpdir/$asset" | awk '{print $1}')
+    elif command -v sha256sum >/dev/null 2>&1; then
+        got=$(sha256sum "$tmpdir/$asset" | awk '{print $1}')
+    else
+        die "no shasum or sha256sum found"
+    fi
+    [ "$got" = "$want" ] || die "checksum mismatch for $asset"
+    log "checksum ok"
+
+    tar -xzf "$tmpdir/$asset" -C "$tmpdir"
+    [ -f "$tmpdir/kache" ] || die "tarball did not contain kache binary"
+    mkdir -p "$cargo_bin"
+    install -m 755 "$tmpdir/kache" "$dest"
+    rm -rf "$tmpdir"
+    trap - EXIT INT TERM
+
+    "$dest" --version 2>/dev/null | grep -q "kache ${version}" \
+        || die "installed binary does not report kache $version"
+    log "installed $dest ($("$dest" --version))"
+else
+    command -v kache >/dev/null 2>&1 || [ -x "$dest" ] || die "kache not found"
+fi
+
+export PATH="$cargo_bin:$PATH"
+
+# Ensure the preferred nightly toolchain exists with rust-src (matches
+# rust-toolchain.toml files that pin channel + rust-src component).
+if ! rustup toolchain list 2>/dev/null | grep -q "^${nightly}"; then
+    log "installing toolchain $nightly"
+    rustup toolchain install "$nightly" --component rust-src
+fi
+rustup run "$nightly" rustc -vV | head -n 2
+
+# Cargo config first (idempotent, preserves user content), then init for the
+# daemon/service plus its own validation of the wrapper setup.
+ensure_cargo_config
+kache init --yes
+kache install-shims || log "install-shims reported an issue, continuing"
+
+# Doctor must pass on this machine.
+kache doctor
+
+# Doctor must also see the preferred nightly when run under it. This is the
+# check that matters for rust-toolchain.toml pins: the wrapper binary (built
+# from the prebuilt release) has to interoperate with nightly rustc.
+doctor_out=$(rustup run "$nightly" kache doctor 2>&1) || die "kache doctor failed under $nightly"
+printf '%s\n' "$doctor_out" | grep -q "1.0" || die "unexpected doctor output under $nightly"
+log "kache works under $nightly"
+
+# End-to-end probe: fresh cargo project pinned to the nightly via
+# rust-toolchain.toml (same mechanism as the user's projects), built once
+# through the wrapper. A miss on first build is fine; failure is not.
+probe=$(mktemp -d "${TMPDIR:-/tmp}/setup-kache-probe.XXXXXX")
+trap 'rm -rf "$probe"' EXIT INT TERM
+(
+    cd "$probe"
+    cargo init --bin --name kache_probe . >/dev/null 2>&1
+    printf '[toolchain]\nchannel = "%s"\n' "$nightly" > rust-toolchain.toml
+    cargo build 2>&1 | tail -n 2
+    [ -x "target/debug/kache_probe" ] || die "probe build produced no binary"
+    ./target/debug/kache_probe >/dev/null
+)
+rm -rf "$probe"
+trap - EXIT INT TERM
+log "probe build under $nightly ok"
+
+# Show the effective kache-managed cargo config, then open the interactive
+# editor when there is a terminal (kache config requires one).
+log "managed cargo config:"
+grep -E '^[[:space:]]*(rustc-wrapper|HOST_CC|HOST_CXX|CC_KNOWN_WRAPPER_CUSTOM)[[:space:]]*=' \
+    "${CARGO_HOME:-$HOME/.cargo}/config.toml" || die "managed keys missing from cargo config"
+if [ -t 0 ]; then
+    kache config
+else
+    log "skipping interactive 'kache config' (no terminal)"
+fi
+
+case ":$PATH:" in
+    *":$HOME/.local/lib/kache/shims:"*) ;;
+    *) log "optional: add shims to PATH for C/C++ caching:"; log "  export PATH=\"\$HOME/.local/lib/kache/shims:\$PATH\"" ;;
+esac
+log "done: kache $version ready, verified under $nightly"

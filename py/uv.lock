@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.14.4"
 
 [[package]]
@@ -23,40 +23,37 @@ requires-dist = [
     { name = "brotli", marker = "implementation_name == 'cpython' and sys_platform != 'ios' and extra == 'pin'", specifier = "==1.2.0" },
     { name = "brotlicffi", marker = "implementation_name != 'cpython' and extra == 'default'" },
     { name = "brotlicffi", marker = "implementation_name != 'cpython' and extra == 'pin'", specifier = "==1.2.0.1" },
-    { name = "certifi", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==2026.2.25" },
+    { name = "certifi", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==2026.7.22" },
     { name = "certifi", marker = "extra == 'default'" },
-    { name = "certifi", marker = "extra == 'pin'", specifier = "==2026.2.25" },
-    { name = "cffi", marker = "platform_python_implementation != 'PyPy' and extra == 'pin-secretstorage'", specifier = "==2.0.0" },
-    { name = "cffi", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==2.0.0" },
-    { name = "cffi", marker = "implementation_name != 'cpython' and extra == 'pin'", specifier = "==2.0.0" },
-    { name = "charset-normalizer", marker = "extra == 'pin'", specifier = "==3.4.6" },
-    { name = "cryptography", marker = "extra == 'pin-secretstorage'", specifier = "==46.0.6" },
-    { name = "curl-cffi", marker = "implementation_name == 'cpython' and extra == 'curl-cffi'", specifier = ">=0.5.10,!=0.6.*,!=0.7.*,!=0.8.*,!=0.9.*,<0.16" },
-    { name = "curl-cffi", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==0.15.0" },
+    { name = "certifi", marker = "extra == 'pin'", specifier = "==2026.7.22" },
+    { name = "cffi", marker = "platform_python_implementation != 'PyPy' and extra == 'pin-secretstorage'", specifier = "==2.1.1" },
+    { name = "cffi", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==2.1.1" },
+    { name = "charset-normalizer", marker = "extra == 'pin'", specifier = "==3.5.0" },
+    { name = "cryptography", marker = "extra == 'pin-secretstorage'", specifier = "==50.0.0" },
+    { name = "curl-cffi", marker = "implementation_name == 'cpython' and extra == 'curl-cffi'", specifier = ">=0.5.10,!=0.6.*,!=0.7.*,!=0.8.*,!=0.9.*,<0.17" },
+    { name = "curl-cffi", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==0.16.0" },
     { name = "deno", marker = "extra == 'deno'", specifier = ">=2.6.6" },
-    { name = "deno", marker = "extra == 'pin-deno'", specifier = "==2.7.8" },
-    { name = "idna", marker = "extra == 'pin'", specifier = "==3.11" },
+    { name = "deno", marker = "extra == 'pin-deno'", specifier = "==2.9.5" },
+    { name = "idna", marker = "extra == 'pin'", specifier = "==3.18" },
     { name = "jeepney", marker = "extra == 'pin-secretstorage'", specifier = "==0.9.0" },
-    { name = "markdown-it-py", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==4.0.0" },
-    { name = "mdurl", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==0.1.2" },
     { name = "mutagen", marker = "extra == 'default'" },
-    { name = "mutagen", marker = "extra == 'pin'", specifier = "==1.47.0" },
+    { name = "mutagen", marker = "extra == 'pin'", specifier = "==1.48.1" },
     { name = "pycparser", marker = "implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' and extra == 'pin-secretstorage'", specifier = "==3.0" },
-    { name = "pycparser", marker = "implementation_name != 'PyPy' and implementation_name != 'cpython' and extra == 'pin'", specifier = "==3.0" },
     { name = "pycparser", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==3.0" },
     { name = "pycryptodomex", marker = "extra == 'default'" },
     { name = "pycryptodomex", marker = "extra == 'pin'", specifier = "==3.23.0" },
-    { name = "pygments", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==2.19.2" },
     { name = "requests", marker = "extra == 'default'", specifier = ">=2.32.2,<3" },
-    { name = "requests", marker = "extra == 'pin'", specifier = "==2.33.0" },
-    { name = "rich", marker = "implementation_name == 'cpython' and extra == 'pin-curl-cffi'", specifier = "==14.3.3" },
+    { name = "requests", marker = "extra == 'pin'", specifier = "==2.34.2" },
     { name = "secretstorage", marker = "extra == 'pin-secretstorage'", specifier = "==3.5.0" },
     { name = "secretstorage", marker = "extra == 'secretstorage'" },
-    { name = "typing-extensions", marker = "python_full_version < '3.11' and extra == 'pin-secretstorage'", specifier = "==4.15.0" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' and extra == 'curl-cffi'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' and extra == 'pin-curl-cffi'", specifier = "==4.16.0" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11' and extra == 'pin-secretstorage'", specifier = "==4.16.0" },
     { name = "urllib3", marker = "extra == 'default'", specifier = ">=2.0.2,<3" },
-    { name = "urllib3", marker = "extra == 'pin'", specifier = "==2.6.3" },
+    { name = "urllib3", marker = "extra == 'pin'", specifier = "==2.7.0" },
+    { name = "websockets", marker = "python_full_version >= '3.11' and extra == 'pin'", specifier = "==17.0.1" },
+    { name = "websockets", marker = "python_full_version < '3.11' and extra == 'pin'", specifier = "==16.1.1" },
     { name = "websockets", marker = "extra == 'default'", specifier = ">=13.0" },
-    { name = "websockets", marker = "extra == 'pin'", specifier = "==16.0" },
     { name = "yt-dlp-ejs", marker = "extra == 'default'", specifier = "==0.8.0" },
     { name = "yt-dlp-ejs", marker = "extra == 'pin'", specifier = "==0.8.0" },
 ]
@@ -71,16 +68,19 @@ delocate = [{ name = "delocate", marker = "sys_platform == 'darwin'", specifier 
 dev = [
     { name = "autopep8", specifier = "~=2.0" },
     { name = "pre-commit" },
-    { name = "pytest", specifier = "~=8.1" },
-    { name = "pytest-rerunfailures", specifier = "~=14.0" },
-    { name = "ruff", specifier = "~=0.15.0" },
+    { name = "pytest", specifier = "~=9.0" },
+    { name = "pytest-rerunfailures", specifier = "~=16.0" },
+    { name = "ruff", specifier = "~=0.16.0" },
 ]
-pyinstaller = [{ name = "pyinstaller", specifier = ">=6.17.0" }]
+pip = [{ name = "pip" }]
+pyflakes = [{ name = "pyflakes", specifier = "~=3.4.0" }]
+pyinstaller = [{ name = "pyinstaller", specifier = "==6.22.0" }]
 static-analysis = [
     { name = "autopep8", specifier = "~=2.0" },
-    { name = "ruff", specifier = "~=0.15.0" },
+    { name = "ruff", specifier = "~=0.16.0" },
 ]
 test = [
-    { name = "pytest", specifier = "~=8.1" },
-    { name = "pytest-rerunfailures", specifier = "~=14.0" },
+    { name = "pytest", specifier = "~=9.0" },
+    { name = "pytest-rerunfailures", specifier = "~=16.0" },
 ]
+uv = [{ name = "uv", specifier = ">=0.10" }]

@@ -10,7 +10,7 @@
     "defaultMode": "auto",
     "skipDangerousModePermissionPrompt": true
   },
-  "model": "sonnet",
+  "model": "opus",
   "hooks": {
     "Notification": [
       {
@@ -43,10 +43,10 @@
       "effortLevel": "high"
     },
     "claude-opus-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
     },
     "claude-sonnet-5-5": {
-      "effortLevel": "medium"
+      "effortLevel": "high"
     }
   },
   "emojiCompletionEnabled": false,
