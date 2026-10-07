@@ -1,7 +1,7 @@
 [user]
     name = Joshua Li
     email = joshuarli98@gmail.com
-	signingkey = /Users/josh/.ssh/github.pub
+#	signingkey = /Users/josh/.ssh/github.pub
 
 [url "git@github.com:"]
     insteadOf = https://github.com/
@@ -97,7 +97,7 @@
 [protocol]
     version = 2
 
-[gpg]
-	format = ssh
-[commit]
-	gpgsign = true
+#[gpg]
+#	format = ssh
+#[commit]
+#	gpgsign = true

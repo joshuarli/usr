@@ -1,10 +1,10 @@
 
 
 [build]
-rustdoc = "/Users/josh/.local/lib/kache/shims/rustdoc"
-rustc-wrapper = "kache"
+rustdoc = "/home/josh/.local/lib/kache/shims/rustdoc"
+rustc-wrapper = "/home/josh/.cargo/bin/kache"
 
 [env]
 CC_KNOWN_WRAPPER_CUSTOM = "kache"
-HOST_CXX = "kache c++"
-HOST_CC = "kache cc"
+HOST_CXX = "/home/josh/.cargo/bin/kache c++"
+HOST_CC = "/home/josh/.cargo/bin/kache cc"

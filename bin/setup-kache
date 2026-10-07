@@ -62,20 +62,38 @@ ensure_toml_key() {
     fi
 }
 
-# Idempotently ensure ~/.cargo/config.toml carries the kache-managed keys.
-# Never overwrites a value the user already set: a conflicting rustc-wrapper
-# (e.g. sccache) is left for `kache init` to resolve with its own prompt.
+# Refresh only values owned by kache, including paths copied from another host.
+# Leave foreign wrappers and rustdoc commands for kache init to resolve.
+refresh_kache_key() {
+    file=$1; section=$2; key=$3; value=$4
+    if [ -f "$file" ]; then
+        tmp=$(mktemp "${TMPDIR:-/tmp}/setup-kache.toml.XXXXXX")
+        awk -v section="$section" -v key="$key" -v value="$value" '
+            /^[[:space:]]*\[/ {
+                header = $0
+                sub(/^[[:space:]]*\[/, "", header)
+                sub(/\][[:space:]]*$/, "", header)
+            }
+            header == section && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" && $0 ~ /kache/ {
+                print key " = " value
+                next
+            }
+            { print }
+        ' "$file" > "$tmp"
+        cat "$tmp" > "$file"
+        rm -f "$tmp"
+    fi
+    ensure_toml_key "$file" "$section" "$key" "$value"
+}
+
 ensure_cargo_config() {
     cfg="${CARGO_HOME:-$HOME/.cargo}/config.toml"
-    if [ -f "$cfg" ] && grep -Eq '^[[:space:]]*rustc-wrapper[[:space:]]*=' "$cfg" \
-        && ! grep -Eq '^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"kache"' "$cfg"; then
-        log "warning: $cfg already sets rustc-wrapper to something else; leaving it for kache init"
-    else
-        ensure_toml_key "$cfg" build rustc-wrapper '"kache"'
-    fi
-    ensure_toml_key "$cfg" env HOST_CC '"kache cc"'
-    ensure_toml_key "$cfg" env HOST_CXX '"kache c++"'
-    ensure_toml_key "$cfg" env CC_KNOWN_WRAPPER_CUSTOM '"kache"'
+    mkdir -p "${CARGO_HOME:-$HOME/.cargo}"
+    refresh_kache_key "$cfg" build rustc-wrapper "\"$dest\""
+    refresh_kache_key "$cfg" build rustdoc "\"$HOME/.local/lib/kache/shims/rustdoc\""
+    refresh_kache_key "$cfg" env HOST_CC "\"$dest cc\""
+    refresh_kache_key "$cfg" env HOST_CXX "\"$dest c++\""
+    refresh_kache_key "$cfg" env CC_KNOWN_WRAPPER_CUSTOM '"kache"'
     log "cargo config ok: $cfg"
 }
 
@@ -86,11 +104,11 @@ strip_cargo_config() {
     cfg="${CARGO_HOME:-$HOME/.cargo}/config.toml"
     [ -f "$cfg" ] || { log "no cargo config, nothing to strip"; return 0; }
     tmp=$(mktemp "${TMPDIR:-/tmp}/setup-kache.toml.XXXXXX")
-    grep -Ev '^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"kache"' "$cfg" | \
+    grep -Ev '^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"([^"]*/)?kache"' "$cfg" | \
     grep -Ev '^[[:space:]]*rustdoc[[:space:]]*=[[:space:]]*"[^"]*kache' | \
-    grep -Ev '^[[:space:]]*HOST_CC[[:space:]]*=[[:space:]]*"kache' | \
-    grep -Ev '^[[:space:]]*HOST_CXX[[:space:]]*=[[:space:]]*"kache' | \
-    grep -Ev '^[[:space:]]*CC_KNOWN_WRAPPER_CUSTOM[[:space:]]*=[[:space:]]*"kache' | \
+    grep -Ev '^[[:space:]]*HOST_CC[[:space:]]*=[[:space:]]*"([^"]*/)?kache' | \
+    grep -Ev '^[[:space:]]*HOST_CXX[[:space:]]*=[[:space:]]*"([^"]*/)?kache' | \
+    grep -Ev '^[[:space:]]*CC_KNOWN_WRAPPER_CUSTOM[[:space:]]*=[[:space:]]*"([^"]*/)?kache' | \
     awk '
         function flush() {
             if (!pending) return
@@ -278,7 +296,9 @@ rustup run "$nightly" rustc -vV | head -n 2
 # daemon/service plus its own validation of the wrapper setup.
 ensure_cargo_config
 kache init --yes
-kache install-shims || log "install-shims reported an issue, continuing"
+kache install-shims
+# Init may preserve a previously configured path; normalize it after shims exist.
+ensure_cargo_config
 
 # Doctor must pass on this machine.
 kache doctor
@@ -310,7 +330,7 @@ log "probe build under $nightly ok"
 # Show the effective kache-managed cargo config, then open the interactive
 # editor when there is a terminal (kache config requires one).
 log "managed cargo config:"
-grep -E '^[[:space:]]*(rustc-wrapper|HOST_CC|HOST_CXX|CC_KNOWN_WRAPPER_CUSTOM)[[:space:]]*=' \
+grep -E '^[[:space:]]*(rustc-wrapper|rustdoc|HOST_CC|HOST_CXX|CC_KNOWN_WRAPPER_CUSTOM)[[:space:]]*=' \
     "${CARGO_HOME:-$HOME/.cargo}/config.toml" || die "managed keys missing from cargo config"
 if [ -t 0 ]; then
     kache config
