@@ -1,0 +1,251 @@
+#!/bin/sh
+# Install mold v3.0.0 on glibc Linux and use it for GNU/Linux Rust targets.
+
+set -eu
+
+prog=${0##*/}
+version=3.0.0
+mode=install
+
+die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+log() { printf '%s: %s\n' "$prog" "$*"; }
+usage() {
+    printf 'usage: %s [uninstall]\n' "$prog" >&2
+    exit 2
+}
+
+case "${1:-}" in
+    "") ;;
+    uninstall) mode=uninstall; shift; [ "$#" -eq 0 ] || usage ;;
+    -h|--help) usage ;;
+    *) usage ;;
+esac
+
+cargo_home=${CARGO_HOME:-$HOME/.cargo}
+cargo_bin="$cargo_home/bin"
+install_dir="$cargo_home/mold-$version"
+cfg="$cargo_home/config.toml"
+section="[target.'cfg(all(target_os = \"linux\", target_env = \"gnu\"))']"
+
+# Remove only mold settings owned by this installer; keep other Cargo config.
+strip_cargo_config() {
+    [ -f "$cfg" ] || { log "no cargo config, nothing to remove"; return 0; }
+    tmp=$(mktemp "${TMPDIR:-/tmp}/setup-mold.toml.XXXXXX")
+    awk -v target="$section" '
+        function mold_flag_line(line) {
+            return line ~ /^[[:space:]]*rustflags[[:space:]]*=[[:space:]]*\["-C",[[:space:]]*"link-arg=-fuse-ld=[^"]*mold"\][[:space:]]*$/
+        }
+        function flush(    i, has_mold_flags, clang_linker, other_keys, keep_content, line) {
+            if (n == 0) return
+            if (header != target) {
+                for (i = 1; i <= n; i++) print lines[i]
+                n = 0
+                return
+            }
+
+            for (i = 2; i <= n; i++) {
+                line = lines[i]
+                if (mold_flag_line(line)) {
+                    has_mold_flags = 1
+                } else if (line ~ /^[[:space:]]*linker[[:space:]]*=[[:space:]]*"clang"[[:space:]]*$/) {
+                    clang_linker = 1
+                } else if (line ~ /^[[:space:]]*[A-Za-z0-9_-]+[[:space:]]*=/) {
+                    other_keys++
+                }
+            }
+
+            if (!has_mold_flags) {
+                for (i = 1; i <= n; i++) print lines[i]
+                n = 0
+                return
+            }
+
+            for (i = 2; i <= n; i++) {
+                line = lines[i]
+                if (mold_flag_line(line)) continue
+                if (clang_linker && other_keys == 0 && line ~ /^[[:space:]]*linker[[:space:]]*=[[:space:]]*"clang"[[:space:]]*$/) continue
+                if (line !~ /^[[:space:]]*(#.*)?$/) keep_content = 1
+            }
+            if (keep_content) {
+                print lines[1]
+                for (i = 2; i <= n; i++) {
+                    line = lines[i]
+                    if (mold_flag_line(line)) continue
+                    if (clang_linker && other_keys == 0 && line ~ /^[[:space:]]*linker[[:space:]]*=[[:space:]]*"clang"[[:space:]]*$/) continue
+                    print line
+                }
+            }
+            n = 0
+        }
+        $0 == "# setup-mold: begin" {
+            if (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--
+            in_managed_block = 1
+            next
+        }
+        in_managed_block {
+            if ($0 == "# setup-mold: end") in_managed_block = 0
+            next
+        }
+        /^[[:space:]]*\[/ {
+            flush()
+            header = $0
+            lines[++n] = $0
+            next
+        }
+        n > 0 { lines[++n] = $0; next }
+        { print }
+        END { flush() }
+    ' "$cfg" > "$tmp" || { rm -f "$tmp"; die "could not update $cfg"; }
+    cat "$tmp" > "$cfg" || { rm -f "$tmp"; die "could not write $cfg"; }
+    rm -f "$tmp"
+    log "removed mold Cargo settings from $cfg"
+}
+
+if [ "$mode" = uninstall ]; then
+    strip_cargo_config
+    for name in mold ld.mold; do
+        link="$cargo_bin/$name"
+        expected="$install_dir/bin/$name"
+        if [ -L "$link" ] && [ "$(readlink "$link")" = "$expected" ]; then
+            rm -f "$link"
+            log "removed $link"
+        fi
+    done
+    if [ -f "$install_dir/.setup-mold-version" ] &&
+        [ "$(cat "$install_dir/.setup-mold-version")" = "$version" ]; then
+        rm -rf "$install_dir"
+        log "removed $install_dir"
+    else
+        log "no mold installation owned by $prog at $install_dir"
+    fi
+    exit 0
+fi
+
+[ "$(uname -s)" = Linux ] || die "Linux glibc only"
+command -v getconf >/dev/null 2>&1 || die "getconf not found; cannot verify glibc"
+libc_version=$(getconf GNU_LIBC_VERSION 2>/dev/null || true)
+case "$libc_version" in
+    glibc\ *) ;;
+    *) die "glibc required; musl is not supported" ;;
+esac
+
+arch=$(uname -m)
+case "$arch" in
+    x86_64|amd64)
+        asset_arch=x86_64
+        checksum=6c90d4a474c7c0409dfb575be03a5345878ac14fdba18de8b40fa58c60121189
+        ;;
+    aarch64|arm64)
+        asset_arch=aarch64
+        checksum=52c759d3689babaea4c42af2f31062a74ab83e17ffb5a8090232534c67b70577
+        ;;
+    arm|armv6l|armv7l|armv8l)
+        asset_arch=arm
+        checksum=255a310d140452156823a22199f973a529c367b08b12cd6660162a7aabf1783e
+        ;;
+    loongarch64)
+        asset_arch=loongarch64
+        checksum=cac6374c69846be33b227e185311069419ae249e695bc7cf8b2e683c98bbf11a
+        ;;
+    ppc64le)
+        asset_arch=ppc64le
+        checksum=28d6c8742fae3a3fb452322fae7e4a3255aa62eb8f495143b833d9b2dd6522eb
+        ;;
+    riscv64)
+        asset_arch=riscv64
+        checksum=3d8866bf419dbc9c34c082a5c40382aab19b31974a9c0df72bde393aaa563afd
+        ;;
+    s390x)
+        asset_arch=s390x
+        checksum=118e454b8c0fc603da3142cabaf0ef86c978068111f96fa057652dc83b43f1d4
+        ;;
+    *) die "unsupported architecture: $arch" ;;
+esac
+
+command -v curl >/dev/null 2>&1 || die "curl not found"
+command -v tar >/dev/null 2>&1 || die "tar not found"
+command -v clang >/dev/null 2>&1 || die "clang not found (required by Cargo's mold linker config)"
+
+# Do not create a second overlapping Linux Cargo target table or replace custom flags.
+managed_begin='# setup-mold: begin'
+managed_end='# setup-mold: end'
+has_begin=0
+has_end=0
+if [ -f "$cfg" ]; then
+    grep -Fqx "$managed_begin" "$cfg" && has_begin=1 || true
+    grep -Fqx "$managed_end" "$cfg" && has_end=1 || true
+    [ "$has_begin" -eq "$has_end" ] || die "$cfg has an incomplete setup-mold block"
+    if [ "$has_begin" -eq 0 ] && grep -Fqx "$section" "$cfg"; then
+        old_flags=$(awk -v section="$section" '
+            $0 == section { active = 1; next }
+            active && /^\[/ { exit }
+            active && /^[[:space:]]*rustflags[[:space:]]*=/ { print; exit }
+        ' "$cfg")
+        case "$old_flags" in
+            *-fuse-ld=*mold*) ;;
+            *) die "$cfg already has a GNU/Linux target section; merge mold into it manually" ;;
+        esac
+    elif [ "$has_begin" -eq 0 ] && grep -Eq '^[[:space:]]*\[target\..*linux' "$cfg"; then
+        die "$cfg already has a Linux target section; merge mold into it manually"
+    fi
+fi
+
+if [ -e "$install_dir" ]; then
+    [ -f "$install_dir/.setup-mold-version" ] &&
+        [ "$(cat "$install_dir/.setup-mold-version")" = "$version" ] \
+        || die "refusing to replace unowned directory: $install_dir"
+fi
+for name in mold ld.mold; do
+    link="$cargo_bin/$name"
+    expected="$install_dir/bin/$name"
+    if [ -e "$link" ] || [ -L "$link" ]; then
+        [ -L "$link" ] && [ "$(readlink "$link")" = "$expected" ] \
+            || die "refusing to replace existing command: $link"
+    fi
+done
+
+asset="mold-${version}-${asset_arch}-linux.tar.gz"
+base_url="https://github.com/rui314/mold/releases/download/v${version}"
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/setup-mold.XXXXXX")
+stage=
+trap 'rm -rf "$tmpdir"; [ -z "$stage" ] || rm -rf "$stage"' EXIT INT TERM
+
+log "downloading $asset"
+curl -fsSL -o "$tmpdir/$asset" "$base_url/$asset"
+if command -v sha256sum >/dev/null 2>&1; then
+    got=$(sha256sum "$tmpdir/$asset" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    got=$(shasum -a 256 "$tmpdir/$asset" | awk '{print $1}')
+else
+    die "no sha256sum or shasum found"
+fi
+[ "$got" = "$checksum" ] || die "checksum mismatch for $asset"
+log "checksum ok"
+
+tar -xzf "$tmpdir/$asset" -C "$tmpdir"
+tree="$tmpdir/mold-${version}-${asset_arch}-linux"
+[ -x "$tree/bin/mold" ] || die "archive did not contain mold"
+"$tree/bin/mold" --version 2>/dev/null | grep -Eq "^mold ${version}([[:space:]]|$)" \
+    || die "release binary does not report mold $version"
+
+mkdir -p "$cargo_home" "$cargo_bin"
+stage=$(mktemp -d "$cargo_home/.setup-mold.XXXXXX")
+cp -R "$tree/." "$stage/"
+printf '%s\n' "$version" > "$stage/.setup-mold-version"
+if [ -e "$install_dir" ]; then rm -rf "$install_dir"; fi
+mv "$stage" "$install_dir"
+stage=
+for name in mold ld.mold; do
+    if [ ! -e "$cargo_bin/$name" ] && [ ! -L "$cargo_bin/$name" ]; then
+        ln -s "$install_dir/bin/$name" "$cargo_bin/$name"
+    fi
+done
+
+# A marker block lets uninstall remove exactly the settings this script adds.
+if [ -f "$cfg" ]; then strip_cargo_config; fi
+mold_path=$(printf '%s' "$install_dir/bin/mold" | sed 's/\\/\\\\/g; s/"/\\"/g')
+printf '\n%s\n%s\nlinker = "clang"\nrustflags = ["-C", "link-arg=-fuse-ld=%s"]\n%s\n' \
+    "$managed_begin" "$section" "$mold_path" "$managed_end" >> "$cfg"
+
+log "installed: $("$install_dir/bin/mold" --version)"
+log "GNU/Linux Rust targets use mold via $cfg"
