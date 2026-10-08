@@ -128,6 +128,15 @@ trust_level = "trusted"
 [projects."/Users/josh/dev/service-registry"]
 trust_level = "trusted"
 
+[projects."/Users/josh/dev/eng-pipes"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/char"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/gocd-deployment-visualizer"]
+trust_level = "trusted"
+
 [mcp_servers.sentry]
 url = "https://mcp.sentry.dev/mcp"
 
