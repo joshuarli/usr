@@ -1,10 +1,14 @@
-
-
 [build]
 rustdoc = "/Users/josh/.local/lib/kache/shims/rustdoc"
 rustc-wrapper = "/Users/josh/.cargo/bin/kache"
 
 [env]
 CC_KNOWN_WRAPPER_CUSTOM = "kache"
-HOST_CXX = "/Users/josh/.cargo/bin/kache c++"
-HOST_CC = "/Users/josh/.cargo/bin/kache cc"
+HOST_CXX = "/home/josh/.cargo/bin/kache c++"
+HOST_CC = "/home/josh/.cargo/bin/kache cc"
+
+# Link with the installed mold. /usr/local/libexec/mold/ld is a symlink to
+# /usr/local/bin/mold, and -B makes the C compiler driver use it as `ld`.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-Clink-arg=-B/usr/local/libexec/mold"]
+

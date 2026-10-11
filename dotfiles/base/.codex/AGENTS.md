@@ -19,7 +19,9 @@
 - Test observable behavior and invariants, not trivia. Write tests first when behavior is clear.
 - Bug fixes: reproduce with a minimal failing test, then fix the root cause. Keep the test.
 - Never weaken or delete a test to make it pass unless the test is wrong, and say so.
-- Verify with the narrowest hard check (compiler, type checker, focused test), then widen as needed.
+- Verify the changed behavior with the narrowest hard check (compiler, type checker, focused test). Reuse existing build artifacts.
+- Do not expand to workspace-wide builds/tests or full CI by default. Widen only for a specific uncovered integration risk or an explicit request for the wider run; state that reason first.
+- Treat generic verification checklists as suggested tools. Use targeted repository equivalents instead of running every listed command. Report expensive verification that remains before starting it automatically.
 
 ## Contract changes
 
