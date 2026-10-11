@@ -1,0 +1,56 @@
+#!/bin/sh
+set -eu
+
+# Prefer performance while leaving frequency selection to AMD firmware and
+# retaining its thermal and power limits.
+die() {
+    printf 'threadripper-tune: %s\n' "$*" >&2
+    exit 1
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+    die "run with doas: doas $0"
+fi
+
+pstate_status=/sys/devices/system/cpu/amd_pstate/status
+boost=/sys/devices/system/cpu/cpufreq/boost
+policy_glob=/sys/devices/system/cpu/cpufreq/policy*
+
+[ -r "$pstate_status" ] || die "AMD P-state status is unavailable"
+[ "$(cat "$pstate_status")" = active ] || die "AMD P-state is not active"
+[ -r "$boost" ] && [ -w "$boost" ] || die "CPU boost control is unavailable"
+
+set -- $policy_glob
+[ -d "$1" ] || die "no CPU frequency policies found"
+policy_count=$#
+
+# Validate every policy before writing, so unsupported systems are left alone.
+for policy do
+    driver_file=$policy/scaling_driver
+    preference_file=$policy/energy_performance_preference
+    available_file=$policy/energy_performance_available_preferences
+
+    [ -r "$driver_file" ] || die "$policy has no scaling driver"
+    [ "$(cat "$driver_file")" = amd-pstate-epp ] || die "$policy is not using amd-pstate-epp"
+    [ -r "$preference_file" ] && [ -w "$preference_file" ] || die "$policy EPP control is unavailable"
+    [ -r "$available_file" ] || die "$policy has no available EPP profiles"
+    case " $(cat "$available_file") " in
+        *" performance "*) ;;
+        *) die "$policy does not support the performance EPP profile" ;;
+    esac
+done
+
+if [ "$(cat "$boost")" != 1 ]; then
+    printf '1\n' > "$boost" || die "could not enable CPU boost"
+fi
+[ "$(cat "$boost")" = 1 ] || die "CPU boost did not enable"
+
+for policy do
+    preference_file=$policy/energy_performance_preference
+    if [ "$(cat "$preference_file")" != performance ]; then
+        printf 'performance\n' > "$preference_file" || die "could not tune $policy"
+    fi
+    [ "$(cat "$preference_file")" = performance ] || die "$policy did not accept performance EPP"
+done
+
+printf 'CPU boost enabled; AMD EPP set to performance on %s policies.\n' "$policy_count"
