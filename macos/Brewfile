@@ -5,8 +5,6 @@ brew "delta"
 
 # brew "detox"
 
-brew "duf"
-brew "dua-cli"
 brew "tree"
 brew "pstree"
 brew "procs"
@@ -23,17 +21,13 @@ brew "xh"
 
 brew "shellcheck"
 
-brew "handbrake"
 brew "graphicsmagick"
 
 brew "smartmontools"
 brew "f3"
 
-brew "just"
 brew "prek"
 
-# brew tap oven-sh/bun
-brew "bun"
 brew "rustup"
 
 brew "dropbear"
