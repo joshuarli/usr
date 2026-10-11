@@ -15,13 +15,24 @@ The goal is **not** “replace every `BTreeMap` with `HashMap`.” The goal is t
 
 ## Baseline hash-table policy
 
-Use current:
+Use current `hashbrown`, declared once in `[workspace.dependencies]` and inherited with `{ workspace = true }`:
 
 ```toml
-hashbrown = "..."
+hashbrown = { version = "0.17", default-features = false, features = ["default-hasher", "inline-more"] }
 ```
 
-and prefer:
+- `default-hasher` supplies foldhash as the default `S`, which is what makes `HashMap::new()` / `HashSet::from([..])` compile.
+- `inline-more` trades compile time and binary size for speed.
+- `default-features = false` drops features we don't use. Add `raw-entry`, `equivalent`, or `allocator-api2` only if the code needs them.
+
+Table and hasher are separate choices:
+
+- **Table:** hashbrown's SwissTable. `std::collections::HashMap` is a hashbrown fork, so the table itself is about as fast. Std's problem is its default hasher, SipHash-1-3 (`RandomState`), which is slow on small keys.
+- **Hasher:** foldhash by default, `rustc_hash::FxBuildHasher` as the candidate for trusted small integer keys.
+- **Do not use `foldhash::HashMap` / `foldhash::HashSet`.** They are aliases of the std types with a foldhash hasher. Use `hashbrown` types instead, which also give you the full hashbrown API.
+- **Never use `std::collections::{HashMap, HashSet}`** in application code, even with a custom hasher.
+
+Prefer:
 
 ```rust
 use hashbrown::{HashMap, HashSet};
@@ -68,7 +79,13 @@ type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 
 and likewise for `HashSet`.
 
-Do not assume Fx hashing wins. Benchmark it.
+When raw speed is the primary concern, this is the first thing to measure:
+
+- Fx is a single multiply-rotate per word, so it is usually the fastest on `u32`/`u64`/ID-like keys and small tuples.
+- foldhash has better distribution and handles strings and longer keys well. It is the safer default.
+- Fx's weak low-bit mixing can cluster some key patterns (for example, aligned or strided IDs), so a win on a microbenchmark can reverse on real data.
+
+Do not assume Fx hashing wins. Benchmark it on the real workload, and adopt it only for trusted keys.
 
 Do not reintroduce the obsolete `fxhash` crate.
 
