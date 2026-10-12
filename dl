@@ -1,10 +1,21 @@
 #!/bin/sh
 # dl - install or update my binaries from their newest GitHub release into ~/.local/bin.
 # usage: dl [TOOL...]    with no TOOL, every tool below
+# Distinct tools are handled concurrently, up to the number requested.
 # Idempotent: a tool is downloaded only when its newest asset differs from the one
 # installed last time. If the newest asset cannot be checked (offline, rate limited)
 # and the tool is already installed, it warns and keeps the installed one.
 set -eu
+
+_dl_worker_mode=false
+if [ "${DL_INTERNAL_WORKER:-false}" = true ]; then _dl_worker_mode=true; fi
+unset DL_INTERNAL_WORKER
+
+script_path=$0
+case "$script_path" in
+    */*) ;;
+    *) script_path=$(command -v "$script_path" || printf './%s\n' "$script_path") ;;
+esac
 
 ARCH=$(uname -m | sed 's/arm64/aarch64/')
 OS=$(uname -s)
@@ -23,7 +34,78 @@ mkdir -p "$STATE"
 
 failed=false
 changed=false
+tmpzip=
+tmpbin=
+tmpbundle=
+worker_pids=
+worker_count=0
+log_dir=
+log_count=0
+if [ "$_dl_worker_mode" = true ]; then
+    worker_pids=
+    worker_count=0
+    log_dir=
+    log_count=0
+fi
 skip() { printf '%s\n' "Skipping $1: $2" >&2; failed=true; }
+
+# Remove only temporary paths created by this invocation. Keep cleanup failures
+# visible without replacing the install or signal failure that caused cleanup.
+cleanup_temporary_files() {
+    if [ -n "$tmpzip" ]; then
+        rm -f "$tmpzip" || printf '%s\n' "Warning: could not remove $tmpzip" >&2
+        tmpzip=
+    fi
+    if [ -n "$tmpbin" ]; then
+        rm -f "$tmpbin" || printf '%s\n' "Warning: could not remove $tmpbin" >&2
+        tmpbin=
+    fi
+    if [ -n "$tmpbundle" ]; then
+        rm -rf "$tmpbundle" || printf '%s\n' "Warning: could not remove $tmpbundle" >&2
+        tmpbundle=
+    fi
+    if [ -n "$log_dir" ]; then
+        rm -rf "$log_dir" || printf '%s\n' "Warning: could not remove $log_dir" >&2
+        log_dir=
+    fi
+    return 0
+}
+
+# Replay worker output only after all writers have closed their logs.
+replay_worker_logs() {
+    log_index=1
+    while [ "$log_index" -le "$log_count" ]; do
+        stdout_log="${log_dir}/${log_index}.stdout"
+        stderr_log="${log_dir}/${log_index}.stderr"
+        if [ -f "$stdout_log" ]; then cat "$stdout_log" || return 1; fi
+        if [ -f "$stderr_log" ]; then cat "$stderr_log" >&2 || return 1; fi
+        log_index=$((log_index + 1))
+    done
+}
+
+# A parent owns every worker it starts and stops them if it is interrupted.
+terminate_workers() {
+    for worker_pid in $worker_pids; do
+        kill "$worker_pid" 2>/dev/null || :
+    done
+    for worker_pid in $worker_pids; do
+        wait "$worker_pid" 2>/dev/null || :
+    done
+}
+
+on_signal() {
+    signal_status=$1
+    trap '' HUP INT TERM
+    terminate_workers
+    replay_worker_logs || :
+    cleanup_temporary_files
+    exit "$signal_status"
+}
+
+trap 'cleanup_temporary_files' 0
+trap 'on_signal 129' HUP
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # unchecked PROG REASON  Keep an installed tool we could not check; fail if there is none.
 unchecked() {
@@ -65,7 +147,7 @@ install_binary() {
 install_release() {
     prog=$1
     case "$prog" in
-        e|fz|fd|rg|fdu|fastermod|tm|fs|srv) owner="laputa-systems" ;;
+        e|fz|fd|rg|fdu|fastermod|tm|fs|srv|diff-pretty) owner="laputa-systems" ;;
         ish|mactop) owner="joshuarli" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
@@ -99,17 +181,22 @@ install_release() {
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
+        tmpzip=
         skip "$prog" "${asset}.zip is not available in ${tag}"
         return
     fi
     tmpbin=$(mktemp "${DEST}/.${prog}.XXXXXX")
     if ! unzip -p "$tmpzip" "$asset" > "$tmpbin"; then
         rm -f "$tmpzip" "$tmpbin"
+        tmpzip=
+        tmpbin=
         skip "$prog" "${asset}.zip does not contain ${asset}"
         return
     fi
     rm -f "$tmpzip"
+    tmpzip=
     install_binary "$prog" "$tmpbin" "$id"
+    tmpbin=
 }
 
 # mactop is a menu-bar app: mirror `make install` from joshuarli/mactop
@@ -117,7 +204,8 @@ install_release() {
 install_mactop_app() {
     app="/Applications/mactop.app"
     printf '%s\n' "Installing ${app} ..."
-    bundle=$(mktemp -d "/Applications/.mactop.XXXXXX")
+    tmpbundle=$(mktemp -d "/Applications/.mactop.XXXXXX")
+    bundle=$tmpbundle
     mkdir -p "$bundle/Contents/MacOS"
     cp "${DEST}/mactop" "$bundle/Contents/MacOS/mactop"
     cat > "$bundle/Contents/Info.plist" <<'EOF'
@@ -152,6 +240,7 @@ EOF
     xattr -dr com.apple.quarantine "$bundle" 2>/dev/null || true
     rm -rf "$app"
     mv "$bundle" "$app"
+    tmpbundle=
     printf '%s\n' "Installed ${app}"
     agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
     mkdir -p "${HOME}/Library/LaunchAgents"
@@ -192,15 +281,82 @@ install_direct() {
     tmpbin=$(mktemp "${DEST}/.$1.XXXXXX")
     if ! curl -fsSL -o "$tmpbin" "$2"; then
         rm -f "$tmpbin"
+        tmpbin=
         skip "$1" "download failed"
         return
     fi
     install_binary "$1" "$tmpbin" "$id"
+    tmpbin=
+}
+
+# Repeated tools share a binary and state file, so keep those requests serial.
+has_duplicate_tools() {
+    for prog in "$@"; do
+        matches=0
+        for candidate in "$@"; do
+            if [ "$prog" = "$candidate" ]; then
+                matches=$((matches + 1))
+            fi
+        done
+        if [ "$matches" -gt 1 ]; then return 0; fi
+    done
+    return 1
+}
+
+wait_for_workers() {
+    group_failed=false
+    for worker_pid in $worker_pids; do
+        if wait "$worker_pid"; then :; else group_failed=true; fi
+        worker_pids=${worker_pids#"$worker_pid"}
+        worker_pids=${worker_pids# }
+    done
+    worker_count=0
+    if $group_failed; then return 1; fi
+    return 0
+}
+
+# Each child handles one tool, so its result and failure state stay independent.
+run_parallel() {
+    max_workers=$#
+    parallel_failed=false
+    worker_pids=
+    worker_count=0
+    if ! log_dir=$(mktemp -d); then
+        printf '%s\n' "Could not create a directory for worker output" >&2
+        return 1
+    fi
+    log_count=0
+    for prog in "$@"; do
+        log_count=$((log_count + 1))
+        DL_INTERNAL_WORKER=true "$script_path" "$prog" \
+            > "${log_dir}/${log_count}.stdout" \
+            2> "${log_dir}/${log_count}.stderr" &
+        worker_pid=$!
+        worker_pids="${worker_pids}${worker_pids:+ }${worker_pid}"
+        worker_count=$((worker_count + 1))
+        if [ "$worker_count" -ge "$max_workers" ]; then
+            if ! wait_for_workers; then parallel_failed=true; fi
+        fi
+    done
+    if [ "$worker_count" -gt 0 ]; then
+        if ! wait_for_workers; then parallel_failed=true; fi
+    fi
+    if ! replay_worker_logs; then parallel_failed=true; fi
+    if $parallel_failed; then return 1; fi
+    return 0
 }
 
 if [ $# -eq 0 ]; then
     set -- fd rg jaq fastermod tm ish e fz fdu fs srv mactop
     if [ "$OS" = Darwin ]; then set -- "$@" vault gh; fi
+fi
+
+if [ "$#" -gt 1 ] && [ "$_dl_worker_mode" != true ] \
+    && ! has_duplicate_tools "$@"; then
+    if ! run_parallel "$@"; then failed=true; fi
+    if $failed; then exit 1; fi
+    printf '%s\n' "Done."
+    exit 0
 fi
 
 for prog in "$@"; do
@@ -232,4 +388,4 @@ for prog in "$@"; do
 done
 
 if $failed; then exit 1; fi
-printf '%s\n' "Done."
+if [ "$_dl_worker_mode" != true ]; then printf '%s\n' "Done."; fi
