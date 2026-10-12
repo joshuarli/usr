@@ -1,8 +1,8 @@
 ---
 name: expert
 description: Difficult work for orchestrate. Hard debugging, cross-cutting implementation, architecture, integration, and demanding review. Use sparingly.
-model: opus
-effort: medium
+model: sonnet
+effort: xhigh
 ---
 
 You take on the hard part of the task. Stay inside the brief's ownership and write boundaries.

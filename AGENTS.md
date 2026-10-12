@@ -10,7 +10,7 @@ This repo is the source of truth for my home directory, plus my personal scripts
 | `dotfiles/darwin/`, `dotfiles/linux/` | Layers that apply on that OS only. Same shape as `base`. |
 | `dotfiles/sym` | POSIX `sh` installer. Tests: `dotfiles/sym-test.sh`. Skill invariants: `dotfiles/skills-check.sh`. |
 | `bin` | Link to `~/.local/bin`, where scripts and downloaded binaries (`fd`, `rg`, `gh`, `ish`, ...) live together. Only the scripts are tracked, under `.local/bin` in a layer. |
-| `dl` | Downloads those binaries from their newest GitHub release into `~/.local/bin` (`dl fd rg` for just those), ad-hoc codesigns them, and installs the `mactop` app and LaunchAgent. It trusts my own release repos over TLS and checks nothing else. |
+| `dl` | Downloads those binaries from their newest GitHub release into `~/.local/bin` (`dl fd rg` for just those), ad-hoc codesigns them, and installs the `mactop` app and LaunchAgent. It is idempotent: it records each installed asset's ETag under `~/.local/state/dl` and downloads only when the newest asset differs. If it cannot check an installed tool (offline), it warns and keeps it. `make` runs it first. It trusts my release repos and `jaq`'s over TLS and checks nothing else. |
 | `macos/` | Run by hand, not installed. `setup-macos` provisions a Mac: Homebrew, the package list, Touch ID sudo, a local DNS cache, each step idempotent (`setup-macos -n` previews). `macos-lean.py` disables macOS services; `setup-macos lean` runs it, and it is never part of the default run. |
 | `.agents/skills/` | Skills for this repo only (`dotfiles-health`). `.claude/skills` links to it. |
 | `skills` | Convenience link to the global skills, `dotfiles/base/.agents/skills`. |
@@ -25,13 +25,13 @@ Anything a harness writes lives in the real `~/.claude`, `~/.codex`, `~/.pi/agen
 
 ## Bootstrap
 
-On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make`; `dl`; `setup-kache` (every `cargo` build goes through the `kache` wrapper that `.cargo/config.toml` names). On Linux: `make`, `dl`, `setup-kache`, and `setup-mold` for glibc; musl targets expect mold at `/usr/local/libexec/mold`.
+On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (which runs `dl`); `setup-kache` (every `cargo` build goes through the `kache` wrapper that `.cargo/config.toml` names). On Linux: `make`, `setup-kache`, and `setup-mold` for glibc; musl targets expect mold at `/usr/local/libexec/mold`.
 
 ## Commands
 
 - `make check`: `sym` tests and skill checks (about 25 s). Run it after touching `sym`, skills, or agent definitions.
 - `make plan`: dry run of the sync into `$HOME`. A `CONFLICT` means a real file, or a symlinked directory, is in the way; resolve it by hand. A path claimed by two layers stops both `plan` and `make`.
-- `make`: sync into `$HOME`. This mutates the real home directory, so only run it when asked.
+- `make`: run `dl`, then sync into `$HOME`. This downloads binaries and mutates the real home directory, so only run it when asked. A `dl` failure does not stop the sync but fails the run. `plan` and `check` never run `dl`.
 - Experiment with `sh dotfiles/sym -t <tmpdir> dotfiles/base`; its default target is `$HOME`.
 - Deleting something from the repo leaves its link dangling in `~`; remove it there too, or run `sh dotfiles/sym -d` on the layer first.
 
@@ -49,7 +49,7 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make`; `dl`
 - `claude-or` and `claude-ds` start Claude Code against OpenRouter or DeepSeek with `--dangerously-skip-permissions`, taking the key from `vault`. `codex-or` runs Codex with its `or` profile.
 - `mdl`, `mpdl`, and `vdl` wrap `yt-dlp` through `uvx`.
 - `reset-claude` and `reset-codex` delete everything in `~/.claude` and `~/.codex` except symlinks into this repo (and directories holding one). Do not run either unprompted.
-- Do not run `dl`, `macos/*`, or `setup-*` without being asked. They download, codesign, install system services, or need sudo.
+- Do not run `dl` (or `make`, which runs it), `macos/*`, or `setup-*` without being asked. Test `dl` with `HOME` pointed at a scratch directory under `.work/`. They download, codesign, install system services, or need sudo.
 
 ## Conventions
 

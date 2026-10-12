@@ -17,6 +17,7 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 | Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `medium` | `mechanic` |
 | Normal implementation, debugging, tests, ordinary review | `gpt-6.1-sol`, `medium` | `worker` |
 | Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` |
+| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `medium` | `god` |
 
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
 
@@ -24,13 +25,13 @@ If work exceeds the parent's delegation ceiling, keep it local at the highest su
 
 Allowed child models, highest to lowest: `gpt-6.1-sol` > `gpt-6-luna`.
 
-Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Children run at `medium` effort, or `low` for scouting. Never assign `high` or `xhigh`, and never use `ultra`: its automatic delegation conflicts with this skill. The normal and difficult rows share one setting; difficulty changes the brief, not the model or effort.
+Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Children run at `medium` effort, or `low` for scouting. Never assign `high` or `xhigh`, and never use `ultra`: its automatic delegation conflicts with this skill. The normal, difficult, and hardest rows share one setting; difficulty changes the brief, not the model or effort.
 
 Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 
 ### Claude
 
-Spawn children only as `scout`, `mechanic`, `worker`, or `expert`. A subagent's model and reasoning effort come from its agent definition in `~/.claude/agents` (frontmatter `model`, `effort`), not from the call, which can override only the model. Those definitions are the single source of truth: change a type's model or effort there, not here. Built-in agent types do not pin effort. Reserve `expert` for the difficult row. When a task needs a model and effort none of the four provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
+Spawn children only as `scout`, `mechanic`, `worker`, `expert`, or `god`. A subagent's model and reasoning effort come from its agent definition in `~/.claude/agents` (frontmatter `model`, `effort`), not from the call, which can override only the model. Those definitions are the single source of truth: change a type's model or effort there, not here. Built-in agent types do not pin effort. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed on with evidence of the difficulty, or for a decision others build on. When a task needs a model and effort none of the five provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
 
 Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
 
@@ -38,7 +39,7 @@ Give every parallel writer its own worktree, created by you with `git worktree a
 
 Delegate coherent component-sized work; do not delegate a one-command or one-edit task when the handoff costs more than doing it locally. Batch related trivial work into one assignment.
 
-Parallelize only independent ownership. Avoid overlapping writes, and use the smallest useful fan-out; concurrency is a ceiling, not a target.
+Maximize parallel work without overlap. Split the task by what each piece owns, and run one child per disjoint ownership set, as wide as the machine's headroom allows. Width follows the task: one child for a single coupled change, many for a wide one. Overlapping writes are the only limit on width, so serialize them inside one child. Give each child the largest coherent slice it can finish end to end, not a fragment that needs a second handoff.
 
 Every child gets:
 
@@ -62,15 +63,16 @@ A campaign is a backlog too large for one session, run as parallel lanes over se
 
 ### Run a wave
 
-1. **Select.** For each workstream take the next items whose prerequisites have merged. One to three items per lane, sized for one session. A workstream with nothing ready sits out.
+1. **Select.** For each workstream take every ready item whose prerequisites have merged and that shares its files, as one slice the lane delivers end to end: code, tests, and docs, with what it obsoletes removed. Make the slice as large as one session can finish, so a few big lanes beat many small ones over the same files. Split a workstream across lanes only when its items own disjoint files. A workstream with nothing ready sits out. The wave has one lane per workstream with ready work.
 2. **Brief.** Item IDs, files the lane owns and files it must not touch, what earlier waves learned, and the report format. The brief is the lane's only context beyond the repository.
-3. **Launch** the wave together, each lane in its own worktree under `.work/wt/`, committing on its own branch as Conventional Commits and never pushing. Start below the fan-out limit and widen once the load on the machine is known.
-4. **Review, merge, then verify**, one lane at a time as they report. Read the diff, rebase the lane onto the campaign branch, fast-forward, then run the checks for the areas it touched on the merged tree. Send a failure back to the lane with the command and its output.
+3. **Launch** the wave together, each lane in its own worktree under `.work/wt/`, committing on its own branch as Conventional Commits and never pushing. Size the wave by the machine: launch the first lanes, read their peak memory and load once they build, then set the width from the available memory with a margin, so the next wave runs as wide as is safe and the machine never swaps or OOMs.
+4. **Review, merge, then verify**, one lane at a time as they report. Read the diff, rebase the lane onto the campaign branch, fast-forward, then run the checks for the areas it touched on the merged tree. Send a failure back to the lane with the command and its output. Do not hold a merged lane for the slowest one: if its workstream has ready items, brief it again at once on the updated campaign branch.
 5. **Close** with every lane merged and none running: the full checks, the performance measurements against the baseline, and any repository-wide rewrite the wave made possible. Such rewrites run only here, because they change the files lanes read.
 6. **Record.** Delete finished items, add the defects found, and report to the owner: what merged, every contract change, measurements, and the decisions the next wave needs.
 
 ### Lane contract
 
+- A lane owns the design of its slice inside its files: it chooses the structure, writes the tests the slice needs, and settles details itself, logging each call. It stops only on a decision the doc leaves open.
 - Lanes never coordinate with each other. A lane that needs something from another workstream reports it; the integrator sequences it.
 - Verification belongs to the integrator. A lane uses the cheapest build that compiles its change and runs only the tests it wrote or changed, by name. It does not run suites, slow or repository-wide checks, or optimized builds; those run once, after the merge, on the code that will ship. A lane's report names what the integrator's checks should exercise and what it left unverified.
 - Shared files are append-only for a lane: add to a registry at the end of its group, put a new unit in its own file, and do not reorganize, rename, or reformat.

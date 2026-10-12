@@ -63,6 +63,7 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 ## Sequence
 
 - **Items** have an ID, a size, prerequisites, the files they own, and an acceptance proof. Prerequisites that cross workstreams are written on the item. An item that shares code with another is in the same workstream.
+- **Size for speed.** An item is a capability a lane delivers end to end, not a ticket: merge adjacent increments that touch the same files into one item, and a lane takes several in a go. Draw the workstreams so each phase offers the most disjoint ownership sets, and write down the widest lane count each phase allows. A sequence of many small items over the same files is a defect to fix before the doc is ready.
 - **Order the phases:**
   1. *P0, ground:* note the known failures on the baseline (so the executor never mistakes a pre-existing red for its own), and the loop timings, and repair the loop itself if it is the bottleneck.
   2. *Parity and completeness:* every deliverable works end to end, and every behavior of the reference has a test that fails if it is wrong. The reference is the thing being ported, replaced, or specified, and the doc names it. The parity register is built as `reference-parity` describes.
@@ -82,6 +83,7 @@ For each area the campaign touches, load the skill and ask what decisions it wou
    - Fix on the way what is egregious, in its own commit, to thresholds stated in numbers: a command over N minutes, a regression of more than N times against the baseline, a test red on the baseline that blocks the item. Record anything else seen and leave it.
    - Parity before optimization.
    - Keep bookkeeping minimal: no provenance, checksums, or pinned hashes unless the campaign delivers something that needs them.
+   - Run as wide as ownership and the machine allow, with the largest slices a lane can finish, as `orchestrate` sets out. The doc states the memory budget per lane.
    - Worktrees and all working state live under `.work/` in the repo, never `/tmp`. The doc states the lane worktree path (`.work/wt/<lane>`).
    - The coordinator cleans up as it integrates: once a lane is merged and its checks pass on the merged tree, it runs `git worktree remove` on the lane's worktree and `git branch -d` on its branch. A parked lane keeps its committed branch. At any moment the only worktrees are those of running lanes.
    - Every commit, the executor's and the lanes', is a Conventional Commit, with the area or workstream as its scope. The item ID belongs in the body, never the subject.

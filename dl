@@ -1,6 +1,9 @@
 #!/bin/sh
 # dl - install or update my binaries from their newest GitHub release into ~/.local/bin.
 # usage: dl [TOOL...]    with no TOOL, every tool below
+# Idempotent: a tool is downloaded only when its newest asset differs from the one
+# installed last time. If the newest asset cannot be checked (offline, rate limited)
+# and the tool is already installed, it warns and keeps the installed one.
 set -eu
 
 ARCH=$(uname -m | sed 's/arm64/aarch64/')
@@ -12,12 +15,41 @@ esac
 DEST="${HOME}/.local/bin"
 mkdir -p "$DEST"
 
+# One file per tool holds the ETag of the asset last installed. The binary itself
+# cannot say which release it came from, and ad-hoc signing changes its bytes, so
+# comparing it with a fresh download would never match on macOS.
+STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
+mkdir -p "$STATE"
+
 failed=false
+changed=false
 skip() { printf '%s\n' "Skipping $1: $2" >&2; failed=true; }
 
-# install_binary PROG FILE
+# unchecked PROG REASON  Keep an installed tool we could not check; fail if there is none.
+unchecked() {
+    if [ -x "${DEST}/$1" ]; then
+        printf '%s\n' "Warning: could not check $1 ($2); keeping the installed one" >&2
+    else
+        skip "$1" "$2"
+    fi
+}
+
+# asset_id URL  Print the ETag of the asset URL finally serves, or nothing if unreachable.
+# A one-byte ranged GET, because release URLs redirect to signed storage URLs that reject HEAD.
+asset_id() {
+    curl -fsSL -r 0-0 -D - -o /dev/null "$1" 2>/dev/null \
+        | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' | tail -n 1
+}
+
+# is_current PROG ID  True when PROG is installed from the asset with this ID.
+is_current() {
+    [ -x "${DEST}/$1" ] && [ "$(cat "${STATE}/$1" 2>/dev/null)" = "$2" ]
+}
+
+# install_binary PROG FILE ID
 # Strip quarantine and ad-hoc sign on macOS, make executable, and move into place.
 # Signing happens before the move so a failure never leaves an unsigned binary installed.
+# The ID is recorded last, so an interrupted install is retried on the next run.
 install_binary() {
     if [ "$OS" = Darwin ]; then
         xattr -d com.apple.quarantine "$2" 2>/dev/null || true
@@ -25,6 +57,8 @@ install_binary() {
     fi
     chmod +x "$2"
     mv "$2" "${DEST}/$1"
+    printf '%s\n' "$3" > "${STATE}/$1"
+    changed=true
     printf '%s\n' "Installed ${DEST}/$1"
 }
 
@@ -36,12 +70,13 @@ install_release() {
         *) skip "$prog" "unknown tool"; return ;;
     esac
     # The release workflows publish prereleases, which GitHub's /latest endpoint
-    # intentionally excludes. The releases collection is newest-first, so its
-    # first tag is the artifact set produced by the most recent dispatch.
-    tag=$(curl -fsSL "https://api.github.com/repos/${owner}/${prog}/releases?per_page=1" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || tag=
+    # intentionally excludes. The releases feed is newest-first and includes them, so
+    # its first tag is the artifact set produced by the most recent dispatch. Unlike
+    # the API, the feed is not rate limited, which matters for a command run often.
+    tag=$(curl -fsSL "https://github.com/${owner}/${prog}/releases.atom" \
+        | sed -n 's|.*<link[^>]*releases/tag/\([^"]*\)".*|\1|p' | head -n 1) || tag=
     if [ -z "$tag" ]; then
-        skip "$prog" "no release found"
+        unchecked "$prog" "no release found"
         return
     fi
     case "${OS}:${prog}" in
@@ -51,6 +86,15 @@ install_release() {
     esac
     asset="${prog}-${artifact_target}"
     url="https://github.com/${owner}/${prog}/releases/download/${tag}/${asset}.zip"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked "$prog" "${asset}.zip is not available in ${tag}"
+        return
+    fi
+    if is_current "$prog" "$id"; then
+        printf '%s\n' "${prog} is current (${tag})"
+        return
+    fi
     printf '%s\n' "Downloading ${asset}.zip ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
@@ -65,7 +109,7 @@ install_release() {
         return
     fi
     rm -f "$tmpzip"
-    install_binary "$prog" "$tmpbin"
+    install_binary "$prog" "$tmpbin" "$id"
 }
 
 # mactop is a menu-bar app: mirror `make install` from joshuarli/mactop
@@ -135,6 +179,15 @@ EOF
 
 # install_direct NAME URL  Download one binary from a fixed URL.
 install_direct() {
+    id=$(asset_id "$2")
+    if [ -z "$id" ]; then
+        unchecked "$1" "$2 is unreachable"
+        return
+    fi
+    if is_current "$1" "$id"; then
+        printf '%s\n' "$1 is current"
+        return
+    fi
     printf '%s\n' "Downloading $1 ..."
     tmpbin=$(mktemp "${DEST}/.$1.XXXXXX")
     if ! curl -fsSL -o "$tmpbin" "$2"; then
@@ -142,7 +195,7 @@ install_direct() {
         skip "$1" "download failed"
         return
     fi
-    install_binary "$1" "$tmpbin"
+    install_binary "$1" "$tmpbin" "$id"
 }
 
 if [ $# -eq 0 ]; then
@@ -151,6 +204,7 @@ if [ $# -eq 0 ]; then
 fi
 
 for prog in "$@"; do
+    changed=false
     case "$prog" in
         vault)
             install_direct vault \
@@ -169,7 +223,9 @@ for prog in "$@"; do
                 "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm" ;;
         *)
             install_release "$prog"
-            if [ "$prog" = mactop ] && [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ]; then
+            # The app and LaunchAgent are rebuilt only for a new binary or a missing app.
+            if [ "$prog" = mactop ] && [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ] \
+                && { $changed || [ ! -d /Applications/mactop.app ]; }; then
                 install_mactop_app
             fi ;;
     esac

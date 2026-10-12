@@ -4,6 +4,9 @@
 #
 # A layer is a directory under dotfiles/. base applies everywhere; darwin or linux applies
 # on that OS. A path belongs to one layer, so a second claim on it is a conflict.
+#
+# `make` first runs dl, which installs the binaries the scripts and hooks call and is a
+# no-op when they are current. A dl failure does not stop the sync, but it fails the make.
 
 TARGET ?= $(HOME)
 OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
@@ -13,7 +16,9 @@ SYM    := sh dotfiles/sym
 .PHONY: sync plan layers check
 
 sync: layers
-	for layer in $(LAYERS); do $(SYM) -v -t $(TARGET) $$layer || exit 1; done
+	status=0; sh dl || status=$$?; \
+	for layer in $(LAYERS); do $(SYM) -v -t $(TARGET) $$layer || exit 1; done; \
+	exit $$status
 
 plan: layers
 	for layer in $(LAYERS); do $(SYM) --dry-run -t $(TARGET) $$layer || exit 1; done
