@@ -20,9 +20,8 @@ A campaign doc is the only thing the executing agent has once the owner walks aw
 - **Edit the draft in place,** and nothing else. No second plan file and no preflight commentary in the doc.
 - **The code is the truth.** Read it at the current commit and record the SHA. Verify every claim the draft makes about what exists and fix the ones that disagree.
 - **The owner owns intent.** Preflight prescribes anything the code, the evidence, or sound practice settles. It asks the owner only for choices that change the product, the contract, or carry real risk, in one batch with a recommendation each, and records the answers as owner decisions with the date.
-- **Pre-answer every place the global instructions say ask:** new dependencies, contract changes, anything destructive. The executor cannot ask, so the doc permits it, forbids it, or says exactly how to proceed.
+- **Pre-answer every place the global instructions say ask:** contract changes and anything destructive. For dependencies, name the performance gates they must stay within. The executor cannot ask, so the doc permits it, forbids it, or says exactly how to proceed.
 - **Cut.** The executable core (charter, decisions, sequence, acceptance) comes first and fits comfortably in the executor's context. Rationale, history, and design background follow as reference. Delete what only explains how the draft got here.
-- **Explicit-only skills are not in your skill list.** Load one by reading `~/.agents/skills/<name>/SKILL.md`.
 - **Follow the repo's instructions,** including its verification limits. Time the loop commands; report before running anything expensive. No formatters, no commits, no pushes.
 
 ## Steps
@@ -53,7 +52,9 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 | Concurrency, lifecycle | `lifecycle-concurrency` | Ownership of tasks, cancellation, shutdown |
 | Effects and testability | `isolate-effects` | Which seams tests use |
 | Untrusted input, platform code | `os-boundaries` | Path, symlink, temp-file, and platform rules |
-| Tests and parity | `test-audit` | The parity oracle, the behavior-to-test register, what counts as a test of a behavior |
+| Parity with a reference | `reference-parity` | The reference and its pin, the behavior register, the corpus |
+| Tests | `test-audit` | What counts as a test of a behavior, and which seams tests use |
+| Failures | `root-cause` | The executor's rule for a failing item: cause before retry |
 | Optimization | `performance-by-mechanism`, `benchmark-checklist` | What is measured, how, against what baseline, and the targets |
 | Cleanup | `dead-code-archaeology`, `deslop` | What is deleted at the end and how liveness is proven |
 | Repeat failures | `correct` | Guards for mistakes the campaign is likely to repeat |
@@ -63,7 +64,7 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 - **Items** have an ID, a size, prerequisites, the files they own, and an acceptance proof. Prerequisites that cross workstreams are written on the item. An item that shares code with another is in the same workstream.
 - **Order the phases:**
   1. *P0, ground:* record the baseline commit, the known failures on it (so the executor never mistakes a pre-existing red for its own), and the loop timings, and repair the loop itself if it is the bottleneck.
-  2. *Parity and completeness:* every deliverable works end to end, and every behavior of the reference has a test that fails if it is wrong. The reference is the thing being ported, replaced, or specified, and the doc names it. A parity register maps each behavior to its test.
+  2. *Parity and completeness:* every deliverable works end to end, and every behavior of the reference has a test that fails if it is wrong. The reference is the thing being ported, replaced, or specified, and the doc names it. The parity register is built as `reference-parity` describes.
   3. *Hardening:* the cases found along the way, the contract changes written up, the docs updated.
   4. *Optimization and polish:* only now. An optimization item earlier than this is moved here unless it unblocks a feature.
   5. *Close:* delete what is dead, run `ultrareview`, fix its P1 and P2 findings, write the final report.

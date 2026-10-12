@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 Migrate this TypeScript codebase comprehensively to the October 2026 frontier TypeScript/web stack below.
 
+The versions below were current in October 2026. After that, check them against upstream before applying.
+
 The stack decisions are made. Do not compare frameworks, research alternatives, or preserve obsolete tooling because it is already present. Inspect the repository, understand its behavior and constraints, establish the existing test and build baseline, then migrate to completion. Preserve externally observable behavior and public APIs unless the migration requires otherwise or it fixes an existing defect. Delete obsolete layers instead of wrapping them in compatibility abstractions.
 
 ## Target stack

@@ -1,6 +1,6 @@
 ---
 name: benchmark-checklist
-description: "Apply before you report or act on a measured speedup, regression, throughput, latency, or benchmark result, including choosing a library or config from one. Vet the number against seven questions first."
+description: "Apply before you report or act on a measured speedup, regression, throughput, latency, or benchmark result, including choosing a library or config from one. Vet the number against seven questions first. Skip results you are not reporting or acting on."
 ---
 
 # Benchmark Checklist

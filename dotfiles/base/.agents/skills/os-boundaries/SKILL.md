@@ -5,7 +5,7 @@ description: "Apply when code handles untrusted or user-supplied paths, symlinks
 
 # OS Boundaries
 
-The filesystem is a concurrent, stateful external system, and operating systems are not interchangeable. Work on the code at hand; audit the whole repo only when asked.
+The filesystem is a concurrent, stateful external system, and operating systems are not interchangeable.
 
 - **Paths are not strings.** Use `Path` and `OsStr`. Convert to text only at presentation or protocol edges. Never lossy-convert a path or an argument.
 - **Pick a symlink policy per operation:** follow, act on the link, reject, or preserve. Convenience APIs choose silently.
@@ -17,6 +17,6 @@ The filesystem is a concurrent, stateful external system, and operating systems 
 
 **The test:** if another process swapped a path component between two lines here, could this read or write the wrong file?
 
-Test on the real filesystem, not a mock: symlinks, replacement, permissions, non-UTF-8 names, interruption. For native code, test zero length, max size, an invalid handle, and short I/O.
+Test on the real filesystem (a temp directory, the test by name), not a mock: symlinks, replacement, permissions, non-UTF-8 names, interruption. For native code, test zero length, max size, an invalid handle, and short I/O.
 
 **Reply:** the semantics you made explicit (symlink policy, atomicity, supported targets, safety preconditions).

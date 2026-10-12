@@ -1,12 +1,11 @@
 ---
 name: single-source-of-truth
-description: "Use when the same fact, closed set, default, or magic value lives in more than one place, or when settings, defaults, limits, and timeouts are scattered. Give each fact one owner and derive the rest."
-disable-model-invocation: true
+description: "Apply when the same fact, closed set, default, or limit is defined in more than one place, or when adding a setting whose default or limit other code must also know. Skip a constant used once, locally."
 ---
 
 # Single Source of Truth
 
-Facts may have many consumers but one owner. Work on the scope named; audit the whole repo only when asked.
+Facts may have many consumers but one owner.
 
 - **Merge facts that must evolve together, not code that looks alike.** A wire model and a domain model are different contracts. Centralize the mapping between them instead.
 - **Name the authority** (the type, a declarative schema, a registry, the database schema, an upstream spec) and derive everything else one way. Never circular, and never make generated output the authority when its input exists.

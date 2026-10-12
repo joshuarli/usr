@@ -1,6 +1,6 @@
 ---
 name: dotfiles-health
-description: "Apply when changing anything in dotfiles/ that configures AI agents (skills, subagent definitions, AGENTS.md, Claude or Codex settings and rules) or the sym installer, and before calling that work done. Also use to audit the setup."
+description: "Apply when changing anything in dotfiles/ that configures AI agents (skills, subagent definitions, AGENTS.md, Claude or Codex settings and rules) or the sym installer, and before calling that work done. Also use to audit the setup. Skip changes outside the agent setup."
 ---
 
 # Dotfiles Health
@@ -21,8 +21,9 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 
 ## Invariants
 
-- **Skill frontmatter:** `name` equals the directory, and `description` exists. An explicit-only skill carries `disable-model-invocation: true` and an `agents/openai.yaml` with `allow_implicit_invocation: false`, since each harness ignores the other's flag. `skills-check.sh` enforces both.
+- **Skill frontmatter:** `name` equals the directory, and `description` exists. An explicit-only skill carries `disable-model-invocation: true` and an `agents/openai.yaml` with `allow_implicit_invocation: false`, since each harness ignores the other's flag. `skills-check.sh` enforces both. It also fails an auto-triggered skill whose description has no `Skip` clause, and a router table (second column `Skill`) that names a skill that does not exist. It warns, without failing, on a skill over 60 lines or with no closing `**Reply:**`.
 - **Descriptions and shape:** an auto-triggered description names its situations and a skip clause, because a broad one fires on every task. Skills stay dense: a thesis, bold rules, a closing `**The test:**`, and a `**Reply:**`.
+- **A rule has one owner.** The shim rules live in `dead-code-archaeology`, the Oracle Test in `test-audit`, and the skill-scope and explicit-only loading rules in the global AGENTS.md. Other skills point to the owner; do not copy.
 - **Model and effort live once.** Claude's are in `agents/*.md`, and `orchestrate` names the agents without repeating them. Codex's sit in the `orchestrate` table and `config.toml`. The default model and effort in settings belong to the owner; do not change them unprompted.
 - **A rule that must hold is enforced, not just written.** "No push" and "no formatters" in AGENTS.md are mirrored as deny rules and prefix rules. When you add such a rule, add its enforcement in the same change.
 - **Test Codex rules** with `bash -c 'codex execpolicy check --rules FILE -- git push'`, because zsh will not split the command. A Codex prefix rule misses `git -C dir push`; the Claude deny list covers it.
@@ -41,6 +42,6 @@ Have fresh reviewers look, because the author misses things: an adversarial pass
 
 ## Known gaps
 
-A tab in a synced filename breaks sync. `sym -d` can remove an emptied target directory, which test 13 pins. The auto-triggered skills have not been run through `skill-eval`.
+A tab in a synced filename breaks sync. `sym -d` can remove an emptied target directory, which test 13 pins. The auto-triggered skills have not been run through `skill-eval`. The warnings `skills-check.sh` prints today are known: `orchestrate`, `ultrareview`, `campaign-preflight` (embedded templates), the three migration skills, and `test-audit` (a compression candidate) are long, and `orchestrate` and the migrations have no `**Reply:**`.
 
 **Reply:** what changed, which checks ran, and any `OVERWRITE` or `DISCARD` you saw.

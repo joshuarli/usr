@@ -5,7 +5,7 @@ description: "Apply when code spawns tasks, threads, or child processes, adds qu
 
 # Lifecycle and Concurrency
 
-If code acquires or starts something, who ends it must be as explicit as who began it. Work on the code at hand; audit the whole repo only when asked.
+If code acquires or starts something, who ends it must be as explicit as who began it.
 
 - **One owner releases.** Use structured ownership (RAII, scopes). Cleanup must not depend on the happy-path epilogue or on process exit.
 - **Partial initialization unwinds.** A failure at step N cleans up steps 1 to N-1, and nothing is visible before it is valid.

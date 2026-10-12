@@ -1,7 +1,6 @@
 ---
 name: make-invalid-states-unrepresentable
-description: Redesign types so they encode domain constraints, using enums for exclusive states, validated constructors, and unit-bearing values.
-disable-model-invocation: true
+description: "Apply when introducing a type with an invariant: option soups, booleans that exclude each other, magic strings for a closed set, unit-less numbers. Skip plain data carriers with no invariant."
 ---
 
 # Make Invalid States Unrepresentable
@@ -40,7 +39,7 @@ Newtypes with no concrete failure mode. Type-level machinery harder to read than
 
 ## Verify
 
-Test invalid construction, invalid transitions, boundary rejection of malformed input, and unchanged serialization. Check that matches are exhaustive, search for checks the types made redundant, and run the compiler and focused tests. Separate preexisting failures from regressions.
+Test invalid construction, invalid transitions, boundary rejection of malformed input, and unchanged serialization. Check that matches are exhaustive, search for checks the types made redundant, and run the compiler, then the focused tests by name. Separate preexisting failures from regressions.
 
 Done when each important type has an intended state set, any remaining superset is bounded and owned by a boundary, and the result is simpler to reason about, not merely fancier.
 

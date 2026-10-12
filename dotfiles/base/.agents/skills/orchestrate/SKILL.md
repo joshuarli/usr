@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Route substantial, routine, mechanical, exploratory, or context-heavy work across subagents to control cost, isolate context, and parallelize independent work, and run a multi-lane campaign over a backlog. Delegate whenever the work is economical to specify and verify.
+description: "Route substantial, routine, mechanical, exploratory, or context-heavy work across subagents to control cost, isolate context, and parallelize independent work, and run a multi-lane campaign over a backlog. Delegate whenever the work is economical to specify and verify. Skip a task cheaper to do directly."
 ---
 
 # Orchestrate
@@ -75,4 +75,4 @@ A campaign is a backlog too large for one session, run as parallel lanes over se
 - Verification belongs to the integrator. A lane uses the cheapest build that compiles its change and runs only the tests it wrote or changed, by name. It does not run suites, slow or repository-wide checks, or optimized builds; those run once, after the merge, on the code that will ship. A lane's report names what the integrator's checks should exercise and what it left unverified.
 - Shared files are append-only for a lane: add to a registry at the end of its group, put a new unit in its own file, and do not reorganize, rename, or reformat.
 - A change in the behavior of existing code is named in the report and ships with whatever makes old code explicit first.
-- A lane does not rewrite the corpus, settle an open decision, add a dependency, or fix another workstream's defect. It reports them.
+- A lane does not rewrite the corpus, settle an open decision, or fix another workstream's defect. It reports them. It adds a dependency only when the brief names it, because manifests and lockfiles are shared files and the performance-gate measurement is the integrator's check after the merge.

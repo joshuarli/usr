@@ -79,7 +79,7 @@ Measure representative application workloads, not isolated hash functions unless
 
 ## Dependencies
 
-Remove `fxhash`, unused hasher crates, and now-unused collection dependencies, and run the dependency checks. Every remaining dependency must correspond to a selected implementation: do not add `ahash`, `foldhash`, `rustc-hash`, or bitmap libraries speculatively. `hashbrown` already supplies its default hasher, so depend on the underlying hasher only if the code needs its API directly. Beyond `hashbrown` and, if it wins its benchmark, `rustc-hash`, ask before adding any dependency.
+Remove `fxhash`, unused hasher crates, and now-unused collection dependencies, and run the dependency checks. Every remaining dependency must correspond to a selected implementation: do not add `ahash`, `foldhash`, `rustc-hash`, or bitmap libraries speculatively. `hashbrown` already supplies its default hasher, so depend on the underlying hasher only if the code needs its API directly. Beyond `hashbrown` and, if it wins its benchmark, `rustc-hash`, add no other dependency without the measured justification above.
 
 ## Deliverable
 

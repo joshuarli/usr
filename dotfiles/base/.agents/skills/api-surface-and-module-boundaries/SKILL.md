@@ -1,18 +1,17 @@
 ---
 name: api-surface-and-module-boundaries
-description: "Use when shrinking or hardening a public API, fixing ambiguous call sites, or untangling module dependency direction, cycles, and reach-through. A capability goes out, implementation structure stays in."
-disable-model-invocation: true
+description: "Apply when adding or changing a public API, exported symbol, or module boundary, or when call sites pass ambiguous boolean or positional arguments. Skip private helpers and internal code."
 ---
 
 # API Surface and Module Boundaries
 
-A public API exposes capabilities, not structure, and makes the correct call look natural. Work on the scope named; audit the whole repo only when asked.
+A public API exposes capabilities, not structure, and makes the correct call look natural.
 
 **The surface**
 - **Every public symbol is a commitment.** For each, ask who needs it and what it promises. Storage, parser internals, cache structures, raw configuration, and dependency adapters stay private. Do not export something because a sibling module needs it.
 - **Invariant-bearing types cannot be corrupted from outside.** No public fields that must be mutated into a valid combination. Check what bypasses the constructor: `Default`, deserialization, struct-update syntax, unchecked conversions.
 - **Do not leak dependency types** unless interop needs them. Do not wrap mature standard types for taste.
-- **One canonical entry point per operation.** Add a compatibility shim only for a proven external or persisted consumer, or when asked. Then it is deprecated, names its replacement, and forwards to the canonical path, and new code and examples never use it. Otherwise delete the old name and migrate callers in the same change.
+- **One canonical entry point per operation.** Delete the old name and migrate callers in the same change. A compatibility shim needs a proven external or persisted consumer, or an explicit ask, and follows `dead-code-archaeology`.
 - **Feature-gated surface stays coherent.** No half-initialized abstractions when a feature is off.
 
 **The call site**
@@ -29,6 +28,6 @@ A public API exposes capabilities, not structure, and makes the correct call loo
 
 **The test:** could a caller who reads only the signature misuse it without the compiler noticing?
 
-Test intended construction, invalid use, feature combinations, and the forwarding of any shim that exists. Breaking a public contract needs the user's permission.
+Test intended construction, invalid use, feature combinations, and the forwarding of any shim that exists, running those tests by name. Breaking a public contract needs the user's permission.
 
 **Reply:** symbols removed or narrowed, call sites clarified, directions fixed, and any contract change.

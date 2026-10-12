@@ -35,7 +35,7 @@ This repo is the source of truth for my home directory, plus my personal scripts
 - **Skills and subagents:** global skills are in `dotfiles/base/.agents/skills/`, Claude subagents in `dotfiles/base/.claude/agents/`. A skill the model must not trigger on its own is marked `disable-model-invocation: true` plus `agents/openai.yaml`; `skills-check.sh` enforces the pairing.
 - **Enforced rules:** "never push" and "no formatters" are mirrored as deny rules in `.claude/settings.json` and prefix rules in `.codex/rules/default.rules`. A new hard rule gets its enforcement in the same change.
 - **Codex:** `config.toml` (mode 0600, lists trusted projects) and `or.config.toml` (OpenRouter, used by `bin/codex-or`).
-- **Skills to use:** `dotfiles-health` before finishing any change to the above. `ultrareview` for a whole-repo review and docs refresh, `review` for the current branch or task, `campaign-preflight` to make a campaign design doc executable unattended.
+- **Skills to use:** `dotfiles-health` before finishing any change to the above. `ultrareview` for a whole-repo review and docs refresh, `review` for the current branch or task, `campaign-preflight` to make a campaign design doc executable unattended. `docs-refresh` for docs alone. `make check` warns about over-long skills and a missing `**Reply:**`; the known ones are listed in `dotfiles-health`.
 
 ## Scripts and binaries
 

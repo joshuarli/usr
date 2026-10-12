@@ -10,7 +10,8 @@
 - Name things for the domain, one name per concept. Mark legacy paths as legacy.
 - Prefer precise types and narrow interfaces that make invalid states hard to represent. Don't loosen a contract or hide a fallback to make a patch fit.
 - Comment the why, constraints, and non-obvious behavior above the definition. Keep existing comments that do this.
-- Keep changes focused. Add no dependency without asking. Temporary workarounds must say why they exist and what removes them.
+- Keep changes focused. Temporary workarounds must say why they exist and what removes them.
+- Dependencies are your call. Vet maintenance, transitive weight, license, and whether the standard library or a few lines would do, and record the choice and reason where the repo records decisions, or in your reply if it has no such place. A dependency must stay within the project's performance gates (build time, binary size, startup, runtime); measure when it could move one. If the repo defines no gates, state the build-time and binary-size impact. Remove ones you stop using.
 - No speculative abstractions, config knobs, or backward-compat shims unless asked. Delete dead code instead of deprecating it.
 - Fail loudly. Don't swallow errors or add silent defaults.
 
@@ -20,8 +21,14 @@
 - Bug fixes: reproduce with a minimal failing test, then fix the root cause. Keep the test.
 - Never weaken or delete a test to make it pass unless the test is wrong, and say so.
 - Verify the changed behavior with the narrowest hard check (compiler, type checker, focused test). Reuse existing build artifacts.
+- A slow check is a defect in the loop, not a cost to accept. Find the narrowest command that covers the change (a test by name, one crate, one file) and iterate on it. When no fast check exists, say so and make one before relying on the slow one.
 - Do not expand to workspace-wide builds/tests or full CI by default. Widen only for a specific uncovered integration risk or an explicit request for the wider run; state that reason first.
 - Treat generic verification checklists as suggestions: run targeted repository equivalents, and report expensive verification before starting it.
+
+## Skills
+
+- A skill applies to the scope named. Audit or sweep the whole repo only when asked.
+- Skills marked explicit-only are absent from the skill list. To use one, read `~/.agents/skills/<name>/SKILL.md`.
 
 ## Contract changes
 

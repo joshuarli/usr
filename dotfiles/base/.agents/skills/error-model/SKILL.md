@@ -5,7 +5,7 @@ description: "Apply when introducing or changing an error type, how errors propa
 
 # Error Model
 
-An error is part of the program's contract, not a string on the unhappy path. Work on the code at hand; audit the whole repo only when asked.
+An error is part of the program's contract, not a string on the unhappy path.
 
 - **Classify only the failures that matter here** (invalid input, invalid configuration, missing resource, permission, dependency failure, transient, timeout, cancellation, conflict, corrupt state, invariant violation). A category no caller distinguishes does not earn a variant.
 - **User and environment failures return errors; they never panic.** A violated internal invariant stays distinguishable (assert or panic). Do not disguise it as a recoverable error, and do not turn a bug into a vague runtime error.
@@ -19,6 +19,6 @@ An error is part of the program's contract, not a string on the unhappy path. Wo
 
 **The test:** can a caller decide between retry, report, and abort from the error's type alone, without reading its text?
 
-Test category, context, retryability, exit or status mapping, cleanup, and partial completion. Do not assert full message strings unless the text is a compatibility contract. Keep observable exit behavior unless the request changes it.
+Run the tests of the touched error path by name. Test category, context, retryability, exit or status mapping, cleanup, and partial completion. Do not assert full message strings unless the text is a compatibility contract. Keep observable exit behavior unless the request changes it.
 
 **Reply:** the failure categories and boundaries you set, and any change to exit or status behavior.

@@ -1,6 +1,6 @@
 ---
 name: deslop
-description: Use when asked to deslop, simplify, or clean up code, or for a focused cleanup pass after implementation.
+description: "Use when asked to deslop, simplify, or clean up code, or for a focused cleanup pass after implementation. Skip behavior changes and new features."
 ---
 
 # Deslop
@@ -23,4 +23,6 @@ Preserve interfaces, error semantics, and safety guarantees. Do not add dependen
 
 ## Verify
 
-Run the narrowest check that covers the diff and inspect the final diff for accidental behavior changes. Briefly report substantive edits, checks actually run, and unresolved concerns. A no-change result is valid.
+Run the narrowest check that covers the diff and inspect the final diff for accidental behavior changes. A no-change result is valid.
+
+**Reply:** the substantive edits, checks actually run, and unresolved concerns.

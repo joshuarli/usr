@@ -1,6 +1,6 @@
 ---
 name: test-audit
-description: Review existing tests in a bounded scope for weak, redundant, implementation-coupled coverage and unnecessary test-only production seams.
+description: "Apply when asked to review existing tests in a bounded scope for weak, redundant, or implementation-coupled coverage and unnecessary test-only production seams. Skip writing new tests."
 ---
 
 # Test Audit

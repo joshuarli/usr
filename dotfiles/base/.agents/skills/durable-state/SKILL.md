@@ -5,7 +5,7 @@ description: "Apply when changing schemas, migrations, persisted or wire formats
 
 # Durable State
 
-Durable state outlives the code that wrote it, so its contracts must be explicit. Work on the code at hand; audit the whole repo only when asked.
+Durable state outlives the code that wrote it, so its contracts must be explicit.
 
 - **Transactions follow invariants.** One transaction covers changes that must succeed or fail together. Domain code decides; one persistence boundary executes.
 - **The datastore guards durable truth.** Use NOT NULL, UNIQUE, CHECK, and foreign keys for facts every write path must respect. Concurrent writers get an atomic update, a version check, or a lock, never a read assumed to stay current. Check existing data before adding a constraint.
@@ -16,6 +16,6 @@ Durable state outlives the code that wrote it, so its contracts must be explicit
 
 **The test:** kill the process between any two writes. The next start must reach a valid state without a human.
 
-Test the failure windows, old-format fixtures (oldest supported, current, unknown field, malformed), and constraint rejection. The happy path proves little.
+Test the failure windows, old-format fixtures (oldest supported, current, unknown field, malformed), and constraint rejection. The happy path proves little. Run them by name, and save the full migration suite for the end.
 
 **Reply:** the contracts you set or tightened, and any format or data compatibility impact.

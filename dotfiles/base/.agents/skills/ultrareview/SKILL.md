@@ -14,15 +14,14 @@ One repository in, two deliverables out: docs that match the code, and a single 
 - **The code is the truth.** When docs and code disagree, fix the doc. If the code is what is wrong, leave it and file a finding.
 - **Big picture only.** A finding must change what the owner does: a correctness, security, data, reliability, delivery, or maintainability risk, or something that slows every future change. No style, naming, formatting, or anything a linter would catch, unless the missing check is the finding. Most repos yield 8 to 20 findings; none is a valid result.
 - **No finding without evidence:** a `file:line` you read or a command you ran. Never invent a caller, API, or version.
-- **Explicit-only skills are not in your skill list.** Most lens skills are of this kind. Load one by reading `~/.agents/skills/<name>/SKILL.md`, and tell every lane you spawn to do the same.
 - **Follow the repo's instructions.** Read its AGENTS.md first and obey its verification limits. Run the cheapest existing check once for a baseline and say what it was; report before starting anything expensive. No formatters, no commits, no pushes.
 
 ## Steps
 
 1. **Orient.** Read AGENTS.md, README, manifests, CI config, any existing `REVIEW.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
-2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each returning candidate findings in the entry shape and nothing else. Merge findings that share a root cause and rank them.
+2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the entry shape and nothing else. Merge findings that share a root cause and rank them.
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder and say which rung you reached. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
-4. **Refresh the docs** (below).
+4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **Write `REVIEW.md`** (below).
 6. **Check.** `git diff --stat` shows only docs, comments, and `REVIEW.md`. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
 
@@ -44,17 +43,11 @@ One repository in, two deliverables out: docs that match the code, and a single 
 | Navigability | `make-code-search-a-reliable-navigation-boundary` | Does text search reach definitions, callers, tests, and docs? |
 | Recurring mistakes | `correct` | Which defect classes recur in history and have no guard? |
 
-No skill covers these, so ask directly: security beyond input handling (authn and authz, secrets in the tree or history, injection); build, release, and CI (reproducible, pinned, can it ship and roll back); dependencies (abandoned, duplicated, unpinned, heavy); operability (can an operator see a failure, configure the system, and recover).
+No skill covers these, so ask directly: security beyond input handling (authn and authz, secrets in the tree or history, injection), which gets a short pass unless the repo has auth, secrets, multi-tenant data, or network exposure, and a hard look when it does; build, release, and CI (reproducible, pinned, can it ship and roll back); dependencies (abandoned, duplicated, unpinned, heavy); operability (can an operator see a failure, configure the system, and recover).
 
 ## Docs refresh
 
-- **Inventory every doc surface:** README, AGENTS.md and CLAUDE.md, `docs/`, contributing notes, `--help` text, config examples, doc comments.
-- **Check each claim against the code:** commands, paths, flags, environment variables, versions, architecture, setup steps. Run the cheap ones. Fix what drifted and delete what is not worth keeping.
-- **Make it shorter.** Cut what is outdated, duplicated, or restates what the code shows. Give each fact one home and link to it rather than copy it. Keep the why, constraints, invariants, commands, and hazards. Do not reword for taste.
-- **AGENTS.md** holds commands, layout, and the conventions and hazards a newcomer cannot read from the code. It does not repeat the global instructions. Keep an existing AGENTS.md and CLAUDE.md arrangement.
-- **Comments** go through `comment-cleanup`.
-- **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. For generated docs, edit the source, not the output.
-- **One writer,** so edits do not overlap. Create no doc file besides `REVIEW.md` unless something essential has no home.
+Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `REVIEW.md` is the only doc file you create.
 
 ## REVIEW.md
 

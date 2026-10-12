@@ -1,6 +1,6 @@
 ---
 name: comment-cleanup
-description: Review code comments and docstrings and remove pointers to documentation and planning material, keeping the technical rationale self-contained.
+description: "Apply when asked to audit or clean code comments and docstrings: remove pointers to documentation and planning material and keep the rationale self-contained. Skip comments you are not asked to touch."
 ---
 
 # Comment Cleanup
@@ -21,4 +21,6 @@ For each finding:
 - Preserve accurate comments that already explain the code without relying on documentation.
 - Do not move code, change behavior, or rewrite unrelated prose as part of this cleanup.
 
-Search the requested source scope for documentation and planning references before and after editing. Review the diff to ensure each changed comment is still clear and no executable strings or fixture text were changed accidentally. Report the files reviewed, changes made, external citations preserved, and any ambiguous references left untouched. Do not run tests unless asked; a focused search and diff review are sufficient for this editorial task.
+Search the requested source scope for documentation and planning references before and after editing. Review the diff to ensure each changed comment is still clear and no executable strings or fixture text were changed accidentally. Do not run tests unless asked; a focused search and diff review are sufficient for this editorial task.
+
+**Reply:** the files reviewed, changes made, external citations preserved, and ambiguous references left untouched.

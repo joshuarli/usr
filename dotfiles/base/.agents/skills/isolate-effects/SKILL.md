@@ -1,12 +1,11 @@
 ---
 name: isolate-effects
-description: "Use when domain logic is mixed with filesystem, process, network, database, clock, randomness, environment, or terminal effects, or when tests need real time, processes, or services. Effects at visible edges, decisions in the core."
-disable-model-invocation: true
+description: "Apply when decision logic needs a real clock, filesystem, process, network, database, or environment to test, or interleaves with such effects. Skip thin adapters that are only effects."
 ---
 
 # Isolate Effects
 
-Effects happen at visible edges; policy stays visible in the core. Work on the scope named; audit the whole repo only when asked.
+Effects happen at visible edges; policy stays visible in the core.
 
 - **Parse, decide, execute.** Decide which files change, then apply them. Compute retry timing from policy, then ask a clock to wait. Low-level I/O helpers hold no policy.
 - **Read process globals once** (environment, current directory, arguments, locale) at startup or an explicit boundary. Convert to typed values and pass down only what a callee needs.
@@ -18,6 +17,6 @@ Effects happen at visible edges; policy stays visible in the core. Work on the s
 
 **The test:** can the decision logic run in a unit test with no clock, filesystem, process, or network?
 
-Keep integration tests for the real adapters. Search for remaining raw effect calls in scope and classify each.
+Decision tests then run in milliseconds, and only the real adapters need slower integration tests, so keep those few. Search for remaining raw effect calls in scope and classify each.
 
 **Reply:** the boundaries you set, each abstraction you added and why it earns its place.

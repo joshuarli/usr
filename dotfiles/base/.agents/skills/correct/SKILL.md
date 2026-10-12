@@ -18,14 +18,14 @@ Read recent commits and reverts, review comments, the `AGENTS.md` chain, comment
 
 1. **Architecture.** One owner per piece of state and one supported way per task. Hide internals so the wrong import fails. Replace hand-synced lists with one source. Delete the old way and the dead code an agent would copy.
 2. **Types.** Make the bad state unwritable. If it still compiles, add a lint or check whose error names the file, type, or function to use instead. If the pattern is already common, fail only changes that add more of it.
-3. **Tests** of behavior. Fix or delete any test that would pass if every function it calls returned nothing.
+3. **Tests** of behavior. Fix or delete any test that fails the Oracle Test in `test-audit`.
 4. **Docs and agent rules last,** for judgment calls only. Nothing fails when an agent skips them.
 
 Take the strongest mechanism available. A weaker guard becomes the next template that agents copy.
 
 ## Prove and record
 
-Fix the most frequent classes now, one logical change each, and commit only if asked. Prove each new check fails on a real past mistake by running it against the old code. Run the same command locally and in CI. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
+Fix the most frequent classes now, one logical change each, and commit only if asked. Prove each new check fails on a real past mistake by running it against the old code. Run the same command locally and in CI. A check agents will not run is not a check, so keep it fast enough to run on every change. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
 
 Keep a table in the agent instruction file pairing each rule with what enforces it. A rule nothing enforces is a repeat: fix it higher in the same change. Drop a rule once its mistake can no longer happen.
 
