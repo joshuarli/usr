@@ -37,7 +37,7 @@ One repository in, two deliverables out: docs that match the code, and a single 
 | Concurrency, lifecycle | `lifecycle-concurrency` | Leaked tasks or processes, unbounded queues, retries, shutdown? |
 | Persisted state | `durable-state` | Can the schema or wire format evolve safely? Who writes concurrently? |
 | Untrusted input, OS | `os-boundaries` | Paths, symlinks, temp files, platform code, `unsafe`? |
-| Tests | `test-audit`, `renovate-tests` | Judge the strategy and sample the riskiest areas; do not audit every test. Do few, wide, deterministic, isolated tests guard the boundaries, or is it trivial unit tests, mocks, ceremony, flakes, shared state, and a line-coverage gate? |
+| Tests | `test-audit`, `renovate-tests` | Judge the strategy and sample the riskiest areas; do not audit every test. Judge against the suite shape `renovate-tests` defines. |
 | Performance | `performance-by-mechanism` | Is there removable work on the hot paths? |
 | Dead weight | `dead-code-archaeology` | Dead code, finished flags, legacy paths: prove liveness. |
 | Navigability | `make-code-search-a-reliable-navigation-boundary` | Does text search reach definitions, callers, tests, and docs? |
