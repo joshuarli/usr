@@ -1,30 +1,21 @@
 ---
 name: durable-state
-description: Use when changing or reviewing database schemas, migrations, persisted or wire formats, transactions, read-modify-write paths, caches over durable data, or retried and leased background jobs.
+description: "Apply when changing schemas, migrations, persisted or wire formats, transactions, read-modify-write paths, or retried and leased background jobs."
 ---
 
 # Durable State
 
-Make durable state an explicit contract: what is stored, in what format, what must change atomically, and what happens after a crash. Apply this to the code being changed or the scope the user names. Do not widen into a repository-wide audit unless asked; if nothing here applies, say so and change nothing.
+Durable state outlives the code that wrote it, so its contracts must be explicit. Work on the code at hand; audit the whole repo only when asked.
 
-Read repository and scoped `AGENTS.md` first. Inventory the affected tables, formats, transactions, and jobs, and run the narrowest baseline check before editing.
+- **Transactions follow invariants.** One transaction covers changes that must succeed or fail together. Domain code decides; one persistence boundary executes.
+- **The datastore guards durable truth.** Use NOT NULL, UNIQUE, CHECK, and foreign keys for facts every write path must respect. Concurrent writers get an atomic update, a version check, or a lock, never a read assumed to stay current. Check existing data before adding a constraint.
+- **A format is a contract.** Field names, discriminants, defaults, and null meaning are compatibility commitments. Choose the versioning strategy on purpose (version field, additive defaults, tagged variants, migrate on read or write), not "try the old shape, then the new". Decide whether unknown fields are rejected, ignored, or preserved. Absent, null, empty, and default stay distinct. Parsing is not validating. Keep one canonical writer: old readers may stay, old writers go. Derived serialization must not expose secrets or internals.
+- **Store each fact once.** Constrain cardinality and uniqueness. Null means one specific absence. Core facts do not live in blobs. Name timestamps for the event (`leased_at`, not `timestamp`). Tenant scope is visible in every query. Migrations converge on one schema, never two equal authorities.
+- **A job is a durable state machine.** Name the delivery guarantee: at-most-once, at-least-once, or effectively-once through idempotency. Exactly-once exists only inside a transactional boundary. Use explicit states, not booleans. A lease has an owner and a compare-and-set, so an expired worker cannot complete the job. Walk the crash windows: side effect before ack, claim before execute, result before status. Dedupe with durable keys scoped by operation, lifetime, tenant, and payload, never an in-memory flag. Retries are bounded.
+- **A cache is derived state.** Invalidate it next to the mutation that makes it stale.
 
-## Rules
+**The test:** kill the process between any two writes. The next start must reach a valid state without a human.
 
-- A transaction covers changes that must succeed or fail together. Keep persistence mechanics at one boundary; domain code decides, persistence code executes.
-- Enforce facts that must hold on every write path in the datastore (NOT NULL, UNIQUE, CHECK, foreign keys). Handle concurrent writers with atomic updates, version checks, or locks, never a read that is assumed to stay current. Consider existing data before adding a constraint.
-- Persisted and wire field names, discriminants, defaults, and null semantics are compatibility commitments. Choose the versioning strategy explicitly, decide unknown-field behavior, keep absent, null, empty, and default distinct, and treat deserialization as untrusted until validated. Keep one canonical writer; old readers may stay, old writers should not.
-- Model each fact once. Constrain cardinality and uniqueness, give null one specific meaning, name timestamps for what they record, keep core facts out of opaque blobs, and keep tenant scope visible in queries.
-- Name delivery semantics honestly (at-most-once, at-least-once, effectively-once). Make job states explicit, enforce lease ownership with compare-and-set, and walk each crash window: after the side effect but before the acknowledgement, after claim but before execution, after the result but before the status update. Retries are bounded; dedupe keys state their scope.
-- A cache or derived index never becomes the source of truth; define its invalidation next to the mutation.
-- Measure before optimizing query shape; fix N+1 and broad fetch-then-filter when found.
+Test the failure windows, old-format fixtures (oldest supported, current, unknown field, malformed), and constraint rejection. The happy path proves little.
 
-## Verify
-
-Test the failure windows and the invalid-write path, not just the happy path: old-format fixtures, malformed input, constraint rejection, stale-owner completion, duplicate delivery. Distinguish pre-existing failures from regressions.
-
-Load `reference.md` for the full inspection checklist, anti-patterns, and acceptance criteria when the change is a broad audit or the design is non-trivial. Where it says "this codebase" or "repository-wide", read it as the requested scope.
-
-## Handoff
-
-Report the contracts you established or tightened, any data or format compatibility impact, checks actually run, and decisions the user must make. Surface changes to schemas, formats, or transaction boundaries explicitly.
+**Reply:** the contracts you set or tightened, and any format or data compatibility impact.

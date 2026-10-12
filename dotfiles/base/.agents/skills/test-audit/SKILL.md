@@ -26,6 +26,20 @@ Tests earn their maintenance cost by protecting observable behavior, a credible 
 
 Static or slow tests are not deletable for those reasons alone. A test that changes during source reorganization is a candidate for review, not automatic deletion. A failing baseline may be a product defect; understand it before changing or deleting coverage.
 
+## The Oracle Test
+
+Ask of every suspect: would this test still pass if every function it imports returned nothing or a wrong value? If so, it detects nothing and is a fix-or-delete candidate, still subject to Evidence and Decisions below.
+
+These shapes usually fail it:
+
+- loose or absent assertions (`toBeDefined`, `toBeTruthy`, `not.toThrow`, `toBeGreaterThan(0)`);
+- call-only or absence-only checks (`toHaveBeenCalled`, `toBeUndefined`, `toEqual([])`);
+- an expected value computed by the code under test, as in `f(a) == f(a)`;
+- a restated constant, config default, table row, or prompt string;
+- assertions on data the test built, with no call to the subject.
+
+Fix by calling the subject with one concrete input and asserting the literal output or effect. For a mock, assert the payload it received. For an absence, also assert the presence on another input. For a constant, test the mechanism that reads it. Keep relation checks across table rows (a key present in two tables, a parent that exists) and type-level tests.
+
 ## Junk Patterns
 
 Treat these as leads for investigation, not automatic reasons to delete:

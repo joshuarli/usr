@@ -10,7 +10,7 @@
     "defaultMode": "auto",
     "skipDangerousModePermissionPrompt": true
   },
-  "model": "sonnet",
+  "model": "haiku",
   "hooks": {
     "Notification": [
       {

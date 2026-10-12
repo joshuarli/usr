@@ -1,31 +1,23 @@
 ---
 name: isolate-effects
-description: Use when domain logic is mixed with filesystem, process, network, database, clock, randomness, environment, or terminal effects, or when tests are forced to use real time, processes, or services.
+description: "Use when domain logic is mixed with filesystem, process, network, database, clock, randomness, environment, or terminal effects, or when tests need real time, processes, or services. Effects at visible edges, decisions in the core."
 disable-model-invocation: true
 ---
 
 # Isolate Effects
 
-Make effects happen at visible edges while decisions stay visible in the core. Apply this to the scope the user names. Do not widen into a repository-wide audit unless asked; if effects are already isolated, report the evidence and change nothing.
+Effects happen at visible edges; policy stays visible in the core. Work on the scope named; audit the whole repo only when asked.
 
-Read repository and scoped `AGENTS.md` first. Inventory direct filesystem, process, network, database, environment, clock, randomness, and terminal calls in the scope, plus global mutable state and the modules that mix them with domain decisions. Run the narrowest baseline check before editing.
+- **Parse, decide, execute.** Decide which files change, then apply them. Compute retry timing from policy, then ask a clock to wait. Low-level I/O helpers hold no policy.
+- **Read process globals once** (environment, current directory, arguments, locale) at startup or an explicit boundary. Convert to typed values and pass down only what a callee needs.
+- **Time and randomness are inputs** wherever behavior depends on them. Acquire "now" at the edge, keep wall-clock and monotonic time distinct, and pass a seed or an RNG. Cryptographic randomness keeps its own boundary.
+- **Abstract an effect only when** tests need to control it, several implementations exist, the mechanism is volatile, or the boundary carries real policy or failure semantics. A function parameter often beats a trait. No dependency-injection framework, and no `Manager`, `Context`, or `Provider` that bundles unrelated effects.
+- **Spawn processes structurally:** build arguments apart from running them, no shell reinterpretation, explicit environment and stdio, defined cancellation and child cleanup.
+- **Translate a mechanism's error only where its meaning changes,** and keep the source. Each effectful resource has a creator, an owner, and a release on every exit path.
+- **Moving a boundary never changes behavior.**
 
-## Rules
+**The test:** can the decision logic run in a unit test with no clock, filesystem, process, or network?
 
-- Shape the flow as parse and validate, then domain decision, then effectful execution. Decide which files change, then apply them; compute retry timing from policy, then ask a clock to wait. Do not hide policy inside low-level I/O helpers.
-- Read process-global inputs (environment, current directory, arguments, locale) once at startup or an explicit boundary, convert them to typed values, and pass down only what is needed.
-- Make time and randomness explicit inputs where behavior depends on them: acquire "now" at the boundary, keep wall-clock and monotonic time distinct, and pass a seed or RNG. Cryptographic randomness keeps its own dedicated boundary.
-- Abstract an effect only when tests need deterministic control, multiple implementations exist, the mechanism is volatile, or the boundary carries real policy or failure semantics. A function parameter often beats a trait. No dependency-injection framework, and no `Manager`, `Context`, or `Provider` that bundles unrelated effects.
-- Process execution: build arguments separately from running, pass opaque arguments without shell reinterpretation, make environment inheritance and stdio explicit, and define cancellation and child cleanup.
-- Translate mechanism errors only where meaning changes, and keep the source. State who creates, owns, and releases each effectful resource, including on early return.
-- Do not change behavior while moving boundaries.
+Keep integration tests for the real adapters. Search for remaining raw effect calls in scope and classify each.
 
-## Verify
-
-Show that decision logic can now be tested without real time, processes, filesystems, or network, and that real adapters still have integration tests. Search for remaining raw effect APIs and classify each. Distinguish pre-existing failures from regressions.
-
-Load `reference.md` for the full inspection checklist, anti-patterns, and acceptance criteria when doing a broad audit. Where it says "this codebase" or "repository-wide", read it as the requested scope.
-
-## Handoff
-
-Report the boundaries you established, effect abstractions added and why each is justified, checks actually run, and decisions the user must make.
+**Reply:** the boundaries you set, each abstraction you added and why it earns its place.
