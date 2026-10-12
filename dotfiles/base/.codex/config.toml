@@ -26,9 +26,9 @@ experimental_mode = true
 enabled = true
 max_concurrent_threads_per_session = 32
 
-# Cost-safe GPT-6 fallback for every unspecified child.
+# Default model and effort for every unspecified child.
 default_subagent_model = "gpt-6-luna"
-default_subagent_reasoning_effort = "medium"
+default_subagent_reasoning_effort = "xhigh"
 
 [features.multi_agent_v2]
 # Expose per-spawn model and reasoning controls when V2 is active.
