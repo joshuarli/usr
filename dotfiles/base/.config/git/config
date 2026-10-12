@@ -7,8 +7,7 @@
     insteadOf = https://github.com/
 
 [core]
-    # Filesystem case behavior is detected separately for each repository.
-    # pager = builtin:diff-pretty
+    # pager = diff-pretty
 
     # commit-graph for fast traversal
     commitGraph = true

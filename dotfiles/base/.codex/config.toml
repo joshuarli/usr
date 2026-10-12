@@ -8,7 +8,7 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
 model = "gpt-6-luna"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 
 [features]
 goals = true
@@ -75,5 +75,17 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects."/Users/josh/d/aincrad2"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/e"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/diff-pretty"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/srv"]
+trust_level = "trusted"
+
+[projects."/Users/josh/usr"]
 trust_level = "trusted"
 

@@ -1,15 +1,15 @@
 # Enforces the AGENTS.md workflow rules, which are advice until a rule blocks them.
 # Prefix rules match a command's leading tokens, so options between `git` and `push`
 # (`git -C dir push`, `git -c k=v push`) and shell wrappers (`sh -c`) are not caught here;
-# the Claude deny list covers those forms.
+# the Claude ask list covers those forms.
 
 prefix_rule(
     pattern = ["git", "push"],
-    decision = "forbidden",
-    justification = "Never push; the user pushes.",
+    decision = "prompt",
+    justification = "Pushing is outward-facing; confirm with the user.",
 )
-prefix_rule(pattern = ["env", "git", "push"], decision = "forbidden", justification = "Never push; the user pushes.")
-prefix_rule(pattern = ["command", "git", "push"], decision = "forbidden", justification = "Never push; the user pushes.")
+prefix_rule(pattern = ["env", "git", "push"], decision = "prompt", justification = "Pushing is outward-facing; confirm with the user.")
+prefix_rule(pattern = ["command", "git", "push"], decision = "prompt", justification = "Pushing is outward-facing; confirm with the user.")
 
 # Formatters: do not run them.
 prefix_rule(pattern = ["go", "fmt"], decision = "forbidden", justification = "Do not run formatters.")
