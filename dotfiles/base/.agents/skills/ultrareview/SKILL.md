@@ -23,7 +23,7 @@ One repository in, two deliverables out: docs that match the code, and a single 
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **Write `REVIEW.md`** (below).
-6. **Check.** `git diff --stat` shows only docs, comments, and `REVIEW.md`. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
+6. **Check.** `git diff --stat` shows only docs, comments, `REVIEW.md`, and deleted completed campaign docs, and nothing durable in them was lost. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
 
 ## Lenses
 
@@ -48,6 +48,8 @@ No skill covers these, so ask directly: security beyond input handling (authn an
 ## Docs refresh
 
 Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `REVIEW.md` is the only doc file you create.
+
+Then roll up campaigns. For each `docs/CAMPAIGN-*.md` whose header status says it is complete, and whose deliverables you confirm in the code, move what a future reader needs (the design rationale, invariants, constraints, and decisions still in force) into the durable docs (README, AGENTS.md, or `docs/` topic files), stated in domain terms with no campaign names or IDs. Then delete the campaign doc and any `DECISIONS.md` entries it owned. Do not keep logs of what was completed or per-item histories; git history is the record. Leave campaigns that are active, paused, or winding down untouched, and file a finding for a "complete" one whose deliverables are not in the code.
 
 ## REVIEW.md
 
@@ -91,4 +93,4 @@ Order findings by priority, then by impact. Rate by impact times likelihood, nev
 
 **The test:** the owner can hand any finding to its `Fix with` skill tomorrow without more investigation, and a newcomer can follow the docs without meeting a stale command.
 
-**Reply:** the docs files changed or removed and what was cut; finding counts by priority with the P1 titles; checks run and not run; open decisions.
+**Reply:** the docs files changed or removed (including campaign docs rolled up and where their content went) and what was cut; finding counts by priority with the P1 titles; checks run and not run; open decisions.
