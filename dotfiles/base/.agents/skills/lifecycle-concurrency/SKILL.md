@@ -1,6 +1,6 @@
 ---
 name: lifecycle-concurrency
-description: "Apply when code spawns tasks, threads, or child processes, uses queues, channels, locks, or retries, or acquires files, sockets, transactions, or temp artifacts that need cleanup, cancellation, or shutdown."
+description: "Apply when code spawns tasks, threads, or child processes, adds queues, channels, locks, or retries, or introduces cleanup, cancellation, or shutdown handling for sockets, transactions, or temp artifacts. Skip ordinary scoped file reads and writes."
 ---
 
 # Lifecycle and Concurrency
@@ -9,8 +9,8 @@ If code acquires or starts something, who ends it must be as explicit as who beg
 
 - **One owner releases.** Use structured ownership (RAII, scopes). Cleanup must not depend on the happy-path epilogue or on process exit.
 - **Partial initialization unwinds.** A failure at step N cleans up steps 1 to N-1, and nothing is visible before it is valid.
-- **Cleanup errors are handled, not buried.** Do not swallow them and do not let them replace the primary error.
-- **Updates go through a temp artifact:** write, flush, atomic replace, clean up on failure.
+- **Cleanup errors never mask the primary error.** Report them, or give the ignore a stated reason.
+- **Updates go through a temp artifact and an atomic replace** (details in `os-boundaries`), cleaned up on failure.
 - **Every task has an owner** that starts it, holds its handle, stops it, and observes its failure. No spawn-and-forget.
 - **Every queue has a capacity and a full-queue policy:** block, reject, drop, or spill. An unbounded queue is a deferred out-of-memory failure. Backpressure should be a decision, not an accident.
 - **Cancellation reaches what the owner started:** child processes, temp files, transactions, queued work. Shutdown states whether it drains or aborts, and orders its steps: stop accepting, drain or abort, flush, close, release.

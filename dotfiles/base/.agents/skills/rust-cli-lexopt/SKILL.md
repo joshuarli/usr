@@ -146,7 +146,7 @@ Command reference:
 
 ## 7. `-v` / `--version` with a compile-time git SHA
 
-Output includes the package version and the short git SHA embedded at build time, for example `tool 1.4.0 (git abc123456789)`. Never execute git at runtime. If there is no build script, add one that obtains the short SHA and emits a Cargo rustc environment variable, then embed it:
+Output includes the package version and the short git SHA embedded at build time, for example `tool 1.4.0 (git abc123456789)`. Never execute git at runtime. If `-v` already means something else in the existing CLI, keep that meaning, provide only `--version`, and report the conflict. If there is no build script, add one that obtains the short SHA and emits a Cargo rustc environment variable, then embed it:
 
 ```rust
 pub const VERSION: &str = concat!(
@@ -157,7 +157,7 @@ pub const VERSION: &str = concat!(
 );
 ```
 
-Define and document the policy for builds outside a Git checkout. Never silently emit an unknown value or omit the SHA. An explicit build-environment override for release archives must still be a non-empty compile-time SHA. Validate that the value is a hexadecimal short SHA, and reject labels such as `unknown` or `dirty`. Add Cargo rerun directives for Git metadata.
+Define and document the policy for builds outside a Git checkout. Never silently emit an unknown value or omit the SHA. An explicit build-environment override for release archives must still be a non-empty compile-time SHA. Validate that the value is a hexadecimal short SHA, and reject labels such as `unknown` or `dirty`. Add Cargo rerun directives for Git metadata, resolving the real git directory with `git rev-parse --git-dir`, because `.git` is a file in a worktree.
 
 ## 8. Typed errors
 

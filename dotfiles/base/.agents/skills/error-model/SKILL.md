@@ -1,6 +1,6 @@
 ---
 name: error-model
-description: "Apply when adding or changing error types, error propagation or context, unwrap, expect, or panics, retry or cancellation handling, ignored cleanup errors, or exit-code and status mapping."
+description: "Apply when introducing or changing an error type, how errors propagate or are presented, retry or cancellation handling, or exit-code and status mapping. Skip incidental error handling in unrelated code."
 ---
 
 # Error Model

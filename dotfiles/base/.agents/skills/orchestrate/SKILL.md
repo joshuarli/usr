@@ -24,7 +24,7 @@ If work exceeds the parent's delegation ceiling, keep it local at the highest su
 
 Allowed child models, highest to lowest: `gpt-6.1-sol` > `gpt-6-luna`.
 
-Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Children run at `medium` effort, or `low` for scouting. Never assign `high` or `xhigh`, and never use `ultra`: its automatic delegation conflicts with this skill.
+Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Children run at `medium` effort, or `low` for scouting. Never assign `high` or `xhigh`, and never use `ultra`: its automatic delegation conflicts with this skill. The normal and difficult rows share one setting; difficulty changes the brief, not the model or effort.
 
 Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 

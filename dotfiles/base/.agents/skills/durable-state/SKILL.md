@@ -1,6 +1,6 @@
 ---
 name: durable-state
-description: "Apply when changing schemas, migrations, persisted or wire formats, transactions, read-modify-write paths, or retried and leased background jobs."
+description: "Apply when changing schemas, migrations, persisted or wire formats, transactions, concurrent writes to shared durable state, or retried and leased background jobs. Skip in-memory-only state."
 ---
 
 # Durable State

@@ -25,7 +25,7 @@ Take the strongest mechanism available. A weaker guard becomes the next template
 
 ## Prove and record
 
-Fix the most frequent classes now, one commit each. Prove each new check fails on a real past mistake by running it against the old code. Run the same command locally and in CI. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
+Fix the most frequent classes now, one logical change each, and commit only if asked. Prove each new check fails on a real past mistake by running it against the old code. Run the same command locally and in CI. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
 
 Keep a table in the agent instruction file pairing each rule with what enforces it. A rule nothing enforces is a repeat: fix it higher in the same change. Drop a rule once its mistake can no longer happen.
 

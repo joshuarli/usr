@@ -23,4 +23,4 @@ Preserve interfaces, error semantics, and safety guarantees. Do not add dependen
 
 ## Verify
 
-Run the relevant repository checks and inspect the final diff for accidental behavior changes. Briefly report substantive edits, checks actually run, and unresolved concerns. A no-change result is valid.
+Run the narrowest check that covers the diff and inspect the final diff for accidental behavior changes. Briefly report substantive edits, checks actually run, and unresolved concerns. A no-change result is valid.

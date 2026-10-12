@@ -50,8 +50,4 @@ Test as a search-driven agent would:
 
 **The test:** a focused `rg` for an important concept returns its definition and reverse references without a large generic haystack.
 
-## Avoid
-
-Vague names, synonyms for one concept, `utils`/`helpers`/`manager` buckets, relying on an IDE or import graph, hidden ownership behind wildcard exports, implicit `any` or untyped contracts, a symbol's only explanation living far away, mechanical renames without an inventory, size-driven splits, behavior changes under cover of a discoverability refactor, and improving one convenient module when the scope is repo-wide.
-
 **Reply:** the vocabulary chosen, renames made, and remaining aliases or old spellings with their status.

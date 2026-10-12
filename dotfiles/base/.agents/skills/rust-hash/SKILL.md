@@ -21,7 +21,7 @@ hashbrown = { version = "0.17", default-features = false, features = ["default-h
 - `default-hasher` supplies foldhash as the default `S`, which is what makes `HashMap::new()` and `HashSet::from([..])` compile. `inline-more` trades compile time and binary size for speed. `default-features = false` drops what we do not use. Add `raw-entry`, `equivalent`, or `allocator-api2` only if the code needs them.
 - Table and hasher are separate choices. The table is hashbrown's SwissTable; `std::collections::HashMap` is a hashbrown fork, so the table itself is about as fast. Std's problem is its default hasher, SipHash-1-3 (`RandomState`), which is slow on small keys. The hasher is foldhash by default, with `rustc_hash::FxBuildHasher` as the candidate for trusted small integer keys.
 - Do not use `foldhash::HashMap` or `foldhash::HashSet`; they are aliases of the std types with a foldhash hasher. Use hashbrown's types, which also give the full hashbrown API.
-- Never use `std::collections::{HashMap, HashSet}` in application code, even with a custom hasher.
+- Never use `std::collections::{HashMap, HashSet}` in application code, even with a custom hasher. For attacker-controlled keys, use `hashbrown::HashMap<K, V, std::hash::RandomState>` (SipHash) instead of the default hasher.
 - Prefer `use hashbrown::{HashMap, HashSet};` for ordinary internal maps and sets, and do not mechanically add hasher parameters. The starting point is plain `HashMap<K, V>` and `HashSet<K>`.
 
 ## rustc-hash
@@ -79,7 +79,7 @@ Measure representative application workloads, not isolated hash functions unless
 
 ## Dependencies
 
-Remove `fxhash`, unused hasher crates, and now-unused collection dependencies, and run the dependency checks. Every remaining dependency must correspond to a selected implementation: do not add `ahash`, `foldhash`, `rustc-hash`, or bitmap libraries speculatively. `hashbrown` already supplies its default hasher, so depend on the underlying hasher only if the code needs its API directly.
+Remove `fxhash`, unused hasher crates, and now-unused collection dependencies, and run the dependency checks. Every remaining dependency must correspond to a selected implementation: do not add `ahash`, `foldhash`, `rustc-hash`, or bitmap libraries speculatively. `hashbrown` already supplies its default hasher, so depend on the underlying hasher only if the code needs its API directly. Beyond `hashbrown` and, if it wins its benchmark, `rustc-hash`, ask before adding any dependency.
 
 ## Deliverable
 

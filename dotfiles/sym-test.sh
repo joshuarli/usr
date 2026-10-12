@@ -341,5 +341,159 @@ echo "  assertion 2: result is a regular file, not a symlink"
 rm -rf home; mkdir home
 
 
+printf '\n22: --force makes the source win: overwrites differing and non-regular targets, pulls nothing, leaves extras\n'
+fs=dotfiles/forcetest/.agents/skills
+mkdir -p $fs home/.agents/skills/b.md
+echo src > $fs/a.md
+echo src-b > $fs/b.md
+echo tgt-edit > home/.agents/skills/a.md
+echo inside > home/.agents/skills/b.md/inner
+echo keep > home/.agents/skills/extra.md
+$sym -t home -v dotfiles/forcetest > log 2>&1 || true
+echo "  assertion 1: without --force the differing file is a conflict"
+grep -q '^CONFLICT: home/.agents/skills/a.md' log || nfailed=$((nfailed + 1))
+$sym -t home -v --force dotfiles/forcetest > log 2>&1
+expected="DISCARD: home/.agents/skills/b.md/inner (inside a directory replaced by a file)
+EXTRA: home/.agents/skills/extra.md
+OVERWRITE: home/.agents/skills/a.md <- $fs/a.md (target changed since the last sync)
+REPLACE: home/.agents/skills/b.md <- $fs/b.md"
+echo "  assertion 2: differing file overwritten, non-regular target replaced and its contents named, extra reported"; assert_output "$expected"
+echo "  assertion 3: targets now match the source and are regular files"
+cmp -s $fs/a.md home/.agents/skills/a.md && [ -f home/.agents/skills/b.md ] && [ ! -L home/.agents/skills/b.md ] && cmp -s $fs/b.md home/.agents/skills/b.md || nfailed=$((nfailed + 1))
+echo "  assertion 4: the target-only file survives and is not pulled into the source"
+[ "$(cat home/.agents/skills/extra.md)" = keep ] && [ ! -e $fs/extra.md ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n23: --delete refuses a target sync root that resolves to its source, and the source survives\n'
+ss=dotfiles/rootlink/.agents/skills
+mkdir -p $ss/foo home/.agents
+echo x > $ss/foo/SKILL.md
+ln -s "$(pwd)/$ss" home/.agents/skills
+rc=0; $sym -t home -d dotfiles/rootlink > log 2>&1 || rc=$?
+echo "  assertion 1: refuses with a nonzero status"
+[ "$rc" -ne 0 ] && grep -q 'resolves to its source' log || nfailed=$((nfailed + 1))
+echo "  assertion 2: the source file survives"
+[ -f $ss/foo/SKILL.md ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n24: a symlinked directory inside a synced directory is a conflict, never written through\n'
+mkdir -p dotfiles/linkdir/.agents/skills/ext outside/data home/.agents/skills
+echo f > dotfiles/linkdir/.agents/skills/ext/data
+echo important > outside/data/db
+ln -s "$(pwd)/outside" home/.agents/skills/ext
+for flag in '' --force; do
+	rc=0; $sym -t home $flag dotfiles/linkdir > log 2>&1 || rc=$?
+	echo "  assertion: conflict and nothing written through the link (${flag:-no flag})"
+	[ "$rc" -ne 0 ] && grep -q 'CONFLICT: .*ext/data.*symlink' log && [ "$(cat outside/data/db)" = important ] || nfailed=$((nfailed + 1))
+done
+rm -rf home outside; mkdir home
+
+
+printf '\n25: a failed copy exits nonzero and does not advance the sync marker\n'
+fk=dotfiles/failtest/.agents/skills
+mkdir -p $fk home/.agents/skills
+echo new > $fk/a.md
+echo old > home/.agents/skills/a.md
+chmod 444 home/.agents/skills/a.md
+touch -t 202001010000 home/.agents/skills/.sym-synced
+touch -t 202101010000 reference-time
+rc=0; $sym -t home --force dotfiles/failtest > log 2>&1 || rc=$?
+echo "  assertion 1: nonzero exit"
+[ "$rc" -ne 0 ] || nfailed=$((nfailed + 1))
+echo "  assertion 2: the marker was not advanced"
+[ ! home/.agents/skills/.sym-synced -nt reference-time ] || nfailed=$((nfailed + 1))
+chmod 644 home/.agents/skills/a.md
+rm -rf home reference-time; mkdir home
+
+
+printf '\n26: a target edit in the same second as the marker still counts as changed\n'
+tt=dotfiles/tietest/.agents/skills
+mkdir -p $tt home/.agents/skills
+echo src > $tt/a.md
+echo tgt > home/.agents/skills/a.md
+touch -t 202001010000 home/.agents/skills/.sym-synced
+touch -r home/.agents/skills/.sym-synced home/.agents/skills/a.md
+touch -t 202101010000 $tt/a.md
+rc=0; $sym -t home -v dotfiles/tietest > log 2>&1 || rc=$?
+expected="CONFLICT: home/.agents/skills/a.md and $tt/a.md differ and sync cannot tell which side is newer (both changed since the last sync, or none is recorded).
+sym will not start until all conflicts are resolved."
+echo "  assertion 1: tie with the marker is a conflict, not a silent overwrite"; assert_output "$expected"
+echo "  assertion 2: the target edit survives"
+[ "$(cat home/.agents/skills/a.md)" = tgt ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n27: --force names an overwrite of a target changed since the last sync, even without -v\n'
+ow=dotfiles/owtest/.agents/skills
+mkdir -p $ow home/.agents/skills
+echo src > $ow/a.md
+echo src > $ow/b.md
+echo edited > home/.agents/skills/a.md
+echo old > home/.agents/skills/b.md
+touch -t 202001010000 home/.agents/skills/.sym-synced
+touch -t 201912310000 home/.agents/skills/b.md
+$sym -t home --force dotfiles/owtest > log 2>&1
+expected="OVERWRITE: home/.agents/skills/a.md <- $ow/a.md (target changed since the last sync)"
+echo "  assertion 1: only the edited file is named; the untouched one is silent"; assert_output "$expected"
+echo "  assertion 2: both targets now match the source"
+cmp -s $ow/a.md home/.agents/skills/a.md && cmp -s $ow/b.md home/.agents/skills/b.md || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n28: --sync rejects paths that are not plain relative directories\n'
+for bad in . ./x a//b .. ../x x/..; do
+	rc=0; $sym -t home --sync "$bad" dotfiles/bash > log 2>&1 || rc=$?
+	echo "  assertion: rejects '$bad'"
+	[ "$rc" -ne 0 ] && grep -q 'must be a relative path' log || nfailed=$((nfailed + 1))
+done
+rc=0; $sym -t home --dry-run --sync foo..bar dotfiles/bash > log 2>&1 || rc=$?
+echo "  assertion: accepts a name that merely contains two dots"
+[ "$rc" -eq 0 ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n29: a symlink in a source sync dir is a conflict; a target-only symlink is left alone\n'
+sl=dotfiles/symtest/.agents/skills
+mkdir -p $sl home/.agents/skills shared
+echo s > shared/ref.md
+ln -s ../../../../shared/ref.md $sl/ref.md
+rc=0; $sym -t home dotfiles/symtest > log 2>&1 || rc=$?
+echo "  assertion 1: a source symlink is a conflict, not silently dropped"
+[ "$rc" -ne 0 ] && grep -q '^CONFLICT: .*ref.md' log || nfailed=$((nfailed + 1))
+rm $sl/ref.md
+echo a > $sl/a.md
+ln -s "$(pwd)/shared" home/.agents/skills/ext
+$sym -t home -v dotfiles/symtest > log 2>&1
+expected="PUSH: home/.agents/skills/a.md <- $sl/a.md"
+echo "  assertion 2: a target-only symlink is neither a conflict nor touched"; assert_output "$expected"
+[ -L home/.agents/skills/ext ] && [ -f shared/ref.md ] || nfailed=$((nfailed + 1))
+rm -rf home shared; mkdir home
+
+
+printf '\n30: --force names the target-only files discarded with a replaced directory\n'
+dc=dotfiles/discardtest/.agents/skills
+mkdir -p $dc home/.agents/skills/notes
+echo n > $dc/notes
+echo mine > home/.agents/skills/notes/mine.md
+$sym -t home -v --force dotfiles/discardtest > log 2>&1
+expected="DISCARD: home/.agents/skills/notes/mine.md (inside a directory replaced by a file)
+REPLACE: home/.agents/skills/notes <- $dc/notes"
+echo "  assertion 1: the discarded file is named"; assert_output "$expected"
+rm -rf home; mkdir home
+
+
+printf '\n31: an existing symlink with the right text but a dangling target is still a conflict\n'
+mkdir -p dotfiles/dangle/.a home/.a
+ln -s ../x/y dotfiles/dangle/.a/link
+ln -s ../x/y home/.a/link
+rc=0; $sym -t home dotfiles/dangle > log 2>&1 || rc=$?
+expected="CONFLICT: home/.a/link already exists. sym cannot create symlinks if there is an existing file.
+sym will not start until all conflicts are resolved."
+echo "  assertion 1: dangling same-text link is rejected"; assert_output "$expected"
+rm -rf home; mkdir home
+
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

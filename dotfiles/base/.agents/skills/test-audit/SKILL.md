@@ -89,4 +89,4 @@ Do not add replacement tests that restate the same implementation, preserve alia
 
 ## Handoff
 
-Report the scope reviewed, the strongest findings and their evidence, changes made if any, focused checks actually run, retained suspicious tests and why they remain, plus unresolved defects or follow-ups. Commit, push, open a pull request, or merge only when explicitly authorized.
+Report the scope reviewed, the strongest findings and their evidence, changes made if any, focused checks actually run, retained suspicious tests and why they remain, plus unresolved defects or follow-ups. Commit only when explicitly authorized, and never push.
