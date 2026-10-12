@@ -24,6 +24,7 @@
 - Verify the changed behavior with the narrowest hard check (compiler, type checker, focused test). Reuse existing build artifacts.
 - A slow check is a defect in the loop, not a cost to accept. Find the narrowest command that covers the change (a test by name, one crate, one file) and iterate on it. When no fast check exists, say so and make one before relying on the slow one.
 - Do not expand to workspace-wide builds/tests or full CI by default. Widen only for a specific uncovered integration risk or an explicit request for the wider run; state that reason first.
+- Time-based perf gates (build time, startup, runtime) run only when `perf-gate-ready` exits 0, and again with `-1` right after the measurement; a run that overlapped load is discarded. If the host stays busy the gate is deferred: it never counts as a pass, it does not block iteration, and it blocks calling the work done or releasing. Say "perf gate deferred: host busy" in the reply. Memory and binary-size gates always run. Prefer CPU time over wall time, min of N runs, and interleaved baseline and candidate runs; fail only on a regression larger than the observed spread.
 - Treat generic verification checklists as suggestions: run targeted repository equivalents, and report expensive verification before starting it.
 
 ## Skills

@@ -1,0 +1,44 @@
+#!/bin/sh
+# Tells whether the host is quiet enough to trust a time-based perf gate
+# (build time, startup, runtime). Memory and size gates do not need it.
+#
+# Exit 0: quiet. Exit 75: busy; report the gate as deferred, never as passed.
+# Exit 1: could not read the load.
+#
+# Usage: perf-gate-ready [-1]
+#   Default retries while busy: PERF_GATE_ATTEMPTS (3) checks, PERF_GATE_WAIT (60) seconds apart.
+#   -1 checks once; use it right after a measurement to discard a run that
+#   overlapped a load spike.
+# PERF_GATE_MAX_LOAD (0.7) is the 1-minute load average per core above which the host counts as busy.
+
+die () { >&2 printf '%s\n' "$1"; exit 1; }
+
+load1 () {
+	if [ -r /proc/loadavg ]; then
+		read -r l _ < /proc/loadavg
+	else
+		# "{ 1.23 1.50 1.60 }"
+		l="$(sysctl -n vm.loadavg)" || return 1
+		l="${l#\{ }"; l="${l%% *}"
+	fi
+	[ -n "$l" ] || return 1
+	printf '%s\n' "$l"
+}
+
+max="${PERF_GATE_MAX_LOAD:-0.7}"
+attempts="${PERF_GATE_ATTEMPTS:-3}"
+wait_s="${PERF_GATE_WAIT:-60}"
+[ "$1" = -1 ] && attempts=1
+
+cores="$(getconf _NPROCESSORS_ONLN)" || die 'cannot read core count'
+
+i=1
+while :; do
+	load="$(load1)" || die 'cannot read load average'
+	busy="$(awk -v l="$load" -v c="$cores" -v m="$max" 'BEGIN { print (l / c > m) ? 1 : 0 }')"
+	[ "$busy" = 0 ] && exit 0
+	>&2 printf 'host busy: load %s on %s cores (limit %s per core), check %s of %s\n' "$load" "$cores" "$max" "$i" "$attempts"
+	[ "$i" -ge "$attempts" ] && exit 75
+	i=$((i + 1))
+	sleep "$wait_s"
+done
