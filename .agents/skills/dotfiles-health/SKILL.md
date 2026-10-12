@@ -42,6 +42,6 @@ Have fresh reviewers look, because the author misses things: an adversarial pass
 
 ## Known gaps
 
-A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins. A link that dangles only until another link in the same run is created counts as a conflict, so migrating a target layout can need a hand `rm` first. The auto-triggered skills have not been run through `skill-eval`. The warnings `skills-check.sh` prints today are known: `orchestrate`, `ultrareview`, `campaign-preflight` (embedded templates), the three migration skills, and `test-audit` (a compression candidate) are long, and `orchestrate` and the migrations have no `**Reply:**`.
+A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins. The auto-triggered skills have not been run through `skill-eval`. The warnings `skills-check.sh` prints today are known: `orchestrate`, `ultrareview`, `campaign-preflight` (embedded templates), the three migration skills, and `test-audit` (a compression candidate) are long, and `orchestrate` and the migrations have no `**Reply:**`.
 
 **Reply:** what changed, which checks ran, and any `CONFLICT` you saw.

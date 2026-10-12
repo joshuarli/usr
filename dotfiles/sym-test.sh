@@ -281,5 +281,17 @@ echo "  assertion 1: the link resolves"
 rm -rf real tglink
 
 
+printf '\n21: a dangling link is valid when its target is a planned whole-directory link\n'
+mkdir -p dotfiles/planned/.agents/skills dotfiles/planned/.claude home/.claude
+touch dotfiles/planned/.agents/skills/.sym-dir
+echo x > dotfiles/planned/.agents/skills/keep
+ln -s ../.agents/skills dotfiles/planned/.claude/skills
+ln -s ../.agents/skills home/.claude/skills
+$sym -t home dotfiles/planned > log 2>&1
+echo "  assertion 1: the existing link resolves after the planned target is linked"
+[ -e home/.claude/skills/keep ] && [ -L home/.agents/skills ] || nfailed=$((nfailed + 1))
+rm -rf home
+
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

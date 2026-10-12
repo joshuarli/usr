@@ -23,6 +23,30 @@ relpath() {
     [ -n "$_r" ] && printf '%s%s' "$_up" "$_r" || printf '%s' "${_up%/}"
 }
 
+# planned_directory LINK_TEXT TARGET_DIR
+# Succeed if LINK_TEXT points at a whole-directory link this run will create.
+planned_directory() {
+    _link_text=$1 _target_dir=$2
+    while IFS= read -r _sd; do
+        [ -z "$_sd" ] && continue
+        _nested=false
+        while IFS= read -r _sd2; do
+            [ "$_sd2" = "$_sd" ] && continue
+            case "$_sd" in "$_sd2"/*) _nested=true; break ;; esac
+        done < "$tmp/symlink-dirs"
+        if $_nested; then continue; fi
+
+        if [ "$_sd" = "$src" ]; then
+            _sd_target_abs=$tgt_abs
+        else
+            _sd_rel=${_sd#"$src"/}
+            _sd_target_abs=$tgt_abs/$_sd_rel
+        fi
+        [ "$(relpath "$_sd_target_abs" "$_target_dir")" = "$_link_text" ] && return 0
+    done < "$tmp/symlink-dirs"
+    return 1
+}
+
 # physical_parent PATH
 # Physical path of the nearest existing ancestor directory of PATH.
 physical_parent() {
@@ -161,7 +185,10 @@ while IFS= read -r fp; do
             [ "$name" -ef "$fp_abs" ] && continue
             # Same link text as sym would write: correct even when it resolves
             # into the target's own tree rather than the source's.
-            [ -e "$name" ] && [ "$(readlink "$name")" = "$dest" ] && continue
+            if [ "$(readlink "$name")" = "$dest" ]; then
+                [ -e "$name" ] && continue
+                planned_directory "$dest" "$dir_abs" && continue
+            fi
             printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
             continue
         elif [ -e "$name" ]; then

@@ -7,16 +7,6 @@
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "64"
   },
   "permissions": {
-    "ask": [
-      "Bash(git push)",
-      "Bash(git push *)",
-      "Bash(git * push)",
-      "Bash(git * push *)",
-      "Bash(env git *push*)",
-      "Bash(command git *push*)",
-      "Bash(sh -c *git *push*)",
-      "Bash(bash -c *git *push*)"
-    ],
     "deny": [
       "Bash(cargo fmt)",
       "Bash(cargo fmt *)",
@@ -37,6 +27,16 @@
       "Bash(black *)",
       "Bash(ruff format)",
       "Bash(ruff format *)"
+    ],
+    "ask": [
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(git * push)",
+      "Bash(git * push *)",
+      "Bash(env git *push*)",
+      "Bash(command git *push*)",
+      "Bash(sh -c *git *push*)",
+      "Bash(bash -c *git *push*)"
     ],
     "defaultMode": "auto"
   },
@@ -87,7 +87,7 @@
   "effortLevel": "high",
   "modelSettings": {
     "claude-sonnet-5-5": {
-      "effortLevel": "medium"
+      "effortLevel": "high"
     },
     "claude-haiku-5-5": {
       "effortLevel": "high"

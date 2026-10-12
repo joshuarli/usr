@@ -17,11 +17,18 @@ SYM    := sh dotfiles/sym
 
 sync: layers
 	status=0; sh dl || status=$$?; \
-	for layer in $(LAYERS); do $(SYM) -v -t $(TARGET) $$layer || exit 1; done; \
+	for layer in $(LAYERS); do $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
 	exit $$status
 
+# sym reports dry-run conflicts without failing, so check every layer and propagate them.
 plan: layers
-	for layer in $(LAYERS); do $(SYM) --dry-run -t $(TARGET) $$layer || exit 1; done
+	status=0; \
+	for layer in $(LAYERS); do \
+		output=$$($(SYM) --dry-run -t "$(TARGET)" "$$layer" 2>&1) || status=$$?; \
+		printf '%s\n' "$$output"; \
+		case "$$output" in *CONFLICT:*) status=1 ;; esac; \
+	done; \
+	exit $$status
 
 # Each layer is checked alone, so a path claimed by two layers would otherwise surface
 # only after the first layer was applied.
