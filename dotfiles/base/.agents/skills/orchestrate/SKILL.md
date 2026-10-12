@@ -32,7 +32,7 @@ Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns
 
 Spawn children only as `scout`, `mechanic`, `worker`, or `expert`. A subagent's model and reasoning effort come from its agent definition in `~/.claude/agents` (frontmatter `model`, `effort`), not from the call, which can override only the model. Those definitions are the single source of truth: change a type's model or effort there, not here. Built-in agent types do not pin effort. Reserve `expert` for the difficult row. When a task needs a model and effort none of the four provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
 
-Give every parallel writer `isolation: "worktree"`. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
+Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
 
 ## Delegation
 
@@ -64,7 +64,7 @@ A campaign is a backlog too large for one session, run as parallel lanes over se
 
 1. **Select.** For each workstream take the next items whose prerequisites have merged. One to three items per lane, sized for one session. A workstream with nothing ready sits out.
 2. **Brief.** Item IDs, files the lane owns and files it must not touch, what earlier waves learned, and the report format. The brief is the lane's only context beyond the repository.
-3. **Launch** the wave together, each lane in its own worktree, committing on its own branch and never pushing. Start below the fan-out limit and widen once the load on the machine is known.
+3. **Launch** the wave together, each lane in its own worktree under `.work/wt/`, committing on its own branch as Conventional Commits and never pushing. Start below the fan-out limit and widen once the load on the machine is known.
 4. **Review, merge, then verify**, one lane at a time as they report. Read the diff, rebase the lane onto the campaign branch, fast-forward, then run the checks for the areas it touched on the merged tree. Send a failure back to the lane with the command and its output.
 5. **Close** with every lane merged and none running: the full checks, the performance measurements against the baseline, and any repository-wide rewrite the wave made possible. Such rewrites run only here, because they change the files lanes read.
 6. **Record.** Delete finished items, add the defects found, and report to the owner: what merged, every contract change, measurements, and the decisions the next wave needs.

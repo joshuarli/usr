@@ -21,6 +21,7 @@ A campaign doc is the only thing the executing agent has once the owner walks aw
 - **The code is the truth.** Read it at the current commit. Verify every claim the draft makes about what exists and fix the ones that disagree.
 - **The owner owns intent.** Preflight prescribes anything the code, the evidence, or sound practice settles. It asks the owner only for choices that change the product, the contract, or carry real risk, in one batch with a recommendation each, and records the answers as owner decisions with the date.
 - **Pre-answer every place the global instructions say ask:** contract changes and anything destructive. For dependencies, name the performance gates they must stay within. The executor cannot ask, so the doc permits it, forbids it, or says exactly how to proceed.
+- **No `/tmp`.** Move any worktree, scratch, or state path the draft puts in `/tmp` or `$TMPDIR` to `.work/` in the repo, so a reboot or an OOM-killed tmpfs cannot take the campaign with it.
 - **Cut.** The executable core (charter, decisions, sequence, acceptance) comes first and fits comfortably in the executor's context. Rationale, history, and design background follow as reference. Delete what only explains how the draft got here.
 - **Follow the repo's instructions,** including its verification limits. Time the loop commands; report before running anything expensive. No formatters, no commits, no pushes.
 
@@ -81,6 +82,9 @@ For each area the campaign touches, load the skill and ask what decisions it wou
    - Fix on the way what is egregious, in its own commit, to thresholds stated in numbers: a command over N minutes, a regression of more than N times against the baseline, a test red on the baseline that blocks the item. Record anything else seen and leave it.
    - Parity before optimization.
    - Keep bookkeeping minimal: no provenance, checksums, or pinned hashes unless the campaign delivers something that needs them.
+   - Worktrees and all working state live under `.work/` in the repo, never `/tmp`. The doc states the lane worktree path (`.work/wt/<lane>`).
+   - The coordinator cleans up as it integrates: once a lane is merged and its checks pass on the merged tree, it runs `git worktree remove` on the lane's worktree and `git branch -d` on its branch. A parked lane keeps its committed branch. At any moment the only worktrees are those of running lanes.
+   - Every commit, the executor's and the lanes', is a Conventional Commit, with the area or workstream as its scope. The item ID belongs in the body, never the subject.
    - Code comments never cite this doc.
 3. **Decisions:** the three tiers, each with its reason.
 4. **Baseline:** known failures, loop timings, and the reference numbers the optimization phase needs.

@@ -1,0 +1,24 @@
+#!/bin/sh
+# WorktreeRemove hook for Claude Code: remove a worktree made by worktree-create
+# and delete its branch if that branch is merged. Claude never deletes a
+# hook-created worktree's branch itself. An unmerged branch is kept, because it
+# may hold the only copy of the work.
+set -eu
+
+path=$(jaq -r .worktree_path)
+
+case "$path" in
+    */.work/wt/?*) ;;
+    *) printf '%s\n' "worktree-remove: refusing path outside .work/wt: $path" >&2; exit 1 ;;
+esac
+
+common=$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)
+branch=$(git -C "$path" symbolic-ref --quiet --short HEAD || true)
+
+git --git-dir="$common" worktree remove --force "$path"
+
+case "$branch" in
+    worktree-*)
+        git --git-dir="$common" branch -d "$branch" >&2 \
+            || printf '%s\n' "worktree-remove: kept unmerged branch $branch" >&2 ;;
+esac

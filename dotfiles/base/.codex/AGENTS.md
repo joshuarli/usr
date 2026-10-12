@@ -43,11 +43,18 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
 - Never push. Commit only when asked; a campaign plan counts as asking.
+- Every commit message is a Conventional Commit: `type(scope): subject`, with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`. The subject is imperative, lowercase, and at most 72 characters, with no trailing period. The optional scope names the area changed. The body says why, not what. A contract change takes `!` after the type or a `BREAKING CHANGE:` footer. This holds for lane and campaign commits too.
 - Reserve release builds for final verification, or when performance is the primary concern.
 
 ## Environment
 
-macOS and Linux. Use `rg`, `fd`, and `jaq` for search and JSON. Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
+macOS and Linux. Use `rg` and `fd` for search. Use `jaq` for all JSON and YAML work, in place of `jq` and `yq` (`jaq --from yaml` reads YAML, `--to yaml` writes it). Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
+
+## Working files
+
+- Every worktree, scratch file, and piece of working state you create lives under `.work/` at the root of the repo you are working in, never `/tmp`, `$TMPDIR`, or `/var/folders`. `/tmp` is often RAM-backed on my Linux machines, so large trees there cause OOM kills, and it does not survive a reboot.
+- Put worktrees at `.work/wt/<name>` and scratch at `.work/tmp`. Before the first write, make sure `.work/` is ignored through `.git/info/exclude`, not a tracked file. Point `TMPDIR` at `.work/tmp` for commands you run that spill large files.
+- State that must outlive the session (plans, handoffs, results) is committed in the repo, not left in `.work/`, which is disposable.
 
 ## Keep code comments self-contained
 
