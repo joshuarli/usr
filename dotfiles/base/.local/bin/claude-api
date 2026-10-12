@@ -1,33 +1,55 @@
 #!/bin/sh
-# Run the ultrareview skill on the repo in the current directory, billed to
-# API credits. Only programmatic mode (`claude -p`) with a Console API key
-# draws on the credits; the subscription login would use subscription limits.
+# Run a skill on the repo in the current directory, billed to API credits.
+# Only programmatic mode (`claude -p`) with a Console API key draws on the
+# credits; the subscription login would use subscription limits.
 # The key lives in vault as ANTHROPIC_API_KEY and is scoped to this process.
-# Usage: [ULTRAREVIEW_MODEL=sonnet] claude-api-ultrareview [max-budget-usd, default 20]
+# Usage: claude-api [--budget usd] [--model name] <skill> [skill arguments...]
+# The default budget is 20 USD. Example: claude-api ultrareview
 # Exits nonzero unless the session ends with a successful result.
 
 set -eu
 
 unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
-model=${ULTRAREVIEW_MODEL:-}
+
+usage() {
+	echo "usage: claude-api [--budget usd] [--model name] <skill> [skill arguments...]" >&2
+	exit 2
+}
+
+budget=20
+model=
+while [ $# -gt 0 ]; do
+	case $1 in
+	--budget) [ $# -ge 2 ] || usage; budget=$2; shift 2 ;;
+	--model) [ $# -ge 2 ] || usage; model=$2; shift 2 ;;
+	-*) usage ;;
+	*) break ;;
+	esac
+done
+[ $# -ge 1 ] || usage
+skill=$1
+shift
+case $skill in
+*[!A-Za-z0-9:_-]*) echo "claude-api: invalid skill name: $skill" >&2; exit 2 ;;
+esac
 
 # The key is not scoped to a workspace, so the API requires this header. The
 # ID only names the workspace and grants no access without the key.
 export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: wrkspc_01AD5KAnLMgJB9A97WHG28DY"
 
-# Fail before spending credits. The skill edits docs, so a clean tree makes
-# the final diff show only what the review changed.
+# Fail before spending credits. A skill may edit files, so a clean tree makes
+# the final diff show only what the run changed.
 vault ls | grep -qx ANTHROPIC_API_KEY || {
-	echo "claude-api-ultrareview: no ANTHROPIC_API_KEY in vault (vault set ANTHROPIC_API_KEY)" >&2
+	echo "claude-api: no ANTHROPIC_API_KEY in vault (vault set ANTHROPIC_API_KEY)" >&2
 	exit 1
 }
 command -v mdstream >/dev/null || {
-	echo "claude-api-ultrareview: mdstream is not on PATH" >&2
+	echo "claude-api: mdstream is not on PATH" >&2
 	exit 1
 }
 root=$(git rev-parse --show-toplevel)
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
-	echo "claude-api-ultrareview: working tree is not clean; commit or stash first" >&2
+	echo "claude-api: working tree is not clean; commit or stash first" >&2
 	exit 1
 fi
 
@@ -35,7 +57,7 @@ fi
 exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
 mkdir -p "$root/.work/logs" "$(dirname "$exclude")"
 grep -qxF .work/ "$exclude" 2>/dev/null || echo .work/ >>"$exclude"
-log="$root/.work/logs/ultrareview-$(date +%Y%m%dT%H%M%S).jsonl"
+log="$root/.work/logs/$(echo "$skill" | tr : -)-$(date +%Y%m%dT%H%M%S).jsonl"
 echo "raw log: $log" >&2
 
 # Estimated spend for the live display. List prices in $/MTok (input, output,
@@ -93,9 +115,8 @@ foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 # assistant text, one blockquote per tool call with the running cost, and only
 # failed tool results (all of them would drown the review). Everything is
 # markdown for mdstream; the loop stamps elapsed time into the blockquotes.
-budget=${1:-20}
 start=$(date +%s)
-vault ANTHROPIC_API_KEY -- claude -p /ultrareview \
+vault ANTHROPIC_API_KEY -- claude -p "/$skill${*:+ $*}" \
 	--max-budget-usd "$budget" \
 	--dangerously-skip-permissions \
 	${model:+--model "$model"} \
