@@ -26,6 +26,11 @@ experimental_mode = true
 enabled = true
 max_concurrent_threads_per_session = 32
 
+# Nesting cap: root plus three levels of children. Every child is the same
+# model, so depth is the only thing to bound. Honored by multi_agent (V1); V2
+# ignores it, so do not enable multi_agent_v2 without another depth control.
+max_depth = 3
+
 # Default model and effort for every unspecified child.
 default_subagent_model = "gpt-6-luna"
 default_subagent_reasoning_effort = "xhigh"

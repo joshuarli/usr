@@ -218,7 +218,7 @@ fi
 [ -n "$version" ] || die "empty version"
 [ -n "$nightly" ] || die "empty nightly toolchain"
 case "$version" in
-    *[!0-9A-Za-z.\-]*) die "invalid version: $version" ;;
+    *[!0-9A-Za-z.-]*) die "invalid version: $version" ;;
 esac
 
 # Detect platform. Linux and macOS on aarch64/x86_64 only.

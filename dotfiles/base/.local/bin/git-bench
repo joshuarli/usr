@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 readonly GIT=/opt/homebrew/bin/git
 
@@ -7,34 +7,38 @@ die()    { printf "error: %s\n" "$1" >&2; exit 1; }
 header() { printf "\n\033[1m━━━ %s ━━━\033[0m\n\n" "$1"; }
 
 main() {
-  command -v hyperfine &>/dev/null || die "hyperfine not found (brew install hyperfine)"
-  [[ -x "$GIT" ]] || die "$GIT not found"
-  "$GIT" rev-parse --is-inside-work-tree &>/dev/null || die "not in a git repository"
+  command -v hyperfine >/dev/null 2>&1 || die "hyperfine not found (brew install hyperfine)"
+  [ -x "$GIT" ] || die "$GIT not found"
+  "$GIT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not in a git repository"
 
-  local repo commit_count
   repo=$("$GIT" rev-parse --show-toplevel)
   commit_count=$("$GIT" rev-list --count HEAD)
-  (( commit_count < 100 )) && die "repo has $commit_count commits — need 100+ for meaningful benchmarks"
+  if [ "$commit_count" -lt 100 ]; then
+    die "repo has $commit_count commits — need 100+ for meaningful benchmarks"
+  fi
 
   # Ensure commit-graph exists (required for A/B comparison)
   "$GIT" commit-graph write --reachable --changed-paths 2>/dev/null || true
 
   # Most frequently modified file in recent history
-  local hot_path hot_count
-  local hot_all
-  hot_all=$("$GIT" log --pretty=format: --name-only -1000 2>/dev/null \
-    | grep -v '^$' | sort | uniq -c | sort -rn)
-  hot_count=$(awk 'NR==1 {print $1}' <<< "$hot_all")
-  hot_path=$(awk 'NR==1 {print $2}' <<< "$hot_all")
-  [[ -z "$hot_path" ]] && die "could not find a frequently modified file"
+  # Each stage is its own assignment so set -e aborts on a git or grep failure
+  # (no pipefail in POSIX sh), as the original pipeline did.
+  hot_log=$("$GIT" log --pretty=format: --name-only -1000 2>/dev/null)
+  hot_names=$(printf '%s\n' "$hot_log" | grep -v '^$')
+  hot_all=$(printf '%s\n' "$hot_names" | sort | uniq -c | sort -rn)
+  hot_count=$(printf '%s\n' "$hot_all" | awk 'NR==1 {print $1}')
+  hot_path=$(printf '%s\n' "$hot_all" | awk 'NR==1 {print $2}')
+  [ -n "$hot_path" ] || die "could not find a frequently modified file"
 
   # Shell-escape the path for safe embedding in hyperfine command strings
-  local hot_path_q
-  printf -v hot_path_q '%q' "$hot_path"
+  # Single-quote it, closing and reopening around embedded single quotes.
+  hot_path_q="'$(printf '%s\n' "$hot_path" | sed "s/'/'\\\\''/g")'"
 
   # Depth for graph tests
-  local depth=1000
-  (( commit_count < depth * 2 )) && depth=$((commit_count / 2))
+  depth=1000
+  if [ "$commit_count" -lt $((depth * 2)) ]; then
+    depth=$((commit_count / 2))
+  fi
 
   printf "\033[1mgit-gc-bench\033[0m\n"
   printf "repo:     %s\n" "$repo"

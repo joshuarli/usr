@@ -14,13 +14,12 @@ fi
 
 pstate_status=/sys/devices/system/cpu/amd_pstate/status
 boost=/sys/devices/system/cpu/cpufreq/boost
-policy_glob=/sys/devices/system/cpu/cpufreq/policy*
 
 [ -r "$pstate_status" ] || die "AMD P-state status is unavailable"
 [ "$(cat "$pstate_status")" = active ] || die "AMD P-state is not active"
 [ -r "$boost" ] && [ -w "$boost" ] || die "CPU boost control is unavailable"
 
-set -- $policy_glob
+set -- /sys/devices/system/cpu/cpufreq/policy*
 [ -d "$1" ] || die "no CPU frequency policies found"
 policy_count=$#
 

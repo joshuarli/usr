@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 set -e
 
@@ -31,47 +31,55 @@ if ! command -v trash >/dev/null 2>&1; then
     exit 1
 fi
 
-# shared helper: build args for the archive-HEVC profile at a given resolution cap
-archive_hevc_args() {
-    local cap="$1"
-    args=(
-        # first video stream, first audio stream; ? = skip silently if no subtitles
-        -map "0:V:0" -map "0:a:0" -map "0:s?"
-
-        -c:v hevc_videotoolbox      # Apple GPU H.265 encoder
-        -pix_fmt yuv420p            # enforce 8-bit output; reliable VT mechanism, -profile:v main is not
-        # tag output as BT.709 SDR; without this, HDR sources keep their original color metadata
-        # despite being resampled to 8-bit, causing players to misinterpret the signal
-        -colorspace bt709
-        -color_primaries bt709
-        -color_trc bt709
-        -q:v 52                     # constant quality 0–100 (lower = better quality)
-        -tag:v hvc1                 # Apple's preferred HEVC tag; QuickTime/iOS expect hvc1, not the default hev1
-
-        # cap to target resolution for both orientations: landscape caps height, portrait caps width
-        # -2 = auto-calculate the other dimension, rounded to even for codec alignment
-        -vf "scale='if(gt(iw,ih),-2,min(iw,$cap))':'if(gt(iw,ih),min(ih,$cap),-2)'"
-        -fps_mode passthrough       # preserve source-native frame timing
-
-        -c:a aac_at                 # CoreAudio AAC-LC encoder
-        -ac 2                       # downmix to stereo
-        -b:a 128k
-
-        -c:s mov_text               # transcode subtitles to MP4-compatible text format
-
-        -map_metadata -1            # strip all global metadata tags
-        -map_chapters -1            # strip chapter markers
-        -movflags +faststart        # move moov atom to front so the file is seekable before fully downloaded
-    )
+# Run ffmpeg with the archive-HEVC settings at the resolution cap in $cap.
+# Arguments are built as positional parameters (POSIX sh has no arrays), so this
+# function owns "$@" and takes the source and output paths as its own arguments.
+archive_hevc_encode() {
+    src="$1"
+    output="$2"
+    # Per-option notes (comments cannot sit between the arguments below):
+    # -map: first video stream, first audio stream; "0:s?" skips silently if no subtitles
+    # -c:v hevc_videotoolbox: Apple GPU H.265 encoder
+    # -pix_fmt yuv420p: enforce 8-bit output; reliable VT mechanism, -profile:v main is not
+    # -colorspace/-color_primaries/-color_trc: tag output as BT.709 SDR; without this, HDR
+    #   sources keep their original color metadata despite being resampled to 8-bit,
+    #   causing players to misinterpret the signal
+    # -q:v 52: constant quality 0-100 (lower = better quality)
+    # -tag:v hvc1: Apple's preferred HEVC tag; QuickTime/iOS expect hvc1, not the default hev1
+    # -vf scale: cap to target resolution for both orientations: landscape caps height,
+    #   portrait caps width; -2 = auto-calculate the other dimension, rounded to even
+    #   for codec alignment
+    # -fps_mode passthrough: preserve source-native frame timing
+    # -c:a aac_at: CoreAudio AAC-LC encoder; -ac 2 downmixes to stereo
+    # -c:s mov_text: transcode subtitles to MP4-compatible text format
+    # -map_metadata -1 / -map_chapters -1: strip global metadata tags and chapter markers
+    # -movflags +faststart: move moov atom to front so the file is seekable before fully downloaded
+    set -- \
+        -map "0:V:0" -map "0:a:0" -map "0:s?" \
+        -c:v hevc_videotoolbox \
+        -pix_fmt yuv420p \
+        -colorspace bt709 \
+        -color_primaries bt709 \
+        -color_trc bt709 \
+        -q:v 52 \
+        -tag:v hvc1 \
+        -vf "scale='if(gt(iw,ih),-2,min(iw,$cap))':'if(gt(iw,ih),min(ih,$cap),-2)'" \
+        -fps_mode passthrough \
+        -c:a aac_at \
+        -ac 2 \
+        -b:a 128k \
+        -c:s mov_text \
+        -map_metadata -1 \
+        -map_chapters -1 \
+        -movflags +faststart
+    ffmpeg -nostdin -hide_banner -loglevel error -i "$src" "$@" "$output"
 }
 
 is_video_file() {
-    local path="$1"
-    local lower
-    local name
+    path="$1"
     name=$(basename "$path")
     case "$name" in
-        .*|._*)
+        .*)
             return 1
             ;;
     esac
@@ -87,11 +95,10 @@ is_video_file() {
 }
 
 abs_path() {
-    local p="$1"
+    p="$1"
     if [ -d "$p" ]; then
         (cd "$p" && pwd -P)
     else
-        local d b
         d=$(dirname "$p")
         b=$(basename "$p")
         (cd "$d" && printf '%s/%s\n' "$(pwd -P)" "$b")
@@ -99,8 +106,7 @@ abs_path() {
 }
 
 encode_one() {
-    local src="$1"
-    local base output src_size out_size pct_change
+    src="$1"
 
     # reject files that were already produced by this script
     case "$src" in
@@ -124,7 +130,7 @@ encode_one() {
     fi
 
     echo "Encoding: $src"
-    if ! ffmpeg -nostdin -hide_banner -loglevel error -i "$src" "${args[@]}" "$output"; then
+    if ! archive_hevc_encode "$src" "$output"; then
         echo "Encode failed: $src" >&2
         rm -f "$output"
         return 1
@@ -150,10 +156,10 @@ encode_one() {
 
 case "$profile" in
     archive-720p-cq52)
-        archive_hevc_args 720
+        cap=720
         ;;
     archive-1080p-cq52)
-        archive_hevc_args 1080
+        cap=1080
         ;;
     *)
         echo "Error: unknown profile '$profile'" >&2
@@ -180,7 +186,12 @@ fi
 had_error=0
 processed=0
 
-while IFS= read -r -d '' file; do
+# Newline-separated paths: POSIX read has no NUL delimiter, so file names
+# containing a newline are not supported. A failing find is ignored, as before.
+files=$(find "$input" \( -mindepth 1 -type d -name '.*' -prune \) -o \( -type f -print \)) || :
+
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
     file=$(abs_path "$file")
     if ! is_video_file "$file"; then
         continue
@@ -189,7 +200,9 @@ while IFS= read -r -d '' file; do
     if ! encode_one "$file"; then
         had_error=1
     fi
-done < <(find "$input" \( -mindepth 1 -type d -name '.*' -prune \) -o \( -type f -print0 \))
+done <<EOF
+$files
+EOF
 
 if [ "$processed" -eq 0 ]; then
     echo "No supported video files found under: $input"

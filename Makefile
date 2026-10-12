@@ -13,7 +13,7 @@ OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
-.PHONY: sync plan layers check
+.PHONY: sync plan layers check lint
 
 sync: layers
 	status=0; sh dl || status=$$?; \
@@ -38,5 +38,15 @@ layers:
 
 check:
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
+	cd dotfiles && sh agent-tier-gate-test.sh
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
+
+# Every shell script must be POSIX sh, so lint every tracked or new file that ends in .sh or
+# starts with a sh, bash, or dash shebang, as sh regardless of what its shebang claims.
+lint:
+	@files=$$(git ls-files -co --exclude-standard | while read -r f; do \
+		[ -f "$$f" ] && [ ! -L "$$f" ] || continue; \
+		{ [ "$${f%.sh}" != "$$f" ] || head -n 1 "$$f" | grep -Eq '^#!.*(sh|bash|dash)( |$$)'; } && echo "$$f"; \
+	done); \
+	shellcheck -s sh $$files

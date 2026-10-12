@@ -33,7 +33,7 @@ Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns
 
 ### Claude
 
-Spawn children only as `scout`, `mechanic`, `worker`, `expert`, or `god`. A subagent's model and reasoning effort come from its agent definition in `~/.claude/agents` (frontmatter `model`, `effort`), not from the call, which can override only the model. Those definitions are the single source of truth: change a type's model or effort there, not here. Built-in agent types do not pin effort. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed on with evidence of the difficulty, or for a decision others build on. When a task needs a model and effort none of the five provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
+Spawn children only as `scout`, `mechanic`, `worker`, `expert`, or `god`, never a built-in type. They rank `scout` < `mechanic` < `worker` < `expert` < `god`, and an agent spawns only tiers strictly below its own (`scout` spawns nothing). Claude cannot restrict spawn types per nested subagent in a definition, so the `agent-tier-gate` PreToolUse hook enforces the order on every spawn, and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps nesting at 3. A subagent's model and reasoning effort come from its agent definition in `~/.claude/agents` (frontmatter `model`, `effort`), not from the call, which can override only the model. Those definitions are the single source of truth: change a type's model or effort there, not here. Built-in agent types do not pin effort. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed on with evidence of the difficulty, or for a decision others build on. When a task needs a model and effort none of the five provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
 
 Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
 
@@ -50,7 +50,7 @@ Every child gets:
 - Clear ownership and write boundaries.
 - A concrete deliverable with only the needed context.
 - Proportionate checks and a stopping condition.
-- No further delegation unless explicitly given a nested budget and scope.
+- No further delegation unless the brief grants it, and then only to lower tiers (Claude) within the depth cap. Codex children are all one tier, so `agents.max_depth` is the only limit.
 
 Carry forward findings and failed approaches.
 

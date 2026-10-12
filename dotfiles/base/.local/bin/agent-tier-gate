@@ -1,0 +1,55 @@
+#!/bin/sh
+# PreToolUse hook for Claude Code, matcher Agent: enforce the orchestrate tier
+# order scout < mechanic < worker < expert < god on every spawn, including
+# spawns made by nested subagents. A caller may spawn only a tier strictly below
+# its own. The main conversation (no agent_type) may spawn any of the five tiers
+# and nothing else, so built-in types and forks are refused. A caller whose type
+# is not a tier (a fork, a built-in) is refused too. Claude cannot restrict
+# spawn types per nested subagent in a definition, so this is the only place the
+# order is enforced.
+set -eu
+
+rank() {
+    case "$1" in
+        scout) echo 1 ;;
+        mechanic) echo 2 ;;
+        worker) echo 3 ;;
+        expert) echo 4 ;;
+        god) echo 5 ;;
+        *) echo 0 ;;
+    esac
+}
+
+deny() {
+    printf '%s\n' "agent-tier-gate: $1" >&2
+    exit 2
+}
+
+# Exit 2 is the only status that blocks a spawn, so a missing JSON tool or
+# unparseable input must deny explicitly instead of failing with another status.
+if command -v jaq >/dev/null 2>&1; then
+    json=jaq
+elif command -v jq >/dev/null 2>&1; then
+    json=jq
+else
+    deny "neither jaq nor jq is installed"
+fi
+
+input=$(cat)
+
+field() {
+    printf '%s' "$input" | "$json" -r "$1" 2>/dev/null || deny "cannot parse hook input"
+}
+
+caller=$(field '.agent_type // ""')
+target=$(field '.tool_input.subagent_type // ""')
+
+target_rank=$(rank "$target")
+[ "$target_rank" -gt 0 ] || deny "'$target' is not one of scout, mechanic, worker, expert, god"
+
+[ -n "$caller" ] || exit 0
+
+caller_rank=$(rank "$caller")
+[ "$caller_rank" -gt 0 ] || deny "caller '$caller' is not a tier and may not spawn"
+[ "$target_rank" -lt "$caller_rank" ] \
+    || deny "$caller may spawn only tiers below it, not $target"

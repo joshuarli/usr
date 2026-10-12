@@ -90,6 +90,8 @@ else
     remote_missing=yes
 fi
 
+# The repo name is meant to expand here so the remote script receives it as $1.
+# shellcheck disable=SC2029
 ssh "$destination" "sh -s -- '$repo_name'" <<'REMOTE'
 set -eu
 repo_name=$1

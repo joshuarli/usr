@@ -30,6 +30,7 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 ## Commands
 
 - `make check`: `sym` tests and skill checks (about 25 s). Run it after touching `sym`, skills, or agent definitions.
+- `make lint`: `shellcheck -s sh` on every tracked or new shell script (`.sh` or a sh, bash, or dash shebang), so a bashism fails even under a bash shebang.
 - `make plan`: dry run of the sync into `$HOME`. A `CONFLICT` means a real file, or a symlinked directory, is in the way; resolve it by hand. A path claimed by two layers stops both `plan` and `make`.
 - `make`: run `dl`, then sync into `$HOME`. This downloads binaries and mutates the real home directory, so only run it when asked. A `dl` failure does not stop the sync but fails the run. `plan` and `check` never run `dl`.
 - Experiment with `sh dotfiles/sym -t <tmpdir> dotfiles/base`; its default target is `$HOME`.

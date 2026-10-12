@@ -1,11 +1,13 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 DIR="$(mktemp -d)" || exit
 
-trap "rm -rf ${DIR}" EXIT
+trap 'rm -rf "${DIR}"' EXIT
+
+START="$PWD"
 
 unzip "$1" -d "${DIR}/extracted"
-cd "${DIR}/extracted"
+cd "${DIR}/extracted" || exit
 fd -e jpg -e jpeg -x \
   jpegoptim -m85 -s {}
 fd -e png -x \
@@ -15,7 +17,9 @@ fd -e png -x \
 # The mimetype file needs to be added first, and without compression.
 zip -X0   "${DIR}/out.zip" mimetype
 zip -X9ur "${DIR}/out.zip" .
-cd -
+# Print the directory like `cd -` did.
+cd "$START" || exit
+printf '%s\n' "$START"
 
 # We could have passed -u to update the source epub in-place, but meh.
 # Just write a new -optimized epub.
