@@ -1,3 +1,9 @@
+---
+name: api-surface-and-module-boundaries
+description: Minimize and harden the public API surface, make call sites unambiguous, and fix module dependency direction, cycles, and reach-through.
+disable-model-invocation: true
+---
+
 # API Surface, Ergonomics, and Module Boundaries
 
 You are improving this codebase so its public API exposes only intentional, stable contracts and keeps implementation details private.

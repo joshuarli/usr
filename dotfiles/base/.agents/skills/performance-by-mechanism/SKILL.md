@@ -1,3 +1,9 @@
+---
+name: performance-by-mechanism
+description: Improve performance by measuring and removing unnecessary work, fitting data structures to operations, cutting copies, and bounding buffers and streaming.
+disable-model-invocation: true
+---
+
 # Performance by Mechanism, Not Folklore
 
 You are improving this codebase so performance-sensitive paths are improved by identifying and removing measurable unnecessary work from first principles.

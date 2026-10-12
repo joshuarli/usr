@@ -1,3 +1,9 @@
+---
+name: dead-code-archaeology
+description: Find dead code, stale fallbacks, completed feature flags, and legacy compatibility paths, prove what is live, and remove or quarantine the rest.
+disable-model-invocation: true
+---
+
 # Dead Code and Legacy Archaeology
 
 You are improving this codebase so obsolete behavior and historical compatibility residue are either proven live, quarantined as compatibility, or removed coherently.
