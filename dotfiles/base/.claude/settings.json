@@ -7,7 +7,6 @@
     "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "64"
   },
   "permissions": {
-    "defaultMode": "auto",
     "deny": [
       "Bash(git push)",
       "Bash(git push *)",
@@ -27,9 +26,10 @@
       "Bash(black *)",
       "Bash(ruff format)",
       "Bash(ruff format *)"
-    ]
+    ],
+    "defaultMode": "auto"
   },
-  "model": "sonnet",
+  "model": "haiku",
   "hooks": {
     "Notification": [
       {
