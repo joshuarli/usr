@@ -1,8 +1,13 @@
 #!/bin/sh
 # sym - batch symlinker for dotfiles
+#
+# Mirrors the files of SOURCE into TARGET as relative symlinks. A directory
+# holding a .sym-dir marker file is linked as a whole instead of file by file.
+# Enumeration follows Git's ignore rules, so ignored files are never linked.
+# Every conflict is reported before anything is written.
 
 die()   { printf '%s\n' "$*" >&2; exit 1; }
-usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] [--exclude PATTERN] [--copy PATTERN]... [--sync DIR]... [--force] SOURCE\n' >&2; exit 1; }
+usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] SOURCE\n' >&2; exit 1; }
 log()   { if "$verbose"; then printf '%s\n' "$1"; fi; }
 
 # relpath DEST BASE
@@ -18,75 +23,7 @@ relpath() {
     [ -n "$_r" ] && printf '%s%s' "$_up" "$_r" || printf '%s' "${_up%/}"
 }
 
-# match_paths < PATTERNS [PATH]...
-# Succeed if any PATH matches one of the newline-separated glob patterns on stdin.
-match_paths() {
-    while IFS= read -r _pat; do
-        [ -z "$_pat" ] && continue
-        for _p do
-            # shellcheck disable=SC2254
-            case $_p in $_pat) return 0 ;; esac
-        done
-    done
-    return 1
-}
-
-# file_kind PATH
-# Print none (absent), file (regular file, not a symlink), or other.
-file_kind() {
-    if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then printf other
-    elif [ -f "$1" ]; then printf file
-    else printf none
-    fi
-}
-
-# under_sync_dir REL
-# Succeed if source-relative path REL is inside a synced directory that the
-# source tree contains. Those files are reconciled by the sync pass, not linked.
-under_sync_dir() {
-    while IFS= read -r _sd; do
-        [ -n "$_sd" ] && [ -d "$src/$_sd" ] || continue
-        case $1 in "$_sd"/*) return 0 ;; esac
-    done < "$tmp/syncs"
-    return 1
-}
-
-# shadowed_by_source_file REL
-# Succeed if an ancestor of REL (relative to the current synced directory) is a
-# regular file in the source, so a target directory there is replaced wholesale.
-shadowed_by_source_file() {
-    _a="$1"
-    while :; do
-        case $_a in */*) _a="${_a%/*}" ;; *) return 1 ;; esac
-        [ -f "$src/$sdir/$_a" ] && return 0
-    done
-}
-
-# symlink_below ROOT REL
-# Succeed if a directory component of REL under ROOT (not its final name) is a
-# symlink. Sync never follows one: it could read or write, or with --force
-# delete, outside the synced directory.
-symlink_below() {
-    _p="$2" _acc=''
-    while :; do
-        case $_p in
-            */*) _acc="${_acc:+$_acc/}${_p%%/*}"; _p="${_p#*/}"
-                 [ -L "$1/$_acc" ] && return 0 ;;
-            *) return 1 ;;
-        esac
-    done
-}
-
-# changed_since_marker FILE
-# Succeed unless FILE is strictly older than the sync marker. File times have
-# one-second resolution here, so a tie counts as changed: the worst outcome is a
-# conflict to resolve, never one side silently overwriting an edit.
-changed_since_marker() {
-    [ ! -e "$marker" ] || ! [ "$marker" -nt "$1" ]
-}
-
-# Defaults
-target="$HOME"; delete=false; dry_run=false; verbose=false; excludes=''; copies=''; syncs=''; force=false; failed=false
+target="$HOME"; delete=false; dry_run=false; verbose=false; failed=false
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -94,22 +31,6 @@ while [ $# -gt 0 ]; do
         -d|--delete)  delete=true ;;
         --dry-run)    dry_run=true; verbose=true ;;
         -v|--verbose) verbose=true ;;
-        --exclude)    [ $# -ge 2 ] || usage; shift
-                      excludes="${excludes:+${excludes}
-}$1" ;;
-        --copy)       [ $# -ge 2 ] || usage; shift
-                      copies="${copies:+${copies}
-}$1" ;;
-        --force)      force=true ;;
-        --sync)       [ $# -ge 2 ] || usage; shift
-                      _d="$1"
-                      while [ "${_d%/}" != "$_d" ]; do _d="${_d%/}"; done
-                      case $_d in
-                          ''|/*|.|./*|*/.|*/./*|..|../*|*/..|*/../*|*//*)
-                              die "--sync directory $1 must be a relative path without . or .. components" ;;
-                      esac
-                      syncs="${syncs:+${syncs}
-}$_d" ;;
         --) shift; break ;;
         -*) usage ;;
         *)  break ;;
@@ -133,25 +54,12 @@ tmp="${TMPDIR:-/tmp}/sym.$$"
 mkdir "$tmp" || die 'failed to create temp directory'
 trap 'rm -rf "$tmp"' 0 1 2 3 15
 
-# TEMPORARY EXCEPTIONS: directories kept as real files on both sides and synced
-# in both directions instead of symlinked. Agent skills are not followed through
-# symlinks, subagent definitions are synced the same way because their symlink
-# support is undocumented, and agents edit the installed copy, so edits must flow
-# back into the source tree. A source tree opts in by containing the directory.
-# Remove entries here when they no longer need to be managed as copies.
-syncs="${syncs:+$syncs
-}.agents/skills
-.claude/agents"
-printf '%s\n' "$syncs" > "$tmp/syncs"
-
 # Enumerate files using Git's ignore rules when src is inside a Git worktree.
 # Exclude .sym-dir marker files themselves (their parent dirs are handled in pass 1b).
 : > "$tmp/files"
 : > "$tmp/symlink-dirs"
 : > "$tmp/names"
 : > "$tmp/dests"
-: > "$tmp/copy-names"
-: > "$tmp/copy-srcs"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$src" ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
     while IFS= read -r rel; do
@@ -181,12 +89,6 @@ fi
 
 # Pass 1: compute jobs and detect conflicts
 while IFS= read -r fp; do
-    # Filter excluded paths
-    if [ -n "$excludes" ] && printf '%s\n' "$excludes" | match_paths "$fp"; then
-        log "IGNORE: $fp"
-        continue
-    fi
-
     # Skip files inside whole-symlink directories
     if [ -s "$tmp/symlink-dirs" ]; then
         _in_sd=false
@@ -197,19 +99,11 @@ while IFS= read -r fp; do
     fi
 
     rel="${fp#"$src/"}"
-    if under_sync_dir "$rel"; then continue; fi
     name="$tgt/$rel"
     # Absolute versions for relpath computation only
     fp_abs="$src_abs/$rel"
     name_abs="$tgt_abs/$rel"
     dir_abs="${name_abs%/*}"
-
-    # Copy exception: matching paths are copied instead of symlinked, so the
-    # usual "existing file" conflicts do not apply.
-    is_copy=false
-    if [ -n "$copies" ] && printf '%s\n' "$copies" | match_paths "$fp_abs" "$name_abs"; then
-        is_copy=true
-    fi
 
     if [ -L "$fp" ]; then
         dest_abs="$(readlink "$fp")"
@@ -222,13 +116,7 @@ while IFS= read -r fp; do
     fi
 
     if $delete; then
-        if $is_copy; then
-            { [ -e "$name" ] || [ -L "$name" ]; } || continue
-            if [ -L "$name" ] || [ ! -f "$name" ] || ! cmp -s "$name" "$fp_abs"; then
-                printf 'CONFLICT: %s is not an identical copy of %s, so refusing to remove.\n' "$name" "$fp_abs" >> "$tmp/conflicts"
-                continue
-            fi
-        elif { [ -e "$name" ] || [ -L "$name" ]; }; then
+        if { [ -e "$name" ] || [ -L "$name" ]; }; then
             if [ ! -L "$name" ]; then
                 printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
                 continue
@@ -241,18 +129,11 @@ while IFS= read -r fp; do
             continue
         fi
     else
-        if $is_copy; then
-            # Copy mode is forceful: the destination is replaced regardless of
-            # its current type or contents.
-            printf '%s\n' "$name" >> "$tmp/copy-names"
-            printf '%s\n' "$fp_abs" >> "$tmp/copy-srcs"
-            continue
-        fi
+        # The same file reached through a linked parent directory is already in place.
+        [ "$name" -ef "$fp_abs" ] && continue
         if [ -L "$name" ]; then
-            [ "$name" -ef "$fp_abs" ] && continue  # already correct, idempotent
             # Same link text as sym would write: correct even when it resolves
-            # into the target's own tree rather than the source's (a symlink to
-            # a synced directory, whose target-side copy is not the source dir).
+            # into the target's own tree rather than the source's.
             [ -e "$name" ] && [ "$(readlink "$name")" = "$dest" ] && continue
             printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
             continue
@@ -284,19 +165,6 @@ while IFS= read -r sd; do
     fp_abs="$src_abs/$rel"
     name_abs="$tgt_abs/$rel"
 
-    # Filter excluded paths
-    if [ -n "$excludes" ] && printf '%s\n' "$excludes" | match_paths "$sd"; then
-        log "IGNORE: $sd"
-        continue
-    fi
-
-    # --copy applies to individual files only, not whole-directory symlinks.
-    rel="${sd#"$src/"}"
-    if [ -n "$copies" ] && printf '%s\n' "$copies" | match_paths "$src_abs/$rel" "$tgt_abs/$rel"; then
-        printf 'CONFLICT: %s is a whole-directory symlink; --copy supports individual files only.\n' "$tgt/$rel" >> "$tmp/conflicts"
-        continue
-    fi
-
     if $delete; then
         { [ -e "$name" ] || [ -L "$name" ]; } || continue
         if [ ! -L "$name" ]; then
@@ -323,108 +191,6 @@ while IFS= read -r sd; do
     printf '%s\n' "$dest" >> "$tmp/dests"
 done < "$tmp/symlink-dirs"
 
-# Pass 1c: plan synced directories.
-# Each synced directory holds a marker file in the target whose mtime is the end
-# of the last successful sync. A file that differs between the sides is pushed
-# (source -> target) or pulled (target -> source) according to which side changed
-# since the marker; if both changed, or no sync is recorded, it is a conflict.
-# Deletions do not propagate: a file missing on one side is restored from the
-# other, so remove it from both sides (or use --delete) to retire it.
-# With --force the source is the truth: it overwrites any differing or
-# non-regular target file, nothing is pulled back, there are no sync conflicts,
-# and a target-only file is left in place and reported as EXTRA. An overwrite of
-# a target that changed since the last sync, and files discarded with a replaced
-# directory, are always printed, because that content is not recoverable.
-# Sync never follows a symlinked directory, and a symlink in the source is a
-# conflict; a target-only symlink is left alone.
-: > "$tmp/sync-ops"
-: > "$tmp/sync-dirs"
-touch "$tmp/sync-start"
-src_in_git=false
-git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1 && src_in_git=true
-while IFS= read -r sdir; do
-    [ -n "$sdir" ] && [ -d "$src/$sdir" ] || continue
-    if [ -L "$src/$sdir" ]; then
-        printf 'CONFLICT: %s is a symlink; a synced directory must be a real directory.\n' "$src/$sdir" >> "$tmp/conflicts"
-        continue
-    fi
-    if [ -d "$tgt/$sdir" ] && [ "$(cd "$tgt/$sdir" && pwd -P)" = "$(cd "$src/$sdir" && pwd -P)" ]; then
-        die "sync directory $tgt/$sdir resolves to its source $src/$sdir"
-    fi
-    marker="$tgt/$sdir/.sym-synced"
-    printf '%s\n' "$sdir" >> "$tmp/sync-dirs"
-    {
-        (cd "$src/$sdir" && find . \( -type f -o -type l \))
-        [ -d "$tgt/$sdir" ] && (cd "$tgt/$sdir" && find . -type f)
-    } | sed 's|^\./||' | sort -u > "$tmp/sync-rels"
-    while IFS= read -r r; do
-        [ "${r##*/}" = .sym-synced ] && continue
-        s="$src/$sdir/$r"; t="$tgt/$sdir/$r"
-        if [ -n "$excludes" ] && printf '%s\n' "$excludes" | match_paths "$s" "$t"; then
-            log "IGNORE: $s"
-            continue
-        fi
-        if $src_in_git && git -C "$src" check-ignore -q -- "$sdir/$r"; then continue; fi
-        if symlink_below "$src/$sdir" "$r" || symlink_below "$tgt/$sdir" "$r"; then
-            printf 'CONFLICT: %s passes through a symlink, so sync will not follow it.\n' "$t" >> "$tmp/conflicts"
-            continue
-        fi
-        sk="$(file_kind "$s")"; tk="$(file_kind "$t")"
-
-        if $delete; then
-            [ "$tk" = none ] && continue
-            if [ "$sk" = file ] && [ "$tk" = file ] && cmp -s "$s" "$t"; then
-                printf 'UNLINK\t%s\n' "$t" >> "$tmp/sync-ops"
-            else
-                printf 'CONFLICT: %s is not an identical copy of %s, so refusing to remove.\n' "$t" "$s" >> "$tmp/conflicts"
-            fi
-            continue
-        fi
-
-        if $force; then
-            if [ "$sk" = other ]; then
-                printf 'CONFLICT: %s must be a regular file to sync.\n' "$s" >> "$tmp/conflicts"
-            elif [ "$sk" = none ]; then
-                if shadowed_by_source_file "$r"; then
-                    printf 'DISCARD: %s (inside a directory replaced by a file)\n' "$t"
-                else
-                    log "EXTRA: $t"
-                fi
-            elif [ "$tk" = other ]; then
-                printf 'REPLACE\t%s\t%s\n' "$t" "$s" >> "$tmp/sync-ops"
-            elif [ "$tk" = none ]; then
-                printf 'PUSH\t%s\t%s\n' "$t" "$s" >> "$tmp/sync-ops"
-            elif ! cmp -s "$s" "$t"; then
-                if changed_since_marker "$t"; then op=OVERWRITE; else op=PUSH; fi
-                printf '%s\t%s\t%s\n' "$op" "$t" "$s" >> "$tmp/sync-ops"
-            fi
-            continue
-        fi
-
-        if [ "$sk" = other ] || [ "$tk" = other ]; then
-            printf 'CONFLICT: %s and %s must both be regular files or absent to sync.\n' "$t" "$s" >> "$tmp/conflicts"
-        elif [ "$tk" = none ]; then
-            printf 'PUSH\t%s\t%s\n' "$t" "$s" >> "$tmp/sync-ops"
-        elif [ "$sk" = none ]; then
-            printf 'PULL\t%s\t%s\n' "$s" "$t" >> "$tmp/sync-ops"
-        elif ! cmp -s "$s" "$t"; then
-            s_changed=false; t_changed=false
-            if changed_since_marker "$s"; then s_changed=true; fi
-            if changed_since_marker "$t"; then t_changed=true; fi
-            if $s_changed && ! $t_changed; then
-                printf 'PUSH\t%s\t%s\n' "$t" "$s" >> "$tmp/sync-ops"
-            elif $t_changed && ! $s_changed; then
-                printf 'PULL\t%s\t%s\n' "$s" "$t" >> "$tmp/sync-ops"
-            else
-                printf 'CONFLICT: %s and %s differ and sync cannot tell which side is newer (both changed since the last sync, or none is recorded).\n' "$t" "$s" >> "$tmp/conflicts"
-            fi
-        fi
-    done < "$tmp/sync-rels"
-
-    # With --delete the marker goes last, after the files it describes.
-    if $delete && [ -e "$marker" ]; then printf 'UNLINK\t%s\n' "$marker" >> "$tmp/sync-ops"; fi
-done < "$tmp/syncs"
-
 # Report conflicts
 if [ -s "$tmp/conflicts" ]; then
     cat "$tmp/conflicts" >&2
@@ -433,55 +199,7 @@ fi
 
 $dry_run && printf 'dry-run; the following operations are what would have been executed.\n'
 
-# Sync jobs. Copies keep the source mtime (-p), which is never later than the
-# marker written afterwards, so a synced file never looks changed since the sync.
-while IFS="$(printf '\t')" read -r op dest from; do
-    [ -n "$op" ] || continue
-    case $op in
-        PUSH|PULL|REPLACE|OVERWRITE)
-            dir="${dest%/*}"
-            if [ ! -d "$dir" ]; then
-                log "MKDIRS: $dir"
-                $dry_run || mkdir -p "$dir" || failed=true
-            fi
-            if [ "$op" = OVERWRITE ]; then
-                printf 'OVERWRITE: %s <- %s (target changed since the last sync)\n' "$dest" "$from"
-            else
-                log "$op: $dest <- $from"
-            fi
-            if ! $dry_run; then
-                # REPLACE first removes a non-regular destination (directory or symlink).
-                if [ "$op" = REPLACE ]; then rm -rf "$dest" || failed=true; fi
-                cp -p "$from" "$dest" || failed=true
-            fi
-            ;;
-        UNLINK)
-            log "UNLINK: $dest"
-            if ! $dry_run; then
-                rm "$dest" || failed=true
-                dir="${dest%/*}"
-                while [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
-                    log "RMDIR: $dir"
-                    rmdir "$dir" || { failed=true; break; }
-                    dir="${dir%/*}"
-                done
-            fi
-            ;;
-    esac
-done < "$tmp/sync-ops"
-# The marker records when planning started, so an edit made while sync ran counts
-# as changed. It is not advanced after a failure, which would hide the failed file.
-if ! $delete && ! $dry_run && ! $failed; then
-    while IFS= read -r sdir; do
-        mkdir -p "$tgt/$sdir" || failed=true
-        touch -r "$tmp/sync-start" "$tgt/$sdir/.sym-synced" || failed=true
-    done < "$tmp/sync-dirs"
-fi
-
-if [ ! -s "$tmp/names" ] && [ ! -s "$tmp/copy-names" ]; then
-    if $failed; then die "sym: some operations failed."; fi
-    exit 0
-fi
+[ -s "$tmp/names" ] || exit 0
 
 # Pass 2: execute
 if $delete; then
@@ -508,22 +226,6 @@ else
         log "LINK: $name -> $dest"
         $dry_run || ln -s "$dest" "$name" || failed=true
     done < "$tmp/jobs"
-fi
-
-# Copy jobs: overwrite the destination with the source contents.
-if [ -s "$tmp/copy-names" ]; then
-    paste "$tmp/copy-names" "$tmp/copy-srcs" > "$tmp/copy-jobs"
-    while IFS="$(printf '\t')" read -r name copy_src; do
-        dir="${name%/*}"
-        if [ ! -d "$dir" ]; then
-            log "MKDIRS: $dir"
-            $dry_run || mkdir -p "$dir" || failed=true
-        fi
-        log "COPY: $name <- $copy_src"
-        # Remove first so an existing symlink or directory is replaced, not
-        # written through or treated as a copy destination.
-        $dry_run || { rm -rf "$name" && cp "$copy_src" "$name"; } || failed=true
-    done < "$tmp/copy-jobs"
 fi
 
 if $failed; then die "sym: some operations failed."; fi

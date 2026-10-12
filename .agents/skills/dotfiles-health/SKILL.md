@@ -10,14 +10,14 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 ## Map
 
 - **Instructions:** `dotfiles/base/.codex/AGENTS.md`, shared with Claude and pi by symlink.
-- **Skills:** `dotfiles/base/.agents/skills/`. Real files synced both ways by `sym`, because symlinked skills are not followed.
-- **Claude subagents:** `dotfiles/base/.claude/agents/`, synced the same way. They are the only place a child's model and effort are set.
+- **Skills:** `dotfiles/base/.agents/skills/`, linked whole into `~/.agents/skills` by a `.sym-dir` marker. Claude and Codex both follow the link, which was tested. The directory's `.gitignore` tracks skill folders and nothing else, because the harnesses write into it.
+- **Claude subagents:** `dotfiles/base/.claude/agents/`, linked and ignored the same way. They are the only place a child's model and effort are set.
 - **Enforcement:** `dotfiles/base/.claude/settings.json` (deny rules) and `dotfiles/base/.codex/rules/default.rules` (prefix rules). Codex config is `dotfiles/base/.codex/config.toml`.
-- **Installer:** `dotfiles/sym`, its tests `dotfiles/sym-test.sh`, and the skill invariants `dotfiles/skills-check.sh`.
+- **Installer:** `dotfiles/sym`, its tests `dotfiles/sym-test.sh`, and the skill invariants `dotfiles/skills-check.sh`. The Makefile applies `dotfiles/base` and then the layer for the OS (`darwin` or `linux`); a path in two layers is a conflict.
 
 ## Commands
 
-`make check` runs the sym tests and the skill checks. `make plan` is a dry run. `make` syncs. Read the plan before syncing: `OVERWRITE` means a home edit is about to be lost, `DISCARD` means files go with a replaced directory, `EXTRA` is a home-only file left alone. Deletions do not propagate, so a skill or agent deleted from the repo stays live in `~` until you delete it there too (or run `sym -d`).
+`make check` runs the sym tests and the skill checks. `make plan` is a dry run. `make` syncs. Read the plan before syncing: a `CONFLICT` is a real file in the way, and `sym` writes nothing until every conflict is resolved. A file deleted from the repo leaves a dangling link in `~`, so remove it there too.
 
 ## Invariants
 
@@ -33,7 +33,7 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 
 - Never run `sym` without `-t <tmpdir>` while experimenting; the default target is `$HOME`.
 - Fix a bug by adding a failing numbered test to `sym-test.sh` first, then the fix.
-- Properties the tests pin: sync never follows a symlinked directory; a sync root that resolves to its source is fatal; a failure exits nonzero without advancing the marker; file times have one-second resolution, so a tie counts as changed; `--force` makes the repo win but names every overwrite and discard.
+- Properties the tests pin: every conflict is reported before anything is written; an existing link with the right text is already correct, but a dangling one is a conflict; a file reachable through a linked parent directory is in place, and delete mode refuses it so the source survives; a `.sym-dir` directory links whole and respects Git ignores.
 - Run the suite under `dash` as well as `sh` (`/bin/sh` is bash 3.2 on macOS and dash on Linux), and run `shellcheck -s sh` on every script.
 
 ## After a substantive change
@@ -42,6 +42,6 @@ Have fresh reviewers look, because the author misses things: an adversarial pass
 
 ## Known gaps
 
-A tab in a synced filename breaks sync. `sym -d` can remove an emptied target directory, which test 13 pins. The auto-triggered skills have not been run through `skill-eval`. The warnings `skills-check.sh` prints today are known: `orchestrate`, `ultrareview`, `campaign-preflight` (embedded templates), the three migration skills, and `test-audit` (a compression candidate) are long, and `orchestrate` and the migrations have no `**Reply:**`.
+A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins. A link that dangles only until another link in the same run is created counts as a conflict, so migrating a target layout can need a hand `rm` first. The auto-triggered skills have not been run through `skill-eval`. The warnings `skills-check.sh` prints today are known: `orchestrate`, `ultrareview`, `campaign-preflight` (embedded templates), the three migration skills, and `test-audit` (a compression candidate) are long, and `orchestrate` and the migrations have no `**Reply:**`.
 
-**Reply:** what changed, which checks ran, and any `OVERWRITE` or `DISCARD` you saw.
+**Reply:** what changed, which checks ran, and any `CONFLICT` you saw.

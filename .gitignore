@@ -1,1 +1,13 @@
 __pycache__
+.DS_Store
+
+# Agent state lives in ~ proper and is never linked from this tree. These names are a
+# backstop in case a tool writes through a linked directory.
+auth.json
+.credentials.json
+models-store.json
+history.jsonl
+sessions/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

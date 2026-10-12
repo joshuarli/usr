@@ -1,0 +1,7 @@
+#!/bin/sh
+# Play the notification sound. Without a sound player the terminal bell stands in.
+sound=/usr/share/sounds/freedesktop/stereo/complete.oga
+if command -v paplay >/dev/null 2>&1 && [ -f "$sound" ]; then
+    exec paplay "$sound"
+fi
+printf '\a'

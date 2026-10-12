@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/afplay /System/Library/Sounds/Glass.aiff"
+            "command": "notify-sound"
           }
         ]
       }

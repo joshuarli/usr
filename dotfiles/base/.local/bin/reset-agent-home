@@ -1,0 +1,19 @@
+#!/bin/sh
+# Delete everything in an agent's home directory (~/.claude, ~/.codex) except what
+# sym installed: symlinks into the dotfiles repo, and directories holding one.
+# That keeps config, instructions, skills, and rules, and clears all state and logins.
+set -eu
+
+[ $# -eq 1 ] || { printf 'usage: reset-agent-home DIR\n' >&2; exit 1; }
+dir=$1
+
+[ -d "$dir" ] || exit 0
+
+for path in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
+    # An unmatched glob stays literal.
+    [ -e "$path" ] || [ -L "$path" ] || continue
+    if [ -n "$(find "$path" -type l -lname '*/dotfiles/*' -print -quit)" ]; then
+        continue
+    fi
+    rm -rf "$path"
+done

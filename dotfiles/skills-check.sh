@@ -24,6 +24,7 @@ for d in "$skills"/*/; do
         echo "auto-triggered skill has no Skip clause in its description: $n"; bad=1
     fi
     # Backticked names in the Skill column of a router table.
+    # shellcheck disable=SC2016  # backticks are literal here
     refs=$(awk -F'|' '/^\|[^|]*\| *Skill *\|/ {t=1; next} t && /^\| *-/ {next} t && /^\|/ {print $3; next} {t=0}' "$f" \
         | grep -o '`[^`]*`' | tr -d '`')
     for r in $refs; do

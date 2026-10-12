@@ -1,21 +1,24 @@
-# ~/usr is the source of truth. `make` makes the home directory match it:
-# files are symlinked, and the synced directories (.agents/skills, .claude/agents)
-# are overwritten from here. Files that exist only in the home directory are left
-# alone and reported as EXTRA.
+# ~/usr is the source of truth. `make` makes the home directory match it: each tracked
+# file in a layer is symlinked into $(TARGET), and a directory holding a .sym-dir marker
+# is linked whole. Files that exist only in the home directory are left alone.
+#
+# A layer is a directory under dotfiles/. base applies everywhere; darwin or linux applies
+# on that OS. A path belongs to one layer, so a second claim on it is a conflict.
 
 TARGET ?= $(HOME)
-SOURCE := dotfiles/base
+OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
 .PHONY: sync plan check
 
 sync:
-	$(SYM) --force -v -t $(TARGET) $(SOURCE)
+	for layer in $(LAYERS); do $(SYM) -v -t $(TARGET) $$layer || exit 1; done
 
 plan:
-	$(SYM) --force --dry-run -t $(TARGET) $(SOURCE)
+	for layer in $(LAYERS); do $(SYM) --dry-run -t $(TARGET) $$layer || exit 1; done
 
 check:
 	cd dotfiles && sh sym-test.sh
-	sh dotfiles/skills-check.sh $(SOURCE)/.agents/skills
+	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills

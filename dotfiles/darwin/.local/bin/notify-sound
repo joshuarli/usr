@@ -1,0 +1,3 @@
+#!/bin/sh
+# Play the notification sound.
+exec /usr/bin/afplay /System/Library/Sounds/Glass.aiff

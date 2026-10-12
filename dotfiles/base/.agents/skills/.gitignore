@@ -1,0 +1,6 @@
+# This directory is linked into ~/.agents/skills, so harnesses can write into it.
+# Track skills and the two markers, nothing else.
+/*
+!/.gitignore
+!/.sym-dir
+!/[!.]*/
