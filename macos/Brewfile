@@ -1,36 +1,25 @@
 cask "font-hack"
 
+brew "unbound"
+
 brew "git"
-brew "delta"
+brew "rustup"
+
+brew "pstree"
+brew "hyperfine"
+brew "shellcheck"
 
 # brew "detox"
 
-brew "tree"
-brew "pstree"
-brew "procs"
+# brew "graphicsmagick"
 
-brew "hyperfine"
-brew "sd"
+# brew "smartmontools"
+# brew "f3"
+
+# brew "git-lfs"
+
+# work
+brew "prek"
 brew "jq"
 brew "yq"
-brew "ast-grep"
-brew "watchexec"
-brew "eza"
-brew "jaq"
-brew "xh"
 
-brew "shellcheck"
-
-brew "graphicsmagick"
-
-brew "smartmontools"
-brew "f3"
-
-brew "prek"
-
-brew "rustup"
-
-brew "dropbear"
-brew "git-lfs"
-
-brew "unbound"
