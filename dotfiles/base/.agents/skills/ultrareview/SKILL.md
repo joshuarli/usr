@@ -19,7 +19,7 @@ One repository in, two deliverables out: docs that match the code, and a single 
 ## Steps
 
 1. **Orient.** Read AGENTS.md, README, manifests, CI config, any existing `REVIEW.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
-2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the entry shape and nothing else. Merge findings that share a root cause and rank them.
+2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the entry shape and nothing else. Run lanes as `worker`, and as `scout` for pure inventory such as the build, CI, and dependency row. A lane with a named method and a lens skill is a `worker` task however large the code. Use `expert` only for a lane that reasons about crash consistency, races, or `unsafe` soundness where a wrong call is costly, and state why in the lane brief. Merge findings that share a root cause and rank them.
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **Write `REVIEW.md`** (below).
