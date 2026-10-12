@@ -1,12 +1,12 @@
-# Collapse Duplicate Sources of Truth
+# Single Source of Truth for Facts, Settings, and Policy
 
-You are improving this codebase so concepts represented in multiple places converge on one authoritative representation instead of drifting independently.
+You are improving this codebase so concepts represented in multiple places converge on one authoritative representation instead of drifting independently, and so tunable behavior (settings, defaults, limits, timeouts, thresholds) has one typed, discoverable home.
 
 The goal is **semantic singularity**: one fact should have one source of truth, with other representations derived from it or mechanically checked against it.
 
-Scope: repository-wide facts represented by multiple parsers, registries, schemas, tables, validators, docs, or generated views.
+Scope: repository-wide facts represented by multiple parsers, registries, schemas, tables, validators, docs, or generated views; and configuration, defaults, constants, limits, and policy knobs.
 
-Applicability: Apply this prompt only when the same semantic fact or closed set is maintained independently in more than one place. If the condition is materially absent, report that evidence and make no speculative changes.
+Applicability: Apply this prompt only when the same semantic fact, closed set, default, or magic value is maintained independently in more than one place, or when tunable policy has unclear ownership. If the condition is materially absent, report that evidence and make no speculative changes.
 
 Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
 
@@ -24,6 +24,7 @@ Before editing:
 - identify comments such as "keep in sync", "must match", "update both", or equivalent
 - identify parallel `match`/`switch` blocks that encode the same closed set
 - identify tests whose primary purpose is catching drift between duplicate declarations
+- inventory configuration files, environment variables, CLI defaults, feature switches, limits, retry parameters, timeouts, buffer sizes, thresholds, and path/URL defaults, and search for duplicated literals that encode one policy
 - run the narrowest useful baseline checks before editing
 
 - Record failures that predate the work.
@@ -209,10 +210,50 @@ Remove obsolete independent copies.
 Search for retired spellings and values after the migration.
 
 
+### 6. Give settings and policy one typed home
+
+#### Classify before moving
+
+- **Runtime settings:** configurable by user, deployment, config file, or CLI.
+  These flow through one typed settings model.
+- **Application policy:** maintainer-tunable but not user-configurable (backoff
+  bounds, batch thresholds, queue capacities). Collect these in a clearly named
+  policy module or domain-specific structures.
+- **Domain/protocol constants:** fixed by a protocol, file format, ABI, or hard
+  invariant (magic bytes, header sizes). Keep them with the code that owns the
+  format; do not pretend they are configurable.
+- **Local implementation constants:** keep them local when locality helps.
+
+The test is where a maintainer would naturally look to change or understand the
+value. Do not hoist every literal, and do not create a `constants`/`common`
+junk drawer.
+
+#### One default, resolved once
+
+A setting has one authoritative default; CLI declarations, env parsing, config
+parsing, constructors, docs, and tests derive from it. Read raw sources (CLI,
+env, config files, platform discovery) at one narrow boundary, resolve
+precedence there, and hand typed settings to the application. Do not let deep
+modules read environment variables or re-apply defaults. Preserve the existing
+precedence unless the request changes it.
+
+#### Typed values and validation
+
+Use `Duration`, path types, `NonZero*`, enums, and byte-size types or unit-suffixed
+names instead of bare `30` or `4096`. Reject invalid combinations (zero workers,
+min greater than max) once, at construction. Do not merge values only because
+their literals match: two unrelated `30`s are not one concept. Do not introduce
+mutable process-wide configuration to centralize anything.
+
 ## Explicit anti-patterns
 
 Do not:
 
+- move every literal into a giant constants file
+- turn protocol invariants into user settings
+- leave duplicate defaults in multiple parsers or constructors
+- read environment variables throughout business logic
+- store parsed settings as strings past the configuration boundary
 - create a "universal schema" that absorbs unrelated domains
 - replace simple duplication with unreadable metaprogramming
 - treat two similar but semantically distinct contracts as one
@@ -249,6 +290,8 @@ The work is complete only when:
 - intentional boundary-specific models remain distinct
 - no obsolete duplicate implementation remains canonical
 - tests protect any irreducible duplicated contract
+- every configurable value has one typed definition and one default, raw sources are normalized once, and invalid settings are rejected before business logic runs
+- protocol constants remain owned by their domains
 - existing behavior and public contracts are preserved
 
-The architectural principle is: **facts may have many consumers, but they should have one owner.**
+The architectural principle is: **facts may have many consumers, but they should have one owner; configuration is policy, and policy should have an obvious, typed, authoritative home.**

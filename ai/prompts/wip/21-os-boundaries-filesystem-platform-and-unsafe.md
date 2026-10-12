@@ -1,12 +1,12 @@
-# Filesystem Correctness and Path Semantics
+# OS Boundaries: Filesystem, Platform, and Unsafe/Syscall Code
 
-You are improving this codebase so filesystem operations have explicit semantics for paths, symlinks, atomicity, durability, permissions, races, partial failure, and non-UTF-8 names.
+You are improving this codebase so its boundary with the operating system is explicit: filesystem operations have defined semantics for paths, symlinks, atomicity, durability, permissions, races, partial failure, and non-UTF-8 names; platform differences are isolated and tested; and unsafe, FFI, and syscall code is narrow, documented, and wrapped by safe contracts.
 
-The goal is to stop treating the filesystem like an in-memory map of string keys.
+The goal is to stop treating the filesystem like an in-memory map of string keys, to stop implying portability because code compiles, and to concentrate unsafe proof obligations at a small boundary.
 
-Scope: path handling, file mutation, symlinks, traversal, metadata, temp files, atomic replacement, durability, and platform filesystem semantics.
+Scope: path handling, file mutation, symlinks, traversal, metadata, temp files, atomic replacement, durability, claimed OS/architecture support, platform conditionals, unsafe blocks, FFI declarations, raw pointers, native handles, syscalls, and callbacks.
 
-Applicability: Apply this prompt only when the codebase performs non-trivial filesystem operations where path fidelity, races, symlinks, partial failure, or metadata matter. If the condition is materially absent, report that evidence and make no speculative changes.
+Applicability: Apply this prompt only when the codebase performs non-trivial filesystem operations where path fidelity, races, symlinks, partial failure, or metadata matter, targets more than one OS or architecture, or contains unsafe/native code. If the condition is materially absent, report that evidence and make no speculative changes.
 
 Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
 
@@ -28,6 +28,8 @@ Before editing:
 - identify writes performed directly to destination files
 - identify cleanup behavior after interruption/failure
 - identify assumptions about filesystem timestamp precision, case sensitivity, or rename behavior
+- inventory `cfg` blocks, build tags, OS and architecture checks, and the CI platform matrix; note repeated platform conditionals and rarely tested fallbacks
+- inventory every unsafe block and function, FFI declaration, raw pointer, manual allocation, transmute or cast, memory map, file-descriptor or handle owner, syscall wrapper, and callback crossing a language boundary
 - run focused baseline tests on supported platforms
 
 - Record failures that predate the work.
@@ -195,6 +197,49 @@ Use integration tests for:
 
 Do not mock the filesystem when the filesystem behavior itself is the contract.
 
+### 5. State the platform contract and isolate mechanisms
+
+- State which OS, architecture, and runtime combinations are supported. Do not
+  imply support because code happens to compile; make an unsupported target a
+  clear compile or configuration error rather than a partially working binary.
+- Keep platform mechanism separate from application contract. A macOS and a
+  Linux implementation may use different syscalls behind one semantic contract;
+  do not duplicate whole workflows when only one mechanism differs. Collect a
+  distinction that recurs across many files behind a narrow platform module, but
+  do not build a portability layer for one branch.
+- Preserve native values (paths, arguments, identifiers, metadata) rather than
+  forcing them through UTF-8 strings for portability.
+- Give every fallback a stated reason, semantic difference, supported platforms,
+  and test coverage; never silently fall back to weaker correctness.
+- Scope platform-specific dependencies to the targets that need them.
+- Test real platform behavior on every claimed target available; semantics that
+  cannot be faithfully mocked need integration tests, not only compilation.
+- When low-level code depends on pointer width, endianness, alignment, page
+  size, or atomic support, say so and check it.
+
+### 6. Keep unsafe, FFI, and syscalls narrow and wrapped
+
+- Keep only the operations that need `unsafe` inside the block; do validation,
+  arithmetic, and control flow outside it.
+- Document each unsafe function and block's preconditions (`# Safety` where
+  applicable): pointer validity, alignment, initialization, aliasing, lifetime,
+  ownership, thread safety, descriptor validity, callback lifetime.
+- Convert raw external contracts into safe types as close to the boundary as
+  possible, so the rest of the code never upholds FFI or syscall invariants.
+- For each native resource, know the creator, owner, transfer semantics, and
+  destructor, and avoid double-close, leaks, and use-after-free. Do not expose
+  raw pointers or handles to unrelated modules.
+- Check integer and pointer conversions (signedness, truncation, alignment,
+  offsets, lengths, nullability) when external values control them; use typed
+  conversions instead of `transmute` or blind casts, and explicit layout
+  annotations instead of assumed ABI layout.
+- For callbacks, define context ownership, lifetime, invoking thread,
+  unregistration, and panic behavior; never unwind across an ABI that forbids it.
+- Read `errno` or last-error state before any call that could clobber it.
+- Test zero lengths, max sizes, invalid handles, short I/O, and callback
+  teardown. Use Miri, sanitizers, or fuzzing only where they have a meaningful
+  target.
+
 ### Migration and compatibility policy
 
 Do not create parallel legacy and canonical implementations as part of this work.
@@ -206,6 +251,11 @@ invoking request or an existing external contract requires it.
 
 Do not:
 
+- claim portability because compilation succeeds
+- scatter identical OS checks everywhere, or add a portability framework for one branch
+- silently downgrade correctness on a fallback path
+- spread `unsafe` to avoid designing a wrapper, or rely on comments without a safe boundary
+- leave native resource ownership ambiguous
 - treat paths as UTF-8 strings
 - assume lexical normalization is secure resolution
 - follow symlinks accidentally
@@ -245,5 +295,7 @@ The work is complete only when:
 - metadata preservation is intentional
 - platform/filesystem precision assumptions are handled
 - real filesystem tests protect meaningful contracts
+- the support matrix is explicit, unsupported targets fail clearly, platform mechanisms are isolated, and claimed platforms have real test coverage
+- unsafe regions are narrow with documented preconditions, native ownership and conversions are explicit, and raw contracts are wrapped by safe APIs
 
-The architectural principle is: **the filesystem is a concurrent, stateful external system with platform-specific semantics—not a dictionary of filenames.**
+The architectural principle is: **the OS is a concurrent, stateful external system with platform-specific semantics (the filesystem is not a dictionary of filenames, and operating systems are not interchangeable), and unsafe code should concentrate proof obligations at a small boundary so the rest of the program stays ordinary safe code.**

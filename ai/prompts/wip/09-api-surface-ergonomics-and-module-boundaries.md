@@ -1,12 +1,12 @@
-# Minimize and Harden the Public API Surface
+# API Surface, Ergonomics, and Module Boundaries
 
 You are improving this codebase so its public API exposes only intentional, stable contracts and keeps implementation details private.
 
 The goal is to make the externally usable surface small, coherent, documented, and difficult to misuse.
 
-Scope: public/exported APIs, constructors, fields, feature-gated surface, dependency leakage, and compatibility shims.
+Scope: public/exported APIs, constructors, fields, feature-gated surface, dependency leakage, compatibility shims, the call-site ergonomics of frequently used internal and public functions, and module/package dependency direction.
 
-Applicability: Apply this prompt only when the codebase exposes an API surface whose intentionality, stability, privacy, or misuse resistance needs audit. If the condition is materially absent, report that evidence and make no speculative changes.
+Applicability: Apply this prompt only when the codebase exposes an API surface whose intentionality, stability, privacy, or misuse resistance needs audit, or when callers face ambiguous parameters, repeated ceremony, surprising side effects, or invalid sequencing. If the condition is materially absent, report that evidence and make no speculative changes.
 
 Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
 
@@ -25,6 +25,9 @@ Before editing:
 - identify public fields that allow invalid mutation
 - identify APIs that expose dependency-specific types unnecessarily
 - identify deprecated APIs and compatibility shims
+- identify functions with many positional parameters, boolean mode parameters, or optional parameters whose combinations are unclear
+- identify steps every caller repeats before invoking the same API (normalize, validate, look up, construct)
+- identify constructors that require post-construction mutation
 - inspect tests and downstream examples that rely on the current surface
 - run narrow baseline checks
 
@@ -149,10 +152,76 @@ Where practical, test:
 - documented examples
 
 
+### 6. Make the correct call obvious at the call site
+
+#### Replace ambiguous parameters
+
+Be skeptical of signatures such as `copy(src, dst, true, false, 30, 3)`.
+
+Prefer enums, domain types, or a named request type. A boolean parameter often
+hides two operations: `WriteMode::Create` / `WriteMode::Replace` beats
+`overwrite: bool` when the distinction has semantic weight. Do not create a
+builder for a two-argument function.
+
+Use distinct request types or variants when optional fields imply modes, rather
+than a large set of optionals whose combinations are unclear.
+
+#### Absorb repeated caller obligations
+
+If every caller must normalize, validate, look up, construct, then invoke, the
+API should probably own more of that sequence. Do not absorb caller-specific
+policy into a generic lower-level API.
+
+If callers repeatedly pass the same arguments, determine whether they are a true
+default and make it one authoritative default instead of copy-pasted policy.
+
+#### Return outcomes callers can act on
+
+Prefer result types that distinguish meaningful outcomes (`Created`, `Updated`,
+`Unchanged`, `NotFound`, `Conflict`) over a `bool` or a side effect the caller
+must reverse-engineer.
+
+#### Make side effects visible
+
+A function named `get` should not mutate durable state. A constructor should not
+start background work unless the API makes that obvious. Builders should
+validate at final construction and must not have order-dependent setters.
+
+Test misuse paths: invalid parameter combinations, invalid sequencing, duplicate
+calls, and missing required configuration.
+
+### 7. Keep module boundaries and dependency direction deliberate
+
+Applies when the repository has several modules, packages, or crates whose
+dependency direction can drift.
+
+- Name the actual architectural units and the allowed direction between them
+  (for example CLI -> application -> domain; adapters -> domain contracts). Do
+  not impose a generic layered template when the codebase has simpler natural
+  boundaries.
+- Break cycles at the owner of the shared contract: move the type to its true
+  owner, extract a narrow boundary contract, invert one dependency, or merge
+  modules that are really one unit. Do not create an `interfaces` or `shared`
+  junk drawer to break a cycle.
+- Keep policy above mechanism: a filesystem adapter should not decide workflow,
+  a storage layer should not know CLI argument semantics.
+- Other modules use a module's intentional API, not its internal submodules or
+  representation. Keep data types with the module that owns their meaning.
+- Treat a module nearly everything depends on as a gravity well and split it by
+  ownership; keep truly cross-cutting primitives small.
+- Invert a dependency only for a real stable boundary or testable effect, not to
+  satisfy a diagram. Enforce important directions mechanically where the
+  ecosystem makes it cheap (package boundaries, visibility, dependency lints).
+
 ## Explicit anti-patterns
 
 Do not:
 
+- impose clean or hexagonal architecture mechanically, or split a cohesive module only to satisfy layering
+- optimize for the shortest call syntax
+- use boolean flags for semantically distinct modes
+- return `bool` when callers need a richer outcome
+- introduce builders everywhere
 - export implementation details for convenience
 - create public getters/setters for every field
 - expose raw dependency types without a reason
@@ -182,7 +251,9 @@ The work is complete only when:
 - there is one canonical API per operation
 - compatibility shims visibly forward to canonical implementations
 - public error/result contracts are understandable
+- parameter meaning is clear at call sites, and semantically distinct modes use explicit types
+- repeated caller boilerplate is absorbed where ownership permits
 - representative public-surface tests pass
 - no unrelated API expansion was introduced
 
-The architectural principle is: **a public API should expose capabilities, not implementation structure.**
+The architectural principle is: **a public API should expose capabilities, not implementation structure, and make the correct call look natural and the incorrect call look awkward or impossible.**

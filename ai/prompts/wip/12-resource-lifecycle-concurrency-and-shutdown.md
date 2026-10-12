@@ -1,12 +1,12 @@
-# Resource Lifecycle and Cleanup Audit
+# Resource Lifecycle, Concurrency, and Shutdown
 
-You are improving this codebase so every resource has clear acquisition, ownership, cleanup, cancellation, and shutdown semantics.
+You are improving this codebase so every resource and every unit of concurrent work has clear acquisition, ownership, boundedness, cleanup, cancellation, and shutdown semantics.
 
-The goal is to prevent leaked processes, descriptors, temporary files, locks, sockets, transactions, tasks, and partially initialized resources.
+The goal is to prevent leaked processes, descriptors, temporary files, locks, sockets, transactions, tasks, and partially initialized resources, and to make concurrency predictable under load and failure.
 
-Scope: files, sockets, transactions, locks, temp artifacts, child processes, tasks, watchers, terminal modes, mappings, and leases.
+Scope: files, sockets, transactions, locks, temp artifacts, child processes, threads/tasks, queues/channels, worker pools, retries, watchers, terminal modes, mappings, and leases.
 
-Applicability: Apply this prompt only when the subsystem acquires resources whose partial initialization, cancellation, cleanup, or shutdown semantics matter. If the condition is materially absent, report that evidence and make no speculative changes.
+Applicability: Apply this prompt only when the subsystem acquires resources or performs concurrent or background work whose partial initialization, ownership, boundedness, backpressure, cancellation, cleanup, or shutdown semantics matter. If the condition is materially absent, report that evidence and make no speculative changes.
 
 Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
 
@@ -33,8 +33,11 @@ Inventory resources such as:
 - memory mappings
 - external leases
 - mounted resources
+- executors/runtimes, channels/queues, semaphores, atomics, worker pools, timers, background loops, and detached tasks
+- unbounded buffering and retry loops
 
 For each, identify creation and cleanup paths, including errors and cancellation.
+Identify producer/consumer relationships and shutdown paths.
 
 - Record failures that predate the work.
 
@@ -136,6 +139,42 @@ Background tasks and child processes should not outlive the component that conce
 
 Do not hold locks across blocking I/O, callbacks, or unrelated work unless required and justified.
 
+### 5. Own concurrent work and bound producer/consumer fan-out
+
+#### Make task ownership explicit
+
+For every task/thread, answer: who starts it, who owns its handle, who stops it,
+who observes its failure, and what happens if the owner disappears.
+
+#### Bound queues and define backpressure
+
+Unbounded queues are deferred memory failures. For each queue define capacity,
+producer behavior when full, consumer behavior when slow, and the
+drop/retry/block policy. Backpressure should propagate intentionally rather than
+emerge through OOM, latency explosions, or timeouts.
+
+#### Propagate cancellation and define shutdown
+
+Cancellation should flow through owned work so abandoned requests do not keep
+running state-mutating operations. Specify whether shutdown drains, aborts,
+times out, flushes, or preserves queued work, and make that policy testable.
+
+#### Audit lock scope and ordering
+
+Look for nested locks, inconsistent acquisition order, blocking I/O or callbacks
+under a lock, and oversized critical sections.
+
+#### Keep retries bounded
+
+Retries need a maximum attempt count or deadline, backoff, a jitter policy, and
+explicit retryable categories. Avoid retry storms.
+
+#### Test concurrency semantically
+
+Prefer deterministic coordination over sleeps. Cover queue saturation,
+cancellation, shutdown, worker failure, duplicate submission, and lock-sensitive
+paths.
+
 ### Migration and compatibility policy
 
 Do not create parallel legacy and canonical implementations as part of this work.
@@ -147,6 +186,11 @@ invoking request or an existing external contract requires it.
 
 Do not:
 
+- spawn and forget without ownership
+- use unbounded queues by default
+- retry forever
+- rely on sleeps in concurrency tests
+- assume scheduler fairness
 - rely on process exit for cleanup
 - duplicate manual cleanup in many branches when structured ownership can encode it
 - ignore child-process lifecycle
@@ -177,6 +221,9 @@ The work is complete only when:
 - background work cannot silently leak
 - lock lifetimes are justified and narrow
 - temporary mutation is atomic where required
+- all long-lived tasks have owners, and queues and worker pools are bounded intentionally
+- backpressure, cancellation propagation, and shutdown behavior are defined and tested
+- retry behavior is bounded
 - lifecycle tests cover meaningful failure paths
 
-The architectural principle is: **if code acquires something, ownership of its end-of-life must be just as explicit.**
+The architectural principle is: **if code acquires something or starts something, ownership of its end-of-life must be just as explicit; concurrency is a resource-management problem before it is a performance feature.**

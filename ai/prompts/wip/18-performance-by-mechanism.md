@@ -4,9 +4,9 @@ You are improving this codebase so performance-sensitive paths are improved by i
 
 The goal is to make performance-sensitive paths simpler, more measurable, and cheaper without sacrificing correctness or readability.
 
-Scope: measurable hot paths and costs from allocation, copying, parsing, serialization, syscalls, I/O round trips, locking, task creation, and buffering.
+Scope: measurable hot paths and costs from algorithms and data-structure choice, allocation, copying, representation churn, parsing, serialization, syscalls, I/O round trips, locking, task creation, buffering, and whole-input loading.
 
-Applicability: Apply this prompt only when performance is a material concern or inspection reveals repeated/unnecessary work worth measuring. If the condition is materially absent, report that evidence and make no speculative changes.
+Applicability: Apply this prompt only when performance is a material concern, input size makes accidental scans or whole-input loading relevant, or inspection reveals repeated/unnecessary work worth measuring. If the condition is materially absent, report that evidence and make no speculative changes.
 
 Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
 
@@ -36,6 +36,11 @@ Identify likely hot paths and cost centers involving:
 - repeated decoding
 - cache misses
 - unnecessary buffering
+- loops nested over collections, linear lookup in frequently queried collections, and repeated sorting
+- repeated clones and bytes -> string -> bytes style conversions
+- `read_to_end`, `read_to_string`, whole-file loading, and full response or query-result buffering
+- long-lived caches, queues, and closures that retain large data
+- expected input sizes, so complexity is judged against the real workload
 
 Use existing benchmarks/profiling if available.
 
@@ -146,6 +151,61 @@ For important regressions, add:
 
 where maintainable.
 
+### 6. Match data structures to the operations the program performs
+
+State each important collection's dominant operations (append, membership, keyed
+lookup, min/max, range, dedup, stable order) and choose the structure for those,
+not from habit.
+
+- Replace accidental quadratic work (a lookup or `contains` inside a loop over the
+  same data) with an index or set when input size makes it material.
+- Sort once at the ownership boundary instead of repeatedly; use a heap or a
+  min/max scan when a full sort is not needed.
+- Use set-like representations for membership, dedup, and intersection.
+- Distinguish insertion order, sorted order, stable deterministic order, and
+  arbitrary order, and do not pay for ordering no consumer requires.
+- A derived index is derived state: make its ownership and invalidation explicit
+  so it cannot become a second source of truth.
+- Bound recursion and traversal over graphs, trees, and filesystems (cycles,
+  depth, visited sets, adversarial input).
+- Document a non-obvious structure with the operation pattern that justifies it.
+  Reproduce a representative N before replacing clear code with a clever structure.
+
+### 7. Keep ownership clear and avoid allocation and representation churn
+
+- For important data, know who creates it, who owns it, who only borrows it, and
+  why any shared ownership (`Rc`/`Arc`) is genuinely required.
+- For each significant clone, decide whether it is needed for ownership or
+  isolation, small and harmless, or avoidable by borrowing or moving. Do not
+  contort lifetimes to remove tiny copies.
+- Remove repeated representation changes (bytes -> string -> bytes,
+  owned -> borrowed -> owned, JSON -> map -> JSON); keep data in the form its
+  consumers use.
+- Prefer slices and views for read-only access when they stay simple.
+- Audit peak memory, not only total allocation: concurrency, queue depth, batch
+  size, decompression, parallel reads, and fan-out.
+- Reuse buffers only where measured. Do not introduce unsafe code merely to avoid
+  an allocation.
+
+### 8. Stream large or unbounded data with bounded buffers
+
+- Classify each input as small and bounded, potentially large, or unbounded. Do
+  not add streaming complexity for tiny bounded data.
+- For large data, process incrementally across file, HTTP, database, compression,
+  archive, and parsing boundaries when the operation permits it.
+- Give every buffer an intentional capacity and growth policy, and define
+  backpressure: whether producers block, await, spill, reject, or drop.
+- Incremental parsing must handle records split across chunks; never assume a
+  chunk is a logical record.
+- Define partial-output behavior on failure: discarded, retained, marked
+  incomplete, or committed atomically at the end.
+- Trace copy chains (kernel -> buffer -> parser buffer -> owned value -> output
+  buffer) and remove unnecessary ones. Flush deliberately for interactive output,
+  protocols, and durable files.
+- Bound decompression and other expansion that external input controls.
+- Test awkward chunk boundaries: one byte at a time, at delimiters, inside
+  multibyte encodings, and at the header/body boundary.
+
 ### Migration and compatibility policy
 
 Do not create parallel legacy and canonical implementations as part of this work.
@@ -157,6 +217,11 @@ invoking request or an existing external contract requires it.
 
 Do not:
 
+- replace every vector with a hash map, or assume hash structures are always faster
+- optimize tiny bounded collections for asymptotics
+- eliminate every clone mechanically, or use reference counting by default
+- stream everything mechanically, or buffer an unbounded "stream"
+- read arbitrary external input fully into memory
 - optimize based on intuition alone
 - add unsafe code for hypothetical gains
 - introduce object pools by default
@@ -186,6 +251,9 @@ The work is complete only when:
 - synchronization cost is understood
 - caches have evidence and explicit invalidation semantics
 - critical paths remain readable
+- collections match their dominant operations, and accidental quadratic work is removed where material
+- ownership of important data is clear, and significant avoidable clones and representation conversions are reduced
+- large or unbounded inputs are identified, streamed where it materially helps, and buffered within explicit bounds
 - representative performance does not regress
 - correctness and public behavior remain intact
 
