@@ -8,9 +8,28 @@
   },
   "permissions": {
     "defaultMode": "auto",
-    "skipDangerousModePermissionPrompt": true
+    "deny": [
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(git -C * push)",
+      "Bash(git -C * push *)",
+      "Bash(cargo fmt)",
+      "Bash(cargo fmt *)",
+      "Bash(rustfmt)",
+      "Bash(rustfmt *)",
+      "Bash(deno fmt)",
+      "Bash(deno fmt *)",
+      "Bash(prettier)",
+      "Bash(prettier *)",
+      "Bash(gofmt)",
+      "Bash(gofmt *)",
+      "Bash(black)",
+      "Bash(black *)",
+      "Bash(ruff format)",
+      "Bash(ruff format *)"
+    ]
   },
-  "model": "haiku",
+  "model": "sonnet",
   "hooks": {
     "Notification": [
       {

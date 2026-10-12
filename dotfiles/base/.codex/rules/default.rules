@@ -1,0 +1,17 @@
+# Enforces the AGENTS.md workflow rules, which are advice until a rule blocks them.
+# Prefix rules match a command's leading tokens, so `git -C dir push` is not caught.
+
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "forbidden",
+    justification = "Never push; the user pushes.",
+)
+
+# Formatters: do not run them.
+prefix_rule(pattern = ["cargo", "fmt"], decision = "forbidden", justification = "Do not run formatters.")
+prefix_rule(pattern = ["rustfmt"], decision = "forbidden", justification = "Do not run formatters.")
+prefix_rule(pattern = ["deno", "fmt"], decision = "forbidden", justification = "Do not run formatters.")
+prefix_rule(pattern = ["prettier"], decision = "forbidden", justification = "Do not run formatters.")
+prefix_rule(pattern = ["gofmt"], decision = "forbidden", justification = "Do not run formatters.")
+prefix_rule(pattern = ["black"], decision = "forbidden", justification = "Do not run formatters.")
+prefix_rule(pattern = ["ruff", "format"], decision = "forbidden", justification = "Do not run formatters.")

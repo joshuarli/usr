@@ -21,7 +21,7 @@
 - Never weaken or delete a test to make it pass unless the test is wrong, and say so.
 - Verify the changed behavior with the narrowest hard check (compiler, type checker, focused test). Reuse existing build artifacts.
 - Do not expand to workspace-wide builds/tests or full CI by default. Widen only for a specific uncovered integration risk or an explicit request for the wider run; state that reason first.
-- Treat generic verification checklists as suggested tools. Use targeted repository equivalents instead of running every listed command. Report expensive verification that remains before starting it automatically.
+- Treat generic verification checklists as suggestions: run targeted repository equivalents, and report expensive verification before starting it.
 
 ## Contract changes
 
@@ -29,13 +29,17 @@ Always surface changes to APIs, types, schemas, permissions, invariants, or tran
 
 ## Replies
 
-Keep final replies short: what changed and anything I need to decide.
+Keep final replies short: what changed and anything I need to decide. Say what you verified and what you did not.
 
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
 - Do not git push.
 - Reserve release builds for final verification, or when performance is the primary concern.
+
+## Environment
+
+macOS and Linux. Use `rg`, `fd`, and `jaq` for search and JSON. Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
 
 ## Keep code comments self-contained
 
