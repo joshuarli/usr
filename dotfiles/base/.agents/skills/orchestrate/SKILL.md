@@ -19,6 +19,8 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 | Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` |
 | The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `medium` | `god` |
 
+**Default to `worker`.** Size is not difficulty. A big lane with a clear method and acceptance (a profiled optimization, a port with a reference, a mock built from a design doc, an investigation with a known procedure, a bug fix with a reproduction) is a `worker` task, and so is most campaign lane work. Use `expert` only when the path is unknown and a wrong turn is costly: a cross-cutting design, a failure with no hypothesis, an integration that spans owners. If the brief can name the steps and the acceptance check, it is not an `expert` brief. Start with `worker` and escalate on evidence that the work was harder than briefed.
+
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
 
 ### Codex
