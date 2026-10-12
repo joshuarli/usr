@@ -7,7 +7,7 @@ claude_dir=$HOME/.claude
 
 for path in "$claude_dir"/* "$claude_dir"/.[!.]* "$claude_dir"/..?*; do
     case $path in
-        "$claude_dir/CLAUDE.md"|"$claude_dir/settings.json"|"$claude_dir/skills")
+        "$claude_dir/AGENTS.md"|"$claude_dir/agents"|"$claude_dir/settings.json"|"$claude_dir/skills")
             ;;
         *)
             rm -rf "$path"

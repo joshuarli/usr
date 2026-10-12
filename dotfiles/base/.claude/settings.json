@@ -56,7 +56,7 @@
   "effortLevel": "high",
   "modelSettings": {
     "claude-sonnet-5-5": {
-      "effortLevel": "medium"
+      "effortLevel": "high"
     },
     "claude-haiku-5-5": {
       "effortLevel": "high"

@@ -41,6 +41,6 @@ Have fresh reviewers look, because the author misses things: an adversarial pass
 
 ## Known gaps
 
-A tab in a synced filename breaks sync. `sym -d` can remove an emptied target directory, which test 13 pins. The auto-triggered skills have not been run through `skill-eval`. `comment-cleanup` allows durable documentation pointers while AGENTS.md forbids document references in comments.
+A tab in a synced filename breaks sync. `sym -d` can remove an emptied target directory, which test 13 pins. The auto-triggered skills have not been run through `skill-eval`.
 
 **Reply:** what changed, which checks ran, and any `OVERWRITE` or `DISCARD` you saw.
