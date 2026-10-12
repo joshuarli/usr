@@ -13,8 +13,8 @@ mkdir -p "$DEST"
 
 for prog in fd rg fastermod tm ish e fz fdu fs srv mactop; do
     case "$prog" in
-        e|fd|rg|fdu|fastermod|tm|fs|srv) owner="laputa-systems" ;;
-        ish|mactop|fz) owner="joshuarli" ;;
+        e|fz|fd|rg|fdu|fastermod|tm|fs|srv) owner="laputa-systems" ;;
+        ish|mactop) owner="joshuarli" ;;
     esac
     # The release workflows publish prereleases, which GitHub's /latest endpoint
     # intentionally excludes. The releases collection is newest-first, so its
