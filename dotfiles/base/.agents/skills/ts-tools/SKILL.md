@@ -1,3 +1,9 @@
+---
+name: ts-tools
+description: Migrate a TypeScript codebase to the Deno, pnpm, TypeScript 7, Vite 8, Solid 2, Effect 4, Oxlint, and Vitest 5 stack.
+disable-model-invocation: true
+---
+
 Migrate this TypeScript codebase comprehensively to the October 2026 frontier TypeScript/web stack described below.
 
 The stack decisions are already made. Do not spend time comparing frameworks, researching alternative stacks, or preserving obsolete tooling merely because it is already present. Inspect the repository, understand its behavior and constraints, establish the existing test/build baseline, then perform the migration to completion.

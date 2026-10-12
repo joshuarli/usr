@@ -1,3 +1,9 @@
+---
+name: rust-hash
+description: Migrate Rust map and set usage to hashbrown with a deliberately chosen hasher, auditing every BTreeMap and BTreeSet and benchmarking changes.
+disable-model-invocation: true
+---
+
 You are working in an existing Rust codebase. Your task is to modernize its map/set usage for performance, with `hashbrown` as the default hash-table implementation, while choosing collection types intelligently based on actual semantics and workload.
 
 The goal is **not** “replace every `BTreeMap` with `HashMap`.” The goal is to audit every important map/set use, determine what guarantees it actually requires, and use the cheapest/highest-performance representation that satisfies those requirements.

@@ -1,3 +1,9 @@
+---
+name: make-invalid-states-unrepresentable
+description: Redesign types so they encode domain constraints, using enums for exclusive states, validated constructors, and unit-bearing values.
+disable-model-invocation: true
+---
+
 # Make Invalid States Unrepresentable
 
 You are improving this codebase so its types encode the real domain constraints instead of relying on comments, boolean combinations, magic values, nullable-field conventions, or caller discipline.

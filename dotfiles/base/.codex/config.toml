@@ -68,3 +68,12 @@ hide_rate_limit_model_nudge = true
 [mcp_servers.sentry]
 url = "https://mcp.sentry.dev/mcp"
 
+[projects."/Users/josh/d/hi-lite"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/ish"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/aincrad2"]
+trust_level = "trusted"
+

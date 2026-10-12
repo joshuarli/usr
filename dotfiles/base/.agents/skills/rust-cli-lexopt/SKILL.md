@@ -1,3 +1,9 @@
+---
+name: rust-cli-lexopt
+description: Rewrite a Rust CLI to use lexopt only, driven by one declarative command schema that generates help and version output, with parser and metadata tests.
+disable-model-invocation: true
+---
+
 # Make the Rust CLI Declarative, Lexopt-Only, and Self-Describing
 
 You are improving this codebase so the command-line surface is explicit, declarative, lexopt-only, self-describing, and tested as an observable contract.

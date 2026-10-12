@@ -208,7 +208,126 @@ echo "  assertion 1: expected output"; assert_output "$expected"
 echo "  assertion 2: directory was replaced with the source copy"
 [ -f home/app.conf ] && [ ! -e home/app.conf/old ] && cmp -s home/app.conf dotfiles/copytest/app.conf || nfailed=$((nfailed + 1))
 rm dotfiles/copytest/app.conf
+rm -r home; mkdir home
+
+
+printf '\n15: .agents/skills is synced: source files are pushed, target-only files are pulled, reruns are no-ops\n'
+skills=dotfiles/synctest/.agents/skills
+mkdir -p $skills/alpha
+echo alpha > $skills/alpha/SKILL.md
+$sym -t home -v dotfiles/synctest > log 2>&1
+expected="MKDIRS: home/.agents/skills/alpha
+PUSH: home/.agents/skills/alpha/SKILL.md <- $skills/alpha/SKILL.md"
+echo "  assertion 1: new source file is pushed as a regular file"; assert_output "$expected"
+[ -f home/.agents/skills/alpha/SKILL.md ] && [ ! -L home/.agents/skills/alpha/SKILL.md ] || nfailed=$((nfailed + 1))
+echo beta > home/.agents/skills/beta.md
+$sym -t home -v dotfiles/synctest > log 2>&1
+expected="PULL: $skills/beta.md <- home/.agents/skills/beta.md"
+echo "  assertion 2: new target-only file is pulled into the source"; assert_output "$expected"
+cmp -s $skills/beta.md home/.agents/skills/beta.md || nfailed=$((nfailed + 1))
+$sym -t home -v dotfiles/synctest > log 2>&1
+echo "  assertion 3: second run is a no-op"
+[ ! -s log ] || nfailed=$((nfailed + 1))
+
+
+printf '\n16: a one-sided edit flows toward the other side; --dry-run changes nothing\n'
+m=home/.agents/skills/.sym-synced
+s=$skills/alpha/SKILL.md
+t=home/.agents/skills/alpha/SKILL.md
+touch -t 202001010000 $m
+touch -t 201912310000 $s $t
+echo edited-at-target > $t
+$sym -t home --dry-run dotfiles/synctest > log 2>&1
+expected="dry-run; the following operations are what would have been executed.
+PULL: $s <- $t"
+echo "  assertion 1: dry-run reports the pull"; assert_output "$expected"
+echo "  assertion 2: dry-run leaves source and marker untouched"
+[ "$(cat $s)" = alpha ] && [ ! $m -nt $t ] || nfailed=$((nfailed + 1))
+$sym -t home -v dotfiles/synctest > log 2>&1
+expected="PULL: $s <- $t"
+echo "  assertion 3: target edit is pulled into the source"; assert_output "$expected"
+[ "$(cat $s)" = edited-at-target ] || nfailed=$((nfailed + 1))
+touch -t 202001010000 $m
+touch -t 201912310000 $s $t
+echo edited-at-source > $s
+$sym -t home -v dotfiles/synctest > log 2>&1
+expected="PUSH: $t <- $s"
+echo "  assertion 4: source edit is pushed to the target"; assert_output "$expected"
+[ "$(cat $t)" = edited-at-source ] || nfailed=$((nfailed + 1))
+
+
+printf '\n17: edits on both sides, or no recorded sync, are a conflict that changes nothing\n'
+touch -t 202001010000 $m
+echo both-source > $s
+echo both-target > $t
+$sym -t home -v dotfiles/synctest > log 2>&1 || true
+expected="CONFLICT: $t and $s differ and sync cannot tell which side is newer (both changed since the last sync, or none is recorded).
+sym will not start until all conflicts are resolved."
+echo "  assertion 1: both-changed conflict"; assert_output "$expected"
+echo "  assertion 2: neither side was modified"
+[ "$(cat $s)" = both-source ] && [ "$(cat $t)" = both-target ] || nfailed=$((nfailed + 1))
+rm $m
+$sym -t home -v dotfiles/synctest > log 2>&1 || true
+echo "  assertion 3: differing files with no recorded sync are also a conflict"; assert_output "$expected"
+cp $s $t
+$sym -t home -v dotfiles/synctest > log 2>&1
+echo "  assertion 4: resolving by hand lets sync proceed and records the marker"
+[ ! -s log ] && [ -f $m ] || nfailed=$((nfailed + 1))
+
+
+printf '\n18: --sync DIR adds a synced directory; a source without the directory is left alone\n'
+mkdir -p dotfiles/synctest/.config/synced
+echo a > dotfiles/synctest/.config/synced/a.txt
+$sym -t home -v --sync .config/synced dotfiles/synctest > log 2>&1
+expected="MKDIRS: home/.config/synced
+PUSH: home/.config/synced/a.txt <- dotfiles/synctest/.config/synced/a.txt"
+echo "  assertion 1: extra directory is synced"; assert_output "$expected"
+mkdir -p home/.agents/skills/ghost
+echo ghost > home/.agents/skills/ghost/SKILL.md
+$sym -t home -v dotfiles/bash > log 2>&1
+echo "  assertion 2: target-only skills are not pulled into a source with no .agents/skills"
+! grep -q PULL log && [ ! -e dotfiles/bash/.agents ] || nfailed=$((nfailed + 1))
+rm -r home/.agents/skills/ghost
+
+
+printf '\n19: --delete removes identical synced copies and the marker, and refuses modified ones\n'
+echo modified > home/.config/synced/a.txt
+$sym -t home -v -d --sync .config/synced dotfiles/synctest > log 2>&1 || true
+expected="CONFLICT: home/.config/synced/a.txt is not an identical copy of dotfiles/synctest/.config/synced/a.txt, so refusing to remove.
+sym will not start until all conflicts are resolved."
+echo "  assertion 1: modified copy is a conflict"; assert_output "$expected"
+echo "  assertion 2: nothing was removed"
+[ -f home/.config/synced/a.txt ] && [ -f $m ] || nfailed=$((nfailed + 1))
+cp dotfiles/synctest/.config/synced/a.txt home/.config/synced/a.txt
+$sym -t home -v -d --sync .config/synced dotfiles/synctest > log 2>&1
+echo "  assertion 3: identical copies and markers are removed; the source is untouched"
+[ ! -e home/.config/synced ] && [ ! -e $m ] && [ -f $s ] && [ -f dotfiles/synctest/.config/synced/a.txt ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n20: a symlink with the link text sym would write is already correct, even if it resolves into the target tree\n'
+mkdir -p dotfiles/linktest/.a dotfiles/linktest/.b/real home/.a home/.b/real
+echo f > dotfiles/linktest/.b/real/f
+ln -s ../.b/real dotfiles/linktest/.a/link
+echo g > home/.b/real/g
+ln -s ../.b/real home/.a/link
+$sym -t home -v dotfiles/linktest > log 2>&1
+expected="LINK: home/.b/real/f -> ../../../dotfiles/linktest/.b/real/f"
+echo "  assertion 1: matching link text is not a conflict"; assert_output "$expected"
+rm home/.a/link; ln -s ../elsewhere home/.a/link
+$sym -t home -v dotfiles/linktest > log 2>&1 || true
+expected="CONFLICT: home/.a/link already exists. sym cannot create symlinks if there is an existing file.
+sym will not start until all conflicts are resolved."
+echo "  assertion 2: different link text is still a conflict"; assert_output "$expected"
+rm home/.a/link; ln -s ../.b/real home/.a/link
+$sym -t home -v -d dotfiles/linktest > log 2>&1
+expected="UNLINK: home/.a/link
+RMDIR: home/.a
+UNLINK: home/.b/real/f"
+echo "  assertion 3: delete mode removes the matching link and leaves unrelated files"; assert_output "$expected"
+[ -f home/.b/real/g ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
 
 
 printf '\ntesting finished.\n'
-[ "$nfailed" -gt 0 ] && die "failed ${nfailed} assertions"
+if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

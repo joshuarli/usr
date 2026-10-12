@@ -1,3 +1,9 @@
+---
+name: make-code-search-a-reliable-navigation-boundary
+description: Rename and restructure code so ordinary filename and text search reaches definitions, callers, tests, and docs in few hops.
+disable-model-invocation: true
+---
+
 # Make Code Search a Reliable Navigation Boundary
 
 You are improving this codebase so coding agents can reliably reach the right definitions, callers, contracts, tests, and documentation through ordinary filename and text search.

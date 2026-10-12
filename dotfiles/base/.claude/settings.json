@@ -35,6 +35,14 @@
     "slack@claude-plugins-official": true
   },
   "effortLevel": "high",
+  "modelSettings": {
+    "claude-sonnet-5-5": {
+      "effortLevel": "medium"
+    },
+    "claude-haiku-5-5": {
+      "effortLevel": "high"
+    }
+  },
   "emojiCompletionEnabled": false,
   "awaySummaryEnabled": false,
   "tui": "fullscreen",
