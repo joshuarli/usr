@@ -1,7 +1,8 @@
 #!/bin/sh
 # Delete everything in an agent's home directory (~/.claude, ~/.codex) except what the
 # dotfiles repo installs there. That keeps config, instructions, skills, and rules, and
-# clears all state and logins.
+# clears all state, but keeps the login credentials (Claude's .credentials.json, Codex's
+# auth.json) so a reset never forces a new login.
 set -eu
 
 [ $# -eq 1 ] || { printf 'usage: reset-agent-home DIR\n' >&2; exit 1; }
@@ -24,6 +25,7 @@ for path in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
     # An unmatched glob stays literal.
     [ -e "$path" ] || [ -L "$path" ] || continue
     name=${path##*/}
+    case $name in .credentials.json|auth.json) continue ;; esac
     kept=false
     for layer in "$repo"/dotfiles/*/; do
         if [ -e "$layer$rel/$name" ] || [ -L "$layer$rel/$name" ]; then kept=true; fi

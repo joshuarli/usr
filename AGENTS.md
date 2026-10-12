@@ -48,7 +48,7 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 - `git ls-files dotfiles/*/.local/bin` shows what is mine; the rest of `~/.local/bin` is downloaded binaries and other tools' links. Do not `cat` or `rg` the binaries.
 - `claude-or` and `claude-ds` start Claude Code against OpenRouter or DeepSeek with `--dangerously-skip-permissions`, taking the key from `vault`. `codex-or` runs Codex with its `or` profile.
 - `mdl`, `mpdl`, and `vdl` wrap `yt-dlp` through `uvx`.
-- `reset-claude` and `reset-codex` delete everything in `~/.claude` and `~/.codex` except symlinks into this repo (and directories holding one). Do not run either unprompted.
+- `reset-claude` and `reset-codex` delete everything in `~/.claude` and `~/.codex` except symlinks into this repo (and directories holding one) and the login credentials (`.credentials.json`, `auth.json`). Do not run either unprompted.
 - Do not run `dl` (or `make`, which runs it), `macos/*`, or `setup-*` without being asked. Test `dl` with `HOME` pointed at a scratch directory under `.work/`. They download, codesign, install system services, or need sudo.
 
 ## Conventions
