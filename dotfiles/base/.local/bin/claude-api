@@ -4,7 +4,9 @@
 # credits; the subscription login would use subscription limits.
 # The key lives in vault as ANTHROPIC_API_KEY and is scoped to this process.
 # Usage: claude-api [--budget usd] [--model name] <skill> [skill arguments...]
-# The default budget is 20 USD. Example: claude-api ultrareview
+# The default budget is 20 USD, the default model is Sonnet 5.5 at high effort. Example: claude-api ultrareview
+# With --prompt, the one remaining argument is a prompt instead of a skill
+# (claude-api-oneshot passes it): claude-api --prompt [options] <prompt>
 # Exits nonzero unless the session ends with a successful result.
 
 set -eu
@@ -13,25 +15,34 @@ unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
 
 usage() {
 	echo "usage: claude-api [--budget usd] [--model name] <skill> [skill arguments...]" >&2
+	echo "       claude-api --prompt [--budget usd] [--model name] <prompt>" >&2
 	exit 2
 }
 
 budget=20
-model=
+model=claude-sonnet-5-5
+oneshot=
 while [ $# -gt 0 ]; do
 	case $1 in
 	--budget) [ $# -ge 2 ] || usage; budget=$2; shift 2 ;;
 	--model) [ $# -ge 2 ] || usage; model=$2; shift 2 ;;
+	--prompt) oneshot=1; shift ;;
 	-*) usage ;;
 	*) break ;;
 	esac
 done
-[ $# -ge 1 ] || usage
-skill=$1
-shift
-case $skill in
-*[!A-Za-z0-9:_-]*) echo "claude-api: invalid skill name: $skill" >&2; exit 2 ;;
-esac
+if [ -n "$oneshot" ]; then
+	[ $# -eq 1 ] || usage
+	skill=oneshot
+	prompt=$1
+else
+	skill=$1
+	shift
+	case $skill in
+	*[!A-Za-z0-9:_-]*) echo "claude-api: invalid skill name: $skill" >&2; exit 2 ;;
+	esac
+	prompt="/$skill${*:+ $*}"
+fi
 
 # The key is not scoped to a workspace, so the API requires this header. The
 # ID only names the workspace and grants no access without the key.
@@ -52,16 +63,18 @@ command -v mdstream >/dev/null || {
 # check can never bill anything, and it runs in the current directory so
 # project skills are included. An unknown "/name" would otherwise be sent to
 # the model as plain text.
-available=$(ANTHROPIC_API_KEY=sk-ant-preflight claude -p x --output-format stream-json --verbose 2>/dev/null |
-	jaq -r 'select(.type == "system" and .subtype == "init") | (.skills + .slash_commands)[]')
-[ -n "$available" ] || {
-	echo "claude-api: could not list skills from claude" >&2
-	exit 1
-}
-printf '%s\n' "$available" | grep -qxF -- "$skill" || {
-	echo "claude-api: no skill named $skill here" >&2
-	exit 1
-}
+if [ -z "$oneshot" ]; then
+	available=$(ANTHROPIC_API_KEY=sk-ant-preflight claude -p x --output-format stream-json --verbose 2>/dev/null |
+		jaq -r 'select(.type == "system" and .subtype == "init") | (.skills + .slash_commands)[]')
+	[ -n "$available" ] || {
+		echo "claude-api: could not list skills from claude" >&2
+		exit 1
+	}
+	printf '%s\n' "$available" | grep -qxF -- "$skill" || {
+		echo "claude-api: no skill named $skill here" >&2
+		exit 1
+	}
+fi
 root=$(git rev-parse --show-toplevel)
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	echo "claude-api: working tree is not clean; commit or stash first" >&2
@@ -131,10 +144,11 @@ foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 # failed tool results (all of them would drown the review). Everything is
 # markdown for mdstream; the loop stamps elapsed time into the blockquotes.
 start=$(date +%s)
-vault ANTHROPIC_API_KEY -- claude -p "/$skill${*:+ $*}" \
+vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 	--max-budget-usd "$budget" \
 	--dangerously-skip-permissions \
-	${model:+--model "$model"} \
+	--model "$model" \
+	--effort high \
 	--output-format stream-json --verbose |
 	tee "$log" |
 	jaq -nr --argjson budget "$budget" "$filter" |
