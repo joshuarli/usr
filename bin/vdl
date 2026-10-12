@@ -1,5 +1,5 @@
 #!/bin/sh
-"$HOME/usr/py/.venv/bin/python" -m yt_dlp --ignore-config --ignore-errors \
+exec uvx --refresh-package yt-dlp --from 'yt-dlp@git+https://github.com/yt-dlp/yt-dlp' yt-dlp --ignore-config --ignore-errors \
     --remote-components 'ejs:github' \
     --js-runtimes node \
     -f 'bv*[height<=1080]+ba/b[height<=1080]' \
