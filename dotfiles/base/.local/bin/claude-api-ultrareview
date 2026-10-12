@@ -1,0 +1,140 @@
+#!/bin/sh
+# Run the ultrareview skill on the repo in the current directory, billed to
+# API credits. Only programmatic mode (`claude -p`) with a Console API key
+# draws on the credits; the subscription login would use subscription limits.
+# The key lives in vault as ANTHROPIC_API_KEY and is scoped to this process.
+# Usage: [ULTRAREVIEW_MODEL=sonnet] claude-api-ultrareview [max-budget-usd, default 20]
+# Exits nonzero unless the session ends with a successful result.
+
+set -eu
+
+unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
+model=${ULTRAREVIEW_MODEL:-}
+
+# The key is not scoped to a workspace, so the API requires this header. The
+# ID only names the workspace and grants no access without the key.
+export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: wrkspc_01AD5KAnLMgJB9A97WHG28DY"
+
+# Fail before spending credits. The skill edits docs, so a clean tree makes
+# the final diff show only what the review changed.
+vault ls | grep -qx ANTHROPIC_API_KEY || {
+	echo "claude-api-ultrareview: no ANTHROPIC_API_KEY in vault (vault set ANTHROPIC_API_KEY)" >&2
+	exit 1
+}
+command -v mdstream >/dev/null || {
+	echo "claude-api-ultrareview: mdstream is not on PATH" >&2
+	exit 1
+}
+root=$(git rev-parse --show-toplevel)
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+	echo "claude-api-ultrareview: working tree is not clean; commit or stash first" >&2
+	exit 1
+fi
+
+# The raw event stream is kept under the repo's .work/, which stays untracked.
+exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
+mkdir -p "$root/.work/logs" "$(dirname "$exclude")"
+grep -qxF .work/ "$exclude" 2>/dev/null || echo .work/ >>"$exclude"
+log="$root/.work/logs/ultrareview-$(date +%Y%m%dT%H%M%S).jsonl"
+echo "raw log: $log" >&2
+
+# Estimated spend for the live display. List prices in $/MTok (input, output,
+# cache read); cache writes are 1.25x input for the 5-minute TTL and 2x for
+# the 1-hour TTL. Models missing here count as $0 and flag the total with "?".
+# Haiku 5.5's higher rate above 100K prompt tokens is not modelled. The result
+# event's total_cost_usd is authoritative and is printed beside the estimate.
+# A message can arrive as several events sharing one id with the same usage,
+# so each id counts once, at its latest usage.
+# shellcheck disable=SC2016 # $vars are jaq's, not the shell's
+filter='
+def price:
+	if   startswith("claude-opus-5-5")   then {i: 4,  o: 20, r: 0.2}
+	elif startswith("claude-opus-5")     then {i: 5,  o: 25, r: 0.5}
+	elif startswith("claude-opus-4-")    then {i: 5,  o: 25, r: 0.5}
+	elif startswith("claude-sonnet-5")   then {i: 2,  o: 10, r: 0.2}
+	elif startswith("claude-sonnet-4-6") then {i: 3,  o: 15, r: 0.3}
+	elif startswith("claude-haiku-5-5")  then {i: 0.1, o: 0.5, r: 0.01}
+	elif startswith("claude-haiku-4-5")  then {i: 1,  o: 5,  r: 0.1}
+	elif startswith("claude-fable-5-1")  then {i: 10, o: 50, r: 0.25}
+	elif startswith("claude-fable-5")    then {i: 10, o: 50, r: 1}
+	else null end;
+def cost($model; $u):
+	($model | price) as $p
+	| if $p == null then null else
+		($u.cache_creation // {}) as $w
+		| ($w.ephemeral_1h_input_tokens // 0) as $w1
+		| ($w.ephemeral_5m_input_tokens // (($u.cache_creation_input_tokens // 0) - $w1)) as $w5
+		| ( ($u.input_tokens // 0) * $p.i + ($u.output_tokens // 0) * $p.o
+		  + ($u.cache_read_input_tokens // 0) * $p.r + $w5 * 1.25 * $p.i + $w1 * 2 * $p.i ) / 1000000
+	  end;
+def money: ((. * 100 | round) / 100);
+foreach inputs as $e ({seen: {}, total: 0, unknown: false};
+	if $e.type == "assistant" and $e.message.id != null then
+		cost($e.message.model; $e.message.usage // {}) as $c
+		| .total += (($c // 0) - (.seen[$e.message.id] // 0))
+		| .seen[$e.message.id] = ($c // 0)
+		| .unknown = (.unknown or $c == null)
+	else . end;
+	. as $s | $e
+	| if .type == "assistant" then
+		.message.content[]
+		| if .type == "text" then "\(.text)\n"
+		  elif .type == "tool_use" then "> **\(.name)** `\(.input | tostring | .[0:120] | gsub("`"; "\u0027"))` `~$\($s.total | money)\(if $s.unknown then "?" else "" end) / $\($budget)`\n"
+		  else empty end
+	  elif .type == "user" then
+		.message.content[]?
+		| select(.type? == "tool_result" and .is_error == true)
+		| "> **tool failed** `\(.content | if type == "string" then . else map(.text? // "") | join(" ") end | .[0:200] | gsub("\n"; " ") | gsub("`"; "\u0027"))`\n"
+	  elif .type == "result" then
+		"> cost: estimated `~$\($s.total | money)\(if $s.unknown then "?" else "" end)`, actual `$\(.total_cost_usd)`\n"
+	  else empty end)'
+
+# stream-json emits one event per line as the session runs. The filter prints
+# assistant text, one blockquote per tool call with the running cost, and only
+# failed tool results (all of them would drown the review). Everything is
+# markdown for mdstream; the loop stamps elapsed time into the blockquotes.
+budget=${1:-20}
+start=$(date +%s)
+vault ANTHROPIC_API_KEY -- claude -p /ultrareview \
+	--max-budget-usd "$budget" \
+	--dangerously-skip-permissions \
+	${model:+--model "$model"} \
+	--output-format stream-json --verbose |
+	tee "$log" |
+	jaq -nr --argjson budget "$budget" "$filter" |
+	while IFS= read -r line; do
+		case $line in
+		'> '*)
+			elapsed=$(($(date +%s) - start))
+			# shellcheck disable=SC2016 # backticks are markdown, not substitutions
+			printf '> `%02d:%02d` %s\n' $((elapsed / 60)) $((elapsed % 60)) "${line#> }"
+			;;
+		*) printf '%s\n' "$line" ;;
+		esac
+	done |
+	mdstream
+
+# The pipeline's status is the loop's, so judge the run by its result event.
+# shellcheck disable=SC2016 # $vars are jaq's, not the shell's
+summary=$(jaq -rs '
+	([.[] | select(.type == "assistant") | .message.content[] | select(.type == "tool_use") | .name]
+	 | group_by(.) | map("\(.[0])=\(length)") | join(" ")) as $tools
+	| (last(.[] | select(.type == "result")) // null) as $r
+	| if $r == null then "no result event"
+	  else "\($r.subtype) | \($r.num_turns) turns | \($r.duration_ms / 60000 | floor) min | $\($r.total_cost_usd) | \($tools)" end' "$log")
+
+rc=1
+if jaq -es 'any(.[]; .type == "result" and .subtype == "success" and .is_error == false)' "$log" >/dev/null; then
+	rc=0
+fi
+
+{
+	jaq -rs 'last(.[] | select(.type == "result")) | .result // empty' "$log"
+	# shellcheck disable=SC2016 # backticks are markdown, not substitutions
+	printf '\n---\n\n`%s`\n\nlog: `%s`\n\n```\n' "$summary" "$log"
+	git -C "$root" status --short
+	git -C "$root" diff --stat
+	printf '```\n'
+} | mdstream
+notify-sound || true
+exit "$rc"
