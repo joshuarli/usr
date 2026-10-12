@@ -47,6 +47,21 @@ command -v mdstream >/dev/null || {
 	echo "claude-api: mdstream is not on PATH" >&2
 	exit 1
 }
+# Claude Code reads the skill list at startup and reports it in the first
+# event, before any model request. The key here is deliberately invalid so this
+# check can never bill anything, and it runs in the current directory so
+# project skills are included. An unknown "/name" would otherwise be sent to
+# the model as plain text.
+available=$(ANTHROPIC_API_KEY=sk-ant-preflight claude -p x --output-format stream-json --verbose 2>/dev/null |
+	jaq -r 'select(.type == "system" and .subtype == "init") | (.skills + .slash_commands)[]')
+[ -n "$available" ] || {
+	echo "claude-api: could not list skills from claude" >&2
+	exit 1
+}
+printf '%s\n' "$available" | grep -qxF -- "$skill" || {
+	echo "claude-api: no skill named $skill here" >&2
+	exit 1
+}
 root=$(git rev-parse --show-toplevel)
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	echo "claude-api: working tree is not clean; commit or stash first" >&2
