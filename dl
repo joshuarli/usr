@@ -199,6 +199,57 @@ install_release() {
     tmpbin=
 }
 
+# install_mold  Install mold from the newest musl prerelease of joshuarli/mold.
+# The release is a tarball, and only x86_64 Linux is published (no macOS yet). ld.mold
+# is a link to mold, which is what `-fuse-ld=mold` looks for.
+install_mold() {
+    if [ "${OS}:${ARCH}" != Linux:x86_64 ]; then
+        skip mold "only x86_64 Linux is published"
+        return
+    fi
+    tag=$(curl -fsSL "https://github.com/joshuarli/mold/releases.atom" \
+        | sed -n 's|.*<link[^>]*releases/tag/\(mold-musl-[^"]*\)".*|\1|p' | head -n 1) || tag=
+    if [ -z "$tag" ]; then
+        unchecked mold "no release found"
+        return
+    fi
+    # The tag is mold-musl-<version>-<commit>; the asset names carry the version.
+    version=${tag#mold-musl-}
+    version=${version%-*}
+    asset="mold-${version}-x86_64-linux-musl"
+    url="https://github.com/joshuarli/mold/releases/download/${tag}/${asset}.tar.gz"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked mold "${asset}.tar.gz is not available in ${tag}"
+        return
+    fi
+    if is_current mold "$id" && [ -L "${DEST}/ld.mold" ]; then
+        printf '%s\n' "mold is current (${tag})"
+        return
+    fi
+    printf '%s\n' "Downloading ${asset}.tar.gz ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip mold "${asset}.tar.gz is not available in ${tag}"
+        return
+    fi
+    tmpbin=$(mktemp "${DEST}/.mold.XXXXXX")
+    if ! tar -xzOf "$tmpzip" "${asset}/bin/mold" > "$tmpbin"; then
+        rm -f "$tmpzip" "$tmpbin"
+        tmpzip=
+        tmpbin=
+        skip mold "${asset}.tar.gz does not contain bin/mold"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    install_binary mold "$tmpbin" "$id"
+    tmpbin=
+    ln -sf mold "${DEST}/ld.mold"
+}
+
 # mactop is a menu-bar app: mirror `make install` from joshuarli/mactop
 # (app bundle in /Applications plus LaunchAgent) on top of the installed binary.
 install_mactop_app() {
@@ -349,6 +400,7 @@ run_parallel() {
 if [ $# -eq 0 ]; then
     set -- fd rg jaq fastermod tm ish e fz fdu fs srv mactop
     if [ "$OS" = Darwin ]; then set -- "$@" vault gh; fi
+    if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
 
 if [ "$#" -gt 1 ] && [ "$_dl_worker_mode" != true ] \
@@ -374,6 +426,7 @@ for prog in "$@"; do
             esac
             install_direct jaq \
                 "https://github.com/01mf02/jaq/releases/latest/download/jaq-${jaq_target}" ;;
+        mold) install_mold ;;
         gh)
             install_direct gh \
                 "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm" ;;
