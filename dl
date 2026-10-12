@@ -11,10 +11,10 @@ esac
 DEST="${HOME}/usr/bin"
 mkdir -p "$DEST"
 
-for prog in fd rg fastermod tm ish e fdu fs srv mactop; do
+for prog in fd rg fastermod tm ish e fz fdu fs srv mactop; do
     case "$prog" in
         e|fd|rg|fdu|fastermod|tm|fs|srv) owner="laputa-systems" ;;
-        ish|mactop) owner="joshuarli" ;;
+        ish|mactop|fz) owner="joshuarli" ;;
     esac
     # The release workflows publish prereleases, which GitHub's /latest endpoint
     # intentionally excludes. The releases collection is newest-first, so its
@@ -26,7 +26,7 @@ for prog in fd rg fastermod tm ish e fdu fs srv mactop; do
         continue
     fi
     case "${OS}:${prog}" in
-        Linux:e|Linux:ish|Linux:fdu) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:e|Linux:ish|Linux:fz|Linux:fdu) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac

@@ -34,7 +34,6 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
-- Do not git push.
 - Reserve release builds for final verification, or when performance is the primary concern.
 
 ## Environment
