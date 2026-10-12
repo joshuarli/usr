@@ -4,7 +4,8 @@ set -e
 die () { >&2 printf %s\\n "$1"; exit 1; }
 
 tmp="$(mktemp -d)" || die 'mktemp failed'
-trap 'rm -rf "$tmp"' 0 1 2 3 15
+trap 'rm -rf "$tmp"' 0
+trap 'exit 130' 1 2 3 15
 
 sym="${PWD}/sym"
 
@@ -199,18 +200,86 @@ rm -rf home; mkdir home
 
 
 
-printf '\n14: a file already reachable through a linked parent directory is in place, not a conflict\n'
-mkdir -p dotfiles/viaparent/.pi/agent real-agent
+printf '\n14: a target directory that links into the source is a conflict in both modes, and the source survives\n'
+mkdir -p dotfiles/viaparent/.pi/agent home/.pi
 echo cfg > dotfiles/viaparent/.pi/agent/settings.json
-mkdir -p home/.pi
+ln -s ../x dotfiles/viaparent/.pi/agent/AGENTS.md
 ln -s "$(pwd)/dotfiles/viaparent/.pi/agent" home/.pi/agent
-$sym -t home -v dotfiles/viaparent > log 2>&1
-echo "  assertion 1: nothing to do"
-[ ! -s log ] || nfailed=$((nfailed + 1))
-echo "  assertion 2: delete mode refuses it, so the source survives"
-rc=0; $sym -t home -d dotfiles/viaparent > log 2>&1 || rc=$?
-[ "$rc" -ne 0 ] && grep -q 'is not a symlink' log && [ -f dotfiles/viaparent/.pi/agent/settings.json ] || nfailed=$((nfailed + 1))
+for flag in "" -d; do
+	rc=0; $sym -t home $flag dotfiles/viaparent > log 2>&1 || rc=$?
+	echo "  assertion: mode '$flag' refuses"
+	[ "$rc" -ne 0 ] && grep -q 'passes through a symlinked directory' log || nfailed=$((nfailed + 1))
+done
+echo "  assertion: the source files survive"
+[ -f dotfiles/viaparent/.pi/agent/settings.json ] && [ -L dotfiles/viaparent/.pi/agent/AGENTS.md ] || nfailed=$((nfailed + 1))
 rm -rf home; mkdir home
+
+
+printf '\n15: delete mode never removes directories above the target\n'
+mkdir -p dotfiles/rmtest/.a outer/keep/home
+echo x > dotfiles/rmtest/.a/f
+$sym -t outer/keep/home dotfiles/rmtest > /dev/null
+$sym -t outer/keep/home -d dotfiles/rmtest > /dev/null
+echo "  assertion 1: the target directory survives"
+[ -d outer/keep/home ] || nfailed=$((nfailed + 1))
+rm -rf outer
+
+
+printf '\n16: ignored files are not linked, and names with non-ASCII characters are linked correctly\n'
+mkdir -p dotfiles/gi/.cfg
+echo a > dotfiles/gi/.cfg/keep
+echo b > dotfiles/gi/.cfg/skip.log
+echo c > "dotfiles/gi/.cfg/café"
+printf 'skip.log\n' > dotfiles/gi/.gitignore
+$sym -t home dotfiles/gi > log 2>&1
+echo "  assertion 1: an ignored file outside a whole-directory link is skipped"
+[ -L home/.cfg/keep ] && [ ! -e home/.cfg/skip.log ] || nfailed=$((nfailed + 1))
+echo "  assertion 2: the non-ASCII name is linked under its real name"
+[ -e "home/.cfg/café" ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n17: a source outside Git works, and honors .sym-dir\n'
+ng="$(mktemp -d)"
+mkdir -p "$ng/src/.a" "$ng/src/d" "$ng/home"
+echo x > "$ng/src/.a/f"; touch "$ng/src/d/.sym-dir"; echo y > "$ng/src/d/g"
+(cd "$ng" && $sym -t home src > /dev/null 2>&1)
+echo "  assertion 1: file link and directory link are both made"
+[ -L "$ng/home/.a/f" ] && [ -L "$ng/home/d" ] && [ "$(find "$ng/home" -type l | wc -l | tr -d ' ')" -eq 2 ] || nfailed=$((nfailed + 1))
+rm -rf "$ng"
+
+
+printf '\n18: a .sym-dir nested in another one is skipped\n'
+mkdir -p dotfiles/nest/.a/inner
+touch dotfiles/nest/.a/.sym-dir dotfiles/nest/.a/inner/.sym-dir
+echo x > dotfiles/nest/.a/inner/f
+$sym -t home -v dotfiles/nest > log 2>&1
+expected="SKIP (nested in another symlink-dir): dotfiles/nest/.a/inner
+LINK: home/.a -> ../dotfiles/nest/.a"
+echo "  assertion 1: only the outer directory is linked"; assert_output "$expected"
+
+
+printf '\n19: delete mode removes a matching directory link and refuses a foreign one\n'
+$sym -t home -v -d dotfiles/nest > log 2>&1
+expected="SKIP (nested in another symlink-dir): dotfiles/nest/.a/inner
+UNLINK: home/.a"
+echo "  assertion 1: the matching link is removed"; assert_output "$expected"
+mkdir -p home; ln -s ../elsewhere home/.a
+rc=0; $sym -t home -d dotfiles/nest > log 2>&1 || rc=$?
+echo "  assertion 2: a link that points elsewhere is refused"
+[ "$rc" -ne 0 ] && grep -q 'does not point to the expected destination' log && [ -L home/.a ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n20: a target reached through a symlink gets links that resolve\n'
+mkdir -p real/tg dotfiles/viasym/.f
+echo x > dotfiles/viasym/.f/g
+ln -s real/tg tglink
+$sym -t tglink dotfiles/viasym > /dev/null
+echo "  assertion 1: the link resolves"
+[ -e tglink/.f/g ] || nfailed=$((nfailed + 1))
+rm -rf real tglink
+
 
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

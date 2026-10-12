@@ -1,5 +1,6 @@
 #!/bin/sh
 
+# The tailscale serve it starts on the remote stays on until `tailscale serve reset`.
 set -eu
 
 stream_root=${STREAM_URL:-http://box:8080}

@@ -1,0 +1,329 @@
+#!/bin/sh
+# setup-macos - provision a Mac: Homebrew, packages, Touch ID for sudo, a local DNS cache.
+#
+# Safe to rerun. Every step reads the current state and changes only what differs.
+#
+# usage: setup-macos [-n] [STEP...]
+#        setup-macos [-n] lean [ARGS...]
+#   -n      report what would change and change nothing
+#   STEP    brew        install Homebrew if missing
+#           packages    install the packages listed in brewfile() below
+#           touchid     Touch ID for sudo, working inside tmux
+#           dns         unbound as a local caching resolver, and point the system at it
+#                       To undo: networksetup -setdnsservers SERVICE Empty
+#           lean        run macos-lean.py with ARGS; it disables macOS services, so it is
+#                       never part of the default run. Audit and dry-run it first.
+#   With no STEP the default is: brew packages touchid dns, in that order. Packages come
+#   first because touchid and dns use what they install, and touchid comes before dns so
+#   that later sudo prompts accept a fingerprint.
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+dry=false
+
+info() { printf '\033[1;32m==> \033[0m%s\n' "$*"; }
+warn() { printf '\033[1;33mwarn:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31merr:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# act CMD...  Run a command, or in a dry run only say so.
+act() {
+    if $dry; then printf '   would run: %s\n' "$*"; else "$@"; fi
+}
+
+# need_sudo  Ask for the password once, up front, before a step that needs it.
+need_sudo() {
+    $dry || sudo -v
+}
+
+# ── packages ──────────────────────────────────────────────────────────────────
+# The Brewfile lives here so there is one file to copy to a new Mac.
+brewfile() {
+    cat <<'EOF'
+cask "font-hack"
+
+brew "git"
+brew "rustup"
+brew "jaq"
+brew "jq"
+brew "yq"
+brew "prek"
+brew "pstree"
+brew "hyperfine"
+brew "shellcheck"
+
+# touchid step
+brew "pam-reattach"
+
+# dns step
+brew "unbound"
+EOF
+}
+
+# ── steps ─────────────────────────────────────────────────────────────────────
+find_brew() {
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        if [ -x "$b" ]; then eval "$("$b" shellenv)"; return 0; fi
+    done
+    return 1
+}
+
+step_brew() {
+    if find_brew; then
+        info "Homebrew is installed"
+        return
+    fi
+    info "Installing Homebrew (the official installer; it asks for your password)"
+    if $dry; then
+        printf '   would run: Homebrew install.sh\n'
+        return
+    fi
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    find_brew || die "Homebrew installed but brew was not found"
+}
+
+step_packages() {
+    find_brew || die "Homebrew is missing; run: setup-macos brew"
+    if brewfile | brew bundle check --file=- >/dev/null 2>&1; then
+        info "Packages are installed"
+        return
+    fi
+    info "Installing packages"
+    if $dry; then
+        brewfile | brew bundle check --file=- --verbose 2>&1 | sed 's/^/   /' || true
+        return
+    fi
+    brewfile | brew bundle --file=-
+}
+
+# The module is copied out of Homebrew's tree because root's sudo loads it, and everything
+# under /opt/homebrew is writable by the user: whoever could replace the module could get
+# root. Every directory above /usr/local/libexec is root-owned.
+pam_dir=/usr/local/libexec/pam
+pam_module=$pam_dir/pam_reattach.so
+sudo_local=/etc/pam.d/sudo_local
+
+sudo_local_wanted() {
+    printf 'auth       optional       %s\n' "$pam_module"
+    printf 'auth       sufficient     pam_tid.so\n'
+}
+
+# sudo_local_state  Print ok, absent, or a foreign line we refuse to overwrite.
+sudo_local_state() {
+    [ -f "$sudo_local" ] || { printf 'absent'; return; }
+    active=$(grep -Ev '^[[:space:]]*(#|$)' "$sudo_local" || true)
+    foreign=$(printf '%s\n' "$active" | grep -Ev 'pam_reattach\.so|pam_tid\.so' || true)
+    if [ -n "$foreign" ]; then printf 'foreign: %s' "$foreign"; return; fi
+    if [ "$active" = "$(sudo_local_wanted)" ]; then printf 'ok'; else printf 'stale'; fi
+}
+
+step_touchid() {
+    find_brew || die "Homebrew is missing; run: setup-macos brew"
+    src="$(brew --prefix)/lib/pam/pam_reattach.so"
+    [ -f "$src" ] || die "$src not found; run: setup-macos packages"
+
+    if [ "$(stat -f '%Su:%Sg %Lp' "$pam_module" 2>/dev/null)" = "root:wheel 755" ] && cmp -s "$src" "$pam_module"; then
+        info "pam_reattach is installed at $pam_module"
+    else
+        info "Installing pam_reattach at $pam_module (root-owned)"
+        need_sudo
+        act sudo install -d -o root -g wheel -m 755 "$pam_dir"
+        act sudo install -o root -g wheel -m 755 "$src" "$pam_module"
+    fi
+
+    case $(sudo_local_state) in
+        ok) info "Touch ID for sudo is configured" ;;
+        foreign:*) die "$sudo_local has lines this script does not manage; merge by hand: $(sudo_local_state)" ;;
+        *)
+            info "Writing $sudo_local"
+            need_sudo
+            if $dry; then
+                printf '   would write:\n'; sudo_local_wanted | sed 's/^/     /'
+            else
+                sudo_local_wanted | sudo tee "$sudo_local" >/dev/null
+            fi
+            ;;
+    esac
+}
+
+unbound_conf() {
+    threads=$(sysctl -n hw.physicalcpu)
+    slabs=1
+    while [ "$slabs" -lt "$threads" ]; do slabs=$((slabs * 2)); done
+    cat <<EOF
+server:
+    # ── Interface ───────────────────────────────────────────────────────────────
+    interface: 127.0.0.1
+    interface: ::1
+    port: 53
+    do-ip4: yes
+    do-ip6: yes
+    do-udp: yes
+    do-tcp: yes
+
+    # ── Access control ──────────────────────────────────────────────────────────
+    access-control: 0.0.0.0/0 refuse
+    access-control: ::0/0 refuse
+    access-control: 127.0.0.0/8 allow
+    access-control: ::1 allow
+
+    # ── Identity ────────────────────────────────────────────────────────────────
+    hide-identity: yes
+    hide-version: yes
+    username: ""  # don't drop priv
+
+    # ── No DNSSEC, no qname minimisation ────────────────────────────────────────
+    qname-minimisation: no
+
+    # ── Cache ───────────────────────────────────────────────────────────────────
+    cache-min-ttl: 300          # ignore TTLs under 5 min, stops cache thrashing
+    cache-max-ttl: 86400
+    cache-max-negative-ttl: 30
+    prefetch: yes               # refresh records before expiry in background
+    neg-cache-size: 8m
+
+    # ── Serve stale ─────────────────────────────────────────────────────────────
+    # answer instantly from cache while refreshing in background
+    serve-expired: yes
+    serve-expired-ttl: 86400
+    serve-expired-reply-ttl: 30
+
+    # ── Threading (one thread per physical core, slabs a power of two) ──────────
+    num-threads: $threads
+    msg-cache-slabs: $slabs
+    rrset-cache-slabs: $slabs
+    infra-cache-slabs: $slabs
+    key-cache-slabs: $slabs
+
+    # ── Memory ──────────────────────────────────────────────────────────────────
+    msg-cache-size: 64m
+    rrset-cache-size: 128m
+
+    # ── Network buffers ─────────────────────────────────────────────────────────
+    so-rcvbuf: 4m
+    so-sndbuf: 4m
+    edns-buffer-size: 1472      # 1500 MTU - 28 byte headers, avoids fragmentation
+
+    # ── Misc ────────────────────────────────────────────────────────────────────
+    minimal-responses: yes
+    rrset-roundrobin: yes
+
+    # ── DNS rebinding protection ────────────────────────────────────────────────
+    private-address: 10.0.0.0/8
+    private-address: 172.16.0.0/12
+    private-address: 192.168.0.0/16
+    private-address: 169.254.0.0/16
+    private-address: fd00::/8
+    private-address: fe80::/10
+
+    # ── Logging ─────────────────────────────────────────────────────────────────
+    verbosity: 0
+    log-queries: no
+    log-replies: no
+
+# ── Forward all queries to Cloudflare ───────────────────────────────────────────
+forward-zone:
+    name: "."
+    forward-addr: 1.1.1.1
+    forward-addr: 1.0.0.1
+EOF
+}
+
+resolver_answers() {
+    [ -n "$(dig +time=2 +tries=1 +short @127.0.0.1 example.com 2>/dev/null)" ]
+}
+
+# network_services  Print the names of the enabled network services, one per line.
+network_services() {
+    networksetup -listallnetworkservices | tail -n +2 | grep -v '^\*' || true
+}
+
+# dns_servers SERVICE  Print the service's DNS servers on one line, or Empty.
+dns_servers() {
+    out=$(networksetup -getdnsservers "$1")
+    case $out in
+        *"aren't any"*) printf 'Empty' ;;
+        *) printf '%s' "$out" | tr '\n' ' ' | sed 's/ $//' ;;
+    esac
+}
+
+dns_wanted='127.0.0.1 1.1.1.1'
+
+step_dns() {
+    find_brew || die "Homebrew is missing; run: setup-macos brew"
+    conf_dir="$(brew --prefix)/etc/unbound"
+    conf=$conf_dir/unbound.conf
+    [ -d "$conf_dir" ] || die "$conf_dir not found; run: setup-macos packages"
+
+    new=$(mktemp "${TMPDIR:-/tmp}/unbound.conf.XXXXXX")
+    trap 'rm -f "$new"' 0
+    unbound_conf > "$new"
+
+    changed=false
+    if cmp -s "$new" "$conf"; then
+        info "unbound.conf is up to date"
+    else
+        changed=true
+        info "Writing $conf"
+        act cp "$new" "$conf"
+    fi
+
+    if $changed || ! resolver_answers; then
+        info "Restarting unbound"
+        need_sudo
+        act sudo brew services restart unbound
+        if ! $dry; then
+            tries=0
+            until resolver_answers; do
+                tries=$((tries + 1))
+                [ "$tries" -lt 10 ] || die "unbound is not answering on 127.0.0.1; check: sudo brew services list"
+                sleep 1
+            done
+        fi
+    else
+        info "unbound is running and answering"
+    fi
+
+    # 1.1.1.1 stays as a fallback, which means a stopped unbound sends queries to Cloudflare
+    # in the clear.
+    network_services | while IFS= read -r svc; do
+        have=$(dns_servers "$svc")
+        [ "$have" = "$dns_wanted" ] && continue
+        info "DNS for $svc: $have -> $dns_wanted"
+        need_sudo
+        # shellcheck disable=SC2086  # the list is two words by construction
+        act sudo networksetup -setdnsservers "$svc" $dns_wanted
+    done
+}
+
+step_lean() {
+    if $dry; then set -- --dry-run "$@"; fi
+    exec "$here/macos-lean.py" "$@"
+}
+
+# ── main ──────────────────────────────────────────────────────────────────────
+[ "$(uname -s)" = Darwin ] || die "macOS only"
+
+if [ "${1:-}" = -n ]; then dry=true; shift; fi
+
+if [ $# -eq 0 ]; then
+    set -- brew packages touchid dns
+fi
+
+for step in "$@"; do
+    case $step in
+        brew|packages|touchid|dns) ;;
+        lean) break ;;
+        *) die "unknown step: $step (see the usage at the top of this script)" ;;
+    esac
+done
+
+while [ $# -gt 0 ]; do
+    step=$1; shift
+    case $step in
+        brew)       step_brew ;;
+        packages)   step_packages ;;
+        touchid)    step_touchid ;;
+        dns)        step_dns ;;
+        lean)       step_lean "$@" ;;
+    esac
+done

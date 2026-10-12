@@ -10,15 +10,21 @@ OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
-.PHONY: sync plan check
+.PHONY: sync plan layers check
 
-sync:
+sync: layers
 	for layer in $(LAYERS); do $(SYM) -v -t $(TARGET) $$layer || exit 1; done
 
-plan:
+plan: layers
 	for layer in $(LAYERS); do $(SYM) --dry-run -t $(TARGET) $$layer || exit 1; done
 
+# Each layer is checked alone, so a path claimed by two layers would otherwise surface
+# only after the first layer was applied.
+layers:
+	@dup=$$(for layer in $(LAYERS); do git ls-files -- $$layer | sed "s|^$$layer/||"; done | sort | uniq -d); \
+	[ -z "$$dup" ] || { printf 'in more than one layer:\n%s\n' "$$dup" >&2; exit 1; }
+
 check:
-	cd dotfiles && sh sym-test.sh
+	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills

@@ -20,7 +20,7 @@ One repository in, two deliverables out: docs that match the code, and a single 
 
 1. **Orient.** Read AGENTS.md, README, manifests, CI config, any existing `REVIEW.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
 2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the entry shape and nothing else. Merge findings that share a root cause and rank them.
-3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder and say which rung you reached. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
+3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **Write `REVIEW.md`** (below).
 6. **Check.** `git diff --stat` shows only docs, comments, and `REVIEW.md`. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
@@ -51,20 +51,16 @@ Run `docs-refresh` over the whole repo, with one writer. Where it finds the code
 
 ## REVIEW.md
 
-Write it at the repo root, replacing any previous copy: drop findings that are fixed and re-verify the ones that remain. Use exactly this shape.
+Write it at the repo root, replacing any previous copy: drop findings that are fixed and re-verify the ones that remain. Use exactly this shape, with no extra tables, counts, or provenance.
 
 ````markdown
 # Review: <repo>
 
-Reviewed `<short sha>` on <date>. Scope: <what>. Checks run: <command and result>. Not covered: <what>.
+Scope: <what>. Checks run: <command and result>. Not covered: <what>.
 
 ## Summary
 
 <3 to 5 sentences: overall health, and the one or two themes behind most findings.>
-
-| P1 | P2 | P3 | P4 |
-| --- | --- | --- | --- |
-| <n> | <n> | <n> | <n> |
 
 ## Findings
 
@@ -72,7 +68,7 @@ Reviewed `<short sha>` on <date>. Scope: <what>. Checks run: <command and result
 
 - **Area:** Architecture | Types | Config | Errors | Concurrency | Data | Security | Tests | Performance | Dead code | Navigability | Build | Dependencies | Operability | Docs
 - **Where:** `path:line`, ...
-- **Problem:** what is wrong, how it fails, who is hit, and the evidence. For P1 and P2, the proof rung reached or `unproven`.
+- **Problem:** what is wrong, how it fails, who is hit, and the evidence. Say `unproven` for a P1 or P2 you could not prove.
 - **Recommendation:** the smallest change that removes the cause.
 - **Fix with:** the skill that carries out the recommendation, or `none`.
 - **Effort:** S (hours) | M (days) | L (weeks)

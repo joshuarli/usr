@@ -12,7 +12,7 @@ Run one evidence-based audit of the tests in the requested scope. Keep the scope
 1. Read repository-level and scoped `AGENTS.md` instructions. Identify the tests within the requested scope and the commands or CI paths that own them. Do not expand scope without a clear reason.
 2. Read each relevant test in full, along with its production owner, entry point, callers, callees, sibling implementations, overlapping tests, relevant history, and CI routing. If the test claims behavior supplied by a dependency, inspect that dependency's source or types.
 3. For each suspicious test, determine what it actually asserts and what plausible failure it detects. Check whether a stronger test already covers the same contract at its owning boundary.
-4. Record the evidence and disposition before editing. If the user asked for review only, report findings without changing files. If cleanup is in scope, change only high-confidence candidates within the requested boundary.
+4. Settle the disposition and its evidence before editing. If the user asked for review only, report findings without changing files. If cleanup is in scope, change only high-confidence candidates within the requested boundary.
 5. Run the narrowest relevant validation allowed by the task and repository instructions. Report what you actually ran and any unresolved risk.
 
 ## Value and Retention Bar
@@ -62,15 +62,7 @@ Treat these as leads for investigation, not automatic reasons to delete:
 
 ## Evidence and Decisions
 
-For each candidate, record:
-
-- exact test name and location;
-- the failure it can actually detect;
-- non-test callers of the covered production or support seam;
-- stronger remaining owner-boundary proof, or why no proof is needed;
-- relevant history and why the test or seam exists;
-- production or test-support deletion unlocked;
-- risk and the focused validation command.
+For each candidate, know the failure the test can actually detect, what stronger proof of the contract remains at the owner boundary, what it unlocks if removed, and the focused validation command. Say so in a line, not a form.
 
 Use one disposition per candidate:
 

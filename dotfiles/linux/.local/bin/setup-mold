@@ -241,6 +241,11 @@ for name in mold ld.mold; do
     fi
 done
 
+if [ -L "$cfg" ]; then
+    log "$cfg is a symlink managed by the dotfiles; add the mold settings to the tracked file by hand"
+    exit 0
+fi
+
 # A marker block lets uninstall remove exactly the settings this script adds.
 if [ -f "$cfg" ]; then strip_cargo_config; fi
 mold_path=$(printf '%s' "$install_dir/bin/mold" | sed 's/\\/\\\\/g; s/"/\\"/g')

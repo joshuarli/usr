@@ -33,7 +33,7 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 
 - Never run `sym` without `-t <tmpdir>` while experimenting; the default target is `$HOME`.
 - Fix a bug by adding a failing numbered test to `sym-test.sh` first, then the fix.
-- Properties the tests pin: every conflict is reported before anything is written; an existing link with the right text is already correct, but a dangling one is a conflict; a file reachable through a linked parent directory is in place, and delete mode refuses it so the source survives; a `.sym-dir` directory links whole and respects Git ignores.
+- Properties the tests pin: every conflict is reported before anything is written; an existing link with the right text is already correct, but a dangling one is a conflict; a target path that passes through a symlinked directory is a conflict in both modes, so the source survives; delete mode never removes directories above the target; relative links are computed from physical paths; a `.sym-dir` directory links whole and respects Git ignores.
 - Run the suite under `dash` as well as `sh` (`/bin/sh` is bash 3.2 on macOS and dash on Linux), and run `shellcheck -s sh` on every script.
 
 ## After a substantive change

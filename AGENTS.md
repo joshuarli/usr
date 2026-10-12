@@ -10,8 +10,8 @@ This repo is the source of truth for my home directory, plus my personal scripts
 | `dotfiles/darwin/`, `dotfiles/linux/` | Layers that apply on that OS only. Same shape as `base`. |
 | `dotfiles/sym` | POSIX `sh` installer. Tests: `dotfiles/sym-test.sh`. Skill invariants: `dotfiles/skills-check.sh`. |
 | `bin` | Link to `~/.local/bin`, where scripts and downloaded binaries (`fd`, `rg`, `gh`, `ish`, ...) live together. Only the scripts are tracked, under `.local/bin` in a layer. |
-| `dl` | Downloads those binaries from GitHub releases into `~/.local/bin`, ad-hoc codesigns them, and installs the `mactop` app and LaunchAgent. |
-| `macos/` | One-off macOS setup that is run by hand, not installed: `Brewfile`, `macos-lean.py` (disables services, needs sudo), Touch ID sudo, unbound DNS. |
+| `dl` | Downloads those binaries from their newest GitHub release into `~/.local/bin` (`dl fd rg` for just those), ad-hoc codesigns them, and installs the `mactop` app and LaunchAgent. It trusts my own release repos over TLS and checks nothing else. |
+| `macos/` | Run by hand, not installed. `setup-macos` provisions a Mac: Homebrew, the package list, Touch ID sudo, a local DNS cache, each step idempotent (`setup-macos -n` previews). `macos-lean.py` disables macOS services; `setup-macos lean` runs it, and it is never part of the default run. |
 | `.agents/skills/` | Skills for this repo only (`dotfiles-health`). `.claude/skills` links to it. |
 | `skills` | Convenience link to the global skills, `dotfiles/base/.agents/skills`. |
 
@@ -23,10 +23,14 @@ A path belongs to exactly one layer, so a second claim on it is a conflict. When
 
 Anything a harness writes lives in the real `~/.claude`, `~/.codex`, `~/.pi/agent`, never in this tree. Because a linked directory is written through, the ones above carry an allowlist `.gitignore` that tracks skills or agent definitions and nothing else, and the root `.gitignore` blocks credentials, history, sessions, and databases by name.
 
+## Bootstrap
+
+On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make`; `dl`; `setup-kache` (every `cargo` build goes through the `kache` wrapper that `.cargo/config.toml` names). On Linux: `make`, `dl`, `setup-kache`, and `setup-mold` for glibc; musl targets expect mold at `/usr/local/libexec/mold`.
+
 ## Commands
 
 - `make check`: `sym` tests and skill checks (about 25 s). Run it after touching `sym`, skills, or agent definitions.
-- `make plan`: dry run of the sync into `$HOME`. A `CONFLICT` means a real file is in the way; resolve it by hand.
+- `make plan`: dry run of the sync into `$HOME`. A `CONFLICT` means a real file, or a symlinked directory, is in the way; resolve it by hand. A path claimed by two layers stops both `plan` and `make`.
 - `make`: sync into `$HOME`. This mutates the real home directory, so only run it when asked.
 - Experiment with `sh dotfiles/sym -t <tmpdir> dotfiles/base`; its default target is `$HOME`.
 - Deleting something from the repo leaves its link dangling in `~`; remove it there too, or run `sh dotfiles/sym -d` on the layer first.

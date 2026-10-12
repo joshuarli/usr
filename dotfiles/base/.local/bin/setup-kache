@@ -88,6 +88,10 @@ refresh_kache_key() {
 
 ensure_cargo_config() {
     cfg="${CARGO_HOME:-$HOME/.cargo}/config.toml"
+    if [ -L "$cfg" ]; then
+        log "cargo config is a symlink managed by the dotfiles; not editing $cfg"
+        return
+    fi
     mkdir -p "${CARGO_HOME:-$HOME/.cargo}"
     refresh_kache_key "$cfg" build rustc-wrapper "\"$dest\""
     refresh_kache_key "$cfg" build rustdoc "\"$HOME/.local/lib/kache/shims/rustdoc\""

@@ -33,7 +33,7 @@ For a wide change, ask more than one model the same question and merge the answe
 ## Hand back
 
 - **What it does,** including the non-obvious part.
-- **The one fact it is safe because of,** the ladder rung you reached, and the proof. If you could not prove it, write `unproven`.
+- **The one fact it is safe because of,** and the proof. If you could not prove it, write `unproven`.
 - **Risks,** each with how it breaks, `file:line`, likelihood, cost, and how to check.
 - **Cleared:** what you checked and why it is fine.
 - **Before you merge:** the cheapest test or repro that catches the real bug, including your script.

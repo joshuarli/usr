@@ -1,6 +1,6 @@
 set TERM tmux-256color
 
-set PATH "$HOME/usr/bin:/opt/homebrew/opt/rustup/bin:$HOME/dev/tools/bin:$HOME/.local/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:$PATH"
+set PATH "$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/dev/tools/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:$PATH"
 set EDITOR $HOME/usr/bin/e
 set PAGER less
 
@@ -35,7 +35,6 @@ alias du  duf
 alias pp  procs
 
 alias syncthing syncthing serve --no-port-probing --no-browser --no-upgrade --gui-address='http://127.0.0.1:6969'
-alias wol "$HOME/usr/bin/wol" '7c:83:34:bd:05:c4'
 alias tu '/Applications/Tailscale.app/Contents/MacOS/Tailscale' up
 alias td '/Applications/Tailscale.app/Contents/MacOS/Tailscale' down
 

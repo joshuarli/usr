@@ -9,7 +9,7 @@ export default {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           if (event.type === "session.idle") {
-            execFile("/usr/bin/afplay", ["/System/Library/Sounds/Glass.aiff"], () => {})
+            execFile("notify-sound", [], () => {})
           }
         }
       } catch {

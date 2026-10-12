@@ -23,6 +23,25 @@ relpath() {
     [ -n "$_r" ] && printf '%s%s' "$_up" "$_r" || printf '%s' "${_up%/}"
 }
 
+# physical_parent PATH
+# Physical path of the nearest existing ancestor directory of PATH.
+physical_parent() {
+    _p="${1%/*}"
+    while [ ! -d "$_p" ]; do _p="${_p%/*}"; done
+    (cd "$_p" && pwd -P)
+}
+
+# confined PATH
+# Succeed if PATH sits inside the physical target and outside the physical source. A
+# symlinked ancestor would otherwise send reads, writes, and deletes into the source tree
+# or out of the target.
+confined() {
+    _pp="$(physical_parent "$1")"
+    case "$_pp/" in "$tgt_phys"/*) ;; *) return 1 ;; esac
+    case "$_pp/" in "$src_phys"/*) return 1 ;; esac
+    return 0
+}
+
 target="$HOME"; delete=false; dry_run=false; verbose=false; failed=false
 
 while [ $# -gt 0 ]; do
@@ -47,12 +66,15 @@ done
 # src_abs/tgt_abs: canonical absolute paths, used only for relpath computation
 src="${1%/}"
 tgt="${target%/}"
-src_abs="$(cd "$src" && pwd)"
-tgt_abs="$(cd "$tgt" && pwd)"
+src_abs="$(cd "$src" && pwd -P)"
+tgt_abs="$(cd "$tgt" && pwd -P)"
+src_phys="$src_abs"
+tgt_phys="$tgt_abs"
 
 tmp="${TMPDIR:-/tmp}/sym.$$"
 mkdir "$tmp" || die 'failed to create temp directory'
-trap 'rm -rf "$tmp"' 0 1 2 3 15
+trap 'rm -rf "$tmp"' 0
+trap 'exit 130' 1 2 3 15
 
 # Enumerate files using Git's ignore rules when src is inside a Git worktree.
 # Exclude .sym-dir marker files themselves (their parent dirs are handled in pass 1b).
@@ -61,7 +83,8 @@ trap 'rm -rf "$tmp"' 0 1 2 3 15
 : > "$tmp/names"
 : > "$tmp/dests"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
-    git -C "$src" ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
+    git -C "$src" -c core.quotePath=false ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
+    ! grep -q '^"' "$tmp/file-relpaths" || die "a file name in $src has a character git quotes; rename it"
     while IFS= read -r rel; do
         [ -z "$rel" ] && continue
         case "$rel" in
@@ -115,6 +138,11 @@ while IFS= read -r fp; do
         dest="$(relpath "$fp_abs" "$dir_abs")"
     fi
 
+    if ! confined "$name"; then
+        printf 'CONFLICT: %s passes through a symlinked directory, so sym will not touch it.\n' "$name" >> "$tmp/conflicts"
+        continue
+    fi
+
     if $delete; then
         if { [ -e "$name" ] || [ -L "$name" ]; }; then
             if [ ! -L "$name" ]; then
@@ -129,9 +157,8 @@ while IFS= read -r fp; do
             continue
         fi
     else
-        # The same file reached through a linked parent directory is already in place.
-        [ "$name" -ef "$fp_abs" ] && continue
         if [ -L "$name" ]; then
+            [ "$name" -ef "$fp_abs" ] && continue
             # Same link text as sym would write: correct even when it resolves
             # into the target's own tree rather than the source's.
             [ -e "$name" ] && [ "$(readlink "$name")" = "$dest" ] && continue
@@ -164,6 +191,11 @@ while IFS= read -r sd; do
     name="$tgt/$rel"
     fp_abs="$src_abs/$rel"
     name_abs="$tgt_abs/$rel"
+
+    if ! confined "$name"; then
+        printf 'CONFLICT: %s passes through a symlinked directory, so sym will not touch it.\n' "$name" >> "$tmp/conflicts"
+        continue
+    fi
 
     if $delete; then
         { [ -e "$name" ] || [ -L "$name" ]; } || continue
@@ -208,7 +240,7 @@ if $delete; then
         $dry_run || rm "$name" || failed=true
         if ! $dry_run; then
             dir="${name%/*}"
-            while [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
+            while [ "$dir" != "$tgt" ] && [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
                 log "RMDIR: $dir"
                 rmdir "$dir" || { failed=true; break; }
                 dir="${dir%/*}"

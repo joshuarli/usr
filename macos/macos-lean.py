@@ -15,7 +15,6 @@ Usage:
     ./macos-lean.py --revert     # re-enable everything managed
 
 Always run --audit first after an OS upgrade, then --dry-run, then apply.
-Apply snapshots pre-change state to ~/.local/state/macos-lean/.
 
 Design: validate-then-act. Every label is checked against a live index of
 labels installed on THIS Mac (``Label`` keys read with plistlib, cached
@@ -803,33 +802,8 @@ def build_label_index(build_ver: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot + disabled-state cache + sudo keepalive
+# Disabled-state cache + sudo keepalive
 # ---------------------------------------------------------------------------
-
-def snapshot_state(state: State) -> None:
-    if not state.mutating:
-        return
-    snapdir = Path.home() / ".local" / "state" / "macos-lean"
-    try:
-        snapdir.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        return
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    snap = snapdir / f"snapshot-{stamp}"
-    user = run(["launchctl", "print-disabled", f"gui/{state.uid}"])
-    system = run(["launchctl", "print-disabled", "system"], sudo=True)
-    try:
-        with snap.open("w") as fh:
-            fh.write(f"# macOS {state.macos_version} {datetime.datetime.now()}\n")
-            fh.write(f"## launchctl print-disabled gui/{state.uid}\n")
-            fh.write(user.stdout)
-            fh.write("## sudo launchctl print-disabled system\n")
-            fh.write(system.stdout)
-    except OSError:
-        return
-    print(f"Snapshot: {snap}")
-    print()
-
 
 def load_disabled_state(state: State) -> None:
     if state.mode != "apply":
@@ -1426,7 +1400,6 @@ def main(argv: list[str] | None = None) -> int:
         keepalive = SudoKeepalive()
         keepalive.start()
     try:
-        snapshot_state(state)
         load_disabled_state(state)
 
         for title, domain, labels in DISABLE_SECTIONS:

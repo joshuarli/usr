@@ -11,7 +11,8 @@
 - Prefer precise types and narrow interfaces that make invalid states hard to represent. Don't loosen a contract or hide a fallback to make a patch fit.
 - Comment the why, constraints, and non-obvious behavior above the definition. Keep existing comments that do this.
 - Keep changes focused. Temporary workarounds must say why they exist and what removes them.
-- Dependencies are your call. Vet maintenance, transitive weight, license, and whether the standard library or a few lines would do, and record the choice and reason where the repo records decisions, or in your reply if it has no such place. A dependency must stay within the project's performance gates (build time, binary size, startup, runtime); measure when it could move one. If the repo defines no gates, state the build-time and binary-size impact. Remove ones you stop using.
+- Dependencies are your call. Vet maintenance, transitive weight, license, and whether the standard library or a few lines would do, and say why in your reply. A dependency must stay within the project's performance gates (build time, binary size, startup, runtime); measure when it could move one. If the repo defines no gates, state the build-time and binary-size impact. Remove ones you stop using.
+- Keep bookkeeping to the minimum. No provenance, checksums, hashes, manifests, registers, logs, backups, or state files unless a reader or a concrete failure needs them. Check the thing itself (run it, compare it) instead of recording where it came from.
 - No speculative abstractions, config knobs, or backward-compat shims unless asked. Delete dead code instead of deprecating it.
 - Fail loudly. Don't swallow errors or add silent defaults.
 
@@ -41,6 +42,7 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
+- Never push. Commit only when asked; a campaign plan counts as asking.
 - Reserve release builds for final verification, or when performance is the primary concern.
 
 ## Environment

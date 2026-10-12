@@ -1,29 +1,48 @@
 #!/bin/sh
+# dl - install or update my binaries from their newest GitHub release into ~/.local/bin.
+# usage: dl [TOOL...]    with no TOOL, every tool below
 set -eu
 
 ARCH=$(uname -m | sed 's/arm64/aarch64/')
 OS=$(uname -s)
 case "$OS" in
-    Darwin) TARGET="${ARCH}-apple-darwin" ;;
-    Linux)  TARGET="${ARCH}-unknown-linux-gnu" ;;
-    *)      printf '%s\n' "Unsupported OS: ${OS}" >&2; exit 1 ;;
+    Darwin|Linux) ;;
+    *) printf '%s\n' "Unsupported OS: ${OS}" >&2; exit 1 ;;
 esac
 DEST="${HOME}/.local/bin"
 mkdir -p "$DEST"
 
-for prog in fd rg fastermod tm ish e fz fdu fs srv mactop; do
+failed=false
+skip() { printf '%s\n' "Skipping $1: $2" >&2; failed=true; }
+
+# install_binary PROG FILE
+# Strip quarantine and ad-hoc sign on macOS, make executable, and move into place.
+# Signing happens before the move so a failure never leaves an unsigned binary installed.
+install_binary() {
+    if [ "$OS" = Darwin ]; then
+        xattr -d com.apple.quarantine "$2" 2>/dev/null || true
+        codesign -fs - "$2"
+    fi
+    chmod +x "$2"
+    mv "$2" "${DEST}/$1"
+    printf '%s\n' "Installed ${DEST}/$1"
+}
+
+install_release() {
+    prog=$1
     case "$prog" in
         e|fz|fd|rg|fdu|fastermod|tm|fs|srv) owner="laputa-systems" ;;
         ish|mactop) owner="joshuarli" ;;
+        *) skip "$prog" "unknown tool"; return ;;
     esac
     # The release workflows publish prereleases, which GitHub's /latest endpoint
     # intentionally excludes. The releases collection is newest-first, so its
     # first tag is the artifact set produced by the most recent dispatch.
     tag=$(curl -fsSL "https://api.github.com/repos/${owner}/${prog}/releases?per_page=1" \
-        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || true
+        | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || tag=
     if [ -z "$tag" ]; then
-        printf '%s\n' "Skipping ${prog}: no release found"
-        continue
+        skip "$prog" "no release found"
+        return
     fi
     case "${OS}:${prog}" in
         Linux:e|Linux:ish|Linux:fz|Linux:fdu) artifact_target="${ARCH}-unknown-linux-musl" ;;
@@ -31,44 +50,33 @@ for prog in fd rg fastermod tm ish e fz fdu fs srv mactop; do
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
     asset="${prog}-${artifact_target}"
-    zip="${asset}.zip"
-    url="https://github.com/${owner}/${prog}/releases/download/${tag}/${zip}"
-    printf '%s\n' "Downloading ${zip} ..."
+    url="https://github.com/${owner}/${prog}/releases/download/${tag}/${asset}.zip"
+    printf '%s\n' "Downloading ${asset}.zip ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
-        printf '%s\n' "Skipping ${prog}: ${zip} is not available in ${tag}" >&2
-        continue
+        skip "$prog" "${asset}.zip is not available in ${tag}"
+        return
     fi
     tmpbin=$(mktemp "${DEST}/.${prog}.XXXXXX")
     if ! unzip -p "$tmpzip" "$asset" > "$tmpbin"; then
-        rm -f "$tmpzip"
-        rm -f "$tmpbin"
-        printf '%s\n' "Skipping ${prog}: ${zip} does not contain ${asset}" >&2
-        continue
+        rm -f "$tmpzip" "$tmpbin"
+        skip "$prog" "${asset}.zip does not contain ${asset}"
+        return
     fi
     rm -f "$tmpzip"
-    mv "$tmpbin" "${DEST}/${prog}"
-    if [ "$OS" = Darwin ]; then
-        xattr -d com.apple.quarantine "${DEST}/${prog}" 2>/dev/null || true
-    fi
-    chmod +x "${DEST}/${prog}"
-    if [ "$OS" = Darwin ]; then
-        codesign -fs - "${DEST}/${prog}"
-    fi
-    printf '%s\n' "Installed ${DEST}/${prog}"
-done
+    install_binary "$prog" "$tmpbin"
+}
 
 # mactop is a menu-bar app: mirror `make install` from joshuarli/mactop
-# (app bundle in /Applications plus LaunchAgent) on top of the
-# binary installed by the loop above.
-if [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ]; then
+# (app bundle in /Applications plus LaunchAgent) on top of the installed binary.
+install_mactop_app() {
     app="/Applications/mactop.app"
     printf '%s\n' "Installing ${app} ..."
-    rm -rf "$app"
-    mkdir -p "$app/Contents/MacOS"
-    cp "${DEST}/mactop" "$app/Contents/MacOS/mactop"
-    cat > "$app/Contents/Info.plist" <<'EOF'
+    bundle=$(mktemp -d "/Applications/.mactop.XXXXXX")
+    mkdir -p "$bundle/Contents/MacOS"
+    cp "${DEST}/mactop" "$bundle/Contents/MacOS/mactop"
+    cat > "$bundle/Contents/Info.plist" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -96,8 +104,10 @@ if [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ]; then
 </dict>
 </plist>
 EOF
-    codesign --force --sign - "$app"
-    xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
+    codesign --force --sign - "$bundle"
+    xattr -dr com.apple.quarantine "$bundle" 2>/dev/null || true
+    rm -rf "$app"
+    mv "$bundle" "$app"
     printf '%s\n' "Installed ${app}"
     agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
     mkdir -p "${HOME}/Library/LaunchAgents"
@@ -121,30 +131,40 @@ EOF
     launchctl bootstrap "gui/$(id -u)" "$agent"
     launchctl kickstart -k "gui/$(id -u)/com.mactop"
     printf '%s\n' "Loaded ${agent}"
-fi
-
-install_direct_macos_binary() {
-    name="$1"
-    url="$2"
-    printf '%s\n' "Downloading ${name} ..."
-    tmpbin=$(mktemp "${DEST}/.${name}.XXXXXX")
-    if ! curl -fsSL -o "$tmpbin" "$url"; then
-        rm -f "$tmpbin"
-        printf '%s\n' "Failed to download ${name}" >&2
-        return 1
-    fi
-    mv "$tmpbin" "${DEST}/${name}"
-    xattr -d com.apple.quarantine "${DEST}/${name}" 2>/dev/null || true
-    chmod +x "${DEST}/${name}"
-    codesign -fs - "${DEST}/${name}"
-    printf '%s\n' "Installed ${DEST}/${name}"
 }
 
-if [ "$OS" = Darwin ]; then
-    install_direct_macos_binary vault \
-        "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault"
-    install_direct_macos_binary gh \
-        "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm"
+# install_direct NAME URL  Download one binary from a fixed URL.
+install_direct() {
+    printf '%s\n' "Downloading $1 ..."
+    tmpbin=$(mktemp "${DEST}/.$1.XXXXXX")
+    if ! curl -fsSL -o "$tmpbin" "$2"; then
+        rm -f "$tmpbin"
+        skip "$1" "download failed"
+        return
+    fi
+    install_binary "$1" "$tmpbin"
+}
+
+if [ $# -eq 0 ]; then
+    set -- fd rg fastermod tm ish e fz fdu fs srv mactop
+    if [ "$OS" = Darwin ]; then set -- "$@" vault gh; fi
 fi
 
+for prog in "$@"; do
+    case "$prog" in
+        vault)
+            install_direct vault \
+                "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault" ;;
+        gh)
+            install_direct gh \
+                "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm" ;;
+        *)
+            install_release "$prog"
+            if [ "$prog" = mactop ] && [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ]; then
+                install_mactop_app
+            fi ;;
+    esac
+done
+
+if $failed; then exit 1; fi
 printf '%s\n' "Done."

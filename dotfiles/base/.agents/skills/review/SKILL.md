@@ -22,7 +22,7 @@ Review the change in front of you, not the repository. This is `ultrareview` nar
 3. **Blast radius.** This is the main lens here. Use `blast-radius` to find what the change breaks beyond the diff, and prove the one fact its safety depends on. Check any measured claim in the branch with `benchmark-checklist`.
 4. **Lenses.** Apply the `ultrareview` lens table to the touched areas only and skip rows the change does not reach. Add `reference-parity` when the change replaces something, and `root-cause` if it fixes a bug without showing the cause. Rows that matter most for a change: `test-audit` on the tests the change adds or should have added; `dead-code-archaeology` on what it orphaned; `single-source-of-truth` on facts it duplicated; `deslop` for needless complexity it introduced, reported and not applied. Use `orchestrate` only when the change is too large to review alone.
 5. **Docs.** Run `docs-refresh` scoped to the change. Do not refresh docs the change did not touch.
-6. **Prove the top.** A P1 or P2 stands only after you have proven the fact it depends on, with the rung reached. Otherwise mark it `unproven` or downgrade it.
+6. **Prove the top.** A P1 or P2 stands only after you have proven the fact it depends on Otherwise mark it `unproven` or downgrade it.
 7. **Report** in the reply. Write no file unless asked, and if asked, write `REVIEW.md` in the `ultrareview` shape.
 
 **The test:** the author can act on every finding without asking what you meant, and nothing the change breaks beyond the diff is left unexamined.
