@@ -1,23 +1,28 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 readonly VERSION="2.0.0"
 readonly MIN_GIT_VERSION="2.56.0"
 
-if [[ -n "${GIT:-}" ]]; then
+if [ -n "${GIT:-}" ]; then
   GIT_BIN="$GIT"
-elif [[ -x /opt/homebrew/bin/git ]]; then
+elif [ -x /opt/homebrew/bin/git ]; then
   GIT_BIN=/opt/homebrew/bin/git
-elif [[ -x /usr/local/bin/git ]]; then
+elif [ -x /usr/local/bin/git ]; then
   GIT_BIN=/usr/local/bin/git
 else
   GIT_BIN=git
 fi
 
-if [[ -z "${NO_COLOR:-}" && -t 1 ]]; then
-  readonly BOLD=$'\033[1m' DIM=$'\033[2m'
-  readonly RED=$'\033[31m' GREEN=$'\033[32m' YELLOW=$'\033[33m' BLUE=$'\033[34m'
-  readonly RESET=$'\033[0m'
+if [ -z "${NO_COLOR:-}" ] && [ -t 1 ]; then
+  BOLD=$(printf '\033[1m')
+  DIM=$(printf '\033[2m')
+  RED=$(printf '\033[31m')
+  GREEN=$(printf '\033[32m')
+  YELLOW=$(printf '\033[33m')
+  BLUE=$(printf '\033[34m')
+  RESET=$(printf '\033[0m')
+  readonly BOLD DIM RED GREEN YELLOW BLUE RESET
 else
   readonly BOLD="" DIM="" RED="" GREEN="" YELLOW="" BLUE="" RESET=""
 fi
@@ -49,31 +54,43 @@ dim()     { printf "  %s%s%s\n" "$DIM" "$1" "$RESET"; }
 die()     { error "$1"; exit 1; }
 
 resolve_git() {
-  if [[ "$GIT_BIN" == */* ]]; then
-    [[ -x "$GIT_BIN" ]] || die "Git executable not found: $GIT_BIN"
-  else
-    GIT_BIN=$(command -v "$GIT_BIN") || die "Git executable not found"
-  fi
+  case "$GIT_BIN" in
+    */*) [ -x "$GIT_BIN" ] || die "Git executable not found: $GIT_BIN" ;;
+    *) GIT_BIN=$(command -v "$GIT_BIN") || die "Git executable not found" ;;
+  esac
 }
 
 git_cmd() {
-  if [[ -n "$REPO_PATH" ]]; then
+  if [ -n "$REPO_PATH" ]; then
     "$GIT_BIN" -C "$REPO_PATH" "$@"
   else
     "$GIT_BIN" "$@"
   fi
 }
 
+# Shell-quotes one word the way bash's printf %q does for printable ASCII:
+# backslash-escape everything outside a conservative safe set, '' for empty.
+# Control characters and non-ASCII bytes are not reproduced exactly.
+shell_quote() {
+  if [ -z "$1" ]; then
+    printf "''"
+    return 0
+  fi
+  case "$1" in
+    *[!A-Za-z0-9_@%+=:,./-]*) printf '%s' "$1" | sed 's/[^A-Za-z0-9_@%+=:,./-]/\\&/g' | tr -d '\n' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 print_command() {
-  local arg
   printf "  %s[dry-run]%s git" "$DIM" "$RESET"
-  if [[ -n "$REPO_PATH" ]]; then printf " -C %q" "$REPO_PATH"; fi
-  for arg in "$@"; do printf " %q" "$arg"; done
+  if [ -n "$REPO_PATH" ]; then printf " -C %s" "$(shell_quote "$REPO_PATH")"; fi
+  for pc_arg in "$@"; do printf " %s" "$(shell_quote "$pc_arg")"; done
   printf "\n"
 }
 
 git_do() {
-  if [[ "$DRY_RUN" == true ]]; then
+  if [ "$DRY_RUN" = true ]; then
     print_command "$@"
     return 0
   fi
@@ -81,7 +98,7 @@ git_do() {
 }
 
 git_do_stdout_quiet() {
-  if [[ "$DRY_RUN" == true ]]; then
+  if [ "$DRY_RUN" = true ]; then
     print_command "$@"
     return 0
   fi
@@ -93,46 +110,53 @@ git_value() {
 }
 
 config_value() {
-  local scope="$1" key="$2"
-  git_value config "$scope" --get "$key"
+  git_value config "$1" --get "$2"
 }
 
 set_config() {
-  local scope="$1" key="$2" value="$3" current
-  current=$(config_value "$scope" "$key") || current=""
-  if [[ "$current" == "$value" ]]; then
-    success "$key = $value (already set)"
+  sc_current=$(config_value "$1" "$2") || sc_current=""
+  if [ "$sc_current" = "$3" ]; then
+    success "$2 = $3 (already set)"
   else
-    git_do config "$scope" --replace-all "$key" "$value"
-    success "$key = $value"
+    git_do config "$1" --replace-all "$2" "$3"
+    success "$2 = $3"
   fi
 }
 
 check_git_version() {
-  local raw version
-  raw=$("$GIT_BIN" --version | awk '{print $3}')
+  gv_out=$("$GIT_BIN" --version)
+  read -r _ _ raw _ <<EOF
+$gv_out
+EOF
   version=${raw%%[-+]*}
-  local -a got want
-  IFS=. read -r -a got <<< "$version"
-  IFS=. read -r -a want <<< "$MIN_GIT_VERSION"
-  local i g w
+  IFS=. read -r got0 got1 got2 _ <<EOF
+$version
+EOF
+  IFS=. read -r want0 want1 want2 _ <<EOF
+$MIN_GIT_VERSION
+EOF
   for i in 0 1 2; do
-    g=${got[$i]:-0}
-    w=${want[$i]:-0}
-    if (( g < w )); then
+    case "$i" in
+      0) g=${got0:-0}; w=${want0:-0} ;;
+      1) g=${got1:-0}; w=${want1:-0} ;;
+      *) g=${got2:-0}; w=${want2:-0} ;;
+    esac
+    if [ "$g" -lt "$w" ]; then
       die "Git $MIN_GIT_VERSION or newer is required (found $raw); upgrade with: brew upgrade git"
-    elif (( g > w )); then
+    elif [ "$g" -gt "$w" ]; then
       break
     fi
   done
 }
 
 confirm() {
-  if [[ "$YES" == true || "$DRY_RUN" == true ]]; then return 0; fi
+  if [ "$YES" = true ] || [ "$DRY_RUN" = true ]; then return 0; fi
   printf "\n  Proceed? [y/N] "
-  local answer
   IFS= read -r answer
-  [[ "$answer" =~ ^[Yy]$ ]] || { printf "Aborted.\n"; exit 0; }
+  case "$answer" in
+    [Yy]) ;;
+    *) printf "Aborted.\n"; exit 0 ;;
+  esac
 }
 
 usage() {
@@ -164,10 +188,10 @@ HELP
 }
 
 parse_args() {
-  while [[ $# -gt 0 ]]; do
+  while [ $# -gt 0 ]; do
     case "$1" in
       -C|--directory)
-        [[ $# -ge 2 ]] || die "$1 requires a repository path"
+        [ $# -ge 2 ] || die "$1 requires a repository path"
         REPO_PATH=$2
         shift 2
         ;;
@@ -175,12 +199,12 @@ parse_args() {
       --yes) YES=true; shift ;;
       --verify) VERIFY=true; shift ;;
       --full)
-        [[ "$MODE" == geometric ]] || die "--full and --redelta cannot be combined"
+        [ "$MODE" = geometric ] || die "--full and --redelta cannot be combined"
         MODE=full
         shift
         ;;
       --redelta)
-        [[ "$MODE" == geometric ]] || die "--full and --redelta cannot be combined"
+        [ "$MODE" = geometric ] || die "--full and --redelta cannot be combined"
         MODE=redelta
         shift
         ;;
@@ -193,22 +217,22 @@ parse_args() {
       *) die "Unknown option: $1" ;;
     esac
   done
-  if [[ "$GLOBALS_ONLY" == true && "$CONFIGURE_ONLY" == true ]]; then
+  if [ "$GLOBALS_ONLY" = true ] && [ "$CONFIGURE_ONLY" = true ]; then
     die "--globals-only and --configure-only cannot be combined"
   fi
-  if [[ "$GLOBALS_ONLY" == true && "$MODE" != geometric ]]; then
+  if [ "$GLOBALS_ONLY" = true ] && [ "$MODE" != geometric ]; then
     die "--full and --redelta require a repository"
   fi
-  if [[ "$GLOBALS_ONLY" == true && "$INCREMENTAL_MIDX" == true ]]; then
+  if [ "$GLOBALS_ONLY" = true ] && [ "$INCREMENTAL_MIDX" = true ]; then
     die "--incremental-midx requires a repository"
   fi
-  if [[ "$GLOBALS_ONLY" == true && "$VERIFY" == true ]]; then
+  if [ "$GLOBALS_ONLY" = true ] && [ "$VERIFY" = true ]; then
     die "--verify requires a repository"
   fi
-  if [[ "$CONFIGURE_ONLY" == true && ( "$MODE" != geometric || "$INCREMENTAL_MIDX" == true ) ]]; then
+  if [ "$CONFIGURE_ONLY" = true ] && { [ "$MODE" != geometric ] || [ "$INCREMENTAL_MIDX" = true ]; }; then
     die "--configure-only cannot be combined with repack mode options"
   fi
-  if [[ "$MODE" != geometric && "$INCREMENTAL_MIDX" == true ]]; then
+  if [ "$MODE" != geometric ] && [ "$INCREMENTAL_MIDX" = true ]; then
     die "--incremental-midx is available with geometric repacks; --full and --redelta rebuild a flat MIDX"
   fi
 }
@@ -216,51 +240,49 @@ parse_args() {
 load_repository_context() {
   git_cmd rev-parse --git-dir >/dev/null 2>&1 || die "No Git repository found; use -C REPO or --globals-only"
 
-  local bare shallow partial refs alternates_path midx_chain git_dir common_dir
   bare=$(git_value rev-parse --is-bare-repository)
-  [[ "$bare" == true ]] && IS_BARE=true
+  [ "$bare" = true ] && IS_BARE=true
   git_dir=$(git_value rev-parse --path-format=absolute --git-dir)
   common_dir=$(git_value rev-parse --path-format=absolute --git-common-dir)
-  if [[ "$git_dir" != "$common_dir" ]]; then
+  if [ "$git_dir" != "$common_dir" ]; then
     IS_LINKED_WORKTREE=true
   fi
-  if [[ "$IS_BARE" == true ]]; then
+  if [ "$IS_BARE" = true ]; then
     REPO_ROOT=$git_dir
   else
     REPO_ROOT=$(git_value rev-parse --show-toplevel)
   fi
 
   shallow=$(git_value rev-parse --is-shallow-repository) || shallow=false
-  [[ "$shallow" == true ]] && IS_SHALLOW=true
+  [ "$shallow" = true ] && IS_SHALLOW=true
   partial=$(git_value config --get extensions.partialClone) || partial=""
-  if [[ -n "$partial" ]] || git_value config --get-regexp '^remote\..*\.promisor$' >/dev/null; then
+  if [ -n "$partial" ] || git_value config --get-regexp '^remote\..*\.promisor$' >/dev/null; then
     IS_PARTIAL=true
   fi
-  if [[ "$(git_value config --bool --get extensions.worktreeConfig || true)" == true ]]; then
+  if [ "$(git_value config --bool --get extensions.worktreeConfig || true)" = true ]; then
     WORKTREE_CONFIG=true
   fi
 
   alternates_path=$(git_value rev-parse --path-format=absolute --git-path objects/info/alternates)
-  if [[ -s "$alternates_path" ]]; then HAS_ALTERNATES=true; fi
+  if [ -s "$alternates_path" ]; then HAS_ALTERNATES=true; fi
 
   refs=$(git_value rev-list --all --max-count=1) || refs=""
-  if [[ -n "$refs" ]] || git_value rev-parse --verify --quiet HEAD >/dev/null; then
+  if [ -n "$refs" ] || git_value rev-parse --verify --quiet HEAD >/dev/null; then
     HAS_COMMITS=true
   fi
 
-  if [[ "$IS_LINKED_WORKTREE" == true && "$WORKTREE_CONFIG" == true ]]; then
+  if [ "$IS_LINKED_WORKTREE" = true ] && [ "$WORKTREE_CONFIG" = true ]; then
     REPO_CONFIG_SCOPE=--worktree
   fi
 
   midx_chain=$(git_value rev-parse --path-format=absolute --git-path objects/pack/multi-pack-index.d)
-  if [[ "$MODE" == geometric && ( "$INCREMENTAL_MIDX" == true || -d "$midx_chain" ) ]]; then
+  if [ "$MODE" = geometric ] && { [ "$INCREMENTAL_MIDX" = true ] || [ -d "$midx_chain" ]; }; then
     MIDX_MODE=incremental
   fi
 
-  local maintenance_strategy maintenance_repack
   maintenance_strategy=$(git_value config --get maintenance.strategy) || maintenance_strategy=""
   maintenance_repack=$(git_value config --bool --get maintenance.incremental-repack.enabled) || maintenance_repack=""
-  if [[ "$MIDX_MODE" == incremental ]] && { [[ "$maintenance_repack" == true ]] || { [[ "$maintenance_strategy" == incremental ]] && [[ "$maintenance_repack" != false ]]; }; }; then
+  if [ "$MIDX_MODE" = incremental ] && { [ "$maintenance_repack" = true ] || { [ "$maintenance_strategy" = incremental ] && [ "$maintenance_repack" != false ]; }; }; then
     die "Layered MIDX cannot be combined with the maintenance.incremental-repack task; disable that task before using this tuner"
   fi
 }
@@ -277,26 +299,23 @@ set_repository_settings() {
   set_config "$REPO_CONFIG_SCOPE" pack.writeBitmapLookupTable true
   set_config "$REPO_CONFIG_SCOPE" core.multiPackIndex true
 
-  if [[ "$IS_BARE" == true ]]; then
+  if [ "$IS_BARE" = true ]; then
     dim "Bare repository: skipping working-tree cache setup"
     return
   fi
 
-  local sparse sparse_checkout index_path index_version index_hex
   sparse=$(git_value config --bool --get index.sparse || true)
   sparse_checkout=$(git_value config --bool --get core.sparseCheckout || true)
-  if [[ "$DRY_RUN" == true ]]; then
-    local untracked
+  if [ "$DRY_RUN" = true ]; then
     untracked=$(config_value "$REPO_CONFIG_SCOPE" core.untrackedCache) || untracked=""
-    if [[ "$untracked" == true ]]; then
+    if [ "$untracked" = true ]; then
       success "core.untrackedCache = true (already set)"
     else
       dim "Would probe the filesystem for untracked-cache support"
     fi
   else
-    local untracked
     untracked=$(config_value "$REPO_CONFIG_SCOPE" core.untrackedCache) || untracked=""
-    if [[ "$untracked" == true ]] || git_cmd update-index --test-untracked-cache >/dev/null 2>&1; then
+    if [ "$untracked" = true ] || git_cmd update-index --test-untracked-cache >/dev/null 2>&1; then
       set_config "$REPO_CONFIG_SCOPE" core.untrackedCache true
     else
       set_config "$REPO_CONFIG_SCOPE" core.untrackedCache false
@@ -304,16 +323,17 @@ set_repository_settings() {
     fi
   fi
 
-  if [[ "$sparse" == true || "$sparse_checkout" == true ]]; then
+  if [ "$sparse" = true ] || [ "$sparse_checkout" = true ]; then
     dim "Sparse checkout detected: leaving the existing index format untouched"
     return
   fi
 
   index_path=$(git_value rev-parse --path-format=absolute --git-path index)
-  if [[ -f "$index_path" ]]; then
+  if [ -f "$index_path" ]; then
     index_hex=$(/usr/bin/od -An -tx1 -j4 -N4 "$index_path" 2>/dev/null | tr -d ' \n') || index_hex=""
-    index_version=${index_hex:6:2}
-    if [[ "$index_version" != 04 ]]; then
+    index_rest=${index_hex#??????}
+    index_version=${index_rest%"${index_rest#??}"}
+    if [ "$index_version" != 04 ]; then
       git_do update-index --index-version=4
       success "Converted the ordinary index to version 4"
     else
@@ -327,9 +347,8 @@ fsmonitor_scope() {
 }
 
 configure_fsmonitor() {
-  [[ "$IS_BARE" == true ]] && return 0
+  [ "$IS_BARE" = true ] && return 0
 
-  local current scope
   current=$(git_value config --get core.fsmonitor) || current=""
   case "$current" in
     ""|false|False|FALSE|0|no|off|NO|OFF|true|True|TRUE|1|yes|on|YES|ON) ;;
@@ -339,17 +358,17 @@ configure_fsmonitor() {
       ;;
   esac
   scope=$(fsmonitor_scope)
-  if [[ "$IS_LINKED_WORKTREE" == true && "$WORKTREE_CONFIG" != true ]]; then
+  if [ "$IS_LINKED_WORKTREE" = true ] && [ "$WORKTREE_CONFIG" != true ]; then
     dim "Linked worktrees share repository-local FSMonitor settings because extensions.worktreeConfig is disabled"
   fi
 
-  if [[ "$DRY_RUN" == true ]]; then
+  if [ "$DRY_RUN" = true ]; then
     print_command fsmonitor--daemon start
     git_do config "$scope" --replace-all core.fsmonitor true
     return 0
   fi
 
-  if [[ "$(uname)" != Darwin ]]; then
+  if [ "$(uname)" != Darwin ]; then
     warn "Built-in FSMonitor setup is only enabled automatically on macOS"
     git_do config "$scope" --replace-all core.fsmonitor false
     return 0
@@ -365,7 +384,7 @@ configure_fsmonitor() {
 }
 
 warm_working_tree() {
-  [[ "$IS_BARE" == true ]] && return 0
+  [ "$IS_BARE" = true ] && return 0
   info "Warming working-tree caches"
   git_do_stdout_quiet status --porcelain=v1 --untracked-files=normal
   success "Working-tree caches initialized"
@@ -378,26 +397,25 @@ verify_objects() {
 }
 
 write_pack_indexes() {
-  local midx_arg
-  if [[ "$MIDX_MODE" == incremental ]]; then
+  if [ "$MIDX_MODE" = incremental ]; then
     midx_arg=--write-midx=incremental
   else
     midx_arg=--write-midx
   fi
 
   info "Repacking objects ($MODE mode)"
-  if [[ "$MODE" == geometric ]]; then
+  if [ "$MODE" = geometric ]; then
     git_do repack --local -d --geometric=2 "$midx_arg" --write-bitmap-index --quiet
-  elif [[ "$MODE" == full ]]; then
+  elif [ "$MODE" = full ]; then
     git_do repack --local -a -d --cruft "$midx_arg" --write-bitmap-index --quiet
   else
     git_do repack --local -a -d --cruft -f --depth=50 --window=10 "$midx_arg" --write-bitmap-index --quiet
   fi
   success "Object packs and bitmap index written"
 
-  if [[ "$HAS_COMMITS" == true ]]; then
+  if [ "$HAS_COMMITS" = true ]; then
     info "Writing commit-graph"
-    if [[ "$MODE" == geometric ]]; then
+    if [ "$MODE" = geometric ]; then
       git_do commit-graph write --reachable --split --changed-paths
       success "Incremental commit-graph layer written"
     else
@@ -414,27 +432,26 @@ write_pack_indexes() {
 }
 
 verify_indexes() {
-  [[ "$VERIFY" == true ]] || return 0
+  [ "$VERIFY" = true ] || return 0
   info "Verifying written indexes"
 
-  local midx graph split_graph
-  if [[ "$DRY_RUN" == true && "$CONFIGURE_ONLY" != true ]]; then
+  if [ "$DRY_RUN" = true ] && [ "$CONFIGURE_ONLY" != true ]; then
     git_do multi-pack-index verify
-    if [[ "$HAS_COMMITS" == true ]]; then
+    if [ "$HAS_COMMITS" = true ]; then
       git_do commit-graph verify
     fi
     return 0
   fi
 
   midx=$(git_value rev-parse --path-format=absolute --git-path objects/pack/multi-pack-index)
-  if [[ -f "$midx" || -d "${midx}.d" ]]; then
+  if [ -f "$midx" ] || [ -d "${midx}.d" ]; then
     git_do multi-pack-index verify
     success "Multi-pack index verified"
   fi
 
   graph=$(git_value rev-parse --path-format=absolute --git-path objects/info/commit-graph)
   split_graph=$(git_value rev-parse --path-format=absolute --git-path objects/info/commit-graphs/commit-graph-chain)
-  if [[ -f "$graph" || -f "$split_graph" ]]; then
+  if [ -f "$graph" ] || [ -f "$split_graph" ]; then
     git_do commit-graph verify
     success "Commit-graph verified"
   fi
@@ -458,7 +475,7 @@ apply_global_settings() {
 
 print_plan() {
   info "Plan"
-  if [[ "$GLOBALS_ONLY" == true ]]; then
+  if [ "$GLOBALS_ONLY" = true ]; then
     dim "Apply shared performance settings; repository settings and data will not be changed"
     dim "core.commitGraph = true"
     dim "core.untrackedCache = true"
@@ -473,24 +490,24 @@ print_plan() {
   fi
 
   printf "  Repository: %s\n" "$REPO_ROOT"
-  if [[ "$IS_LINKED_WORKTREE" == true ]]; then
-    if [[ "$REPO_CONFIG_SCOPE" == --worktree ]]; then
+  if [ "$IS_LINKED_WORKTREE" = true ]; then
+    if [ "$REPO_CONFIG_SCOPE" = --worktree ]; then
       dim "Linked worktree: repository settings use worktree-specific config"
     else
       dim "Linked worktree: repository settings use shared config because extensions.worktreeConfig is disabled"
     fi
   fi
-  if [[ "$HAS_ALTERNATES" == true ]]; then
+  if [ "$HAS_ALTERNATES" = true ]; then
     dim "Alternate object store detected: repack will only write objects owned by this repository"
   fi
-  if [[ "$IS_PARTIAL" == true ]]; then
+  if [ "$IS_PARTIAL" = true ]; then
     dim "Partial clone detected: Git's promisor-aware repack keeps promised objects recoverable"
   fi
-  if [[ "$IS_SHALLOW" == true ]]; then
+  if [ "$IS_SHALLOW" = true ]; then
     dim "Shallow repository detected: repacking and graph traversal respect its shallow history boundary"
   fi
   dim "Apply repository-local graph, index, negotiation, pack, and working-tree cache settings"
-  if [[ "$CONFIGURE_ONLY" == true ]]; then
+  if [ "$CONFIGURE_ONLY" = true ]; then
     dim "Warm working-tree caches and stop before repacking"
     return
   fi
@@ -501,10 +518,10 @@ print_plan() {
   esac
   dim "Write split commit-graph data and check automatic ref packing"
   dim "No reflogs, unreachable objects, branches, remotes, worktree records, or rerere data will be expired or removed"
-  if [[ "$VERIFY" == true ]]; then
+  if [ "$VERIFY" = true ]; then
     dim "Run a full object check before work and verify written indexes afterward"
   fi
-  if [[ "$MIDX_MODE" == incremental ]]; then
+  if [ "$MIDX_MODE" = incremental ]; then
     dim "Write layered MIDX output"
   fi
 }
@@ -514,14 +531,14 @@ main() {
   resolve_git
   check_git_version
 
-  if [[ "$GLOBALS_ONLY" != true ]]; then
+  if [ "$GLOBALS_ONLY" != true ]; then
     load_repository_context
   fi
 
   print_plan
   confirm
 
-  if [[ "$GLOBALS_ONLY" == true ]]; then
+  if [ "$GLOBALS_ONLY" = true ]; then
     apply_global_settings
     return 0
   fi
@@ -530,8 +547,8 @@ main() {
   configure_fsmonitor
   warm_working_tree
 
-  if [[ "$VERIFY" == true ]]; then verify_objects; fi
-  if [[ "$CONFIGURE_ONLY" == true ]]; then
+  if [ "$VERIFY" = true ]; then verify_objects; fi
+  if [ "$CONFIGURE_ONLY" = true ]; then
     verify_indexes
     success "Configuration complete"
     return 0
