@@ -6,118 +6,35 @@ disable-model-invocation: true
 
 # Make the Rust CLI Declarative, Lexopt-Only, and Self-Describing
 
-You are improving this codebase so the command-line surface is explicit, declarative, lexopt-only, self-describing, and tested as an observable contract.
+Establish one authoritative command schema that drives parsing, validation, help, version, error behavior, and tests, without changing business logic.
 
-The goal is to establish one authoritative command schema that drives parsing, validation, help, version/error behavior, and testable CLI semantics without changing business logic.
+Apply only when migrating an existing Rust CLI to this architecture; otherwise report the evidence and change nothing. The intended changes are: replace the parser with lexopt, remove Clap and its dependency surface, centralize CLI behavior under the schema and modules below, and add generated help, version, and tests. Preserve command names, valid invocations, aliases (unless removal is documented), defaults, environment behavior, output formats, exit codes, and side effects.
 
-Scope: the complete Rust CLI surface: parser, dispatcher, command modules, metadata schema, help, version, errors, tests, docs, and build-time version metadata.
+## Inspect first
 
-Applicability: Apply this prompt only when an existing Rust CLI is being migrated to the explicitly mandated lexopt-based declarative command architecture described by this prompt. If the condition is materially absent, report that evidence and make no speculative changes.
+Read `Cargo.toml`, `Cargo.lock`, `src/main.rs`, `src/lib.rs` if present, every CLI module, tests, README and docs, build scripts, and every argument consumer. Inventory the whole surface: executable name, subcommands and nested subcommands, aliases, global and local options, short and long flags, positionals (required, optional, repeated), defaults, environment inputs, exit codes, and current help and version behavior. Run the narrowest baseline tests and record preexisting failures.
 
-Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
+## 1. lexopt only
 
-Intentional changes: Replace the CLI parser with lexopt exclusively; remove obsolete Clap parser/dependency surface; centralize CLI behavior under the mandated schema/modules; add generated help/version metadata and associated tests. Do not change business logic or other CLI semantics beyond those explicit architectural changes.
+`lexopt` is the sole parser. No clap (or derive), structopt, argh, pico-args, custom parser libraries, or ad hoc per-command parsing. Remove Clap dependencies and derives from `Cargo.toml` and `Cargo.lock`.
 
-If inspection shows that the relevant contract already holds, do not manufacture
-changes. Verify it, correct only concrete gaps, and report the evidence.
+No glob imports in the CLI: no `use super::*`, `use crate::*`, `use lexopt::prelude::*`. Import the specific metadata, helpers, and lexopt types each module uses, so a reader can see what uses lexopt.
 
-## First inspect the repository
+Parse `OsString`/`OsStr`-aware and never lossy-convert arguments. If a downstream contract needs UTF-8, reject a non-UTF-8 value with an explicit parse error; keep opaque command tails and paths as `OsString`.
 
-Before editing:
+Support lexopt semantics: long options, short options, short clusters where unambiguous, option values, `--option=value`, `--`, positionals, and unknown-option errors. Make lexopt visibly the parsing boundary:
 
-- Read Cargo.toml, Cargo.lock, src/main.rs, src/lib.rs if present, all CLI-related modules, tests, README/docs, build scripts, and every current argument consumer.
-- Inventory the complete existing CLI surface:
-  - executable name
-  - subcommands and nested subcommands
-  - aliases
-  - global options
-  - command-local options
-  - short and long flags
-  - positional arguments
-  - required/optional/repeated values
-  - defaults
-  - environment-variable inputs
-  - exit-code behavior
-  - existing help/version behavior
-- Run the narrowest useful baseline tests before changing code.
-
-- Record failures that predate the work.
-
-## Non-negotiable design
-
-Each numbered requirement defines an invariant or observable behavior, its
-authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
-and the evidence that proves it. Do not prescribe incidental implementation
-structure unless that structure is itself part of the contract.
-
-### 1. Use lexopt exclusively
-
-Use `lexopt` as the only argument-parser dependency.
-
-Do not use:
-
-- clap
-- clap derive
-- structopt
-- argh
-- pico-args
-- custom parser libraries
-- ad hoc parsing in individual commands
-
-Remove obsolete Clap dependencies and derives from Cargo.toml and Cargo.lock.
-
-Do not use glob imports anywhere in the CLI implementation. In particular, do
-not use `use super::*`, `use crate::*`, or `use lexopt::prelude::*`. Import the
-specific command metadata, helpers, and lexopt types each module uses. This is
-intentional: a reader should be able to see which code is using lexopt and
-which shared contracts a command depends on.
-
-Use `OsString`/`OsStr`-aware parsing. Do not lossy-convert command-line arguments to UTF-8 merely for convenience.
-If a downstream domain contract genuinely requires UTF-8, reject a non-UTF-8
-value explicitly with a parse error; preserve opaque command tails and paths as
-`OsString` values.
-
-Support the normal lexopt semantics for:
-
-- long options
-- short options
-- short-option clusters where unambiguous
-- options with values
-- `--option=value`
-- `--`
-- positional arguments
-- unknown-option errors
-
-The implementation must visibly use lexopt as the parsing boundary:
-
-- construct a `lexopt::Parser` from the argument iterator
-- consume tokens with `Parser::next`
-- consume option values with `Parser::value` (or `Parser::values` when the
-  option intentionally owns a contiguous value list)
+- construct a `lexopt::Parser` from the argument iterator and consume tokens with `Parser::next`
+- consume option values with `Parser::value` (`Parser::values` for a contiguous list the option owns)
 - match `lexopt::Arg::Short`, `Arg::Long`, and `Arg::Value` explicitly
-- use `Parser::from_args`/`from_iter` in focused parser tests
-- use `Parser::raw_args` only for an intentionally opaque tail after a
-  required `--` separator, such as a guest command and its arguments
+- use `Parser::from_args` or `from_iter` in parser tests
+- use `Parser::raw_args` only for an intentionally opaque tail after a required `--`, such as a guest command and its arguments
 
-Do not replace lexopt with manual index arithmetic over `Vec<String>`. If a
-command has a required opaque tail, it is acceptable to materialize that
-command's remaining raw arguments, locate the required `--` boundary, and
-construct one new `lexopt::Parser` for the isolated structured prefix. That
-prefix must still be parsed entirely with lexopt; preserve only the post-`--`
-tail as `OsString` values. Document this boundary rather than hiding it behind
-a generic second parser.
+Never replace lexopt with index arithmetic over `Vec<String>`. For a required opaque tail, materialize that command's remaining raw arguments, locate the required `--`, build one new `lexopt::Parser` for the structured prefix (parsed entirely with lexopt), and keep only the post-`--` tail as `OsString`s. Document that boundary instead of hiding it behind a generic second parser.
 
-### 2. src/main.rs is the sole CLI entrypoint
+## 2. main.rs is the sole entrypoint
 
-`src/main.rs` must contain only binary entrypoint responsibilities:
-
-- collect `std::env::args_os()`
-- call the CLI dispatcher
-- convert the result into the process exit code
-
-No argument parsing, command dispatch logic, help rendering, or business logic may live in `main.rs`.
-
-All CLI behavior must flow through a single function such as:
+`src/main.rs` collects `std::env::args_os()`, calls the dispatcher, and converts the result to an exit code. No argument parsing, dispatch, help rendering, or business logic. All behavior flows through one function, adapted to the project:
 
 ```rust
 pub fn run<I, T>(args: I) -> ExitCode
@@ -126,13 +43,9 @@ where
     T: Into<OsString>;
 ```
 
-Adapt the exact signature to the project’s architecture, but keep parsing centralized.
+Multiple binary targets route through the same implementation, or the skipped target is documented with the reason.
 
-If the repository has multiple binary targets, route them through the same CLI implementation or clearly document why another target is not part of this CLI.
-
-### 3. Split subcommands into modules
-
-Use this general structure:
+## 3. One module per subcommand
 
 ```text
 src/main.rs
@@ -142,42 +55,15 @@ src/cli/
   help.rs            # generated help renderer
   error.rs           # parse and presentation errors
   version.rs         # embedded version information
-  <subcommand>.rs
-  <another-command>.rs
+  <subcommand>.rs    # one per subcommand, nested ones follow the same pattern
 build.rs             # if needed for git metadata
 ```
 
-Each subcommand must have its own module:
+Each subcommand module owns its typed argument model, parser, command spec, execution function, and focused parser and help tests.
 
-```text
-src/cli/run.rs
-src/cli/check.rs
-src/cli/status.rs
-```
+## 4. One declarative schema
 
-Each subcommand module owns:
-
-- its typed argument model
-- its parser
-- its command metadata/specification
-- its command execution function
-- focused parser/help tests
-
-Nested subcommands should follow the same pattern.
-
-### 4. Create one declarative command schema
-
-Do not maintain separate lists for:
-
-- parser spellings
-- help text
-- usage strings
-- required arguments
-- defaults
-- value names
-- command summaries
-
-Define a shared metadata model, for example:
+Do not maintain separate lists for parser spellings, help text, usage strings, required arguments, defaults, value names, or summaries. Define shared metadata, for example:
 
 ```rust
 struct CommandSpec {
@@ -208,87 +94,22 @@ struct PositionalSpec {
 }
 ```
 
-The exact types may differ, but the design must satisfy these invariants:
+The exact types may differ, but these invariants hold:
 
-- every command has a specification
-- every option spelling comes from the specification
-- every positional argument is described in the specification
-- every option and positional argument has a non-empty brief explanation
-- every command has one non-empty canonical description; do not maintain both
-  a summary and a long description for the same command
-- names are unique within their scope
-- short/long collisions are rejected by tests or construction
-- usage lines are rendered from metadata rather than manually duplicated
-- help output is rendered from metadata rather than hardcoded help blobs
+- every command has a spec, every option spelling comes from a spec, and every positional is described
+- every option and positional has a non-empty explanation, and every command has exactly one non-empty canonical description (no summary plus long description for the same command)
+- names are unique within their scope, and short and long collisions are rejected by tests or construction
+- usage lines and help output are rendered from metadata, never hand-written; no separate `FOO_HELP` constants or multi-line help strings
 
-Descriptions are necessarily textual data, but they must live in the command schema and be rendered from it. Do not create separate `FOO_HELP` constants or hand-maintained multi-line help strings.
+The same schema drives lexopt token recognition, validation, usage, command help, complete top-level help, and the metadata tests. Use option-matching helpers that consume `OptionSpec` values, so spellings are not repeated as string literals in parsers, and tie dispatch names to registered `CommandSpec` values.
 
-The same schema must drive:
+## 5. Per-command help
 
-1. lexopt token recognition
-2. argument validation
-3. usage generation
-4. command help
-5. complete top-level help
-6. metadata invariant tests
+`tool command -h` and `--help` (nested commands too) print to stdout, exit successfully, and work before required-argument validation. They show complete usage, every local option and positional with defaults, value names, required and repeated status, environment inputs, nested subcommands, and examples when provided. All of it is generated from the spec.
 
-Use explicit option-matching helpers that consume `OptionSpec` values so option
-spellings are not repeated as string literals in command parsers. Keep command
-dispatch names tied to the registered `CommandSpec` values as well.
+## 6. Top-level help
 
-### 5. Every command gets its own help
-
-Every command and nested command must support:
-
-```text
-tool command -h
-tool command --help
-```
-
-Help must:
-
-- print to stdout
-- exit successfully
-- work before required-argument validation
-- show the command’s complete usage
-- show all local options
-- show all positional arguments
-- show defaults, value names, required/repeated status, and environment inputs where relevant
-- show nested subcommands if applicable
-- show examples when provided
-
-`-h` and `--help` must be generated from the command specification, not implemented as special hardcoded text.
-
-### 6. Top-level help must describe the entire CLI
-
-The following must expose the complete CLI surface:
-
-```text
-tool -h
-tool --help
-```
-
-Do not print only a short subcommand list.
-
-Top-level help must include, in deterministic order:
-
-- full executable usage
-- global/common options, shown once
-- one generated command reference containing every command and nested command
-- each command’s usage, canonical description, options, positional arguments,
-  defaults, value names, and required/repeated markers
-
-Do not print a short `Commands:` index followed by a second copy of the same
-descriptions. Do not concatenate complete standalone command pages. The root
-view should be a compact reference, while `tool command --help` remains the
-detailed page with examples and any command-specific narrative.
-
-Show inherited/common options once at the root. Command blocks should list only
-their command-specific options, with one note explaining that common options
-are inherited. A standalone command page must still show the complete option
-set, including inherited options.
-
-For example, a readable generated root view should have this shape:
+`tool -h` and `--help` expose the complete CLI surface, deterministically ordered: full usage, common options shown once, and one generated command reference containing every command and nested command with usage, canonical description, options, positionals, defaults, value names, and required and repeated markers. No short `Commands:` index followed by duplicated descriptions, and no concatenated standalone pages. The root is a compact reference; `tool command --help` is the detailed page with examples. Command blocks list only their own options with one note that common options are inherited, while a standalone command page shows the full set including inherited ones. The reference is rendered recursively from the schema, with no second hand-written top-level document. Target shape:
 
 ```text
 tool: Local worlds for the development environment.
@@ -323,36 +144,9 @@ Command reference:
       COMMAND [ARG ...]             Command and arguments after `--`
 ```
 
-The command reference must be rendered recursively from the shared schema. A
-user must be able to understand the complete command surface from this one
-invocation without repeatedly calling `--help` on every subcommand. Do not
-maintain a second hand-written top-level help document.
+## 7. `-v` / `--version` with a compile-time git SHA
 
-### 7. Add -v/--version with compile-time git SHA
-
-Implement:
-
-```text
-tool -v
-tool --version
-```
-
-The version output must include:
-
-- the package version
-- the git short SHA embedded at build time
-
-Example shape:
-
-```text
-tool 1.4.0 (git abc123456789)
-```
-
-Do not execute git at runtime.
-
-If the project has no build script, add one that obtains the short SHA and emits a Cargo rustc environment variable, then embed it with `env!` or `concat!`.
-
-For example, the resulting code may use:
+Output includes the package version and the short git SHA embedded at build time, for example `tool 1.4.0 (git abc123456789)`. Never execute git at runtime. If there is no build script, add one that obtains the short SHA and emits a Cargo rustc environment variable, then embed it:
 
 ```rust
 pub const VERSION: &str = concat!(
@@ -363,136 +157,22 @@ pub const VERSION: &str = concat!(
 );
 ```
 
-Use a clear, documented policy when building outside a Git checkout. Do not silently emit an unknown value or omit the SHA. If an explicit build-environment override is necessary for release archives, it must still be a non-empty compile-time SHA value.
-Validate that the embedded value has the expected hexadecimal short-SHA shape;
-do not accept arbitrary labels such as `unknown` or `dirty` in its place.
+Define and document the policy for builds outside a Git checkout. Never silently emit an unknown value or omit the SHA. An explicit build-environment override for release archives must still be a non-empty compile-time SHA. Validate that the value is a hexadecimal short SHA, and reject labels such as `unknown` or `dirty`. Add Cargo rerun directives for Git metadata.
 
-Add appropriate Cargo rerun directives for Git metadata.
+## 8. Typed errors
 
-### 8. Define predictable error behavior
+Use typed errors for unknown commands, unknown options, missing option values, invalid option values, missing required positionals, unexpected positionals, and duplicate non-repeatable options. Parse errors go to stderr with a nonzero exit, identify the command or argument, and include concise usage when useful. Help and version are successful early exits. User input never panics. Preserve existing runtime error and exit-code semantics. Define global-option placement rules, preserve existing behavior where possible, and document intentional changes.
 
-Use typed errors for:
+## 9. Tests
 
-- unknown commands
-- unknown options
-- missing option values
-- invalid option values
-- missing required positionals
-- unexpected positionals
-- duplicate non-repeatable options
+Test the observable contract: every command's parser and its `-h` and `--help`; top-level help, including the compact shape and the absence of a duplicate command index; `-v` and `--version`; the embedded SHA; unknown commands and options; missing and invalid values; required positionals; optional and repeated values; `--`; short clusters; `--option=value`; the `Arg::Short`, `Arg::Long`, and `Arg::Value` paths; opaque post-`--` tails preserved without option reinterpretation; non-UTF-8 arguments where relevant; nested commands; and deterministic help ordering.
 
-Requirements:
+Metadata tests fail when an option or positional has no explanation, a command has no description, an option name collides with another, a command is missing from the registered tree, a usage or help string is manually duplicated, or a parser repeats an option spelling instead of matching its `OptionSpec`. Prefer stable string assertions or the project's existing snapshot convention; add no snapshot dependency unless necessary.
 
-- parse errors go to stderr
-- parse errors use a nonzero exit code
-- errors identify the relevant command/argument
-- errors include concise usage guidance when useful
-- help and version are successful early exits
-- avoid panics for user input
-- preserve existing runtime error and exit-code semantics
+## 10. Keep the migration coherent
 
-Global options must have clearly defined placement rules. Preserve existing behavior where possible and document any intentional change.
+No business logic changes, no unrelated dependencies or refactors. Update README and docs so the documented CLI matches generated help. Verify with the compiler and focused tests, classify every remaining exception, widen checks only where the boundary warrants it, and separate preexisting failures from regressions.
 
-### 9. Test the observable contract
+Done when lexopt is the only parser with no Clap remaining, no glob imports exist under `src/cli`, `src/main.rs` is only the entrypoint, each subcommand has its own `src/cli/<subcommand>.rs` module and spec, parsing and help share one schema, every flag and positional is explained, every command supports `-h`/`--help`, top-level help is one recursive reference, `--version` carries the compile-time SHA, output is deterministic, parser and metadata tests exist, behavior is preserved, and the project compiles and passes its tests.
 
-Add focused tests covering:
-
-- every command’s parser
-- every command’s `-h` and `--help`
-- top-level complete help, including the compact reference shape and the
-  absence of a duplicate command index
-- `-v` and `--version`
-- embedded git SHA presence
-- unknown commands/options
-- missing values
-- invalid values
-- required positionals
-- optional and repeated values
-- `--`
-- short-option clusters
-- `--option=value`
-- `lexopt::Arg::Short`, `Arg::Long`, and `Arg::Value` paths
-- opaque post-`--` tails preserved without option reinterpretation
-- non-UTF-8 arguments where relevant
-- nested commands
-- deterministic help ordering
-
-Add metadata invariant tests that fail if:
-
-- an option has no explanation
-- a positional has no explanation
-- a command has no description
-- an option name collides with another option
-- a command is omitted from the registered command tree
-- a manually duplicated usage/help string is introduced
-- a command parser repeats an option spelling instead of matching its
-  `OptionSpec`
-
-Prefer stable string assertions or existing project snapshot conventions. Do not add a snapshot dependency unless necessary.
-
-### 10. Keep the migration coherent
-
-Do not change business logic while migrating the parser.
-
-Preserve:
-
-- command names
-- existing valid invocations
-- aliases, unless intentionally removed and documented
-- defaults
-- environment-variable behavior
-- output formats
-- exit codes
-- side effects
-
-Update relevant README/docs so the documented CLI matches generated help.
-
-Do not introduce unrelated dependencies or unrelated refactors.
-
-
-## Explicit anti-patterns
-
-Do not:
-
-- use Clap, clap derive, structopt, argh, pico-args, another parser library, or ad hoc per-command parsing instead of lexopt
-- hide lexopt behind manual index arithmetic or a generic parser that repeats option spellings outside the command schema
-- use glob imports under `src/cli` or lossy UTF-8 conversion for paths, arguments, or opaque command tails
-- hardcode duplicate usage/help blobs or maintain parser/help/default metadata as competing sources of truth
-- execute Git at runtime for version output or silently emit an unknown/non-hexadecimal SHA
-- panic on user input, weaken parser/help tests, or change business logic under cover of the CLI migration
-- introduce unrelated dependencies, formatting churn, or refactors
-
-
-## Verification
-
-After editing:
-
-- Run the nearest hard judge for the complete Rust CLI surface: parser, dispatcher, command modules, metadata schema, help, version, errors, tests, docs, and build-time version metadata: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
-- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
-- Audit all CLI spellings/semantics, lexopt-only parsing, main.rs boundary, command schema, recursive help, version SHA, typed errors, parser/help tests, docs, and migration completeness; classify every remaining exception rather than assuming it is harmless.
-- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
-
-## Acceptance criteria
-
-The refactor is complete only when all of the following are true:
-
-- `lexopt` is the only CLI parser.
-- CLI modules use explicit imports; no `use super::*`, `use crate::*`, or
-  `use lexopt::prelude::*` remains under `src/cli`.
-- No Clap parser, derive, or help definition remains.
-- `src/main.rs` is only the binary entrypoint.
-- Every subcommand has its own `src/cli/<subcommand>.rs` module.
-- Every command has a shared metadata specification.
-- Parser behavior and help rendering use the same metadata.
-- Every flag and positional argument has a brief explanation.
-- Every command supports `-h` and `--help`.
-- Top-level `-h`/`--help` prints the complete recursive CLI surface.
-- Top-level help is one readable generated command reference, not a short
-  command index plus duplicated command pages.
-- `-v`/`--version` includes the package version and compile-time git short SHA.
-- Help and version output are deterministic.
-- Focused tests cover the parser contract and metadata invariants.
-- Existing behavior is preserved unless explicitly changed.
-- The project compiles and its relevant tests pass.
-
-The architectural principle is: **one command schema must drive parsing, validation, and help rendering while the lexopt boundary remains explicit and visible in the source.**
+**The principle:** one command schema drives parsing, validation, and help while the lexopt boundary stays explicit in the source.

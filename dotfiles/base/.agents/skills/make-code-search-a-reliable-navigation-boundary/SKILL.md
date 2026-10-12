@@ -6,373 +6,52 @@ disable-model-invocation: true
 
 # Make Code Search a Reliable Navigation Boundary
 
-You are improving this codebase so coding agents can reliably reach the right definitions, callers, contracts, tests, and documentation through ordinary filename and text search.
+Make names, paths, types, and comments the shortest path from task vocabulary to the right definition, caller, test, and doc, using ordinary filename and text search. A compiler, language server, or index may help, but it must not be the only way to find or understand code.
 
-The goal is to make names, paths, types, boundaries, and explanations form the shortest useful path from task vocabulary to the correct code.
+Apply only where current naming causes needless hops or ambiguity; otherwise report the evidence and change nothing. Preserve behavior, public contracts, persisted formats, output, side effects, and permissions. Discoverability renames, moves, type tightening, module splits, and legacy cleanup are the only intended changes.
 
-Scope: repository-wide naming, paths, symbols, methods, types, modules, tests, docs, exports, aliases, and legacy implementations as navigated by ordinary filename/text search.
+## Inspect first
 
-Applicability: Apply this prompt only when coding agents or humans must reliably locate important concepts using ordinary filename and text search, and current naming/structure produces unnecessary search hops or ambiguity. If the condition is materially absent, report that evidence and make no speculative changes.
-
-Preserve: Existing valid behavior, public contracts, persisted data and formats, output, side effects, permissions, state transitions, and supported-platform semantics unless this request explicitly changes them.
-
-Intentional changes: Discoverability-driven renames, moves, type tightening, module splits, and legacy cleanup only where required by the contract and compatible with the invoking request.
-
-If inspection shows that the relevant contract already holds, do not manufacture
-changes. Verify it, correct only concrete gaps, and report the evidence.
-
-## First inspect the repository
-
-Before editing:
-
-- Inventory the important domain concepts and their definitions, callers, methods,
-  types, file paths, tests, fixtures, documentation, configuration, exports, aliases,
-  and legacy implementations.
-- Use `rg --files` and focused `rg` searches to see how an agent would actually find
-  those concepts. Search both symbol names and likely task vocabulary.
-- Identify generic names, inconsistent spellings, monolithic or grab-bag modules,
-  implicit contracts, duplicated implementations, and stale paths.
-- Run the narrowest useful baseline compiler, type checker, and focused tests before
-  changing code. Record failures that predate the work.
-
-## Non-negotiable design
-
-Each numbered requirement defines an invariant or observable behavior, its
-authoritative owner or boundary, the shortcut or ambiguous state it prohibits,
-and the evidence that proves it. Do not prescribe incidental implementation
-structure unless that structure is itself part of the contract.
-
-### 1. Treat text search as a navigation boundary
-
-Assume that a coding agent will commonly navigate with commands such as:
+Inventory the important concepts with their definitions, callers, methods, types, paths, tests, fixtures, docs, config, exports, aliases, and legacy implementations. Search the way an agent would, by symbol and by task vocabulary:
 
 ```text
 rg --files | rg -i 'delivery-history|deliveryHistory|delivery_history'
 rg -n 'calculateNotificationRetryBackoff'
 ```
 
-Design important concepts so a focused search reaches the relevant definition in one
-or very few hops. A compiler, language server, repository map, or semantic index may
-help, but it must not be the only way to locate or understand the code.
+Note generic names, inconsistent spellings, grab-bag modules, duplicate implementations, and stale paths. Run the narrowest baseline compile and tests, and record preexisting failures.
 
-Names and paths are search interfaces. Every important concept should have a stable,
-distinctive textual handle that appears at its definition and at meaningful uses.
-Prefer a precise domain term over a short name that happens to be locally clear.
+## Rules
 
-Do not optimize for fewer characters, cleverness, or accidental reuse of a familiar
-generic word. Optimize for signal: a search should return the definition, its relevant
-callers, its tests, and its documentation without a large unrelated haystack.
+- **A name is a search handle.** Every important concept has a distinctive textual handle at its definition and at meaningful uses: `createStripeClient`, `NotificationDeliveryHistory`, `calculateNotificationRetryBackoff`, `OrganizationId`, not `create`, `data`, `manager`, `helper`, `utils`, `config`, `result`. Method names count, because a call has no import trail and the method name may be the only handle. Qualify a generic word only when its scope does not make it unambiguous. Optimize for signal, not brevity.
+- **One spelling per concept** across directories, files, symbols, parameters, imports, exports, config keys, tests, fixtures, and docs. No `organizations` beside `customers`, no `orgId` beside `organizationId`. A compatibility alias keeps the canonical internal name, is documented at the boundary, and is marked legacy.
+- **Files and modules carry domain meaning.** Name them for the concept they own and keep definition, implementation, and focused tests together (`notification-delivery-history.ts` beside its `.test.ts`). Split a grab-bag only along a coherent domain boundary, never to hit a line count. Do not let barrel files or wildcard re-exports convey ownership; prefer explicit exports when that makes a source easier to find. Name test files after the source (`stripe.test.ts` for `stripe.ts`, `delivery_history_test.py` for `delivery_history.py`) and test names after the behavior or invariant. Avoid ownership-hiding names like `helpers.ts`, `utils.ts`, `common.ts`, `misc.ts`, `manager.ts`.
+- **Types are searchable contracts.** Precise input and output types, branded ids, enums for states, explicit result and error types, named request and response types. Prefer `transferOwnership(userId: UserId, organizationId: OrganizationId, projectId: ProjectId) -> TransferOwnershipResult` to three strings and an untyped return. Use `unknown` only at untrusted boundaries, then narrow. Avoid catch-all `Data`, `Config`, `Result`, `Context`.
+- **Explanations sit where a name search lands:** a concise comment above the definition giving the why, invariants, ordering, permission, or transaction rules, compatibility quirks, and why a fallback exists. Never restate the name. Repo-wide conventions (source locations, naming rules, generated-code boundaries) go in `AGENTS.md`, `CLAUDE.md`, or the established conventions file, and stay current.
+- **Do not hide behavior behind indirection** (a generic dispatcher, anonymous callback, or catch-all registry) whose only description lives elsewhere.
+- **Rust:** `parse`, `new`, `validate`, `run`, `execute`, `context`, `result`, and `value` are fine when the receiver or enclosing module makes the domain unmistakable. Do not mechanically repeat that context in the symbol: when a function is its module's sole entry point, `runner_runtime::main` and `web::run` are clearer than a verb that repeats the module, and a module-owned validator can stay `workflow_validation::validate`. Qualify only when it adds information search would lose (`parse_workflow_source`, `validate_command_spec_tree`, `render_command_help`, `read_leased_job_spec`, `job_expression_context`). Apply the same vocabulary to associated methods, error variants, fixtures, test names, docs, and examples; a precise top-level function does not make up for ambiguous methods or a stale alias elsewhere.
+- **Legacy is explicit.** Remove obsolete implementations and aliases when safe. Otherwise mark them deprecated (`@deprecated` or the language's equivalent), name the replacement, state the compatibility or removal constraint, forward to the single canonical implementation, and keep new code, examples, and tests off them.
 
-### 2. Choose one canonical, domain-specific vocabulary
+## Renames
 
-Choose one spelling for each concept and use it consistently in:
+Before renaming, moving, or splitting, inventory every reference: the definition and overloads, direct and indirect callers including method calls, imports, exports, re-exports, tests, fixtures, scripts, generated inputs, config, migrations, docs, and deprecated paths. State the canonical vocabulary and the compatibility policy. Update every reference, then search the old spelling and classify each remaining match. Do not leave a half-migrated tree where both spellings look canonical, and do not mix a rename with formatting, dependency, or logic changes.
 
-- directories and file names
-- modules, classes, functions, methods, constants, events, and errors
-- parameters, local variables, and type names
-- imports, exports, configuration keys, tests, fixtures, examples, and docs
+A repo-wide request covers source, binaries, exports, feature gates, migrations, config, generated inputs, fixtures, tests, scripts, docs, diagnostics, and parallel implementations that answer the same vocabulary. Renames that cross exports, binaries, persistence names, or wire fields need more than a focused module test.
 
-Prefer names such as:
+## Verify
 
-```text
-createStripeClient
-NotificationDeliveryHistory
-calculateNotificationRetryBackoff
-OrganizationId
-```
+Test as a search-driven agent would:
 
-over names such as:
+1. Search the canonical name; the definition is the obvious hit, followed by callers, tests, and docs.
+2. Search old names, synonyms, and generic terms; every remaining match is intentional and documented.
+3. Search by task vocabulary ("where is the notification retry delay calculated?"); the resulting files, symbols, comments, and tests answer it without paging through unrelated modules.
+4. Check that methods, types, errors, and state names are independently searchable, not just top-level functions.
+5. Run the compiler or type checker and focused tests, widening when the change crosses public contracts. Test behavior, not preferred strings.
 
-```text
-create
-data
-manager
-helper
-utils
-config
-result
-```
+**The test:** a focused `rg` for an important concept returns its definition and reverse references without a large generic haystack.
 
-Generic words are acceptable only when the surrounding scope makes the concept truly
-unambiguous. Otherwise qualify the name with the domain, operation, resource, or
-state it represents. Name methods as carefully as top-level functions: a method call
-often has no import or module trail, so its method name may be the agent's only useful
-search handle.
+## Avoid
 
-Do not use synonyms or arbitrary aliases for one concept, such as `organizations` in
-one area and `customers` in another, or `orgId` beside `organizationId`. If an alias is
-required for compatibility or an external protocol, keep the canonical internal name,
-document the boundary, and mark the alias as legacy where the language supports it.
+Vague names, synonyms for one concept, `utils`/`helpers`/`manager` buckets, relying on an IDE or import graph, hidden ownership behind wildcard exports, implicit `any` or untyped contracts, a symbol's only explanation living far away, mechanical renames without an inventory, size-driven splits, behavior changes under cover of a discoverability refactor, and improving one convenient module when the scope is repo-wide.
 
-Do not rename a public concept merely to satisfy a preference. When a rename is
-needed, inventory all references first and migrate the vocabulary coherently.
-
-### 3. Make files and module boundaries carry domain meaning
-
-Name directories and files after the concept they own. Keep a related definition,
-implementation, and focused tests easy to find together. Prefer boundaries such as:
-
-```text
-notifications/
-  notification-delivery-history.ts
-  notification-retry-backoff.ts
-  notification-delivery-history.test.ts
-```
-
-over a large module whose ownership is hidden behind names such as `helpers.ts`,
-`utils.ts`, `common.ts`, `misc.ts`, or `manager.ts`.
-
-Split a monolith or grab-bag module when a coherent domain boundary makes retrieval,
-reasoning, and testing clearer. Keep each resulting module responsible for a
-searchable concept or tightly related set of concepts. Do not fragment code to meet
-an arbitrary line count, and do not move code without updating every reference.
-
-Avoid relying on package specifiers, barrel files, or wildcard re-exports to convey
-ownership. They may remain when they are part of the public API, but important symbols
-must still have distinctive names and an obvious definition. Prefer explicit exports
-when that makes the source of a concept easier to search.
-
-Name test files after the source concept they cover, for example
-`stripe.test.ts` for `stripe.ts` or `delivery_history_test.py` for
-`delivery_history.py`. Test names should include the behavior or invariant they
-exercise so a search for a requirement reaches the test as well as the implementation.
-
-### 4. Make contracts and state transitions explicit in types
-
-Give functions, methods, public values, and important internal boundaries precise
-input and output types. A signature should tell an agent what the code accepts,
-returns, mutates, and may reject without requiring a full implementation read.
-
-Avoid `any`, untyped dictionaries, implicit dynamic values, and broad primitive types
-when a domain contract is available. Use the strongest suitable representation for
-the language:
-
-- distinct or branded types/newtypes for semantically different identifiers
-- enums or tagged unions for finite states and state transitions
-- explicit result/error types for failure behavior
-- units and value objects for quantities that must not be interchanged
-- named request, response, configuration, and event types
-
-For example, prefer:
-
-```text
-transferOwnership(userId: UserId, organizationId: OrganizationId,
-                  projectId: ProjectId) -> TransferOwnershipResult
-```
-
-over three interchangeable `string` parameters and an untyped return value. Precise
-types should let the compiler catch swapped arguments, invalid states, and unsupported
-transitions. They should also provide useful, searchable names when an agent follows a
-type-checker error.
-
-Use `unknown` or an equivalent opaque type at an untrusted boundary when appropriate,
-then validate and narrow it. Do not spread an escape hatch through the rest of the
-codebase merely to avoid defining a contract.
-
-Keep names such as `NotificationDeliveryHistory`, `UserEnrichmentResult`, and
-`OrganizationId` specific enough that searching the type name finds its definition and
-the places that use the contract. Avoid vague catch-all types named only `Data`,
-`Config`, `Result`, or `Context` when a domain name is available.
-
-### 5. Put explanations where a name search lands
-
-Place concise comments immediately above the definition they explain: the function,
-method, type, module-level constant, state transition, or other symbol an agent will
-reach from a search result.
-
-Explain what the code cannot express by itself, especially:
-
-- why a non-obvious choice is required
-- invariants and safety constraints
-- ordering, lifecycle, permission, or transaction rules
-- compatibility behavior and external protocol quirks
-- why a fallback exists and when it is safe
-
-Do not write comments that merely repeat the symbol name or restate obvious syntax.
-Keep rationale next to the definition rather than in a distant document that a search
-for the symbol is unlikely to open.
-
-Record repository-wide conventions, source locations, naming rules, generated-code
-boundaries, and other non-obvious navigation guidance in `AGENTS.md`, `CLAUDE.md`, or
-the nearest established conventions file. Keep that guidance current when structure
-or terminology changes.
-
-### 6. Make ownership and reverse references discoverable
-
-Before renaming, moving, or splitting a concept, build a complete reference inventory:
-
-- the definition and related overloads or implementations
-- direct and indirect callers, including method calls
-- imports, exports, re-exports, and package-specifier boundaries
-- tests, fixtures, examples, scripts, and generated inputs
-- configuration, migrations, docs, and operational references
-- deprecated or compatibility paths
-
-Update all references to the canonical spelling. Search for the old spelling after the
-change and classify every remaining match; do not assume an import graph or barrel has
-revealed every caller. A compatibility bridge must be explicit, temporary or
-purposeful, and documented at the boundary.
-
-Keep the definition and its contract visible. Do not hide important behavior behind a
-generic dispatcher, anonymous callback, catch-all registry, or indirection whose only
-description exists elsewhere. Abstractions are welcome when their names and types
-preserve the domain concept they implement.
-
-### 7. Handle legacy paths explicitly
-
-Remove obsolete implementations and aliases when it is safe. If a legacy path must
-remain, mark it with the language's deprecation mechanism (such as `@deprecated`), name
-the replacement, and explain the removal or compatibility constraint where users and
-agents will find it.
-
-Do not let new code, examples, or tests choose a deprecated path. Keep one canonical
-implementation; a compatibility wrapper should forward to it rather than create a
-second source of truth. Make legacy status visible in names, docs, diagnostics, and
-tests where relevant.
-
-### 8. Verify discoverability as an observable contract
-
-After editing, test the codebase the way a search-driven agent would:
-
-1. Search the canonical concept name and confirm that the definition is an obvious
-   hit, followed by relevant callers, tests, and docs.
-2. Search the old name, synonyms, and generic terms; confirm that remaining matches
-   are intentional and documented.
-3. Search by likely task vocabulary, not only by implementation symbol. For example:
-
-   ```text
-   Where is the notification retry delay calculated?
-   Where is delivery history loaded for an organization?
-   ```
-
-   The resulting filenames, symbols, comments, and tests should make the answer clear
-   without paging through unrelated modules.
-4. Check that methods, types, errors, and state names are independently searchable;
-   do not verify only top-level functions.
-5. Run the nearest compiler or type checker and focused tests, then broaden the checks
-   when the change crosses module or public-contract boundaries.
-
-Test observable behavior and invariants, not just the presence of preferred strings.
-Add regression coverage for a bug before fixing it when behavior is being corrected.
-Do not weaken tests, remove useful type checks, or accept a discoverability change that
-silently changes outputs, side effects, permissions, or state transitions.
-
-### 9. Keep the migration coherent
-
-Make the smallest coherent change that improves discoverability for the requested
-scope. Do not mix a naming or structure migration with unrelated formatting,
-dependency, business-logic, or API changes.
-
-When a public rename, file move, type change, or module split is necessary:
-
-- state the canonical vocabulary and the compatibility policy
-- update definitions, callers, tests, docs, configuration, and generated artifacts
-- preserve old behavior until the intended migration boundary
-- keep a visible deprecation path when removal cannot happen immediately
-- update conventions documentation so future code uses the new path
-
-Do not leave a repository in a half-migrated state where both spellings look equally
-canonical or where the only explanation of ownership lives in an external tool.
-
-### 10. Apply the vocabulary across the repository
-
-Greppability is a repository property, not a local-module property. When the requested
-scope is a repository or product, inspect and reconcile all relevant surfaces before
-stopping:
-
-- source modules, binaries, public exports, feature gates, migrations, configuration,
-  generated inputs, fixtures, tests, and operational scripts
-- user-facing documentation, architecture maps, examples, diagnostics, and compatibility
-  notes
-- duplicate or parallel implementations that live in different boundaries but answer the
-  same task vocabulary
-
-For Rust repositories, a method or function named `parse`, `new`, `validate`, `run`,
-`execute`, `context`, `result`, or `value` is acceptable when its receiver or enclosing
-module makes the domain unmistakable. Do not mechanically repeat that context in the
-symbol: `runner_runtime::main` and `web::run` are clearer than a verb that repeats the
-enclosing module when each is the module's sole entry point. Qualify a name only when it
-adds information that search would otherwise lose,
-such as `parse_workflow_source`, `validate_command_spec_tree`, `render_command_help`,
-`read_leased_job_spec`, or `job_expression_context`. A module-owned validator can stay
-short when its enclosing module is the domain boundary: `workflow_validation::validate`
-is clearer than a validator name that repeats `workflow`. Apply the same vocabulary to
-associated methods, error variants, fixtures, test names, docs, and examples; a precise
-top-level function does not compensate for ambiguous methods or a stale alias elsewhere.
-
-Before declaring a repository-wide migration complete, search each canonical term and
-each retired synonym across the full tree. Remaining old spellings must be either removed
-or visibly deprecated at their definition, documented with the replacement, and covered by
-the compatibility contract. A focused module test is necessary but not sufficient when a
-rename crosses exports, binaries, persistence names, wire fields, or documentation.
-
-## Explicit anti-patterns
-
-Do not:
-
-- use vague names when a domain-specific name is available
-- use multiple spellings or synonyms for one concept
-- put unrelated behavior in `utils`, `helpers`, `common`, `misc`, or `manager` buckets
-- depend on an IDE, semantic index, import graph, or barrel alone to reveal callers
-- hide important ownership behind wildcard exports or anonymous indirection
-- leave important contracts implicit in `any`, untyped values, or interchangeable
-  primitives
-- place the only explanation of a symbol far from its definition
-- perform a broad mechanical rename without a reference inventory and compatibility
-  plan
-- split files solely to satisfy an arbitrary size target
-- leave deprecated and canonical implementations with equal status
-- change runtime behavior under cover of a discoverability refactor
-- skip the baseline or focused compiler and test checks
-- improve only one convenient module when the requested scope is repository-wide
-- repeat an enclosing module or receiver name in a symbol when that context already
-  makes the symbol unique
-
-
-## Verification
-
-After editing:
-
-- Run the nearest hard judge for repository-wide naming, paths, symbols, methods, types, modules, tests, docs, exports, aliases, and legacy implementations as navigated by ordinary filename/text search: the compiler, type checker, schema/build check, or focused tests that can reject an invalid change.
-- Test the observable success behavior, failure behavior, edge cases, and invariants established by the numbered requirements.
-- Audit canonical vocabulary, search hits, module ownership, type contracts, local rationale, reverse references, legacy paths, repository-wide old/new spellings, and search-based verification; classify every remaining exception rather than assuming it is harmless.
-- Broaden checks only when the changed boundary warrants it, and distinguish pre-existing failures from regressions introduced by this work.
-
-## Acceptance criteria
-
-The work is complete only when all of the following are true:
-
-- Important concepts have one canonical, specific, domain-oriented spelling.
-- Definitions, methods, call sites, types, files, tests, configuration, and docs use
-  that spelling consistently.
-- A focused `rg` search for an important concept reaches its definition and relevant
-  reverse references without a large generic haystack.
-- File and module boundaries make domain ownership apparent; no new catch-all module
-  hides unrelated concepts.
-- Important functions, values, errors, and state transitions have precise,
-  searchable contracts and types.
-- Semantically different identifiers or units cannot be accidentally interchanged
-  where the language can enforce the distinction.
-- Test files are named after the source concepts they cover, and test names expose the
-  behavior or invariant under review.
-- Non-obvious rationale, constraints, and fallbacks are documented immediately above
-  the definitions they explain.
-- Repository conventions and navigation guidance are recorded in the established
-  conventions file and match the resulting structure.
-- Legacy paths are removed or visibly deprecated, with a named replacement and no
-  duplicate canonical implementation.
-- Remaining aliases, old spellings, wildcard exports, and compatibility wrappers are
-  intentional, documented, and covered by tests where relevant.
-- The nearest compiler or type checker and focused tests pass; broader checks pass
-  when the changed boundary requires them.
-- Existing behavior, public contracts, output, side effects, permissions, and state
-  transitions are preserved unless explicitly changed.
-- No unrelated dependencies, formatting churn, or refactors were introduced.
-- Repository-wide requests have an explicit inventory and search audit covering source,
-  tests, docs, configuration, generated artifacts, and legacy paths—not only the files
-  that were easiest to rename.
-
-The architectural principle is: **make the words in the source good search terms**.
-A greppable codebase gives an agent a short, reliable path from task vocabulary to the
-right definition, contract, caller, test, and explanation; precise names and types
-make that path useful to humans as well.
+**Reply:** the vocabulary chosen, renames made, and remaining aliases or old spellings with their status.

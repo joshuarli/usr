@@ -13,10 +13,10 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 | Work | Codex | Claude |
 | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `low` | `haiku`, or the `Explore` agent type |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `xhigh` | `sonnet`, `xhigh` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-sol`, `medium` | `opus`, `medium` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `high` | `opus`, `high` |
+| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `low` | `scout` (`haiku`, `medium`) |
+| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `medium` | `mechanic` (`haiku`, `high`) |
+| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-sol`, `medium` | `worker` (`sonnet`, `medium`) |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` (`opus`, `medium`) |
 
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
 
@@ -24,15 +24,15 @@ If work exceeds the parent's delegation ceiling, keep it local at the highest su
 
 Allowed child models, highest to lowest: `gpt-6.1-sol` > `gpt-6-luna`.
 
-Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Never use `ultra` effort; its automatic delegation conflicts with this skill.
+Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Children run at `medium` effort, or `low` for scouting. Never assign `high` or `xhigh`, and never use `ultra`: its automatic delegation conflicts with this skill.
 
 Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 
 ### Claude
 
-Allowed child models, highest to lowest: `opus` > `sonnet` > `haiku`.
+Allowed child models, highest to lowest: `opus` > `sonnet` > `haiku`. Spend `opus` only on the difficult row, use `sonnet` for normal implementation, and use `haiku` for scouting and fully specified mechanical work. Every child runs at `medium` effort except `mechanic`, which runs at `high`. Never assign `xhigh`.
 
-A subagent's reasoning effort comes from its agent definition (`.claude/agents/NAME.md` frontmatter: `model`, `effort`), not from the call; the call can override only the model. When the model and effort a task needs have no definition, add one to the project instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
+A subagent's reasoning effort comes from its agent definition (`.claude/agents/NAME.md` frontmatter: `model`, `effort`), not from the call; the call can override only the model. The four types in the table (`scout`, `mechanic`, `worker`, `expert`) pin both, so spawn children only as those `subagent_type`s; built-in types do not pin effort. When a task needs a model and effort none of them provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
 
 Give every parallel writer `isolation: "worktree"`. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
 

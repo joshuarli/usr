@@ -97,11 +97,13 @@ trap 'rm -rf "$tmp"' 0 1 2 3 15
 
 # TEMPORARY EXCEPTIONS: directories kept as real files on both sides and synced
 # in both directions instead of symlinked. Agent skills are not followed through
-# symlinks, and agents edit the installed copy, so edits must flow back into the
-# source tree. A source tree opts in by containing the directory.
+# symlinks, subagent definitions are synced the same way because their symlink
+# support is undocumented, and agents edit the installed copy, so edits must flow
+# back into the source tree. A source tree opts in by containing the directory.
 # Remove entries here when they no longer need to be managed as copies.
 syncs="${syncs:+$syncs
-}.agents/skills"
+}.agents/skills
+.claude/agents"
 printf '%s\n' "$syncs" > "$tmp/syncs"
 
 # Enumerate files using Git's ignore rules when src is inside a Git worktree.

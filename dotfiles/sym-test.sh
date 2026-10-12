@@ -329,5 +329,17 @@ echo "  assertion 3: delete mode removes the matching link and leaves unrelated 
 rm -rf home; mkdir home
 
 
+printf '\n21: .claude/agents is synced by default, as real files\n'
+mkdir -p dotfiles/agenttest/.claude/agents
+echo scout > dotfiles/agenttest/.claude/agents/scout.md
+$sym -t home -v dotfiles/agenttest > log 2>&1
+expected="MKDIRS: home/.claude/agents
+PUSH: home/.claude/agents/scout.md <- dotfiles/agenttest/.claude/agents/scout.md"
+echo "  assertion 1: source agent definition is pushed"; assert_output "$expected"
+echo "  assertion 2: result is a regular file, not a symlink"
+[ -f home/.claude/agents/scout.md ] && [ ! -L home/.claude/agents/scout.md ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

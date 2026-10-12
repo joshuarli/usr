@@ -4,77 +4,29 @@ description: Migrate Rust map and set usage to hashbrown with a deliberately cho
 disable-model-invocation: true
 ---
 
-You are working in an existing Rust codebase. Your task is to modernize its map/set usage for performance, with `hashbrown` as the default hash-table implementation, while choosing collection types intelligently based on actual semantics and workload.
+You are working in an existing Rust codebase. Modernize its map and set usage for performance, with `hashbrown` as the default hash table, choosing each collection from its actual semantics and workload.
 
-The goal is **not** “replace every `BTreeMap` with `HashMap`.” The goal is to audit every important map/set use, determine what guarantees it actually requires, and use the cheapest/highest-performance representation that satisfies those requirements.
+This is not "replace every `BTreeMap` with `HashMap`." Audit every important map and set, determine what guarantees it needs, and use the cheapest representation that provides them. Implement the changes rather than just reporting. Preserve observable semantics, measure instead of assuming, and keep the result simple: no abstraction layers or exotic dependencies without measured justification.
 
-## Primary goals
+Goals: port ordinary hash maps and sets to current `hashbrown`; remove dead fast-hash crates such as `fxhash`; eliminate trees where order and range semantics are not needed; choose hashers deliberately; use a specialized representation where a generic hash table is not the best fit.
 
-1. Port ordinary hash maps and hash sets to current `hashbrown`.
-2. Remove dependence on old/dead fast-hash crates such as `fxhash`.
-3. Audit `BTreeMap` / `BTreeSet` usage and eliminate them where ordering/range semantics are not actually required.
-4. Where hashing is appropriate, choose the hasher deliberately.
-5. Where a generic hash table is not the best structure, use a more specialized representation.
-6. Preserve observable semantics and correctness.
-7. Measure performance changes rather than assuming they are improvements.
-8. Keep the resulting implementation simple. Do not introduce abstraction layers, generic machinery, or exotic dependencies without measurable justification.
+## Baseline policy
 
-## Baseline hash-table policy
-
-Use current `hashbrown`, declared once in `[workspace.dependencies]` and inherited with `{ workspace = true }`:
+Declare `hashbrown` once in `[workspace.dependencies]` and inherit it with `{ workspace = true }`:
 
 ```toml
 hashbrown = { version = "0.17", default-features = false, features = ["default-hasher", "inline-more"] }
 ```
 
-- `default-hasher` supplies foldhash as the default `S`, which is what makes `HashMap::new()` / `HashSet::from([..])` compile.
-- `inline-more` trades compile time and binary size for speed.
-- `default-features = false` drops features we don't use. Add `raw-entry`, `equivalent`, or `allocator-api2` only if the code needs them.
+- `default-hasher` supplies foldhash as the default `S`, which is what makes `HashMap::new()` and `HashSet::from([..])` compile. `inline-more` trades compile time and binary size for speed. `default-features = false` drops what we do not use. Add `raw-entry`, `equivalent`, or `allocator-api2` only if the code needs them.
+- Table and hasher are separate choices. The table is hashbrown's SwissTable; `std::collections::HashMap` is a hashbrown fork, so the table itself is about as fast. Std's problem is its default hasher, SipHash-1-3 (`RandomState`), which is slow on small keys. The hasher is foldhash by default, with `rustc_hash::FxBuildHasher` as the candidate for trusted small integer keys.
+- Do not use `foldhash::HashMap` or `foldhash::HashSet`; they are aliases of the std types with a foldhash hasher. Use hashbrown's types, which also give the full hashbrown API.
+- Never use `std::collections::{HashMap, HashSet}` in application code, even with a custom hasher.
+- Prefer `use hashbrown::{HashMap, HashSet};` for ordinary internal maps and sets, and do not mechanically add hasher parameters. The starting point is plain `HashMap<K, V>` and `HashSet<K>`.
 
-Table and hasher are separate choices:
+## rustc-hash
 
-- **Table:** hashbrown's SwissTable. `std::collections::HashMap` is a hashbrown fork, so the table itself is about as fast. Std's problem is its default hasher, SipHash-1-3 (`RandomState`), which is slow on small keys.
-- **Hasher:** foldhash by default, `rustc_hash::FxBuildHasher` as the candidate for trusted small integer keys.
-- **Do not use `foldhash::HashMap` / `foldhash::HashSet`.** They are aliases of the std types with a foldhash hasher. Use `hashbrown` types instead, which also give you the full hashbrown API.
-- **Never use `std::collections::{HashMap, HashSet}`** in application code, even with a custom hasher.
-
-Prefer:
-
-```rust
-use hashbrown::{HashMap, HashSet};
-```
-
-for ordinary internal maps/sets.
-
-Use `hashbrown`'s current default hasher—currently foldhash—as the baseline fast implementation.
-
-Do **not** mechanically add custom hasher parameters everywhere.
-
-The default starting point should therefore be:
-
-```rust
-HashMap<K, V>
-HashSet<K>
-```
-
-from `hashbrown`.
-
-## Consider `rustc-hash` where appropriate
-
-For compiler-like/internal workloads dominated by:
-
-- integer IDs
-- enums
-- interned symbols
-- handles
-- indexes
-- inode/device IDs
-- small fixed-size keys
-- other trusted non-adversarial keys
-
-benchmark `rustc-hash` 2.x against `hashbrown`'s default hasher.
-
-A candidate configuration is:
+For trusted, non-adversarial keys dominated by integer IDs, enums, interned symbols, handles, indexes, inode and device IDs, or other small fixed-size keys, benchmark `rustc-hash` 2.x against the default:
 
 ```rust
 use hashbrown::HashMap;
@@ -83,401 +35,57 @@ use rustc_hash::FxBuildHasher;
 type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 ```
 
-and likewise for `HashSet`.
-
-When raw speed is the primary concern, this is the first thing to measure:
-
-- Fx is a single multiply-rotate per word, so it is usually the fastest on `u32`/`u64`/ID-like keys and small tuples.
-- foldhash has better distribution and handles strings and longer keys well. It is the safer default.
-- Fx's weak low-bit mixing can cluster some key patterns (for example, aligned or strided IDs), so a win on a microbenchmark can reverse on real data.
-
-Do not assume Fx hashing wins. Benchmark it on the real workload, and adopt it only for trusted keys.
-
-Do not reintroduce the obsolete `fxhash` crate.
+(and likewise for `HashSet`). Fx is one multiply-rotate per word, so it is usually fastest on `u32`/`u64`/ID-like keys and small tuples. foldhash distributes better, handles strings and longer keys well, and is the safer default. Fx's weak low-bit mixing can cluster aligned or strided IDs, so a microbenchmark win can reverse on real data. Adopt Fx only for trusted keys and only if the real workload wins. Do not reintroduce the obsolete `fxhash` crate.
 
 ## Security boundary
 
-Fast non-cryptographic hashers must not casually be used where keys can be deliberately controlled by an untrusted attacker and a collision DoS would matter.
-
-During the audit, distinguish:
-
-### Trusted/internal keys
-
-Examples:
-
-- compiler IR IDs
-- filesystem metadata collected locally
-- internal indexes
-- generated symbols
-- enum/integer keys
-- trusted configuration
-
-Fast hashers are appropriate here.
-
-### Attacker-controlled/untrusted keys
-
-Examples:
-
-- network service request data
-- arbitrary externally supplied strings
-- remotely supplied protocol fields
-- public server endpoints
-
-Retain a DoS-resistant hashing strategy where relevant.
-
-Do not sacrifice a meaningful security property for a microbenchmark.
+Trusted internal keys (compiler IR IDs, locally collected filesystem metadata, internal indexes, generated symbols, enum and integer keys, trusted configuration) may use fast hashers. Attacker-controlled keys (network request data, externally supplied strings, remote protocol fields, public endpoints) keep a DoS-resistant hashing strategy. Do not give up a security property for a microbenchmark.
 
 ## Audit every `BTreeMap` and `BTreeSet`
 
-For each call site, determine why a tree is being used.
+Find out why each tree exists. Search for `.range(...)`, `.first_key_value()`, `.last_key_value()`, `.pop_first()`, `.pop_last()`, lower and upper bound usage, and assumptions about sorted iteration. Classify each:
 
-Search for operations such as:
+- **A. Ordering not required.** Use `hashbrown::HashMap` or `HashSet`. This is the common case when a tree was just a convenient map.
+- **B. Deterministic output required, ordered mutation not.** Keep a hash table on the hot path and sort only at the output boundary (`items.sort_unstable_by_key(...)`): diagnostics, serialization, reports, CLI output, tests.
+- **C. Build once, read many, ordered.** Use a sorted `Vec<K>` or `Vec<(K, V)>`: `sort_unstable()`, `dedup()`, binary search. Better locality; only where mutation patterns permit.
+- **D. Genuine ordered or range workload** (ordered iteration, predecessor and successor queries, arbitrary ranges, min and max extraction, incremental sorted insertion). Keep the tree. Correct semantics outweigh theoretical hash speed.
 
-```rust
-.range(...)
-.first_key_value()
-.last_key_value()
-.pop_first()
-.pop_last()
-lower_bound...
-upper_bound...
-```
-
-as well as assumptions about sorted iteration.
-
-Classify each tree into one of these groups.
-
-### A. Ordering is not required
-
-Replace with:
-
-```rust
-hashbrown::HashMap
-hashbrown::HashSet
-```
-
-This should be the common case if the tree was merely selected as a convenient map/set.
-
-### B. Deterministic output is required, but ordered mutation is not
-
-Do not necessarily pay `BTreeMap` costs throughout execution.
-
-Prefer keeping the hot-path representation as a hash table and sorting only at the output boundary:
-
-```rust
-let mut items: Vec<_> = map.iter().collect();
-items.sort_unstable_by_key(...);
-```
-
-This is especially attractive for diagnostics, serialization, reports, CLI output, tests, etc.
-
-### C. Build once / read many ordered collection
-
-Consider a sorted `Vec` instead of `BTreeMap` / `BTreeSet`.
-
-Examples:
-
-```rust
-Vec<K>
-Vec<(K, V)>
-```
-
-Build, then:
-
-```rust
-sort_unstable()
-dedup()
-```
-
-and use binary search.
-
-A contiguous representation can substantially improve cache locality compared with a pointer-heavy/tree representation.
-
-Do this only where mutation patterns permit it.
-
-### D. Genuine ordered/range-query workload
-
-Keep `BTreeMap` / `BTreeSet`.
-
-Do not replace a tree when the algorithm genuinely relies on:
-
-- ordered iteration
-- predecessor/successor queries
-- arbitrary ranges
-- min/max extraction
-- efficient incremental sorted insertion
-
-Correct semantics outweigh theoretical hash-table speed.
+Hash iteration is unsorted. Find code that relied accidentally on `BTreeMap` order, sort explicitly where deterministic output is required, and do not let tests become flaky.
 
 ## Specialized representations
 
-Do not treat every set/map problem as a hash-table problem.
+Inspect key domains and cardinalities before reaching for a hash table.
 
-Inspect key domains and cardinalities.
+- **Dense integer sets:** a bitset, with a bitset crate only for a clear, measured benefit.
+- **Large sparse integer sets** with unions, intersections, differences, repeated membership, or serialization: evaluate Roaring bitmaps, after benchmarking.
+- **Dense integer-key maps** (`NodeId(usize)`, `FileId(u32)`, `SlotId(usize)`): `Vec<Option<V>>` or other indexed storage. Densely allocated IDs need no hashing, which can beat any hasher change.
+- **Tiny collections:** benchmark a `Vec<(K, V)>` linear scan. It avoids allocation and table metadata and has excellent locality. Build no small-map abstraction without profiling.
+- **Static or read-only data** built once and queried heavily: sorted contiguous storage over a mutable table. Optimize for lifecycle, not just asymptotics.
 
-### Dense integer sets
+## Table usage quality
 
-For sets over a reasonably bounded integer domain, consider a bitset.
+- Replace `contains_key` followed by `get_mut`, `contains` followed by `insert`, and repeated lookups of one key with the entry API (`match map.entry(key) { Entry::Occupied(..) .. Entry::Vacant(..) .. }`), which avoids repeated hashing and probing.
+- Look for needless key clones and temporary allocations, owned `String`s built only for lookup (use borrowed-key lookup), maps recreated in hot loops, and collecting into one map only to transform it into another.
+- Use `with_capacity` or `reserve` where cardinality is predictable (parsers, directory walkers, graph construction, symbol tables, bulk indexing, known-length iterators) without grossly over-reserving.
+- For create, fill, drop, repeat loops, `clear()` retains the allocation. Do it only where ownership stays clear; do not turn local data into long-lived mutable state to save an allocation unless a benchmark justifies it.
 
-Instead of:
+## No abstraction for its own sake
 
-```rust
-HashSet<u32>
-```
-
-a bitmap may provide drastically cheaper membership, union, intersection, and memory usage.
-
-Only add a bitset dependency if there is a clear use case and measurable benefit.
-
-### Sparse integer sets
-
-For large sparse integer sets with significant set algebra, evaluate Roaring bitmaps.
-
-Especially relevant if the code performs:
-
-- unions
-- intersections
-- differences
-- repeated membership tests
-- serialization of large integer sets
-
-Again: benchmark before adopting.
-
-### Dense integer-key maps
-
-If keys are small dense integer IDs such as:
-
-```rust
-NodeId(usize)
-FileId(u32)
-SlotId(usize)
-```
-
-consider whether a direct:
-
-```rust
-Vec<Option<V>>
-```
-
-or equivalent indexed storage is superior to hashing.
-
-If IDs are allocated densely, hashing may be completely unnecessary.
-
-This can be a larger optimization than changing hash functions.
-
-### Small collections
-
-For collections that usually contain only a handful of entries, benchmark whether a small `Vec` beats a hash table.
-
-For example:
-
-```rust
-Vec<(K, V)>
-```
-
-with a linear scan can outperform hashing at very small cardinalities because it:
-
-- avoids allocation/table metadata
-- has excellent locality
-- has negligible setup cost
-
-Do not introduce a complicated small-map abstraction unless profiling identifies this as meaningful.
-
-### Static/read-only data
-
-If a collection is constructed once and then queried heavily, consider whether a sorted contiguous representation is better than maintaining a mutable hash table.
-
-Optimize for lifecycle, not just asymptotic complexity.
-
-## Hash table usage quality
-
-While performing the migration, clean up inefficient table usage.
-
-Look for patterns such as:
-
-```rust
-if map.contains_key(&key) {
-    map.get_mut(&key)...
-}
-```
-
-Replace double lookups with entry/raw-entry APIs where appropriate.
-
-Prefer:
-
-```rust
-match map.entry(key) {
-    Entry::Occupied(...)
-    Entry::Vacant(...)
-}
-```
-
-where that prevents repeated hashing/probing.
-
-Likewise inspect:
-
-- redundant `contains` followed by `insert`
-- repeated lookup of the same key
-- needless cloning of keys
-- unnecessary temporary allocations
-- constructing owned `String`s merely for lookup
-- repeated table growth
-- maps recreated in hot loops
-- collecting into one map merely to immediately transform it into another
-
-Use borrowed-key lookup where possible.
-
-## Capacity management
-
-Where cardinality is reasonably predictable, use:
-
-```rust
-HashMap::with_capacity(...)
-HashSet::with_capacity(...)
-```
-
-or reserve appropriately.
-
-Do not grossly over-reserve.
-
-Pay particular attention to:
-
-- parsers
-- directory walkers
-- graph construction
-- symbol tables
-- bulk indexing
-- known-length iterators
-
-Avoid repeated table resizing in obvious bulk-construction paths.
-
-## Allocation/lifecycle analysis
-
-For hot maps, inspect whether the code repeatedly:
-
-1. creates a map
-2. fills it
-3. drops it
-4. repeats
-
-If so, consider whether the table can be reused with:
-
-```rust
-clear()
-```
-
-while retaining its allocation.
-
-Only do this where ownership/lifetime design remains clear.
-
-Avoid turning straightforward local data into long-lived mutable state just to save an allocation unless benchmarks justify it.
-
-## Iteration
-
-Remember that iteration over a hash table is not sorted.
-
-Any existing code relying accidentally on `BTreeMap`'s deterministic order must be identified.
-
-Tests should not become flaky because an implicit ordering guarantee disappeared.
-
-Where deterministic output is required, sort explicitly at that boundary.
-
-This is preferable to retaining a tree globally merely to make output deterministic.
-
-## Avoid abstraction for abstraction's sake
-
-Do not immediately create project-wide wrappers such as:
-
-```rust
-FastMap
-FastSet
-```
-
-unless there is a concrete benefit.
-
-Direct:
-
-```rust
-hashbrown::HashMap
-hashbrown::HashSet
-```
-
-is often clearer.
-
-A project-level alias is appropriate only if:
-
-- many call sites genuinely share the same specialized hasher policy, or
-- we intend to benchmark/switch implementations centrally.
-
-If aliases are introduced, keep them trivial and obvious.
+Do not create `FastMap` or `FastSet` wrappers unless many call sites share one specialized hasher policy or you intend to switch implementations centrally, and then keep the alias trivial. Direct `hashbrown::HashMap` and `HashSet` are usually clearer.
 
 ## Benchmarking
 
-Establish meaningful before/after measurements.
+Measure representative application workloads, not isolated hash functions unless hashing is the bottleneck. Measure what is relevant: wall time, CPU time, allocations, peak and steady-state memory, instructions, cycles, cache misses, branch misses. Use the project's existing infrastructure; otherwise Criterion for stable microbenchmarks and `perf stat` and `perf record` on Linux. For particularly hot collections compare (1) the existing implementation, (2) the `hashbrown` default, (3) `hashbrown` plus `rustc_hash::FxBuildHasher` when the keys make Fx plausible. Keep no losing implementation or feature flag afterward.
 
-Do not benchmark isolated hash functions unless that is actually the bottleneck.
+## Dependencies
 
-Benchmark representative application workloads.
+Remove `fxhash`, unused hasher crates, and now-unused collection dependencies, and run the dependency checks. Every remaining dependency must correspond to a selected implementation: do not add `ahash`, `foldhash`, `rustc-hash`, or bitmap libraries speculatively. `hashbrown` already supplies its default hasher, so depend on the underlying hasher only if the code needs its API directly.
 
-Measure, where relevant:
+## Deliverable
 
-- wall-clock runtime
-- CPU time
-- allocations
-- peak/steady-state memory
-- instructions
-- cycles
-- cache misses
-- branch misses
+Implement the changes, then summarize concisely: every important collection representation changed; why each major `BTreeMap` or `BTreeSet` was changed or retained, calling out the trees reviewed and intentionally kept; the hashing strategy now in use; any specialized representations adopted; before and after benchmark results; and remaining collection-related bottlenecks.
 
-For Linux, use the project's existing benchmark/profiling infrastructure where possible; otherwise useful tools include Criterion for stable microbenchmarks and `perf stat` / `perf record` for system-level behavior.
-
-Prefer real representative inputs over synthetic single-operation loops.
-
-For particularly hot collections, compare at least:
-
-1. existing implementation
-2. `hashbrown` default
-3. `hashbrown + rustc_hash::FxBuildHasher`
-
-when the key workload makes FxHash plausible.
-
-Do not keep multiple implementations or feature flags after determining the winner unless there is a real ongoing reason.
-
-## Dependency cleanup
-
-After migration:
-
-- remove obsolete `fxhash`
-- remove unused hasher crates
-- remove now-unused collection dependencies
-- run dependency checks
-- keep the dependency graph minimal
-
-Do not add `ahash`, `foldhash`, `rustc-hash`, bitmap libraries, etc. merely because they might theoretically be useful.
-
-Every additional dependency should correspond to an actual selected implementation.
-
-Note that `hashbrown` already supplies its own current default hashing strategy; do not explicitly depend on its underlying hasher unless the code needs its API directly.
-
-## Deliverables
-
-Implement the improvements rather than merely producing a report.
-
-At the end, provide a concise summary containing:
-
-1. every important collection representation changed
-2. why each major `BTreeMap` / `BTreeSet` was changed or retained
-3. which hashing strategy is now used
-4. any specialized representations adopted
-5. benchmark results before vs. after
-6. any remaining collection-related bottlenecks worth investigating
-
-Also explicitly call out tree structures that were reviewed and intentionally retained.
-
-## Decision principle
-
-Use this hierarchy:
+## Decision tree
 
 ```text
 Need a collection?
@@ -502,6 +110,4 @@ Need a collection?
                                    → benchmark rustc-hash
 ```
 
-The governing objective is **cache-efficient, simple data structures chosen from actual access patterns**, not merely replacing one Rust collection crate with another.
-
-Be aggressive about removing accidental tree usage, but conservative about adding cleverness. Prefer a straightforward `hashbrown::HashMap` over an elaborate custom structure unless profiling clearly shows the latter matters.
+The governing objective is cache-efficient, simple data structures chosen from actual access patterns. Be aggressive about removing accidental tree usage and conservative about cleverness: a straightforward `hashbrown::HashMap` beats an elaborate custom structure unless profiling clearly shows otherwise.
