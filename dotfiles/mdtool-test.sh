@@ -1,7 +1,7 @@
 #!/bin/sh
 
 set -u
-repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd) || exit 1
 tool="$repo/dotfiles/base/.local/bin/mdtool"
 nfailed=0
 mkdir -p "$repo/.work/tmp" || exit 1

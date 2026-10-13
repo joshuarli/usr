@@ -10,8 +10,8 @@
 # Warnings (exit 0): a skill over 60 lines, or one with no closing **Reply:**.
 set -u
 skills="${1:-base/.agents/skills}"
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
-repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd) || exit 1
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd) || exit 1
 command_list=$(python3 -I "$repo_root/dotfiles/base/.local/bin/mdtool" commands) || {
     echo "cannot read mdtool command list" >&2
     exit 1
