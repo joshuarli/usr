@@ -286,7 +286,7 @@ def ref_findings(files, content, tracked=None):
     out = []
     names = set(tracked or files)
     dirs={"."}
-    for p in files:
+    for p in names:
         parent=PurePosixPath(p).parent
         while str(parent)!=".":
             dirs.add(str(parent)); parent=parent.parent
@@ -307,16 +307,26 @@ def ref_findings(files, content, tracked=None):
         if not markdown(file) or file not in content: continue
         text=content[file]
         spans = []
-        for m in re.finditer(r"`([^`]+)`", text):
-            spans.append((text.count("\n", 0, m.start())+1, m.start(), m.group(1)))
-        lines, clean = visible_lines(text)
-        fence, offset = False, 0
-        for i, line in enumerate(lines):
-            if re.match(r"^\s*```\s*sh\b", line): fence = True
-            elif fence and re.match(r"^\s*```", line): fence = False
-            elif fence:
-                for m in re.finditer(r"\S+", line): spans.append((i+1, offset+m.start(), m.group()))
-            offset += len(line)+1
+        fence_char, fence_len, shell_fence = "", 0, False
+        inline_code = re.compile(r"(?<!`)(`+)(?!`)(.+?)\1(?!`)")
+        for n, line in enumerate(text.splitlines(), 1):
+            marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if not fence_char:
+                if marker:
+                    fence_char, fence_len = marker.group(1)[0], len(marker.group(1))
+                    shell_fence = bool(re.match(r"^sh(?:\s|$)", marker.group(2).strip()))
+                    continue
+                if line.startswith(("    ", "\t")):
+                    continue
+                for m in inline_code.finditer(line):
+                    spans.append((n, m.start(), m.group(2)))
+                continue
+            if (marker and marker.group(1)[0] == fence_char
+                    and len(marker.group(1)) >= fence_len and not marker.group(2).strip()):
+                fence_char, fence_len, shell_fence = "", 0, False
+            elif shell_fence:
+                for m in re.finditer(r"\S+", line):
+                    spans.append((n, m.start(), m.group()))
         for n, col, token in spans:
             token = token.strip("'\"()[]{}.,;")
             if not token or PLACEHOLDER.search(token): continue
@@ -327,6 +337,7 @@ def ref_findings(files, content, tracked=None):
                 if normalized not in names and normalized not in dirs:
                     add(out, "R001", "warn", file, n, col+1, "repo path is not tracked", token)
             for m in re.finditer(r"\bmake\s+([A-Za-z0-9_.-]+)", token):
+                if m.end() < len(token) and token[m.end()] not in " \t": continue
                 if m.group(1) not in make_targets:
                     add(out, "R002", "warn", file, n, col+1, "make target is not declared", m.group(1))
             for m in re.finditer(r"(?:-p|--package)\s+([A-Za-z0-9_-]+)", token):
@@ -426,7 +437,7 @@ def pointer_findings(files, content, labels=()):
                 target = m.group()
                 if target in tracked or Path(target).name in {Path(p).name for p in tracked}:
                     add(out, "P001", "error", file, n, m.start()+1, "comment points to repository documentation", target)
-            if re.search(r"\b(?:section|clause|milestone)\s+[\w.-]+|\b[0-9]+\.[0-9]+\b", comment, re.I):
+            if re.search(r"\b(?:section|clause|milestone)\s+[\w.-]+|(?<![\w.+-])[0-9]+\.[0-9]+(?:\.[0-9]+)?(?![\w.+-])", comment, re.I):
                 add(out, "P002", "warn", file, n, 1, "comment points to a numbered section", comment.strip())
             for m in labels_re.finditer(comment):
                 add(out, "P003", "warn", file, n, 1, "comment uses a planning label", m.group())
@@ -472,7 +483,7 @@ def router_findings(files, content, max_lines=150):
     out=[]
     agents = next((p for p in files if Path(p).name == "AGENTS.md"), None)
     readme = next((p for p in files if Path(p).name.lower() == "readme.md"), None)
-    docs = [p for p in files if p.startswith("docs/") and markdown(p)]
+    docs = [p for p in files if p.startswith("docs/") and markdown(p) and p in content]
     if not agents or not docs:
         add(out,"T000","note",".",1,1,"repository has no AGENTS.md","AGENTS.md")
         return out
@@ -504,7 +515,7 @@ def router_findings(files, content, max_lines=150):
             if normalized.startswith("../") or normalized=="..": continue
             if source==agents: targets.add(normalized)
             if normalized.endswith((".md",".markdown")):
-                if normalized not in files:
+                if normalized not in content:
                     add(out,"T004","warn",source,1,1,"router names a missing document",target)
                 else:
                     linked.add(normalized)
@@ -515,7 +526,7 @@ def router_findings(files, content, max_lines=150):
     for doc in linked:
         text=content.get(doc,"")
         remainder=re.sub(r"(?m)^\s*#.*$|\[[^]]*\]\([^)]*\)|`[^`]*`|\s+","",text)
-        if len(text.splitlines())<20 or not remainder:
+        if len(remainder)<40:
             add(out,"T005","note",doc,1,1,"linked document is short or only links elsewhere",doc)
     if readme and readme in content:
         text=content[readme]
@@ -618,7 +629,7 @@ def main(argv=None):
     if args.label:
         try: re.compile("|".join(args.label))
         except re.error as e: parser.error(f"invalid --label expression: {e}")
-    if args.command == "anchors" and (args.since or args.json or args.ignore or args.untracked): parser.error("unsupported anchors option")
+    if args.command == "anchors" and (args.since or args.json or args.ignore): parser.error("unsupported anchors option")
     if args.since and args.command in {"anchors"}: parser.error("--since is not supported for anchors")
     invalid=set(args.ignore)-{f"L{i:03}" for i in range(1,7)}-{f"R{i:03}" for i in range(1,5)}-{f"C{i:03}" for i in range(1,4)}-{f"P{i:03}" for i in range(1,4)}-{"D001","T000","T001","T002","T003","T004","T005","IO01"}
     if invalid: parser.error("unknown ignore code: "+", ".join(sorted(invalid)))
@@ -725,6 +736,18 @@ class MdtoolTests(unittest.TestCase):
         content={"Makefile":".PHONY: check lint\ncheck:\n\t@true\n","guide.md":"Run `make check` and `make missing`.\n"}
         found=ref_findings(list(content),content)
         self.assertEqual([(f.code,f.target) for f in found],[('R002','missing')])
+    def test_refs_ignore_non_shell_fences_and_redirections(self):
+        files=["guide.md"]
+        content={
+            "guide.md":"""Run `make 2> err.log`, `crates/foo`, and `src/existing.rs`.\n\n```text\n`missing/fenced.rs`\n```\n\n`missing/path.md`\n""",
+            "Makefile":"test:\n\t@true\n",
+            "Cargo.toml":"[package]\nname = \"sample\"\n",
+            "src/existing.rs":"",
+            "crates/foo/src/lib.rs":"",
+        }
+        found=ref_findings(files,content,list(content))
+        self.assertEqual([(f.code,f.target) for f in found],[("R001","missing/path.md")])
+
     def test_literal_reference_warning_categories(self):
         files=["guide.md","Cargo.toml","src/a.py"]
         content={"Cargo.toml":"[package]\nname = \"sample\"\n","guide.md":"`missing/path.md` `cargo test -p absent` `./scripts/nope` `sh -c` `https://example.com/docs/guide.md` `~/usr`\n","src/a.py":""}
