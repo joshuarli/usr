@@ -7,7 +7,8 @@
 #     every task;
 #   - a literal mdtool reference names a command the checked-in tool does not expose;
 #   - a router table whose second column is Skill names a skill that does not exist.
-# Warnings (exit 0): a skill over 60 lines, or one with no closing **Reply:**.
+# Warnings (exit 0): a skill over 60 lines (except ultrareview), or one with no
+# closing **Reply:**.
 set -u
 skills="${1:-base/.agents/skills}"
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
@@ -45,7 +46,10 @@ for d in "$skills"/*/; do
             *) echo "$n references unknown mdtool command: $c"; bad=1 ;;
         esac
     done
-    [ "$(wc -l < "$f")" -le 60 ] || echo "warning: $n is over 60 lines"
+    # The whole-repo review keeps its lenses together in the entrypoint.
+    if [ "$n" != ultrareview ]; then
+        [ "$(wc -l < "$f")" -le 60 ] || echo "warning: $n is over 60 lines"
+    fi
     grep -q '^\*\*Reply:\*\*\|^## \(Hand back\|Report\|Handoff\)' "$f" || echo "warning: $n has no closing **Reply:**"
 done
 exit $bad

@@ -7,8 +7,8 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6-luna"
-model_reasoning_effort = "xhigh"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
 
 [features]
 goals = true
@@ -161,5 +161,11 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects."/home/josh/d/laputa-systems/laputa"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/home"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/ptytest"]
 trust_level = "trusted"
 
