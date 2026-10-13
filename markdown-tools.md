@@ -343,19 +343,7 @@ repo-specific options beyond `--max-lines`.
 Each phase is usable on its own and each is a separate commit. Skills are updated in the
 same change that adds the subcommand they call.
 
-## 11. Related finding: `rg` and `fd` do not run on this host
-
-Not part of `mdtool`, but it shaped this RFC because the lack of search tools is why
-`consumers` is worth having at all. On this Linux machine `~/.local/bin/rg` and `fd` fail
-with "required file not found". `file` shows both are dynamically linked against
-`/lib64/ld-linux-x86-64.so.2` (glibc), and this host has only `/lib/ld-musl-x86_64.so.1`.
-So `dl` installed the glibc release assets on a musl host. `AGENTS.md` already notes
-musl-vs-glibc for `mold`; `dl` likely needs the same choice for `rg` and `fd`
-(upstream publishes `x86_64-unknown-linux-musl` builds of both, to my knowledge; I did
-not verify the release listing). I did not touch `dl`, which the repo
-rules say not to run unprompted.
-
-## 12. Open questions
+## 11. Open questions
 
 1. **Name.** `mdtool` is short and unclaimed in `~/.local/bin`. `docs-check` reads better
    in a skill sentence but suggests it only checks. Preference?

@@ -147,7 +147,7 @@ install_binary() {
 install_release() {
     prog=$1
     case "$prog" in
-        e|fz|fd|rg|fdu|fastermod|tm|fs|srv|diff-pretty) owner="laputa-systems" ;;
+        e|fz|fdu|fastermod|tm|fs|srv|diff-pretty) owner="laputa-systems" ;;
         ish|mactop) owner="joshuarli" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
@@ -191,6 +191,62 @@ install_release() {
         tmpzip=
         tmpbin=
         skip "$prog" "${asset}.zip does not contain ${asset}"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    install_binary "$prog" "$tmpbin" "$id"
+    tmpbin=
+}
+
+# fd and ripgrep use upstream archives so Linux always gets the static musl build.
+install_fd_or_rg() {
+    prog=$1
+    case "$prog" in
+        fd) owner=sharkdp; project=fd ;;
+        rg) owner=BurntSushi; project=ripgrep ;;
+    esac
+    case "${OS}:${ARCH}" in
+        Linux:x86_64|Linux:aarch64) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Darwin:x86_64|Darwin:aarch64) artifact_target="${ARCH}-apple-darwin" ;;
+        *) skip "$prog" "no upstream release for ${OS}/${ARCH}"; return ;;
+    esac
+    latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+        "https://github.com/${owner}/${project}/releases/latest") || latest_url=
+    tag=$(printf '%s\n' "$latest_url" \
+        | sed -n 's|.*/releases/tag/\([^/]*\)$|\1|p')
+    if [ -z "$tag" ]; then
+        unchecked "$prog" "no upstream release found"
+        return
+    fi
+    case "$prog" in
+        fd) asset="fd-${tag}-${artifact_target}" ;;
+        rg) asset="ripgrep-${tag}-${artifact_target}" ;;
+    esac
+    url="https://github.com/${owner}/${project}/releases/download/${tag}/${asset}.tar.gz"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked "$prog" "${asset}.tar.gz is not available in ${tag}"
+        return
+    fi
+    if is_current "$prog" "$id"; then
+        printf '%s\n' "${prog} is current (${tag})"
+        return
+    fi
+    printf '%s\n' "Downloading ${asset}.tar.gz ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip "$prog" "${asset}.tar.gz is not available in ${tag}"
+        return
+    fi
+    tmpbin=$(mktemp "${DEST}/.${prog}.XXXXXX")
+    if ! tar -xzOf "$tmpzip" "${asset}/${prog}" > "$tmpbin"; then
+        rm -f "$tmpzip" "$tmpbin"
+        tmpzip=
+        tmpbin=
+        skip "$prog" "${asset}.tar.gz does not contain ${prog}"
         return
     fi
     rm -f "$tmpzip"
@@ -414,6 +470,7 @@ fi
 for prog in "$@"; do
     changed=false
     case "$prog" in
+        fd|rg) install_fd_or_rg "$prog" ;;
         vault)
             install_direct vault \
                 "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault" ;;
