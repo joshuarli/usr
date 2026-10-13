@@ -1,360 +1,229 @@
-# RFC: `mdtool`, read-only documentation checks for agents and skills
+# Campaign: `mdtool`, read-only documentation checks
 
-Status: draft. Written 2026-10-13 by Claude (Sonnet 5.5) at Josh's request, after a
-`docs-refresh` of `~/d/aincrad2`. Nothing in this RFC is implemented.
+Status: ready. This campaign adds one Python 3.9+ standard-library command, `mdtool`, for mechanical Markdown and documentation checks used by repository skills. No implementation exists at the campaign base; the behavior below is the specification.
 
-## 1. Summary
+Deliverables:
 
-Add one self-contained Python 3.9+ standard-library script, `mdtool`, that answers the
-mechanical questions every docs-related skill keeps re-deriving with ad-hoc `grep` and
-throwaway Python: do the links resolve, do the things the docs name exist, which docs does
-code depend on, which comments point at docs, which paragraphs are duplicated, and what did
-this change break that was fine before. It also checks that a repo follows the
-documentation format `docs-refresh` prescribes (README for end users only, AGENTS.md a thin
-router, detail split by topic under `docs/`; section 6.8). It never writes to the tree. It
-is installed once, on `PATH`, from this repo, and the skills call it by name.
+1. A deterministic `mdtool` command with read-only check commands covering links, anchors, references, code consumers, comment pointers, duplicate documentation blocks, and docs-router conventions.
+2. Embedded behavioral tests, a numbered test wrapper, and a `make check` entry.
+3. Skill instructions that use the command with a working fallback, plus a guard that rejects unknown `mdtool` subcommands in skills.
+4. A measured, documented verification loop and a close review with no unresolved campaign item except items explicitly parked with evidence.
 
-## 2. Motivation
+## Charter
 
-The docs refresh of aincrad2 covered 123 tracked markdown files (about 30k lines) with one
-lead and seven parallel workers. The semantic work (is this claim still true of the code)
-needed judgement and no tool would have removed it. The mechanical work cost real time,
-and in three cases nearly caused damage:
+- Decide within the bounds below, add a one-line decision-log entry when the call would otherwise surprise a reader, and continue. Never ask, wait for approval, or send a check-in. Stop only when deliverables are met or remaining work is parked behind a hard stop.
+- Hard stops: an action outside the repository; any write by a check command to scanned repository content or outside `.work/tmp`; a path escape or symlink policy violation; or no runnable check for an item. Park only the affected item and continue with independent work. Never push.
+- Check commands are read-only: no writes, network, or subprocess except the documented read-only `git` operations for `--since` and tracked-file discovery. `selftest` may create and remove fixtures under `.work/tmp` and use Git to initialize, stage, commit, and query its temporary comparison repository. It may inspect untracked paths only when `--untracked` is supplied.
+- Finish functional parity and tests before optimization or polish. Record performance during parity; do not gate feature work on it.
+- Fix on the way a plainly broken check, a baseline failure that blocks an item, or a command over two minutes that blocks the campaign, each in a separate Conventional Commit. Record lesser issues and leave them. Time-box a failing item to three root-cause experiments; after three refutations, recheck assumptions, then park it with the repro, evidence, and next useful check.
+- Keep bookkeeping to the decision log and one short campaign-log line per phase. Do not add provenance, hashes, inventories, or other state files.
+- Use one serial executor and no child agents or lane worktrees. Keep scratch under `.work/tmp`, set `TMPDIR` there, and keep measured peak RSS below 512 MiB. `.work/` is already ignored in `.git/info/exclude`.
+- Commit each completed phase as a Conventional Commit with the area as scope; item IDs go in the body. Never push. Code comments explain local behavior and never cite this plan.
 
-1. **Link and anchor checking was written from scratch, twice.** I wrote a relative-link
-   script and a GitHub-slug anchor script in `.work/tmp`. Workers wrote their own, one
-   under the same filename as mine. My later run executed the worker's version, printed a
-   different format, and then crashed on a file I had just `git mv`'d. A trustworthy
-   checker would have been run once by the lead and its findings handed to the workers.
-2. **Docs that code depends on were found by luck.** `docs/content/card-format.md` is
-   `include_str!`'d by `a2-cards` and asserted on by tests; `docs/battle/AUTHORING.md` has
-   fenced blocks a test compiles; `docs/NUMERIC-ENVELOPE.md` is hashed into the engine
-   identity by `tools/engine_identity.rs`; `battlelab check docs` parses the layout blocks
-   of `AGENTS.md` and `docs/STRUCTURE.md`. I found these only because I happened to grep
-   for `include_str!` and `read_to_string` before the workers started cutting. Missing one
-   would have meant a worker "tidying" a load-bearing file.
-3. **"Does the thing the doc names exist" was checked by eye.** Make targets, `-p CRATE`
-   names, `scripts/x.sh` paths and `path:line` references are all checkable without
-   judgement, and each worker re-did it by hand, differently.
-4. **Comparing before and after used `git stash`.** To see whether the anchor check had
-   regressed I stashed a tree that seven workers were still editing, then popped it. It
-   restored cleanly, but only by luck of timing. A baseline comparison should read a
-   revision, not mutate the working tree.
-5. **The search tools were unavailable.** See section 11.
-6. **Conforming a repo to the standard format needed three more throwaway checks.** When
-   `docs-refresh` gained its standard format and aincrad2 was restructured to it, I wrote
-   ad-hoc scripts to confirm that every doc under `docs/` is reachable from AGENTS.md in one
-   hop, that the layout block still names every crate, and that no developer material
-   remained in README. Moving content out of README and AGENTS.md also made the
-   load-bearing rule (2) concrete: AGENTS.md and `docs/STRUCTURE.md` are read by a check
-   that fails the gate if a crate is missing from their layout blocks.
+## Decisions
 
-A shared script fixes (1) to (4) and (6) once, for every skill that touches docs, and lets
-each `SKILL.md` stay short. `skills-check.sh` already warns above 60 lines.
+### Owner-decided — answered 2026-10-13
 
-## 3. Goals and non-goals
+- **Command name:** `mdtool`. The owner chose the recommended short name; it covers more than link checking.
+- **`dups`:** include in v1, limited to documentation blocks. Code duplication analysis is out of scope.
+- **Consumer file set:** include non-Markdown tracked files in a directory containing tracked Markdown, so embedded or parsed documentation data is discoverable.
+- **`router` exit status:** findings remain warnings and notes; repo-specific enforcement belongs in a separate gate.
+- **Execution shape:** one serial executor, with no child agents or lane worktrees. The owner chose this bounded workflow.
 
-Goals:
+### Prescribed
 
-- One file, Python 3.9+, standard library only, runnable as `python3 -I mdtool ...` and
-  directly via its shebang. macOS's system `python3` is 3.9, so 3.9 is the floor.
-- Read-only. No writes, no network, no subprocess other than `git` (section 6.7).
-- Deterministic: same tree, same bytes out. Sorted, no timestamps, no absolute paths.
-- Findings carry a stable code and a `path:line` a harness can open.
-- Fast enough to run on every refresh without thought (section 9).
+- **One file and no dependencies:** implement the command as `dotfiles/base/.local/bin/mdtool`, Python 3.9+, standard library only. The requested command is small enough for one file, and one slugger and walker can serve multiple subcommands. No config file or plugin API. Reverse this only if the full specified behavior cannot remain understandable within the 800-line ceiling; if so, park the split as a design finding rather than adding an unreviewed module system.
+- **Full-scope default:** with no paths, inspect all tracked docs; `--since` is explicit, never an implicit default. This avoids hiding pre-existing findings. Change-only callers pass `--since HEAD` explicitly.
+- **Git is the oracle for tracked files and revisions:** use `git ls-files -z`, `git ls-tree`, and `git cat-file --batch` without a checkout or stash; invoke Git with an argument vector, never through a shell. Outside a Git tree, walk the requested root using the exclusions below. `--since` without Git exits 2.
+- **Error and output contract:** findings sort by file, line, column, code, then target, with repo-relative `/` paths. Text goes to stdout one finding per line; summaries go to stderr as `N findings in N of N files`. Exit 0 means no `error` findings, 1 means at least one, and 2 means usage, unreadable-root, or Git-operation failure. File-read failures are `note`s and continue. JSON emits one object per finding per line with `code`, `severity`, `file`, `line`, `col`, `message`, and `target`; all fields are present. `--quiet` suppresses only the summary. An unknown `--ignore CODE` is a usage error.
+- **Platform and path safety:** support macOS and Linux with Python 3.9+. Decode Markdown as UTF-8 with replacement. Do not follow symlinks outside the root; read an in-root symlink target once and do not recurse through it. Confine resolved targets before opening and use directory-relative no-follow opens for each path component so a symlink swap cannot escape between check and read. Outside-root destinations are `L001` and are never opened. Output paths always use `/`.
+- **File bounds:** tracked missing paths are skipped with a `note`; skip binary files with a NUL in the first 8 KiB and files larger than 2 MiB. Outside Git, skip dot-directories, `target`, `node_modules`, and `.work`. `--untracked` adds untracked, non-ignored files.
+- **No legacy parity target:** this is greenfield. The RFC behavior tables and numbered examples below are the oracle; no throwaway script or prior output is a compatibility contract. Every behavior row has a literal-output or literal-exit behavioral test, including negative controls that prove the test fails when behavior is wrong.
+- **`refs` invocation:** do not hide old findings by default. In `docs-refresh`, use `--since HEAD` when checking only the current worktree change; use the full-scope form for a whole-repo refresh.
+- **Skill command validation does not depend on installation:** `skills-check.sh` invokes the checked-in `dotfiles/base/.local/bin/mdtool commands` through `python3 -I`, resolving the repository root from its own path. This keeps `make check` working before a home sync.
+- **Test effects:** keep decision logic callable against explicit roots and file sets. Real filesystem tests use a temporary directory under `.work/tmp`; Git comparison tests use a small temporary repository there. No network, clock, or subprocess seam is needed beyond the explicit read-only Git boundary.
+- **No persisted state, concurrency, retry, or transaction contract:** the tool is a synchronous read-only process. Do not add these abstractions.
+- **Performance and size:** no dependency means no dependency maintenance, build-time, or binary-size impact. Keep the script under 800 lines and 64 KiB; keep peak RSS under 128 MiB on the representative consumer workload. After parity, measure `links` on 120 files / 30,000 lines below 1 CPU second and `consumers` on a few thousand tracked text files below 3 CPU seconds, minimum of five runs. Interleave baseline and candidate measurements; require `perf-gate-ready` to return 0 before and `-1` immediately after each time measurement. A busy host defers the time gate and it is not a pass. Memory and source-size gates still run.
+- **No formatter:** preserve repository formatting conventions by hand.
 
-Non-goals:
+### Delegated within bounds
 
-- It does not edit anything, fix anything or format anything. Repo rules ban formatters,
-  and a checker that writes is a different tool.
-- It does not judge prose, tone, length or whether a claim is true. It reports facts a
-  skill can act on.
-- It does not run the repo's binaries (no `--help` scraping). Whether `--flag` exists is
-  left to the skill, which can run `--help` itself.
-- No config file and no plugin API in v1. Flags only (section 5).
-- Not a renderer. It models GitHub-flavoured Markdown only.
+- The executor chooses the smallest line-oriented parsing helpers that meet the forms enumerated below; do not add a Markdown parser dependency or support an unlisted renderer dialect.
+- The executor may choose exact diagnostic wording, provided codes, severities, fields, ordering, and exit behavior remain fixed. Add a literal test for every stable diagnostic shape.
+- Choose how `skills-check.sh` obtains the command list, provided there is one authoritative list from `mdtool commands` and invalid skill references fail with the skill and unknown subcommand named.
 
-## 4. Where it lives and how skills get it
+## Baseline
 
-- **File:** `dotfiles/base/.local/bin/mdtool`, mode 0755, `#!/usr/bin/env python3`. `sym`
-  links it into `~/.local/bin`, which is on `PATH` for Claude, Codex and pi alike. It is
-  the single copy; no skill carries its own.
-- **Skill text:** a skill names the command and its fallback in one line, for example
-  "run `mdtool links` on the files you touched (without `mdtool`, grep for the link
-  targets)". A skill must still work on a machine that has not yet run `make`.
-- **Check:** `skills-check.sh` gains one rule beside the existing "names a skill that does
-  not exist" check: a skill that writes `` `mdtool <word>` `` must name a subcommand that
-  `mdtool commands` prints. A subcommand cannot be renamed under a skill silently.
-- **Skills that call it:**
+- Base is greenfield for `mdtool`: no source file, callers, or tests exist. Existing scripts establish the installation and check patterns: `dotfiles/sym` links tracked files into a target; `Makefile` `check` runs the numbered tests and both skill trees; `dotfiles/skills-check.sh` checks skill routing tables.
+- Foundation proof: `sh dotfiles/sym -t "$PWD/.work/tmp/sym-proof/home" dotfiles/base` installed the real base layer into scratch; the resulting `shift_srt.py` symlink resolved and was executable. This proves the planned executable script can reach the PATH location through the existing installer. The tracked mode of `shift_srt.py` is 100755.
+- Foundation proof: `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` exited 0. Its current skill-reference check is at `dotfiles/skills-check.sh:26-31`; `mdtool` validation belongs alongside it.
+- Measured loop command: base skill check, 0.63 s wall / 0.16 s CPU. The repository describes `make check` as about 25 s; it was not run for this documentation preflight. The current full command timings and known failures are unknown until P0; the executor records them before editing code. The new command has no baseline implementation to time.
+- A read-only `sym --dry-run` against the repository root reported the expected conflict at `.agents/skills`, because that link already exists. It made no change and is not an installer failure.
+- No release build exists or is needed. Performance is measured after parity against the thresholds above, not as an early feature gate.
 
-  | Skill | Subcommands |
-  |---|---|
-  | `docs-refresh` | `links`, `refs`, `consumers`, `anchors`, `router`, `--since` |
-  | `comment-cleanup` | `pointers` |
-  | `single-source-of-truth` | `dups` |
-  | `ultrareview` (its docs lane) | through `docs-refresh` |
-  | `campaign-preflight` | `refs`, `links` on the design doc it makes executable |
+## Sequence
 
-- **Subagent briefs:** `docs-refresh` (and `orchestrate`, when it fans docs work out) tells
-  the lead to run `mdtool consumers` and `mdtool links` once, before dispatch, and to paste
-  the findings into each worker's brief. Workers do not write their own checkers.
+Each item lists its size, prerequisites, owned files, and acceptance proof. Execute every item serially in this order. Keep campaign changes on the active campaign branch; do not create child agents or worktrees.
 
-## 5. Interface
+### P0 — Ground
+
+**G0 · Record the baseline** (small; no prerequisite). The executor owns no source files. Record `git status`, known failures, available Python versions, memory headroom, and wall / CPU times for the current `make check`, `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills`, and `sh dotfiles/skills-check.sh .agents/skills`. Confirm `.work/` is ignored via `.git/info/exclude`, adding that local ignore rule if needed before scratch writes. Run only these existing checks; do not run `make` or any setup/download command. If `make check` exceeds two minutes, isolate the slow check and fix the loop before feature work. Acceptance: the baseline entries are recorded in the campaign log with exact command, result, and timing; existing reds are named and `.work/` is ignored before M1.
+
+### P1 — Parity and completeness
+
+**M1 · Implement the complete tool, tests, and skill wiring** (large; prerequisite G0). One serial executor owns `dotfiles/base/.local/bin/mdtool` (mode 0755, `#!/usr/bin/env python3`), `dotfiles/mdtool-test.sh`, `Makefile`, `dotfiles/skills-check.sh`, and the skill files for `docs-refresh`, `comment-cleanup`, `single-source-of-truth`, `ultrareview`, and `campaign-preflight`. Deliver all commands and behaviors in the Reference section together; do not ship a partial phase. Use a single file walker and shared GitHub slugger. Tests are embedded `unittest` cases and run via `mdtool selftest`; the wrapper follows the numbered-output convention of `dotfiles/sym-test.sh`. Each skill names the relevant command and a useful fallback for machines without `mdtool`; `campaign-preflight` uses `--untracked` for an untracked design doc. The checker extracts literal backticked `mdtool <subcommand>` references and rejects names absent from `mdtool commands`, identifying the skill and bad name; invoke the checked-in command through `python3 -I` so `make check` works before a home sync. Acceptance: `python3 -I dotfiles/base/.local/bin/mdtool selftest`, the numbered wrapper, both skill checks, and `make check` pass; `make lint` passes for the new POSIX wrapper; temporary scratch skill inputs containing valid and invalid names prove success and failure respectively; every mapped skill command has a working fallback; `mdtool commands` emits the exact command set; the script parses with Python 3.9 grammar; no external import is required.
+
+Skill command map: `docs-refresh` uses `links`, `refs`, `consumers`, `anchors`, and `router`; use `--since HEAD` for a change-only refresh. `comment-cleanup` uses `pointers`. `single-source-of-truth` uses docs-only `dups`. The docs lane in `ultrareview` routes through `docs-refresh`. `campaign-preflight` uses `links` and `refs --untracked` for a not-yet-tracked design doc.
+
+P1 gate: `make check` proves the new wrapper and command guard are wired into the repository loop; `make lint` checks the new POSIX wrapper. Do not begin hardening or optimization if a feature or its behavior test is missing.
+
+### P2 — Hardening
+
+**H1 · Close boundary and cross-platform cases** (medium; requires M1). Own `mdtool` and its embedded tests. Cover symlink escape, outside-root paths, permission/read errors, case-only mismatches, percent decoding, malformed options, duplicate references, missing tracked files, non-UTF-8 names where supported, and Python 3.9 execution when available. Every failure must retain its specified code, severity, and exit status. Acceptance: focused named selftests pass; Python 3.9 runs `commands` when installed; Linux and macOS path rules are exercised by platform-specific tests or explicitly logged as unverified where a runner is unavailable.
+
+P2 gate: run `mdtool selftest` and the numbered wrapper because H1 changes tool behavior and boundary handling. Report any baseline failure separately. Fix root causes; do not retry a red without a new hypothesis.
+
+### P3 — Optimization and polish
+
+**O1 · Measure the bounded workloads** (medium; requires P1 and P2). The serial executor owns `mdtool` and selftests. Capture the parity baseline before optimization. Measure the specified 120-file / 30k-line link corpus and few-thousand-file consumer corpus with CPU time, at least five interleaved runs, `perf-gate-ready` bracketing, and correctness checks on every run. Report minimum, median, and range; answer the benchmark-checklist questions about limiter, tuning, errors, and completed work. Check peak RSS and source bytes regardless of host load. Fix only measured excess over the targets; preserve behavior tests. Acceptance: command outputs remain identical, source stays under 800 lines / 64 KiB, peak RSS is at most 128 MiB, and workload targets pass. If host load prevents a time measurement, log `perf gate deferred: host busy`; leave O1 and campaign close incomplete until the gate can be measured.
+
+### P4 — Close
+
+**C1 · Review, clean, and report** (medium; requires all landed items). The serial executor verifies all deliverables and no dead fallback/test-only code remains, runs final `make check` and `make lint`, applies `dotfiles-health` because skills are part of agent setup, then performs a whole-repo `ultrareview` as its final consistency pass. Do not spawn a reviewer; the owner chose a single serial executor. Fix P1/P2 findings in scope; park other findings with evidence. Acceptance: all checks and time gates pass except individually named baseline failures that do not block an item; campaign log states outcome, contract changes, metrics, and unverified platforms. A deferred time gate means the campaign is not complete.
+
+## Acceptance
+
+Every deliverable has a check, and campaign completion never waits on a person.
+
+| Deliverable | Proof |
+|---|---|
+| Read-only CLI and all named commands | `python3 -I dotfiles/base/.local/bin/mdtool selftest`; test each exit class and output in embedded tests |
+| Python 3.9 compatibility | `ast.parse(source, feature_version=(3, 9))`; if available, `python3.9 -I .../mdtool commands` |
+| Skills call valid commands and work without installation | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills`; `sh dotfiles/skills-check.sh .agents/skills`; fallback paths checked in updated skill text |
+| Numbered wrapper is in the routine loop | `sh dotfiles/mdtool-test.sh`; `make check` includes it |
+| No POSIX shell regression | `make lint` |
+| Time and size limits | P3 workload commands and measurements in O1; time gate only counts when pre/post readiness checks pass |
+| Close review | P4 campaign-scoped ultrareview; fix P1/P2 findings and record remaining hard-stopped work |
+
+## Contract changes
+
+Pre-authorized: a new executable command and its subcommands, flags, output codes / severities, and exit statuses exactly as specified; one added `skills-check.sh` rule; skill text updates; a `make check` entry; and test-fixture writes under ignored `.work/tmp`. These are additive and do not alter existing command contracts. The executable is installed through the existing base layer; no home-directory sync is run by this campaign.
+
+Forbidden: writes or formatting to scanned repository content; network access; running non-Git subprocesses; reading outside `--root`; adding third-party dependencies; changing `sym`, installer behavior, existing skill invocation policy, or the meaning of existing `make` targets. Any extension beyond the pre-authorized command contract is parked for owner review.
+
+No schema, persisted data, wire format, transaction, retry, or concurrency changes are in scope.
+
+## Non-goals
+
+- Rendering Markdown or checking remote URLs.
+- Judging prose, tone, truth of claims, or whether a docs split is sensible.
+- Editing, formatting, or fixing documentation.
+- Scraping binaries' help output, plugin APIs, configuration files, or code-wide duplicate analysis.
+- Supporting Markdown dialects beyond the listed GitHub-flavored forms.
+- Changing docs-refresh's broader workflow or restructuring the skills tree.
+
+## Reference
+
+### Design and verified code map
+
+- The current branch has no `mdtool`; the command contract below is the source of truth for this greenfield addition.
+- `dotfiles/base/.local/bin/` is the shared PATH-script layer. `dotfiles/sym` installs each tracked file as a relative symlink; its install pass is at `dotfiles/sym:263-287`.
+- `Makefile:39-43` owns `make check` and runs both base and top-level skill checks. `dotfiles/skills-check.sh:26-31` validates skill-router references; add the mdtool command check next to this rule.
+- `dotfiles/base/.agents/skills/docs-refresh/SKILL.md` owns docs-refresh's general policy. The other command consumers are `comment-cleanup`, `single-source-of-truth`, `ultrareview`, and this campaign-preflight skill.
+
+### CLI contract
 
 ```
 mdtool COMMAND [options] [PATH...]
-mdtool commands            # one subcommand name per line, for skills-check.sh
-mdtool selftest            # run the embedded tests (section 9)
+mdtool commands
+mdtool selftest
 ```
 
-`PATH` limits the scope to files or directories; with none, the scope is every tracked
-doc. "Just the docs this change touched" is a normal invocation.
+Commands: `links`, `anchors`, `refs`, `consumers`, `pointers`, `dups`, and `router`. `commands` prints one command name per line. `selftest` runs embedded tests. `PATH` limits scope to files or directories; without paths, inspect every tracked Markdown file. `anchors` requires at least one path. `--root DIR` defaults to `git rev-parse --show-toplevel`, or the current directory outside Git; it and `--untracked` apply to all scanning commands. `--untracked` includes untracked, non-ignored files. `--since REV` filters findings absent at that revision and applies only to finding commands, not `anchors`, `commands`, or `selftest`. `--json`, repeatable `--ignore CODE`, and `--quiet` apply to finding commands; `anchors` prints its heading table. Subcommand flags are `--label REGEX` for `pointers`, `--code` for `dups`, and `--max-lines N` for `router`. Reject a flag not supported by the selected command. Options may appear before or after command paths. Usage errors exit 2.
 
-Common options:
+Output is sorted and stable. Text findings use `path:line:col: severity CODE message: target`; summaries go to stderr. JSON has one object per finding per line with the exact fields named above. `note` and `warn` never change exit status.
 
-| Option | Meaning |
-|---|---|
-| `--root DIR` | Repository root. Default: `git rev-parse --show-toplevel`, else the cwd. |
-| `--untracked` | Also include untracked, non-ignored files. Default is tracked files only. |
-| `--since REV` | Report only findings absent at `REV` (section 6.7). |
-| `--json` | One JSON object per finding per line: `code`, `severity`, `file`, `line`, `col`, `message`, `target`. |
-| `--ignore CODE` | Drop a finding code. Repeatable. |
-| `--quiet` | No summary line. |
+### Behavior specification
 
-Output, one finding per line, grep-shaped so a terminal makes it clickable:
-
-```
-docs/CONTENT.md:99:5: error L001 missing-target: content/pack-prompt.template.md
-```
-
-The summary goes to stderr: `3 findings in 2 of 118 files`. Exit status: 0 no findings
-at `error` severity, 1 at least one, 2 usage error or unreadable root. `note` and `warn`
-never change the exit status.
-
-File set rules (these exist because each one bit during the refresh):
-
-- Start from `git ls-files -z`. **Skip a tracked path that is missing from the worktree**
-  and print one `note` per skipped path, so a half-finished `git mv` or `rm` neither
-  crashes the run nor hides a problem.
-- Outside a git tree, walk the directory and skip dot-directories, `target`,
-  `node_modules` and `.work`.
-- Skip binary files (a NUL byte in the first 8 KiB) and files over 2 MiB.
-- Decode as UTF-8 with `errors="replace"`; never raise on content.
-
-## 6. Subcommands
-
-### 6.1 `links`: do relative links and anchors resolve
-
-Checks every markdown link and image in the doc set.
-
-Forms handled: inline `[t](dest "title")`, `<dest>` destinations, reference links
-`[t][ref]`, collapsed `[ref][]` and shortcut `[ref]` against `[ref]: dest` definitions,
-autolinks, and raw `<a href>` / `<a id>` / `<a name>` anchors. Links inside fenced code,
-indented code and inline code spans are not links. Destinations with a scheme
-(`https:`, `mailto:`) and bare `#frag` links to the same file are handled; schemes are
-never fetched.
+**`links` — resolve links and anchors.** Handle inline `[text](dest "title")`, angle destinations, reference `[text][ref]`, collapsed `[ref][]`, shortcut `[ref]` when a matching definition exists, autolinks, raw `<a href>`, `<a id>`, and `<a name>`. Ignore links inside fenced, indented, or inline code; independently inspect inline-code spans for L004. Do not fetch schemes (`https:`, `mailto:`); resolve bare `#frag` against the same file. Percent-decode destinations before lookup. Heading slugs: lowercase; remove HTML tags and Markdown syntax markers while retaining visible text; keep Unicode letters, digits, spaces, hyphens, and underscores; drop other characters; convert spaces to hyphens; suffix repeated slugs `-1`, `-2`, etc. ATX and setext headings count, but fenced headings do not.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `L001` | error | Destination file or directory does not exist. |
-| `L002` | error | File exists, but it has no heading or explicit anchor with that slug. |
-| `L003` | error | Exists only under another letter case. macOS is case-insensitive and Linux is not, and both are in use here, so a link that passes on one machine can be dead on the other. |
-| `L004` | error | A `path:N` or `path:N-M` reference in an inline code span names a line beyond the end of the file. |
-| `L005` | error | `[text][ref]` with no `[ref]:` definition. |
-| `L006` | warn | A `[ref]:` definition nothing uses. |
+| L001 | error | Missing destination or outside-root destination; never open outside-root paths. |
+| L002 | error | File exists but fragment has no heading or explicit anchor. |
+| L003 | error | Path exists only with different letter case. |
+| L004 | error | `path:N` or `path:N-M` inline-code reference exceeds target line count. |
+| L005 | error | Reference link has no definition. |
+| L006 | warn | Reference definition is unused. |
 
-Slug rules (GitHub): lowercase; remove inline formatting characters and HTML tags; drop
-everything that is not a letter, digit, space, hyphen or underscore (Unicode letters are
-kept); spaces become hyphens; the n-th repeat of a slug within one file gets `-n`. ATX
-(`#`) and setext (`===`, `---`) headings both count. `#` lines inside fences are not
-headings. Percent-escapes in destinations are decoded before lookup.
+**`anchors FILE...` — list linkable headings.** Print each heading as line, level, slug, and text; use the same slugger as `links`. Exit 0.
 
-### 6.2 `anchors FILE...`: what can I link to
-
-Prints each heading as `line  level  slug  text`, so an author or worker writes
-`file.md#slug` from the table instead of guessing. Uses the same slugger as `links`, so
-the two cannot disagree. Exit status is always 0.
-
-### 6.3 `refs`: do the things the docs name exist
-
-Reads inline code spans and fenced `sh` blocks in the doc set and checks the claims that
-need no judgement. A span containing placeholders (`<name>`, `NN`, `{a,b}`, `*`, `$VAR`,
-`...`) is skipped, not reported.
+**`refs` — check literal references.** Inspect inline-code spans and fenced `sh` blocks. Skip spans with placeholders such as `<name>`, `NN`, `{a,b}`, `*`, `$VAR`, or `...`.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `R001` | warn | A span that looks like a repo path (contains `/`, or ends in a known source or doc extension) and names no tracked file or directory. Paths under a directory the repo does not track (`runs/`, `target/`) are skipped. |
-| `R002` | warn | `make TARGET` where no Makefile in scope defines `TARGET`. Targets come from `^name:` lines and `.PHONY`. |
-| `R003` | warn | `cargo ... -p NAME` or `--package NAME` where no `Cargo.toml` has `[package] name = "NAME"`. |
-| `R004` | warn | A script invoked as `scripts/x`, `./x` or `sh x` that is not tracked. |
+| R001 | warn | A span containing `/` or ending case-insensitively in `.md`, `.markdown`, `.txt`, `.rs`, `.toml`, `.yaml`, `.yml`, `.json`, `.py`, `.sh`, `.c`, `.h`, `.go`, `.ts`, or `.js` looks like a repo path but names no tracked file or directory; skip paths beneath untracked `runs/` or `target/`. Do not duplicate R002–R004 findings as R001. |
+| R002 | warn | `make TARGET` has no target in an in-scope Makefile's target or `.PHONY` declarations. |
+| R003 | warn | `cargo ... -p NAME` / `--package NAME` has no matching `[package] name` in any `Cargo.toml`. |
+| R004 | warn | Invoked `scripts/x`, `./x`, or `sh x` is not tracked. |
 
-These are `warn`, not `error`: a doc may legitimately name something a reader is meant to
-create. The point is that a skill sees the list and decides.
+These are warnings because docs can name files readers are expected to create.
 
-### 6.4 `consumers`: which docs does code depend on
-
-Lists every tracked non-markdown text file that contains the repo-relative path of a
-tracked doc (or data file living in a docs directory, such as `docs/*.tsv`) as a string
-literal, and says how:
+**`consumers` — find code depending on docs.** Inspect tracked non-Markdown text files for tracked Markdown and for data files whose parent directory also contains tracked Markdown. Classify literal path matches outside comments as `C001` embeds (`include_str!`, `include_bytes!`, `include!`, `#include`, `embed`, or language equivalent), `C002` reads (a call containing `read`, `open`, `load`, or `parse`), or `C003` lists (other literal uses). Resolve `.`-prefixed literals relative to the containing file; compare others as repo-relative suffixes. Basename-only read-like matches are `C002 (name only)`. State in the summary that runtime-built paths cannot be resolved; do not claim completeness. Consumers are warnings or notes, never exit failures.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `C001` | warn | **embeds**: the path is inside `include_str!`, `include_bytes!`, `include!`, `#include`, `embed`, or a language's equivalent. Editing the doc changes the binary. |
-| `C002` | warn | **reads**: the path is a string literal in a call whose name contains `read`, `open`, `load` or `parse`. Editing the doc can break a test or a check. |
-| `C003` | note | **lists**: the path is a literal anywhere else outside a comment, such as a path array or a Makefile rule. Editing it may matter to a hash or manifest. |
+| C001 | warn | Embedded documentation changes can affect built output. |
+| C002 | warn | Read documentation can affect a test or check. |
+| C003 | note | Other literal consumers may affect a hash, manifest, or rule. |
 
-Resolution: a literal beginning with `.` is joined to the containing file's directory and
-normalised before comparison, so `include_str!("../../../docs/x.md")` resolves. Other
-literals are compared as repo-relative suffixes. A literal naming only a doc's basename
-inside a read-like call is reported as `C002` with `(name only)`. Paths built at runtime
-(`root().join("docs").join(name)`) cannot be resolved; the command says so in its summary
-rather than claiming completeness.
-
-Run before dispatching workers, the output is the "do not reshape these" list. It does
-not decide how an edit affects a hash. That remains the reader's call, and `consumers`
-exists so the reader knows to make it.
-
-### 6.5 `pointers`: comments that point at docs or plans
-
-For `comment-cleanup`. Extracts comments from source files (not strings, not markdown
-prose) and reports references that would break if documentation were renamed or deleted.
-
-Comment syntax by extension family: `//`, `///`, `//!` and `/* */` (rs, c, h, go, java,
-js, ts, kdl); `#` (py, sh, toml, yaml, Makefile, rb); `--` (sql, lua); `<!-- -->`
-(html); Python docstrings (a string that is a statement's first expression). A light
-tokenizer tracks string literals, including Rust raw strings, so `//` inside a string is
-not a comment. An unknown extension is skipped and counted in the summary.
+**`pointers` — find comments that point to docs/plans.** Inspect source comments, not strings or Markdown prose. Recognize `//`, `///`, `//!`, `/* */` (Rust, C-family, Go, Java, JS/TS, KDL); `#` (Python, shell, TOML, YAML, Makefile, Ruby); `--` (SQL, Lua); HTML comments; and Python docstrings. Use a light string-aware tokenizer, including Rust raw strings. Skip and count unknown extensions.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `P001` | error | Names a tracked doc by path or basename. |
-| `P002` | warn | A section or clause reference: `§`, `section 4`, `clause 2`, `step 3 of`. |
-| `P003` | warn | Matches a label shape. Built in: `M\d+`, `Phase \d+`, `#\d+`. Add repo-specific shapes with `--label REGEX` (aincrad2: `--label '\bD\d{2,3}\b'`). |
+| P001 | error | Comment names a tracked doc by path or basename. |
+| P002 | warn | Comment uses a section or clause reference. |
+| P003 | warn | Comment matches a built-in `M\d+`, `Phase \d+`, or `#\d+` label, or repeatable `--label REGEX`. |
 
-External citations (RFC numbers, spec names) are left alone; `P003`'s `#\d+` is `warn`
-so a human decides between an issue number and a standard.
+Leave external citations alone. `--label` is the only repo-specific heuristic option.
 
-### 6.6 `dups`: the same paragraph in two places
-
-For `single-source-of-truth` and the "give each fact one home" rule. Splits docs into
-blocks (paragraphs, list items, table row groups), normalises whitespace, case and
-markdown punctuation, and reports block pairs across or within files whose 8-word
-shingle overlap is at least 0.8 and that are at least 40 words (or 3 table rows).
+**`dups` — find repeated documentation blocks.** Split docs into paragraphs, list items, and table-row groups; normalize whitespace, case, and Markdown punctuation. Report pairs within or across files with Jaccard similarity of 8-word shingles at least 0.8 and at least 40 words, or at least three table rows. Exclude fenced code unless `--code` is supplied.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `D001` | note | `fileA:lineA-lineA2` and `fileB:lineB-lineB2` say substantially the same thing. |
+| D001 | note | Two source ranges state substantially the same thing. |
 
-Fenced code is excluded by default (`--code` includes it); repeated shell snippets are
-usually deliberate. Only reports; which copy is the home is the skill's decision.
-
-### 6.7 `--since REV`: only what this change broke
-
-Any subcommand takes `--since REV`. The tool runs the check against the tree at `REV`
-(read through `git ls-tree -r -z` and `git cat-file --batch`, with no checkout and no
-stash), runs it against the worktree, and prints only findings whose key
-`(code, file, target text)` is new. Line numbers are not part of the key, so a finding
-that merely moved is not "new".
-
-This is the one use of a subprocess, and it is `git`, read-only. With `--since` and no
-git, the command exits 2. It replaces my `git stash`-based comparison and is safe while
-other agents are editing.
-
-### 6.8 `router`: does the repo follow the standard format
-
-For `docs-refresh`, which prescribes: README.md for end users only; AGENTS.md a thin router
-(what the repo is, commands, one-line invariants, a map from topic to the doc that owns it);
-`docs/` holding the detail, split by topic. Judging whether a split "makes sense" is the
-skill's job. This command reports the parts that are mechanical.
+**`router` — check the mechanical parts of the docs format.** AGENTS.md (or a CLAUDE.md import/symlink to it) is a thin router; README.md is for end users; detail is in `docs/`. Judgement of a split stays with the skill.
 
 | Code | Severity | Meaning |
 |---|---|---|
-| `T001` | warn | A tracked markdown file under `docs/` that AGENTS.md reaches neither by a link to the file nor by a link to a directory that contains it. A developer cannot get to it in one hop. |
-| `T002` | note | AGENTS.md is longer than `--max-lines` (default 150), or has a section other than the map and the layout block longer than 30 lines. "Thin" is a judgement; this says where to look. |
-| `T003` | note | README.md has a heading matching `build`, `develop`, `contribut`, `architecture`, `layout`, `internals`, `invariant` or `testing` (case-insensitive), or a fenced block running `make ci`, `cargo test` or `cargo xtask`. Developer material in an end-user file. |
-| `T004` | warn | AGENTS.md or README.md names a doc path that does not exist (the same finding as `L001`, listed here so a router check does not need `links` as well). |
-| `T005` | note | A doc is linked from AGENTS.md but is under 20 lines or is a stub that only links elsewhere, which suggests a split that did not need to happen. |
+| T001 | warn | Tracked Markdown under `docs/` is not reachable in one hop from AGENTS.md by file or containing-directory link. |
+| T002 | note | AGENTS.md exceeds `--max-lines` (default 150), or a non-map/layout section exceeds 30 lines. |
+| T003 | note | README has a heading matching `build`, `develop`, `contribut`, `architecture`, `layout`, `internals`, `invariant`, or `testing` (case-insensitive), or a fenced `make ci`, `cargo test`, or `cargo xtask`. |
+| T004 | warn | AGENTS.md or README names a missing doc path. |
+| T005 | note | A linked doc is under 20 lines or only links elsewhere. |
 
-A repo with no `docs/` directory, or no AGENTS.md, gets one `note` and no `T001`. A router
-may be a `CLAUDE.md` that imports or symlinks AGENTS.md; the tool resolves the symlink or
-the `@AGENTS.md` import and reads the target. The format is global, so there are no
-repo-specific options beyond `--max-lines`.
+With no docs directory or AGENTS.md, emit one note and no T001. A docs-refresh skill must run `consumers` before acting on `router` findings.
 
-`router` does not know that a doc is load-bearing. Run `consumers` first and treat a
-`C001`/`C002` doc's structure as fixed when acting on a `T001` or `T002` finding.
+### Safety, tests, and measurement details
 
-## 7. Failure and safety behaviour
+- Never follow symlinks outside root. A symlink inside root is read once as a file and never recursively traversed. Lexical `..` escape is rejected before any read. Open through root-relative directory handles with no-follow semantics so a concurrent path swap cannot bypass the confinement check.
+- `--since` compares worktree findings with revision findings read via `git ls-tree -r -z` and `git cat-file --batch`; no checkout or stash. Finding identity is `(code, file, target text)`, excluding line numbers.
+- The first test cases cover duplicate heading suffixes, fenced fake headings, case-only paths, tracked-but-missing files, `include_str!` consumer classification, setext headings, out-of-range line refs, moved findings under `--since`, and links after a `git mv`. Add representative cases for every behavior row and each exit class.
+- There is no renderer/parser dependency. The line-oriented scanner is capped at 800 lines; a full CommonMark parser and extra slug flavors are out of scope.
+- Tests build fixtures only under `.work/tmp`; the wrapper runs the embedded tests and prints numbered cases in the repository's existing style.
 
-- A file that cannot be read is a `note` and the run continues.
-- A path that resolves outside `--root` after normalisation (`../../etc/passwd`) is
-  reported as `L001` with the message `outside the repository` and is never opened.
-- Symlinks are not followed outside the root. A symlink inside the root is read as the
-  link target's content once and not walked recursively.
-- The tool imports nothing from the current directory, so a planted `json.py` is not
-  executed. It runs cleanly under `python3 -I`.
-- Output paths are repo-relative with `/` separators on every OS.
+## Decision log
 
-## 8. Design choices worth recording
+- 2026-10-13 — Keep `mdtool`, include docs-only `dups`, include docs data alongside Markdown, and keep router findings non-failing; owner selected all four recommended choices.
+- 2026-10-13 — Keep `--since` opt-in so default runs expose the whole tracked baseline; change-only skill runs must name `--since HEAD`.
+- 2026-10-13 — Keep this as one standard-library Python file; one file walker and slugger reduce drift across related commands, and the 800-line ceiling bounds the choice.
 
-- **Subcommands in one file, not several scripts.** One slugger serves `links` and
-  `anchors`; one file walker serves everything; one install target; one thing to test.
-- **Heuristics say they are heuristics.** `consumers` and `refs` return `warn` and `note`,
-  and each prints what it could not resolve. A false `error` would teach skills to ignore
-  the tool.
-- **No config file.** The only repo-specific knob is `--label`, because decision IDs
-  (`D53`) are genuinely per-repo. Anything else is a flag a skill passes explicitly.
-- **GitHub flavour only.** The docs here are read on GitHub and by agents. A second slug
-  flavour can be added behind `--flavor` if another renderer matters.
-- **Not a Markdown parser.** A line-oriented scanner with a fence state and an inline-code
-  state handles every form above and stays under 800 lines. A full CommonMark parser is
-  not stdlib and not needed.
+## Campaign log
 
-## 9. Testing and performance
+- P0 — Existing base skill check passed in 0.63 s wall / 0.16 s CPU; `mdtool` has no baseline. Full check baselines are recorded by G0.
 
-- `mdtool selftest` runs `unittest` cases embedded in the file against fixtures built in a
-  temporary directory under `$TMPDIR` (which the repo rules point at `.work/tmp`).
-  `dotfiles/mdtool-test.sh` wraps it in the numbered style of `sym-test.sh`, and `make
-  check` runs it.
-- The first cases are the incidents above: a duplicate heading getting `-1`; a `#` line
-  inside a fence not being a heading; a case-only mismatch; a tracked-but-missing file
-  skipped with a note; `include_str!("../../../docs/x.md")` classed `C001`; a setext
-  heading; `path:N-M` past end of file; a finding that moved lines not being "new" under
-  `--since`; and a `git mv` leaving no dangling link.
-- The self-test parses the script with `ast.parse(source, feature_version=(3, 9))`, which
-  rejects syntax newer than 3.9 (such as `match`). If a `python3.9` is on `PATH` the test
-  also executes `python3.9 -I mdtool commands`.
-- Performance target, as a gate in the self-test using CPU time, min of 5 runs: `links` on
-  a 120-file, 30k-line doc tree in under 1 s; `consumers` over a few thousand tracked
-  text files in under 3 s. Time gates follow the repo's `perf-gate-ready` rule and are
-  deferred, never passed, when the host is busy.
-- Dependencies: none. Build time and binary size do not apply; there is no build.
+## For the owner afterwards
 
-## 10. Rollout
-
-1. **Phase 1:** `links`, `anchors`, `commands`, `selftest`, `--since`. This is everything
-   the refresh re-implemented. Wire `docs-refresh` to it and add the `skills-check.sh`
-   rule.
-2. **Phase 2:** `consumers`, `refs` and `router`. Add the "run `consumers` before dispatch"
-   step to `docs-refresh` and to the worker brief template; `router` is its conformance
-   check for the standard format.
-3. **Phase 3:** `pointers` (for `comment-cleanup`) and `dups` (for
-   `single-source-of-truth`).
-
-Each phase is usable on its own and each is a separate commit. Skills are updated in the
-same change that adds the subcommand they call.
-
-## 11. Open questions
-
-1. **Name.** `mdtool` is short and unclaimed in `~/.local/bin`. `docs-check` reads better
-   in a skill sentence but suggests it only checks. Preference?
-2. **Should `dups` ship?** It serves `single-source-of-truth`, which is not only about
-   docs. It could instead be a code-and-docs `dups` under another name later.
-3. **Docs data files.** `consumers` treats non-markdown files in doc directories
-   (`docs/ingredient-judgement.tsv` is `include_str!`'d by `a2-sim`) as docs. Is "lives
-   under a directory containing tracked markdown" the right rule, or should the caller
-   list them?
-4. **Should `router` ever fail the exit status?** As specified it never does (`warn` and
-   `note` only). A repo that wants the format enforced could wrap it in its own gate, as
-   aincrad2's `battlelab check docs` already does for the crate list.
-5. **Run `refs` in `--since` mode by default in `docs-refresh`?** Probably yes: a first
-   run over a mature repo will be noisy, and the new findings are the actionable ones.
+- Read `dotfiles/base/.local/bin/mdtool`, its numbered test wrapper, and `dotfiles/skills-check.sh` for the implementation and CLI/skill contract.
+- Review the campaign log and P3 measurements. No cherry-pick is needed when running on the campaign branch; do not push unless separately asked.
