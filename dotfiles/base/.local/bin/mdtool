@@ -19,13 +19,14 @@ from collections import Counter
 from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path, PurePosixPath
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote
 
 COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
 CHECKS = ("links", "refs", "consumers", "pointers", "dups", "router")
 EXTS = {".md", ".markdown"}
 MAX_BYTES = 2 * 1024 * 1024
 SKIP_DIRS = {".git", ".work", "target", "node_modules"}
+URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,7 @@ def link_findings(root, files, content):
                     if target in content and end > len(content[target].splitlines()):
                         add(out, "L004", "error", file, n, m.start()+1+ref.start(), "line reference exceeds target", f"{target}:{start}-{end}")
         for n, col, dest in spans:
-            if urlsplit(dest).scheme or dest.startswith("//"):
+            if URL_SCHEME.match(dest) or dest.startswith("//"):
                 continue
             path, _, frag = dest.partition("#"); path, frag = unquote(path), unquote(frag)
             if not path:
@@ -343,7 +344,7 @@ def ref_findings(files, content, tracked=None):
             token = token.strip("'\"()[]{}.,;")
             if not token or PLACEHOLDER.search(token): continue
             special=bool(re.search(r"\bmake\s+[A-Za-z0-9_.-]+|(?:-p|--package)\s+[A-Za-z0-9_-]+|(?:scripts/\S+|\./\S+|\bsh\s+\S+)",token))
-            if PATH_EXT.search(token) and "/" in token and not special and not token.startswith(("~/","/")) and not urlsplit(token).scheme:
+            if PATH_EXT.search(token) and "/" in token and not special and not token.startswith(("~/","/")) and not URL_SCHEME.match(token):
                 normalized = token.removeprefix("./").rstrip("/")
                 if normalized.startswith(("runs/", "target/")) and normalized not in names: continue
                 if normalized not in names and normalized not in dirs:
@@ -989,6 +990,10 @@ class MdtoolTests(unittest.TestCase):
         files=["guide.md","Cargo.toml","src/a.py"]
         content={"Cargo.toml":"[package]\nname = \"sample\"\n","guide.md":"`missing/path.md` `cargo test -p absent` `./scripts/nope` `sh -c` `https://example.com/docs/guide.md` `~/usr`\n","src/a.py":""}
         self.assertEqual(sorted(f.code for f in ref_findings(files,content)),["R001","R003","R004"])
+    def test_malformed_ipv6_url_examples_do_not_crash(self):
+        url="http://127.0.0.1[:PORT"
+        self.assertEqual(link_findings(Path.cwd(),["guide.md"],{"guide.md":f"[server]({url})\n"}),[])
+        self.assertEqual(ref_findings(["guide.md"],{"guide.md":f"`{url}`\n"}),[])
     def test_consumer_read_and_literal_categories(self):
         files=["docs/a.md","src/a.py"]
         content={"docs/a.md":"# Doc\n","src/a.py":"read_text(\"a.md\")\nvalue = \"docs/a.md\"\n"}
