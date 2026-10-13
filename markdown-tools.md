@@ -221,7 +221,7 @@ With no docs directory or AGENTS.md, emit one note and no T001. A docs-refresh s
 
 ## Campaign log
 
-- P0 — Existing base skill check passed in 0.63 s wall / 0.16 s CPU; `mdtool` has no baseline. Full check baselines are recorded by G0.
+- P0 — `git status --short` was clean on `main`; `.work/` was ignored by `.git/info/exclude:8`. `python3` is 3.14.8; `python3.9` is unavailable. Available memory was 623655 pages × 4096 bytes (about 2.39 GiB). `make check` passed in 1.90 s wall / 0.37 s CPU; base skill check passed in 0.91 s / 0.17 s; root skill check passed in 0.08 s / 0.01 s. Existing checker warnings: `campaign-preflight`, `orchestrate`, and `ultrareview` exceed 60 lines; `orchestrate` lacks `**Reply:**`. `mdtool` has no baseline.
 
 ## For the owner afterwards
 
