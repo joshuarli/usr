@@ -7,8 +7,8 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6-luna"
-model_reasoning_effort = "xhigh"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
 
 [features]
 goals = true
@@ -104,5 +104,59 @@ trust_level = "trusted"
 trust_level = "trusted"
 
 [projects."/Users/josh/d/laputa-systems/fdu"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/fastermod"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/fz"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/rustybench"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/hi-lite"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/tm"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/fs"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/h12tiny"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/srv"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/laputa-systems/diff-pretty"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/defuddle-rs"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/grab"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/grab-ts"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/shadowdriver"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/ig"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/discover"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/extensions"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/tool"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/epsh"]
 trust_level = "trusted"
 

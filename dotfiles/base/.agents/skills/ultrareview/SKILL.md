@@ -49,7 +49,7 @@ No skill covers these, so ask directly: security beyond input handling (authn an
 
 Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `REVIEW.md` is the only doc file you create.
 
-The docs lane uses `mdtool links`, `mdtool refs`, `mdtool consumers`, `mdtool anchors FILE`, and `mdtool router` when installed. Without it, follow the fallback searches in `docs-refresh` and inspect targets manually.
+The docs lane runs one `mdtool check` when installed; it combines all checks with grouped output and anchor suggestions. Use `--untracked` for new docs and `--since HEAD` for new findings after edits. Request `--verbose` or `--json` only for complete occurrence details; `mdtool anchors FILE...` is only for a heading inventory. Without it, follow the fallback searches in `docs-refresh` and inspect targets manually.
 
 Then roll up campaigns. For each `docs/CAMPAIGN-*.md` whose header status says it is complete, and whose deliverables you confirm in the code, move what a future reader needs (the design rationale, invariants, constraints, and decisions still in force) into the durable docs (README, AGENTS.md, or `docs/` topic files), stated in domain terms with no campaign names or IDs. Then delete the campaign doc and any `DECISIONS.md` entries it owned. Do not keep logs of what was completed or per-item histories; git history is the record. Leave campaigns that are active, paused, or winding down untouched, and file a finding for a "complete" one whose deliverables are not in the code.
 

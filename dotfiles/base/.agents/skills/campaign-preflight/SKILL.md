@@ -37,7 +37,7 @@ A campaign doc is the only thing the executing agent has once the owner walks aw
 5. **Prove the foundation.** Pick the one or two assumptions the whole plan stands on and prove them with `blast-radius`, by running real code, before the plan is called ready.
 6. **Compress and write** in the shape below. Verify every `path:line` you kept.
 
-   - When `mdtool` is installed, check a draft with `mdtool links --untracked PATH` and `mdtool refs --untracked PATH`. Without it, search Markdown links with `rg -n '\[[^]]+\]\(' PATH`, then inspect each target and literal path reference manually.
+   - When `mdtool` is installed, check a draft once with `mdtool check --untracked PATH`; it groups all checks and searches source consumers across the repo. Without it, search Markdown links with `rg -n '\[[^]]+\]\(' PATH`, then inspect each target and literal path reference manually.
 7. **Report** a verdict: `ready`, `ready after the owner answers <list>`, or `not ready` with the reason.
 
 ## Lenses

@@ -17,6 +17,7 @@ import tempfile
 import unittest
 from collections import Counter
 from dataclasses import dataclass
+from difflib import get_close_matches
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -126,11 +127,17 @@ def markdown(path):
     return Path(path).suffix.lower() in EXTS
 
 
-def selected(paths, args):
+def selected(paths, args, *, require_matches=True):
     if not args.paths:
         return [p for p in paths if markdown(p)]
-    wanted = [Path(p).as_posix().rstrip("/") for p in args.paths]
-    return [p for p in paths if any(p == w or p.startswith(w + "/") for w in wanted)]
+    wanted = [os.path.normpath(p).replace(os.sep, "/") for p in args.paths]
+    for path in wanted:
+        if path == ".." or path.startswith(("../", "/")):
+            raise RuntimeError(f"scope must be repo-relative and stay inside the root: {path}")
+        if not any(path == "." or p == path or p.startswith(path + "/") for p in paths):
+            if require_matches and args.command != "anchors":
+                raise RuntimeError(f"scope matches no files: {path}; use --untracked for new files")
+    return [p for p in paths if any(w == "." or p == w or p.startswith(w + "/") for w in wanted)]
 
 
 def slug_headings(text):
@@ -273,7 +280,10 @@ def link_findings(root, files, content):
                 if target_text is not None:
                     hs, ex = slug_headings(target_text)
                     if frag not in {h[2] for h in hs} | ex:
-                        add(out, "L002", "error", file, n, col, "fragment does not exist", dest)
+                        anchors = sorted({h[2] for h in hs} | ex)
+                        suggestions = get_close_matches(frag, anchors, n=3) or anchors[:3]
+                        hint = "; available: " + ", ".join("#" + a for a in suggestions) if suggestions else "; target has no anchors"
+                        add(out, "L002", "error", file, n, col, "fragment does not exist" + hint, dest)
         for label, (dest, n) in defs.items():
             if not refs_used[label]:
                 add(out, "L006", "warn", file, n, 1, "unused reference definition", label)
@@ -355,15 +365,13 @@ def ref_findings(files, content, tracked=None):
 
 def consumer_findings(files, content):
     out = []
-    docs = [p for p in files if markdown(p)]
-    doc_dirs = {str(PurePosixPath(p).parent) for p in docs}
-    targets = set(docs) | {p for p in files if str(PurePosixPath(p).parent) in doc_dirs}
+    targets = {p for p in files if markdown(p)}
     for file, text in content.items():
         if markdown(file): continue
         lines = text.splitlines()
         for target in targets:
             base = Path(target).name
-            literal = re.compile(r"(?<![\w])(?:\./)?" + re.escape(target) + r"(?![\w])|(?<![\w])" + re.escape(base) + r"(?![\w])")
+            literal = re.compile(r"(?<![\w/])(?:\.\./)*(?:\./)?" + re.escape(target) + r"(?![\w])|(?<![\w/])" + re.escape(base) + r"(?![\w])")
             for n, line in enumerate(lines, 1):
                 for m in literal.finditer(line):
                     left = line[max(0, m.start()-80):m.start()]
@@ -375,7 +383,7 @@ def consumer_findings(files, content):
 
 
 COMMENT_EXTS = {".py", ".sh", ".bash", ".toml", ".yaml", ".yml", ".mk", ".rb", ".sql", ".lua", ".rs", ".c", ".h", ".cc", ".cpp", ".go", ".java", ".js", ".ts", ".kdl", ".html"}
-DOC_POINTER = re.compile(r"(?:\b[A-Za-z0-9_.-]+\.md\b|\bdocs/[\w./-]+|\bREADME(?:\.md)?\b|\bAGENTS\.md\b)")
+DOC_POINTER = re.compile(r"(?:\b(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.md\b|\bdocs/[\w./-]+|\bREADME(?:\.md)?\b|\bAGENTS\.md\b)")
 
 
 def source_comments(file, text):
@@ -486,7 +494,7 @@ def router_findings(files, content, max_lines=150):
     agents = next((p for p in files if Path(p).name == "AGENTS.md"), None)
     readme = next((p for p in files if Path(p).name.lower() == "readme.md"), None)
     docs = [p for p in files if p.startswith("docs/") and markdown(p) and p in content]
-    if not agents or not docs:
+    if not agents:
         add(out,"T000","note",".",1,1,"repository has no AGENTS.md","AGENTS.md")
         return out
     at = content.get(agents, "")
@@ -583,37 +591,71 @@ def check_command(command, root, files, content, opts, tracked=None):
 def all_check_findings(root, files, content, opts, tracked):
     docs = [p for p in files if markdown(p)]
     findings = []
+    scope = set(files)
+    doc_names = {Path(p).name for p in docs}
     for command in CHECKS:
-        inputs = files if command in {"consumers", "pointers"} else docs
-        findings.extend(check_command(command, root, inputs, content, opts, tracked))
+        inputs = tracked if command in {"router", "dups", "pointers"} else docs
+        results = check_command(command, root, inputs, content, opts, tracked)
+        if opts.paths and command in {"router", "dups"}:
+            results = [f for f in results if f.file in scope or f.target in scope
+                       or (command == "dups" and f.target.rsplit(":", 1)[0] in scope)]
+        if opts.paths and command == "pointers":
+            results = [f for f in results if f.file in scope
+                       or (f.code == "P001" and (f.target in scope
+                           or ("/" not in f.target and f.target in doc_names)))]
+        findings.extend(results)
     return findings
 
 
-def emit(findings, total_files, quiet=False, json_mode=False, extra=""):
+def emit(findings, total_files, quiet=False, json_mode=False, extra="", verbose=False):
     findings.sort(key=lambda f:(f.file,f.line,f.col,f.code,f.target))
     if json_mode:
         for f in findings:
             print(json.dumps({"code":f.code,"severity":f.severity,"file":f.file,"line":f.line,"col":f.col,"message":f.message,"target":f.target},ensure_ascii=False))
-    else:
+    elif verbose:
         for f in findings: print(f"{f.file}:{f.line}:{f.col}: {f.severity} {f.code} {f.message}: {f.target}")
+    else:
+        groups = {}
+        for f in findings:
+            groups.setdefault((f.severity, f.code, f.message), {}).setdefault(f.target, []).append(f)
+        hidden = 0
+        for (severity, code, message), targets in sorted(groups.items(), key=lambda item: ({"error":0,"warn":1,"note":2}[item[0][0]], item[0][1:])):
+            count = sum(len(items) for items in targets.values())
+            print(f"{severity} {code} {message} ({count})")
+            for target, items in sorted(targets.items()):
+                locations = {}
+                for f in items[:8]:
+                    locations.setdefault(f.file, []).append(f"{f.line}:{f.col}")
+                where = "; ".join(f"{file}:" + ",".join(rows) for file, rows in locations.items())
+                omitted = len(items) - 8
+                if omitted > 0:
+                    where += f"; +{omitted} occurrences"
+                    hidden += omitted
+                print(f"  {target} — {where}")
+        if hidden:
+            print(f"{hidden} locations omitted; use --verbose or --json for all locations")
     if not quiet:
         files={f.file for f in findings}
-        print(f"{len(findings)} findings in {len(files)} of {total_files} files" + (f"; {extra}" if extra else ""),file=sys.stderr)
+        counts=Counter(f.severity for f in findings)
+        print(f"{len(findings)} findings ({counts['error']} errors, {counts['warn']} warnings, {counts['note']} notes); files checked: {total_files}, files with findings: {len(files)}" + (f"; {extra}" if extra else ""),file=sys.stderr)
     return 1 if any(f.severity == "error" for f in findings) else 0
 
 
 def build_parser():
     parser=argparse.ArgumentParser(
         prog="mdtool",
-        description="Read-only checks for Markdown and documentation.",
-        epilog="Run 'check' to combine all finding-producing checks; 'anchors FILE' lists headings.",
+        description="One read-only documentation audit: links, refs, consumers, pointers, duplicates, and routing.",
+        epilog="mdtool: audit the repo. mdtool check PATH...: audit a scope with repo context. "
+               "mdtool check --since HEAD: new findings only. Text groups repeated findings; "
+               "--verbose expands locations, --json emits every finding. Use anchors FILE... only to list headings.",
     )
-    parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"))
-    parser.add_argument("paths",nargs="*")
+    parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"),nargs="?",default="check",help="default: check (all checks)")
+    parser.add_argument("paths",nargs="*",help="repo-relative files or directories; consumers are searched across the repo")
     parser.add_argument("--root",default=None)
     parser.add_argument("--untracked",action="store_true")
     parser.add_argument("--since")
     parser.add_argument("--json",action="store_true")
+    parser.add_argument("--verbose",action="store_true",help="one complete finding per line")
     parser.add_argument("--ignore",action="append",default=[])
     parser.add_argument("--quiet",action="store_true")
     parser.add_argument("--label",action="append")
@@ -624,21 +666,23 @@ def build_parser():
 
 def main(argv=None):
     parser=build_parser()
-    args=parser.parse_args(argv)
+    args=parser.parse_intermixed_args(argv)
     if args.command == "commands":
-        if args.paths or args.root or args.since or args.untracked or args.json or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
+        if args.paths or args.root or args.since or args.untracked or args.json or args.verbose or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
             parser.error("commands takes no options")
         print("\n".join(COMMANDS)); return 0
     if args.command == "selftest":
-        if args.paths or args.root or args.since or args.untracked or args.json or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
+        if args.paths or args.root or args.since or args.untracked or args.json or args.verbose or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
             parser.error("selftest takes no options")
         tmp=Path(__file__).resolve().parents[4]/".work"/"tmp"; tmp.mkdir(parents=True,exist_ok=True); os.environ["TMPDIR"]=str(tmp)
         suite=unittest.defaultTestLoader.loadTestsFromTestCase(MdtoolTests)
         return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
     if args.command == "anchors" and not args.paths: parser.error("anchors requires at least one path")
-    if args.command != "pointers" and args.label: parser.error("--label is only valid for pointers")
-    if args.command != "dups" and args.code: parser.error("--code is only valid for dups")
-    if args.command != "router" and args.max_lines is not None: parser.error("--max-lines is only valid for router")
+    if args.command not in {"pointers", "check"} and args.label: parser.error("--label is only valid for pointers or check")
+    if args.command not in {"dups", "check"} and args.code: parser.error("--code is only valid for dups or check")
+    if args.command not in {"router", "check"} and args.max_lines is not None: parser.error("--max-lines is only valid for router or check")
+    if args.json and args.verbose: parser.error("--json and --verbose are mutually exclusive")
+    if args.command == "anchors" and args.verbose: parser.error("--verbose is not supported for anchors")
     if args.max_lines is None: args.max_lines = 150
     if args.max_lines < 1: parser.error("--max-lines must be positive")
     if args.label:
@@ -662,6 +706,7 @@ def main(argv=None):
                 if normalized not in paths and (root/normalized).is_file(): paths.append(normalized)
         if args.since and not git: raise RuntimeError("--since requires a Git repository")
         read_paths=paths
+        if args.command in {"check", "consumers"}: read_paths=all_paths
         if args.command=="refs": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if Path(p).name in {"Makefile","Cargo.toml"}]))
         contents, unreadable=read_set(root,read_paths)
         if args.command == "anchors":
@@ -675,17 +720,18 @@ def main(argv=None):
         findings=(all_check_findings(root,paths,contents,args,all_paths)
                   if args.command=="check" else check_command(args.command,root,paths,contents,args,all_paths))
         for path in unreadable:
-            add(findings,"IO01","note",path,1,1,"file is missing or unreadable",path)
+            message = "file is missing or unreadable" if path in paths else "context file is missing or unreadable; analysis may be incomplete"
+            add(findings,"IO01","note",path,1,1,message,path)
         if args.since:
             old=old_tree(root,args.since)
-            old_paths=selected(list(old),args) if args.paths else list(old)
+            old_paths=selected(list(old),args,require_matches=False) if args.paths else list(old)
             oldfind=(all_check_findings(root,old_paths,old,args,list(old))
-                     if args.command=="check" else check_command(args.command,root,paths,old,args,list(old)))
+                     if args.command=="check" else check_command(args.command,root,old_paths,old,args,list(old)))
             identities={f.identity() for f in oldfind}
             findings=[f for f in findings if f.identity() not in identities]
         findings=[f for f in findings if f.code not in args.ignore]
         extra="runtime-built paths cannot be resolved" if args.command=="consumers" else ""
-        return emit(findings,len(paths),args.quiet,args.json,extra)
+        return emit(findings,len(read_paths),args.quiet,args.json,extra,args.verbose)
     except (OSError,RuntimeError,ValueError) as e:
         print(f"mdtool: {e}",file=sys.stderr); return 2
 
@@ -697,6 +743,161 @@ def git(root, args):
 
 
 class MdtoolTests(unittest.TestCase):
+    def test_check_since_groups_new_findings_from_multiple_checks(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"README.md").write_text("[bad](missing.md)\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            (root/"src.py").write_text("# See README.md\n")
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","--root",td,"--untracked","--since","HEAD"])
+            self.assertEqual(rc,1)
+            self.assertIn("error P001",out.getvalue())
+            self.assertIn("note C003",out.getvalue())
+            self.assertNotIn("L001",out.getvalue())
+            self.assertNotIn("T000",out.getvalue())
+
+    def test_group_preview_keeps_full_json_and_verbose_details(self):
+        findings=[Finding("L001","error","a.md",n,1,"missing","missing.md") for n in range(1,13)]
+        out=io.StringIO()
+        with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+            rc=emit(findings,1)
+        self.assertEqual(rc,1)
+        self.assertIn("+4 occurrences",out.getvalue())
+        self.assertIn("--verbose or --json",out.getvalue())
+        for opts in ({"verbose":True},{"json_mode":True}):
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=emit(findings,1,**opts)
+            self.assertEqual(rc,1)
+            self.assertEqual(len(out.getvalue().splitlines()),12)
+
+    def test_scoped_check_since_includes_new_untracked_doc(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"AGENTS.md").write_text("# Repo\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            (root/"new.md").write_text("[bad](missing.md)\n")
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","--root",td,"--untracked","./new.md","--since","HEAD","--json"])
+            self.assertEqual(rc,1)
+            self.assertIn('"code": "L001"',out.getvalue())
+
+    def test_scope_errors_and_dot_scope(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"AGENTS.md").write_text("# Repo\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            for path in ("not-present.md", "../outside", "/outside"):
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                    rc=main(["check",path,"--root",td])
+                self.assertEqual(rc,2)
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check",".","--root",td])
+            self.assertEqual((rc,out.getvalue()),(0,""))
+
+    def test_default_check_groups_repeated_findings(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"a.md").write_text("[bad](missing.md)\n[bad](missing.md)\n")
+            (root/"b.md").write_text("[bad](missing.md)\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out,err=io.StringIO(),io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
+                rc=main(["--root",td])
+            self.assertEqual(rc,1)
+            self.assertEqual(out.getvalue().count("destination does not exist"),1)
+            self.assertEqual(out.getvalue().count("missing.md"),1)
+            self.assertIn("a.md:1:1,2:1",out.getvalue())
+            self.assertIn("b.md:1:1",out.getvalue())
+            self.assertIn("3 errors",err.getvalue())
+
+    def test_scoped_check_uses_repository_context(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"AGENTS.md").write_text("[guide](docs/guide.md)\n")
+            (root/"docs/guide.md").write_text("# Guide\n\nRun `make verify`.\n" + "Useful details. "*10)
+            (root/"docs/other.md").write_text("[bad](missing.md)\n")
+            (root/"Makefile").write_text("verify:\n\t@true\n")
+            (root/"src/a.rs").write_text('include_str!("../docs/guide.md");\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","docs/guide.md","--root",td,"--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,0)
+            self.assertEqual([(f["code"],f["file"]) for f in findings],[("C001","src/a.rs")])
+
+    def test_scoped_consumers_read_sources_outside_scope(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"docs/guide.md").write_text("# Guide\n")
+            (root/"src/a.rs").write_text('include_str!("../docs/guide.md");\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["consumers","docs/guide.md","--root",td,"--json"])
+            self.assertEqual(rc,0)
+            self.assertIn('"code": "C001"',out.getvalue())
+
+    def test_scoped_check_finds_comments_pointing_to_selected_doc(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"AGENTS.md").write_text("[guide](docs/guide.md)\n")
+            (root/"docs/guide.md").write_text("# Guide\n\n" + "Useful details. "*10)
+            (root/"docs/other.md").write_text("# Other\n")
+            (root/"src/a.py").write_text("# See docs/guide.md\n# See docs/other.md\n# Phase 1\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","docs/guide.md","--root",td,"--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,1)
+            self.assertEqual([(f["file"],f["target"]) for f in findings if f["code"].startswith("P")],[("src/a.py","docs/guide.md")])
+
+    def test_scoped_check_labels_unreadable_context(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"AGENTS.md").write_text("# Repo\n")
+            (root/"gone.py").write_text("# code\n")
+            git(root,["init","-q"]); git(root,["add","."]); (root/"gone.py").unlink()
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","AGENTS.md","--root",td,"--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,0)
+            self.assertEqual([f["code"] for f in findings],["IO01"])
+            self.assertIn("context",findings[0]["message"])
+
+    def test_check_accepts_component_options(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"src.py").write_text("# CUSTOM\n")
+            (root/"AGENTS.md").write_text("# Repo\n" + "detail\n"*25)
+            for file in ("a.md","b.md"):
+                (root/file).write_text("```text\n" + "example "*45 + "\n```\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","--root",td,"--label","CUSTOM","--code","--max-lines","20","--json"])
+            self.assertEqual(rc,0)
+            self.assertEqual({json.loads(line)["code"] for line in out.getvalue().splitlines()}, {"P003","D001","T002"})
+
+    def test_missing_fragment_includes_anchor_suggestion(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"a.md").write_text("[bad](b.md#install)\n")
+            (root/"b.md").write_text("# Installation\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["links","--root",td])
+            self.assertEqual(rc,1)
+            self.assertIn("#installation",out.getvalue())
+
     def test_slug_suffix_and_setext(self):
         h,_=slug_headings("# Same\n# Same\nSetext\n---\n```\n# Fake\n```")
         self.assertEqual([(x[2],x[1]) for x in h],[("same",1),("same-1",1),("setext",2)])
@@ -792,6 +993,18 @@ class MdtoolTests(unittest.TestCase):
         files=["docs/a.md","src/a.py"]
         content={"docs/a.md":"# Doc\n","src/a.py":"read_text(\"a.md\")\nvalue = \"docs/a.md\"\n"}
         self.assertEqual(sorted((f.code,f.target) for f in consumer_findings(files,content)),[("C002","docs/a.md (name only)"),("C003","docs/a.md")])
+    def test_consumers_do_not_report_unrelated_root_files(self):
+        files=["README.md","Cargo.toml","src/a.rs"]
+        content={"README.md":"# Repo\n", "Cargo.toml":"", "src/a.rs":'let path = "Cargo.toml";\ninclude_str!("../README.md");\n'}
+        self.assertEqual([(f.code,f.target) for f in consumer_findings(files,content)],[("C001","README.md")])
+
+    def test_scoped_document_paths_do_not_match_same_basename_elsewhere(self):
+        content={"docs/guide.md":"# Guide\n", "manual/guide.md":"# Other\n",
+                 "src/a.py":'# See manual/guide.md\nopen("manual/guide.md")\n'}
+        self.assertEqual(consumer_findings(["docs/guide.md"],content),[])
+        opts=argparse.Namespace(paths=["docs/guide.md"],label=None,code=False,max_lines=150)
+        found=all_check_findings(Path.cwd(),["docs/guide.md"],content,opts,list(content))
+        self.assertFalse(any(f.code == "P001" for f in found))
     def test_router_reports_missing_and_unreachable_docs(self):
         files=["AGENTS.md","README.md","docs/linked.md","docs/lost.md"]
         content={"AGENTS.md":"[topic](docs/linked.md) [missing](docs/no.md)\n","README.md":"## Testing\n","docs/linked.md":"# Detail\n","docs/lost.md":"# Lost\n"}
@@ -805,7 +1018,8 @@ class MdtoolTests(unittest.TestCase):
             (root/"gone.md").unlink()
             out,err=io.StringIO(),io.StringIO()
             with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err): rc=main(["links","--root",str(root)])
-            self.assertEqual(rc,0); self.assertIn("note IO01 file is missing or unreadable: gone.md",out.getvalue())
+            self.assertEqual(rc,0); self.assertIn("note IO01 file is missing or unreadable",out.getvalue())
+            self.assertIn("gone.md:1:1",out.getvalue())
 
     def test_since_detects_finding_moved_to_new_path(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
@@ -813,7 +1027,7 @@ class MdtoolTests(unittest.TestCase):
             git(root,["init","-q"]); git(root,["add","bad.md"]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
             git(root,["mv","bad.md","moved.md"]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","move"])
             out=io.StringIO()
-            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["links","--root",str(root),"--since","HEAD^"])
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["links","--root",str(root),"--since","HEAD^","--verbose"])
             self.assertEqual(rc,1); self.assertIn("moved.md:1:1: error L001",out.getvalue())
 
     def test_links_follow_a_git_move(self):
@@ -832,7 +1046,7 @@ class MdtoolTests(unittest.TestCase):
             git(root,["init","-q"]); git(root,["add","."])
             out=io.StringIO()
             with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["consumers","--root",td,"--quiet","--json"])
-            expected='{"code": "C001", "severity": "warn", "file": "src/a.rs", "line": 2, "col": 20, "message": "embedded documentation can affect built output", "target": "docs/guide.md"}\n'
+            expected='{"code": "C001", "severity": "warn", "file": "src/a.rs", "line": 2, "col": 19, "message": "embedded documentation can affect built output", "target": "docs/guide.md"}\n'
             self.assertEqual((rc,out.getvalue()),(0,expected))
 
     def test_check_runs_finding_checks_together(self):
