@@ -18,4 +18,6 @@ Facts may have many consumers but one owner.
 
 Afterward, search for each retired copy and spelling and classify what remains. Preserve existing defaults and precedence unless asked to change them.
 
+When `mdtool` is installed, use `mdtool dups` to find repeated documentation blocks; otherwise compare the relevant documentation sections manually and search distinctive phrases with `rg -n`.
+
 **Reply:** each fact and its new owner, plus intentional duplicates and the drift test that guards each.

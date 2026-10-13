@@ -29,6 +29,8 @@ Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home, as when developer material leaves README.
 - **Verify narrowly:** every `path:line` and link you kept resolves, and any doc check the repo has (a link checker, a doctest) runs on the files you touched.
 
+When `mdtool` is installed, run `mdtool links`, `mdtool anchors FILE`, `mdtool refs`, `mdtool consumers`, and `mdtool router`. For a change-only refresh, pass `--since HEAD` to `mdtool refs`. Without `mdtool`, use `rg -n '\[[^]]+\]\('` to find links, `rg -n '^#{1,6} '` to list headings, search backticked paths with `rg`, search source for each changed doc path to find consumers, and inspect AGENTS.md links and README headings by hand.
+
 **The test:** an end user can install and use the thing from README alone, a developer reaches any topic in one hop from AGENTS.md, a newcomer can follow every command and reach the code each doc points to, and no sentence is there only because it used to be true.
 
 **Reply:** the files changed, moved, or removed and what was cut, claims you could not verify, and places where the code looks wrong rather than the doc.

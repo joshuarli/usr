@@ -1,0 +1,799 @@
+#!/usr/bin/env python3
+"""Read-only checks for Markdown and documentation in a repository."""
+from __future__ import annotations
+
+import argparse
+import ast
+import contextlib
+import io
+import json
+import os
+import re
+import subprocess
+import stat
+import sys
+import tempfile
+import unittest
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
+
+COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router")
+EXTS = {".md", ".markdown"}
+MAX_BYTES = 2 * 1024 * 1024
+SKIP_DIRS = {".git", ".work", "target", "node_modules"}
+
+
+@dataclass(frozen=True)
+class Finding:
+    code: str
+    severity: str
+    file: str
+    line: int
+    col: int
+    message: str
+    target: str
+
+    def identity(self):
+        return self.code, self.file, self.target
+
+
+def run_git(root, args, data=None):
+    try:
+        p = subprocess.run(["git", "-C", str(root), *args], input=data,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except OSError as e:
+        raise RuntimeError(f"cannot run git: {e}") from e
+    if p.returncode:
+        raise RuntimeError(p.stderr.decode("utf-8", "replace").strip() or "git failed")
+    return p.stdout
+
+
+def in_git(root):
+    try:
+        run_git(root, ["rev-parse", "--show-toplevel"])
+        return True
+    except RuntimeError:
+        return False
+
+
+def tracked_files(root, untracked=False):
+    paths = set()
+    git = in_git(root)
+    if git:
+        paths.update(x.decode("utf-8", "surrogateescape") for x in
+                     run_git(root, ["ls-files", "-z"]).split(b"\0") if x)
+        if untracked:
+            paths.update(x.decode("utf-8", "surrogateescape") for x in
+                         run_git(root, ["ls-files", "--others", "--exclude-standard", "-z"]).split(b"\0") if x)
+    else:
+        for base, dirs, names in os.walk(root, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+            for name in names:
+                path = Path(base, name)
+                paths.add(path.relative_to(root).as_posix())
+    return git, sorted(paths)
+
+
+def safe_read(root, rel):
+    """Read one confined regular file; resolve in-root links, then open no-follow."""
+    raw = root / Path(rel)
+    try:
+        resolved = raw.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+        parts = resolved.relative_to(root.resolve()).parts
+        if not parts:
+            raise OSError("not a file")
+        flags_dir = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags_file = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(root, flags_dir)
+        try:
+            for part in parts[:-1]:
+                nxt = os.open(part, flags_dir, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+            final = os.open(parts[-1], flags_file, dir_fd=fd)
+            try:
+                st = os.fstat(final)
+                if not stat.S_ISREG(st.st_mode):
+                    raise OSError("not a regular file")
+                if st.st_size > MAX_BYTES:
+                    return None
+                chunks = []
+                total = 0
+                while total <= MAX_BYTES:
+                    block = os.read(final, min(65536, MAX_BYTES + 1 - total))
+                    if not block:
+                        break
+                    chunks.append(block)
+                    total += len(block)
+                data = b"".join(chunks)
+                if len(data) > MAX_BYTES or b"\0" in data[:8192]:
+                    return None
+                return data.decode("utf-8", "replace")
+            finally:
+                os.close(final)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, RuntimeError):
+        raise
+
+
+def markdown(path):
+    return Path(path).suffix.lower() in EXTS
+
+
+def selected(paths, args):
+    if not args.paths:
+        return [p for p in paths if markdown(p)]
+    wanted = [Path(p).as_posix().rstrip("/") for p in args.paths]
+    return [p for p in paths if any(p == w or p.startswith(w + "/") for w in wanted)]
+
+
+def slug_headings(text):
+    result, used = [], Counter()
+    fenced = False
+    fence_char, fence_len = "", 0
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if m:
+            tok = m.group(1)
+            if not fenced:
+                fenced, fence_char, fence_len = True, tok[0], len(tok)
+            elif tok[0] == fence_char and len(tok) >= fence_len:
+                fenced = False
+            continue
+        if fenced:
+            continue
+        m = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        level, title = (len(m.group(1)), m.group(2)) if m else (0, "")
+        if not m and i + 1 < len(lines) and re.match(r"^\s{0,3}(=+|-+)\s*$", lines[i + 1]):
+            level, title = (1 if "=" in lines[i + 1] else 2), line.strip()
+        if not level or not title:
+            continue
+        visible = re.sub(r"<[^>]*>", "", title)
+        visible = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", visible)
+        visible = re.sub(r"!?\[([^\]]*)\](?:\[[^]]*\])?", r"\1", visible)
+        visible = re.sub(r"[`*_~]", "", visible)
+        base = "".join(c.lower() if c.isalnum() or c in " -_" else "" for c in visible)
+        base = re.sub(r"\s+", "-", base.strip())
+        n = used[base]
+        used[base] += 1
+        result.append((i + 1, level, base if n == 0 else f"{base}-{n}", visible.strip()))
+    anchors = set()
+    for match in re.finditer(r"<a\s+(?:id|name)=[\"']([^\"']+)[\"']", text, re.I):
+        anchors.add(match.group(1))
+    return result, anchors
+
+
+def visible_lines(text):
+    lines = text.splitlines()
+    out, fence = [], None
+    for line in lines:
+        m = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if m:
+            token = m.group(1)
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+            out.append("")
+        elif fence:
+            out.append("")
+        elif line.startswith(("    ","\t")):
+            out.append("")
+        else:
+            out.append(re.sub(r"(`+).*?\1", lambda x: "\0" * len(x.group()), line))
+    return lines, out
+
+
+def add(findings, code, severity, file, line, col, message, target):
+    findings.append(Finding(code, severity, file, line, col, message, target))
+
+
+def link_findings(root, files, content):
+    out = []
+    all_files = set(files)
+    file_case = {p.casefold() for p in files}
+    for file in files:
+        text = content.get(file)
+        if text is None:
+            continue
+        lines, clean = visible_lines(text)
+        headings, explicit = slug_headings(text)
+        defs = {}
+        refs_used = Counter()
+        for n, line in enumerate(clean, 1):
+            for d in re.finditer(r"^\s{0,3}\[([^]]+)\]:\s*(?:<([^>]+)>|(\S+))", line):
+                defs[d.group(1).strip().casefold()] = (d.group(2) or d.group(3), n)
+        spans = []
+        for n, line in enumerate(clean, 1):
+            definition = re.match(r"^\s{0,3}\[[^]]+\]:\s*(?:<([^>]+)>|(\S+))", line)
+            if definition:
+                spans.append((n, definition.start()+1, definition.group(1) or definition.group(2)))
+                continue
+            for m in re.finditer(r"!?\[[^]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+['\"][^'\"]*['\"])?\)", line):
+                spans.append((n, m.start() + 1, m.group(1) or m.group(2)))
+            for m in re.finditer(r"<((?:https?://|mailto:)[^>]+)>|<a\s+href=['\"]([^'\"]+)['\"]", line, re.I):
+                spans.append((n, m.start() + 1, m.group(1) or m.group(2)))
+            for m in re.finditer(r"\[([^]]+)\](?:\[([^]]*)\])?", line):
+                label = (m.group(2) if m.group(2) else m.group(1)).strip().casefold()
+                if label in defs:
+                    refs_used[label] += 1
+                    if "(" not in line[m.end():m.end()+1]:
+                        spans.append((n, m.start() + 1, defs[label][0]))
+                elif m.group(2) is not None:
+                    add(out, "L005", "error", file, n, m.start()+1, "missing reference definition", label)
+            for m in re.finditer(r"(?<!`)`([^`]+)`(?!`)", lines[n-1]):
+                for ref in re.finditer(r"([^\s:]+):(\d+)(?:-(\d+))?", m.group(1)):
+                    target, start, end = ref.group(1), int(ref.group(2)), int(ref.group(3) or ref.group(2))
+                    if target in content and end > len(content[target].splitlines()):
+                        add(out, "L004", "error", file, n, m.start()+1+ref.start(), "line reference exceeds target", f"{target}:{start}-{end}")
+        for n, col, dest in spans:
+            if urlsplit(dest).scheme or dest.startswith("//"):
+                continue
+            path, _, frag = dest.partition("#"); path, frag = unquote(path), unquote(frag)
+            if not path:
+                target_file = file
+            else:
+                candidate = (PurePosixPath(file).parent / path).as_posix()
+                norm = os.path.normpath(candidate).replace("\\", "/")
+                if norm == ".." or norm.startswith("../") or norm.startswith("/"):
+                    add(out, "L001", "error", file, n, col, "destination escapes root", dest)
+                    continue
+                if norm not in all_files and norm.casefold() in file_case:
+                    add(out, "L003", "error", file, n, col, "path differs only by letter case", dest)
+                    continue
+                if norm not in content:
+                    try:
+                        resolved = (root / norm).resolve(strict=True)
+                        resolved.relative_to(root.resolve())
+                    except (OSError, ValueError):
+                        add(out, "L001", "error", file, n, col, "destination does not exist or escapes root", dest)
+                        continue
+                if norm not in all_files:
+                    # Existing untracked targets are valid destinations.
+                    target_file = norm
+                else:
+                    target_file = norm
+            if frag:
+                if (root / target_file).is_dir():
+                    add(out, "L002", "error", file, n, col, "directory has no fragment", dest)
+                    continue
+                target_text = content.get(target_file)
+                if target_text is None:
+                    try:
+                        target_text = safe_read(root, target_file)
+                    except (OSError, ValueError):
+                        target_text = None
+                if target_text is not None:
+                    hs, ex = slug_headings(target_text)
+                    if frag not in {h[2] for h in hs} | ex:
+                        add(out, "L002", "error", file, n, col, "fragment does not exist", dest)
+        for label, (dest, n) in defs.items():
+            if not refs_used[label]:
+                add(out, "L006", "warn", file, n, 1, "unused reference definition", label)
+    return out
+
+
+PATH_EXT = re.compile(r"(?:/|\.(?:md|markdown|txt|rs|toml|ya?ml|json|py|sh|c|h|go|ts|js)$)", re.I)
+PLACEHOLDER = re.compile(r"<[^>]+>|\bNN\b|\{[^}]*,[^}]*\}|\*|\$[A-Za-z_]|\.\.\.")
+
+
+def ref_findings(files, content, tracked=None):
+    out = []
+    names = set(tracked or files)
+    dirs={"."}
+    for p in files:
+        parent=PurePosixPath(p).parent
+        while str(parent)!=".":
+            dirs.add(str(parent)); parent=parent.parent
+    cargo_names = set()
+    for p, text in content.items():
+        if p.endswith("Cargo.toml"):
+            m = re.search(r"(?m)^\s*name\s*=\s*['\"]([^'\"]+)", text.split("[dependencies]")[0])
+            if m: cargo_names.add(m.group(1))
+    make_targets = set()
+    for p, text in content.items():
+        if Path(p).name == "Makefile":
+            for line in text.splitlines():
+                phony = re.match(r"^\s*\.PHONY:\s*(.*)", line)
+                target = re.match(r"^([A-Za-z0-9_.-]+)\s*:(?:\s|$)", line)
+                if phony: make_targets.update(phony.group(1).split())
+                if target: make_targets.add(target.group(1))
+    for file in files:
+        if not markdown(file) or file not in content: continue
+        text=content[file]
+        spans = []
+        for m in re.finditer(r"`([^`]+)`", text):
+            spans.append((text.count("\n", 0, m.start())+1, m.start(), m.group(1)))
+        lines, clean = visible_lines(text)
+        fence, offset = False, 0
+        for i, line in enumerate(lines):
+            if re.match(r"^\s*```\s*sh\b", line): fence = True
+            elif fence and re.match(r"^\s*```", line): fence = False
+            elif fence:
+                for m in re.finditer(r"\S+", line): spans.append((i+1, offset+m.start(), m.group()))
+            offset += len(line)+1
+        for n, col, token in spans:
+            token = token.strip("'\"()[]{}.,;")
+            if not token or PLACEHOLDER.search(token): continue
+            special=bool(re.search(r"\bmake\s+[A-Za-z0-9_.-]+|(?:-p|--package)\s+[A-Za-z0-9_-]+|(?:scripts/\S+|\./\S+|\bsh\s+\S+)",token))
+            if PATH_EXT.search(token) and "/" in token and not special and not token.startswith(("~/","/")) and not urlsplit(token).scheme:
+                normalized = token.removeprefix("./").rstrip("/")
+                if normalized.startswith(("runs/", "target/")) and normalized not in names: continue
+                if normalized not in names and normalized not in dirs:
+                    add(out, "R001", "warn", file, n, col+1, "repo path is not tracked", token)
+            for m in re.finditer(r"\bmake\s+([A-Za-z0-9_.-]+)", token):
+                if m.group(1) not in make_targets:
+                    add(out, "R002", "warn", file, n, col+1, "make target is not declared", m.group(1))
+            for m in re.finditer(r"(?:-p|--package)\s+([A-Za-z0-9_-]+)", token):
+                if m.group(1) not in cargo_names:
+                    add(out, "R003", "warn", file, n, col+1, "cargo package is not declared", m.group(1))
+            for m in re.finditer(r"(?:scripts/\S+|\./\S+|\bsh\s+\S+)", token):
+                path = m.group(0).split()[-1].strip("'\"")
+                if path.startswith("./"): path = path[2:]
+                if not path.startswith("-") and path not in names:
+                    add(out, "R004", "warn", file, n, col+1, "invoked script is not tracked", path)
+    return out
+
+
+def consumer_findings(files, content):
+    out = []
+    docs = [p for p in files if markdown(p)]
+    doc_dirs = {str(PurePosixPath(p).parent) for p in docs}
+    targets = set(docs) | {p for p in files if str(PurePosixPath(p).parent) in doc_dirs}
+    for file, text in content.items():
+        if markdown(file): continue
+        lines, clean = visible_lines(text)
+        for target in targets:
+            base = Path(target).name
+            literal = re.compile(r"(?<![\w])(?:\./)?" + re.escape(target) + r"(?![\w])|(?<![\w])" + re.escape(base) + r"(?![\w])")
+            for n, line in enumerate(clean, 1):
+                for m in literal.finditer(line):
+                    left = line[max(0, m.start()-80):m.start()]
+                    kind = "C001" if re.search(r"include_str!|include_bytes!|include!|#include|embed", left) else "C002" if re.search(r"\b(?:read|open|load|parse)\w*\s*\([^)]*$", left) else "C003"
+                    target_text = f"{target} (name only)" if kind=="C002" and m.group()==base else target
+                    message = {"C001":"embedded documentation can affect built output", "C002":"read documentation can affect a check", "C003":"literal consumer may affect generated data"}[kind]
+                    add(out, kind, "note" if kind == "C003" else "warn", file, n, m.start()+1, message, target_text)
+    return out
+
+
+COMMENT_EXTS = {".py", ".sh", ".bash", ".toml", ".yaml", ".yml", ".mk", ".rb", ".sql", ".lua", ".rs", ".c", ".h", ".cc", ".cpp", ".go", ".java", ".js", ".ts", ".kdl", ".html"}
+DOC_POINTER = re.compile(r"(?:\b[A-Za-z0-9_.-]+\.md\b|\bdocs/[\w./-]+|\bREADME(?:\.md)?\b|\bAGENTS\.md\b)")
+
+
+def source_comments(file, text):
+    ext=Path(file).suffix.lower()
+    line_comments={".py":"#",".sh":"#",".bash":"#",".toml":"#",".yaml":"#",".yml":"#",".mk":"#",".rb":"#",".sql":"--",".lua":"--"}
+    marker="<!--" if ext==".html" else line_comments.get(ext,"//")
+    result=[]; line=1; i=0; block=False; block_start=1; block_text=[]
+    while i<len(text):
+        if text[i]=="\n": line+=1; i+=1; continue
+        if block:
+            if text.startswith("*/",i):
+                result.append((block_start,"".join(block_text))); block=False; i+=2; continue
+            block_text.append(text[i]); i+=1; continue
+        if ext not in line_comments and ext!=".html" and text.startswith("/*",i):
+            block=True; block_start=line; block_text=[]; i+=2; continue
+        if text.startswith(marker,i):
+            end=text.find("\n",i)
+            if end<0: end=len(text)
+            if ext==".html":
+                close=text.find("-->",i+4)
+                if close>=0: end=close
+            result.append((line,text[i+len(marker):end]))
+            if end<len(text): line+=text[i:end+1].count("\n") or 1
+            i=end+(1 if end<len(text) else 0); continue
+        raw=re.match(r"r(#+)?\"",text[i:]) if ext==".rs" else None
+        if raw:
+            terminator='"'+(raw.group(1) or "")
+            end=text.find(terminator,i+raw.end())
+            i=len(text) if end<0 else end+len(terminator); continue
+        if text[i] in "\"'`":
+            quote=text[i]; width=3 if text.startswith(quote*3,i) else 1
+            i+=width
+            while i<len(text):
+                if text[i]=="\\": i+=2; continue
+                if text[i]=="\n": line+=1
+                if text.startswith(quote*width,i): i+=width; break
+                i+=1
+            continue
+        i+=1
+    if block: result.append((block_start,"".join(block_text)))
+    if ext==".py":
+        try:
+            tree=ast.parse(text)
+            for node in ast.walk(tree):
+                body=getattr(node,"body",None)
+                if isinstance(body,list) and body and isinstance(body[0],ast.Expr) and isinstance(body[0].value,ast.Constant) and isinstance(body[0].value.value,str):
+                    result.append((body[0].lineno,body[0].value.value))
+        except SyntaxError: pass
+    return result
+
+
+def pointer_findings(files, content, labels=()):
+    out = []
+    tracked = set(files)
+    labels_re = re.compile(r"\b(?:M\d+|Phase\s+\d+|#\d+|" + "|".join(labels) + r")\b", re.I) if labels else re.compile(r"\b(?:M\d+|Phase\s+\d+|#\d+)\b", re.I)
+    for file, text in content.items():
+        ext = Path(file).suffix.lower()
+        if ext not in COMMENT_EXTS: continue
+        for n, comment in source_comments(file,text):
+            for m in DOC_POINTER.finditer(comment):
+                target = m.group()
+                if target in tracked or Path(target).name in {Path(p).name for p in tracked}:
+                    add(out, "P001", "error", file, n, m.start()+1, "comment points to repository documentation", target)
+            if re.search(r"\b(?:section|clause|milestone)\s+[\w.-]+|\b[0-9]+\.[0-9]+\b", comment, re.I):
+                add(out, "P002", "warn", file, n, 1, "comment points to a numbered section", comment.strip())
+            for m in labels_re.finditer(comment):
+                add(out, "P003", "warn", file, n, 1, "comment uses a planning label", m.group())
+    return out
+
+
+def words(block):
+    return re.findall(r"[\w]+", re.sub(r"[`*_~#>|\[\]()!-]", " ", block).lower())
+
+
+def dup_findings(files, content, code=False):
+    blocks = []
+    for file in files:
+        text = content.get(file)
+        if text is None: continue
+        chunks = re.split(r"\n\s*\n", text)
+        offset = 1
+        for chunk in chunks:
+            start = offset
+            line_count=max(1,len(chunk.splitlines()))
+            end=start+line_count-1
+            offset += line_count + 1
+            if not code and re.search(r"(?m)^\s*(```|~~~)", chunk): continue
+            w = words(chunk)
+            rows = [re.sub(r"\s+", " ", row.strip().lower()) for row in re.findall(r"(?m)^\s*\|.*\|\s*$", chunk)]
+            if len(w) >= 40 or len(rows) >= 3:
+                shingles = set(tuple(w[i:i+8]) for i in range(len(w)-7))
+                blocks.append((file, start, end, shingles, len(w), chunk, set(rows)))
+    out = []
+    for i, a in enumerate(blocks):
+        for b in blocks[i+1:]:
+            union = a[3] | b[3]
+            sim = len(a[3] & b[3]) / len(union) if union else 0
+            row_union = a[6] | b[6]
+            row_similarity = len(a[6] & b[6]) / len(row_union) if row_union else 0
+            if sim >= .8 and a[4] >= 40 and b[4] >= 40 or row_similarity >= .8 and len(a[6]) >= 3 and len(b[6]) >= 3:
+                target = f"{b[0]}:{b[1]}-{b[2]}"
+                add(out, "D001", "note", a[0], a[1], 1, "documentation blocks substantially overlap", target)
+    return out
+
+
+def router_findings(files, content, max_lines=150):
+    out=[]
+    agents = next((p for p in files if Path(p).name == "AGENTS.md"), None)
+    readme = next((p for p in files if Path(p).name.lower() == "readme.md"), None)
+    docs = [p for p in files if p.startswith("docs/") and markdown(p)]
+    if not agents or not docs:
+        add(out,"T000","note",".",1,1,"repository has no AGENTS.md","AGENTS.md")
+        return out
+    at = content.get(agents, "")
+    if len(at.splitlines()) > max_lines:
+        add(out,"T002","note",agents,max_lines+1,1,"AGENTS.md exceeds the line limit",str(len(at.splitlines())))
+    lines=at.splitlines()
+    for i,line in enumerate(lines):
+        heading=re.match(r"^(#{1,6})\s+(.+)",line)
+        if not heading or re.search(r"\b(map|layout)\b",heading.group(2),re.I): continue
+        end=i+1
+        while end<len(lines):
+            nxt=re.match(r"^(#{1,6})\s+",lines[end])
+            if nxt and len(nxt.group(1))<=len(heading.group(1)): break
+            end+=1
+        if end-i>30:
+            add(out,"T002","note",agents,i+1,1,"router section exceeds 30 lines",heading.group(2))
+    targets=set()
+    linked=set()
+    sources=[p for p in (agents,readme) if p and p in content]
+    for source in sources:
+        text=content[source]
+        candidates=[]
+        for m in re.finditer(r"\[[^]]*\]\(([^)#]+)(?:#[^)]*)?\)|`((?:docs/)?[^`]+\.md)`",text):
+            candidates.append((m.group(1) or m.group(2)).strip())
+        for target in candidates:
+            if target.startswith(("http://","https://","mailto:")): continue
+            normalized=os.path.normpath(str(PurePosixPath(source).parent / target)).replace("\\","/")
+            if normalized.startswith("../") or normalized=="..": continue
+            if source==agents: targets.add(normalized)
+            if normalized.endswith((".md",".markdown")):
+                if normalized not in files:
+                    add(out,"T004","warn",source,1,1,"router names a missing document",target)
+                else:
+                    linked.add(normalized)
+    for doc in docs:
+        parent=str(PurePosixPath(doc).parent)
+        if doc not in targets and parent not in targets:
+            add(out,"T001","warn",agents,1,1,"docs file is not linked directly",doc)
+    for doc in linked:
+        text=content.get(doc,"")
+        remainder=re.sub(r"(?m)^\s*#.*$|\[[^]]*\]\([^)]*\)|`[^`]*`|\s+","",text)
+        if len(text.splitlines())<20 or not remainder:
+            add(out,"T005","note",doc,1,1,"linked document is short or only links elsewhere",doc)
+    if readme and readme in content:
+        text=content[readme]
+        for m in re.finditer(r"(?mi)^#{1,6}\s+.*\b(build|develop|contribut|architecture|layout|internals|invariant|testing)\b",text):
+            add(out,"T003","note",readme,text.count("\n",0,m.start())+1,1,"README has a developer-topic heading",m.group().strip())
+        for m in re.finditer(r"(?s)```.*?\b(?:make\s+ci|cargo\s+test|cargo\s+xtask)\b.*?```",text):
+            add(out,"T003","note",readme,text.count("\n",0,m.start())+1,1,"README contains a developer test command",m.group().splitlines()[0])
+    return out
+
+
+def read_set(root, paths):
+    content, unreadable = {}, []
+    for file in paths:
+        try:
+            value=safe_read(root,file)
+            if value is None: continue
+            content[file]=value
+        except FileNotFoundError:
+            unreadable.append(file)
+        except (OSError,ValueError):
+            unreadable.append(file)
+    return content, unreadable
+
+
+def old_tree(root, rev):
+    entries=run_git(root,["ls-tree","-r","-z","--full-tree",rev])
+    blobs=[]
+    for record in entries.split(b"\0"):
+        if not record: continue
+        meta,path=record.split(b"\t",1)
+        mode,kind,oid=meta.split()
+        if kind == b"blob": blobs.append((path.decode("utf-8","surrogateescape"),oid.decode()))
+    raw=run_git(root,["cat-file","--batch"],("".join(oid+"\n" for _,oid in blobs)).encode())
+    pos=0; data={}
+    for path,oid in blobs:
+        end=raw.index(b"\n",pos); header=raw[pos:end].split(); size=int(header[2]); start=end+1
+        body=raw[start:start+size]; pos=start+size+1
+        if size<=MAX_BYTES and b"\0" not in body[:8192]: data[path]=body.decode("utf-8","replace")
+    return data
+
+
+def check_command(command, root, files, content, opts, tracked=None):
+    if command == "links": return link_findings(root, [p for p in files if markdown(p)], content)
+    if command == "refs": return ref_findings(files, content, tracked)
+    if command == "consumers": return consumer_findings(files, content)
+    if command == "pointers": return pointer_findings(files, content, opts.label or [])
+    if command == "dups": return dup_findings([p for p in files if markdown(p)], content, opts.code)
+    if command == "router": return router_findings(files, content, opts.max_lines)
+    return []
+
+
+def emit(findings, total_files, quiet=False, json_mode=False, extra=""):
+    findings.sort(key=lambda f:(f.file,f.line,f.col,f.code,f.target))
+    if json_mode:
+        for f in findings:
+            print(json.dumps({"code":f.code,"severity":f.severity,"file":f.file,"line":f.line,"col":f.col,"message":f.message,"target":f.target},ensure_ascii=False))
+    else:
+        for f in findings: print(f"{f.file}:{f.line}:{f.col}: {f.severity} {f.code} {f.message}: {f.target}")
+    if not quiet:
+        files={f.file for f in findings}
+        print(f"{len(findings)} findings in {len(files)} of {total_files} files" + (f"; {extra}" if extra else ""),file=sys.stderr)
+    return 1 if any(f.severity == "error" for f in findings) else 0
+
+
+def build_parser():
+    parser=argparse.ArgumentParser(prog="mdtool")
+    parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"))
+    parser.add_argument("paths",nargs="*")
+    parser.add_argument("--root",default=None)
+    parser.add_argument("--untracked",action="store_true")
+    parser.add_argument("--since")
+    parser.add_argument("--json",action="store_true")
+    parser.add_argument("--ignore",action="append",default=[])
+    parser.add_argument("--quiet",action="store_true")
+    parser.add_argument("--label",action="append")
+    parser.add_argument("--code",action="store_true")
+    parser.add_argument("--max-lines",type=int)
+    return parser
+
+
+def main(argv=None):
+    parser=build_parser()
+    args=parser.parse_args(argv)
+    if args.command == "commands":
+        if args.paths or args.root or args.since or args.untracked or args.json or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
+            parser.error("commands takes no options")
+        print("\n".join(COMMANDS)); return 0
+    if args.command == "selftest":
+        if args.paths or args.root or args.since or args.untracked or args.json or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
+            parser.error("selftest takes no options")
+        tmp=Path(__file__).resolve().parents[4]/".work"/"tmp"; tmp.mkdir(parents=True,exist_ok=True); os.environ["TMPDIR"]=str(tmp)
+        suite=unittest.defaultTestLoader.loadTestsFromTestCase(MdtoolTests)
+        return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+    if args.command == "anchors" and not args.paths: parser.error("anchors requires at least one path")
+    if args.command != "pointers" and args.label: parser.error("--label is only valid for pointers")
+    if args.command != "dups" and args.code: parser.error("--code is only valid for dups")
+    if args.command != "router" and args.max_lines is not None: parser.error("--max-lines is only valid for router")
+    if args.max_lines is None: args.max_lines = 150
+    if args.max_lines < 1: parser.error("--max-lines must be positive")
+    if args.label:
+        try: re.compile("|".join(args.label))
+        except re.error as e: parser.error(f"invalid --label expression: {e}")
+    if args.command == "anchors" and (args.since or args.json or args.ignore or args.untracked): parser.error("unsupported anchors option")
+    if args.since and args.command in {"anchors"}: parser.error("--since is not supported for anchors")
+    invalid=set(args.ignore)-{f"L{i:03}" for i in range(1,7)}-{f"R{i:03}" for i in range(1,5)}-{f"C{i:03}" for i in range(1,4)}-{f"P{i:03}" for i in range(1,4)}-{"D001","T000","T001","T002","T003","T004","T005","IO01"}
+    if invalid: parser.error("unknown ignore code: "+", ".join(sorted(invalid)))
+    try:
+        root=Path(args.root or os.getcwd()).resolve()
+        if not root.is_dir(): raise RuntimeError("root is not a directory")
+        git=in_git(root)
+        if args.root is None and git:
+            root=Path(run_git(root,["rev-parse","--show-toplevel"]).decode().strip()).resolve()
+        git,all_paths=tracked_files(root,args.untracked)
+        paths=selected(all_paths,args) if args.paths else all_paths if args.command in {"consumers","pointers"} else selected(all_paths,args)
+        if args.since and not git: raise RuntimeError("--since requires a Git repository")
+        read_paths=paths
+        if args.command=="refs": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if Path(p).name in {"Makefile","Cargo.toml"}]))
+        contents, unreadable=read_set(root,read_paths)
+        if args.command == "anchors":
+            for file in paths:
+                value=contents.get(file)
+                if value is None:
+                    if file in unreadable: print(f"{file}:1:1: note IO01 file is missing or unreadable: {file}",file=sys.stderr)
+                    continue
+                for line,level,slug,title in slug_headings(value)[0]: print(f"{file}:{line}\t{level}\t{slug}\t{title}")
+            return 0
+        findings=check_command(args.command,root,paths,contents,args,all_paths)
+        for path in unreadable:
+            add(findings,"IO01","note",path,1,1,"file is missing or unreadable",path)
+        if args.since:
+            old=old_tree(root,args.since)
+            oldfind=check_command(args.command,root,paths,old,args,list(old))
+            identities={f.identity() for f in oldfind}
+            findings=[f for f in findings if f.identity() not in identities]
+        findings=[f for f in findings if f.code not in args.ignore]
+        extra="runtime-built paths cannot be resolved" if args.command=="consumers" else ""
+        return emit(findings,len(paths),args.quiet,args.json,extra)
+    except (OSError,RuntimeError,ValueError) as e:
+        print(f"mdtool: {e}",file=sys.stderr); return 2
+
+
+def git(root, args):
+    """Git-only fixture helper used by the comparison tests."""
+    p=subprocess.run(["git","-C",str(root),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    if p.returncode: raise AssertionError(p.stderr.decode("utf-8","replace"))
+
+
+class MdtoolTests(unittest.TestCase):
+    def test_slug_suffix_and_setext(self):
+        h,_=slug_headings("# Same\n# Same\nSetext\n---\n```\n# Fake\n```")
+        self.assertEqual([(x[2],x[1]) for x in h],[("same",1),("same-1",1),("setext",2)])
+
+    def test_case_only_and_escape_links(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"Readme.md").write_text("# Hi\n")
+            (root/"index.md").write_text("[case](readme.md) [escape](../outside.md)\n")
+            fs=["Readme.md","index.md"]
+            found=link_findings(root,fs,{p:(root/p).read_text() for p in fs})
+            self.assertEqual([(f.code,f.target) for f in found],[("L003","readme.md"),("L001","../outside.md")])
+            if os.name=="posix":
+                raw=os.fsencode(root)+b"/bad\xff.md"; fd=os.open(raw,os.O_CREAT|os.O_WRONLY,0o600); os.close(fd)
+                self.assertIsNotNone(safe_read(root,os.fsdecode(raw).split("/")[-1]))
+
+    def test_symlink_escape_is_never_opened(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td, tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as outside:
+            root=Path(td); (Path(outside)/"secret.md").write_text("# Private\n")
+            try: (root/"link.md").symlink_to(Path(outside)/"secret.md")
+            except (OSError,NotImplementedError): self.skipTest("symlinks unavailable")
+            (root/"index.md").write_text("[private](link.md#private)\n")
+            found=link_findings(root,["index.md","link.md"],{"index.md":"[private](link.md#private)\n"})
+            self.assertEqual([(f.code,f.target) for f in found],[('L001','link.md#private')])
+
+    def test_percent_decoding_and_in_root_symlink(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"space #name.md").write_text("# Found\n")
+            (root/"alias.md").symlink_to(root/"space #name.md")
+            source="[encoded](space%20%23name.md#found) [alias](alias.md#found)\n"
+            (root/"index.md").write_text(source)
+            found=link_findings(root,["index.md","space #name.md","alias.md"],{"index.md":source,"space #name.md":"# Found\n","alias.md":"# Found\n"})
+            self.assertEqual(found,[])
+    def test_html_anchor_and_missing_fragment(self):
+        files=["index.md","target.md"]
+        text="[ok](target.md#named) [bad](target.md#missing)\n\n    [ignored](missing.md)\n"
+        found=link_findings(Path.cwd(),files,{"index.md":text,"target.md":"<a id=\"named\"></a>\n"})
+        self.assertEqual([(f.code,f.target) for f in found],[('L002','target.md#missing')])
+    def test_reference_links_and_unused_definition(self):
+        text="[a][known] [b][unknown]\n\n[known]: target.md\n[unused]: other.md\n"
+        files=["index.md","target.md","other.md"]
+        found=link_findings(Path.cwd(),files,{"index.md":text,"target.md":"ok","other.md":"ok"})
+        self.assertEqual([(f.code,f.target) for f in found],[('L005','unknown'),('L006','unused')])
+
+    def test_comment_scanner_skips_strings_and_reads_docstrings(self):
+        source='''"""README.md"""\nvalue = "# README.md"\ncallback = lambda: "# README.md"\n# see docs/guide.md in section 2.1\n'''
+        found=pointer_findings(["src.py","README.md","docs/guide.md"],{"src.py":source,"README.md":"","docs/guide.md":""})
+        self.assertEqual(sorted((f.code,f.target) for f in found),[('P001','README.md'),('P001','docs/guide.md'),('P002','see docs/guide.md in section 2.1')])
+
+    def test_rust_raw_strings_are_not_comments(self):
+        source='let text = r##("// README.md")##; // README.md\n'
+        found=pointer_findings(["src.rs","README.md"],{"src.rs":source,"README.md":""})
+        self.assertEqual([(f.code,f.target) for f in found],[('P001','README.md')])
+    def test_table_duplicate_blocks(self):
+        table="| Name | Kind | Purpose |\n|---|---|---|\n| One | file | state |\n| Two | file | state |\n"
+        found=dup_findings(["a.md","b.md"],{"a.md":table,"b.md":table})
+        self.assertEqual([(f.code,f.file,f.target) for f in found],[('D001','a.md','b.md:1-4')])
+    def test_make_target_declarations_include_phony(self):
+        content={"Makefile":".PHONY: check lint\ncheck:\n\t@true\n","guide.md":"Run `make check` and `make missing`.\n"}
+        found=ref_findings(list(content),content)
+        self.assertEqual([(f.code,f.target) for f in found],[('R002','missing')])
+    def test_literal_reference_warning_categories(self):
+        files=["guide.md","Cargo.toml","src/a.py"]
+        content={"Cargo.toml":"[package]\nname = \"sample\"\n","guide.md":"`missing/path.md` `cargo test -p absent` `./scripts/nope` `sh -c` `https://example.com/docs/guide.md` `~/usr`\n","src/a.py":""}
+        self.assertEqual(sorted(f.code for f in ref_findings(files,content)),["R001","R003","R004"])
+    def test_consumer_read_and_literal_categories(self):
+        files=["docs/a.md","src/a.py"]
+        content={"docs/a.md":"# Doc\n","src/a.py":"read_text(\"a.md\")\nvalue = \"docs/a.md\"\n"}
+        self.assertEqual(sorted((f.code,f.target) for f in consumer_findings(files,content)),[("C002","docs/a.md (name only)"),("C003","docs/a.md")])
+    def test_router_reports_missing_and_unreachable_docs(self):
+        files=["AGENTS.md","README.md","docs/linked.md","docs/lost.md"]
+        content={"AGENTS.md":"[topic](docs/linked.md) [missing](docs/no.md)\n","README.md":"## Testing\n","docs/linked.md":"# Detail\n","docs/lost.md":"# Lost\n"}
+        found=router_findings(files,content)
+        self.assertEqual(sorted(f.code for f in found),["T001","T003","T004","T005"])
+
+    def test_missing_tracked_file_is_a_note(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"gone.md").write_text("# gone")
+            git(root,["init","-q"]); git(root,["add","gone.md"]); git(root,["commit","-qm","tracked"])
+            (root/"gone.md").unlink()
+            out,err=io.StringIO(),io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err): rc=main(["links","--root",str(root)])
+            self.assertEqual(rc,0); self.assertIn("note IO01 file is missing or unreadable: gone.md",out.getvalue())
+
+    def test_since_detects_finding_moved_to_new_path(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"bad.md").write_text("[broken](missing.md)\n")
+            git(root,["init","-q"]); git(root,["add","bad.md"]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            git(root,["mv","bad.md","moved.md"]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","move"])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["links","--root",str(root),"--since","HEAD^"])
+            self.assertEqual(rc,1); self.assertIn("moved.md:1:1: error L001",out.getvalue())
+
+    def test_links_follow_a_git_move(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"target.md").write_text("# Here\n"); (root/"source.md").write_text("[here](target.md#here)\n")
+            git(root,["init","-q"]); git(root,["add","."]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            git(root,["mv","target.md","renamed.md"]); (root/"source.md").write_text("[here](renamed.md#here)\n")
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["links","--root",str(root)])
+            self.assertEqual(rc,0); self.assertEqual(out.getvalue(),"")
+
+    def test_consumer_embed_classification(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"docs/guide.md").write_text("# Guide\n"); (root/"src/a.rs").write_text('include_str!("../docs/guide.md");')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["consumers","--root",td,"--quiet","--json"])
+            expected='{"code": "C001", "severity": "warn", "file": "src/a.rs", "line": 1, "col": 16, "message": "embedded documentation can affect built output", "target": "docs/guide.md"}\n'
+            self.assertEqual((rc,out.getvalue()),(0,expected))
+    def test_missing_line_ref(self):
+        found=link_findings(Path.cwd(),["a.md","b.md"],{"a.md":"See `b.md:1-4`.\n","b.md":"one\n"})
+        self.assertEqual([(f.code,f.target) for f in found],[('L004','b.md:1-4')])
+    def test_unknown_ignore_is_usage_error(self):
+        with self.assertRaises(SystemExit) as ex: main(["links","--ignore","ZZZ"])
+        self.assertEqual(ex.exception.code,2)
+
+    def test_flags_are_limited_to_their_command(self):
+        with self.assertRaises(SystemExit) as ex: main(["links","--max-lines","150"])
+        self.assertEqual(ex.exception.code,2)
+        with self.assertRaises(SystemExit) as ex: main(["commands","--root","."])
+        self.assertEqual(ex.exception.code,2)
+        with self.assertRaises(SystemExit) as ex: main(["pointers","--label","["])
+        self.assertEqual(ex.exception.code,2)
+
+    def test_source_python39_grammar(self):
+        source=Path(__file__).read_text()
+        ast.parse(source,feature_version=(3,9))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

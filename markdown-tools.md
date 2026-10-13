@@ -1,6 +1,6 @@
 # Campaign: `mdtool`, read-only documentation checks
 
-Status: ready. This campaign adds one Python 3.9+ standard-library command, `mdtool`, for mechanical Markdown and documentation checks used by repository skills. No implementation exists at the campaign base; the behavior below is the specification.
+Status: execution incomplete. The tool and behavioral checks are delivered; final lint and timing gates remain parked because `shellcheck` is unavailable and the host is busy.
 
 Deliverables:
 
@@ -218,10 +218,15 @@ With no docs directory or AGENTS.md, emit one note and no T001. A docs-refresh s
 - 2026-10-13 — Keep `mdtool`, include docs-only `dups`, include docs data alongside Markdown, and keep router findings non-failing; owner selected all four recommended choices.
 - 2026-10-13 — Keep `--since` opt-in so default runs expose the whole tracked baseline; change-only skill runs must name `--since HEAD`.
 - 2026-10-13 — Keep this as one standard-library Python file; one file walker and slugger reduce drift across related commands, and the 800-line ceiling bounds the choice.
+- 2026-10-13 — Set `GIT_CEILING_DIRECTORIES` to `.work/tmp` when running `make check` with scratch there; this keeps the existing outside-Git fixture outside the checkout while its own temporary Git repositories remain discoverable.
 
 ## Campaign log
 
 - P0 — `git status --short` was clean on `main`; `.work/` was ignored by `.git/info/exclude:8`. `python3` is 3.14.8; `python3.9` is unavailable. Available memory was 623655 pages × 4096 bytes (about 2.39 GiB). `make check` passed in 1.90 s wall / 0.37 s CPU; base skill check passed in 0.91 s / 0.17 s; root skill check passed in 0.08 s / 0.01 s. Existing checker warnings: `campaign-preflight`, `orchestrate`, and `ultrareview` exceed 60 lines; `orchestrate` lacks `**Reply:**`. `mdtool` has no baseline.
+- P1 — Added the seven commands, numbered wrapper, Makefile entry, and five skill routes; final `make check` passed in 1.05 s wall / 0.78 s CPU, valid and invalid skill fixtures behaved as expected, and both changed shell scripts pass `sh -n`. `make lint` is parked because `shellcheck` is not installed; existing skill warnings remain.
+- P2 — The 21 embedded tests and numbered wrapper pass, including symlink confinement, case-only names, percent decoding, non-UTF-8 names, moved findings, malformed options, and router/consumer boundaries. Python 3.9 is unavailable and macOS path behavior is unverified on this Linux runner.
+- P3 — Correctness corpus passed for 120 Markdown files / 30000 lines (0 findings) and 3001 tracked text files (3000 expected consumers); peak RSS was 18160 KiB / 19424 KiB, and `mdtool` is 799 lines / 41569 bytes. `perf-gate-ready` exited 75 after three busy checks (latest load 52.74, 50.24, and 41.45 on 32 cores); **perf gate deferred: host busy**. The result is inconclusive: no eligible CPU runs, limiter, tuning comparison, range, or end-to-end impact were measured; correctness outputs proved the data was read and results were consumed.
+- P4 — Final `make check`, standalone 21-test selftest, Python 3.9 grammar parse, shell syntax checks, and `git diff --check` pass. C1 remains open because `shellcheck` is unavailable and the host-busy P3 time gate is still deferred; campaign close is not complete.
 
 ## For the owner afterwards
 

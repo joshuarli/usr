@@ -23,4 +23,6 @@ For each finding:
 
 Search the requested source scope for documentation and planning references before and after editing. Review the diff to ensure each changed comment is still clear and no executable strings or fixture text were changed accidentally. Do not run tests unless asked; a focused search and diff review are sufficient for this editorial task.
 
+When `mdtool` is installed, use `mdtool pointers`; otherwise search source comments with `rg -n 'README|AGENTS|docs/|\.md|Phase|M[0-9]+'` and inspect each match in context.
+
 **Reply:** the files reviewed, changes made, external citations preserved, and ambiguous references left untouched.
