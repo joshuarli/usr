@@ -31,7 +31,8 @@ refs
 consumers
 pointers
 dups
-router'
+router
+check'
 got=$(python3 -I "$tool" commands)
 if [ "$got" = "$expected" ]; then printf 'ok: exact command set\n'; else printf 'FAIL: command set differs\n'; nfailed=$((nfailed + 1)); fi
 

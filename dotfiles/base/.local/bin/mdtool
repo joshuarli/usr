@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import errno
 import io
 import json
 import os
@@ -19,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
-COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router")
+COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
+CHECKS = ("links", "refs", "consumers", "pointers", "dups", "router")
 EXTS = {".md", ".markdown"}
 MAX_BYTES = 2 * 1024 * 1024
 SKIP_DIRS = {".git", ".work", "target", "node_modules"}
@@ -358,11 +360,11 @@ def consumer_findings(files, content):
     targets = set(docs) | {p for p in files if str(PurePosixPath(p).parent) in doc_dirs}
     for file, text in content.items():
         if markdown(file): continue
-        lines, clean = visible_lines(text)
+        lines = text.splitlines()
         for target in targets:
             base = Path(target).name
             literal = re.compile(r"(?<![\w])(?:\./)?" + re.escape(target) + r"(?![\w])|(?<![\w])" + re.escape(base) + r"(?![\w])")
-            for n, line in enumerate(clean, 1):
+            for n, line in enumerate(lines, 1):
                 for m in literal.finditer(line):
                     left = line[max(0, m.start()-80):m.start()]
                     kind = "C001" if re.search(r"include_str!|include_bytes!|include!|#include|embed", left) else "C002" if re.search(r"\b(?:read|open|load|parse)\w*\s*\([^)]*$", left) else "C003"
@@ -578,6 +580,15 @@ def check_command(command, root, files, content, opts, tracked=None):
     return []
 
 
+def all_check_findings(root, files, content, opts, tracked):
+    docs = [p for p in files if markdown(p)]
+    findings = []
+    for command in CHECKS:
+        inputs = files if command in {"consumers", "pointers"} else docs
+        findings.extend(check_command(command, root, inputs, content, opts, tracked))
+    return findings
+
+
 def emit(findings, total_files, quiet=False, json_mode=False, extra=""):
     findings.sort(key=lambda f:(f.file,f.line,f.col,f.code,f.target))
     if json_mode:
@@ -592,7 +603,11 @@ def emit(findings, total_files, quiet=False, json_mode=False, extra=""):
 
 
 def build_parser():
-    parser=argparse.ArgumentParser(prog="mdtool")
+    parser=argparse.ArgumentParser(
+        prog="mdtool",
+        description="Read-only checks for Markdown and documentation.",
+        epilog="Run 'check' to combine all finding-producing checks; 'anchors FILE' lists headings.",
+    )
     parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"))
     parser.add_argument("paths",nargs="*")
     parser.add_argument("--root",default=None)
@@ -640,7 +655,11 @@ def main(argv=None):
         if args.root is None and git:
             root=Path(run_git(root,["rev-parse","--show-toplevel"]).decode().strip()).resolve()
         git,all_paths=tracked_files(root,args.untracked)
-        paths=selected(all_paths,args) if args.paths else all_paths if args.command in {"consumers","pointers"} else selected(all_paths,args)
+        paths=selected(all_paths,args) if args.paths else all_paths if args.command in {"consumers","pointers","check"} else selected(all_paths,args)
+        if args.command=="anchors" and args.paths:
+            for requested in args.paths:
+                normalized=Path(requested).as_posix().rstrip("/")
+                if normalized not in paths and (root/normalized).is_file(): paths.append(normalized)
         if args.since and not git: raise RuntimeError("--since requires a Git repository")
         read_paths=paths
         if args.command=="refs": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if Path(p).name in {"Makefile","Cargo.toml"}]))
@@ -653,12 +672,15 @@ def main(argv=None):
                     continue
                 for line,level,slug,title in slug_headings(value)[0]: print(f"{file}:{line}\t{level}\t{slug}\t{title}")
             return 0
-        findings=check_command(args.command,root,paths,contents,args,all_paths)
+        findings=(all_check_findings(root,paths,contents,args,all_paths)
+                  if args.command=="check" else check_command(args.command,root,paths,contents,args,all_paths))
         for path in unreadable:
             add(findings,"IO01","note",path,1,1,"file is missing or unreadable",path)
         if args.since:
             old=old_tree(root,args.since)
-            oldfind=check_command(args.command,root,paths,old,args,list(old))
+            old_paths=selected(list(old),args) if args.paths else list(old)
+            oldfind=(all_check_findings(root,old_paths,old,args,list(old))
+                     if args.command=="check" else check_command(args.command,root,paths,old,args,list(old)))
             identities={f.identity() for f in oldfind}
             findings=[f for f in findings if f.identity() not in identities]
         findings=[f for f in findings if f.code not in args.ignore]
@@ -679,6 +701,14 @@ class MdtoolTests(unittest.TestCase):
         h,_=slug_headings("# Same\n# Same\nSetext\n---\n```\n# Fake\n```")
         self.assertEqual([(x[2],x[1]) for x in h],[("same",1),("same-1",1),("setext",2)])
 
+    def test_anchors_reads_an_explicit_untracked_file(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"new.md").write_text("# Topic\n")
+            git(root,["init","-q"])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out): rc=main(["anchors","new.md","--root",td])
+            self.assertEqual((rc,out.getvalue()),(0,"new.md:1\t1\ttopic\tTopic\n"))
+
     def test_case_only_and_escape_links(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
             root=Path(td)
@@ -688,8 +718,14 @@ class MdtoolTests(unittest.TestCase):
             found=link_findings(root,fs,{p:(root/p).read_text() for p in fs})
             self.assertEqual([(f.code,f.target) for f in found],[("L003","readme.md"),("L001","../outside.md")])
             if os.name=="posix":
-                raw=os.fsencode(root)+b"/bad\xff.md"; fd=os.open(raw,os.O_CREAT|os.O_WRONLY,0o600); os.close(fd)
-                self.assertIsNotNone(safe_read(root,os.fsdecode(raw).split("/")[-1]))
+                raw=os.fsencode(root)+b"/bad\xff.md"
+                try:
+                    fd=os.open(raw,os.O_CREAT|os.O_WRONLY,0o600)
+                except OSError as e:
+                    if e.errno != errno.EILSEQ: raise
+                else:
+                    os.close(fd)
+                    self.assertIsNotNone(safe_read(root,os.fsdecode(raw).split("/")[-1]))
 
     def test_symlink_escape_is_never_opened(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td, tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as outside:
@@ -792,12 +828,25 @@ class MdtoolTests(unittest.TestCase):
     def test_consumer_embed_classification(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
             root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
-            (root/"docs/guide.md").write_text("# Guide\n"); (root/"src/a.rs").write_text('include_str!("../docs/guide.md");')
+            (root/"docs/guide.md").write_text("# Guide\n"); (root/"src/a.rs").write_text('fn main() {\n    include_str!("../docs/guide.md");\n}\n')
             git(root,["init","-q"]); git(root,["add","."])
             out=io.StringIO()
             with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["consumers","--root",td,"--quiet","--json"])
-            expected='{"code": "C001", "severity": "warn", "file": "src/a.rs", "line": 1, "col": 16, "message": "embedded documentation can affect built output", "target": "docs/guide.md"}\n'
+            expected='{"code": "C001", "severity": "warn", "file": "src/a.rs", "line": 2, "col": 20, "message": "embedded documentation can affect built output", "target": "docs/guide.md"}\n'
             self.assertEqual((rc,out.getvalue()),(0,expected))
+
+    def test_check_runs_finding_checks_together(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"docs/guide.md").write_text("# Guide\n\n[missing](nope.md)\n")
+            (root/"src/a.rs").write_text('fn main() {\n    include_str!("../docs/guide.md");\n}\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["check","--root",td,"--quiet","--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,1)
+            self.assertIn("L001",{finding["code"] for finding in findings})
+            self.assertIn("C001",{finding["code"] for finding in findings})
     def test_missing_line_ref(self):
         found=link_findings(Path.cwd(),["a.md","b.md"],{"a.md":"See `b.md:1-4`.\n","b.md":"one\n"})
         self.assertEqual([(f.code,f.target) for f in found],[('L004','b.md:1-4')])
