@@ -13,11 +13,11 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 | Work | Codex | Claude |
 | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `xhigh` | `scout` |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `xhigh` | `mechanic` |
+| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` |
+| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` |
 | Normal implementation, debugging, tests, ordinary review | `gpt-6-luna`, `xhigh` | `worker` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6-luna`, `xhigh` | `expert` |
-| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6-luna`, `xhigh` | `god` |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` |
+| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` |
 
 **Default to `worker`.** Size is not difficulty. A big lane with a clear method and acceptance (a profiled optimization, a port with a reference, a mock built from a design doc, an investigation with a known procedure, a bug fix with a reproduction) is a `worker` task, and so is most campaign lane work. Use `expert` only when the path is unknown and a wrong turn is costly: a cross-cutting design, a failure with no hypothesis, an integration that spans owners. If the brief can name the steps and the acceptance check, it is not an `expert` brief. Start with `worker` and escalate on evidence that the work was harder than briefed.
 
@@ -25,7 +25,7 @@ If work exceeds the parent's delegation ceiling, keep it local at the highest su
 
 ### Codex
 
-Use `gpt-6-luna` at `xhigh` effort for every Codex child, including scouts. This profile overrides the parent's effort ceiling; if Luna is unavailable, report the limitation instead of substituting a model.
+Use the model and effort in the Codex column for each Codex child. This profile overrides the parent's effort ceiling; if the assigned model is unavailable, report the limitation instead of substituting a model.
 
 Never assign a child `gpt-6-astra` or `gpt-6-sol`. GPT-5.x and Terra are also banned. Never use `ultra`: its automatic delegation conflicts with this skill.
 
