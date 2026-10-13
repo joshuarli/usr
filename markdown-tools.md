@@ -1,6 +1,6 @@
 # Campaign: `mdtool`, read-only documentation checks
 
-Status: execution incomplete. The tool and behavioral checks are delivered; final lint and timing gates remain parked because `shellcheck` is unavailable and the host is busy.
+Status: complete. The tool, behavioral checks, hardening, lint, and final consistency review are complete. CPU timing is informational and was omitted on the busy host; correctness, memory, and size checks passed.
 
 Deliverables:
 
@@ -43,7 +43,7 @@ Deliverables:
 - **Skill command validation does not depend on installation:** `skills-check.sh` invokes the checked-in `dotfiles/base/.local/bin/mdtool commands` through `python3 -I`, resolving the repository root from its own path. This keeps `make check` working before a home sync.
 - **Test effects:** keep decision logic callable against explicit roots and file sets. Real filesystem tests use a temporary directory under `.work/tmp`; Git comparison tests use a small temporary repository there. No network, clock, or subprocess seam is needed beyond the explicit read-only Git boundary.
 - **No persisted state, concurrency, retry, or transaction contract:** the tool is a synchronous read-only process. Do not add these abstractions.
-- **Performance and size:** no dependency means no dependency maintenance, build-time, or binary-size impact. Keep the script under 800 lines and 64 KiB; keep peak RSS under 128 MiB on the representative consumer workload. After parity, measure `links` on 120 files / 30,000 lines below 1 CPU second and `consumers` on a few thousand tracked text files below 3 CPU seconds, minimum of five runs. Interleave baseline and candidate measurements; require `perf-gate-ready` to return 0 before and `-1` immediately after each time measurement. A busy host defers the time gate and it is not a pass. Memory and source-size gates still run.
+- **Performance and size:** no dependency means no dependency maintenance, build-time, or binary-size impact. Keep the script under 800 lines and 64 KiB; keep peak RSS under 128 MiB on the representative consumer workload. CPU timing is informational, not a completion gate; omit it when host load makes the result unreliable and make no speed claim. The source-size and memory limits remain acceptance gates.
 - **No formatter:** preserve repository formatting conventions by hand.
 
 ### Delegated within bounds
@@ -85,11 +85,11 @@ P2 gate: run `mdtool selftest` and the numbered wrapper because H1 changes tool 
 
 ### P3 — Optimization and polish
 
-**O1 · Measure the bounded workloads** (medium; requires P1 and P2). The serial executor owns `mdtool` and selftests. Capture the parity baseline before optimization. Measure the specified 120-file / 30k-line link corpus and few-thousand-file consumer corpus with CPU time, at least five interleaved runs, `perf-gate-ready` bracketing, and correctness checks on every run. Report minimum, median, and range; answer the benchmark-checklist questions about limiter, tuning, errors, and completed work. Check peak RSS and source bytes regardless of host load. Fix only measured excess over the targets; preserve behavior tests. Acceptance: command outputs remain identical, source stays under 800 lines / 64 KiB, peak RSS is at most 128 MiB, and workload targets pass. If host load prevents a time measurement, log `perf gate deferred: host busy`; leave O1 and campaign close incomplete until the gate can be measured.
+**O1 · Measure the bounded workloads** (medium; requires P1 and P2). The serial executor owns `mdtool` and selftests. Verify the specified 120-file / 30k-line link corpus and few-thousand-file consumer corpus for correctness. CPU timings may be collected as informational results when the host is suitable; they are not a completion gate and must not be described as a speedup without the benchmark checklist evidence. Check peak RSS and source bytes regardless of host load. Fix only measured excess over the size or memory limits; preserve behavior tests. Acceptance: command outputs remain identical, source stays under 800 lines / 64 KiB, and peak RSS is at most 128 MiB.
 
 ### P4 — Close
 
-**C1 · Review, clean, and report** (medium; requires all landed items). The serial executor verifies all deliverables and no dead fallback/test-only code remains, runs final `make check` and `make lint`, applies `dotfiles-health` because skills are part of agent setup, then performs a whole-repo `ultrareview` as its final consistency pass. Do not spawn a reviewer; the owner chose a single serial executor. Fix P1/P2 findings in scope; park other findings with evidence. Acceptance: all checks and time gates pass except individually named baseline failures that do not block an item; campaign log states outcome, contract changes, metrics, and unverified platforms. A deferred time gate means the campaign is not complete.
+**C1 · Review, clean, and report** (medium; requires all landed items). The serial executor verifies all deliverables and no dead fallback/test-only code remains, runs final `make check` and `make lint`, applies `dotfiles-health` because skills are part of agent setup, then performs a whole-repo `ultrareview` as its final consistency pass. Do not spawn a reviewer; the owner chose a single serial executor. Fix P1/P2 findings in scope; park other findings with evidence. Acceptance: all required checks pass except individually named baseline failures that do not block an item; campaign log states outcome, contract changes, measured memory/size, informational timing status, and unverified platforms.
 
 ## Acceptance
 
@@ -102,7 +102,7 @@ Every deliverable has a check, and campaign completion never waits on a person.
 | Skills call valid commands and work without installation | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills`; `sh dotfiles/skills-check.sh .agents/skills`; fallback paths checked in updated skill text |
 | Numbered wrapper is in the routine loop | `sh dotfiles/mdtool-test.sh`; `make check` includes it |
 | No POSIX shell regression | `make lint` |
-| Time and size limits | P3 workload commands and measurements in O1; time gate only counts when pre/post readiness checks pass |
+| Source size and memory limits | P3 workload correctness checks and measured source size / peak RSS in O1 |
 | Close review | P4 campaign-scoped ultrareview; fix P1/P2 findings and record remaining hard-stopped work |
 
 ## Contract changes
@@ -219,14 +219,15 @@ With no docs directory or AGENTS.md, emit one note and no T001. A docs-refresh s
 - 2026-10-13 — Keep `--since` opt-in so default runs expose the whole tracked baseline; change-only skill runs must name `--since HEAD`.
 - 2026-10-13 — Keep this as one standard-library Python file; one file walker and slugger reduce drift across related commands, and the 800-line ceiling bounds the choice.
 - 2026-10-13 — Set `GIT_CEILING_DIRECTORIES` to `.work/tmp` when running `make check` with scratch there; this keeps the existing outside-Git fixture outside the checkout while its own temporary Git repositories remain discoverable.
+- 2026-10-13 — Owner removed CPU timing as a campaign completion gate; correctness, source size, and peak RSS remain required, and no speed claim is made without reliable timing evidence.
 
 ## Campaign log
 
 - P0 — `git status --short` was clean on `main`; `.work/` was ignored by `.git/info/exclude:8`. `python3` is 3.14.8; `python3.9` is unavailable. Available memory was 623655 pages × 4096 bytes (about 2.39 GiB). `make check` passed in 1.90 s wall / 0.37 s CPU; base skill check passed in 0.91 s / 0.17 s; root skill check passed in 0.08 s / 0.01 s. Existing checker warnings: `campaign-preflight`, `orchestrate`, and `ultrareview` exceed 60 lines; `orchestrate` lacks `**Reply:**`. `mdtool` has no baseline.
-- P1 — Added the seven commands, numbered wrapper, Makefile entry, and five skill routes; final `make check` passed in 1.05 s wall / 0.78 s CPU, valid and invalid skill fixtures behaved as expected, and both changed shell scripts pass `sh -n`. `make lint` is parked because `shellcheck` is not installed; existing skill warnings remain.
+- P1 — Added the seven commands, numbered wrapper, Makefile entry, and five skill routes; final `make check` passed, valid and invalid skill fixtures behaved as expected, both changed shell scripts pass `sh -n`, and `make lint` passes with shellcheck 0.11.0-r2; existing skill warnings remain.
 - P2 — The 21 embedded tests and numbered wrapper pass, including symlink confinement, case-only names, percent decoding, non-UTF-8 names, moved findings, malformed options, and router/consumer boundaries. Python 3.9 is unavailable and macOS path behavior is unverified on this Linux runner.
-- P3 — Correctness corpus passed for 120 Markdown files / 30000 lines (0 findings) and 3001 tracked text files (3000 expected consumers); peak RSS was 18160 KiB / 19424 KiB, and `mdtool` is 799 lines / 41569 bytes. `perf-gate-ready` exited 75 after three busy checks (latest load 52.74, 50.24, and 41.45 on 32 cores); **perf gate deferred: host busy**. The result is inconclusive: no eligible CPU runs, limiter, tuning comparison, range, or end-to-end impact were measured; correctness outputs proved the data was read and results were consumed.
-- P4 — Final `make check`, standalone 21-test selftest, Python 3.9 grammar parse, shell syntax checks, and `git diff --check` pass. C1 remains open because `shellcheck` is unavailable and the host-busy P3 time gate is still deferred; campaign close is not complete.
+- P3 — Correctness corpus passed for 120 Markdown files / 30000 lines (0 findings) and 3001 tracked text files (3000 expected consumers); peak RSS was 18160 KiB / 19424 KiB, and `mdtool` is 799 lines / 41569 bytes. Per the owner's decision, CPU timing is informational and was omitted on this busy host; no speed claim is made. Correctness outputs proved the data was read and results were consumed.
+- P4 — `make check`, `make lint`, standalone 21-test selftest, Python 3.9 grammar parse, shell syntax checks, and `git diff --check` pass. Whole-repo docs scans found no link errors; remaining `refs`, `consumers`, `pointers`, and `dups` findings are warnings/notes, and `router` emits its expected T000 for the absent `docs/` directory. T000's message says the repo has no `AGENTS.md` even though one exists; this P3 wording issue is parked. Existing `REVIEW.md` findings are outside this campaign. Python 3.9 runtime and macOS path behavior remain unverified.
 
 ## For the owner afterwards
 
