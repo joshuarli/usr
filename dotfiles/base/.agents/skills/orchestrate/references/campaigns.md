@@ -24,7 +24,9 @@ A campaign is a backlog too large for one session, run as parallel lanes in roll
    artifact reuse. A broad gate that eventually finishes does not excuse a
    missing focused check; retain the broad gate for the integration risk it
    actually covers.
-5. **Close** with every lane merged and none running: the full checks, the performance measurements against the baseline, and any repository-wide rewrite the wave made possible. Such rewrites run only here, because they change the files lanes read. Hold for the close only what depends on the final state (full checks, baselines, held-out runs, the final report); everything else runs when it is ready.
+5. **Close** with every lane merged and none running. Run `codex-campaign-closeout.py begin` from the integration worktree. Run the full checks and performance measurements against the baseline. Run any repository-wide rewrite the wave made possible. Rewrites run here because they change files lanes read. Hold only work that depends on the final state.
+   The Stop hook checks registered worktrees before Codex ends its turn. Remove safe leftovers. Keep any retained worktree under `.work/`, commit it, and record its path and reason in the campaign handoff. Then allow it with `codex-campaign-closeout.py allow --path <path> --reason <reason>`.
+   If the campaign resumes before closeout passes, run `codex-campaign-closeout.py cancel` before selecting work. Run `begin` again at the next close.
 6. **Record.** Delete finished items, add the defects found, and report to the owner: what merged, every contract change, measurements, and the decisions the next wave needs.
 
 ### Lane contract

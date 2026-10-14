@@ -40,7 +40,7 @@
    - Keep bookkeeping minimal: no provenance, checksums, or pinned hashes unless the campaign delivers something that needs them.
    - Run as wide as ownership and the machine allow, with the largest slices a lane can finish, as `orchestrate` sets out. The doc states the memory budget per lane.
    - Worktrees and all working state live under `.work/` in the repo, never `/tmp`. The doc states the lane worktree path (`.work/wt/<lane>`).
-   - The coordinator cleans up as it integrates: once a lane is merged and its checks pass on the merged tree, it runs `git worktree remove` on the lane's worktree and `git branch -d` on its branch. A parked lane keeps its committed branch. At any moment the only worktrees are those of running lanes.
+   - The coordinator cleans up as it integrates: once a lane is merged and its checks pass on the merged tree, it runs `git worktree remove` on the lane's worktree and `git branch -d` on its branch. A parked lane keeps its committed branch, not its worktree. During winddown, retain a worktree only when it is clean, named in the handoff, and explicitly allowed by the closeout guard.
    - Every commit, the executor's and the lanes', is a Conventional Commit, with the area or workstream as its scope. The item ID belongs in the body, never the subject.
    - Code comments never cite this doc.
 3. **Decisions:** the three tiers, each with its reason.
