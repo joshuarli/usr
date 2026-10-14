@@ -1,10 +1,4 @@
 #!/bin/sh
-# dl - install or update my binaries from their newest GitHub release into ~/.local/bin.
-# usage: dl [TOOL...]    with no TOOL, every tool below
-# Distinct tools are handled concurrently, up to the number requested.
-# Idempotent: a tool is downloaded only when its newest asset differs from the one
-# installed last time. If the newest asset cannot be checked (offline, rate limited)
-# and the tool is already installed, it warns and keeps the installed one.
 set -eu
 
 _dl_worker_mode=false
@@ -37,6 +31,8 @@ changed=false
 tmpzip=
 tmpbin=
 tmpbundle=
+tmpcurrentlink=
+tmpbinlink=
 worker_pids=
 worker_count=0
 log_dir=
@@ -63,6 +59,14 @@ cleanup_temporary_files() {
     if [ -n "$tmpbundle" ]; then
         rm -rf "$tmpbundle" || printf '%s\n' "Warning: could not remove $tmpbundle" >&2
         tmpbundle=
+    fi
+    if [ -n "$tmpcurrentlink" ]; then
+        rm -f "$tmpcurrentlink" || printf '%s\n' "Warning: could not remove $tmpcurrentlink" >&2
+        tmpcurrentlink=
+    fi
+    if [ -n "$tmpbinlink" ]; then
+        rm -f "$tmpbinlink" || printf '%s\n' "Warning: could not remove $tmpbinlink" >&2
+        tmpbinlink=
     fi
     if [ -n "$log_dir" ]; then
         rm -rf "$log_dir" || printf '%s\n' "Warning: could not remove $log_dir" >&2
@@ -396,6 +400,274 @@ install_direct() {
     tmpbin=
 }
 
+install_jaq() {
+    case "${OS}:${ARCH}" in
+        Linux:x86_64) jaq_target=x86_64-unknown-linux-musl ;;
+        Linux:*) jaq_target="${ARCH}-unknown-linux-gnu" ;;
+        *) jaq_target="${ARCH}-apple-darwin" ;;
+    esac
+    install_direct jaq \
+        "https://github.com/01mf02/jaq/releases/latest/download/jaq-${jaq_target}"
+}
+
+jaq_available() {
+    command -v jaq >/dev/null 2>&1 || [ -x "${DEST}/jaq" ]
+}
+
+run_jaq() {
+    if command -v jaq >/dev/null 2>&1; then
+        jaq "$@"
+    else
+        "${DEST}/jaq" "$@"
+    fi
+}
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+install_checked_direct() {
+    prog=$1
+    url=$2
+    id=$3
+    expected_sha256=$4
+    if [ -z "$id" ]; then
+        unchecked "$prog" "no asset ETag"
+        return
+    fi
+    if is_current "$prog" "$id"; then
+        printf '%s\n' "$prog is current"
+        return
+    fi
+    printf '%s\n' "Downloading $prog ..."
+    tmpbin=$(mktemp "${DEST}/.$prog.XXXXXX")
+    if ! curl -fsSL -o "$tmpbin" "$url"; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip "$prog" "download failed"
+        return
+    fi
+    actual_sha256=$(sha256_file "$tmpbin")
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip "$prog" "download checksum mismatch"
+        return
+    fi
+    install_binary "$prog" "$tmpbin" "$id"
+    tmpbin=
+}
+
+install_grok() {
+    case "$OS:$ARCH" in
+        Darwin:x86_64) platform=macos-x86_64 ;;
+        Darwin:aarch64) platform=macos-aarch64 ;;
+        Linux:x86_64) platform=linux-x86_64 ;;
+        Linux:aarch64) platform=linux-aarch64 ;;
+        *) skip grok "no upstream binary for ${OS}/${ARCH}"; return ;;
+    esac
+    version=$(curl -fsSL https://x.ai/cli/stable 2>/dev/null) || version=
+    version=$(printf '%s\n' "$version" | sed -n '/^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/p')
+    [ -n "$version" ] || { unchecked grok "no stable release found"; return; }
+    install_direct grok "https://x.ai/cli/grok-${version}-${platform}"
+}
+
+install_muse() {
+    jaq_available || { unchecked muse "jaq is required"; return; }
+    case "$OS:$ARCH" in
+        Darwin:x86_64) platform=x86_macos ;;
+        Darwin:aarch64) platform=aarch64_macos ;;
+        Linux:x86_64) platform=x86_linux ;;
+        Linux:aarch64) platform=aarch64_linux ;;
+        *) skip muse "no upstream binary for ${OS}/${ARCH}"; return ;;
+    esac
+    channel_url=https://api.meta.ai/muse-code/channels/muse-stable
+    channel_json=$(curl -fsSL "$channel_url" 2>/dev/null) || channel_json=
+    version=$(printf '%s\n' "$channel_json" | run_jaq -r '.version // empty' 2>/dev/null) || version=
+    case "$version" in
+        *[!0-9R.]*|'') unchecked muse "no stable release found"; return ;;
+    esac
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-R[0-9]+(\.[0-9]+)?$' \
+        || { unchecked muse "no stable release found"; return; }
+    manifest_url=$(printf '%s\n' "$channel_json" | run_jaq -r '.manifest_url // empty' 2>/dev/null) || manifest_url=
+    case "$manifest_url" in
+        https://lookaside.facebook.com/lookaside/muse/download/*) ;;
+        *) skip muse "invalid release manifest URL"; return ;;
+    esac
+    manifest_json=$(curl -fsSL "$manifest_url" 2>/dev/null) || manifest_json=
+    manifest_version=$(printf '%s\n' "$manifest_json" | run_jaq -r '.version // empty' 2>/dev/null) || manifest_version=
+    [ "$manifest_version" = "$version" ] || { skip muse "release manifest version mismatch"; return; }
+    expected_sha256=$(printf '%s\n' "$manifest_json" | run_jaq -r --arg platform "$platform" ".artifacts[\$platform].checksum // empty" 2>/dev/null) || expected_sha256=
+    url=$(printf '%s\n' "$manifest_json" | run_jaq -r --arg platform "$platform" ".artifacts[\$platform].url // empty" 2>/dev/null) || url=
+    case "$expected_sha256" in
+        *[!0-9a-f]*|'') skip muse "invalid release manifest"; return ;;
+    esac
+    [ "${#expected_sha256}" -eq 64 ] || { skip muse "invalid release manifest"; return; }
+    case "$url" in
+        https://lookaside.facebook.com/*) ;;
+        *) skip muse "invalid release manifest"; return ;;
+    esac
+    id=$(asset_id "$url")
+    install_checked_direct muse "$url" "$id" "$expected_sha256"
+}
+
+install_claude() {
+    jaq_available || { unchecked claude "jaq is required"; return; }
+    case "$OS:$ARCH" in
+        Darwin:x86_64) platform=darwin-x64 ;;
+        Darwin:aarch64) platform=darwin-arm64 ;;
+        Linux:x86_64) platform=linux-x64 ;;
+        Linux:aarch64) platform=linux-arm64 ;;
+        *) skip claude "no upstream binary for ${OS}/${ARCH}"; return ;;
+    esac
+    if [ "$OS" = Linux ] && { [ -f /lib/libc.musl-x86_64.so.1 ] \
+        || [ -f /lib/libc.musl-aarch64.so.1 ]; }; then
+        platform="${platform}-musl"
+    fi
+    base=https://downloads.claude.ai/claude-code-releases
+    version=$(curl -fsSL "$base/latest" 2>/dev/null) || version=
+    version=$(printf '%s\n' "$version" | sed -n '/^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/p')
+    [ -n "$version" ] || { unchecked claude "no release found"; return; }
+    manifest=$(curl -fsSL "$base/$version/manifest.json" 2>/dev/null) || manifest=
+    expected_sha256=$(printf '%s\n' "$manifest" | run_jaq -r --arg platform "$platform" ".platforms[\$platform].checksum // empty" 2>/dev/null) || expected_sha256=
+    case "$expected_sha256" in
+        *[!0-9a-f]*|'') skip claude "invalid release manifest"; return ;;
+    esac
+    [ "${#expected_sha256}" -eq 64 ] || { skip claude "invalid release manifest"; return; }
+    url="$base/$version/$platform/claude"
+    id=$(asset_id "$url")
+    install_checked_direct claude "$url" "$id" "$expected_sha256"
+}
+
+install_codex() {
+    jaq_available || { unchecked codex "jaq is required"; return; }
+    case "$OS:$ARCH" in
+        Darwin:x86_64) target=x86_64-apple-darwin ;;
+        Darwin:aarch64) target=aarch64-apple-darwin ;;
+        Linux:x86_64) target=x86_64-unknown-linux-musl ;;
+        Linux:aarch64) target=aarch64-unknown-linux-musl ;;
+        *) skip codex "no upstream binary for ${OS}/${ARCH}"; return ;;
+    esac
+    release_json=$(curl -fsSL https://releases.openai.com/codex/channels/latest 2>/dev/null) || release_json=
+    tag=$(printf '%s\n' "$release_json" | run_jaq -r '.tag_name // empty' 2>/dev/null) || tag=
+    case "$tag" in
+        rust-v*) version=${tag#rust-v} ;;
+        *) unchecked codex "no release found"; return ;;
+    esac
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked codex "no release found"; return; }
+    asset="codex-package-${target}.tar.gz"
+    asset_json=$(printf '%s\n' "$release_json" \
+        | run_jaq -c --arg asset "$asset" ".assets[] | select(.name == \$asset)" 2>/dev/null) || asset_json=
+    url=$(printf '%s\n' "$asset_json" | run_jaq -r '.browser_download_url // empty' 2>/dev/null) || url=
+    digest=$(printf '%s\n' "$asset_json" | run_jaq -r '.digest // empty' 2>/dev/null) || digest=
+    expected_sha256=${digest#sha256:}
+    case "$expected_sha256" in
+        *[!0-9a-f]*|'') unchecked codex "$asset is missing a SHA-256 digest"; return ;;
+    esac
+    [ "${#expected_sha256}" -eq 64 ] || {
+        unchecked codex "$asset is missing a SHA-256 digest"
+        return
+    }
+    case "$url" in
+        https://releases.openai.com/codex/releases/*|https://github.com/openai/codex/releases/download/*) ;;
+        *) unchecked codex "$asset is missing a SHA-256 digest"; return ;;
+    esac
+    codex_root="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
+    if [ -d "${DEST}/codex" ] && [ ! -L "${DEST}/codex" ]; then
+        skip codex "${DEST}/codex is a directory"
+        return
+    fi
+    if [ -d "${codex_root}/current" ] && [ ! -L "${codex_root}/current" ]; then
+        skip codex "${codex_root}/current is a directory"
+        return
+    fi
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked codex "$asset is unavailable"
+        return
+    fi
+    if is_current codex "$id"; then
+        printf '%s\n' "codex is current (${version})"
+        return
+    fi
+    releases="$codex_root/releases"
+    mkdir -p "$releases"
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip codex "$asset download failed"
+        return
+    fi
+    actual_sha256=$(sha256_file "$tmpzip")
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip codex "$asset checksum mismatch"
+        return
+    fi
+    if ! tar -tzf "$tmpzip" | awk '
+        /^\// { bad = 1 }
+        {
+            count = split($0, path, "/")
+            for (index = 1; index <= count; index++) {
+                if (path[index] == "..") bad = 1
+            }
+        }
+        END { exit bad }
+    '; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip codex "$asset contains an invalid path"
+        return
+    fi
+    tmpbundle=$(mktemp -d "${releases}/.codex.XXXXXX")
+    if ! tar -xzf "$tmpzip" -C "$tmpbundle"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip codex "$asset could not be extracted"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    if [ ! -f "${tmpbundle}/codex-package.json" ] \
+        || [ ! -x "${tmpbundle}/bin/codex" ] \
+        || [ ! -x "${tmpbundle}/bin/codex-code-mode-host" ] \
+        || [ ! -x "${tmpbundle}/codex-path/rg" ]; then
+        skip codex "$asset is missing required package files"
+        return
+    fi
+    release_dir="${releases}/${version}"
+    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then rm -rf "$release_dir"; fi
+    mv "$tmpbundle" "$release_dir"
+    tmpbundle=
+    tmpcurrentlink=$(mktemp "${codex_root}/.current.XXXXXX")
+    rm -f "$tmpcurrentlink"
+    ln -s "$release_dir" "$tmpcurrentlink"
+    mv -f "$tmpcurrentlink" "${codex_root}/current"
+    tmpcurrentlink=
+    tmpbinlink=$(mktemp "${DEST}/.codex.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${codex_root}/current/bin/codex" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/codex"
+    tmpbinlink=
+    if [ "$OS" = Darwin ]; then
+        tmpbinlink=$(mktemp "${DEST}/.codex-code-mode-host.XXXXXX")
+        rm -f "$tmpbinlink"
+        ln -s "${codex_root}/current/bin/codex-code-mode-host" "$tmpbinlink"
+        mv -f "$tmpbinlink" "${DEST}/codex-code-mode-host"
+        tmpbinlink=
+    fi
+    printf '%s\n' "$id" > "${STATE}/codex"
+    changed=true
+    printf '%s\n' "Installed ${DEST}/codex"
+}
+
 # Repeated tools share a binary and state file, so keep those requests serial.
 has_duplicate_tools() {
     for prog in "$@"; do
@@ -454,9 +726,21 @@ run_parallel() {
 }
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jaq fastermod tm ish e fz fdu fs srv
+    set -- fd rg jaq muse grok codex claude fastermod tm ish e fz fdu fs srv
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
+fi
+
+needs_jaq=false
+for prog in "$@"; do
+    case "$prog" in
+        muse|codex|claude) needs_jaq=true ;;
+    esac
+done
+if $needs_jaq && ! jaq_available; then
+    changed=false
+    install_jaq
+    if $failed; then exit 1; fi
 fi
 
 if [ "$#" -gt 1 ] && [ "$_dl_worker_mode" != true ] \
@@ -471,18 +755,14 @@ for prog in "$@"; do
     changed=false
     case "$prog" in
         fd|rg) install_fd_or_rg "$prog" ;;
+        grok) install_grok ;;
+        muse) install_muse ;;
+        claude) install_claude ;;
+        codex) install_codex ;;
         vault)
             install_direct vault \
                 "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault" ;;
-        jaq)
-            # Upstream publishes bare binaries, not zips, and musl only for x86_64.
-            case "${OS}:${ARCH}" in
-                Linux:x86_64) jaq_target="x86_64-unknown-linux-musl" ;;
-                Linux:*) jaq_target="${ARCH}-unknown-linux-gnu" ;;
-                *) jaq_target="${ARCH}-apple-darwin" ;;
-            esac
-            install_direct jaq \
-                "https://github.com/01mf02/jaq/releases/latest/download/jaq-${jaq_target}" ;;
+        jaq) install_jaq ;;
         mold) install_mold ;;
         gh)
             install_direct gh \
