@@ -183,3 +183,8 @@ command = '"$HOME/.local/bin/codex-campaign-closeout.py" hook'
 timeout = 30
 statusMessage = "Checking campaign worktrees"
 
+[hooks.state]
+
+[hooks.state."/Users/josh/.codex/config.toml:stop:0:0"]
+trusted_hash = "sha256:0d0564abe1b14925cf07bc041fb4dc0ebec5a0d659f1b51b3aa91523be13e37e"
+

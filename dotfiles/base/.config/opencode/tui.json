@@ -2,6 +2,6 @@
   "$schema": "https://opencode.ai/tui.json",
   "keybinds": {
     "editor_open": "ctrl+g",
-    "messages_first": "ctrl+alt+g,home"
+    "messages_first": "home,alt+home"
   }
 }
