@@ -201,17 +201,17 @@ rm -rf home; mkdir home
 
 
 printf '\n14: a target directory that links into the source is a conflict in both modes, and the source survives\n'
-mkdir -p dotfiles/viaparent/.pi/agent home/.pi
-echo cfg > dotfiles/viaparent/.pi/agent/settings.json
-ln -s ../x dotfiles/viaparent/.pi/agent/AGENTS.md
-ln -s "$(pwd)/dotfiles/viaparent/.pi/agent" home/.pi/agent
+mkdir -p dotfiles/viaparent/.tool/agent home/.tool
+echo cfg > dotfiles/viaparent/.tool/agent/settings.json
+ln -s ../x dotfiles/viaparent/.tool/agent/AGENTS.md
+ln -s "$(pwd)/dotfiles/viaparent/.tool/agent" home/.tool/agent
 for flag in "" -d; do
 	rc=0; $sym -t home $flag dotfiles/viaparent > log 2>&1 || rc=$?
 	echo "  assertion: mode '$flag' refuses"
 	[ "$rc" -ne 0 ] && grep -q 'passes through a symlinked directory' log || nfailed=$((nfailed + 1))
 done
 echo "  assertion: the source files survive"
-[ -f dotfiles/viaparent/.pi/agent/settings.json ] && [ -L dotfiles/viaparent/.pi/agent/AGENTS.md ] || nfailed=$((nfailed + 1))
+[ -f dotfiles/viaparent/.tool/agent/settings.json ] && [ -L dotfiles/viaparent/.tool/agent/AGENTS.md ] || nfailed=$((nfailed + 1))
 rm -rf home; mkdir home
 
 

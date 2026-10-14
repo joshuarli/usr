@@ -27,7 +27,7 @@ If work exceeds the parent's delegation ceiling, keep it local at the highest su
 
 Use the model and effort in the Codex column for each Codex child. This profile overrides the parent's effort ceiling; if the assigned model is unavailable, report the limitation instead of substituting a model.
 
-Assign a child only the model and effort in the Codex column. Never use any other model, including GPT-5.x, Terra, and the `astra` tier, and never use `ultra`: its automatic delegation conflicts with this skill.
+Assign a child only the model and effort in the Codex column. Never use any other model, including GPT-5.x, Terra, the `astra` tier, or `ultra`; this repository keeps delegation explicit through the orchestration instructions.
 
 Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 

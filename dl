@@ -668,6 +668,53 @@ install_codex() {
     printf '%s\n' "Installed ${DEST}/codex"
 }
 
+install_opencode2() {
+    case "$OS:$ARCH" in
+        Darwin:x86_64) asset=opencode-darwin-x64.zip ;;
+        Darwin:aarch64) asset=opencode-darwin-arm64.zip ;;
+        Linux:x86_64) asset=opencode-linux-x64.tar.gz ;;
+        Linux:aarch64) asset=opencode-linux-arm64.tar.gz ;;
+        *) skip opencode2 "no upstream binary for ${OS}/${ARCH}"; return ;;
+    esac
+    if [ "$OS" = Linux ] && { [ -f /etc/alpine-release ] \
+        || { command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl; }; }; then
+        case "$asset" in
+            opencode-linux-*) asset=${asset%.tar.gz}-musl.tar.gz ;;
+        esac
+    fi
+    url="https://opencode.ai/update/api/latest/cli/opencode/$asset"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked opencode2 "$asset is unavailable"
+        return
+    fi
+    if is_current opencode2 "$id"; then
+        printf '%s\n' "opencode2 is current"
+        return
+    fi
+    printf '%s\n' "Downloading opencode2 ..."
+    tmpzip=$(mktemp "${DEST}/.opencode2.XXXXXX")
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip opencode2 "download failed"
+        return
+    fi
+    tmpbin=$(mktemp "${DEST}/.opencode2.XXXXXX")
+    case "$asset" in
+        *.zip) unzip -p "$tmpzip" opencode > "$tmpbin" ;;
+        *.tar.gz) tar -xOzf "$tmpzip" opencode > "$tmpbin" ;;
+    esac
+    if [ ! -s "$tmpbin" ]; then
+        skip opencode2 "$asset is missing the opencode binary"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    install_binary opencode2 "$tmpbin" "$id"
+    tmpbin=
+}
+
 # Repeated tools share a binary and state file, so keep those requests serial.
 has_duplicate_tools() {
     for prog in "$@"; do
@@ -726,7 +773,7 @@ run_parallel() {
 }
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jaq muse grok codex claude fastermod tm ish e fz fdu fs srv
+    set -- fd rg jaq muse grok codex claude opencode2 fastermod tm ish e fz fdu fs srv
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
@@ -759,6 +806,7 @@ for prog in "$@"; do
         muse) install_muse ;;
         claude) install_claude ;;
         codex) install_codex ;;
+        opencode2) install_opencode2 ;;
         vault)
             install_direct vault \
                 "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault" ;;

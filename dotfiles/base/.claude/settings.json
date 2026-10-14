@@ -87,7 +87,7 @@
   },
   "disableRemoteControl": true,
   "disableWorkflows": true,
-  "disableArtifact": true,
+  "enableArtifact": false,
   "workflowKeywordTriggerEnabled": false,
   "statusLine": {
     "type": "command",
