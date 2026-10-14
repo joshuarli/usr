@@ -175,6 +175,12 @@ trust_level = "trusted"
 [projects."/home/josh/d/goose"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/tansu2"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/ferrisearch"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
