@@ -1,0 +1,41 @@
+[cli]
+installer = "internal"
+
+[marketplace]
+default_skills_installs_purged = true
+official_marketplace_auto_installed = true
+
+[[marketplace.sources]]
+name = "xAI Official"
+git = "https://github.com/xai-org/plugin-marketplace.git"
+
+[ui]
+max_thoughts_width = 120
+yolo = true
+compact_mode = false
+permission_mode = "always-approve"
+screen_mode = "fullscreen"
+default_selected_permission = "always_allow_all_sessions"
+theme = "terminal"
+
+[ui.status_line]
+type = "command"
+command = '''jaq -r '(.model.display_name // "Unknown") as $m | (.effort.level // "n/a") as $e | (.context_window.used_percentage // 0) as $pct | "\($m) \($e) \($pct)% ctx"' '''
+
+[models]
+default = "grok-4.7"
+default_reasoning_effort = "medium"
+
+[features]
+telemetry = false
+terminal_theme = true
+
+[memory]
+enabled = false
+
+[memory_v2]
+enabled = false
+
+[subagents]
+max_concurrent = 64
+max_depth = 3

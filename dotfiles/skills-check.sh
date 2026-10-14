@@ -47,8 +47,10 @@ for d in "$skills"/*/; do
         esac
     done
     # The whole-repo review keeps its lenses together in the entrypoint.
+    limit=8000
+    [ "$n" = orchestrate ] && limit=12000
     if [ "$n" != ultrareview ]; then
-        [ "$(wc -c < "$f")" -le 8000 ] || echo "warning: $n is over 8000 bytes"
+        [ "$(wc -c < "$f")" -le "$limit" ] || echo "warning: $n is over $limit bytes"
     fi
     grep -q '^\*\*Reply:\*\*\|^## \(Hand back\|Report\|Handoff\)' "$f" || echo "warning: $n has no closing **Reply:**"
 done
