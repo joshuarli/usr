@@ -477,13 +477,27 @@ def dup_findings(files, content, code=False):
             if len(w) >= 40 or len(rows) >= 3:
                 shingles = set(tuple(w[i:i+8]) for i in range(len(w)-7))
                 blocks.append((file, start, end, shingles, len(w), chunk, set(rows)))
+    postings = {}
+    for index, block in enumerate(blocks):
+        for shingle in block[3]:
+            postings.setdefault((0, shingle), []).append(index)
+        for row in block[6]:
+            postings.setdefault((1, row), []).append(index)
     out = []
     for i, a in enumerate(blocks):
-        for b in blocks[i+1:]:
-            union = a[3] | b[3]
-            sim = len(a[3] & b[3]) / len(union) if union else 0
-            row_union = a[6] | b[6]
-            row_similarity = len(a[6] & b[6]) / len(row_union) if row_union else 0
+        candidates = set()
+        for shingle in a[3]:
+            candidates.update(j for j in postings[(0, shingle)] if j > i)
+        for row in a[6]:
+            candidates.update(j for j in postings[(1, row)] if j > i)
+        for j in sorted(candidates):
+            b = blocks[j]
+            shared = len(a[3] & b[3])
+            union_size = len(a[3]) + len(b[3]) - shared
+            sim = shared / union_size if union_size else 0
+            shared_rows = len(a[6] & b[6])
+            row_union_size = len(a[6]) + len(b[6]) - shared_rows
+            row_similarity = shared_rows / row_union_size if row_union_size else 0
             if sim >= .8 and a[4] >= 40 and b[4] >= 40 or row_similarity >= .8 and len(a[6]) >= 3 and len(b[6]) >= 3:
                 target = f"{b[0]}:{b[1]}-{b[2]}"
                 add(out, "D001", "note", a[0], a[1], 1, "documentation blocks substantially overlap", target)
@@ -970,6 +984,33 @@ class MdtoolTests(unittest.TestCase):
         table="| Name | Kind | Purpose |\n|---|---|---|\n| One | file | state |\n| Two | file | state |\n"
         found=dup_findings(["a.md","b.md"],{"a.md":table,"b.md":table})
         self.assertEqual([(f.code,f.file,f.target) for f in found],[('D001','a.md','b.md:1-4')])
+    def test_duplicate_similarity_keeps_threshold_for_shared_candidates(self):
+        original=[f"token{i}" for i in range(80)]
+        near=original.copy(); near[40]="variant"
+        apart=original.copy(); apart[20]="other20"; apart[60]="other60"
+        content={"a.md":" ".join(original),"b.md":" ".join(near),"c.md":" ".join(apart)}
+        found=dup_findings(list(content),content)
+        self.assertEqual([(f.file,f.target) for f in found],[("a.md","b.md:1-1")])
+    def test_duplicate_findings_preserve_text_table_and_code_pairs(self):
+        paragraph=" ".join(f"word{i}" for i in range(45))
+        table="| Name | Kind | Purpose |\n|---|---|---|\n| One | file | state |\n| Two | file | state |\n"
+        fenced="```text\n"+paragraph+"\n```"
+        content={
+            "a.md":paragraph+"\n\n"+table+"\n"+fenced,
+            "b.md":paragraph+"\n\n"+table+"\n"+fenced,
+            "c.md":paragraph,
+            "d.md":" ".join(f"other{i}" for i in range(45)),
+        }
+        files=list(content)
+        ordinary=dup_findings(files,content)
+        self.assertEqual([(f.file,f.line,f.target) for f in ordinary],[
+            ("a.md",1,"b.md:1-1"),
+            ("a.md",1,"c.md:1-1"),
+            ("a.md",3,"b.md:3-6"),
+            ("b.md",1,"c.md:1-1"),
+        ])
+        with_code=dup_findings(files,content,code=True)
+        self.assertIn(("a.md",8,"b.md:8-10"),[(f.file,f.line,f.target) for f in with_code])
     def test_make_target_declarations_include_phony(self):
         content={"Makefile":".PHONY: check lint\ncheck:\n\t@true\n","guide.md":"Run `make check` and `make missing`.\n"}
         found=ref_findings(list(content),content)
