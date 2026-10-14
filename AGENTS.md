@@ -12,7 +12,7 @@ This repo is the source of truth for my home directory, plus my personal scripts
 | `bin` | Link to `~/.local/bin`, where scripts and downloaded binaries (`fd`, `rg`, `gh`, `ish`, ...) live together. Only the scripts are tracked, under `.local/bin` in a layer. |
 | `dl` | Downloads those binaries from their newest GitHub release into `~/.local/bin` (`dl fd rg` for just those), ad-hoc codesigns them, and installs the `mactop` app and LaunchAgent. `fd` and `rg` come from their upstream projects; Linux uses their static musl archives, while macOS uses native Darwin archives. `mold` is installed on x86_64 Linux only (musl prerelease tarball; no macOS build yet). It is idempotent: it records each installed asset's ETag under `~/.local/state/dl` and downloads only when the newest asset differs. If it cannot check an installed tool (offline), it warns and keeps it. `make` runs it first. Other release downloads come from my release repos and `jaq`'s over TLS, with no additional verification. |
 | `macos/` | Run by hand, not installed. `setup-macos` provisions a Mac: Homebrew, the package list, Touch ID sudo, a local DNS cache, each step idempotent (`setup-macos -n` previews). `macos-lean.py` disables macOS services; `setup-macos lean` runs it, and it is never part of the default run. |
-| `.agents/skills/` | Skills for this repo only (`dotfiles-health`). `.claude/skills` links to it. |
+| `.agents/skills/` | Skills for this repo only (`dotfiles-health`, `agent-config-refresh`). `.claude/skills` links to it. |
 | `skills` | Convenience link to the global skills, `dotfiles/base/.agents/skills`. |
 
 A path belongs to exactly one layer, so a second claim on it is a conflict. When a file must differ per OS, split it into per-OS commands or files (`notify-sound` exists in both OS layers and the shared hooks call it).
@@ -29,7 +29,7 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 
 ## Commands
 
-- `make check`: `sym` tests and skill checks (about 25 s). Run it after touching `sym`, skills, or agent definitions.
+- `make check`: the `sym`, `agent-tier-gate`, and `mdtool` tests plus the skill checks (about 12 s). Run it after touching `sym`, skills, or agent definitions.
 - `make lint`: `shellcheck -s sh` on every tracked or new shell script (`.sh` or a sh, bash, or dash shebang), so a bashism fails even under a bash shebang.
 - `make plan`: dry run of the sync into `$HOME`. A `CONFLICT` means a real file, or a symlinked directory, is in the way; resolve it by hand. A path claimed by two layers stops both `plan` and `make`.
 - `make`: run `dl`, then sync into `$HOME`. This downloads binaries and mutates the real home directory, so only run it when asked. A `dl` failure does not stop the sync but fails the run. `plan` and `check` never run `dl`.
@@ -42,13 +42,14 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 - **Skills and subagents:** global skills are in `dotfiles/base/.agents/skills/`, Claude subagents in `dotfiles/base/.claude/agents/`. A skill the model must not trigger on its own is marked `disable-model-invocation: true` plus `agents/openai.yaml`; `skills-check.sh` enforces the pairing.
 - **Enforced rules:** "no formatters" is mirrored as deny rules in `.claude/settings.json` and prefix rules in `.codex/rules/default.rules`; pushes are `ask`/`prompt` rules there, not denied. A new hard rule gets its enforcement in the same change.
 - **Codex:** `config.toml` (mode 0600, lists trusted projects) and `or.config.toml` (OpenRouter, used by `codex-or`).
-- **Skills to use:** `dotfiles-health` before finishing any change to the above. `agent-config-refresh` to check the Claude and Codex setup against their current docs (explicit-only). `ultrareview` for a whole-repo review and docs refresh, `review` for the current branch or task, `campaign-preflight` to make a campaign design doc executable unattended, `docs-refresh` for docs alone. `make check` warns about over-long skills and a missing `**Reply:**`; the known ones are listed in `dotfiles-health`.
+- **Skills to use:** `dotfiles-health` before finishing any change to the above. `agent-config-refresh` to check the Claude and Codex setup against their current docs (explicit-only). `ultrareview` for a whole-repo review and docs refresh, `review` for the current branch or task, `campaign-preflight` to make a campaign design doc executable unattended, `docs-refresh` for docs alone. The rules `make check` enforces on skills are in `dotfiles-health`.
 
 ## Scripts
 
 - `git ls-files dotfiles/*/.local/bin` shows what is mine; the rest of `~/.local/bin` is downloaded binaries and other tools' links. Do not `cat` or `rg` the binaries.
 - `claude-or` and `claude-ds` start Claude Code against OpenRouter or DeepSeek with `--dangerously-skip-permissions`, taking the key from `vault`. `codex-or` runs Codex with its `or` profile.
 - `mdl`, `mpdl`, and `vdl` wrap `yt-dlp` through `uvx`.
+- `mdtool` is the read-only docs audit that the docs skills call; its reference is `docs/mdtool.md`.
 - `reset-claude` and `reset-codex` delete everything in `~/.claude` and `~/.codex` except symlinks into this repo (and directories holding one) and the login credentials (`.credentials.json`, `auth.json`). Do not run either unprompted.
 - Do not run `dl` (or `make`, which runs it), `macos/*`, or `setup-*` without being asked. Test `dl` with `HOME` pointed at a scratch directory under `.work/`. They download, codesign, install system services, or need sudo.
 
