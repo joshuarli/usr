@@ -26,9 +26,9 @@ This is a search for candidates, not a re-review. `double-take` asks what the ch
 1. Run `double-take` on the last turn's change and apply its trivial fixes.
 2. Name the transformation, list the files the last turn touched, and propose the search: patterns and directories.
 3. Stop and wait for the owner to confirm or adjust the search.
-4. Search the repo for the shape, and group the hits by owner or layer.
+4. Search the repo for the shape, and group the hits by owner or layer. When the hits span many directories or layers, fan the search out to read-only children per `orchestrate`.
 5. Classify each hit and prove it.
-6. Apply the mechanical group, one logical change per kind.
+6. Apply the mechanical group, one logical change per kind. When one script or codemod covers every site, write and run it per `orchestrate` instead of editing by hand.
 7. Check narrowly with the cheapest command that covers what you touched.
 
 An empty sweep is valid. Say which searches came up empty so the owner can trust it.
