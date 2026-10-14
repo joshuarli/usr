@@ -13,7 +13,7 @@ A skill that reads well proves nothing. Sessions you already ran show whether it
 `skill-usage` is read-only and scans `~/.claude/projects`, `~/.codex/sessions`, `~/.local/share/muse/sessions`, and `~/.grok/sessions`.
 
 - `skill-usage [--days N] [--all]` prints each skill's kind (auto or explicit-only), the sessions that listed it, and the sessions that loaded it, for Claude, Codex, Muse, and Grok.
-- `skill-usage --show NAME` prints each load with its date, harness, project, how it loaded, and the prompt before it.
+- `skill-usage --show NAME` prints each load with its date, harness, project, how it loaded, and a clipped excerpt of the preceding prompt.
 
 A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex or Grok, or Muse's recorded skill-read event. Grok does not save the session skill catalog, so its listed count is unavailable and its firing rate cannot be calculated. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. The misses decide it.
 

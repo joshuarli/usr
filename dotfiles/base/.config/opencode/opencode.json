@@ -1,4 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "shell": "/bin/bash"
+  "shell": "/bin/bash",
+  "permission": "allow"
 }

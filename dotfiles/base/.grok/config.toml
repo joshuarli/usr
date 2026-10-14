@@ -39,3 +39,6 @@ enabled = false
 [subagents]
 max_concurrent = 64
 max_depth = 3
+
+[sandbox]
+profile = "off"
