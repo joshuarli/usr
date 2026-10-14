@@ -15,7 +15,7 @@ The layout, the commands, and where each piece of agent configuration lives are 
 - **Descriptions and shape:** an auto-triggered description names its situations and a skip clause, because a broad one fires on every task. Skills stay dense: a thesis, bold rules, a closing `**The test:**`, and a `**Reply:**`.
 - **A rule has one owner.** The shim rules live in `dead-code-archaeology`, the Oracle Test in `test-audit`, and the skill-scope and explicit-only loading rules in the global AGENTS.md. Other skills point to the owner; do not copy.
 - **Model and effort live once.** Claude's are in `agents/*.md`, and `orchestrate` names the agents without repeating them. Codex's sit in the `orchestrate` table and `config.toml`. The default model and effort in settings belong to the owner; do not change them unprompted.
-- **Test Codex rules** with `bash -c 'codex execpolicy check --rules FILE -- git push'`, because zsh will not split the command. A Codex prefix rule misses `git -C dir push`; the Claude deny list covers it.
+- **Test Codex rules** with `bash -c 'codex execpolicy check --rules FILE -- git push'`, because zsh will not split the command. A Codex prefix rule misses `git -C dir push`; the Claude ask list and the global `pre-push` hook cover it.
 - **Check tool behavior against current docs, not memory.** Established so far: Claude agent files take `model` and `effort` and hot-reload, deny rules beat allow even in `auto` mode, and the rule form is `Bash(cmd *)`. Codex skills use `agents/openai.yaml`, and Codex rules use `prefix_rule(..., decision = "forbidden")`.
 
 ## sym

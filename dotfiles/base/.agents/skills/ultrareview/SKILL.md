@@ -1,12 +1,12 @@
 ---
 name: ultrareview
-description: "Use for /ultrareview: a thorough review of one whole repository that refreshes its docs to match the code and writes a prioritized REVIEW.md. A router to the other skills, not a restatement of them."
+description: "Use for /ultrareview: a thorough review of one whole repository that refreshes its docs to match the code and files prioritized findings as tickets and RFCs. A router to the other skills, not a restatement of them."
 disable-model-invocation: true
 ---
 
 # Ultrareview
 
-One repository in, two deliverables out: docs that match the code, and a single `REVIEW.md` of the few things most worth fixing. This skill only routes. The method for each topic lives in the skill named for it, so load that skill and use its tests and proof standard. Use the skills for review only: report what they find and do not run their edit steps. The only files you change are documentation and comments.
+One repository in, two deliverables out: docs that match the code, and tickets in `TODO.md` (with RFCs where a design or a decision needs sign-off) for the few things most worth fixing. This skill only routes. The method for each topic lives in the skill named for it, so load that skill and use its tests and proof standard. Use the skills for review only: report what they find and do not run their edit steps. The only files you change are documentation, comments, `TODO.md`, and RFCs.
 
 ## Rules
 
@@ -18,12 +18,12 @@ One repository in, two deliverables out: docs that match the code, and a single 
 
 ## Steps
 
-1. **Orient.** Read AGENTS.md, README, manifests, CI config, any existing `REVIEW.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
-2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the entry shape and nothing else. Run lanes as `worker`, and as `scout` for pure inventory such as the build, CI, and dependency row. A lane with a named method and a lens skill is a `worker` task however large the code. Use `expert` only for a lane that reasons about crash consistency, races, or `unsafe` soundness where a wrong call is costly, and state why in the lane brief. Merge findings that share a root cause and rank them.
+1. **Orient.** Read AGENTS.md, README, manifests, CI config, the open tickets in `TODO.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
+2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the `todo` ticket shape and nothing else. Run lanes as `worker`, and as `scout` for pure inventory such as the build, CI, and dependency row. A lane with a named method and a lens skill is a `worker` task however large the code. Use `expert` only for a lane that reasons about crash consistency, races, or `unsafe` soundness where a wrong call is costly, and state why in the lane brief. Merge findings that share a root cause and rank them.
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
-5. **Write `REVIEW.md`** (below).
-6. **Check.** `git diff --stat` shows only docs, comments, `REVIEW.md`, and deleted completed campaign docs, and nothing durable in them was lost. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
+5. **File the findings** (below).
+6. **Check.** `git diff --stat` shows only docs, comments, `TODO.md`, `docs/rfc/`, and deleted completed campaign docs, and nothing durable in them was lost. Every claim you kept in a doc traces to code that exists. Every finding has a priority, a recommendation, and a `Fix with`.
 
 ## Lenses
 
@@ -48,52 +48,20 @@ No skill covers these, so ask directly: security beyond input handling (authn an
 
 ## Docs refresh
 
-Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `REVIEW.md` is the only doc file you create. Comments follow `comment-cleanup` in its review mode, and its findings take the area of the code they excuse.
+Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `TODO.md` and `docs/rfc/` are the only doc files you create. Comments follow `comment-cleanup` in its review mode, and its findings take the area of the code they excuse.
 
 The docs lane runs one `mdtool check` when installed; it combines all checks with grouped output and anchor suggestions. Use `--untracked` for new docs and `--since HEAD` for new findings after edits. Request `--verbose` or `--json` only for complete occurrence details; `mdtool anchors FILE...` is only for a heading inventory. Without it, follow the fallback searches in `docs-refresh` and inspect targets manually.
 
 Then roll up campaigns. For each `docs/CAMPAIGN-*.md` whose header status says it is complete, and whose deliverables you confirm in the code, move what a future reader needs (the design rationale, invariants, constraints, and decisions still in force) into the durable docs (README, AGENTS.md, or `docs/` topic files), stated in domain terms with no campaign names or IDs. Then delete the campaign doc and any `DECISIONS.md` entries it owned. Do not keep logs of what was completed or per-item histories; git history is the record. Leave campaigns that are active, paused, or winding down untouched, and file a finding for a "complete" one whose deliverables are not in the code.
 
-## REVIEW.md
-
-Write it at the repo root, replacing any previous copy: drop findings that are fixed and re-verify the ones that remain. Use exactly this shape, with no extra tables, counts, or provenance.
-
-````markdown
-# Review: <repo>
-
-Scope: <what>. Checks run: <command and result>. Not covered: <what>.
-
-## Summary
-
-<3 to 5 sentences: overall health, and the one or two themes behind most findings.>
-
 ## Findings
 
-### R1 · P1 · <title naming the problem>
+File each finding as a `todo` ticket in `TODO.md`, in that skill's shape, priority definitions, and ID rules. Order tickets by priority, then impact. Rate by impact times likelihood, never by effort.
 
-- **Area:** Architecture | Types | Config | Errors | Concurrency | Data | Security | Tests | Performance | Dead code | Navigability | Build | Dependencies | Operability | Docs
-- **Where:** `path:line`, ...
-- **Problem:** what is wrong, how it fails, who is hit, and the evidence. Say `unproven` for a P1 or P2 you could not prove.
-- **Recommendation:** the smallest change that removes the cause.
-- **Fix with:** the skill that carries out the recommendation, or `none`.
-- **Effort:** S (hours) | M (days) | L (weeks)
-
-## Open decisions
-
-<Choices only the owner can make that block a finding, each with options and a recommendation. Omit if none.>
-
-## Strengths to keep
-
-<2 to 4 designs or guards a future change should not erode.>
-````
-
-Order findings by priority, then by impact. Rate by impact times likelihood, never by effort.
-
-- **P1, fix now:** data loss or corruption, a security exposure, silently wrong results, or a broken build, release, or recovery path, on a reachable path.
-- **P2, fix soon:** a real defect or structural risk that will cause incidents or tax every change, likely but not yet hit.
-- **P3, plan:** a clear payoff at scale and no urgency.
-- **P4, optional:** a few at most, and only if cheap. Drop it if it is a nitpick.
+- **Tickets already open** are re-verified, not duplicated: delete one that is fixed, update one that drifted, and keep its ID. A new finding takes the next ID.
+- **A finding that needs a design or an owner's call** gets a draft RFC under `docs/rfc/`, linked from its ticket. Choices only the owner can make, each with options and a recommendation, belong in the RFC's Open questions.
+- **The reply carries what a ticket cannot:** scope, the baseline check, what was not covered, a 3 to 5 sentence summary naming the one or two themes behind most findings, and 2 to 4 designs or guards a future change should not erode.
 
 **The test:** the owner can hand any finding to its `Fix with` skill tomorrow without more investigation, and a newcomer can follow the docs without meeting a stale command.
 
-**Reply:** the docs files changed or removed (including campaign docs rolled up and where their content went) and what was cut; finding counts by priority with the P1 titles; checks run and not run; open decisions.
+**Reply:** the docs files changed or removed (including campaign docs rolled up and where their content went) and what was cut; finding counts by priority with the P1 titles and the ticket and RFC IDs filed; checks run and not run; open decisions.

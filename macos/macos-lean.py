@@ -1361,7 +1361,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     group.add_argument("--audit", action="store_true",
                        help="validate labels vs live OS; no sudo, no changes")
     group.add_argument("--revert", action="store_true",
-                       help="re-enable everything this script manages")
+                       help="re-enable everything this script manages; power and preference "
+                            "settings return to this script's defaults, not to their values before apply")
     return parser.parse_args(argv)
 
 

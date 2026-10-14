@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Review
 
-Review the change in front of you, not the repository. This is `ultrareview` narrowed to a change set, and it shares that skill's lens table, entry shape, and P1 to P4 definitions: read its `SKILL.md` instead of copying them here. Follow this skill's steps, not its. Review only: report what you find and do not edit code. You may fix docs the change made stale and delete comments it added or left stale.
+Review the change in front of you, not the repository. This is `ultrareview` narrowed to a change set, and it shares that skill's lens table and the `todo` skill's ticket shape and P1 to P4 definitions: read them instead of copying them here. Follow this skill's steps, not its. Review only: report what you find and do not edit code. You may fix docs the change made stale and delete comments it added or left stale.
 
 ## Rules
 
@@ -23,8 +23,8 @@ Review the change in front of you, not the repository. This is `ultrareview` nar
 4. **Lenses.** Apply the `ultrareview` lens table to the touched areas only and skip rows the change does not reach. Add `reference-parity` when the change replaces something, and `root-cause` if it fixes a bug without showing the cause. Rows that matter most for a change: `test-audit` on the tests the change adds or should have added, against the suite shape `renovate-tests` defines; `dead-code-archaeology` on what it orphaned; `single-source-of-truth` on facts it duplicated; reader load it added, reported and not applied: layers between a question and its answer (wrappers with one caller, adapters with no second implementation) and state the reader must hold, where a new reader should answer "where does X come from" and "what can change X" in under 30 seconds; `comment-cleanup` in its review mode on every comment it adds or touches. Use `orchestrate` only when the change is too large to review alone.
 5. **Docs.** Run `docs-refresh` scoped to the change. Do not refresh docs the change did not touch.
 6. **Prove the top.** A P1 or P2 stands only after you have proven the fact it depends on Otherwise mark it `unproven` or downgrade it.
-7. **Report** in the reply. Write no file unless asked, and if asked, write `REVIEW.md` in the `ultrareview` shape.
+7. **Report** in the reply, each finding in the `todo` ticket shape. File them to `TODO.md`, and an open decision to a draft RFC, only for what the owner defers or asks you to keep. Write no other file.
 
 **The test:** the author can act on every finding without asking what you meant, and nothing the change breaks beyond the diff is left unexamined.
 
-**Reply:** the intent line and the change set reviewed; a verdict (`ready`, `fix P1 and P2 first`, or `rethink`); findings in the `ultrareview` entry shape, most severe first; docs you changed; checks run and not run; open decisions.
+**Reply:** the intent line and the change set reviewed; a verdict (`ready`, `fix P1 and P2 first`, or `rethink`); findings in the `todo` ticket shape, most severe first, and the IDs filed; docs you changed; checks run and not run; open decisions.

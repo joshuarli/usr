@@ -1,0 +1,9 @@
+#!/bin/sh
+# core.hooksPath replaces a repository's own hooks directory, so run its pre-push by hand.
+[ -t 2 ] || {
+    printf 'pre-push: refusing to push without a terminal; agents and scripts do not push\n' >&2
+    exit 1
+}
+repo_hook=$(git rev-parse --git-common-dir)/hooks/pre-push
+[ -x "$repo_hook" ] && exec "$repo_hook" "$@"
+exit 0

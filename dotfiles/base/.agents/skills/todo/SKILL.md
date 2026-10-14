@@ -1,11 +1,11 @@
 ---
 name: todo
-description: "Apply when asked to save, defer, or ticket something for later (\"save this as a todo\"): file it as a standard ABC-123 ticket with a P1 to P4 priority. Skip work being done now and TODO comments in code."
+description: "Apply when asked to save, defer, or ticket something for later (\"save this as a todo\"), or to keep a review's findings: file ABC-123 tickets with a P1 to P4 priority, and RFCs for designs. Skip work being done now and TODO comments in code."
 ---
 
 # Todo
 
-A deferred item is a ticket in a committed file, not a code comment, a chat reply, or memory. One shape means any ticket can be picked up cold, and review findings and todos are interchangeable.
+A deferred item is a ticket in a committed file, not a code comment, a chat reply, or memory. One shape means any ticket can be picked up cold, and review findings and todos are the same thing.
 
 ## Where
 
@@ -15,46 +15,40 @@ A deferred item is a ticket in a committed file, not a code comment, a chat repl
 
 ## Ticket
 
-The shape is `ultrareview`'s finding entry. Read `~/.agents/skills/ultrareview/SKILL.md` for the Area values and the P1 to P4 definitions. They are defined only there, so do not copy them.
-
 ```markdown
 ### ABC-123 · P2 · <title naming the problem>
 
-- **Area:** <one of ultrareview's areas>
+- **Area:** Architecture | Types | Config | Errors | Concurrency | Data | Security | Tests | Performance | Dead code | Navigability | Build | Dependencies | Operability | Docs
 - **Where:** `path:line`, ...
-- **Problem:** what is wrong or missing, in the user's words, and why it was deferred.
+- **Problem:** what is wrong or missing, how it fails, who is hit, and the evidence. Say `unproven` for a P1 or P2 you could not prove.
 - **Recommendation:** the smallest change that removes the cause.
-- **Effort:** S | M | L
+- **Fix with:** the skill that carries out the recommendation, or `none`.
+- **Effort:** S (hours) | M (days) | L (weeks)
 - **Design:** optional, a link to the RFC for this ticket.
 ```
+
+Rate by impact times likelihood, never by effort.
+- **P1, fix now:** data loss or corruption, a security exposure, silently wrong results, or a broken build, release, or recovery path, on a reachable path.
+- **P2, fix soon:** a real defect or structural risk that will cause incidents or tax every change, likely but not yet hit.
+- **P3, plan:** a clear payoff at scale and no urgency.
+- **P4, optional:** cheap, and never a nitpick.
 
 ## Filing
 
 - **Filing is not doing.** Read only enough to fill `Where`, and make no code change for the ticket. File one ticket per independent item, and extend a match found in `TODO.md` instead of duplicating it.
 - **Priority comes from the user.** When they give none, choose from the definitions and say it was assumed.
-- **Never a code comment.** A reminder the code needs becomes a test or a check. Code does not cite ticket IDs.
+- **A review finding is a ticket as it stands.** An open decision that blocks one is a draft RFC linked from it.
+- **Never a code comment.** A reminder the code needs becomes a test or a check, and code does not cite ticket IDs.
 - **Do not commit** unless asked. A commit that finishes a ticket ends its body with `Closes ABC-123`.
 - **Delete a ticket when it is done.** Git history is the record, and no done list is kept.
 - **Campaign lanes never write `TODO.md`.** A lane reports a deferred item and the integrator files it.
 
 ## RFC
 
-Write an RFC when a ticket's design is more than a few lines or needs the owner's sign-off. It lives at `docs/rfc/ABC-123-<slug>.md` and is linked from the ticket's `Design` field. Follow `technical-writing` in explanation mode.
+Write an RFC when a ticket's design is more than a few lines or needs the owner's sign-off. It lives at `docs/rfc/ABC-123-<slug>.md`, is linked from the ticket's `Design` field, and follows `technical-writing` in explanation mode.
 
-```markdown
-# ABC-123: <title>
-Status: draft | accepted | rejected | superseded by ABC-456
-
-## Summary
-## Motivation
-## Design
-## Alternatives considered
-## Open questions
-## Decision
-```
-
-An RFC is a dated record. Set its status instead of deleting it, and do not rewrite an accepted one. What a future reader needs from it moves into the docs that own the topic.
+It opens with `# ABC-123: <title>` and `Status: draft | accepted | rejected | superseded by ABC-456`, then the sections Summary, Motivation, Design, Alternatives considered, Open questions, and Decision. An RFC is a dated record: set its status instead of deleting it, and do not rewrite an accepted one. What a future reader needs from it moves into the docs that own the topic.
 
 **The test:** a newcomer can take the top ticket, find where to start, and begin without asking what it meant, and no ID appears twice in the file's history.
 
-**Reply:** the ticket ID and title filed, its priority (given or assumed), the file changed, and that nothing was committed.
+**Reply:** the tickets and RFCs filed (ID, title, priority, given or assumed), the files changed, and that nothing was committed.

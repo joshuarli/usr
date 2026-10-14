@@ -4,6 +4,8 @@
 
 - Read the relevant code, callers, tests, and local instructions. Follow existing conventions.
 - Resolve ordinary ambiguity with the smallest reversible assumption. Ask only when a choice changes the contract, the user's intent, or carries real risk.
+- Do not ask what you can observe. If the answer is a fact a command or a quick experiment can show (behavior, output, timing), run it and let the result decide.
+- Give your real judgment. Asked whether to do something, decline or push back when it does not earn its place. Agreement is not the default.
 
 ## Code
 

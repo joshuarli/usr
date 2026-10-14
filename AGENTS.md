@@ -40,8 +40,9 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 
 - **Instructions:** `dotfiles/base/.codex/AGENTS.md` is the single copy. `.claude`, `.pi/agent`, and `.config/opencode` link to it, so edit that file and never the links.
 - **Skills and subagents:** global skills are in `dotfiles/base/.agents/skills/`, Claude subagents in `dotfiles/base/.claude/agents/`. A skill the model must not trigger on its own is marked `disable-model-invocation: true` plus `agents/openai.yaml`; `skills-check.sh` enforces the pairing.
-- **Enforced rules:** "no formatters" is mirrored as deny rules in `.claude/settings.json` and prefix rules in `.codex/rules/default.rules`; pushes are `ask`/`prompt` rules there, not denied. A new hard rule gets its enforcement in the same change.
+- **Enforced rules:** "no formatters" is mirrored as deny rules in `.claude/settings.json` and prefix rules in `.codex/rules/default.rules`; pushes are `ask`/`prompt` rules there, not denied. The global `pre-push` hook in `dotfiles/base/.config/git/hooks` also refuses any push without a terminal, which catches the forms the Codex prefix rules cannot see; `--no-verify` skips it. A new hard rule gets its enforcement in the same change.
 - **Codex:** `config.toml` (mode 0600, lists trusted projects) and `or.config.toml` (OpenRouter, used by `codex-or`).
+- **Config the tools rewrite:** Codex appends trusted projects to `config.toml` and Claude rewrites `settings.json` (for example on `/effort`), both through the symlink, so read `git diff` on those two files before committing.
 - **Skills to use:** `dotfiles-health` before finishing any change to the above. `agent-config-refresh` to check the Claude and Codex setup against their current docs (explicit-only). `ultrareview` for a whole-repo review and docs refresh, `review` for the current branch or task, `campaign-preflight` to make a campaign design doc executable unattended, `docs-refresh` for docs alone. The rules `make check` enforces on skills are in `dotfiles-health`.
 
 ## Scripts
@@ -57,5 +58,6 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 
 - Scripts are `#!/bin/sh` or `dash` and stay POSIX. `sym` must work under macOS `/bin/sh` (bash 3.2) and dash. Check scripts with `shellcheck -s sh`. Python scripts use only the standard library.
 - Fix a `sym` bug with a failing numbered test in `sym-test.sh` first.
+- Deferred work is a ticket in `TODO.md` and a design is an RFC in `docs/rfc/`. The `todo` skill owns both formats.
 - My interactive shell is `ish` (`~/.local/bin/ish`, config in `.config/ish`), not bash or zsh.
 - Leave commits to me. Push only when I ask; the harness prompts first.
