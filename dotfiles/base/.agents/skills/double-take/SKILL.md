@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 The first pass finds what you went looking for. The second asks what that pass left inconsistent and where the same shape lives elsewhere. A rule changed in one place nearly always has stragglers, and a cleanup you just made usually has a twin.
 
+This is a re-review of the change itself, not a search for other places it belongs. Use `sweep` for that.
+
 Scope is the change or finding set from this session, or the one the user names. Do not widen to a whole-repo audit unless asked.
 
 ## Steps
