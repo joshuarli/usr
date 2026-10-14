@@ -134,11 +134,9 @@ Only the standard library is used.
 from __future__ import annotations
 
 import argparse
-import datetime
 import os
 import plistlib
 import re
-import shutil
 import signal
 import subprocess
 import sys

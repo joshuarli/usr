@@ -41,14 +41,21 @@ check:
 	cd dotfiles && sh agent-tier-gate-test.sh
 	cd dotfiles && sh pre-push-test.sh
 	sh dotfiles/mdtool-test.sh
+	python3 -I dotfiles/base/.local/bin/skill-usage selftest
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
 
 # Every shell script must be POSIX sh, so lint every tracked or new file that ends in .sh or
-# starts with a sh, bash, or dash shebang, as sh regardless of what its shebang claims.
+# starts with a sh, bash, or dash shebang, as sh regardless of what its shebang claims. Every
+# Python script, by .py or a python shebang, goes through ruff with the rules in ruff.toml.
 lint:
 	@files=$$(git ls-files -co --exclude-standard | while read -r f; do \
 		[ -f "$$f" ] && [ ! -L "$$f" ] || continue; \
 		{ [ "$${f%.sh}" != "$$f" ] || head -n 1 "$$f" | grep -Eq '^#!.*(sh|bash|dash)( |$$)'; } && echo "$$f"; \
 	done); \
 	shellcheck -s sh $$files
+	@files=$$(git ls-files -co --exclude-standard | while read -r f; do \
+		[ -f "$$f" ] && [ ! -L "$$f" ] || continue; \
+		{ [ "$${f%.py}" != "$$f" ] || head -n 1 "$$f" | grep -Eq '^#!.*python'; } && echo "$$f"; \
+	done); \
+	uvx ruff check --no-cache $$files

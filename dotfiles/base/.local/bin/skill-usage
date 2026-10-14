@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Count how each skill is listed and loaded across real Claude and Codex sessions (read-only)."""
+import argparse
+import collections
+import json
+import os
+import re
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+LISTING = re.compile(r"^- ([a-z0-9][a-z0-9-]*):", re.M)
+READ = re.compile(r"/skills/([a-z0-9][a-z0-9-]*)/SKILL\.md")
+SLASH = re.compile(r"<command-name>/([^<]+)</command-name>")
+
+
+def text_of(content):
+    if isinstance(content, str):
+        return content
+    return " ".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") in ("text", "input_text"))
+
+
+def bare(name):
+    prefix, _, rest = name.rpartition(":")
+    return rest if "/" in prefix else name
+
+
+def clip(text):
+    return " ".join(text.split())[:160]
+
+
+class Usage:
+    def __init__(self, want_show):
+        self.want_show = want_show
+        self.listed = collections.defaultdict(set)   # skill -> {(harness, session)}
+        self.loaded = collections.defaultdict(set)
+        self.loads = collections.defaultdict(list)    # skill -> [(when, harness, project, how, prompt)]
+        self.sessions = collections.defaultdict(set)
+
+    def load(self, skill, harness, session, when, project, how, prompt):
+        skill = bare(skill)
+        self.loaded[skill].add((harness, session))
+        if self.want_show:
+            self.loads[skill].append((when, harness, project, how, clip(prompt)))
+
+
+def scan_claude(root, since, use):
+    for path in sorted(Path(root).rglob("*.jsonl")):
+        if path.stat().st_mtime < since:
+            continue
+        prompt = ""
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                listing = '"skill_listing"' in line
+                tool = '"Skill"' in line and '"skill"' in line
+                slash = "<command-name>/" in line
+                user = use.want_show and '"user"' in line
+                if not (listing or tool or slash or user):
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                session = obj.get("sessionId") or path.stem
+                use.sessions["claude"].add(session)
+                when = str(obj.get("timestamp", ""))[:10]
+                project = os.path.basename(obj.get("cwd", "") or "")
+                if listing:
+                    for name in obj.get("attachment", {}).get("names", []) or []:
+                        use.listed[bare(name)].add(("claude", session))
+                message = obj.get("message", {}) if isinstance(obj.get("message"), dict) else {}
+                content = message.get("content", [])
+                if obj.get("type") == "user":
+                    text = text_of(content)
+                    match = SLASH.search(text)
+                    if match:
+                        use.load(match.group(1), "claude", session, when, project, "slash", prompt)
+                    elif text and not (isinstance(content, list) and any(b.get("type") == "tool_result" for b in content if isinstance(b, dict))):
+                        prompt = text
+                if tool and isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Skill":
+                            use.load(block.get("input", {}).get("skill", ""), "claude", session, when, project, "tool", prompt)
+
+
+def scan_codex(root, since, use):
+    for path in sorted(Path(root).rglob("rollout-*.jsonl")):
+        if path.stat().st_mtime < since:
+            continue
+        session, project, prompt = path.stem, "", ""
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                meta = '"session_meta"' in line
+                listing = "Available skills" in line
+                read = "SKILL.md" in line and not listing
+                user = use.want_show and '"user"' in line
+                if not (meta or listing or read or user):
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                payload = obj.get("payload", {}) if isinstance(obj.get("payload"), dict) else {}
+                when = str(obj.get("timestamp", ""))[:10]
+                if obj.get("type") == "session_meta":
+                    session = payload.get("parent_thread_id") or payload.get("id") or session
+                    project = os.path.basename(payload.get("cwd", "") or "")
+                    use.sessions["codex"].add(session)
+                elif payload.get("type") == "message" and payload.get("role") == "developer" and listing:
+                    section = text_of(payload.get("content", []))
+                    for name in LISTING.findall(section[section.find("Available skills"):]):
+                        use.listed[name].add(("codex", session))
+                elif payload.get("type") == "message" and payload.get("role") == "user":
+                    text = text_of(payload.get("content", []))
+                    if text and not text.lstrip().startswith("<") and "AGENTS.md instructions" not in text:
+                        prompt = text
+                elif payload.get("type") in ("function_call", "custom_tool_call") and read:
+                    blob = json.dumps(payload.get("arguments", payload.get("input", "")))
+                    for name in set(READ.findall(blob)):
+                        use.load(name, "codex", session, when, project, "read", prompt)
+
+
+def kinds(skills):
+    out = {}
+    for skill in sorted(Path(skills).glob("*/SKILL.md")):
+        head = skill.read_text(errors="replace").split("---")[1] if skill.read_text(errors="replace").startswith("---") else ""
+        out[skill.parent.name] = "explicit" if re.search(r"^disable-model-invocation:\s*true", head, re.M) else "auto"
+    return out
+
+
+def report(use, skill_kinds, args):
+    names = sorted(set(skill_kinds) | (set(use.listed) if args.all else set(use.listed) & set(use.loaded)))
+    rows = []
+    for name in names:
+        row = {"skill": name, "kind": skill_kinds.get(name, "other")}
+        for harness in ("claude", "codex"):
+            row[f"listed_{harness}"] = sum(1 for h, _ in use.listed[name] if h == harness)
+            row[f"loaded_{harness}"] = sum(1 for h, _ in use.loaded[name] if h == harness)
+        row["last_loaded"] = max((w for w, *_ in use.loads[name]), default="")
+        rows.append(row)
+    rows.sort(key=lambda r: (-(r["loaded_claude"] + r["loaded_codex"]), r["skill"]))
+    totals = {h: len(s) for h, s in use.sessions.items()}
+    if args.json:
+        print(json.dumps({"days": args.days, "sessions": totals, "skills": rows}))
+        return
+    print(f"window {args.days} days; sessions: claude {totals.get('claude', 0)}, codex {totals.get('codex', 0)}")
+    print(f"{'skill':50} {'kind':8} {'listed c/x':>11} {'loaded c/x':>11}")
+    for r in rows:
+        print(f"{r['skill']:50} {r['kind']:8} {r['listed_claude']:>5}/{r['listed_codex']:<5} {r['loaded_claude']:>5}/{r['loaded_codex']:<5}")
+    never = [r["skill"] for r in rows if r["kind"] == "auto" and r["loaded_claude"] + r["loaded_codex"] == 0]
+    print("auto-triggered and never loaded: " + (", ".join(never) or "none"))
+
+
+def run(args):
+    since = time.time() - args.days * 86400
+    use = Usage(bool(args.show))
+    if os.path.isdir(args.claude):
+        scan_claude(args.claude, since, use)
+    if os.path.isdir(args.codex):
+        scan_codex(args.codex, since, use)
+    if args.show:
+        for when, harness, project, how, prompt in sorted(use.loads.get(args.show, [])):
+            print(f"{when}\t{harness}\t{project}\t{how}\t{prompt}")
+        return 0
+    report(use, kinds(args.skills), args)
+    return 0
+
+
+class SelfTest(unittest.TestCase):
+    def fixture(self, root):
+        claude, codex, skills = Path(root, "claude"), Path(root, "codex"), Path(root, "skills")
+        for name, flag in (("a", ""), ("b", "disable-model-invocation: true\n"), ("c", "")):
+            (skills / name).mkdir(parents=True)
+            (skills / name / "SKILL.md").write_text(f"---\nname: {name}\n{flag}---\n")
+        claude.mkdir()
+        lines = [
+            {"type": "attachment", "sessionId": "s1", "attachment": {"type": "skill_listing", "names": ["a", "c"]}},
+            {"type": "user", "sessionId": "s1", "timestamp": "2026-10-13T00:00:00Z", "cwd": "/x/proj", "message": {"role": "user", "content": "tidy the comments"}},
+            {"type": "assistant", "sessionId": "s1", "timestamp": "2026-10-13T00:00:01Z", "cwd": "/x/proj", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Skill", "input": {"skill": "a"}}]}},
+            {"type": "user", "sessionId": "s1", "timestamp": "2026-10-13T00:00:02Z", "cwd": "/x/proj", "message": {"role": "user", "content": "<command-name>/b</command-name>"}},
+        ]
+        (claude / "s1.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+        codex.mkdir()
+        rollout = [
+            {"type": "session_meta", "payload": {"id": "x1", "cwd": "/x/other"}},
+            {"type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "Available skills\n- a: does a\n- c: does c\n"}]}},
+            {"type": "response_item", "timestamp": "2026-10-13T01:00:00Z", "payload": {"type": "function_call", "arguments": json.dumps({"cmd": "cat /h/.agents/skills/a/SKILL.md"})}},
+        ]
+        (codex / "rollout-2026-10-13T01-x1.jsonl").write_text("\n".join(json.dumps(x) for x in rollout) + "\n")
+        return claude, codex, skills
+
+    def test_counts_listings_and_loads_per_harness(self):
+        with tempfile.TemporaryDirectory() as root:
+            claude, codex, skills = self.fixture(root)
+            use = Usage(False)
+            scan_claude(claude, 0, use)
+            scan_codex(codex, 0, use)
+            self.assertEqual({k: len(v) for k, v in use.sessions.items()}, {"claude": 1, "codex": 1})
+            self.assertEqual({(h, s) for h, s in use.loaded["a"]}, {("claude", "s1"), ("codex", "x1")})
+            self.assertEqual(use.loaded["b"], {("claude", "s1")})
+            self.assertEqual(use.loaded["c"], set())
+            self.assertEqual(use.listed["c"], {("claude", "s1"), ("codex", "x1")})
+            self.assertEqual(kinds(skills), {"a": "auto", "b": "explicit", "c": "auto"})
+
+    def test_show_pairs_a_load_with_the_preceding_prompt(self):
+        with tempfile.TemporaryDirectory() as root:
+            claude, _, _ = self.fixture(root)
+            use = Usage(True)
+            scan_claude(claude, 0, use)
+            self.assertEqual(use.loads["a"], [("2026-10-13", "claude", "proj", "tool", "tidy the comments")])
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="skill-usage", description=__doc__)
+    parser.add_argument("command", nargs="?", choices=("report", "selftest"), default="report")
+    parser.add_argument("--days", type=int, default=60, help="only sessions touched in the last N days")
+    parser.add_argument("--skills", default=os.path.expanduser("~/.agents/skills"))
+    parser.add_argument("--claude", default=os.path.expanduser("~/.claude/projects"))
+    parser.add_argument("--codex", default=os.path.expanduser("~/.codex/sessions"))
+    parser.add_argument("--show", metavar="SKILL", help="list each load of SKILL with the prompt before it")
+    parser.add_argument("--all", action="store_true", help="also list skills that are not in --skills and never loaded")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.command == "selftest":
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(SelfTest)
+        return 0 if unittest.TextTestRunner(verbosity=1).run(suite).wasSuccessful() else 1
+    return run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

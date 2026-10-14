@@ -285,7 +285,7 @@ def link_findings(root, files, content):
                         suggestions = get_close_matches(frag, anchors, n=3) or anchors[:3]
                         hint = "; available: " + ", ".join("#" + a for a in suggestions) if suggestions else "; target has no anchors"
                         add(out, "L002", "error", file, n, col, "fragment does not exist" + hint, dest)
-        for label, (dest, n) in defs.items():
+        for label, (_dest, n) in defs.items():
             if not refs_used[label]:
                 add(out, "L006", "warn", file, n, 1, "unused reference definition", label)
     return out
@@ -572,7 +572,7 @@ def old_tree(root, rev):
         if kind == b"blob": blobs.append((path.decode("utf-8","surrogateescape"),oid.decode()))
     raw=run_git(root,["cat-file","--batch"],("".join(oid+"\n" for _,oid in blobs)).encode())
     pos=0; data={}
-    for path,oid in blobs:
+    for path,_oid in blobs:
         end=raw.index(b"\n",pos); header=raw[pos:end].split(); size=int(header[2]); start=end+1
         body=raw[start:start+size]; pos=start+size+1
         if size<=MAX_BYTES and b"\0" not in body[:8192]: data[path]=body.decode("utf-8","replace")

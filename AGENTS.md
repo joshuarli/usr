@@ -30,7 +30,7 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 ## Commands
 
 - `make check`: the `sym`, `agent-tier-gate`, and `mdtool` tests plus the skill checks (about 12 s). Run it after touching `sym`, skills, or agent definitions.
-- `make lint`: `shellcheck -s sh` on every tracked or new shell script (`.sh` or a sh, bash, or dash shebang), so a bashism fails even under a bash shebang.
+- `make lint`: `shellcheck -s sh` on every tracked or new shell script (`.sh` or a sh, bash, or dash shebang), so a bashism fails even under a bash shebang, then `uvx ruff check` on every Python script (`.py` or a python shebang) with the rules in `ruff.toml`.
 - `make plan`: dry run of the sync into `$HOME`. A `CONFLICT` means a real file, or a symlinked directory, is in the way; resolve it by hand. A path claimed by two layers stops both `plan` and `make`.
 - `make`: run `dl`, then sync into `$HOME`. This downloads binaries and mutates the real home directory, so only run it when asked. A `dl` failure does not stop the sync but fails the run. `plan` and `check` never run `dl`.
 - Experiment with `sh dotfiles/sym -t <tmpdir> dotfiles/base`; its default target is `$HOME`.
@@ -51,6 +51,7 @@ On a new Mac, in this order: clone to `~/usr`; `macos/setup-macos`; `make` (whic
 - `claude-or` and `claude-ds` start Claude Code against OpenRouter or DeepSeek with `--dangerously-skip-permissions`, taking the key from `vault`. `codex-or` runs Codex with its `or` profile.
 - `mdl`, `mpdl`, and `vdl` wrap `yt-dlp` through `uvx`.
 - `mdtool` is the read-only docs audit that the docs skills call; its reference is `docs/mdtool.md`.
+- `skill-usage` counts which skills were listed and loaded across real Claude and Codex sessions; `skill-eval` reads its output to decide what each skill earns.
 - `reset-claude` and `reset-codex` delete everything in `~/.claude` and `~/.codex` except symlinks into this repo (and directories holding one) and the login credentials (`.credentials.json`, `auth.json`). Do not run either unprompted.
 - Do not run `dl` (or `make`, which runs it), `macos/*`, or `setup-*` without being asked. Test `dl` with `HOME` pointed at a scratch directory under `.work/`. They download, codesign, install system services, or need sudo.
 

@@ -11,7 +11,8 @@ The layout, the commands, and where each piece of agent configuration lives are 
 
 ## Invariants
 
-- **Skill frontmatter:** `name` equals the directory, and `description` exists. An explicit-only skill carries `disable-model-invocation: true` and an `agents/openai.yaml` with `allow_implicit_invocation: false`, since each harness ignores the other's flag. `skills-check.sh` enforces both. It also fails an auto-triggered skill whose description has no `Skip` clause, and a router table (second column `Skill`) that names a skill that does not exist. It warns, without failing, on a skill over 60 lines or with no closing `**Reply:**`. `ultrareview` alone is exempt from the length warning so its review lenses stay together.
+- **Skill frontmatter:** `name` equals the directory, and `description` exists. An explicit-only skill carries `disable-model-invocation: true` and an `agents/openai.yaml` with `allow_implicit_invocation: false`, since each harness ignores the other's flag. `skills-check.sh` enforces both. It also fails an auto-triggered skill whose description has no `Skip` clause, and a router table (second column `Skill`) that names a skill that does not exist. It warns, without failing, on a skill over 6000 bytes or with no closing `**Reply:**`. `ultrareview` alone is exempt from the length warning so its review lenses stay together.
+- **Scripts pass `make lint`.** Shell is POSIX sh under `shellcheck -s sh` whatever its shebang. Every Python script, by `.py` or a python shebang (so `mdtool` and `skill-usage` count), passes `uvx ruff check` with the rules in `ruff.toml`, which ignores only the one-line-statement style. `make lint` also covers new untracked files. Run it and `make check` before calling the work done.
 - **Descriptions and shape:** an auto-triggered description names its situations and a skip clause, because a broad one fires on every task. Skills stay dense: a thesis, bold rules, a closing `**The test:**`, and a `**Reply:**`.
 - **A rule has one owner.** The shim rules live in `dead-code-archaeology`, the Oracle Test in `test-audit`, and the skill-scope and explicit-only loading rules in the global AGENTS.md. Other skills point to the owner; do not copy.
 - **Model and effort live once.** Claude's are in `agents/*.md`, and `orchestrate` names the agents without repeating them. Codex's sit in the `orchestrate` table and `config.toml`. The default model and effort in settings belong to the owner; do not change them unprompted.
@@ -23,7 +24,7 @@ The layout, the commands, and where each piece of agent configuration lives are 
 - Never run `sym` without `-t <tmpdir>` while experimenting; the default target is `$HOME`.
 - Fix a bug by adding a failing numbered test to `sym-test.sh` first, then the fix.
 - Properties the tests pin: every conflict is reported before anything is written; an existing link with the right text is already correct, but a dangling one is a conflict; a target path that passes through a symlinked directory is a conflict in both modes, so the source survives; delete mode never removes directories above the target; relative links are computed from physical paths; a `.sym-dir` directory links whole and respects Git ignores.
-- Run the suite under `dash` as well as `sh` (`/bin/sh` is bash 3.2 on macOS and dash on Linux), and run `shellcheck -s sh` on every script.
+- Run the suite under `dash` as well as `sh` (`/bin/sh` is bash 3.2 on macOS and dash on Linux), and run `make lint`.
 
 ## After a substantive change
 
@@ -31,6 +32,6 @@ Have fresh reviewers look, because the author misses things: an adversarial pass
 
 ## Known gaps
 
-A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins. The auto-triggered skills have not been run through `skill-eval`.
+A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins. The auto-triggered skills have not been read with `skill-eval` against real sessions.
 
 **Reply:** what changed, which checks ran, and any `CONFLICT` you saw.

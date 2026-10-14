@@ -14,8 +14,8 @@ Next: 4
 
 - **Area:** Tests
 - **Where:** `dotfiles/base/.agents/skills/` (the skills without `disable-model-invocation: true`)
-- **Problem:** Their descriptions are reviewed for breadth, but nothing shows that they fire at the right times or change behavior. Several were switched from explicit-only to auto-triggered, and four were added or merged recently, without a measurement.
-- **Recommendation:** Run `skill-eval` on the broadest few (`single-source-of-truth`, `make-invalid-states-unrepresentable`, `isolate-effects`, `comment-cleanup`) and demote any that does not move the result.
+- **Problem:** Their descriptions are reviewed for breadth, but nothing shows that they fire at the right times or change behavior. A first `skill-usage` read of the last 60 days shows several auto skills listed in 30 to 90 Claude sessions and loaded in none (`comment-cleanup`, `test-audit`, `root-cause`, `single-source-of-truth`, `dead-code-archaeology`), while Codex loads them often. Low rates are expected for narrow skills, so this needs the miss analysis, not the raw rate.
+- **Recommendation:** Run `skill-eval` on the auto-triggered skills, reading the loads and the misses in real sessions, and retune, demote, or fold each one by its counts.
 - **Fix with:** skill-eval
 - **Effort:** M (days)
 

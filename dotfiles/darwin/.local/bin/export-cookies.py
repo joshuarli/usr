@@ -56,7 +56,7 @@ def parse_binary_cookies(path):
             if record_size < 48 or cs + record_size > page_end:
                 continue
 
-            def read_str(offset):
+            def read_str(offset, cs=cs, record_size=record_size):
                 at = cs + offset
                 if offset < 0 or at >= cs + record_size:
                     return ""
