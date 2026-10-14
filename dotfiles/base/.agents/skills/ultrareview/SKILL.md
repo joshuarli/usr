@@ -38,16 +38,17 @@ One repository in, two deliverables out: docs that match the code, and a single 
 | Persisted state | `durable-state` | Can the schema or wire format evolve safely? Who writes concurrently? |
 | Untrusted input, OS | `os-boundaries` | Paths, symlinks, temp files, platform code, `unsafe`? |
 | Tests | `test-audit`, `renovate-tests` | Judge the strategy and sample the riskiest areas; do not audit every test. Judge against the suite shape `renovate-tests` defines. |
-| Performance | `performance-by-mechanism` | Is there removable work on the hot paths? |
+| Performance | `make-it-fast` | Is there removable work on the hot paths? |
 | Dead weight | `dead-code-archaeology` | Dead code, finished flags, legacy paths: prove liveness. |
 | Navigability | `make-code-search-a-reliable-navigation-boundary` | Does text search reach definitions, callers, tests, and docs? |
+| Comments | `comment-cleanup` | Which comments excuse a workaround or claim a constraint nothing enforces? Each is a finding about that code, and the spreading ones are the worst. |
 | Recurring mistakes | `correct` | Which defect classes recur in history and have no guard? |
 
 No skill covers these, so ask directly: security beyond input handling (authn and authz, secrets in the tree or history, injection), which gets a short pass unless the repo has auth, secrets, multi-tenant data, or network exposure, and a hard look when it does; build, release, and CI (reproducible, pinned, can it ship and roll back); dependencies (abandoned, duplicated, unpinned, heavy); operability (can an operator see a failure, configure the system, and recover).
 
 ## Docs refresh
 
-Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `REVIEW.md` is the only doc file you create.
+Run `docs-refresh` over the whole repo, with one writer. Where it finds the code wrong rather than the doc, that becomes a finding. `REVIEW.md` is the only doc file you create. Comments follow `comment-cleanup` in its review mode, and its findings take the area of the code they excuse.
 
 The docs lane runs one `mdtool check` when installed; it combines all checks with grouped output and anchor suggestions. Use `--untracked` for new docs and `--since HEAD` for new findings after edits. Request `--verbose` or `--json` only for complete occurrence details; `mdtool anchors FILE...` is only for a heading inventory. Without it, follow the fallback searches in `docs-refresh` and inspect targets manually.
 

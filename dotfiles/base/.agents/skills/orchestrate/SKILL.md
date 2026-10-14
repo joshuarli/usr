@@ -39,7 +39,7 @@ Give every parallel writer its own worktree, created by you with `git worktree a
 
 ## Delegation
 
-Delegate coherent component-sized work; do not delegate a one-command or one-edit task when the handoff costs more than doing it locally. Batch related trivial work into one assignment.
+Delegate coherent component-sized work; do not delegate a one-command or one-edit task when the handoff costs more than doing it locally. Batch related trivial work into one assignment. When one script or codemod can apply the change to every unit in a single pass, write and run it yourself instead of fanning out children to hand-apply it, and prove it by rerunning it on the unit you did by hand.
 
 Maximize parallel work without overlap. Split the task by what each piece owns, and run one child per disjoint ownership set, as wide as the machine's headroom allows. Width follows the task: one child for a single coupled change, many for a wide one. Overlapping writes are the only limit on width, so serialize them inside one child. Give each child the largest coherent slice it can finish end to end, not a fragment that needs a second handoff.
 

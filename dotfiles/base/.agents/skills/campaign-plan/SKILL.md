@@ -24,7 +24,7 @@ Planning only: it turns a goal into a campaign doc a coordinator can run unatten
 2. **Survey.** Map what exists with `path:line`, each part marked reuse, change, or new. Record the baseline: known red, loop timings, the numbers the goal moves.
 3. **Name the deliverables.** Numbered, each an outcome, each with its proof command and threshold.
 4. **Pick the proof for the kind of target:**
-   - *Speed, size:* `performance-by-mechanism` and `benchmark-checklist`; a baseline, a noisy-host rule (counts and CPU, medians of interleaved runs), a target.
+   - *Speed, size:* `make-it-fast` and `benchmark-checklist`; a baseline, a noisy-host rule (counts and CPU, medians of interleaved runs), a target.
    - *Looks, layout:* approved images as the spec; browser screenshots diffed against them with `odiff` and a threshold per surface, plus a structural check that no text or datum was lost.
    - *Behavior parity:* `reference-parity`. *Storage, wire formats:* `durable-state`.
 5. **Decompose.** Workstreams by shared code, items sized as capabilities, prerequisites written on the item, the files each lane owns and must not touch, the widest lane count each phase allows, and a memory budget per lane. Foundations that every lane builds on (shared stylesheet, harness, types) are built first by the coordinator or one lane, never invented in parallel.

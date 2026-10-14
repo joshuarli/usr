@@ -1,28 +1,35 @@
 ---
 name: comment-cleanup
-description: "Apply when asked to audit or clean code comments and docstrings: remove pointers to documentation and planning material and keep the rationale self-contained. Skip comments you are not asked to touch."
+description: "Apply when asked to audit or clean code comments and docstrings, or when about to add a comment that explains a why, a constraint, or a workaround: delete the comment and fix the code it excuses. Skip user-facing strings, test fixture content, and comments outside the requested scope."
 ---
 
 # Comment Cleanup
 
-Use this skill when asked to audit or clean comments and docstrings in source code.
+A comment is prose nothing enforces. It goes stale, and agents copy the nearest one, so a single workaround note breeds more hacks. Delete the comment and move what it said into something that fails when it is wrong: a name, a type, a test, a lint rule, or the commit body.
 
-Inspect the requested scope before editing. Follow repository instructions and use local code behavior to understand each comment. Include line comments, block comments, and docstrings that contain potentially stale pointers; leave user-facing strings and test fixture content alone unless the user explicitly includes them.
+Scope is the caller's files or diff; otherwise the current change. Read each comment against the code before judging it, including line comments, block comments, and docstrings. Leave user-facing strings and fixture content alone.
 
-A comment must stay useful if every documentation and planning file is renamed or deleted. Search for document names and paths, links, section or clause numbers, milestone labels such as `M1`, phase names, roadmap entries, issues, PRs, and acceptance-criterion IDs. Look for varied forms such as “plan section 1a,” “section 1a,” “milestone 1,” and “M1”; do not rely on one exact filename or spelling.
+## What survives
 
-Remove every such pointer, even when its target still exists. That includes READMEs, guides, and design notes as well as plans, roadmaps, milestones, phases used as project stages, acceptance criteria, issues, and pull requests. If the comment also holds a lasting technical invariant, constraint, or rationale, rewrite that explanation so it stands on its own. Runtime and domain phases are not planning references and should be left alone.
+Only what the comment rule in the global `AGENTS.md` allows: a quirk of an external dependency, platform, or protocol we cannot reshape; a public API contract; a legal header; a comment a lint requires; a link to an issue or PR that explains a constraint code cannot express; a suppression whose rule is wrong for that line. A surprise in our own code is never on the list. When unsure, the comment goes. A keep needs proof it is true today on a live path and that the code cannot say it.
 
-Keep accurate citations to external technical standards, such as RFCs and web-platform specifications, when they explain protocol or parser behavior. Their absence from the repository does not make them pointers to project documentation; revise or remove them only when they are inaccurate, obsolete, misleading, or irrelevant to the code.
+## Each comment
 
-For each finding:
+- **Narration, banners, changelogs, `TODO` and `FIXME`, commented-out code:** delete. Version control is the archive, and a task belongs in the reply, not the tree.
+- **Pointers** to docs, plans, milestones, phases, or acceptance criteria: delete. Do not rewrite them into prose; the rationale goes through the next bullet. Accurate citations of external standards such as RFCs stay when they explain protocol behavior.
+- **Issue and PR links** stay only as evidence for a constraint code cannot express, such as an upstream bug the code works around, and only beside a comment that already states the constraint, so it reads without the link. A link standing alone, or one that only says "see #123" for our own code's why, is deleted and its cause fixed.
+- **A why, a constraint, or an excuse for a workaround in our own code:** the comment reports a defect. First check the claim against the code and callers. Then remove the cause: rename, extract, narrow the type, split the state, delete the dead path, use the real API. A constraint that cannot be removed gets the cheapest test or check that fails when it is violated, with an error that names the fix. Then delete the comment. A claim you cannot confirm is deleted, not polished into a shorter alibi.
+- **Rationale no code shape can hold,** such as a rejected alternative, goes in the commit body, or once in the doc that owns the topic. Never back into the source.
+- **Lint and type suppressions:** look up the rule. If it protects correctness or safety, remove the suppression and fix the code. Keep it only when the rule is wrong for that line, and say why in one line.
 
-- Remove the pointer and keep any explanation it accompanied.
-- Preserve accurate comments that already explain the code without relying on documentation.
-- Do not move code, change behavior, or rewrite unrelated prose as part of this cleanup.
+## Limits
 
-Search the requested source scope for documentation and planning references before and after editing. Review the diff to ensure each changed comment is still clear and no executable strings or fixture text were changed accidentally. Do not run tests unless asked; a focused search and diff review are sufficient for this editorial task.
+Apply the fix only where the caller permits code edits. Under `review`, `ultrareview`, and `docs-refresh`, delete the comments that need no code change and report the rest as findings naming the symbol, the excuse, and the fix, with the comment as evidence, `comment-cleanup` as `Fix with`, and a priority from the workaround's impact. If a fix is out of scope, delete the comment anyway and report the symbol, so the hack is flagged once, to the owner, instead of in the tree. Do not widen the scope to fix instances outside it.
 
-When `mdtool` is installed, use `mdtool pointers`; otherwise search source comments with `rg -n 'README|AGENTS|docs/|\.md|Phase|M[0-9]+'` and inspect each match in context.
+## Verify
 
-**Reply:** the files reviewed, changes made, external citations preserved, and ambiguous references left untouched.
+Search the scope for comments and for documentation pointers before and after. With `mdtool` installed use `mdtool pointers`; otherwise `rg -n 'README|AGENTS|docs/|\.md|Phase|M[0-9]+'` over source comments, inspecting each match. The diff holds comment deletions and the named root-cause fixes only, with no fixture or executable strings changed. Run the narrowest check that covers any code you changed.
+
+**The test:** a reader who deleted every remaining comment would lose only an external quirk or a public contract, and every deleted excuse is gone from the code or reported open.
+
+**Reply:** comments deleted by count; fixes made and what each replaced; constraints now enforced by a test or check; hacks and constraints left open, with symbols; keeps with the reason each stays.

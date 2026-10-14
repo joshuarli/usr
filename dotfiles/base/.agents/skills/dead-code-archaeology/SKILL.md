@@ -14,7 +14,7 @@ Historical complexity must justify its continued existence.
 - **A fallback is suspect once its trigger is gone.** Verify the condition that justified it before removing it.
 - **A completed rollout gets its final behavior and loses the flag,** the dual path, and the tests for the dead side.
 - **Legacy readers may stay for old data. Old writers do not.** New writes use the canonical format.
-- **Docs and comments describe the live system.** Remove references to deleted flags, APIs, and paths.
+- **Docs describe the live system, and no comment mentions what was removed.** Remove references to deleted flags, APIs, and paths. Quarantined compatibility is marked by its name, a language deprecation attribute, and its removal condition in the reply or a failing check, not a comment.
 
 **The test:** for each survivor, name who calls it or which data needs it. If you cannot, it goes.
 

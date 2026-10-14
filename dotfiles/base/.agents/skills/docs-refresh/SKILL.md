@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Docs Refresh
 
-Make the docs true, short, and findable, in the standard shape below. Docs and comments are the only files you change. When the code is what is wrong, leave it and report it.
+Make the docs true, short, and findable, in the standard shape below. Docs and comments are the only files you change, and a comment is only ever deleted, never added or reworded. Prose rots, so a doc claim that a type, test, or lint could enforce is reported as a candidate to enforce and then cut. When the code is what is wrong, leave it and report it.
 
 ## Standard format
 
@@ -17,14 +17,15 @@ Make the docs true, short, and findable, in the standard shape below. Docs and c
 
 ## Scope
 
-Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, contributing notes, `--help` text, config examples, and doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the comments it added or changed.
+Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the comments it added or changed.
 
 ## Rules
 
 - **The code is the truth.** Check each claim against it: commands, paths, flags, environment variables, versions, architecture, setup steps. Run the cheap checks (`--help`, a single narrow command) and read the code for the rest. Fix what drifted, and delete what is not worth keeping.
+- **Prose follows `technical-writing` and `unslop`:** one mode per document, one reading per sentence, no AI tells. Apply them to what you touch, not to untouched prose.
 - **Make it shorter.** Cut what is outdated, duplicated, or restates what the code shows. Give each fact one home and link to it rather than copy it (`single-source-of-truth`). Keep the why, constraints, invariants, commands, and hazards. Do not reword for taste.
 - **A doc code reads is load-bearing.** Before you move, split, rename, or cut a doc, search source and build files for its path: embeds such as `include_str!`, tests that read or compile it, hashes, and checks of its layout. Report what you find to every writer, and leave such a doc's structure to the code that reads it.
-- **Comments** go through `comment-cleanup`.
+- **Comments** go through `comment-cleanup` in its review mode. Only public API contract doc comments are doc surface; every other comment is a defect, not documentation. Rationale a deleted comment carried lands once in the `docs/` topic that owns it, never back in source.
 - **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. For generated docs, edit the source and the generator input, not the output.
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home, as when developer material leaves README.
 - **Verify narrowly:** every `path:line` and link you kept resolves, and any doc check the repo has (a link checker, a doctest) runs on the files you touched.

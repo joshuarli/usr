@@ -9,8 +9,8 @@
 
 - Name things for the domain, one name per concept. Mark legacy paths as legacy.
 - Prefer precise types and narrow interfaces that make invalid states hard to represent. Don't loosen a contract or hide a fallback to make a patch fit.
-- Comment the why, constraints, and non-obvious behavior above the definition. Keep existing comments that do this.
-- Keep changes focused. Temporary workarounds must say why they exist and what removes them.
+- Write no code comments. Put the why in a name, a type, a test, or a lint, and a decision's reasoning in the commit body. A comment is allowed only for a quirk of an external dependency, platform, or protocol we cannot reshape; a public API contract; a legal header; a comment a lint requires (`// SAFETY:` on `unsafe`); a link to an issue or PR that explains a constraint code cannot express; or a suppression whose rule is wrong for that line. A surprise in our own code is a defect to fix, not to explain. A surviving comment states its constraint itself, so it reads with every doc deleted and every link rotted, and never points to a document, section, milestone, phase, roadmap item, or acceptance label. Delete existing comments you touch that fail this, and fix what they excused.
+- Keep changes focused. Fix the cause instead of working around it. If a workaround is unavoidable, say what it is and what removes it in the reply, not in the code.
 - Dependencies are your call. Vet maintenance, transitive weight, license, and whether the standard library or a few lines would do, and say why in your reply. A dependency must stay within the project's performance gates (build time, binary size, startup, runtime); measure when it could move one. If the repo defines no gates, state the build-time and binary-size impact. Remove ones you stop using.
 - Keep bookkeeping to the minimum. No provenance, checksums, hashes, manifests, registers, logs, backups, or state files unless a reader or a concrete failure needs them. Check the thing itself (run it, compare it) instead of recording where it came from.
 - No speculative abstractions, config knobs, or backward-compat shims unless asked. Delete dead code instead of deprecating it.
@@ -56,8 +56,3 @@ macOS and Linux. Use `rg` and `fd` for search. Use `jaq` for all JSON and YAML w
 - Every worktree, scratch file, and piece of working state you create lives under `.work/` at the root of the repo you are working in, never `/tmp`, `$TMPDIR`, or `/var/folders`. `/tmp` is often RAM-backed on my Linux machines, so large trees there cause OOM kills, and it does not survive a reboot.
 - Put worktrees at `.work/wt/<name>` and scratch at `.work/tmp`. Before the first write, make sure `.work/` is ignored through `.git/info/exclude`, not a tracked file. Point `TMPDIR` at `.work/tmp` for commands you run that spill large files.
 - State that must outlive the session (plans, handoffs, results) is committed in the repo, not left in `.work/`, which is disposable.
-
-## Keep code comments self-contained
-
-- Never use code comments or docstrings to point to planning documentation. Do not cite document names, paths, links, sections, numbered clauses, milestones (such as `M1`), phases, roadmap items, issues, PRs, or acceptance-criterion labels.
-- Comments must remain useful if every planning and documentation file is renamed or deleted. State the local reason, invariant, constraint, or behavior directly in domain terms.

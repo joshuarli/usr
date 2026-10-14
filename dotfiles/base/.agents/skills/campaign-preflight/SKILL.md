@@ -29,24 +29,15 @@ Read the [procedure, sequencing rules, and final document shape](references/proc
 
 ## Lenses
 
-For each area the campaign touches, load the skill and ask what decisions it would make the executor stop on. Answer them in the doc now.
+For each area the campaign touches, load the skill and ask what decisions it would make the executor stop on. Answer them in the doc now. The design areas are the rows of the `ultrareview` lens table (boundaries, types, config, effects, errors, concurrency, persisted state, untrusted input, tests, navigability), asked of the planned work instead of the existing repo. These rows are specific to a campaign:
 
 | Area | Skill | Pre-answer |
 | --- | --- | --- |
 | Lanes, waves, ownership, merges | `orchestrate` | Workstreams, prerequisites across them, files each lane owns, who integrates and verifies |
-| Public surface, module layout | `api-surface-and-module-boundaries` | What may be exposed, which direction dependencies run |
-| Types and domain model | `make-invalid-states-unrepresentable` | The shapes of the new core types |
-| Configuration, defaults | `single-source-of-truth` | Where each new setting and fact lives, and its default |
-| Persisted and wire formats | `durable-state` | Format versions, migrations or refusal of old data, transaction boundaries |
-| Errors, retries | `error-model` | Error types, exit codes, what is retried |
-| Concurrency, lifecycle | `lifecycle-concurrency` | Ownership of tasks, cancellation, shutdown |
-| Effects and testability | `isolate-effects` | Which seams tests use |
-| Untrusted input, platform code | `os-boundaries` | Path, symlink, temp-file, and platform rules |
 | Parity with a reference | `reference-parity` | The reference, and the behaviors and corpus that cover it |
-| Tests | `test-audit` | What counts as a test of a behavior, and which seams tests use |
 | Failures | `root-cause` | The executor's rule for a failing item: cause before retry |
-| Optimization | `performance-by-mechanism`, `benchmark-checklist` | What is measured, how, against what baseline, and the targets |
-| Cleanup | `dead-code-archaeology`, `deslop` | What is deleted at the end and how liveness is proven |
+| Optimization | `make-it-fast`, `benchmark-checklist` | What is measured, how, against what baseline, and the targets |
+| Cleanup | `dead-code-archaeology` | What is deleted at the end and how liveness is proven |
 | Repeat failures | `correct` | Guards for mistakes the campaign is likely to repeat |
 
 **The test:** an agent with only this doc and the repo can run from the first item to the last without asking a question, and cannot reach a point where it works on optimization while a feature or a parity test is missing.

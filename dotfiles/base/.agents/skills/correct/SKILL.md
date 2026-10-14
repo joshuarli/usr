@@ -12,14 +12,14 @@ Assume every contributor is an agent that sees only the files it opened, copies 
 
 ## Find the classes
 
-Read recent commits and reverts, review comments, the `AGENTS.md` chain, comments that explain workarounds, and recent sessions under `~/.claude/projects/` for the user's corrections. Group mistakes into classes. A class counts once it has happened twice.
+Read recent commits and reverts, review comments, the `AGENTS.md` chain, comments that explain workarounds (each is a defect class agents will copy), and recent sessions under `~/.claude/projects/` for the user's corrections. Group mistakes into classes. A class counts once it has happened twice.
 
 ## Fix each at the highest level that works
 
 1. **Architecture.** One owner per piece of state and one supported way per task. Hide internals so the wrong import fails. Replace hand-synced lists with one source. Delete the old way and the dead code an agent would copy.
 2. **Types.** Make the bad state unwritable. If it still compiles, add a lint or check whose error names the file, type, or function to use instead. If the pattern is already common, fail only changes that add more of it.
 3. **Tests** of behavior. Fix or delete any test that fails the Oracle Test in `test-audit`.
-4. **Docs and agent rules last,** for judgment calls only. Nothing fails when an agent skips them.
+4. **Docs and agent rules last,** for judgment calls only. Nothing fails when an agent skips them. Never a code comment: it goes stale and agents copy it.
 
 Take the strongest mechanism available. A weaker guard becomes the next template that agents copy.
 

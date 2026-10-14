@@ -18,7 +18,7 @@ Read `Cargo.toml`, `Cargo.lock`, `main.rs`, every CLI module, tests, docs, build
 - No glob imports in the CLI (`use super::*`, `use crate::*`, `lexopt::prelude::*`); import what each module uses.
 - Arguments stay `OsString`/`OsStr`; never convert lossily. Where a downstream contract needs UTF-8, reject non-UTF-8 with an explicit parse error.
 - Make the boundary visible: build a `lexopt::Parser`, consume tokens with `Parser::next`, option values with `value` (`values` for a contiguous list), and match `Arg::Short`, `Arg::Long`, `Arg::Value` explicitly. Support long and short options, unambiguous clusters, `--opt=value`, `--`, and unknown-option errors. Parser tests use `Parser::from_args` or `from_iter`.
-- Never use index arithmetic over `Vec<String>`. For an opaque tail after a required `--` (e.g. a guest command), find the `--`, parse the prefix with one new `lexopt::Parser`, keep the tail as `OsString`s, and document that boundary. `Parser::raw_args` is only for such tails.
+- Never use index arithmetic over `Vec<String>`. For an opaque tail after a required `--` (e.g. a guest command), find the `--`, parse the prefix with one new `lexopt::Parser`, keep the tail as `OsString`s in a type or function named for that boundary. `Parser::raw_args` is only for such tails.
 
 ## Structure
 
