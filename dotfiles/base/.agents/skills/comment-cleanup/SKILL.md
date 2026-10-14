@@ -1,6 +1,6 @@
 ---
 name: comment-cleanup
-description: "Apply when asked to audit or clean code comments and docstrings, or when about to add a comment that explains a why, a constraint, or a workaround: delete the comment and fix the code it excuses. Skip user-facing strings, test fixture content, and comments outside the requested scope."
+description: "Apply when auditing comments, or about to write one that explains a why, constraint, or workaround: delete it and fix the code it excuses. Skip strings, fixtures, and out-of-scope comments."
 ---
 
 # Comment Cleanup
@@ -15,7 +15,7 @@ Only what the comment rule in the global `AGENTS.md` allows: a quirk of an exter
 
 ## Each comment
 
-- **Narration, banners, changelogs, `TODO` and `FIXME`, commented-out code:** delete. Version control is the archive, and a task belongs in the reply, not the tree.
+- **Narration, banners, changelogs, `TODO` and `FIXME`, commented-out code:** delete. Version control is the archive, and a deferred task becomes a `todo` ticket, not a comment.
 - **Pointers** to docs, plans, milestones, phases, or acceptance criteria: delete. Do not rewrite them into prose; the rationale goes through the next bullet. Accurate citations of external standards such as RFCs stay when they explain protocol behavior.
 - **Issue and PR links** stay only as evidence for a constraint code cannot express, such as an upstream bug the code works around, and only beside a comment that already states the constraint, so it reads without the link. A link standing alone, or one that only says "see #123" for our own code's why, is deleted and its cause fixed.
 - **A why, a constraint, or an excuse for a workaround in our own code:** the comment reports a defect. First check the claim against the code and callers. Then remove the cause: rename, extract, narrow the type, split the state, delete the dead path, use the real API. A constraint that cannot be removed gets the cheapest test or check that fails when it is violated, with an error that names the fix. Then delete the comment. A claim you cannot confirm is deleted, not polished into a shorter alibi.

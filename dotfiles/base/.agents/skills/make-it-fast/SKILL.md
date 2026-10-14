@@ -1,6 +1,6 @@
 ---
 name: make-it-fast
-description: "Apply when asked to make something faster or leaner, fix a slowdown, quadratic scan, or memory growth, improve a project's performance across user workflows, or find where time or resources go. Skip isolated benchmark reviews and changes unrelated to performance."
+description: "Apply when asked to make something faster or leaner, fix a slowdown or memory growth, or find where time and resources go. Skip isolated benchmark reviews and non-performance changes."
 ---
 
 # Make It Fast

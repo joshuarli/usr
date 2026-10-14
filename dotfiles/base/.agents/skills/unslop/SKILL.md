@@ -1,6 +1,6 @@
 ---
 name: unslop
-description: "Apply when writing or revising prose a reader will keep (docs, READMEs, PR descriptions, commit bodies) or when asked to unslop. Cut AI tells and keep the meaning. Skip code, comments, quoted text, and user-facing product copy."
+description: "Apply when asked to unslop, or when prose reads machine-written (AI vocabulary, filler, hedging). Skip code, comments, quoted text, and product copy."
 ---
 
 # Unslop

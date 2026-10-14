@@ -1,6 +1,6 @@
 ---
 name: technical-writing
-description: "Apply when writing or reviewing documentation, READMEs, design docs, PR descriptions, or commit bodies: one reader mode per document and unambiguous sentences. Skip code comments, user-facing product copy, and chat replies."
+description: "Apply when writing or reviewing docs, READMEs, design docs, or PR descriptions: one reader mode per document, one reading per sentence. Skip code comments, product copy, and chat replies."
 ---
 
 # Technical Writing
@@ -34,7 +34,7 @@ Never mix modes. Split and link.
 
 ## Commits and PRs
 
-A PR body is a briefing a reviewer reads in under a minute: what changed, why, how it was verified, what the reviewer must decide. Do not paste logs, SHA lists, or metric tables; link them. A commit body says why, not what. Every count or tree claim must be true at the commit that lands it.
+A PR body is a briefing a reviewer reads in under a minute: what changed, why, how it was verified, what the reviewer must decide. Do not paste logs, SHA lists, or metric tables; link them. Every count or tree claim must be true at the commit that lands it.
 
 Before: "Configuration of the budget script is performed via budget.json. Note that it's important to remember that running with --write should only be done when lowering it."
 

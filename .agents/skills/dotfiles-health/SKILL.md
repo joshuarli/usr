@@ -7,17 +7,7 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 
 `~/usr` is the source of truth, and `make` makes the home directory match it. Edit the repo, never `~`.
 
-## Map
-
-- **Instructions:** `dotfiles/base/.codex/AGENTS.md`, shared with Claude and pi by symlink.
-- **Skills:** `dotfiles/base/.agents/skills/`, linked whole into `~/.agents/skills` by a `.sym-dir` marker. Claude and Codex both follow the link, which was tested. The directory's `.gitignore` tracks skill folders and nothing else, because the harnesses write into it.
-- **Claude subagents:** `dotfiles/base/.claude/agents/`, linked and ignored the same way. They are the only place a child's model and effort are set.
-- **Enforcement:** `dotfiles/base/.claude/settings.json` (deny rules) and `dotfiles/base/.codex/rules/default.rules` (prefix rules). Codex config is `dotfiles/base/.codex/config.toml`.
-- **Installer:** `dotfiles/sym`, its tests `dotfiles/sym-test.sh`, and the skill invariants `dotfiles/skills-check.sh`. The Makefile applies `dotfiles/base` and then the layer for the OS (`darwin` or `linux`); a path in two layers is a conflict.
-
-## Commands
-
-`make check` runs the sym tests and the skill checks. `make plan` is a dry run. `make` syncs. Read the plan before syncing: a `CONFLICT` is a real file in the way, and `sym` writes nothing until every conflict is resolved. A file deleted from the repo leaves a dangling link in `~`, so remove it there too.
+The layout, the commands, and where each piece of agent configuration lives are in the repo `AGENTS.md`. This skill holds the invariants to check.
 
 ## Invariants
 
@@ -25,7 +15,6 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 - **Descriptions and shape:** an auto-triggered description names its situations and a skip clause, because a broad one fires on every task. Skills stay dense: a thesis, bold rules, a closing `**The test:**`, and a `**Reply:**`.
 - **A rule has one owner.** The shim rules live in `dead-code-archaeology`, the Oracle Test in `test-audit`, and the skill-scope and explicit-only loading rules in the global AGENTS.md. Other skills point to the owner; do not copy.
 - **Model and effort live once.** Claude's are in `agents/*.md`, and `orchestrate` names the agents without repeating them. Codex's sit in the `orchestrate` table and `config.toml`. The default model and effort in settings belong to the owner; do not change them unprompted.
-- **A rule that must hold is enforced, not just written.** "No push" and "no formatters" in AGENTS.md are mirrored as deny rules and prefix rules. When you add such a rule, add its enforcement in the same change.
 - **Test Codex rules** with `bash -c 'codex execpolicy check --rules FILE -- git push'`, because zsh will not split the command. A Codex prefix rule misses `git -C dir push`; the Claude deny list covers it.
 - **Check tool behavior against current docs, not memory.** Established so far: Claude agent files take `model` and `effort` and hot-reload, deny rules beat allow even in `auto` mode, and the rule form is `Bash(cmd *)`. Codex skills use `agents/openai.yaml`, and Codex rules use `prefix_rule(..., decision = "forbidden")`.
 
