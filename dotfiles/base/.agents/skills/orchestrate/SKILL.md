@@ -56,4 +56,12 @@ Carry forward findings and failed approaches. Every child gets:
 
 For a backlog run as parallel lanes, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work.
 
+Treat the iteration loop as shared campaign infrastructure. When serialized
+build or verification work becomes the critical path, assign a loop-speed lane
+before adding more implementation width. It owns measuring selected work,
+removing unexpectedly broad gates, exposing exact checks, and preserving safe
+artifact reuse; it does not weaken final acceptance. Re-evaluate this bottleneck
+after merges and failed gates instead of assuming the initial tooling remains
+adequate.
+
 **Reply:** what was delegated and integrated, checks and measurements, contract changes, and any blockers or decisions the owner needs to resolve.

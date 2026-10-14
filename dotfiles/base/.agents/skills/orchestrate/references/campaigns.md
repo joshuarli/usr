@@ -16,6 +16,14 @@ A campaign is a backlog too large for one session, run as parallel lanes in roll
 2. **Brief.** Item IDs, files the lane owns and files it must not touch, what earlier waves learned, and the report format. The brief is the lane's only context beyond the repository.
 3. **Launch** the wave together, each lane in its own worktree under `.work/wt/`, committing on its own branch as Conventional Commits and never pushing. Size the wave by the machine: launch the first lanes, read their peak memory and load once they build, then set the width from the available memory with a margin, so the next wave runs as wide as is safe and the machine never swaps or OOMs. Do not hold a launch for the previous wave to finish: tranches overlap.
 4. **Review, merge, then verify**, one lane at a time as they report. Read the diff, rebase the lane onto the campaign branch, fast-forward, then run the checks for the areas it touched on the merged tree. Run them from a scratch worktree at the merged commit, never in the integration tree, so a slow suite does not block the next merge or change the files under it. Send a failure back to the lane with the command and its output; send a follow-up in the same files to the lane that holds the context (resume it) rather than starting a new one. Do not hold a merged lane for the slowest one: if its workstream has ready items, brief it again at once on the updated campaign branch.
+   Treat the serialized verification queue as a workstream. Track the targets,
+   test counts, and unrelated work selected by each focused command. If queue
+   wait or verification becomes the campaign's critical path, give loop speed a
+   dedicated owner before widening implementation further. Fix selectors,
+   expose named tests, split oversized harnesses, or improve revision-safe
+   artifact reuse. A broad gate that eventually finishes does not excuse a
+   missing focused check; retain the broad gate for the integration risk it
+   actually covers.
 5. **Close** with every lane merged and none running: the full checks, the performance measurements against the baseline, and any repository-wide rewrite the wave made possible. Such rewrites run only here, because they change the files lanes read. Hold for the close only what depends on the final state (full checks, baselines, held-out runs, the final report); everything else runs when it is ready.
 6. **Record.** Delete finished items, add the defects found, and report to the owner: what merged, every contract change, measurements, and the decisions the next wave needs.
 
