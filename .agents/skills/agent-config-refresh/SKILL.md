@@ -25,7 +25,7 @@ Both harnesses change monthly, and our setup encodes facts about them: key names
 4. **Check each item.** Is it still documented, renamed, deprecated, removed, or given a new default? Then the other direction: does anything in the changelogs since the window began retire a hook, script, or rule we wrote?
 5. **Load it.** Run what each tool offers: `bash -c 'codex execpolicy check --rules FILE -- git push'` for the rules, the settings `$schema`, and one cheap headless run of each harness to read its startup warnings. Test any hook or script you changed.
 6. **Edit the repo.** Fix keys, remove retired workarounds, and update the stale statements in `dotfiles-health` and `orchestrate`. A rule keeps its single owner. A hard rule keeps its enforcement.
-7. **Verify.** `make check` and `make plan`, with no `CONFLICT`.
+7. **Verify.** The checks that cover what you changed (`skills-check.sh` for skills, the matching `*-test.sh` for a hook) and `make plan`, with no `CONFLICT`.
 
 **The test:** every key, field, and event we set is one the current docs list, nothing we carry works around something the harness now does, and each change traces to a doc page.
 

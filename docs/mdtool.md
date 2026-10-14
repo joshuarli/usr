@@ -29,7 +29,7 @@ mdtool [COMMAND] [options] [PATH...]
 | `--quiet`, `--ignore CODE` | Suppress the summary line, or drop a code. An unknown code is a usage error. |
 | `--label REGEX`, `--code`, `--max-lines N` | Extra `pointers` labels, `dups` over fenced code, and the `router` AGENTS.md limit (default 150). Each is rejected on a command that does not use it. |
 
-With no paths, a command covers every tracked Markdown file. `check`, `consumers`, and `pointers` always read all tracked text files for context, and `PATH` filters what they report.
+With no paths, a command covers every tracked Markdown file. `check` and `consumers` read all tracked text files for context, and `PATH` filters what they report. `pointers` always reads every tracked text file. A standalone `router PATH` only discovers `AGENTS.md` and `README.md` among the selected paths.
 
 Exit status is 0 for no `error` findings, 1 for at least one, and 2 for a usage, root, or Git failure. Warnings and notes never change it.
 
@@ -55,12 +55,12 @@ Nothing is written, no network is used, and the only subprocess is read-only `gi
 | C002 | warn | A doc is read by code or a test. |
 | C003 | note | A doc is listed literally by other code. |
 | P001 | error | Comment names a tracked doc by path or basename. |
-| P002 | warn | Comment cites a section or clause. |
+| P002 | warn | Comment or Python docstring contains a section, clause, or milestone label, or a dotted numeric sequence. |
 | P003 | warn | Comment cites a built-in `M1`, `Phase 1`, or `#1` label, or a `--label` match. |
 | D001 | note | Two blocks state substantially the same thing (8-word shingles, similarity at least 0.8, at least 40 words or 3 table rows). |
 | T000 | note | The router checks found no AGENTS.md to check. |
 | T001 | warn | A `docs/` file is not reachable in one hop from AGENTS.md. |
-| T002 | note | AGENTS.md is over the line limit, or a non-map section is over 30 lines. |
+| T002 | note | AGENTS.md is over the line limit, or a heading's section extends over 30 lines before the next heading at the same or higher level. |
 | T003 | note | README carries developer material (build, architecture, testing headings). |
 | T004 | warn | AGENTS.md or README names a missing doc path. |
 | T005 | note | A linked doc is under 20 lines or only links elsewhere. |

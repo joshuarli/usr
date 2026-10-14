@@ -1,9 +1,4 @@
 # Enforces the AGENTS.md workflow rules, which are advice until a rule blocks them.
-# Prefix rules match a command's leading tokens, so options between `git` and `push`
-# (`git -C dir push`, `git -c k=v push`) and shell wrappers (`sh -c`) are not caught here;
-# the Claude ask list and the global pre-push hook (which refuses a push without a terminal)
-# cover those forms.
-
 prefix_rule(
     pattern = ["git", "push"],
     decision = "prompt",
