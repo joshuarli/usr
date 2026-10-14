@@ -355,7 +355,8 @@ def run_hook():
         if remaining:
             paths = "\n".join(f"- {path}" for path in remaining)
             reason = (
-                "Campaign closeout is active. Remove safe worktrees. For each tree that must stay, "
+                "Campaign closeout is active. Run git worktree prune to clear stale registrations, "
+                "then remove safe worktrees. For each tree that must stay, "
                 "put it under .work/, commit and name it in the campaign handoff, then run "
                 "codex-campaign-closeout.py allow --path <path> --reason <reason>. "
                 f"Unaccounted registered worktrees:\n{paths}"

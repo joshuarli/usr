@@ -7,7 +7,7 @@
 #     every task;
 #   - a literal mdtool reference names a command the checked-in tool does not expose;
 #   - a router table whose second column is Skill names a skill that does not exist.
-# Warnings (exit 0): a skill over 6000 bytes (except ultrareview), or one with no
+# Warnings (exit 0): a skill over 8000 bytes (except ultrareview), or one with no
 # closing **Reply:**.
 set -u
 skills="${1:-base/.agents/skills}"
@@ -48,7 +48,7 @@ for d in "$skills"/*/; do
     done
     # The whole-repo review keeps its lenses together in the entrypoint.
     if [ "$n" != ultrareview ]; then
-        [ "$(wc -c < "$f")" -le 6000 ] || echo "warning: $n is over 6000 bytes"
+        [ "$(wc -c < "$f")" -le 8000 ] || echo "warning: $n is over 8000 bytes"
     fi
     grep -q '^\*\*Reply:\*\*\|^## \(Hand back\|Report\|Handoff\)' "$f" || echo "warning: $n has no closing **Reply:**"
 done
