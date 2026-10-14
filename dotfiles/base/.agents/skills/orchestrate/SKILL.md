@@ -11,7 +11,7 @@ Delegate when specification and verification cost less than doing the work local
 
 Route by difficulty, uncertainty, and risk. Use the column for the harness you are running in.
 
-| Work | Codex | Claude | OpenCode |
+| Work | Codex | Claude and Grok | OpenCode |
 | --- | --- | --- | --- |
 | Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | same model, `explore` |
 | Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | same model, `general` |
@@ -21,7 +21,7 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 **Default to `worker`.** Size is not difficulty. A big lane with a clear method and acceptance (a profiled optimization, a port with a reference, a mock built from a design doc, an investigation with a known procedure, a bug fix with a reproduction) is a `worker` task, and so is most campaign lane work. Use `expert` only when the path is unknown and a wrong turn is costly: a cross-cutting design, a failure with no hypothesis, an integration that spans owners. If the brief can name the steps and the acceptance check, it is not an `expert` brief. Start with `worker` and escalate on evidence that the work was harder than briefed.
 
-If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent, except for the Codex child profile specified below. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
+If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent, except for the Codex profile and the Grok pins below. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
 
 ### Codex
 
@@ -31,9 +31,9 @@ Assign a child only the model and effort in the Codex column. Never use any othe
 
 Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 
-### Claude
+### Claude and Grok
 
-Spawn children only as `scout`, `mechanic`, `worker`, `expert`, or `god`, never a built-in type. They rank `scout` < `mechanic` < `worker` < `expert` < `god`, and an agent spawns only tiers strictly below its own (`scout` spawns nothing). Claude cannot restrict spawn types per nested subagent in a definition, so the `agent-tier-gate` PreToolUse hook enforces the order on every spawn, and `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps nesting at 3. A subagent's model and reasoning effort come from its agent definition in `~/.claude/agents` (frontmatter `model`, `effort`), not from the call, which can override only the model. Those definitions are the single source of truth: change a type's model or effort there, not here. Built-in agent types do not pin effort. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed on with evidence of the difficulty, or for a decision others build on. When a task needs a model and effort none of the five provide, add a definition instead of settling for the nearest. Prefer a fresh agent with a self-contained brief over a fork; fork only when the child needs the conversation itself.
+Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that order. A caller spawns only a lower tier, and `scout` spawns nothing. `agent-tier-gate` enforces that: Claude matches `Agent`, Grok matches `spawn_subagent`. `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps Claude nesting at 3. Model and effort come from `~/.claude/agents` or `~/.grok/agents`, not from the call. Every Grok definition pins `grok-4.7`. Do not use another model or `xhigh`. If `grok-4.7` is unavailable, report it. Change a type's model or effort in its file. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed, or a decision others build on. Add a definition when none of the five fit. Prefer a fresh agent; fork only when the child needs the conversation.
 
 ### OpenCode
 
@@ -56,7 +56,7 @@ Carry forward findings and failed approaches. Every child gets:
 - Clear ownership and write boundaries.
 - A concrete deliverable with only the needed context.
 - Proportionate checks and a stopping condition.
-- No further delegation unless the brief grants it, and then only to lower tiers (Claude) within the depth cap. Codex children are all one tier, so `agents.max_depth` is the only limit.
+- No further delegation unless the brief grants it, and then only to lower tiers (Claude and Grok) within the depth cap. Codex children are all one tier, so `agents.max_depth` is the only limit.
 
 ## Campaigns
 

@@ -1,12 +1,14 @@
 #!/bin/sh
-# PreToolUse hook for Claude Code, matcher Agent: enforce the orchestrate tier
-# order scout < mechanic < worker < expert < god on every spawn, including
-# spawns made by nested subagents. A caller may spawn only a tier strictly below
-# its own. The main conversation (no agent_type) may spawn any of the five tiers
-# and nothing else, so built-in types and forks are refused. A caller whose type
-# is not a tier (a fork, a built-in) is refused too. Claude cannot restrict
-# spawn types per nested subagent in a definition, so this is the only place the
-# order is enforced.
+# PreToolUse hook for Claude Code (matcher Agent) and Grok (matcher spawn_subagent).
+# Enforce the orchestrate tier order scout < mechanic < worker < expert < god on
+# every spawn, including spawns made by nested subagents. A caller may spawn only
+# a tier strictly below its own. The main conversation (no caller type) may spawn
+# any of the five tiers and nothing else, so built-in types and forks are refused.
+# A caller whose type is not a tier (a fork, a built-in) is refused too. Neither
+# harness can restrict spawn types per nested subagent in a definition, so this
+# is the only place the order is enforced. Claude sends agent_type and
+# tool_input.subagent_type. Grok sends subagentType and toolInput.subagent_type
+# (or toolInput.subagentType). Exit 2 is the only status that blocks a spawn.
 set -eu
 
 rank() {
@@ -41,8 +43,8 @@ field() {
     printf '%s' "$input" | "$json" -r "$1" 2>/dev/null || deny "cannot parse hook input"
 }
 
-caller=$(field '.agent_type // ""')
-target=$(field '.tool_input.subagent_type // ""')
+caller=$(field '.subagentType // .agent_type // ""')
+target=$(field '.toolInput.subagent_type // .toolInput.subagentType // .tool_input.subagent_type // ""')
 
 target_rank=$(rank "$target")
 [ "$target_rank" -gt 0 ] || deny "'$target' is not one of scout, mechanic, worker, expert, god"

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "spawn_subagent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "agent-tier-gate"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # Agent setup
 
-`dotfiles/base/.codex/AGENTS.md` is the canonical global instruction file. The Claude, Pi, and OpenCode `AGENTS.md` paths link to it. `dotfiles/base/.agents/skills/` holds the global skills, and `dotfiles/base/.claude/agents/` holds Claude subagents.
+`dotfiles/base/.codex/AGENTS.md` is the canonical global instruction file. The Claude, Pi, and OpenCode `AGENTS.md` paths link to it. `dotfiles/base/.agents/skills/` holds the global skills. `dotfiles/base/.claude/agents/` holds Claude subagents. `dotfiles/base/.grok/agents/` holds the same five types for Grok, each pinned to `grok-4.7`. A same-named file there wins over the Claude copy.
 
 The repository-specific skills live under `.agents/skills/`; `.claude/skills` links to that directory. The root `skills` link points to the global skills. Whole-directory links use `.sym-dir` markers and allowlists so harness-written state stays outside the repository.
 

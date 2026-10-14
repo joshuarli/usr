@@ -33,6 +33,11 @@ expect 2 'empty input is refused' ''
 empty=$(mktemp -d) || exit 1
 trap 'rm -rf "$empty"' 0
 expect 2 'a missing JSON tool is refused' '{"tool_input":{"subagent_type":"scout"}}' "$empty"
+expect 0 'grok main conversation spawns any tier' '{"toolInput":{"subagent_type":"god"}}'
+expect 2 'grok main conversation cannot spawn a built-in type' '{"toolInput":{"subagent_type":"general-purpose"}}'
+expect 0 'grok mechanic spawns scout' '{"subagentType":"mechanic","toolInput":{"subagent_type":"scout"}}'
+expect 2 'grok mechanic cannot spawn worker' '{"subagentType":"mechanic","toolInput":{"subagent_type":"worker"}}'
+expect 2 'grok camelCase target is still ranked' '{"subagentType":"worker","toolInput":{"subagentType":"worker"}}'
 
 echo "testing finished."
 [ "$nfailed" -eq 0 ]
