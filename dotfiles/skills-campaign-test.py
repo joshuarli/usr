@@ -164,7 +164,7 @@ class SkillCampaignTests(unittest.TestCase):
         fake_bin = Path(tempfile.mkdtemp(prefix="verify-usr-failure-", dir=work))
         try:
             fake_git = fake_bin / "git"
-            fake_git.write_text(f"#!/bin/sh\ncase \"$*\" in\n  *check-ignore*) exec {shutil.which('git')} \"$@\" ;;\nesac\nexit 97\n", encoding="utf-8")
+            fake_git.write_text(f"#!/bin/sh\ncase \"$*\" in\n  *check-ignore*|*rev-parse*) exec {shutil.which('git')} \"$@\" ;;\nesac\nexit 97\n", encoding="utf-8")
             fake_git.chmod(0o755)
             env = os.environ.copy()
             env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
@@ -209,6 +209,47 @@ class SkillCampaignTests(unittest.TestCase):
                     self.assertEqual([], list(outside.iterdir()))
                 finally:
                     shutil.rmtree(work)
+
+    def test_usr_journey_requires_the_git_info_exclude_rule(self):
+        work = Path(tempfile.mkdtemp(prefix="verify-usr-ignore-source-", dir=WORK_TMP))
+        try:
+            repo = work / "repo"
+            helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
+            helper.parent.mkdir(parents=True)
+            helper.write_text(VERIFY_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
+            helper.chmod(0o755)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / ".gitignore").write_text(".work/\n", encoding="utf-8")
+            result = run(str(helper))
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("must be ignored through .git/info/exclude", result.stderr)
+            self.assertFalse((repo / ".work").exists())
+        finally:
+            shutil.rmtree(work)
+
+    def test_usr_journey_retains_evidence_when_interrupted_before_observation(self):
+        work = Path(tempfile.mkdtemp(prefix="verify-usr-interrupt-", dir=WORK_TMP))
+        try:
+            repo = work / "repo"
+            helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
+            helper.parent.mkdir(parents=True)
+            script = VERIFY_HELPER.read_text(encoding="utf-8")
+            signal_trap = "trap 'exit 130' 1 2 3 15\n"
+            self.assertIn(signal_trap, script)
+            helper.write_text(script.replace(signal_trap, signal_trap + 'kill -TERM "$$"\n', 1), encoding="utf-8")
+            helper.chmod(0o755)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            exclude = repo / ".git" / "info" / "exclude"
+            exclude.write_text(".work/\n", encoding="utf-8")
+            interrupted = run(str(helper))
+            self.assertEqual(130, interrupted.returncode, interrupted.stdout + interrupted.stderr)
+            match = re.search(r"^evidence: (.+)$", interrupted.stdout, re.MULTILINE)
+            self.assertIsNotNone(match, interrupted.stdout)
+            evidence = Path(match.group(1))
+            self.assertEqual("journey exited before its first observation\n", evidence.read_text(encoding="utf-8"))
+            self.assertEqual([], [path for path in (repo / ".work" / "tmp").glob("verify-usr.*") if path.is_dir()])
+        finally:
+            shutil.rmtree(work)
 
     def test_fixture_setup_creates_offline_git_repository_with_observable_failure(self):
         result = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "bug")

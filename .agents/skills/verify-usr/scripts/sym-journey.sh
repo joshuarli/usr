@@ -9,7 +9,13 @@ if [ -L "$scratch_root" ] || [ -L "$scratch_tmp" ]; then
 	printf '%s\n' '.work and .work/tmp must not be symlinks' >&2
 	exit 1
 fi
-git -C "$repo" check-ignore -q .work || { printf '%s\n' '.work must be ignored by .git/info/exclude' >&2; exit 1; }
+git -C "$repo" check-ignore -q .work/tmp/verify-marker || { printf '%s\n' '.work must be ignored by .git/info/exclude' >&2; exit 1; }
+exclude_path=$(git -C "$repo" rev-parse --git-path info/exclude) || exit 1
+ignore_rule=$(git -C "$repo" check-ignore -v -- .work/tmp/verify-marker) || { printf '%s\n' '.work must be ignored by .git/info/exclude' >&2; exit 1; }
+case "$ignore_rule" in
+	"$exclude_path":*|"$repo/$exclude_path":*) ;;
+	*) printf '%s\n' '.work must be ignored through .git/info/exclude' >&2; exit 1 ;;
+esac
 mkdir -p "$scratch_tmp" || exit 1
 if [ ! -d "$scratch_root" ] || [ -L "$scratch_root" ] || [ ! -d "$scratch_tmp" ] || [ -L "$scratch_tmp" ]; then
 	printf '%s\n' '.work and .work/tmp must be real directories' >&2
@@ -21,12 +27,27 @@ evidence="$scratch_tmp/$run_name.log"
 fixture="$run_dir/repo"
 cleanup() {
 	status=$?
+	trap '' 1 2 3 15
 	trap - 0
+	if [ -L "$evidence" ]; then
+		printf 'evidence path is a symlink: %s\n' "$evidence" >&2
+		status=1
+	elif [ ! -f "$evidence" ]; then
+		if ! printf '%s\n' 'journey exited before its first observation' > "$evidence"; then
+			printf 'failed to retain evidence: %s\n' "$evidence" >&2
+			status=1
+		fi
+	fi
 	if ! rm -rf "$run_dir"; then
 		printf 'failed to clean fixture: %s\n' "$run_dir" >&2
 		status=1
 	fi
-	printf 'evidence: %s\n' "$evidence"
+	if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
+		printf 'evidence: %s\n' "$evidence"
+	else
+		printf 'evidence was not retained: %s\n' "$evidence" >&2
+		status=1
+	fi
 	exit "$status"
 }
 trap cleanup 0

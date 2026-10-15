@@ -19,7 +19,7 @@ This procedure does not exercise `dl`, home sync, platform setup, installed syst
 
 ## Launch and readiness
 
-Run from the repository root. The helper checks that `.work` is ignored through `.git/info/exclude` before it creates scratch files.
+Run from the repository root. The helper checks that `.work` is ignored by `.git/info/exclude` before it creates scratch files.
 
 ```sh
 ./.agents/skills/verify-usr/scripts/sym-journey.sh
@@ -33,7 +33,7 @@ If the result looks wrong, confirm that the command runs at the `usr` Git root a
 
 ```sh
 git rev-parse --show-toplevel
-git check-ignore -v .work
+git check-ignore -v .work/tmp/verify-marker
 git status --short --branch
 ```
 
@@ -55,7 +55,7 @@ python3 -I dotfiles/base/.local/bin/mdtool check --untracked
 
 The helper prints the path to a text record under `.work/tmp/verify-usr.*.log`. Read it to see the commands' output and the observed filesystem results. It contains no environment dump or credentials. A successful record proves only the exercised `sym` behavior on this platform.
 
-On success or failure, the helper removes only the fixture directory it created and keeps the evidence file. Run it again to create a fresh fixture; each run uses a unique name, so prior evidence cannot collide. Do not delete evidence as part of fixture cleanup.
+On success, failure, or interruption after the cleanup trap is installed, the helper removes only the fixture directory it created and keeps the evidence file. If interrupted before its first observation, the evidence states that no journey observation was recorded. Run it again to create a fresh fixture; each run uses a unique name, so prior evidence cannot collide. Do not delete evidence as part of fixture cleanup.
 
 Update this procedure if `sym` flags, its fixture assumptions, `.work` handling, or the repository check commands change.
 

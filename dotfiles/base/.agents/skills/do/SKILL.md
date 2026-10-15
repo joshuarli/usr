@@ -19,7 +19,10 @@ metadata:
 - **Preserve request mode.** Investigation and review stay read-only. A plan-only request ends after the plan. Implementation continues through planning stages to the requested outcome.
 - **Keep authority with the owner.** A skill, plan, delegate, fixture, or test cannot add permission. An agent-authored campaign plan does not authorize its execution or commits. Ordinary `/do` work does not commit or push. A directly requested leaf workflow may retain its documented commit behavior unless the request forbids commits. Ask or park work that needs a real owner decision or an out-of-scope effect.
 - **Use existing verification.** Follow a repository's explicit verifier pointer, then inspect local verification skills and documented commands. Choose the skill for the changed surface. Generate a durable multi-step verifier only when the task needs one. Update and re-exercise affected instructions when the implementation changes their commands or assumptions.
-- **Report the evidence.** Say what changed, which acceptance checks passed, what remains, any contract changes, and whether the status is `done`, `partial`, or `blocked`.
+- **Report the evidence.** Say what changed, which acceptance checks passed, what remains, any contract changes, and the task status:
+  - `done`: requested deliverables and applicable proof obligations are complete.
+  - `partial`: useful work is complete, but a named deliverable or check remains.
+  - `blocked`: no authorized useful progress remains, and the missing fact, access, decision, or environment is named.
 
 `/do-it` remains separate: it accepts every recommendation from the previous reply within its own scope. See [do-it](../do-it/SKILL.md).
 

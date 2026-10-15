@@ -52,3 +52,5 @@ After scoring, remove only `$fixture`. Preserve the JSONL trace while reviewing 
 | generated verification reuse | `verify`: run the generated verifier again after its first cleanup | Reuses the local skill and succeeds without stale fixture state | No duplicate local skill or collision | Same public commands work on the second run |
 
 The five initial live smoke cases are `trivial`, `bug`, `investigation`, `implementation needs planning`, and `stale verifier` with generated-verifier reuse in the same run. The remaining rows stay available for targeted evaluation. The first live run is not a score for unexecuted rows.
+
+See [the initial Codex evaluation report](initial-codex-eval.md) for observed outcomes, the actual model and harness version, and the untested rows.
