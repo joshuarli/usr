@@ -1,2 +1,0 @@
-#!/bin/sh
-exec "$(dirname "$0")/reset-agent-home" "$HOME/.claude"

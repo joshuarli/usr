@@ -1,17 +1,39 @@
 #!/bin/sh
-# Delete everything in an agent's home directory (~/.claude, ~/.codex) except what the
-# dotfiles repo installs there. That keeps config, instructions, skills, and rules, and
-# clears all state, but keeps the login credentials (Claude's .credentials.json, Codex's
-# auth.json) so a reset never forces a new login.
 set -eu
 
-[ $# -eq 1 ] || { printf 'usage: reset-agent-home DIR\n' >&2; exit 1; }
-dir=${1%/}
+[ $# -gt 0 ] || { printf 'usage: reset-agent-home DIR...\n' >&2; exit 2; }
+case $HOME in
+    /*) ;;
+    *) printf 'reset-agent-home: HOME must be an absolute path\n' >&2; exit 1 ;;
+esac
+if ! home=$(CDPATH='' cd "$HOME" 2>/dev/null && pwd -P); then
+    printf 'reset-agent-home: HOME is not a directory\n' >&2
+    exit 1
+fi
 
-[ -d "$dir" ] || exit 0
-[ ! -L "$dir" ] || { printf 'reset-agent-home: %s is a symlink\n' "$dir" >&2; exit 1; }
+for dir do
+    dir=${dir%/}
+    case $dir in
+        "$HOME"/*) rel=${dir#"$HOME"/} ;;
+        *) printf 'reset-agent-home: %s is outside HOME\n' "$dir" >&2; exit 1 ;;
+    esac
+    [ -n "$rel" ] || { printf 'reset-agent-home: refusing to reset HOME\n' >&2; exit 1; }
+    current=$home
+    remaining=$rel
+    while [ -n "$remaining" ]; do
+        component=${remaining%%/*}
+        case $component in
+            ''|.|..) printf 'reset-agent-home: invalid path %s\n' "$dir" >&2; exit 1 ;;
+        esac
+        current=$current/$component
+        [ ! -L "$current" ] || { printf 'reset-agent-home: %s is a symlink\n' "$current" >&2; exit 1; }
+        case $remaining in
+            */*) remaining=${remaining#*/} ;;
+            *) remaining= ;;
+        esac
+    done
+done
 
-# The repo root, found from where this script's link points.
 self=$0
 if [ -L "$self" ]; then
     link=$(readlink "$self")
@@ -19,16 +41,31 @@ if [ -L "$self" ]; then
 fi
 repo=$(cd "$(dirname "$self")" && pwd -P)
 repo=${repo%/dotfiles/*}
-rel=${dir#"$HOME"/}
 
-for path in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
-    # An unmatched glob stays literal.
-    [ -e "$path" ] || [ -L "$path" ] || continue
-    name=${path##*/}
-    case $name in .credentials.json|auth.json) continue ;; esac
-    kept=false
-    for layer in "$repo"/dotfiles/*/; do
-        if [ -e "$layer$rel/$name" ] || [ -L "$layer$rel/$name" ]; then kept=true; fi
+reset_contents() {
+    for path in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+        [ -e "$path" ] || [ -L "$path" ] || continue
+        name=${path##*/}
+        case $3:$name in
+            root:.credentials.json|root:auth.json|root:mcp_credentials.json) continue ;;
+        esac
+        kept=false
+        for layer in "$repo"/dotfiles/*/; do
+            if [ -e "$layer$2/$name" ] || [ -L "$layer$2/$name" ]; then kept=true; fi
+        done
+        if $kept; then
+            if [ -d "$path" ] && [ ! -L "$path" ]; then
+                reset_contents "$path" "$2/$name" nested
+            fi
+        else
+            rm -rf "$path"
+        fi
     done
-    $kept || rm -rf "$path"
+}
+
+for dir do
+    rel=${dir#"$HOME"/}
+    dir=$home/$rel
+    [ -d "$dir" ] || continue
+    reset_contents "$dir" "$rel" root
 done

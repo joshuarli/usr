@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+
+xdg_config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+xdg_data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+xdg_cache_home=${XDG_CACHE_HOME:-$HOME/.cache}
+case $xdg_config_home in /*) ;; *) xdg_config_home=$HOME/.config ;; esac
+case $xdg_data_home in /*) ;; *) xdg_data_home=$HOME/.local/share ;; esac
+case $xdg_cache_home in /*) ;; *) xdg_cache_home=$HOME/.cache ;; esac
+while [ "$xdg_config_home" != / ] && [ "${xdg_config_home%/}" != "$xdg_config_home" ]; do xdg_config_home=${xdg_config_home%/}; done
+while [ "$xdg_data_home" != / ] && [ "${xdg_data_home%/}" != "$xdg_data_home" ]; do xdg_data_home=${xdg_data_home%/}; done
+while [ "$xdg_cache_home" != / ] && [ "${xdg_cache_home%/}" != "$xdg_cache_home" ]; do xdg_cache_home=${xdg_cache_home%/}; done
+
+agent_roots="claude|$HOME/.claude
+codex|$HOME/.codex
+grok|$HOME/.grok
+muse|$xdg_config_home/muse
+muse|$xdg_data_home/muse
+opencode|$HOME/.config/opencode
+opencode|$HOME/.local/share/opencode
+opencode|$xdg_cache_home/opencode"
+
+usage() {
+    printf 'usage: reset-agents [agent]\n' >&2
+    printf 'agents:' >&2
+    previous=
+    while IFS='|' read -r agent root; do
+        if [ -n "$agent" ] && [ "$agent" != "$previous" ]; then printf ' %s' "$agent" >&2; fi
+        previous=$agent
+    done <<EOF
+$agent_roots
+EOF
+    printf '\n' >&2
+    exit 2
+}
+
+if [ $# -eq 0 ]; then
+    selected=all
+elif [ $# -eq 1 ]; then
+    selected=$1
+else
+    usage
+fi
+
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P)
+set --
+matched=false
+while IFS='|' read -r agent root; do
+    [ -n "$agent" ] || continue
+    if [ "$selected" = all ] || [ "$selected" = "$agent" ]; then
+        matched=true
+        set -- "$@" "$root"
+    fi
+done <<EOF
+$agent_roots
+EOF
+
+[ "$matched" = true ] || usage
+"$script_dir/reset-agent-home" "$@"

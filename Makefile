@@ -39,6 +39,7 @@ layers:
 check:
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
 	cd dotfiles && sh agent-tier-gate-test.sh
+	sh dotfiles/reset-agents-test.sh
 	cd dotfiles && sh pre-push-test.sh
 	cd dotfiles && sh worktree-remove-test.sh
 	sh dotfiles/mdtool-test.sh
