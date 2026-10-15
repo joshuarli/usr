@@ -10,9 +10,6 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "sandbox": {
-    "enabled": false
-  },
   "model": "sonnet",
   "hooks": {
     "Notification": [
@@ -68,10 +65,13 @@
   "enabledPlugins": {
     "slack@claude-plugins-official": true
   },
+  "sandbox": {
+    "enabled": false
+  },
   "effortLevel": "high",
   "modelSettings": {
     "claude-sonnet-5-5": {
-      "effortLevel": "high"
+      "effortLevel": "medium"
     },
     "claude-haiku-5-5": {
       "effortLevel": "high"

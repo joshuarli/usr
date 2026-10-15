@@ -62,6 +62,16 @@ Carry forward findings and failed approaches. Every child gets:
 - Proportionate checks and a stopping condition.
 - No further delegation unless the brief grants it, and then only to lower tiers (Claude and Grok) within the depth cap. Codex children are all one tier, so `agents.max_depth` is the only limit.
 
+## Worktree lifecycle
+
+The parent owns each child worktree from creation through removal. Record its exact path, its branch when it has one, and the integration worktree when you create it or the harness creates it. A child finishing does not remove its worktree. Remove only the recorded path, never every entry under `.work/wt/`.
+
+After a child finishes, review its changes and decide whether to integrate or park them. For accepted changes, integrate them and run the required checks against the integrated commit. Remove the child worktree only after those checks pass, the child has stopped, and all work worth keeping is in the integration branch or a preserved branch.
+
+Before removal, run `git -C <child-worktree> status --porcelain --ignored=matching --untracked-files=all`. Keep the worktree if it has modified or untracked files. Review ignored files and preserve any local data worth keeping. Remove the worktree with `git -C <integration-worktree> worktree remove <child-worktree>`. Delete its branch only when `git -C <integration-worktree> merge-base --is-ancestor <branch> HEAD` succeeds, then run `git -C <integration-worktree> branch -d <branch>`. Keep the branch when that check fails, including after squash integration. Never force-delete a branch or worktree.
+
+When you park unfinished work and commits are authorized, commit the work, remove its clean worktree, and keep its branch. Without commit authorization, keep the worktree and report its path. Keep a worktree while its child is running, its changes remain unreviewed, or it contains uncommitted work.
+
 ## Campaigns
 
 For a backlog run as parallel lanes, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work.
