@@ -132,6 +132,18 @@ is_current() {
     [ -x "${DEST}/$1" ] && [ "$(cat "${STATE}/$1" 2>/dev/null)" = "$2" ]
 }
 
+installed() {
+    [ -x "${DEST}/$1" ] && [ ! -d "${DEST}/$1" ]
+}
+
+keep_installed() {
+    if installed "$1"; then
+        printf '%s\n' "$1 is installed"
+        return 0
+    fi
+    return 1
+}
+
 # install_binary PROG FILE ID
 # Strip quarantine and ad-hoc sign on macOS, make executable, and move into place.
 # Signing happens before the move so a failure never leaves an unsigned binary installed.
@@ -463,6 +475,7 @@ install_checked_direct() {
 }
 
 install_grok() {
+    if keep_installed grok; then return; fi
     case "$OS:$ARCH" in
         Darwin:x86_64) platform=macos-x86_64 ;;
         Darwin:aarch64) platform=macos-aarch64 ;;
@@ -477,6 +490,7 @@ install_grok() {
 }
 
 install_muse() {
+    if keep_installed muse; then return; fi
     jaq_available || { unchecked muse "jaq is required"; return; }
     case "$OS:$ARCH" in
         Darwin:x86_64) platform=x86_macos ;;
@@ -516,6 +530,7 @@ install_muse() {
 }
 
 install_claude() {
+    if keep_installed claude; then return; fi
     jaq_available || { unchecked claude "jaq is required"; return; }
     case "$OS:$ARCH" in
         Darwin:x86_64) platform=darwin-x64 ;;
@@ -544,6 +559,7 @@ install_claude() {
 }
 
 install_codex() {
+    if keep_installed codex; then return; fi
     jaq_available || { unchecked codex "jaq is required"; return; }
     case "$OS:$ARCH" in
         Darwin:x86_64) target=x86_64-apple-darwin ;;
@@ -612,11 +628,12 @@ install_codex() {
         return
     fi
     if ! tar -tzf "$tmpzip" | awk '
+        BEGIN { bad = 0 }
         /^\// { bad = 1 }
         {
             count = split($0, path, "/")
-            for (index = 1; index <= count; index++) {
-                if (path[index] == "..") bad = 1
+            for (component = 1; component <= count; component++) {
+                if (path[component] == "..") bad = 1
             }
         }
         END { exit bad }
@@ -669,6 +686,7 @@ install_codex() {
 }
 
 install_opencode2() {
+    if keep_installed opencode2; then return; fi
     case "$OS:$ARCH" in
         Darwin:x86_64) asset=opencode-darwin-x64.zip ;;
         Darwin:aarch64) asset=opencode-darwin-arm64.zip ;;
@@ -781,7 +799,9 @@ fi
 needs_jaq=false
 for prog in "$@"; do
     case "$prog" in
-        muse|codex|claude) needs_jaq=true ;;
+        muse|codex|claude)
+            if ! installed "$prog"; then needs_jaq=true; fi
+            ;;
     esac
 done
 if $needs_jaq && ! jaq_available; then
