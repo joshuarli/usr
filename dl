@@ -19,6 +19,7 @@ case "$OS" in
 esac
 DEST="${HOME}/.local/bin"
 mkdir -p "$DEST"
+CLAUDE_VERSIONS="${XDG_DATA_HOME:-${HOME}/.local/share}/claude/versions"
 
 # One file per tool holds the ETag of the asset last installed. The binary itself
 # cannot say which release it came from, and ad-hoc signing changes its bytes, so
@@ -139,6 +140,46 @@ installed() {
 keep_installed() {
     if installed "$1"; then
         printf '%s\n' "$1 is installed"
+        return 0
+    fi
+    return 1
+}
+
+claude_launcher_is_native() {
+    [ -L "${DEST}/claude" ] || return 1
+    claude_launcher_target=$(readlink "${DEST}/claude") || return 1
+    case "$claude_launcher_target" in
+        "${CLAUDE_VERSIONS}/"*) [ -x "${DEST}/claude" ] ;;
+        *) return 1 ;;
+    esac
+}
+
+claude_launcher_is_legacy_direct() {
+    [ -f "${DEST}/claude" ] && [ ! -L "${DEST}/claude" ] \
+        && [ -s "${STATE}/claude" ]
+}
+
+claude_launcher_is_dl_binary() {
+    claude_launcher_is_legacy_direct || return 1
+    command -v file >/dev/null 2>&1 || return 1
+    claude_file_type=$(file -b "${DEST}/claude" 2>/dev/null) || return 1
+    case "$claude_file_type" in
+        'Mach-O '*|'ELF '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+claude_keep_installed() {
+    if claude_launcher_is_native; then
+        printf '%s\n' 'claude is installed'
+        return 0
+    fi
+    if ! installed claude; then
+        return 1
+    fi
+    if ! claude_launcher_is_legacy_direct || ! command -v file >/dev/null 2>&1 \
+        || ! claude_launcher_is_dl_binary; then
+        printf '%s\n' 'claude is installed'
         return 0
     fi
     return 1
@@ -474,6 +515,51 @@ install_checked_direct() {
     tmpbin=
 }
 
+install_checked_claude() {
+    url=$1
+    id=$2
+    expected_sha256=$3
+    version=$4
+    if [ -z "$id" ]; then
+        unchecked claude "no asset ETag"
+        return
+    fi
+    if [ "$(cat "${STATE}/claude" 2>/dev/null)" = "$id" ] \
+        && [ -x "${CLAUDE_VERSIONS}/${version}" ] \
+        && [ -L "${DEST}/claude" ] \
+        && [ "$(readlink "${DEST}/claude")" = "${CLAUDE_VERSIONS}/${version}" ]; then
+        printf '%s\n' "claude is current"
+        return
+    fi
+    printf '%s\n' 'Downloading claude ...'
+    mkdir -p "$CLAUDE_VERSIONS"
+    tmpbin=$(mktemp "${CLAUDE_VERSIONS}/.claude.XXXXXX")
+    if ! curl -fsSL -o "$tmpbin" "$url"; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip claude "download failed"
+        return
+    fi
+    actual_sha256=$(sha256_file "$tmpbin")
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip claude "download checksum mismatch"
+        return
+    fi
+    chmod +x "$tmpbin"
+    mv -f "$tmpbin" "${CLAUDE_VERSIONS}/${version}"
+    tmpbin=
+    tmpbinlink=$(mktemp "${DEST}/.claude.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${CLAUDE_VERSIONS}/${version}" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/claude"
+    tmpbinlink=
+    printf '%s\n' "$id" > "${STATE}/claude"
+    changed=true
+    printf '%s\n' "Installed ${DEST}/claude"
+}
+
 install_grok() {
     if keep_installed grok; then return; fi
     case "$OS:$ARCH" in
@@ -530,7 +616,12 @@ install_muse() {
 }
 
 install_claude() {
-    if keep_installed claude; then return; fi
+    if claude_keep_installed; then
+        if claude_launcher_is_legacy_direct && ! command -v file >/dev/null 2>&1; then
+            printf '%s\n' 'Warning: file is required to identify the existing Claude launcher; keeping it' >&2
+        fi
+        return
+    fi
     jaq_available || { unchecked claude "jaq is required"; return; }
     case "$OS:$ARCH" in
         Darwin:x86_64) platform=darwin-x64 ;;
@@ -555,7 +646,7 @@ install_claude() {
     [ "${#expected_sha256}" -eq 64 ] || { skip claude "invalid release manifest"; return; }
     url="$base/$version/$platform/claude"
     id=$(asset_id "$url")
-    install_checked_direct claude "$url" "$id" "$expected_sha256"
+    install_checked_claude "$url" "$id" "$expected_sha256" "$version"
 }
 
 install_codex() {
@@ -799,8 +890,11 @@ fi
 needs_jaq=false
 for prog in "$@"; do
     case "$prog" in
-        muse|codex|claude)
+        muse|codex)
             if ! installed "$prog"; then needs_jaq=true; fi
+            ;;
+        claude)
+            if ! claude_keep_installed >/dev/null; then needs_jaq=true; fi
             ;;
     esac
 done
