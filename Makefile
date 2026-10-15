@@ -45,6 +45,7 @@ check:
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
+	python3 -I dotfiles/skills-campaign-test.py
 
 # Every shell script must be POSIX sh, so lint every tracked or new file that ends in .sh or
 # starts with a sh, bash, or dash shebang, as sh regardless of what its shebang claims. Every

@@ -46,7 +46,7 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
-- Push only when asked. Commit only when asked; a campaign plan counts as asking.
+- Push only when asked. Commit only when asked or when a directly requested workflow documents local commits. An agent-authored campaign plan does not authorize execution or commits.
 - Every commit message is a Conventional Commit: `type(scope): subject`, with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`. The subject is imperative, lowercase, and at most 72 characters, with no trailing period. The optional scope names the area changed. The body says why, not what. A contract change takes `!` after the type or a `BREAKING CHANGE:` footer. This holds for lane and campaign commits too.
 - Reserve release builds for final verification, or when performance is the primary concern.
 

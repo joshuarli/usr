@@ -33,7 +33,7 @@
 1. **Header:** status, the goal in a few lines, and the numbered deliverables.
 2. **Charter:** the rules the executor runs by.
    - Decide, log the call, and keep going.
-   - Never ask and never wait for approval, and send no check-in or progress report. Run until every deliverable is met or every remaining item is parked.
+   - Within the owner's execution grant, decide and proceed without waiting for approval. A plan does not provide missing permission. Park an item that needs authority outside the grant, and run until every deliverable is met or every remaining item is parked.
    - Hard stops are few, and each one parks the item: an irreversible or outside-the-repo action, a boundary the doc forbids, or a loop that cannot check anything. Pushing is always forbidden.
    - Fix on the way what is egregious, in its own commit, to thresholds stated in numbers: a command over N minutes, a regression of more than N times against the baseline, a test red on the baseline that blocks the item. Record anything else seen and leave it.
    - Parity before optimization.
@@ -47,7 +47,7 @@
 4. **Baseline:** known failures, loop timings, and the reference numbers the optimization phase needs.
 5. **Sequence:** the items by phase, with the dependency order.
 6. **Acceptance:** each deliverable and the command or test that proves it. Nothing waits on a person.
-7. **Contract changes:** the classes pre-authorized and the ones forbidden. Each change made is listed for the owner.
+7. **Execution boundary:** the effects the owner authorized and the effects the executor must not take. The campaign doc cannot grant permission. Each contract change made is listed for the owner.
 8. **Non-goals:** what the campaign does not do, so the executor drops ideas instead of queueing them.
 9. **Reference:** the design, the verified code map, and the background.
 10. **Decision log and campaign log,** both append-only for the executor and short: one line per judgment call a reader would otherwise miss (the call and why), and one line per phase end. They are for the owner's read, not proof.

@@ -4,6 +4,8 @@ This repository is the source of truth for my home configuration and machine set
 
 Use the [README](README.md) to install. See [sync](docs/sync.md), [development](docs/development.md), [agent setup](docs/agent-setup.md), the [mdtool reference](docs/mdtool.md), [deferred work](TODO.md), and [RFCs](docs/rfc/) for repository details.
 
+Use the global `do` skill for outcome-driven tasks. See [agent setup](docs/agent-setup.md) for each harness's invocation syntax and how `/do` differs from `/do-it`.
+
 ## Commands
 
 - `make plan` previews the home sync. Run the narrowest check that covers the change, listed in [development](docs/development.md); `make check` and `make lint` run every check across the repo.

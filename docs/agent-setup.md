@@ -6,6 +6,28 @@ The repository-specific skills live under `.agents/skills/`; `.claude/skills` li
 
 `dotfiles/skills-check.sh` enforces skill frontmatter and invocation rules. A new hard agent rule needs enforcement in the same change. The repository working contract asks agents not to format, commit, or push unless asked; these are instructions, not harness permission rules.
 
+## Outcome-driven work
+
+The global `do` skill selects a workflow for a task and follows it through verification. The global `do-it` skill keeps its separate meaning: it accepts every recommendation in the previous reply.
+
+Invoke `/do <task>` using the host's syntax:
+
+| Harness | Invocation |
+| --- | --- |
+| Codex CLI or IDE | `$do <task>`; interactive sessions also provide `/skills` to select a skill. |
+| Claude Code | `/do <task>` in the prompt. |
+| Muse Code | `/do <task>` in the TUI. |
+| Grok Code | `/do <task>` in the TUI. |
+| OpenCode | `/do <task>` in the TUI; the skill metadata exposes this shortcut. |
+
+For example, ask Codex to `Use the $do skill to fix the reconnect notification bug.` Invoke `/do fix the reconnect notification bug` in Claude Code, Muse Code, Grok Code, or OpenCode.
+
+Codex, Muse, Grok, and OpenCode discover shared skills in `~/.agents/skills`; Codex, Muse, and OpenCode also scan project `.agents/skills`. Claude uses `~/.claude/skills` and project `.claude/skills`. The home links expose `dotfiles/base/.agents/skills/` to global discovery, while `.claude/skills` links to project `.agents/skills`. Codex explicitly selects a skill with `$do` or `/skills`; Claude Code, Muse Code, and Grok expose user-invocable skills as `/do`; OpenCode uses the slash metadata. Use the equivalent host syntax for `create-verification-skill`.
+
+The `/do` router follows a local verifier pointer in the repository instructions, then selects a local verification skill for the interface under change. Use `create-verification-skill` when a reusable project procedure is missing or stale. The `verify-usr` skill covers the safe `sym` scratch-home journey; `dotfiles-health` owns setup policy and structural invariants.
+
+Native syntax and metadata differ by host. See [Codex skills](https://developers.openai.com/codex/skills/), [Claude Code skills](https://code.claude.com/docs/en/skills), [Muse Code skills](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/), [Grok skills](https://docs.x.ai/build/features/skills-plugins-marketplaces), and [OpenCode skills](https://docs.opencode.ai/docs/skills/).
+
 The configured coding harnesses use unrestricted permissions: Claude Code runs `bypassPermissions` with sandboxing disabled; Codex uses `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`; Muse uses `:unrestricted`; Grok uses `yolo = true` and sandbox profile `off`; OpenCode sets `permission` to `allow`. Grok imports Claude's `notify-sound` hook, but does not load Claude's `env`. The Grok config turns telemetry off, caps concurrent subagents at 64, caps nest depth at 3, and sets the status line. Grok has no worktree hook, so `worktree-create` and `worktree-remove` stay on Claude.
 
 Codex stores trusted projects in `dotfiles/base/.codex/config.toml` and the OpenRouter profile in `or.config.toml`. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. Review their diffs before committing.

@@ -29,7 +29,7 @@ Planning only: it turns a goal into a campaign doc a coordinator can run unatten
    - *Behavior parity:* `reference-parity`. *Storage, wire formats:* `durable-state`.
 5. **Decompose.** Workstreams by shared code, items sized as capabilities, prerequisites written on the item, the files each lane owns and must not touch, the widest lane count each phase allows, and a memory budget per lane. Foundations that every lane builds on (shared stylesheet, harness, types) are built first by the coordinator or one lane, never invented in parallel.
 6. **Phase** as preflight orders them: ground (baseline red, loop speed, the proof harness), parity and completeness, hardening, optimization and polish, close.
-7. **Contract changes.** Pre-authorize the classes the campaign needs, forbid the rest, and have each made change listed for the owner.
+7. **Execution authority.** State which effects execution needs the owner to authorize and forbid the rest. The plan records that boundary; writing or approving a plan does not authorize execution or commits.
 8. **Write** `docs/CAMPAIGN-<NAME>.md` in preflight's shape. Commit nothing.
 9. **Preflight it.** Apply `campaign-preflight` to the draft: audit, decide, sequence, make the loop fast, prove the foundation with `blast-radius`. Do not stop at a draft.
 

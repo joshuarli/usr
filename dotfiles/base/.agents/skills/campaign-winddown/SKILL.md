@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Winddown takes a running campaign to a clean stop. Work already in flight lands, no work begins, and the campaign doc says exactly how to resume. The bar is a reboot: after power loss, the repo, its branches, and the doc alone must be enough to continue, so nothing the campaign needs may live in `/tmp` or in a process. Mechanics (lanes, merges) are as in the Campaigns section of `orchestrate`. You are the coordinator; if that session is gone, rebuild the lane state from `git worktree list`, `git branch`, and the doc.
 
+This workflow requires owner-authorized local commits. Do not use its commit-dependent handoff when commits are forbidden.
+
 ## Rules
 
 - **Freeze first.** Set the doc's status to `winding down` and commit it before doing anything else. A crash mid-winddown must still read as a stop. Then run `codex-campaign-closeout.py begin` from the integration worktree. Select no items. Launch no lanes or waves. Cancel every loop, cron, or wakeup that would resume the campaign.

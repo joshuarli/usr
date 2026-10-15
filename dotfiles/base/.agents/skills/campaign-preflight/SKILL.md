@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 A campaign doc is the only thing the executing agent has once the owner walks away. Preflight edits the draft in place until that agent can run to the end without asking anything, then reports whether it is ready. It does not start the campaign. Like `ultrareview` it is a router: the method for each design area lives in the skill named for it. For campaign mechanics (workstreams, waves, lane contract) the doc conforms to the campaign reference linked by `orchestrate` instead of restating it.
 
+An execution-ready plan records an authority boundary; it does not authorize the effects it describes.
+
 ## The bar
 
 - **Unattended.** No question is left for runtime. Every decision is made in the doc, or delegated with a bound and a tie-break, so the executor has judgment inside the bounds and nothing to wait for. It stops only when every deliverable is met or every remaining item is parked behind a hard stop.

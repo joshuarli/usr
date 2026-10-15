@@ -2,6 +2,8 @@
 
 A campaign is a backlog too large for one session, run as parallel lanes in rolling tranches: a wave is a selection of ready work, not a barrier, and later tranches start as soon as their prerequisites allow. The parent is the integrator: it selects, briefs, reviews, merges, verifies, and reports to the owner. It writes no feature code while lanes are running.
 
+The lane and closeout steps below require owner-authorized commits. When commits are forbidden, use serial work or disjoint patch handoffs that do not commit. Do not claim commit-dependent closeout or a reboot-safe committed handoff.
+
 ### Prepare
 
 - Group the backlog into workstreams by the code they share, so that work likely to conflict is serialized inside one lane. Order the items in each workstream, give each a stable ID, and write prerequisites that cross workstreams on the item.
@@ -33,7 +35,7 @@ A campaign is a backlog too large for one session, run as parallel lanes in roll
 
 - A lane owns the design of its slice inside its files: it chooses the structure, writes the tests the slice needs, and settles details itself, logging each call. It stops only on a decision the doc leaves open.
 - Lanes never coordinate with each other. A lane that needs something from another workstream reports it; the integrator sequences it.
-- Verification belongs to the integrator. A lane uses the cheapest build that compiles its change and runs only the tests it wrote or changed, by name. It does not run suites, slow or repository-wide checks, or optimized builds; those run once, after the merge, on the code that will ship. A lane's report names what the integrator's checks should exercise and what it left unverified.
+- Verification belongs to the integrator. A lane uses the cheapest build that compiles its change and runs tests it wrote or changed, by name. It does not run suites, slow or repository-wide checks, or optimized builds. After integration, the parent runs the narrow checks for touched areas, including existing focused regression tests that cover the change. The parent runs broader checks once at the close. A lane's report names what integration should exercise and what it left unverified.
 - Shared files are append-only for a lane: add to a registry at the end of its group, put a new unit in its own file, and do not reorganize, rename, or reformat. Registries and lists that every lane appends to (switch overlays, format constants, lock files) take one entry per line, so concurrent lanes merge cleanly; the integrator renumbers format constants at merge.
 - A brief may grant a bounded exception to the no-suites rule when the item is judged by a measurement (a batch, a benchmark): the number of attempts, the command, and the scratch output path. Anything not granted stays the integrator's.
 - A change in the behavior of existing code is named in the report and ships with whatever makes old code explicit first.
