@@ -72,7 +72,11 @@ Read the selected ticket, linked decisions, and current code. Route one ticket t
 
 **Entry:** the user names a campaign or the task has real dependency and integration risk.
 
-Inspect existing branches, changes, prerequisites, and acceptance before resuming a named campaign. Use [orchestrate](../../orchestrate/SKILL.md) and its [campaign mechanics](../../orchestrate/references/campaigns.md) when delegation fits the grant. A plan-only request stops after planning. A request to execute continues under the owner's actual authorization. If commits are forbidden, use serial work or patch handoffs; do not use commit-dependent closeout as written.
+For a new campaign-sized implementation, use [campaign-plan](../../campaign-plan/SKILL.md), which runs [campaign-preflight](../../campaign-preflight/SKILL.md). Continue from a ready plan only under the owner's actual implementation and commit authority.
+
+For an existing campaign, inspect its changes, prerequisites, and acceptance before resuming. Use `campaign-preflight` only when the plan is stale or incomplete, then resume the existing work.
+
+Use [orchestrate](../../orchestrate/SKILL.md) and its [campaign mechanics](../../orchestrate/references/campaigns.md) when delegation fits the grant. If commits are forbidden, use serial work or patch handoffs; do not use commit-dependent closeout as written.
 
 Compose unusual work from a few evidence-based stages. A blocked portion does not prevent independent useful work.
 

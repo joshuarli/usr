@@ -9,7 +9,7 @@ metadata:
 
 # Create verification skill
 
-Create or maintain a compact repository-local procedure for exercising a project's actual interface. This invocation authorizes verifier instructions and narrowly needed helpers in the target repository, not product fixes, dependencies, home installation, or external writes.
+Create or maintain a compact repository-local procedure for exercising a project's actual interface. Change verifier instructions and narrowly needed helpers only when they are within the user's requested scope. This workflow does not authorize product fixes, dependencies, home installation, or external writes.
 
 ## Rules
 

@@ -179,21 +179,6 @@ trust_level = "trusted"
 [projects."/Users/josh/dev/eng-pipes"]
 trust_level = "trusted"
 
-[projects."/Users/josh/usr/.work/tmp/do-eval-trivial-i8jwf3q8"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr/.work/tmp/do-eval-bug-i_l78rue"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr/.work/tmp/do-eval-feature-ve8a2ewa"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr/.work/tmp/do-eval-verify-xubod55n"]
-trust_level = "trusted"
-
-[projects."/Users/josh/usr/.work/tmp/do-eval-verify-8ovhg20e"]
-trust_level = "trusted"
-
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]

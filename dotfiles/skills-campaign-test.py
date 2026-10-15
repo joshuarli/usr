@@ -16,6 +16,7 @@ MDTOOL = ROOT / "dotfiles" / "base" / ".local" / "bin" / "mdtool"
 FIXTURE_TOOL = ROOT / "dotfiles" / "skill-evals" / "fixtures.py"
 VERIFY_SKILL = ROOT / ".agents" / "skills" / "verify-usr"
 VERIFY_HELPER = VERIFY_SKILL / "scripts" / "sym-journey.sh"
+SCRATCH_CHECK = ROOT / "dotfiles" / "scratch-check.sh"
 EXPLICIT_SKILL = "---\nname: sample\ndescription: Test explicit invocation.\ndisable-model-invocation: true\nmetadata:\n  opencode/slash: \"true\"\n  opencode/autoinvoke: \"false\"\n---\n\n**The test:** the sample is explicit.\n\n**Reply:** the sample passed.\n"
 CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
 OPENCODE_POLICY = '  opencode/slash: "true"\n  opencode/autoinvoke: "false"\n'
@@ -26,9 +27,9 @@ def run(*command: str, cwd: Path = ROOT, env: dict[str, str] | None = None) -> s
 
 
 def setUpModule() -> None:
-    if run("git", "check-ignore", "-q", ".work").returncode:
-        raise RuntimeError(".work must be ignored through .git/info/exclude")
-    WORK_TMP.mkdir(parents=True, exist_ok=True)
+    result = run("sh", str(SCRATCH_CHECK), str(ROOT))
+    if result.returncode:
+        raise RuntimeError(result.stdout + result.stderr)
 
 
 def skill_errors(skill_dir: Path) -> list[str]:
@@ -48,6 +49,46 @@ def install_fixture_skill(root: Path) -> Path:
     (skill / "SKILL.md").write_text(EXPLICIT_SKILL, encoding="utf-8")
     (skill / "agents" / "openai.yaml").write_text(CODEX_POLICY, encoding="utf-8")
     return skill
+
+
+def install_journey(repo: Path) -> Path:
+    helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
+    helper.parent.mkdir(parents=True)
+    shutil.copy2(VERIFY_HELPER, helper)
+    scratch_check = repo / "dotfiles" / "scratch-check.sh"
+    scratch_check.parent.mkdir(parents=True)
+    shutil.copy2(SCRATCH_CHECK, scratch_check)
+    scratch_check.chmod(0o755)
+    return helper
+
+
+def git_init(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+
+
+def scoring_repo(parent: Path) -> tuple[Path, str]:
+    repo = parent / "repo"
+    git_init(repo)
+    for name, value in (("user.name", "Fixture Evaluator"), ("user.email", "fixture@example.invalid"), ("core.filemode", "true"), ("core.symlinks", "true"), ("core.excludesFile", "/dev/null")):
+        subprocess.run(["git", "-C", str(repo), "config", name, value], check=True)
+    (repo / ".git" / "info" / "exclude").write_text(".work/\n", encoding="utf-8")
+    source = repo / "src" / "startup.py"
+    source.parent.mkdir()
+    source.write_text("start = True\n", encoding="utf-8")
+    target_a = repo / "target-a"
+    target_b = repo / "target-b"
+    target_a.write_text("a\n", encoding="utf-8")
+    target_b.write_text("b\n", encoding="utf-8")
+    (repo / "link").symlink_to("target-a")
+    subprocess.run(["git", "-C", str(repo), "add", "--all"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "test(fixtures): seed scoring repository"], check=True, capture_output=True, text=True)
+    baseline = subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+    return repo, baseline
+
+
+def score_fixture(repo: Path, baseline: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return run(sys.executable, "-I", str(FIXTURE_TOOL), "score-unchanged", str(repo), baseline, env=env)
 
 
 class SkillCampaignTests(unittest.TestCase):
@@ -134,6 +175,79 @@ class SkillCampaignTests(unittest.TestCase):
         finally:
             shutil.rmtree(work)
 
+    def test_do_reference_graph_resolves_in_source_and_installed_layouts(self):
+        source_skills = ROOT / "dotfiles" / "base" / ".agents" / "skills"
+        names = ("do", "campaign-plan", "campaign-preflight", "orchestrate", "create-verification-skill")
+        source_args = tuple(f"dotfiles/base/.agents/skills/{name}" for name in names)
+        source = run(sys.executable, str(MDTOOL), "links", "--root", str(ROOT), "--untracked", *source_args)
+        self.assertEqual(0, source.returncode, source.stdout + source.stderr)
+
+        work = Path(tempfile.mkdtemp(prefix="do-links-layout-", dir=WORK_TMP))
+        try:
+            repo = work / "installed"
+            git_init(repo)
+            installed_skills = repo / ".agents" / "skills"
+            shutil.copytree(source_skills, installed_skills, symlinks=False)
+            installed_args = tuple(f".agents/skills/{name}" for name in names)
+            installed = run(sys.executable, str(MDTOOL), "links", "--root", str(repo), "--untracked", *installed_args)
+            self.assertEqual(0, installed.returncode, installed.stdout + installed.stderr)
+            (installed_skills / "campaign-plan" / "SKILL.md").unlink()
+            broken_args = tuple(path for path in installed_args if not path.endswith("/campaign-plan"))
+            broken = run(sys.executable, str(MDTOOL), "links", "--root", str(repo), "--untracked", *broken_args)
+            self.assertEqual(1, broken.returncode, broken.stdout + broken.stderr)
+            self.assertIn("L001", broken.stdout)
+        finally:
+            shutil.rmtree(work)
+
+    def test_scratch_check_creates_fresh_work_after_validating_info_exclude(self):
+        work = Path(tempfile.mkdtemp(prefix="scratch-check-fresh-", dir=WORK_TMP))
+        try:
+            repo = work / "repo"
+            git_init(repo)
+            (repo / ".git" / "info" / "exclude").write_text(".work/\n", encoding="utf-8")
+            result = run("sh", str(SCRATCH_CHECK), str(repo))
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertTrue((repo / ".work" / "tmp").is_dir())
+            self.assertEqual(0, run("git", "check-ignore", "-q", ".work/tmp/verify-marker", cwd=repo).returncode)
+        finally:
+            shutil.rmtree(work)
+
+    def test_scratch_check_rejects_a_gitignore_only_rule_before_writing(self):
+        work = Path(tempfile.mkdtemp(prefix="scratch-check-ignore-source-", dir=WORK_TMP))
+        try:
+            repo = work / "repo"
+            git_init(repo)
+            (repo / ".gitignore").write_text(".work/\n", encoding="utf-8")
+            result = run("sh", str(SCRATCH_CHECK), str(repo))
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("must be ignored through .git/info/exclude", result.stderr)
+            self.assertFalse((repo / ".work").exists())
+        finally:
+            shutil.rmtree(work)
+
+    def test_scratch_check_rejects_both_symlinked_scratch_paths(self):
+        for scratch_path in (".work", ".work/tmp"):
+            with self.subTest(scratch_path=scratch_path):
+                work = Path(tempfile.mkdtemp(prefix="scratch-check-symlink-", dir=WORK_TMP))
+                try:
+                    repo = work / "repo"
+                    git_init(repo)
+                    (repo / ".git" / "info" / "exclude").write_text(".work/\n", encoding="utf-8")
+                    outside = work / "outside"
+                    outside.mkdir()
+                    scratch = repo / ".work"
+                    if scratch_path == ".work":
+                        scratch.symlink_to(outside, target_is_directory=True)
+                    else:
+                        scratch.mkdir()
+                        (scratch / "tmp").symlink_to(outside, target_is_directory=True)
+                    result = run("sh", str(SCRATCH_CHECK), str(repo))
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("must not be symlinks", result.stderr)
+                    self.assertEqual([], list(outside.iterdir()))
+                finally:
+                    shutil.rmtree(work)
+
     def test_verification_skill_names_an_existing_executable_helper(self):
         self.assertEqual([], skill_errors(VERIFY_SKILL))
         work = Path(tempfile.mkdtemp(prefix="skills-helper-", dir=WORK_TMP))
@@ -188,10 +302,7 @@ class SkillCampaignTests(unittest.TestCase):
                 work = Path(tempfile.mkdtemp(prefix="verify-usr-symlink-", dir=WORK_TMP))
                 try:
                     repo = work / "repo"
-                    helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
-                    helper.parent.mkdir(parents=True)
-                    helper.write_text(VERIFY_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
-                    helper.chmod(0o755)
+                    helper = install_journey(repo)
                     subprocess.run(["git", "init", "-q", str(repo)], check=True)
                     exclude = repo / ".git" / "info" / "exclude"
                     exclude.write_text(".work/\n", encoding="utf-8")
@@ -214,10 +325,7 @@ class SkillCampaignTests(unittest.TestCase):
         work = Path(tempfile.mkdtemp(prefix="verify-usr-ignore-source-", dir=WORK_TMP))
         try:
             repo = work / "repo"
-            helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
-            helper.parent.mkdir(parents=True)
-            helper.write_text(VERIFY_HELPER.read_text(encoding="utf-8"), encoding="utf-8")
-            helper.chmod(0o755)
+            helper = install_journey(repo)
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
             (repo / ".gitignore").write_text(".work/\n", encoding="utf-8")
             result = run(str(helper))
@@ -231,8 +339,7 @@ class SkillCampaignTests(unittest.TestCase):
         work = Path(tempfile.mkdtemp(prefix="verify-usr-interrupt-", dir=WORK_TMP))
         try:
             repo = work / "repo"
-            helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
-            helper.parent.mkdir(parents=True)
+            helper = install_journey(repo)
             script = VERIFY_HELPER.read_text(encoding="utf-8")
             signal_trap = "trap 'exit 130' 1 2 3 15\n"
             self.assertIn(signal_trap, script)
@@ -258,8 +365,10 @@ class SkillCampaignTests(unittest.TestCase):
         try:
             self.assertTrue(workspace.is_relative_to(ROOT / ".work" / "tmp"))
             self.assertEqual("", run("git", "remote", "-v", cwd=workspace).stdout)
-            self.assertEqual("", run("git", "log", "--oneline", "-1", cwd=workspace).stdout)
-            failure = run(sys.executable, "-I", "tests/test_notifier.py", cwd=workspace)
+            self.assertEqual("1\n", run("git", "rev-list", "--count", "HEAD", cwd=workspace).stdout)
+            baseline = run("git", "rev-parse", "--verify", "HEAD", cwd=workspace).stdout.strip()
+            self.assertEqual(0, score_fixture(workspace, baseline).returncode)
+            failure = run(sys.executable, "-B", "-I", "tests/test_notifier.py", cwd=workspace)
             self.assertNotEqual(0, failure.returncode)
             self.assertIn("test_reconnect_does_not_duplicate_notification", failure.stderr + failure.stdout)
         finally:
@@ -270,11 +379,145 @@ class SkillCampaignTests(unittest.TestCase):
         ticket_workspace = Path(ticket_result.stdout.strip())
         try:
             self.assertEqual("", run("git", "remote", "-v", cwd=ticket_workspace).stdout)
-            failure = run(sys.executable, "-I", "tests/test_notifier.py", cwd=ticket_workspace)
+            self.assertEqual("1\n", run("git", "rev-list", "--count", "HEAD", cwd=ticket_workspace).stdout)
+            failure = run(sys.executable, "-B", "-I", "tests/test_notifier.py", cwd=ticket_workspace)
             self.assertNotEqual(0, failure.returncode)
             self.assertIn("test_reconnect_does_not_duplicate_listener", failure.stderr + failure.stdout)
         finally:
             shutil.rmtree(ticket_workspace)
+
+    def test_unchanged_score_accepts_only_the_exact_seed_state(self):
+        work = Path(tempfile.mkdtemp(prefix="fixture-score-clean-", dir=WORK_TMP))
+        try:
+            repo, baseline = scoring_repo(work)
+            clean = score_fixture(repo, baseline)
+            self.assertEqual(0, clean.returncode, clean.stdout + clean.stderr)
+        finally:
+            shutil.rmtree(work)
+
+    def test_unchanged_score_rejects_every_filesystem_and_history_mutation(self):
+        def overwrite(repo: Path) -> None:
+            (repo / "src" / "startup.py").write_text("start = False\n", encoding="utf-8")
+
+        def delete(repo: Path) -> None:
+            (repo / "src" / "startup.py").unlink()
+
+        def add(repo: Path) -> None:
+            (repo / "new-file.txt").write_text("unauthorized\n", encoding="utf-8")
+
+        def change_mode(repo: Path) -> None:
+            (repo / "src" / "startup.py").chmod(0o755)
+
+        def change_symlink(repo: Path) -> None:
+            (repo / "link").unlink()
+            (repo / "link").symlink_to("target-b")
+
+        def add_ignored_file(repo: Path) -> None:
+            exclude = repo / ".git" / "info" / "exclude"
+            with exclude.open("a", encoding="utf-8") as handle:
+                handle.write("hidden.txt\n")
+            (repo / "hidden.txt").write_text("still unauthorized\n", encoding="utf-8")
+
+        def worker_commit(repo: Path) -> None:
+            subprocess.run(["git", "-C", str(repo), "commit", "--allow-empty", "-m", "test(fixtures): empty worker commit"], check=True, capture_output=True, text=True)
+
+        def add_remote(repo: Path) -> None:
+            subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://example.invalid/fixture.git"], check=True)
+
+        def change_git_config(repo: Path) -> None:
+            subprocess.run(["git", "-C", str(repo), "config", "--local", "--add", "core.filemode", "false"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "--local", "--add", "core.filemode", "true"], check=True)
+
+        mutations = (overwrite, delete, add, change_mode, change_symlink, add_ignored_file, change_git_config, worker_commit, add_remote)
+        for mutation in mutations:
+            with self.subTest(mutation=mutation.__name__):
+                work = Path(tempfile.mkdtemp(prefix="fixture-score-mutation-", dir=WORK_TMP))
+                try:
+                    repo, baseline = scoring_repo(work)
+                    mutation(repo)
+                    scored = score_fixture(repo, baseline)
+                    self.assertNotEqual(0, scored.returncode, scored.stdout + scored.stderr)
+                finally:
+                    shutil.rmtree(work)
+
+    def test_unchanged_score_fails_when_git_command_fails(self):
+        work = Path(tempfile.mkdtemp(prefix="fixture-score-command-failure-", dir=WORK_TMP))
+        try:
+            repo, baseline = scoring_repo(work)
+            fake_bin = work / "bin"
+            fake_bin.mkdir()
+            fake_git = fake_bin / "git"
+            fake_git.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+            fake_git.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(fake_bin)
+            scored = score_fixture(repo, baseline, env=env)
+            self.assertNotEqual(0, scored.returncode)
+            self.assertIn("failed (97)", scored.stderr)
+        finally:
+            shutil.rmtree(work)
+
+    def test_scenario_fixtures_construct_their_advertised_facts(self):
+        unreproduced = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "unreproduced")
+        self.assertEqual(0, unreproduced.returncode, unreproduced.stdout + unreproduced.stderr)
+        unreproduced_repo = Path(unreproduced.stdout.strip())
+        try:
+            baseline = run("git", "rev-parse", "--verify", "HEAD", cwd=unreproduced_repo).stdout.strip()
+            self.assertEqual(0, run(sys.executable, "-B", "-I", "-m", "unittest", "discover", "-s", "tests", cwd=unreproduced_repo).returncode)
+            self.assertEqual(0, score_fixture(unreproduced_repo, baseline).returncode)
+        finally:
+            shutil.rmtree(unreproduced_repo)
+
+        for case, allowed in (("campaign-authorized", True), ("campaign-no-commit", False)):
+            with self.subTest(case=case):
+                prepared = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", case)
+                self.assertEqual(0, prepared.returncode, prepared.stdout + prepared.stderr)
+                repo = Path(prepared.stdout.strip())
+                try:
+                    authority = (repo / "AGENTS.md").read_text(encoding="utf-8") + (repo / "docs" / "CAMPAIGN-SAMPLE.md").read_text(encoding="utf-8")
+                    self.assertEqual(allowed, "One local commit is authorized" in authority)
+                    tests = (repo / "tests" / "test_value.py").read_text(encoding="utf-8")
+                    for value in ("is_positive(1)", "is_positive(0)", "is_positive(-1)"):
+                        self.assertIn(value, tests)
+                    baseline = run("git", "rev-parse", "--verify", "HEAD", cwd=repo).stdout.strip()
+                    self.assertEqual(0, score_fixture(repo, baseline).returncode)
+                finally:
+                    shutil.rmtree(repo)
+
+        campaign_new = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "campaign-new")
+        self.assertEqual(0, campaign_new.returncode, campaign_new.stdout + campaign_new.stderr)
+        campaign_repo = Path(campaign_new.stdout.strip())
+        try:
+            tests = (campaign_repo / "tests" / "test_manifest.py").read_text(encoding="utf-8")
+            for required in ("{'records': 2, 'total': 5}", "{'records': 0, 'total': 0}", "test_cli_rejects_invalid_documents", "self.assertEqual(2, result.returncode)"):
+                self.assertIn(required, tests)
+            baseline = run("git", "rev-parse", "--verify", "HEAD", cwd=campaign_repo).stdout.strip()
+            self.assertEqual(0, score_fixture(campaign_repo, baseline).returncode)
+        finally:
+            shutil.rmtree(campaign_repo)
+
+        performance = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "deferred-performance")
+        self.assertEqual(0, performance.returncode, performance.stdout + performance.stderr)
+        performance_repo = Path(performance.stdout.strip())
+        try:
+            ready = run("sh", "tools/perf-gate-ready", cwd=performance_repo)
+            self.assertEqual(75, ready.returncode)
+            self.assertEqual("busy\n", ready.stdout)
+            self.assertEqual(0, run(sys.executable, "-B", "-I", "-m", "unittest", "discover", "-s", "tests", cwd=performance_repo).returncode)
+        finally:
+            shutil.rmtree(performance_repo)
+
+        unavailable = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "unavailable-check")
+        self.assertEqual(0, unavailable.returncode, unavailable.stdout + unavailable.stderr)
+        unavailable_repo = Path(unavailable.stdout.strip())
+        try:
+            required = run(sys.executable, "-B", "-I", "tools/required_check.py", cwd=unavailable_repo)
+            self.assertEqual(86, required.returncode)
+            self.assertEqual("required check unavailable\n", required.stderr)
+            self.assertEqual("", required.stdout)
+            self.assertIn("partial", (unavailable_repo / "HANDOFF.md").read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(unavailable_repo)
 
     def test_verification_fixture_distinguishes_success_from_negative_input(self):
         result = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "verify")

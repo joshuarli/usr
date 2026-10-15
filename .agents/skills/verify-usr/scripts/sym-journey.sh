@@ -5,22 +5,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
 repo=$(CDPATH='' cd -- "$script_dir/../../../.." && pwd) || exit 1
 scratch_root="$repo/.work"
 scratch_tmp="$scratch_root/tmp"
-if [ -L "$scratch_root" ] || [ -L "$scratch_tmp" ]; then
-	printf '%s\n' '.work and .work/tmp must not be symlinks' >&2
-	exit 1
-fi
-git -C "$repo" check-ignore -q .work/tmp/verify-marker || { printf '%s\n' '.work must be ignored by .git/info/exclude' >&2; exit 1; }
-exclude_path=$(git -C "$repo" rev-parse --git-path info/exclude) || exit 1
-ignore_rule=$(git -C "$repo" check-ignore -v -- .work/tmp/verify-marker) || { printf '%s\n' '.work must be ignored by .git/info/exclude' >&2; exit 1; }
-case "$ignore_rule" in
-	"$exclude_path":*|"$repo/$exclude_path":*) ;;
-	*) printf '%s\n' '.work must be ignored through .git/info/exclude' >&2; exit 1 ;;
-esac
-mkdir -p "$scratch_tmp" || exit 1
-if [ ! -d "$scratch_root" ] || [ -L "$scratch_root" ] || [ ! -d "$scratch_tmp" ] || [ -L "$scratch_tmp" ]; then
-	printf '%s\n' '.work and .work/tmp must be real directories' >&2
-	exit 1
-fi
+"$repo/dotfiles/scratch-check.sh" "$repo" || exit $?
 run_dir=$(mktemp -d "$scratch_tmp/verify-usr.XXXXXX") || exit 1
 run_name=${run_dir##*/}
 evidence="$scratch_tmp/$run_name.log"
