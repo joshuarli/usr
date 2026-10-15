@@ -118,6 +118,19 @@ ln -s "$physical_home" "$linked_home"
 HOME=$linked_home "$reset_agents" grok
 absent "$physical_home/.grok/runtime.json"
 
+physical_xdg_home=$scratch/physical-xdg-home
+linked_xdg_home=$scratch/linked-xdg-home
+mkdir -p "$physical_xdg_home/custom-config/muse" "$physical_xdg_home/custom-data/muse"
+: > "$physical_xdg_home/custom-config/muse/auth.json"
+: > "$physical_xdg_home/custom-data/muse/session-index.db"
+ln -s "$physical_xdg_home" "$linked_xdg_home"
+HOME=$linked_xdg_home \
+    XDG_CONFIG_HOME=$physical_xdg_home/custom-config \
+    XDG_DATA_HOME=$physical_xdg_home/custom-data \
+    "$reset_agents" muse
+present "$physical_xdg_home/custom-config/muse/auth.json"
+absent "$physical_xdg_home/custom-data/muse/session-index.db"
+
 preflight_home=$scratch/preflight-home
 mkdir -p "$preflight_home/.config/muse" "$outside/share/muse"
 : > "$preflight_home/.config/muse/runtime.json"

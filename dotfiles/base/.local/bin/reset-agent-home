@@ -11,12 +11,17 @@ if ! home=$(CDPATH='' cd "$HOME" 2>/dev/null && pwd -P); then
     exit 1
 fi
 
+target_relative_path() {
+    case $1 in
+        "$HOME"/*) rel=${1#"$HOME"/} ;;
+        "$home"/*) rel=${1#"$home"/} ;;
+        *) printf 'reset-agent-home: %s is outside HOME\n' "$1" >&2; return 1 ;;
+    esac
+}
+
 for dir do
     dir=${dir%/}
-    case $dir in
-        "$HOME"/*) rel=${dir#"$HOME"/} ;;
-        *) printf 'reset-agent-home: %s is outside HOME\n' "$dir" >&2; exit 1 ;;
-    esac
+    target_relative_path "$dir" || exit 1
     [ -n "$rel" ] || { printf 'reset-agent-home: refusing to reset HOME\n' >&2; exit 1; }
     current=$home
     remaining=$rel
@@ -64,7 +69,8 @@ reset_contents() {
 }
 
 for dir do
-    rel=${dir#"$HOME"/}
+    dir=${dir%/}
+    target_relative_path "$dir" || exit 1
     dir=$home/$rel
     [ -d "$dir" ] || continue
     reset_contents "$dir" "$rel" root
