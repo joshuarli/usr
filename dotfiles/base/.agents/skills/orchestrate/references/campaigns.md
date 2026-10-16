@@ -31,6 +31,18 @@ The lane and closeout steps below require owner-authorized commits. When commits
    If the campaign resumes before closeout passes, run `codex-campaign-closeout.py cancel` before selecting work. Run `begin` again at the next close.
 6. **Record.** Delete finished items, add the defects found, and report to the owner: what merged, every contract change, measurements, and the decisions the next wave needs.
 
+### Keep every stage busy
+
+The owner should never have to ask for more lanes or staggered work; the parent does this unprompted, every turn it acts. These are rules, not tips:
+
+- **A lane that stops is replaced in the same turn.** When a lane reports or stops short of its list, resume it with the ruling that unblocks it, or start a fresh lane on its remainder before doing anything else. A lane whose context is large and slow is replaced by a fresh one, not resumed. Check the ready-work list against the running lanes after every report.
+- **Width has a floor and a ceiling.** Keep at least as many lanes running as there is disjoint ready work, up to what the machine allows (set by measured load, swap, memory and disk). Stronger tiers go to the hard remainder; concurrency is not lowered to afford them.
+- **Integration overlaps the next wave.** Build and verify the integration branch from finished lanes while the next wave runs. The next wave starts from that unintegrated branch (`git merge --ff-only <integration branch>` as its first step) so it does not redo finished work. Integrate continuously in small groups, not once at the end.
+- **Verification runs in parallel on disjoint inputs.** When the serialized check is the critical path, split the candidate set into independent groups and run several at once as memory allows, instead of one long queue. Never run two collects on the same tree.
+- **Every wait names its next action.** Schedule a follow-up (30 minutes at most) that states what to do when it fires, so no stage stalls on the parent.
+- **Parked work is a backlog.** Each round, hand the parked items to a stronger lane with a design task. They are not left in a report.
+- **A rejection of the integration check is routine.** Attribute it to the smallest culprit set, exclude or fix that set, and re-run without stopping the lanes; a policy gap in the checker is fixed in the checker with a test, never by weakening acceptance.
+
 ### Lane contract
 
 - A lane owns the design of its slice inside its files: it chooses the structure, writes the tests the slice needs, and settles details itself, logging each call. It stops only on a decision the doc leaves open.

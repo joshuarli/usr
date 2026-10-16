@@ -16,6 +16,7 @@ An execution-ready plan records an authority boundary; it does not authorize the
 - **Parity first, optimization last.** Feature-completeness and test parity come first, because a campaign that polishes before it works is too slow. Optimization, size, and polish items are the final phases, and until then performance budgets are measured and logged, not gating.
 - **Autonomy with a floor.** The executor makes the judgment calls and logs each. It also fixes anything egregiously slow or plainly broken that it meets, to thresholds the doc states in numbers.
 - **Checkable.** Every deliverable has a proof an agent can run, and "done" never waits on the owner.
+- **Saturated.** The doc states the lane-count floor and the machine limits that bound it, tells the executor to replace or resume a stopped lane in the same turn, to overlap integration with the next wave, and to parallelize verification on disjoint inputs (see the campaigns reference, "Keep every stage busy"). An owner prompt to add lanes or stagger work means the doc failed this bar.
 
 ## Rules
 
