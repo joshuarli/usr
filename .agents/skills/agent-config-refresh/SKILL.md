@@ -44,7 +44,7 @@ Claude, Codex, Muse Code, Grok, and OpenCode change regularly, and our setup enc
    mkdir -p "$repo/.work/tmp/grok-home"
    cp dotfiles/base/.grok/config.toml "$repo/.work/tmp/grok-home/config.toml"
    GROK_HOME="$repo/.work/tmp/grok-home" TMPDIR="$repo/.work/tmp" grok -p 'Reply exactly OK. Do not use tools.' --tools '' --output-format plain >/dev/null
-   jaq -e '.permission == "allow"' dotfiles/base/.config/opencode/opencode.json
+   jaq -e '.permissions == [{"action": "*", "resource": "*", "effect": "allow"}]' dotfiles/base/.config/opencode/opencode.json
    if command -v opencode >/dev/null 2>&1; then TMPDIR="$PWD/.work/tmp" opencode mcp list; fi
    ```
    Run Muse from outside the repo because it rejects a `TMPDIR` inside its workspace. The isolated Grok home keeps headless session files in `.work/tmp`; the copy loads the tracked config, and a missing API key may prevent a model reply. `grok inspect --json` reports effective config sources and diagnostics but does not validate every config key or agent frontmatter. Test any hook or script you changed.

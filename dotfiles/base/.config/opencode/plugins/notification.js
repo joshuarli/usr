@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
+import { Plugin } from "@opencode/plugin"
 
-export default {
+export default Plugin.define({
   id: "notification",
   setup(ctx) {
     const controller = new AbortController()
@@ -19,4 +20,4 @@ export default {
 
     return () => controller.abort()
   },
-}
+})

@@ -85,10 +85,10 @@ mkdir -p "$home/.config/opencode/plugins" "$home/.local/share/opencode" "$home/.
 : > "$home/.cache/opencode/bin/tool"
 reset_agent opencode
 present "$home/.config/opencode/opencode.json"
-present "$home/.config/opencode/tui.json"
+present "$home/.config/opencode/cli.json"
 present "$home/.config/opencode/plugins/notification.js"
 present "$home/.local/share/opencode/auth.json"
-absent "$home/.config/opencode/cli.json"
+absent "$home/.config/opencode/tui.json"
 absent "$home/.config/opencode/plugins/untracked.js"
 absent "$home/.local/share/opencode/opencode.db"
 absent "$home/.cache/opencode/bin"
