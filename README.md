@@ -8,7 +8,7 @@ On macOS, preview the system setup with `./macos/setup-macos -n`. Run `./macos/s
 
 The service-disabling step is optional. Run `./macos/setup-macos lean --audit`, review the report, then run `./macos/setup-macos lean --dry-run`. Apply it with `./macos/setup-macos lean` only after reviewing the planned changes.
 
-On Linux, skip the macOS setup. On either platform, run `make plan` and resolve any reported conflicts. Then run `make` to download the supported tools and link the current OS layer into your home directory. Run `setup-kache` after syncing. On glibc Linux, also run `setup-mold`; musl builds expect mold at `/usr/local/libexec/mold`.
+On Linux, skip the macOS setup. On either platform, run `make plan` and resolve any reported conflicts. Then run `make` to download the supported tools, link the current OS layer into your home directory, and install kache if it is missing. On glibc Linux, also run `setup-mold`; musl builds expect mold at `/usr/local/libexec/mold`.
 
 See [sync details](docs/sync.md) for what `make` changes and how the layers work.
 

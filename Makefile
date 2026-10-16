@@ -7,8 +7,11 @@
 #
 # `make` first runs dl, which installs the binaries the scripts and hooks call and is a
 # no-op when they are current. A dl failure does not stop the sync, but it fails the make.
+# After the sync, `make` runs setup-kache when kache is not installed, with no terminal so
+# it skips the interactive config; the failure rule is the same.
 
 TARGET ?= $(HOME)
+KACHE  := $(or $(CARGO_HOME),$(HOME)/.cargo)/bin/kache
 OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
@@ -18,6 +21,7 @@ SYM    := sh dotfiles/sym
 sync: layers
 	status=0; sh dl || status=$$?; \
 	for layer in $(LAYERS); do $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
+	[ -x "$(KACHE)" ] || sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; \
 	exit $$status
 
 # sym reports dry-run conflicts without failing, so check every layer and propagate them.

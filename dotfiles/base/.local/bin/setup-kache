@@ -36,6 +36,9 @@ usage() {
     exit 2
 }
 log() { printf '%s: %s\n' "$prog" "$*"; }
+quiet() {
+    quiet_out=$("$@" 2>&1) || { printf '%s\n' "$quiet_out" >&2; die "failed: $*"; }
+}
 
 # Ensure a `key = value` line exists under a [section] header in a TOML file.
 # Idempotent: does nothing when the key is already present anywhere in the
@@ -98,7 +101,6 @@ ensure_cargo_config() {
     refresh_kache_key "$cfg" env HOST_CC "\"$dest cc\""
     refresh_kache_key "$cfg" env HOST_CXX "\"$dest c++\""
     refresh_kache_key "$cfg" env CC_KNOWN_WRAPPER_CUSTOM '"kache"'
-    log "cargo config ok: $cfg"
 }
 
 # Remove the kache-managed keys from ~/.cargo/config.toml, preserving
@@ -255,7 +257,6 @@ if [ -n "$asset" ]; then
     tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/setup-kache.XXXXXX")
     trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
-    log "downloading $asset"
     curl -fsSL -o "$tmpdir/$asset" "$base_url/$asset"
     curl -fsSL -o "$tmpdir/$asset.sha256" "$base_url/$asset.sha256"
 
@@ -270,7 +271,6 @@ if [ -n "$asset" ]; then
         die "no shasum or sha256sum found"
     fi
     [ "$got" = "$want" ] || die "checksum mismatch for $asset"
-    log "checksum ok"
 
     tar -xzf "$tmpdir/$asset" -C "$tmpdir"
     [ -f "$tmpdir/kache" ] || die "tarball did not contain kache binary"
@@ -281,7 +281,7 @@ if [ -n "$asset" ]; then
 
     "$dest" --version 2>/dev/null | grep -q "kache ${version}" \
         || die "installed binary does not report kache $version"
-    log "installed $dest ($("$dest" --version))"
+    log "installed $("$dest" --version)"
 else
     command -v kache >/dev/null 2>&1 || [ -x "$dest" ] || die "kache not found"
 fi
@@ -292,27 +292,26 @@ export PATH="$cargo_bin:$PATH"
 # rust-toolchain.toml files that pin channel + rust-src component).
 if ! rustup toolchain list 2>/dev/null | grep -q "^${nightly}"; then
     log "installing toolchain $nightly"
-    rustup toolchain install "$nightly" --component rust-src
+    quiet rustup toolchain install "$nightly" --component rust-src
 fi
-rustup run "$nightly" rustc -vV | head -n 2
+quiet rustup run "$nightly" rustc -vV
 
 # Cargo config first (idempotent, preserves user content), then init for the
 # daemon/service plus its own validation of the wrapper setup.
 ensure_cargo_config
-kache init --yes
-kache install-shims
+quiet kache init --yes
+quiet kache install-shims
 # Init may preserve a previously configured path; normalize it after shims exist.
 ensure_cargo_config
 
 # Doctor must pass on this machine.
-kache doctor
+quiet kache doctor
 
 # Doctor must also see the preferred nightly when run under it. This is the
 # check that matters for rust-toolchain.toml pins: the wrapper binary (built
 # from the prebuilt release) has to interoperate with nightly rustc.
 doctor_out=$(rustup run "$nightly" kache doctor 2>&1) || die "kache doctor failed under $nightly"
 printf '%s\n' "$doctor_out" | grep -q "1.0" || die "unexpected doctor output under $nightly"
-log "kache works under $nightly"
 
 # End-to-end probe: fresh cargo project pinned to the nightly via
 # rust-toolchain.toml (same mechanism as the user's projects), built once
@@ -323,18 +322,16 @@ trap 'rm -rf "$probe"' EXIT INT TERM
     cd "$probe"
     cargo init --bin --name kache_probe . >/dev/null 2>&1
     printf '[toolchain]\nchannel = "%s"\n' "$nightly" > rust-toolchain.toml
-    cargo build 2>&1 | tail -n 2
+    quiet cargo build
     [ -x "target/debug/kache_probe" ] || die "probe build produced no binary"
     ./target/debug/kache_probe >/dev/null
 )
 rm -rf "$probe"
 trap - EXIT INT TERM
-log "probe build under $nightly ok"
 
 # Show the effective kache-managed cargo config, then open the interactive
 # editor when there is a terminal (kache config requires one).
-log "managed cargo config:"
-grep -E '^[[:space:]]*(rustc-wrapper|rustdoc|HOST_CC|HOST_CXX|CC_KNOWN_WRAPPER_CUSTOM)[[:space:]]*=' \
+grep -Eq '^[[:space:]]*(rustc-wrapper|rustdoc|HOST_CC|HOST_CXX|CC_KNOWN_WRAPPER_CUSTOM)[[:space:]]*=' \
     "${CARGO_HOME:-$HOME/.cargo}/config.toml" || die "managed keys missing from cargo config"
 if [ -t 0 ]; then
     kache config
