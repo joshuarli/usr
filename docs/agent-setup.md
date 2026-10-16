@@ -8,7 +8,7 @@ The repository-specific skills live under `.agents/skills/`; `.claude/skills` li
 
 ## Outcome-driven work
 
-The global `do` skill selects a workflow for a task and follows it through verification. The global `do-it` skill keeps its separate meaning: it accepts every recommendation in the previous reply.
+The global `do` skill selects a workflow for a task and follows it through verification. The global `yea` skill keeps its separate meaning: it accepts every recommendation in the previous reply.
 
 Invoke `/do <task>` using the host's syntax:
 

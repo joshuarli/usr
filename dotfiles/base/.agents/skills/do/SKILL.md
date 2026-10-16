@@ -25,7 +25,7 @@ metadata:
   - `partial`: useful work is complete, but a named deliverable or check remains.
   - `blocked`: no authorized useful progress remains, and the missing fact, access, decision, or environment is named.
 
-`/do-it` remains separate: it accepts every recommendation from the previous reply within its own scope. See [do-it](../do-it/SKILL.md).
+`/yea` remains separate: it accepts every recommendation from the previous reply within its own scope. See [yea](../yea/SKILL.md).
 
 **The test:** the requested outcome is complete or has a specific remaining blocker, and the work stayed within the owner's task and authority.
 

@@ -15,6 +15,7 @@ Planning only: it turns a goal into a campaign doc a coordinator can run unatten
 - **An approved artifact is the spec.** If earlier work left owner-approved output (reviewed mocks, a frozen baseline, a reference), the campaign reproduces it. It does not reinterpret it.
 - **Every deliverable has a proof an agent can run**, with a threshold. If none exists yet, the first phase builds the proof, and nothing else starts before it works.
 - **Read the prior campaigns** in `docs/CAMPAIGN-*.md` and `DECISIONS.md`. Reuse their house style. Find why the weak ones fell short (a goal judged by words, not artifacts) and design that out.
+- **Technical blockers are not questions.** Anything the evidence and the code can settle (a type design, a rule the campaign wrote for itself, a cross-file change) goes in the plan as parent work. Ask only what changes the product, the contract, or authorization.
 - **Ask once.** Batch the owner's decisions into one `AskUserQuestion`: at most four, each with a recommendation, only for choices that change the product or the contract or carry real risk. Everything else is prescribed (with the reason) or delegated (with a bound).
 - **No code, no commits, no pushes, no formatters.** Write the doc and the files it needs to be executable, nothing else.
 

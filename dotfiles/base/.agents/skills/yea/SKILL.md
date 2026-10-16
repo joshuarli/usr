@@ -1,10 +1,10 @@
 ---
-name: do-it
-description: "Use for /do-it: accept every recommendation from your last reply and carry all of them out, in full, instead of the smallest change you proposed."
+name: yea
+description: "Use for /yea: accept every recommendation from your last reply and carry all of them out, in full, instead of the smallest change you proposed."
 disable-model-invocation: true
 ---
 
-# Do It
+# Yea
 
 The owner has read your recommendations and accepted all of them. Do the full recommended set, not the smallest subset you offered as a fallback.
 
