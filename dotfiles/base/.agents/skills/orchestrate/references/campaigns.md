@@ -33,7 +33,7 @@ The lane and closeout steps below require owner-authorized commits. When commits
 
 ### Keep every stage busy
 
-The owner should never have to ask for more lanes or staggered work; the parent does this unprompted, every turn it acts. These are rules, not tips:
+The owner should never have to ask for more lanes or staggered work; the parent does this unprompted, every turn it acts. When the owner does ask, apply the [accelerate](../../accelerate/SKILL.md) skill. These are rules, not tips:
 
 - **A lane that stops is replaced in the same turn.** When a lane reports or stops short of its list, resume it with the ruling that unblocks it, or start a fresh lane on its remainder before doing anything else. A lane whose context is large and slow is replaced by a fresh one, not resumed. Check the ready-work list against the running lanes after every report.
 - **Width has a floor and a ceiling.** Keep at least as many lanes running as there is disjoint ready work, up to what the machine allows (set by measured load, swap, memory and disk). Stronger tiers go to the hard remainder; concurrency is not lowered to afford them.
