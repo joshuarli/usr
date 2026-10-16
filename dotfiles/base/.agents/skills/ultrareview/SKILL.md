@@ -12,6 +12,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 
 - **The scope is the repo you are in,** not its dependencies or deployment. Name what you did not cover.
 - **The code is the truth.** When docs and code disagree, fix the doc. If the code is what is wrong, leave it and file a finding.
+- **Findings never ask for smoke tests or new CI.** A missing test is a finding only when a named behavior has no check; a missing CI job is not a finding.
 - **Big picture only.** A finding must change what the owner does: a correctness, security, data, reliability, delivery, or maintainability risk, or something that slows every future change. No style, naming, formatting, or anything a linter would catch, unless the missing check is the finding. Most repos yield 8 to 20 findings; none is a valid result.
 - **No finding without evidence:** a `file:line` you read or a command you ran. Never invent a caller, API, or version.
 - **Follow the repo's instructions.** Read its AGENTS.md first and obey its verification limits. Run the cheapest existing check once for a baseline and say what it was; report before starting anything expensive. No formatters, no commits, no pushes.
@@ -44,7 +45,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 | Comments | `comment-cleanup` | Which comments excuse a workaround or claim a constraint nothing enforces? Each is a finding about that code, and the spreading ones are the worst. |
 | Recurring mistakes | `correct` | Which defect classes recur in history and have no guard? |
 
-No skill covers these, so ask directly: security beyond input handling (authn and authz, secrets in the tree or history, injection), which gets a short pass unless the repo has auth, secrets, multi-tenant data, or network exposure, and a hard look when it does; build, release, and CI (reproducible, pinned, can it ship and roll back); dependencies (abandoned, duplicated, unpinned, heavy); operability (can an operator see a failure, configure the system, and recover).
+No skill covers these, so ask directly: security beyond input handling (authn and authz, secrets in the tree or history, injection), which gets a short pass unless the repo has auth, secrets, multi-tenant data, or network exposure, and a hard look when it does; build and release (reproducible, pinned, can it ship and roll back), reading CI config only to learn them and proposing no new CI; dependencies (abandoned, duplicated, unpinned, heavy); operability (can an operator see a failure, configure the system, and recover).
 
 ## Docs refresh
 

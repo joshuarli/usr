@@ -22,6 +22,8 @@
 ## Tests and verification
 
 - Test observable behavior and invariants, not trivia. Write tests first when behavior is clear.
+- Do not add smoke tests, existence checks, or "it runs" tests. Add a test only when it fails for a behavior a user or caller depends on.
+- Work on CI only when asked. Do not add, edit, or extend workflows, pipelines, or CI-only steps, or propose them, while doing other work. Verify locally.
 - Bug fixes: reproduce with a minimal failing test, then fix the root cause. Keep the test.
 - Never weaken or delete a test to make it pass unless the test is wrong, and say so.
 - Verify the changed behavior with the narrowest hard check (compiler, type checker, focused test). Reuse existing build artifacts.

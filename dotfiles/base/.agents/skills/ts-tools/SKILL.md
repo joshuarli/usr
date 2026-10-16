@@ -38,7 +38,7 @@ Remnants to delete unless a real compatibility surface remains: react, next, red
 
 If the repo has no agent instructions, add a terse `AGENTS.md` naming the ownership above and the canonical commands (`pnpm install`, `deno task check`), and forbidding a return to React, Node-first execution, SolidStart, Vite+, Jest, ESLint, npm/Yarn/Bun, or a second lockfile.
 
-CI mirrors local: `pnpm install --frozen-lockfile` (never regenerate the lockfile), then the Deno tasks, plus browser and end-to-end suites where applicable. Correctness must not depend on a warm cache.
+Touch CI only when asked. When asked, mirror local: `pnpm install --frozen-lockfile` (never regenerate the lockfile), then the Deno tasks, plus browser and end-to-end suites where applicable. Correctness must not depend on a warm cache.
 
 ## Verification
 
