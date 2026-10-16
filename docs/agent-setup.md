@@ -30,7 +30,7 @@ Native syntax and metadata differ by host. See [Codex skills](https://developers
 
 The configured coding harnesses use unrestricted permissions: Claude Code runs `bypassPermissions` with sandboxing disabled; Codex uses `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`; Muse uses `:unrestricted`; Grok uses `yolo = true` and sandbox profile `off`; OpenCode allows everything with a `permissions` allow-all rule. Grok imports Claude's `notify-sound` hook, but does not load Claude's `env`. The Grok config turns telemetry off, caps concurrent subagents at 64, caps nest depth at 3, and sets the status line. Grok has no worktree hook, so `worktree-create` and `worktree-remove` stay on Claude.
 
-Codex stores trusted projects in `dotfiles/base/.codex/config.toml` and the OpenRouter profile in `or.config.toml`. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. Review their diffs before committing.
+Codex stores trusted projects in `dotfiles/base/.codex/config.toml` and the OpenRouter profile in `or.config.toml`. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. The OpenCode client owns `cli.json` and restores it when missing, so install its tracked symlink with the client stopped. Review their diffs before committing.
 
 Claude retains its `agent-tier-gate` subagent hook and the official Slack plugin. The configured OpenCode `permissions` allow-all rule applies globally; there are no per-agent permission overrides in this tree.
 
