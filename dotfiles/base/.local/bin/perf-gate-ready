@@ -1,21 +1,37 @@
 #!/bin/sh
-# Tells whether the host is quiet enough to trust a time-based perf gate
-# (build time, startup, runtime). Memory and size gates do not need it.
+# Two jobs, on macOS and Linux. Gate mode tells whether the host is quiet enough to trust a
+# time-based perf gate (build time, startup, runtime); only load decides it. Status mode
+# reports load and memory pressure together so parallel work is sized to avoid running out
+# of memory or thrashing swap. Memory is a precaution, not a perf gate: it never makes a
+# timing measurement valid or invalid, and memory and size gates do not need gate mode.
 #
-# Exit 0: quiet. Exit 75: busy; report the gate as deferred, never as passed.
+# Gate mode (default). Exit 0: quiet. Exit 75: busy; report the gate as deferred, never as passed.
 # Exit 1: could not read the load.
 #
-# Usage: perf-gate-ready [-1]
+# Status mode (-s). Prints one line with load, free memory, swap, free disk and
+# lanes_by_memory. Exit 0: roomy. Exit 75: constrained by memory, swap or disk (reasons on stderr);
+# add no width, because more work risks an OOM kill or swap thrash. Load is shown beside it but
+# never decides the status verdict; a loaded host is slower, not unsafe.
+#
+# Usage: perf-gate-ready [-1] | perf-gate-ready -s [PATH]
 #   Default retries while busy: PERF_GATE_ATTEMPTS (3) checks, PERF_GATE_WAIT (60) seconds apart.
 #   -1 checks once; use it right after a measurement to discard a run that
 #   overlapped a load spike.
+#   -s PATH names the directory whose filesystem is checked for free disk (default: .).
 # PERF_GATE_MAX_LOAD (0.7) is the 1-minute load average per core above which the host counts as busy.
+# PERF_GATE_MIN_MEM_PCT (15)   status: free memory percent below which the host is constrained.
+# PERF_GATE_MAX_SWAP_PCT (50)  status: swap used percent above which the host is constrained.
+# PERF_GATE_MIN_DISK_GIB (20)  status: free GiB on PATH below which the host is constrained.
+# PERF_GATE_LANE_GIB (4)       status: resident GiB planned per lane; lanes_by_memory divides free memory by it.
+# PERF_GATE_PROC               directory standing in for /proc (tests).
 
 die () { >&2 printf '%s\n' "$1"; exit 1; }
 
+proc="${PERF_GATE_PROC:-/proc}"
+
 load1 () {
-	if [ -r /proc/loadavg ]; then
-		read -r l _ < /proc/loadavg
+	if [ -r "$proc/loadavg" ]; then
+		read -r l _ < "$proc/loadavg"
 	else
 		# "{ 1.23 1.50 1.60 }"
 		l="$(sysctl -n vm.loadavg)" || return 1
@@ -25,12 +41,78 @@ load1 () {
 	printf '%s\n' "$l"
 }
 
+# Sets total_kib avail_kib swap_total_kib swap_free_kib.
+memory () {
+	if [ -r "$proc/meminfo" ]; then
+		read -r total_kib avail_kib swap_total_kib swap_free_kib <<EOF
+$(awk '
+	$1 == "MemTotal:" { t = $2 }
+	$1 == "MemAvailable:" { a = $2 }
+	$1 == "SwapTotal:" { st = $2 }
+	$1 == "SwapFree:" { sf = $2 }
+	END { print t, a, st, sf }' "$proc/meminfo")
+EOF
+		[ -n "$avail_kib" ] || die 'cannot read memory from meminfo'
+	elif [ -r "$proc/loadavg" ]; then
+		die "no meminfo under $proc"
+	else
+		total_kib="$(( $(sysctl -n hw.memsize) / 1024 ))" || die 'cannot read memory size'
+		# memory_pressure counts reclaimable pages as free, which is the figure that matters here.
+		pct="$(memory_pressure 2>/dev/null | awk '/free percentage/ { sub(/%/, "", $NF); print $NF }')"
+		[ -n "$pct" ] || die 'cannot read memory pressure'
+		avail_kib="$(( total_kib * pct / 100 ))"
+		# "total = 1024.00M  used = 219.94M  free = 804.06M  (encrypted)"
+		read -r swap_total_kib swap_free_kib <<EOF
+$(sysctl -n vm.swapusage | awk '{ gsub(/M/, ""); printf "%d %d\n", $3 * 1024, $9 * 1024 }')
+EOF
+	fi
+}
+
+cores="$(getconf _NPROCESSORS_ONLN)" || die 'cannot read core count'
+
+status () {
+	path="${1:-.}"
+	min_mem="${PERF_GATE_MIN_MEM_PCT:-15}"
+	max_swap="${PERF_GATE_MAX_SWAP_PCT:-50}"
+	min_disk="${PERF_GATE_MIN_DISK_GIB:-20}"
+	lane_gib="${PERF_GATE_LANE_GIB:-4}"
+	load="$(load1)" || die 'cannot read load average'
+	memory
+	disk_kib="$(df -Pk "$path" | awk 'NR == 2 { print $4 }')"
+	[ -n "$disk_kib" ] || die "cannot read free disk for $path"
+	line="$(awk -v cores="$cores" -v load="$load" -v tk="$total_kib" -v ak="$avail_kib" \
+		-v stk="$swap_total_kib" -v sfk="$swap_free_kib" -v dk="$disk_kib" \
+		-v min_mem="$min_mem" -v max_swap="$max_swap" -v min_disk="$min_disk" -v lane="$lane_gib" '
+		BEGIN {
+			gib = 1024 * 1024
+			mem_pct = tk > 0 ? 100 * ak / tk : 0
+			swap_used = stk - sfk
+			swap_pct = stk > 0 ? 100 * swap_used / stk : 0
+			disk = dk / gib
+			lanes = int((ak / gib) / lane)
+			reasons = ""
+			if (mem_pct < min_mem) reasons = reasons sprintf("memory %.0f%% free (below %s); ", mem_pct, min_mem)
+			if (swap_pct > max_swap) reasons = reasons sprintf("swap %.0f%% used (above %s); ", swap_pct, max_swap)
+			if (disk < min_disk) reasons = reasons sprintf("disk %.0f GiB free (below %s); ", disk, min_disk)
+			verdict = reasons == "" ? "ok" : "constrained"
+			printf "%s\tcores=%d load=%.2f (%.2f/core) mem_free=%.0f%% (%.1f of %.1f GiB) swap=%.0f/%.0f MiB disk_free=%.0f GiB lanes_by_memory=%d\t%s\n",
+				verdict, cores, load, load / cores, mem_pct, ak / gib, tk / gib,
+				swap_used / 1024, stk / 1024, disk, lanes, reasons
+		}')" || die 'cannot compute status'
+	verdict="${line%%	*}"
+	rest="${line#*	}"
+	printf 'perf-gate-ready: %s  %s\n' "$verdict" "${rest%%	*}"
+	[ "$verdict" = ok ] && exit 0
+	>&2 printf 'perf-gate-ready: constrained (risk of OOM or swap thrash, not a perf-gate result): %s\n' "${rest#*	}"
+	exit 75
+}
+
+[ "$1" = -s ] && status "$2"
+
 max="${PERF_GATE_MAX_LOAD:-0.7}"
 attempts="${PERF_GATE_ATTEMPTS:-3}"
 wait_s="${PERF_GATE_WAIT:-60}"
 [ "$1" = -1 ] && attempts=1
-
-cores="$(getconf _NPROCESSORS_ONLN)" || die 'cannot read core count'
 
 i=1
 while :; do

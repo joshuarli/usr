@@ -12,8 +12,10 @@ under the existing [orchestrate](../orchestrate/SKILL.md) and campaign rules;
 this skill changes the settings, not the contract.
 
 - **More lanes.** Count running lanes against ready work with no owner and
-  launch the difference this turn. Re-read the machine's measured load, memory,
-  and swap, then raise the width to the new margin instead of the old one.
+  launch the difference this turn. Run `perf-gate-ready -s` for the machine's memory, swap, disk
+  and load, then raise the width to the new margin instead of the old one. Memory
+  decides width, as a precaution against OOM and swap thrash rather than a perf
+  gate; high load alone slows builds but does not stop a launch.
 - **Wider lanes.** Merge slivers that share files into one slice per lane, and
   hand each lane its whole workstream remainder, not the next item. Brief a
   resumed lane with everything now ready for its files.
