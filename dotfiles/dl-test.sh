@@ -97,6 +97,165 @@ esac
 EOF
 chmod +x "$mock_bin/file"
 
+cat > "$mock_bin/npm" <<'EOF'
+#!/bin/sh
+set -eu
+case "$1" in
+    view)
+        case "$2" in
+            @deepseek-ai/dsh@next) printf '%s\n' '0.2.1-rc.2' ;;
+            @deepseek-harness-tui/dsh-tui) printf '%s\n' '0.16.0' ;;
+            *) exit 1 ;;
+        esac
+        ;;
+    install)
+        prefix=
+        for arg do
+            case "$arg" in
+                --prefix) next_is_prefix=true ;;
+                *)
+                    if [ "${next_is_prefix:-false}" = true ]; then
+                        prefix=$arg
+                        next_is_prefix=false
+                    fi
+                    ;;
+            esac
+        done
+        [ -n "$prefix" ] || exit 1
+        mkdir -p "$prefix/bin"
+        mkdir -p "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui"
+        printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh"
+        printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh-tui"
+        printf '%s\n' '- id: tool-ralph' '  disabled: true' > \
+            "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
+        chmod +x "$prefix/bin/dsh" "$prefix/bin/dsh-tui"
+        printf '%s\n' "install $*" >> "$NPM_LOG"
+        ;;
+    uninstall)
+        [ "$2" = --global ] && [ "$3" = --prefix ] && [ "$5" = @deepseek-ai/dsh ] || exit 1
+        rm -rf "$4/lib/node_modules/@deepseek-ai/dsh"
+        rm -f "$4/bin/dsh"
+        printf '%s\n' "uninstall $*" >> "$NPM_LOG"
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+chmod +x "$mock_bin/npm"
+
+cat > "$mock_bin/pnpm" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$mock_bin/pnpm"
+
+dsh_home="$test_root/dsh-home"
+dsh_data="$dsh_home/data"
+dsh_state="$dsh_home/state"
+npm_log="$test_root/npm.log"
+mkdir -p "$dsh_home/.local/bin" "$dsh_home/.local/lib/node_modules/@deepseek-ai/dsh"
+ln -s ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js "$dsh_home/.local/bin/dsh"
+if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" dsh 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$dsh_data/dsh/bin/dsh" ]
+[ -x "$dsh_data/dsh/bin/dsh-tui" ]
+[ ! -L "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml" ]
+if grep -Fq 'tool-ralph' "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"; then
+    printf '%s\n' 'dsh did not remove the incompatible TUI patch row' >&2
+    exit 1
+fi
+[ ! -e "$dsh_home/.local/bin/dsh" ]
+[ ! -d "$dsh_home/.local/lib/node_modules/@deepseek-ai/dsh" ]
+case "$output" in
+    *"Installed dsh and dsh-tui under $dsh_data/dsh"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+case "$(cat "$npm_log")" in
+    *'@deepseek-ai/dsh@0.2.1-rc.2 @deepseek-harness-tui/dsh-tui@0.16.0'*) ;;
+    *) cat "$npm_log" >&2; exit 1 ;;
+esac
+
+managed_dsh_home="$test_root/managed-dsh-home"
+managed_dsh_data="$managed_dsh_home/data"
+managed_dsh_state="$managed_dsh_home/state"
+managed_dsh_log="$test_root/managed-dsh-npm.log"
+mkdir -p "$managed_dsh_home/.local/bin" "$managed_dsh_home/.local/lib/node_modules/@deepseek-ai/dsh"
+ln -s "$repo_root/dotfiles/base/.local/bin/dsh" "$managed_dsh_home/.local/bin/dsh"
+if output=$(HOME="$managed_dsh_home" XDG_DATA_HOME="$managed_dsh_data" \
+    XDG_STATE_HOME="$managed_dsh_state" TMPDIR="$test_root/tmp" NPM_LOG="$managed_dsh_log" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" dsh 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$managed_dsh_home/.local/bin/dsh")" = "$repo_root/dotfiles/base/.local/bin/dsh" ]
+[ -d "$managed_dsh_home/.local/lib/node_modules/@deepseek-ai/dsh" ]
+if grep -Fq 'uninstall ' "$managed_dsh_log"; then
+    printf '%s\n' 'dsh removed a repo-managed launcher while cleaning up the old npm package' >&2
+    exit 1
+fi
+case "$output" in
+    *"Keeping existing dsh launcher at $managed_dsh_home/.local/bin/dsh"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+
+if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" dsh 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'dsh and dsh-tui are current (0.2.1-rc.2, 0.16.0)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+printf '%s\n' '- id: tool-ralph' '  disabled: true' \
+    > "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
+if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" dsh 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+if grep -Fq 'tool-ralph' "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"; then
+    printf '%s\n' 'dsh did not repair the TUI patch on the current fast path' >&2
+    exit 1
+fi
+printf '%s\n' sentinel > "$test_root/external-patch.yml"
+rm "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
+ln -s "$test_root/external-patch.yml" \
+    "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
+if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" dsh 2>&1); then
+    printf '%s\n' 'dsh followed a symlinked TUI patch' >&2
+    exit 1
+fi
+[ "$(cat "$test_root/external-patch.yml")" = sentinel ]
+rm "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
+printf '%s\n' '- id: tool-ralph' '  disabled: false' \
+    > "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
+if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" dsh 2>&1); then
+    printf '%s\n' 'dsh accepted a changed TUI compatibility row' >&2
+    exit 1
+fi
+case "$(cat "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml")" in
+    *'disabled: false'*) ;;
+    *) printf '%s\n' 'dsh changed the unexpected TUI patch row' >&2; exit 1 ;;
+esac
+
 if output=$(HOME="$home" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" \
     TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" muse 2>&1); then
     :

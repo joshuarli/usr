@@ -66,6 +66,21 @@ confined() {
     return 0
 }
 
+source_relative_path() {
+    if [ "$1" = "$src" ]; then
+        source_rel=$src
+    else
+        case "$1" in
+            "$src"/*) source_rel=${1#"$src"/} ;;
+            *) return 1 ;;
+        esac
+    fi
+    case "/$source_rel/" in
+        *"/../"*|*"/./"*) return 1 ;;
+    esac
+    return 0
+}
+
 target="$HOME"; delete=false; dry_run=false; verbose=false; failed=false
 
 while [ $# -gt 0 ]; do
@@ -145,7 +160,11 @@ while IFS= read -r fp; do
         if $_in_sd; then continue; fi
     fi
 
-    rel="${fp#"$src/"}"
+    if ! source_relative_path "$fp"; then
+        printf 'CONFLICT: %s is not a safe source path.\n' "$fp" >> "$tmp/conflicts"
+        continue
+    fi
+    rel=$source_rel
     name="$tgt/$rel"
     # Absolute versions for relpath computation only
     fp_abs="$src_abs/$rel"
@@ -214,7 +233,11 @@ while IFS= read -r sd; do
     done < "$tmp/symlink-dirs"
     if $_nested; then log "SKIP (nested in another symlink-dir): $sd"; continue; fi
 
-    rel="${sd#"$src/"}"
+    if ! source_relative_path "$sd"; then
+        printf 'CONFLICT: %s is not a safe source path.\n' "$sd" >> "$tmp/conflicts"
+        continue
+    fi
+    rel=$source_rel
     name="$tgt/$rel"
     fp_abs="$src_abs/$rel"
     name_abs="$tgt_abs/$rel"

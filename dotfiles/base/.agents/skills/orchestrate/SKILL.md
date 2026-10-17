@@ -11,13 +11,13 @@ Delegate when specification and verification cost less than doing the work local
 
 Route by difficulty, uncertainty, and risk. Use the column for the harness you are running in.
 
-| Work | Codex | Claude and Grok | OpenCode | Muse Code | Antigravity CLI |
-| --- | --- | --- | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | same model, `explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | same model, `general` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6-luna`, `xhigh` | `worker` | same model, `general` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` | same model, `general` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-medium` |
-| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | same model, `general` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` |
+| Work | Codex | Claude and Grok | OpenCode | Muse Code | Antigravity CLI | DeepSeek TUI |
+| --- | --- | --- | --- | --- | --- | --- |
+| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | same model, `explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` |
+| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | same model, `general` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` |
+| Normal implementation, debugging, tests, ordinary review | `gpt-6-luna`, `xhigh` | `worker` | same model, `general` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` | same model, `general` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-medium` | `deepseek-flash`, `max` |
+| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | same model, `general` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` |
 
 **Default to `worker`.** Size is not difficulty. A big lane with a clear method and acceptance (a profiled optimization, a port with a reference, a mock built from a design doc, an investigation with a known procedure, a bug fix with a reproduction) is a `worker` task, and so is most campaign lane work. Use `expert` only when the path is unknown and a wrong turn is costly: a cross-cutting design, a failure with no hypothesis, an integration that spans owners. If the brief can name the steps and the acceptance check, it is not an `expert` brief. Start with `worker` and escalate on evidence that the work was harder than briefed.
 
@@ -50,6 +50,10 @@ Pass `model: muse-spark-1.3` and the row's `effort` on every child. Never use an
 ### Antigravity CLI
 
 Select the model from the Antigravity CLI column with `agy --model <model>`. Use only Gemini models, even though the CLI also lists other providers. Antigravity custom agents accept only `inherit`, `flash`, or `pro` in their `model` field, not exact model IDs. Set each child to `inherit` and select the row's model for the parent session.
+
+### DeepSeek TUI
+
+The DeepSeek TUI column is the only permitted model and effort route for DSH skill work. DeepSeek exposes `off`, `low`, `high`, and `max`, with no `medium`; use `high` for workers as the medium analogue and `max` for experts and gods as the high analogue. Do not switch providers or substitute another model; if the assigned model or effort is unavailable, report it.
 
 ## Delegation
 

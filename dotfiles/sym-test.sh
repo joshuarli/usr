@@ -3,7 +3,11 @@
 set -e
 die () { >&2 printf %s\\n "$1"; exit 1; }
 
-tmp="$(mktemp -d)" || die 'mktemp failed'
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
+work_root="$repo_root/.work/tmp"
+mkdir -p "$work_root"
+tmp="$(mktemp -d "$work_root/sym.XXXXXX")" || die 'mktemp failed'
 trap 'rm -rf "$tmp"' 0
 trap 'exit 130' 1 2 3 15
 
@@ -240,10 +244,16 @@ rm -rf home; mkdir home
 
 
 printf '\n17: a source outside Git works, and honors .sym-dir\n'
-ng="$(mktemp -d)"
+ng="$(mktemp -d "$work_root/sym-nongit.XXXXXX")"
 mkdir -p "$ng/src/.a" "$ng/src/d" "$ng/home"
 echo x > "$ng/src/.a/f"; touch "$ng/src/d/.sym-dir"; echo y > "$ng/src/d/g"
-(cd "$ng" && $sym -t home src > /dev/null 2>&1)
+mkdir -p "$ng/no-git"
+cat > "$ng/no-git/git" <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x "$ng/no-git/git"
+(cd "$ng" && PATH="$ng/no-git:$PATH" $sym -t home src > /dev/null 2>&1)
 echo "  assertion 1: file link and directory link are both made"
 [ -L "$ng/home/.a/f" ] && [ -L "$ng/home/d" ] && [ "$(find "$ng/home" -type l | wc -l | tr -d ' ')" -eq 2 ] || nfailed=$((nfailed + 1))
 rm -rf "$ng"
@@ -291,6 +301,42 @@ $sym -t home dotfiles/planned > log 2>&1
 echo "  assertion 1: the existing link resolves after the planned target is linked"
 [ -e home/.claude/skills/keep ] && [ -L home/.agents/skills ] || nfailed=$((nfailed + 1))
 rm -rf home
+
+
+printf '\n22: newline-split paths cannot escape the target in either mode\n'
+newline=$(printf 'x\ny')
+escaped_source="escape/prefixx${newline}yfoo/../../outside-source"
+escaped_target=escape/target
+escaped_destination=escape/outside-source/payload
+mkdir -p "escape/prefixx${newline}yfoo" "$escaped_target" outside-source
+printf '%s\n' payload > outside-source/payload
+mkdir -p no-git
+cat > no-git/git <<'EOF'
+#!/bin/sh
+exit 1
+EOF
+chmod +x no-git/git
+rc=0
+PATH="$(pwd)/no-git:$PATH" "$sym" -t "$escaped_target" "$escaped_source" > log 2>&1 || rc=$?
+echo "  assertion 1: linking rejects newline-split traversal fragments"
+[ "$rc" -ne 0 ] && grep -Fq 'is not a safe source path' log && [ ! -L "$escaped_destination" ] || nfailed=$((nfailed + 1))
+if [ -L "$escaped_destination" ]; then rm "$escaped_destination"; fi
+mkdir -p "$escaped_target/yyfoo" escape/outside-source
+ln -s "$(pwd)/outside-source/payload" "$escaped_destination"
+rc=0
+PATH="$(pwd)/no-git:$PATH" "$sym" -t "$escaped_target" -d "$escaped_source" > log 2>&1 || rc=$?
+echo "  assertion 2: delete mode rejects fragments and preserves a link outside the target"
+[ "$rc" -ne 0 ] && grep -Fq 'is not a safe source path' log && [ -L "$escaped_destination" ] || nfailed=$((nfailed + 1))
+escaped_directory_name="outside-marker-$$"
+escaped_directory_source="escape-dir/prefixx${newline}yfoo/../../${escaped_directory_name}"
+escaped_directory_target=escape-dir/target
+escaped_directory_destination="escape-dir/${escaped_directory_name}"
+mkdir -p "escape-dir/prefixx${newline}yfoo" "$escaped_directory_target" "$escaped_directory_name"
+touch "$escaped_directory_name/.sym-dir"
+rc=0
+PATH="$(pwd)/no-git:$PATH" "$sym" -t "$escaped_directory_target" "$escaped_directory_source" > log 2>&1 || rc=$?
+echo "  assertion 3: newline-split .sym-dir paths cannot escape the target"
+[ "$rc" -ne 0 ] && grep -Fq 'is not a safe source path' log && [ ! -L "$escaped_directory_destination" ] || nfailed=$((nfailed + 1))
 
 
 printf '\ntesting finished.\n'

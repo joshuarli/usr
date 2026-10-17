@@ -1,0 +1,68 @@
+#!/bin/sh
+set -eu
+
+script_path=$0
+while [ -L "$script_path" ]; do
+    target=$(readlink "$script_path")
+    case "$target" in
+        /*) script_path=$target ;;
+        *) script_path=$(dirname "$script_path")/$target ;;
+    esac
+done
+script_dir=$(CDPATH='' cd -P "$(dirname "$script_path")" && pwd -P)
+patch_file="${script_dir}/../../.config/dsh/tui.patch.yml"
+dsh_install_root="${XDG_DATA_HOME:-${HOME}/.local/share}/dsh"
+dsh_bin="${dsh_install_root}/bin/dsh"
+tui_bin="${dsh_install_root}/bin/dsh-tui"
+PATH="${dsh_install_root}/bin:${PATH:-}"
+export PATH
+
+run_with_api_key() {
+    if command -v vault >/dev/null 2>&1; then
+        exec vault DEEPSEEK_API_KEY -- "$@"
+    fi
+    if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+        exec "$@"
+    fi
+    printf '%s\n' 'dsh: set DEEPSEEK_API_KEY or install vault with that entry' >&2
+    return 1
+}
+
+start_tui() {
+    run_with_api_key "$tui_bin" --patch "$patch_file" "$@"
+}
+
+if [ "$#" -eq 0 ]; then
+    start_tui
+fi
+
+case "$1" in
+    tui|dsh-tui)
+        shift
+        start_tui "$@"
+        ;;
+    --profile)
+        if [ "$#" -ge 2 ]; then
+            profile=$2
+            shift 2
+            case "$profile" in
+                tui|dsh-tui)
+                    start_tui "$@"
+                    ;;
+            esac
+            run_with_api_key "$dsh_bin" --profile "$profile" --patch "$patch_file" "$@"
+        fi
+        exec "$dsh_bin" "$@"
+        ;;
+    plugin|--help|-h|--version|-V)
+        exec "$dsh_bin" "$@"
+        ;;
+    -*)
+        run_with_api_key "$dsh_bin" --patch "$patch_file" "$@"
+        ;;
+    *)
+        profile=$1
+        shift
+        run_with_api_key "$dsh_bin" --profile "$profile" --patch "$patch_file" "$@"
+        ;;
+esac
