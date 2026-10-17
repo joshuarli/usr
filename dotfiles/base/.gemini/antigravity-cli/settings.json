@@ -1,0 +1,8 @@
+{
+  "agentMode": "accept-edits",
+  "runningLightSpeed": "slow",
+  "showFeedbackSurvey": false,
+  "showTips": false,
+  "toolPermission": "always-proceed",
+  "verbosity": "low"
+}
