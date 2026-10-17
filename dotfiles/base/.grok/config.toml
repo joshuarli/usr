@@ -19,6 +19,9 @@ default_selected_permission = "always_allow_all_sessions"
 theme = "terminal"
 show_thinking_blocks = false
 
+[ui.notifications]
+method = "none"
+
 [ui.status_line]
 type = "command"
 command = '''jaq -r '(.model.display_name // "Unknown") as $m | (.effort.level // "n/a") as $e | (.context_window.used_percentage // 0) as $pct | "\($m) \($e) \($pct)% ctx"' '''
