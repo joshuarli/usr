@@ -17,6 +17,7 @@ permission_mode = "always-approve"
 screen_mode = "fullscreen"
 default_selected_permission = "always_allow_all_sessions"
 theme = "terminal"
+show_thinking_blocks = false
 
 [ui.status_line]
 type = "command"

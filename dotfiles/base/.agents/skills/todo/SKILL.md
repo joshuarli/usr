@@ -40,14 +40,16 @@ Rate by impact times likelihood, never by effort.
 - **A review finding is a ticket as it stands.** An open decision that blocks one is a draft RFC linked from it.
 - **Never a code comment.** A reminder the code needs becomes a test or a check, and code does not cite ticket IDs.
 - **Do not commit** unless asked. A commit that finishes a ticket ends its body with `Closes ABC-123`.
-- **Delete a ticket when it is done.** Git history is the record, and no done list is kept.
+- **Delete a ticket when it is done.** Git history is the record, and no done list is kept. Delete its RFC in the same change when the RFC section calls that RFC done.
 - **Campaign lanes never write `TODO.md`.** A lane reports a deferred item and the integrator files it.
 
 ## RFC
 
 Write an RFC when a ticket's design is more than a few lines or needs the owner's sign-off. It lives at `docs/rfc/ABC-123-<slug>.md`, is linked from the ticket's `Design` field, and follows `technical-writing` in explanation mode.
 
-It opens with `# ABC-123: <title>` and `Status: draft | accepted | rejected | superseded by ABC-456`, then the sections Summary, Motivation, Design, Alternatives considered, Open questions, and Decision. An RFC is a dated record: set its status instead of deleting it, and do not rewrite an accepted one. What a future reader needs from it moves into the docs that own the topic.
+It opens with `# ABC-123: <title>` and `Status: draft | accepted | rejected | superseded by ABC-456`, then the sections Summary, Motivation, Design, Alternatives considered, Open questions, and Decision.
+
+**Delete an RFC when it is done.** Done means the design is in the code, or the RFC was rejected or superseded. Move any fact a future reader still needs into the doc that owns the topic, drop the ticket's `Design` link, and delete the file. Git history is the record. Do not leave a done list, and do not leave an accepted RFC next to code that already follows it. A draft stays. An accepted RFC that is still the spec to build stays, and is not rewritten in place.
 
 **The test:** a newcomer can take the top ticket, find where to start, and begin without asking what it meant, and no ID appears twice in the file's history.
 

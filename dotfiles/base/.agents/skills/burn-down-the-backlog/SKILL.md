@@ -28,7 +28,7 @@ Close the tickets in `TODO.md` unattended, in priority order, one commit each. D
   1. Read the whole diff against the ticket's `Recommendation`. Reject edits outside the ticket's `Where` files, unrelated cleanups, new dependencies the brief did not name, and a weakened or deleted test.
   2. For a bug, check out the base commit with only the new test applied and confirm it fails, then confirm it passes with the fix.
   3. Apply the diff to the branch, rerun the lane's named tests, and run the narrowest lint and type checks for the touched files on the merged tree.
-  4. Delete the ticket from `TODO.md` and commit once, so the fix and the ticket's removal are one commit.
+  4. Delete the ticket from `TODO.md`. Delete its RFC in that same commit when `todo` counts the RFC done. Commit once, so the fix and those removals are one commit.
   A failed check goes back to the lane under the attempt rule above. A weaker tier gets the same checks, never fewer.
 - **Commit message:** a Conventional Commit, `type(scope): subject` with the body saying why, a `!` or `BREAKING CHANGE:` footer for a contract change, and `Closes ABC-123` last.
 - **A ticket that exhausts its attempts parks.** Nothing is committed for it and the ticket is untouched.

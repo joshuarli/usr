@@ -55,6 +55,8 @@ The docs lane runs one `mdtool check` when installed; it combines all checks wit
 
 Then roll up campaigns. For each `docs/CAMPAIGN-*.md` whose header status says it is complete, and whose deliverables you confirm in the code, move what a future reader needs (the design rationale, invariants, constraints, and decisions still in force) into the durable docs (README, AGENTS.md, or `docs/` topic files), stated in domain terms with no campaign names or IDs. Then delete the campaign doc and any `DECISIONS.md` entries it owned. Do not keep logs of what was completed or per-item histories; git history is the record. Leave campaigns that are active, paused, or winding down untouched, and file a finding for a "complete" one whose deliverables are not in the code.
 
+Delete a completed RFC the same way. `todo` says when an RFC is done. An accepted RFC whose design is already in the code does not stay.
+
 ## Findings
 
 File each finding as a `todo` ticket in `TODO.md`, in that skill's shape, priority definitions, and ID rules. Order tickets by priority, then impact. Rate by impact times likelihood, never by effort.

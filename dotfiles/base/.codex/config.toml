@@ -188,6 +188,12 @@ trust_level = "trusted"
 [projects."/Users/josh/dev/pytest-parallel"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/gcsf"]
+trust_level = "trusted"
+
+[projects."/Users/josh/dev/sentry-typing-hillclimb"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]

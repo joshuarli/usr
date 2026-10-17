@@ -29,7 +29,7 @@ Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs
 - **Point at code, do not copy it.** A list that mirrors one file, such as the env vars one function reads or a route table, becomes a pointer to that file. Setup steps the product already shows, on a home page or in `--help`, become a link.
 - **A doc code reads is load-bearing.** Before you move, split, rename, or cut a doc, search source and build files for its path: embeds such as `include_str!`, tests that read or compile it, hashes, and checks of its layout. Report what you find to every writer, and leave such a doc's structure to the code that reads it.
 - **Comments** go through `comment-cleanup` in its review mode. Only public API contract doc comments are doc surface; every other comment is a defect, not documentation. Rationale a deleted comment carried lands once in the `docs/` topic that owns it, never back in source.
-- **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. For generated docs, edit the source and the generator input, not the output.
+- **Leave dated records alone** (changelog, ADRs, release notes), marking a superseded one rather than rewriting it. A completed RFC is not one of these: delete it per `todo`. For generated docs, edit the source and the generator input, not the output.
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home and would make its nearest existing doc too long to scan.
 - **Verify narrowly:** every `path:line` and link you kept resolves, and any doc check the repo has (a link checker, a doctest) runs on the files you touched.
 
