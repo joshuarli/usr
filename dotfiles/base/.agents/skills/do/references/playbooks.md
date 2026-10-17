@@ -28,6 +28,16 @@ Inspect existing behavior and define observable acceptance. Use [architect](../.
 
 **Exit:** the requested capability and its acceptance evidence are complete.
 
+## Removal
+
+**Entry:** the user directs complete removal of a live capability or supported surface, including its old behavior.
+
+Use [delete](../../delete/SKILL.md) to trace and remove the retired path without compatibility support. Identify breaking contracts and any existing data that needs an authorized one-time conversion.
+
+**Proof:** no live execution path or supported surface retains the removed behavior, and every remaining reference is unrelated or historical.
+
+**Exit:** the requested removal is complete, with breaking contracts and any unperformed data conversion reported.
+
 ## Refactor or migration
 
 **Entry:** the request changes structure or replaces an existing implementation while preserving agreed behavior.

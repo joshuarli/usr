@@ -1,11 +1,13 @@
 ---
 name: dead-code-archaeology
-description: "Apply when hunting or removing dead code, or when adding a compatibility path, deprecated alias, or feature flag for old consumers. Skip ordinary error handling and new code with no legacy consumer."
+description: "Apply when investigating whether code is dead or a compatibility path still has consumers, or when adding a compatibility path, deprecated alias, or feature flag for old consumers. Skip owner-directed complete removals without compatibility; use delete."
 ---
 
 # Dead Code Archaeology
 
 Historical complexity must justify its continued existence.
+
+Owner-directed complete removals without compatibility belong to `delete`. Use this skill to establish liveness and consumer evidence; an explicit no-compatibility request rules out quarantining the old path.
 
 - **Classify each suspect with evidence:** actively used, consumed externally, present in persisted data, needed for compatibility, needed for a migration, or dead. Check callers, tests, docs, scripts, config, and generated inputs. A compiler warning is a lead, not a verdict.
 - **Delete dead code completely:** the implementation, its tests, config, docs, exports, feature gates, and compatibility glue. Leave no tombstone and no commented-out copy. Version control is the archive.
