@@ -35,7 +35,9 @@
 ## Skills
 
 - A skill applies to the scope named. Audit or sweep the whole repo only when asked.
-- Skills marked explicit-only are absent from the skill list. To use one, read `~/.agents/skills/<name>/SKILL.md`.
+- In Codex, skills marked explicit-only are absent from its automatic selection list. To use one, read `~/.agents/skills/<name>/SKILL.md`.
+- Antigravity CLI reads skill descriptions and may activate a relevant skill automatically. Its documented skill frontmatter uses only `name` and `description`, so treat shared skills with `disable-model-invocation: true` as explicit-only and invoke them with `/<skill-name>` only when the user asks.
+- Use only Gemini models in Antigravity CLI. The `orchestrate` skill owns its model tier mapping.
 
 ## Contract changes
 

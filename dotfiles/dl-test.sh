@@ -44,6 +44,16 @@ case "$url" in
             exit 1
         fi
         ;;
+    https://antigravity.google/cli/install.sh)
+        [ -n "$output" ] || exit 1
+        cat > "$output" <<'INSTALLER'
+#!/bin/sh
+[ "$1" = --dir ] && [ "$2" = "$HOME/.local/bin" ] || exit 1
+mkdir -p "$HOME/.local/bin"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/agy"
+chmod +x "$HOME/.local/bin/agy"
+INSTALLER
+        ;;
     https://api.meta.ai/muse-code/channels/muse-stable)
         printf '%s\n' '{"version":"1.4.9-R6297.1","manifest_url":"https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.9-R6297.1&file=manifest.json"}'
         ;;
@@ -100,6 +110,31 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 [ "$(cat "$home/.local/bin/muse")" = muse-test-binary ]
+
+antigravity_home="$test_root/antigravity-home"
+if output=$(HOME="$antigravity_home" XDG_STATE_HOME="$antigravity_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" antigravity 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$antigravity_home/.local/bin/agy" ]
+case "$output" in
+    *"Installed Antigravity CLI ($antigravity_home/.local/bin/agy)"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if output=$(HOME="$antigravity_home" XDG_STATE_HOME="$antigravity_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" antigravity 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'agy is installed'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
 
 cat > "$mock_bin/uname" <<'EOF'
 #!/bin/sh

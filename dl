@@ -575,6 +575,32 @@ install_grok() {
     install_direct grok "https://x.ai/cli/grok-${version}-${platform}"
 }
 
+install_antigravity() {
+    if keep_installed agy; then return; fi
+    printf '%s\n' 'Installing Antigravity CLI ...'
+    tmpbin=$(mktemp)
+    if ! curl -fsSL -o "$tmpbin" https://antigravity.google/cli/install.sh; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip antigravity "official installer is unavailable"
+        return
+    fi
+    if ! bash "$tmpbin" --dir "$DEST"; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip antigravity "official installer failed"
+        return
+    fi
+    rm -f "$tmpbin"
+    tmpbin=
+    if ! installed agy; then
+        skip antigravity "official installer did not install ${DEST}/agy"
+        return
+    fi
+    changed=true
+    printf '%s\n' "Installed Antigravity CLI (${DEST}/agy)"
+}
+
 install_muse() {
     if keep_installed muse; then return; fi
     jaq_available || { unchecked muse "jaq is required"; return; }
@@ -882,7 +908,7 @@ run_parallel() {
 }
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jaq muse grok codex claude opencode2 fastermod tm ish e fz fdu fs srv
+    set -- fd rg jaq muse grok codex claude opencode2 antigravity fastermod tm ish e fz fdu fs srv
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
@@ -917,6 +943,7 @@ for prog in "$@"; do
     case "$prog" in
         fd|rg) install_fd_or_rg "$prog" ;;
         grok) install_grok ;;
+        antigravity) install_antigravity ;;
         muse) install_muse ;;
         claude) install_claude ;;
         codex) install_codex ;;
