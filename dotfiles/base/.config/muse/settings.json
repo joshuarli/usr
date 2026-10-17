@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
-  "model": "muse-spark-1.3",
+  "provider": "meta",
+  "model": "muse-wonder-1.0",
   "reasoning_effort": "high",
+  "model_reasoning_efforts": {
+    "muse-wonder-1.0": "high"
+  },
   "tui": {
     "foreign_context_notice_shown": true
   },
@@ -13,6 +17,8 @@
       "url": "https://mcp.sentry.dev/mcp"
     }
   },
+  "contributor_mode_enabled": true,
+  "contributor_mode_disclosure_acknowledged": true,
   "permissions": {
     "schema_version": 1,
     "default_profile": ":unrestricted"
