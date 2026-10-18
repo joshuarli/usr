@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git status -sb
+    exit
+fi
+
+find . -name .git -prune -exec sh -c '
+    for marker do
+        repo=${marker%/.git}
+        printf "%s\n" "$repo"
+        git -C "$repo" status -sb || exit
+    done
+' sh {} +
