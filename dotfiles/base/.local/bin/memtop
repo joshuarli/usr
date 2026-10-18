@@ -1,0 +1,271 @@
+#!/bin/sh
+set -eu
+
+limit=12
+usage() {
+    printf 'usage: memtop [-n processes]\n' >&2
+    exit 2
+}
+
+while getopts n:h opt; do
+    case $opt in
+        n) limit=$OPTARG ;;
+        h) printf 'usage: memtop [-n processes]\n'; exit 0 ;;
+        *) usage ;;
+    esac
+done
+case $limit in
+    '' | *[!0-9]*) usage ;;
+esac
+[ "$limit" -ge 1 ] || usage
+
+platform=$(uname -s)
+case $platform in
+    Darwin | Linux) ;;
+    *) printf 'memtop: unsupported platform %s\n' "$platform" >&2; exit 1 ;;
+esac
+
+host=$(hostname -s)
+now=$(date '+%Y-%m-%d %H:%M')
+
+case $platform in
+    Darwin)
+        up=$(uptime | sed 's/^.* up //; s/, *[0-9][0-9]* user.*//; s/, *load average.*//')
+        load=$(uptime | sed 's/.*load averages*: *//; s/,//g')
+        procheader='processes by physical footprint'
+        sample=$(top -l 1 -o mem -n 9999 -stats pid,mem,command 2>/dev/null || true)
+        proctable=$(printf '%s\n' "$sample" | awk '
+            /^PID/ { start = 1; next }
+            !start || NF < 3 || $1 !~ /^[0-9]+$/ { next }
+            {
+                unit = substr($2, length($2), 1)
+                mb = $2
+                sub(/[A-Za-z]$/, "", mb)
+                if (mb !~ /^[0-9.]+$/) next
+                if (unit == "K") mb /= 1024
+                else if (unit == "G") mb *= 1024
+                else if (unit == "B") mb /= 1048576
+                cmd = substr($0, index($0, $3))
+                sub(/[ \t]+$/, "", cmd)
+                printf "%s %.1f %s\n", $1, mb, cmd
+            }')
+        ;;
+    Linux)
+        load=$(cut -d' ' -f1-3 /proc/loadavg)
+        up=$(awk '
+            { s = int($1); d = int(s / 86400); h = int(s % 86400 / 3600); m = int(s % 3600 / 60)
+              if (d > 0) printf "%d days, %d:%02d", d, h, m
+              else printf "%d:%02d", h, m }' /proc/uptime)
+        procheader='processes by resident set (RSS, shared pages counted per process)'
+        proctable=$(ps -eo pid=,rss=,comm= --sort=-rss 2>/dev/null | awk '
+            $2 ~ /^[0-9]+$/ {
+                cmd = substr($0, index($0, $3))
+                sub(/[ \t]+$/, "", cmd)
+                printf "%s %.1f %s\n", $1, $2 / 1024, cmd
+            }' || true)
+        ;;
+esac
+
+set -- $(printf '%s\n' "$proctable" | awk '
+    NF >= 3 { n++; sum += $2; if ($2 > max) { max = $2; pid = $1 } }
+    END { print n+0, sum+0, max+0, pid+0 }')
+procount=$1 procmb=$2 topmb=$3 toppid=$4
+topname=$(printf '%s\n' "$proctable" | head -n 1 | cut -d' ' -f3-)
+
+case $platform in
+    Darwin)
+        pagesize=$(sysctl -n hw.pagesize)
+        ram=$(sysctl -n hw.memsize)
+        swap=$(sysctl -n vm.swapusage)
+
+        vm_stat | awk -v ps="$pagesize" -v ram="$ram" -v swap="$swap" \
+            -v procount="$procount" -v procmb="$procmb" -v topmb="$topmb" \
+            -v toppid="$toppid" -v topname="$topname" \
+            -v host="$host" -v now="$now" -v up="$up" -v load="$load" '
+        NR > 1 {
+            key = $0
+            sub(/:.*/, "", key)
+            gsub(/[ \t"\-]/, "", key)
+            value = $0
+            sub(/^[^:]*:[ \t]*/, "", value)
+            gsub(/[^0-9]/, "", value)
+            if (value != "") page[tolower(key)] = value + 0
+        }
+
+        function bar(n,   s, i) {
+            for (i = 0; i < n; i++) s = s "#"
+            return s
+        }
+
+        function row(label, value, total,   pct) {
+            pct = (total > 0 ? 100 * value / total : 0)
+            printf "  %-11s %7.2f GiB %3.0f%%  %s\n", label, value, pct, bar(int(pct * 40 / 100 + 0.5))
+        }
+
+        function num(s) {
+            sub(/[A-Za-z]$/, "", s)
+            return s + 0
+        }
+
+        END {
+            gib = 1073741824
+            total = ram / gib
+            free = page["pagesfree"] * ps / gib
+            compressed = page["pagesoccupiedbycompressor"] * ps / gib
+            wired = page["pageswireddown"] * ps / gib
+            active = page["pagesactive"] * ps / gib
+            inactive = page["pagesinactive"] * ps / gib
+            speculative = page["pagesspeculative"] * ps / gib
+            stored = page["pagesstoredincompressor"] * ps / gib
+            filebacked = page["filebackedpages"] * ps / gib
+            anonymous = page["anonymouspages"] * ps / gib
+            purgeable = page["pagespurgeable"] * ps / gib
+
+            split(swap, field, /[ =]+/)
+            swapTotal = num(field[2]) / 1024
+            swapUsed = num(field[4]) / 1024
+
+            printf "memtop  %s  %s  up %s  load %s\n\n", host, now, up, load
+
+            printf "memory map  %.2f GiB total, %.2f GiB free\n", total, free
+            row("wired", wired, total)
+            row("compressed", compressed, total)
+            row("active", active, total)
+            row("inactive", inactive, total)
+            if (speculative > 0.05) row("speculative", speculative, total)
+            if (swapTotal > 0)
+                printf "  %-11s %7.2f GiB %3.0f%%  of %.2f GiB\n", "swap", swapUsed, 100 * swapUsed / swapTotal, swapTotal
+            else
+                printf "  %-11s %s\n", "swap", "none"
+            printf "  %-11s %s\n", "cache", sprintf("%.2f GiB file-backed, %.2f GiB anonymous, %.2f GiB purgeable", filebacked, anonymous, purgeable)
+
+            printf "\nchurn\n"
+            printf "  %-11s %.2f GiB of data held as %.2f GiB (%.1fx), %d compressions / %d decompressions\n", \
+                "compressor", stored, compressed, (compressed > 0 ? stored / compressed : 0), \
+                page["compressions"], page["decompressions"]
+            printf "  %-11s %d pageins / %d pageouts, %d swapins / %d swapouts\n", \
+                "paging", page["pageins"], page["pageouts"], page["swapins"], page["swapouts"]
+
+            hog = "memory is spread out, no single holder"
+            if (compressed >= procmb / 1024 && compressed / total >= 0.15)
+                hog = "the kernel compressor, not any process"
+            else if (topmb / 1024 / total >= 0.15)
+                hog = topname " (" toppid ")"
+            else if (free / total < 0.05 || (swapTotal > 0 && swapUsed / swapTotal > 0.8))
+                hog = "no single holder, swap and the compressor are absorbing the pressure"
+
+            printf "\nholding it\n"
+            printf "  %-11s %7.2f GiB %3.0f%% of RAM\n", "compressor", compressed, 100 * compressed / total
+            printf "  %-11s %7.2f GiB %3.0f%% of RAM across %d processes\n", "processes", procmb / 1024, 100 * procmb / 1024 / total, procount
+            if (procount > 0)
+                printf "  %-11s %s (%d) %.1f MiB, %.0f%% of RAM\n", "largest", topname, toppid, topmb, 100 * topmb / 1024 / total
+            printf "  %-11s %s\n", "verdict", hog
+        }'
+        ;;
+    Linux)
+        compressed=''
+        for dev in /sys/block/zram*/mm_stat; do
+            [ -r "$dev" ] || continue
+            read -r orig compr rest < "$dev" || true
+            [ "${compr:-0}" -gt 1048576 ] || continue
+            compressed=$(awk -v o="$orig" -v c="$compr" '
+                BEGIN { printf "zram %.2f GiB held as %.2f GiB (%.1fx)", o / 1073741824, c / 1073741824, (c > 0 ? o / c : 0) }')
+            break
+        done
+        if [ -r /sys/kernel/debug/zswap/stored_pages ]; then
+            read -r stored < /sys/kernel/debug/zswap/stored_pages || true
+            read -r pool < /sys/kernel/debug/zswap/pool_total_size || true
+            zswap=$(awk -v p="$stored" -v s="$pool" '
+                BEGIN { printf "zswap %.2f GiB held as %.2f GiB", p * 4096 / 1073741824, s / 1073741824 }')
+            if [ -n "$compressed" ]; then
+                compressed="$compressed; $zswap"
+            else
+                compressed=$zswap
+            fi
+        fi
+
+        cat /proc/meminfo /proc/vmstat | awk \
+            -v procount="$procount" -v procmb="$procmb" -v topmb="$topmb" \
+            -v toppid="$toppid" -v topname="$topname" -v compressed="$compressed" \
+            -v host="$host" -v now="$now" -v up="$up" -v load="$load" '
+        {
+            key = $1
+            sub(/:$/, "", key)
+            if ($2 ~ /^[0-9]+$/) val[key] = $2 + 0
+        }
+
+        function bar(n,   s, i) {
+            for (i = 0; i < n; i++) s = s "#"
+            return s
+        }
+
+        function row(label, value, total, pad,   pct) {
+            pct = (total > 0 ? 100 * value / total : 0)
+            printf "%s%-11s %7.2f GiB %3.0f%%  %s\n", pad, label, value, pct, bar(int(pct * 40 / 100 + 0.5))
+        }
+
+        END {
+            kb = 1024
+            gib = 1073741824
+            total = val["MemTotal"] * kb / gib
+            free = val["MemFree"] * kb / gib
+            cache = (val["Buffers"] + val["Cached"] + val["SReclaimable"]) * kb / gib
+            anon = val["AnonPages"] * kb / gib
+            kernel = (val["SUnreclaim"] + val["KernelStack"] + val["PageTables"]) * kb / gib
+            used = total - free - cache
+            other = used - anon - kernel
+            if (other < 0) other = 0
+            if ("MemAvailable" in val) available = val["MemAvailable"] * kb / gib
+            else available = free + cache
+            swapTotal = val["SwapTotal"] * kb / gib
+            swapUsed = (val["SwapTotal"] - val["SwapFree"]) * kb / gib
+
+            for (key in val) {
+                if (key ~ /^allocstall/) allocstall += val[key]
+                if (key ~ /^workingset_refault/) refault += val[key]
+            }
+
+            printf "memtop  %s  %s  up %s  load %s\n\n", host, now, up, load
+
+            printf "memory map  %.2f GiB total, %.2f GiB available\n", total, available
+            row("used", used, total, "  ")
+            row("anon", anon, total, "    ")
+            row("kernel", kernel, total, "    ")
+            row("other", other, total, "    ")
+            row("cache", cache, total, "  ")
+            row("free", free, total, "  ")
+            if (swapTotal > 0)
+                printf "  %-11s %7.2f GiB %3.0f%%  of %.2f GiB\n", "swap", swapUsed, 100 * swapUsed / swapTotal, swapTotal
+            else
+                printf "  %-11s %s\n", "swap", "none"
+            if (compressed != "") printf "  %-11s %s\n", "compressed", compressed
+
+            printf "\nchurn\n"
+            printf "  %-11s pgpgin %d KiB, pgpgout %d KiB, pswpin %d, pswpout %d\n", \
+                "paging", val["pgpgin"], val["pgpgout"], val["pswpin"], val["pswpout"]
+            printf "  %-11s majfault %d, allocstall %d, oomkill %d, refault %d\n", \
+                "pressure", val["pgmajfault"], allocstall, val["oom_kill"], refault
+
+            hog = "nothing, " sprintf("%.2f GiB available", available)
+            if (procount > 0 && topmb / 1024 / total >= 0.15)
+                hog = topname " (" toppid ")"
+            else if (available / total < 0.10 && cache / total >= 0.20)
+                hog = "the page cache, and it is reclaimable"
+            else if (available / total < 0.10)
+                hog = "the sum of processes, no single holder"
+
+            printf "\nholding it\n"
+            printf "  %-11s %7.2f GiB %3.0f%% of RAM across %d processes\n", "processes", procmb / 1024, 100 * procmb / 1024 / total, procount
+            if (procount > 0)
+                printf "  %-11s %s (%d) %.1f MiB, %.0f%% of RAM\n", "largest", topname, toppid, topmb, 100 * topmb / 1024 / total
+            printf "  %-11s %s\n", "verdict", hog
+        }'
+        ;;
+esac
+
+if [ "$procount" -gt 0 ]; then
+    printf '\n%s\n' "$procheader"
+    printf '%s\n' "$proctable" | head -n "$limit" | awk '
+        NF >= 3 { printf "  %7d  %9.1f MiB  %s\n", $1, $2, substr($0, index($0, $3)) }'
+    [ "$procount" -le "$limit" ] || printf '  ... %d more\n' "$((procount - limit))"
+fi
