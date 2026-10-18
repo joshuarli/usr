@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-12 · P3 · `sym` can loop forever for a root-level target path
-
-- **Area:** Operability
-- **Where:** `dotfiles/sym:52-55`
-- **Problem:** For a destination such as `/.bashrc`, `${1%/*}` becomes empty. The loop keeps trimming the empty path and never reaches an existing directory. A shell expansion reproduction confirmed the empty ancestor.
-- **Recommendation:** Handle `/` explicitly when finding the nearest existing parent.
-- **Fix with:** os-boundaries
-- **Effort:** S
-
 ### USR-13 · P3 · Stale PR cleanup exits successfully after branch deletion errors
 
 - **Area:** Errors

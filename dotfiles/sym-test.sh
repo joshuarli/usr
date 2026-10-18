@@ -365,5 +365,25 @@ echo "  assertion 1: the correct pre-existing link is absent from ownership reco
 [ ! -s "$ownership_file" ] || nfailed=$((nfailed + 1))
 
 
+printf '\n25: the root-level destination parent resolves to /\n'
+physical_parent_definition=$(sed -n '/^physical_parent() {/,/^}/p' "$sym")
+parent=$(eval "$physical_parent_definition
+physical_parent /.bashrc")
+echo "  assertion 1: the nearest existing parent is root"
+[ "$parent" = / ] || nfailed=$((nfailed + 1))
+
+printf '\n26: root targets include files beneath existing root directories\n'
+confinement_helpers=$(sed -n '/^physical_parent() {/,/^}/p; /^confined() {/,/^}/p' "$sym")
+if eval "$confinement_helpers
+tgt_phys=/
+src_phys=/not/source
+confined /etc/hosts"; then
+    echo "  assertion 1: an existing root subdirectory is inside the target"
+else
+    echo "  assertion 1: an existing root subdirectory is inside the target"
+    nfailed=$((nfailed + 1))
+fi
+
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

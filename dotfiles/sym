@@ -38,6 +38,10 @@ relpath() {
     [ -n "$_r" ] && printf '%s%s' "$_up" "$_r" || printf '%s' "${_up%/}"
 }
 
+target_path() {
+    if [ "$1" = / ]; then _target_path="/$2"; else _target_path="$1/$2"; fi
+}
+
 # planned_directory LINK_TEXT TARGET_DIR
 # Succeed if LINK_TEXT points at a whole-directory link this run will create.
 planned_directory() {
@@ -55,7 +59,8 @@ planned_directory() {
             _sd_target_abs=$tgt_abs
         else
             _sd_rel=${_sd#"$src"/}
-            _sd_target_abs=$tgt_abs/$_sd_rel
+            target_path "$tgt_abs" "$_sd_rel"
+            _sd_target_abs=$_target_path
         fi
         [ "$(relpath "$_sd_target_abs" "$_target_dir")" = "$_link_text" ] && return 0
     done < "$tmp/symlink-dirs"
@@ -66,7 +71,11 @@ planned_directory() {
 # Physical path of the nearest existing ancestor directory of PATH.
 physical_parent() {
     _p="${1%/*}"
-    while [ ! -d "$_p" ]; do _p="${_p%/*}"; done
+    [ -n "$_p" ] || _p=/
+    while [ ! -d "$_p" ]; do
+        _p="${_p%/*}"
+        [ -n "$_p" ] || _p=/
+    done
     (cd "$_p" && pwd -P)
 }
 
@@ -76,7 +85,11 @@ physical_parent() {
 # or out of the target.
 confined() {
     _pp="$(physical_parent "$1")"
-    case "$_pp/" in "$tgt_phys"/*) ;; *) return 1 ;; esac
+    if [ "$tgt_phys" = / ]; then
+        case "$_pp/" in /*) ;; *) return 1 ;; esac
+    else
+        case "$_pp/" in "$tgt_phys"/*) ;; *) return 1 ;; esac
+    fi
     case "$_pp/" in "$src_phys"/*) return 1 ;; esac
     return 0
 }
@@ -120,6 +133,7 @@ done
 # src_abs/tgt_abs: canonical absolute paths, used only for relpath computation
 src="${1%/}"
 tgt="${target%/}"
+[ -n "$tgt" ] || tgt=/
 src_abs="$(cd "$src" && pwd -P)"
 tgt_abs="$(cd "$tgt" && pwd -P)"
 src_phys="$src_abs"
@@ -181,11 +195,14 @@ while IFS= read -r fp; do
         continue
     fi
     rel=$source_rel
-    name="$tgt/$rel"
+    target_path "$tgt" "$rel"
+    name=$_target_path
     # Absolute versions for relpath computation only
     fp_abs="$src_abs/$rel"
-    name_abs="$tgt_abs/$rel"
+    target_path "$tgt_abs" "$rel"
+    name_abs=$_target_path
     dir_abs="${name_abs%/*}"
+    [ -n "$dir_abs" ] || dir_abs=/
 
     if [ -L "$fp" ]; then
         dest_abs="$(readlink "$fp")"
@@ -255,9 +272,11 @@ while IFS= read -r sd; do
         continue
     fi
     rel=$source_rel
-    name="$tgt/$rel"
+    target_path "$tgt" "$rel"
+    name=$_target_path
     fp_abs="$src_abs/$rel"
-    name_abs="$tgt_abs/$rel"
+    target_path "$tgt_abs" "$rel"
+    name_abs=$_target_path
 
     if ! confined "$name"; then
         printf 'CONFLICT: %s passes through a symlinked directory, so sym will not touch it.\n' "$name" >> "$tmp/conflicts"
@@ -308,6 +327,7 @@ if $delete; then
         $dry_run || rm "$name" || failed=true
         if ! $dry_run; then
             dir="${name%/*}"
+            [ -n "$dir" ] || dir=/
             while [ "$dir" != "$tgt" ] && [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
                 log "RMDIR: $dir"
                 rmdir "$dir" || { failed=true; break; }
@@ -319,6 +339,7 @@ else
     paste "$tmp/names" "$tmp/dests" "$tmp/absolute-names" > "$tmp/jobs"
     while IFS="$(printf '\t')" read -r name dest name_abs; do
         dir="${name%/*}"
+        [ -n "$dir" ] || dir=/
         if [ ! -d "$dir" ]; then
             log "MKDIRS: $dir"
             if ! $dry_run; then
