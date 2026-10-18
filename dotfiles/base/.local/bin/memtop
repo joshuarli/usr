@@ -241,9 +241,9 @@ case $platform in
             if (compressed != "") printf "  %-11s %s\n", "compressed", compressed
 
             printf "\nchurn\n"
-            printf "  %-11s pgpgin %d KiB, pgpgout %d KiB, pswpin %d, pswpout %d\n", \
+            printf "  %-11s pgpgin %.0f KiB, pgpgout %.0f KiB, pswpin %.0f, pswpout %.0f\n", \
                 "paging", val["pgpgin"], val["pgpgout"], val["pswpin"], val["pswpout"]
-            printf "  %-11s majfault %d, allocstall %d, oomkill %d, refault %d\n", \
+            printf "  %-11s majfault %.0f, allocstall %.0f, oomkill %.0f, refault %.0f\n", \
                 "pressure", val["pgmajfault"], allocstall, val["oom_kill"], refault
 
             hog = "nothing, " sprintf("%.2f GiB available", available)
