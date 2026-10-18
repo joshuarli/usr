@@ -54,10 +54,6 @@ vault ls | grep -qx ANTHROPIC_API_KEY || {
 	echo "claude-api: no ANTHROPIC_API_KEY in vault (vault set ANTHROPIC_API_KEY)" >&2
 	exit 1
 }
-command -v mdstream >/dev/null || {
-	echo "claude-api: mdstream is not on PATH" >&2
-	exit 1
-}
 # Claude Code reads the skill list at startup and reports it in the first
 # event, before any model request. The key here is deliberately invalid so this
 # check can never bill anything, and it runs in the current directory so
@@ -141,8 +137,8 @@ foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 
 # stream-json emits one event per line as the session runs. The filter prints
 # assistant text, one blockquote per tool call with the running cost, and only
-# failed tool results (all of them would drown the review). Everything is
-# markdown for mdstream; the loop stamps elapsed time into the blockquotes.
+# failed tool results (all of them would drown the review). The loop stamps
+# elapsed time into the blockquotes.
 start=$(date +%s)
 vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 	--max-budget-usd "$budget" \
@@ -161,8 +157,7 @@ vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 			;;
 		*) printf '%s\n' "$line" ;;
 		esac
-	done |
-	mdstream
+	done
 
 # The pipeline's status is the loop's, so judge the run by its result event.
 # shellcheck disable=SC2016 # $vars are jaq's, not the shell's
@@ -185,6 +180,6 @@ fi
 	git -C "$root" status --short
 	git -C "$root" diff --stat
 	printf '```\n'
-} | mdstream
+}
 notify-sound || true
 exit "$rc"
