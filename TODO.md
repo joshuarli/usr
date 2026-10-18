@@ -11,16 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-1 · P3 · The local DNS cache falls back to Cloudflare in the clear
-
-- **Area:** Security
-- **Where:** `macos/setup-macos:223`, `macos/setup-macos:246`, `macos/setup-macos:283`
-- **Problem:** The system resolver list is `127.0.0.1 1.1.1.1`, so a stopped unbound sends queries to Cloudflare over plain DNS. unbound also runs as root (`username: ""`, line 169). Both choices are deliberate, but the failure mode has not been revisited.
-- **Recommendation:** Choose whether to remove the plain DNS fallback, keep the availability tradeoff, or configure an encrypted upstream. See the RFC.
-- **Fix with:** none
-- **Effort:** S
-- **Design:** [USR-1 RFC](docs/rfc/USR-1-dns-fallback.md)
-
 ### USR-2 · P3 · The auto-triggered skills have never been measured
 
 - **Area:** Tests

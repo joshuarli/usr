@@ -243,7 +243,7 @@ dns_servers() {
     esac
 }
 
-dns_wanted='127.0.0.1 1.1.1.1'
+dns_wanted='127.0.0.1'
 
 step_dns() {
     find_brew || die "Homebrew is missing; run: setup-macos brew"
@@ -280,8 +280,6 @@ step_dns() {
         info "unbound is running and answering"
     fi
 
-    # 1.1.1.1 stays as a fallback, which means a stopped unbound sends queries to Cloudflare
-    # in the clear.
     network_services | while IFS= read -r svc; do
         have=$(dns_servers "$svc")
         [ "$have" = "$dns_wanted" ] && continue
