@@ -2,26 +2,35 @@
 exec python3 -I - "$@" <<'PY'
 import concurrent.futures
 import datetime
+import hashlib
 import json
+import math
+import os
+from pathlib import Path
 import select
 import shutil
 import subprocess
 import sys
 import time
+import unicodedata
 
 
 PROVIDERS = (
+    ("claude", "Claude Code", "claude", []),
     ("codex", "Codex", "codex", ["app-server", "--stdio"]),
     ("muse", "Muse Code", "muse", ["serve", "--no-session-log"]),
+    ("dsh", "DeepSeek API", "dsh", []),
+    # Disabled: direct Google OAuth quota access violates its terms; the supported CLI path is slow.
     # ("agy", "Antigravity", "agy", []),
 )
-HELP = """usage: usage [codex|muse]
+HELP = """usage: usage [claude|codex|muse|dsh]
 
-Read subscription quota usage from the installed Codex and Muse Code CLIs.
-With no provider, query every supported CLI installed here.
-These reads do not submit a model prompt. Claude Code's interactive /usage
-shows quota figures, but `claude -p "/usage"` omits them. Grok Build and
-OpenCode do not expose a scriptable subscription quota read.
+Read subscription quota usage from Claude Code, Codex, and Muse Code, plus
+the DeepSeek API credit balance. The DeepSeek balance is not a subscription
+quota. With no provider, query every supported CLI installed here. These
+reads do not submit a model prompt. Claude Code uses its undocumented OAuth
+usage endpoint and does not refresh credentials. Grok Build and OpenCode do
+not have a free-model quota reader integrated here.
 """
 
 
@@ -114,6 +123,221 @@ def query_muse(binary):
     return query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
 
 
+def read_claude_credentials():
+    config_directory = os.environ.get("CLAUDE_CONFIG_DIR")
+    if sys.platform == "darwin":
+        secure_storage_directory = os.environ.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+        keychain_directory = secure_storage_directory or config_directory
+        service = "Claude Code-credentials"
+        if keychain_directory:
+            normalized_directory = unicodedata.normalize("NFC", keychain_directory)
+            suffix = hashlib.sha256(os.fsencode(normalized_directory)).hexdigest()[:8]
+            service = f"{service}-{suffix}"
+        security = shutil.which("security")
+        if not security:
+            raise RuntimeError("macOS Keychain command `security` is unavailable")
+        process = subprocess.run(
+            [security, "find-generic-password", "-s", service, "-w"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if process.returncode:
+            raise RuntimeError("Claude Code OAuth credentials were not found in Keychain")
+        contents = process.stdout
+    elif sys.platform.startswith("linux"):
+        directory = Path(config_directory).expanduser() if config_directory else Path.home() / ".claude"
+        credential_path = directory / ".credentials.json"
+        try:
+            contents = credential_path.read_text(encoding="utf-8")
+        except FileNotFoundError as error:
+            raise RuntimeError("Claude Code OAuth credentials were not found") from error
+        except OSError as error:
+            raise RuntimeError(f"cannot read Claude Code credentials: {error.strerror}") from error
+    else:
+        raise RuntimeError("Claude Code subscription usage supports macOS and Linux")
+    try:
+        credentials = json.loads(contents)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Claude Code credential store contains invalid JSON") from error
+    oauth = credentials.get("claudeAiOauth") if isinstance(credentials, dict) else None
+    if not isinstance(oauth, dict) or not isinstance(oauth.get("accessToken"), str):
+        raise RuntimeError("Claude Code credential store has no OAuth subscription token")
+    return oauth
+
+
+def query_claude(_binary):
+    oauth = read_claude_credentials()
+    token = oauth["accessToken"]
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError("curl is required to verify Anthropic's HTTPS certificate")
+    if any(character in token for character in "\r\n\x00"):
+        raise RuntimeError("Claude Code OAuth token contains invalid header characters")
+    headers = (
+        "Accept: application/json",
+        f"Authorization: Bearer {token}",
+        "anthropic-beta: oauth-2025-04-20",
+        "User-Agent: dotfiles-usage/1",
+    )
+    config = "".join(
+        f'header = "{curl_config_value(header)}"\n'
+        for header in headers
+    )
+    del token
+    process = subprocess.run(
+        [
+            curl,
+            "-q",
+            "--silent",
+            "--show-error",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "12",
+            "--config",
+            "-",
+            "--write-out",
+            "\\n%{http_code}",
+            "https://api.anthropic.com/api/oauth/usage",
+        ],
+        input=config,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or f"curl exited with status {process.returncode}"
+        raise RuntimeError(f"Claude usage request failed: {detail}")
+    body, separator, status = process.stdout.rpartition("\n")
+    if not separator or len(status) != 3 or not status.isdigit():
+        raise RuntimeError("curl returned an invalid HTTP response")
+    status_code = int(status)
+    if status_code in (401, 403):
+        raise RuntimeError("Anthropic rejected the OAuth token; open Claude Code to refresh the login")
+    if status_code == 429:
+        raise RuntimeError("Anthropic rate-limited the usage request; try again later")
+    if status_code < 200 or status_code >= 300:
+        raise RuntimeError(f"Anthropic usage endpoint returned HTTP {status_code}")
+    try:
+        usage = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("Anthropic returned invalid usage JSON") from error
+    if not isinstance(usage, dict):
+        raise RuntimeError("Anthropic returned an invalid usage response")
+    if not claude_windows(usage):
+        raise RuntimeError("Anthropic returned no recognized quota windows")
+    return {"plan": oauth.get("subscriptionType"), "usage": usage}
+
+
+def curl_config_value(value):
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def read_deepseek_api_key():
+    token = os.environ.get("DEEPSEEK_API_KEY")
+    if token:
+        return token
+    vault = shutil.which("vault")
+    if not vault:
+        raise RuntimeError("set DEEPSEEK_API_KEY or install vault with that entry")
+    process = subprocess.run(
+        [
+            vault,
+            "DEEPSEEK_API_KEY",
+            "--",
+            sys.executable,
+            "-I",
+            "-c",
+            "import os, sys; sys.stdout.write(os.environ.get('DEEPSEEK_API_KEY', ''))",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or "vault could not provide DEEPSEEK_API_KEY"
+        raise RuntimeError(detail)
+    if not process.stdout:
+        raise RuntimeError("vault returned an empty DEEPSEEK_API_KEY")
+    return process.stdout
+
+
+def query_dsh(_binary):
+    token = read_deepseek_api_key()
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError("curl is required to verify DeepSeek's HTTPS certificate")
+    if any(character in token for character in "\r\n\x00"):
+        raise RuntimeError("DeepSeek API key contains invalid header characters")
+    headers = (
+        "Accept: application/json",
+        f"Authorization: Bearer {token}",
+        "User-Agent: dotfiles-usage/1",
+    )
+    config = "".join(
+        f'header = "{curl_config_value(header)}"\n'
+        for header in headers
+    )
+    del token
+    process = subprocess.run(
+        [
+            curl,
+            "-q",
+            "--silent",
+            "--show-error",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "12",
+            "--config",
+            "-",
+            "--write-out",
+            "\\n%{http_code}",
+            "https://api.deepseek.com/user/balance",
+        ],
+        input=config,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or f"curl exited with status {process.returncode}"
+        raise RuntimeError(f"DeepSeek balance request failed: {detail}")
+    body, separator, status = process.stdout.rpartition("\n")
+    if not separator or len(status) != 3 or not status.isdigit():
+        raise RuntimeError("curl returned an invalid HTTP response")
+    status_code = int(status)
+    if status_code in (401, 403):
+        raise RuntimeError("DeepSeek rejected the API key")
+    if status_code == 402:
+        raise RuntimeError("DeepSeek reports insufficient API balance")
+    if status_code == 429:
+        raise RuntimeError("DeepSeek rate-limited the balance request; try again later")
+    if status_code < 200 or status_code >= 300:
+        raise RuntimeError(f"DeepSeek balance endpoint returned HTTP {status_code}")
+    try:
+        result = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("DeepSeek returned invalid balance JSON") from error
+    if not isinstance(result, dict) or not isinstance(result.get("is_available"), bool):
+        raise RuntimeError("DeepSeek returned an invalid balance response")
+    balances = result.get("balance_infos")
+    if not isinstance(balances, list):
+        raise RuntimeError("DeepSeek returned no balance information")
+    for balance in balances:
+        if not isinstance(balance, dict) or any(
+            not isinstance(balance.get(field), str)
+            for field in ("currency", "total_balance", "granted_balance", "topped_up_balance")
+        ):
+            raise RuntimeError("DeepSeek returned an invalid balance entry")
+    return result
+
+
 def query_agy(binary):
     process = subprocess.run(
         [binary, "-p", "/usage", "--output-format", "json", "--print-timeout", "30s"],
@@ -148,6 +372,33 @@ def local_time(timestamp, scale=1):
         return "unknown"
 
 
+def reset_delay(timestamp, scale=1):
+    try:
+        if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
+            target = timestamp / scale
+        elif isinstance(timestamp, str):
+            parsed = datetime.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            target = parsed.timestamp()
+        else:
+            return "unknown"
+        remaining = target - time.time()
+    except (OverflowError, OSError, ValueError):
+        return "unknown"
+    if remaining <= 0:
+        return "now"
+    minutes = math.ceil(remaining / 60)
+    days, remainder = divmod(minutes, 1440)
+    hours, minutes = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or not parts:
+        parts.append(f"{minutes}m")
+    return "".join(parts)
+
+
 def duration_name(minutes):
     if not isinstance(minutes, (int, float)) or minutes <= 0:
         return None
@@ -167,13 +418,41 @@ def duration_name(minutes):
     return " ".join(parts)
 
 
+def color(text, code, stream=None):
+    stream = stream or sys.stdout
+    if not stream.isatty() or "NO_COLOR" in os.environ:
+        return str(text)
+    return f"\033[{code}m{text}\033[0m"
+
+
+def percentage_text(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return color("unknown", "2") if value is None else str(value)
+    text = f"{value:g}% used"
+    if value >= 100:
+        return color(text, "31")
+    if value >= 80:
+        return color(text, "33")
+    return color(text, "32")
+
+
+def print_heading(title):
+    print(color(title, "1;36"))
+
+
+def print_window(label, used, reset, scale=1):
+    delay = reset_delay(reset, scale)
+    reset_text = color("resets in " + delay, "2")
+    print(f"  {label}: {percentage_text(used)}, {reset_text}")
+
+
 def print_codex(result):
-    print("Codex")
+    print_heading("Codex")
     buckets = result.get("rateLimitsByLimitId") or {}
     bucket = buckets.get("codex") if isinstance(buckets, dict) else None
     bucket = bucket or result.get("rateLimits")
     if not isinstance(bucket, dict):
-        print("  no subscription quota returned")
+        print(f"  {color('no subscription quota returned', '33')}")
         return
     plan = bucket.get("planType")
     if plan:
@@ -184,37 +463,108 @@ def print_codex(result):
         if isinstance(window, dict):
             windows.append((slot, window))
     if not windows:
-        print("  no subscription quota returned")
+        print(f"  {color('no subscription quota returned', '33')}")
         return
     for slot, window in windows:
         label = duration_name(window.get("windowDurationMins")) or slot
         used = window.get("usedPercent")
-        reset = local_time(window.get("resetsAt"))
-        print(f"  {label}: {used}% used, resets {reset}")
+        print_window(label, used, window.get("resetsAt"))
+
+
+def claude_windows(result):
+    limits = result.get("limits")
+    if isinstance(limits, list):
+        windows = []
+        for item in limits:
+            if not isinstance(item, dict):
+                continue
+            percent = item.get("percent")
+            if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+                continue
+            kind = item.get("kind")
+            if not isinstance(kind, str):
+                continue
+            model_scope = item.get("scope")
+            model = model_scope.get("model") if isinstance(model_scope, dict) else None
+            if isinstance(model, str):
+                model_name = model
+            elif isinstance(model, dict):
+                model_name = model.get("display_name") or model.get("id")
+            else:
+                model_name = None
+            if kind == "session":
+                label = "5h"
+            elif kind == "weekly_all":
+                label = "7d"
+            elif kind == "weekly_scoped" and model_name:
+                label = f"7d {model_name}"
+            else:
+                label = kind.replace("_", " ")
+                if model_name:
+                    label = f"{label} {model_name}"
+            windows.append((label, percent, item.get("resets_at")))
+        if windows:
+            return windows
+    windows = []
+    for key, item in result.items():
+        if key == "five_hour":
+            label = "5h"
+        elif key == "seven_day":
+            label = "7d"
+        elif key.startswith("seven_day_"):
+            label = f"7d {key.removeprefix('seven_day_').replace('_', ' ')}"
+        else:
+            continue
+        if not isinstance(item, dict):
+            continue
+        percent = item.get("utilization")
+        if isinstance(percent, bool) or not isinstance(percent, (int, float)):
+            continue
+        windows.append((label, percent, item.get("resets_at")))
+    return windows
+
+
+def print_claude(result):
+    print_heading("Claude Code")
+    if result.get("plan"):
+        print(f"  plan: {result['plan']}")
+    windows = claude_windows(result["usage"])
+    for label, percent, reset in windows:
+        print_window(label, percent, reset)
 
 
 def print_muse(result):
-    print("Muse Code")
+    print_heading("Muse Code")
     usage = result.get("usage") if isinstance(result, dict) else None
     if not isinstance(usage, dict):
-        print("  no subscription usage has been observed by Muse yet")
+        print(f"  {color('no subscription usage has been observed by Muse yet', '33')}")
         return
     if usage.get("tier"):
         print(f"  plan: {usage['tier']}")
-    print(f"  as of {local_time(usage.get('observedAtMs'), 1000)}")
+    print(f"  {color('as of', '2')} {color(local_time(usage.get('observedAtMs'), 1000), '2')}")
     current = usage.get("window")
     weekly = usage.get("weekly")
     if isinstance(current, dict):
         label = duration_name(current.get("windowDurationMins")) or "current window"
-        reset = local_time(current.get("resetsAtMs"), 1000)
-        print(f"  {label}: {current.get('usedPercent')}% used, resets {reset}")
+        print_window(label, current.get("usedPercent"), current.get("resetsAtMs"), 1000)
     if isinstance(weekly, dict):
-        reset = local_time(weekly.get("resetsAtMs"), 1000)
-        print(f"  7d: {weekly.get('usedPercent')}% used, resets {reset}")
+        print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
+
+
+def print_dsh(result):
+    print_heading("DeepSeek API balance")
+    available = result["is_available"]
+    label = "available for API requests" if available else "insufficient for API requests"
+    print(f"  {color(label, '32' if available else '31')}")
+    for balance in result["balance_infos"]:
+        print(
+            f"  {balance['currency']}: {balance['total_balance']} total "
+            f"({balance['granted_balance']} granted, {balance['topped_up_balance']} topped up)"
+        )
 
 
 def print_agy(report):
-    print("Antigravity")
+    print_heading("Antigravity")
     for line in str(report).strip().splitlines():
         print(f"  {line}")
 
@@ -244,8 +594,20 @@ def main(arguments):
     if not available:
         print("usage: no supported subscription-usage CLI is installed", file=sys.stderr)
         return 1
-    query = {"codex": query_codex, "muse": query_muse, "agy": query_agy}
-    render = {"codex": print_codex, "muse": print_muse, "agy": print_agy}
+    query = {
+        "claude": query_claude,
+        "codex": query_codex,
+        "muse": query_muse,
+        "dsh": query_dsh,
+        "agy": query_agy,
+    }
+    render = {
+        "claude": print_claude,
+        "codex": print_codex,
+        "muse": print_muse,
+        "dsh": print_dsh,
+        "agy": print_agy,
+    }
     results = {}
     failures = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(available)) as pool:
@@ -263,7 +625,7 @@ def main(arguments):
         if key not in results and key not in failures:
             continue
         if key in failures:
-            print(f"{title}: {failures[key]}", file=sys.stderr)
+            print(color(f"{title}: {failures[key]}", "1;31", sys.stderr), file=sys.stderr)
             continue
         render[key](results[key])
     return 1 if failures else 0
