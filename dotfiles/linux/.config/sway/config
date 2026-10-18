@@ -6,7 +6,6 @@ output * bg #000000 solid_color
 
 bindsym $mod+Return exec foot
 bindsym Shift+Return exec bemenu-run --no-exec | xargs swaymsg exec --
-bindsym $mod+b exec MOZ_ENABLE_WAYLAND=1 MOZ_DISABLE_RDD_SANDBOX=1 firefox --MOZ_LOG_FILE=/dev/null
 
 bindsym $mod+p exec grim -g "$(slurp -d)" - | wl-copy
 

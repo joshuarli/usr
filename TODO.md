@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-7 · P2 · Firefox's RDD sandbox is disabled by default
-
-- **Area:** Security
-- **Where:** `dotfiles/linux/.config/sway/config:9`
-- **Problem:** The normal Firefox binding sets `MOZ_DISABLE_RDD_SANDBOX=1`, disabling the Data Decoder process sandbox. Mozilla documents this variable as a sandbox disable switch. Media decoding of untrusted web content therefore runs without that process boundary. [Mozilla sandbox reference](https://wiki.mozilla.org/Security/Sandbox)
-- **Recommendation:** Remove the variable from the normal launcher and use it only for a specific troubleshooting session.
-- **Fix with:** none
-- **Effort:** S
-
 ### USR-8 · P2 · Cookie exports are readable by other local users
 
 - **Area:** Security
