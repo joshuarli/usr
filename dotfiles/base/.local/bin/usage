@@ -1,0 +1,273 @@
+#!/bin/sh
+exec python3 -I - "$@" <<'PY'
+import concurrent.futures
+import datetime
+import json
+import select
+import shutil
+import subprocess
+import sys
+import time
+
+
+PROVIDERS = (
+    ("codex", "Codex", "codex", ["app-server", "--stdio"]),
+    ("muse", "Muse Code", "muse", ["serve", "--no-session-log"]),
+    # ("agy", "Antigravity", "agy", []),
+)
+HELP = """usage: usage [codex|muse]
+
+Read subscription quota usage from the installed Codex and Muse Code CLIs.
+With no provider, query every supported CLI installed here.
+These reads do not submit a model prompt. Claude Code's interactive /usage
+shows quota figures, but `claude -p "/usage"` omits them. Grok Build and
+OpenCode do not expose a scriptable subscription quota read.
+"""
+
+
+def stop_process(process):
+    if process.stdin and not process.stdin.closed:
+        try:
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def read_rpc_response(process, request_id, deadline):
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for the CLI response")
+        ready, _, _ = select.select([process.stdout], [], [], remaining)
+        if not ready:
+            raise TimeoutError("timed out waiting for the CLI response")
+        line = process.stdout.readline()
+        if not line:
+            raise RuntimeError("the CLI closed its protocol output")
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("the CLI returned invalid protocol JSON") from error
+        if message.get("id") != request_id:
+            continue
+        if "error" in message:
+            detail = message["error"].get("message", "request failed")
+            raise RuntimeError(detail)
+        return message.get("result")
+
+
+def send_rpc(process, request):
+    process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+    process.stdin.flush()
+
+
+def query_rpc(binary, arguments, method, experimental=False):
+    process = subprocess.Popen(
+        [binary, *arguments],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    deadline = time.monotonic() + 35
+    try:
+        send_rpc(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {"name": "usage", "version": "1"},
+                    "capabilities": {"experimentalApi": experimental},
+                },
+            },
+        )
+        read_rpc_response(process, 1, deadline)
+        send_rpc(
+            process,
+            {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+        )
+        send_rpc(
+            process,
+            {"jsonrpc": "2.0", "id": 2, "method": method, "params": {}},
+        )
+        return read_rpc_response(process, 2, deadline)
+    finally:
+        stop_process(process)
+
+
+def query_codex(binary):
+    return query_rpc(binary, ["app-server", "--stdio"], "account/rateLimits/read", True)
+
+
+def query_muse(binary):
+    return query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
+
+
+def query_agy(binary):
+    process = subprocess.run(
+        [binary, "-p", "/usage", "--output-format", "json", "--print-timeout", "30s"],
+        capture_output=True,
+        text=True,
+        timeout=35,
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or "command failed"
+        raise RuntimeError(detail)
+    try:
+        result = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Antigravity returned invalid JSON") from error
+    if result.get("status") == "ERROR":
+        raise RuntimeError(result.get("error") or result.get("response") or "usage read failed")
+    report = result.get("response") or result.get("structured_output")
+    if not report:
+        raise RuntimeError("Antigravity returned no quota report")
+    return report
+
+
+def local_time(timestamp, scale=1):
+    if not isinstance(timestamp, (int, float)):
+        return "unknown"
+    try:
+        return datetime.datetime.fromtimestamp(timestamp / scale).astimezone().strftime(
+            "%Y-%m-%d %H:%M %Z"
+        )
+    except (OverflowError, OSError, ValueError):
+        return "unknown"
+
+
+def duration_name(minutes):
+    if not isinstance(minutes, (int, float)) or minutes <= 0:
+        return None
+    if minutes == 300:
+        return "5h"
+    if minutes == 10080:
+        return "7d"
+    days, remainder = divmod(int(minutes), 1440)
+    hours, remaining_minutes = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if remaining_minutes or not parts:
+        parts.append(f"{remaining_minutes}m")
+    return " ".join(parts)
+
+
+def print_codex(result):
+    print("Codex")
+    buckets = result.get("rateLimitsByLimitId") or {}
+    bucket = buckets.get("codex") if isinstance(buckets, dict) else None
+    bucket = bucket or result.get("rateLimits")
+    if not isinstance(bucket, dict):
+        print("  no subscription quota returned")
+        return
+    plan = bucket.get("planType")
+    if plan:
+        print(f"  plan: {plan}")
+    windows = []
+    for slot in ("primary", "secondary"):
+        window = bucket.get(slot)
+        if isinstance(window, dict):
+            windows.append((slot, window))
+    if not windows:
+        print("  no subscription quota returned")
+        return
+    for slot, window in windows:
+        label = duration_name(window.get("windowDurationMins")) or slot
+        used = window.get("usedPercent")
+        reset = local_time(window.get("resetsAt"))
+        print(f"  {label}: {used}% used, resets {reset}")
+
+
+def print_muse(result):
+    print("Muse Code")
+    usage = result.get("usage") if isinstance(result, dict) else None
+    if not isinstance(usage, dict):
+        print("  no subscription usage has been observed by Muse yet")
+        return
+    if usage.get("tier"):
+        print(f"  plan: {usage['tier']}")
+    print(f"  as of {local_time(usage.get('observedAtMs'), 1000)}")
+    current = usage.get("window")
+    weekly = usage.get("weekly")
+    if isinstance(current, dict):
+        label = duration_name(current.get("windowDurationMins")) or "current window"
+        reset = local_time(current.get("resetsAtMs"), 1000)
+        print(f"  {label}: {current.get('usedPercent')}% used, resets {reset}")
+    if isinstance(weekly, dict):
+        reset = local_time(weekly.get("resetsAtMs"), 1000)
+        print(f"  7d: {weekly.get('usedPercent')}% used, resets {reset}")
+
+
+def print_agy(report):
+    print("Antigravity")
+    for line in str(report).strip().splitlines():
+        print(f"  {line}")
+
+
+def main(arguments):
+    if arguments in (["-h"], ["--help"]):
+        print(HELP, end="")
+        return 0
+    if len(arguments) > 1:
+        print(HELP, end="", file=sys.stderr)
+        return 2
+    selected = arguments[0] if arguments else None
+    providers = {item[0]: item for item in PROVIDERS}
+    if selected is not None and selected not in providers:
+        print(HELP, end="", file=sys.stderr)
+        return 2
+    available = []
+    for item in PROVIDERS:
+        if selected is not None and item[0] != selected:
+            continue
+        binary = shutil.which(item[2])
+        if binary:
+            available.append((item, binary))
+        elif selected is not None:
+            print(f"usage: {item[2]} is not installed", file=sys.stderr)
+            return 1
+    if not available:
+        print("usage: no supported subscription-usage CLI is installed", file=sys.stderr)
+        return 1
+    query = {"codex": query_codex, "muse": query_muse, "agy": query_agy}
+    render = {"codex": print_codex, "muse": print_muse, "agy": print_agy}
+    results = {}
+    failures = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(available)) as pool:
+        futures = {
+            pool.submit(query[key], binary): key
+            for (key, _, _, _), binary in available
+        }
+        for future in concurrent.futures.as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception as error:
+                failures[key] = str(error)
+    for key, title, _, _ in PROVIDERS:
+        if key not in results and key not in failures:
+            continue
+        if key in failures:
+            print(f"{title}: {failures[key]}", file=sys.stderr)
+            continue
+        render[key](results[key])
+    return 1 if failures else 0
+
+
+raise SystemExit(main(sys.argv[1:]))
+PY

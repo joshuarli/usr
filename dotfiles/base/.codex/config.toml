@@ -200,6 +200,9 @@ trust_level = "trusted"
 [projects."/Users/josh/d/h12tiny"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/mactop"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
