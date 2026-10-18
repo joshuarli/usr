@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-13 · P3 · Stale PR cleanup exits successfully after branch deletion errors
-
-- **Area:** Errors
-- **Where:** `dotfiles/base/.local/bin/close-stale-prs.py:406-419`
-- **Problem:** A failed branch deletion prints an error and continues, but `main()` returns 0 after the loop. Automation can treat a partial cleanup as complete.
-- **Recommendation:** Preserve the per-branch attempts and return a nonzero status if any deletion failed.
-- **Fix with:** error-model
-- **Effort:** S
-
 ### USR-3 · P4 · `mdtool` reports false positives on this repo
 
 - **Area:** Docs

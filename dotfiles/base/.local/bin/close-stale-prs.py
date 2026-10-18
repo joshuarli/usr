@@ -372,6 +372,7 @@ def main() -> int:
 
     candidates = 0
     skipped = 0
+    deletion_failed = False
     for branch_name in sorted(closed):
         branch = remote_branches.get(branch_name)
         if branch is None or branch.last_commit_at > cutoff:
@@ -411,12 +412,13 @@ def main() -> int:
                 delete_branch(repository, branch_name)
             except RuntimeError as error:
                 print(f"    ERROR: {error}", file=sys.stderr)
+                deletion_failed = True
                 continue
             print("    DELETED")
 
     print(f"\nEligible branches: {candidates}")
     print(f"Skipped branches:  {skipped}")
-    return 0
+    return 1 if deletion_failed else 0
 
 
 if __name__ == "__main__":
