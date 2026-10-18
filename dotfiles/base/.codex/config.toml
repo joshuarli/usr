@@ -6,7 +6,7 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
 model = "gpt-6-luna"
-model_reasoning_effort = "high"
+model_reasoning_effort = "xhigh"
 
 [features]
 goals = true

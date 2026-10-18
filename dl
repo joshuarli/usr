@@ -816,7 +816,10 @@ install_codex() {
         printf '%s\n' 'codex is installed'
         return
     fi
-    jaq_available || { unchecked codex "jaq is required"; return; }
+    if ! jaq_available; then
+        install_jaq
+        if ! jaq_available; then return; fi
+    fi
     case "$OS:$ARCH" in
         Darwin:x86_64) target=x86_64-apple-darwin ;;
         Darwin:aarch64) target=aarch64-apple-darwin ;;
@@ -1022,20 +1025,6 @@ EOF
     printf '%s\n' "Installed ${DEST}/opencode2"
 }
 
-# Repeated tools share a binary and state file, so keep those requests serial.
-has_duplicate_tools() {
-    for prog in "$@"; do
-        matches=0
-        for candidate in "$@"; do
-            if [ "$prog" = "$candidate" ]; then
-                matches=$((matches + 1))
-            fi
-        done
-        if [ "$matches" -gt 1 ]; then return 0; fi
-    done
-    return 1
-}
-
 wait_for_workers() {
     group_failed=false
     for worker_pid in $worker_pids; do
@@ -1049,7 +1038,7 @@ wait_for_workers() {
 }
 
 # Each child handles one tool, so its result and failure state stay independent.
-run_parallel() {
+run_parallel_wave() {
     max_workers=$#
     parallel_failed=false
     worker_pids=
@@ -1075,7 +1064,31 @@ run_parallel() {
         if ! wait_for_workers; then parallel_failed=true; fi
     fi
     if ! replay_worker_logs; then parallel_failed=true; fi
+    if [ -n "$log_dir" ]; then
+        rm -rf "$log_dir" || parallel_failed=true
+        log_dir=
+    fi
     if $parallel_failed; then return 1; fi
+    return 0
+}
+
+run_parallel() {
+    run_failed=false
+    while [ "$#" -gt 0 ]; do
+        wave_tools=
+        deferred_tools=
+        for prog in "$@"; do
+            case " $wave_tools " in
+                *" $prog "*) deferred_tools="${deferred_tools}${deferred_tools:+ }${prog}" ;;
+                *) wave_tools="${wave_tools}${wave_tools:+ }${prog}" ;;
+            esac
+        done
+        # shellcheck disable=SC2086
+        if ! run_parallel_wave $wave_tools; then run_failed=true; fi
+        # shellcheck disable=SC2086
+        set -- $deferred_tools
+    done
+    if $run_failed; then return 1; fi
     return 0
 }
 
@@ -1094,13 +1107,17 @@ for prog in "$@"; do
     esac
 done
 if $needs_jaq && ! jaq_available; then
-    changed=false
-    install_jaq
-    if $failed; then exit 1; fi
+    requested_tools=
+    for prog in "$@"; do
+        if [ "$prog" != jaq ]; then
+            requested_tools="${requested_tools}${requested_tools:+ }${prog}"
+        fi
+    done
+    # shellcheck disable=SC2086
+    set -- $requested_tools
 fi
 
-if [ "$#" -gt 1 ] && [ "$_dl_worker_mode" != true ] \
-    && ! has_duplicate_tools "$@"; then
+if [ "$#" -gt 1 ] && [ "$_dl_worker_mode" != true ]; then
     if ! run_parallel "$@"; then failed=true; fi
     if $failed; then exit 1; fi
     printf '%s\n' "Done."

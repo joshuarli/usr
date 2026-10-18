@@ -63,6 +63,27 @@ INSTALLER
     https://x.ai/cli/stable)
         printf '%s\n' '1.2.3'
         ;;
+    https://github.com/01mf02/jaq/releases/latest/download/jaq-*)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: jaq-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$DL_JAQ_MOCK" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://releases.openai.com/codex/channels/latest)
+        printf '%s\n' '{}'
+        ;;
+    https://releases.openai.com/codex/releases/codex-test.tar.gz)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: codex-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$CODEX_TAR" "$output"
+        else
+            exit 1
+        fi
+        ;;
     https://x.ai/cli/grok-1.2.3-linux-x86_64)
         if [ "$headers" = - ]; then
             printf '%s\n' 'ETag: grok-test-etag'
@@ -105,6 +126,10 @@ cat > "$mock_bin/jaq" <<'EOF'
 #!/bin/sh
 for query do :; done
 case "$query" in
+    '.tag_name // empty') printf '%s\n' 'rust-v1.2.3' ;;
+    *'select(.name == $asset)'*) printf '%s\n' '{"browser_download_url":"https://releases.openai.com/codex/releases/codex-test.tar.gz","digest":"sha256:'"$CODEX_SHA256"'"}' ;;
+    '.browser_download_url // empty') printf '%s\n' 'https://releases.openai.com/codex/releases/codex-test.tar.gz' ;;
+    '.digest // empty') printf '%s\n' "sha256:$CODEX_SHA256" ;;
     '.version // empty') printf '%s\n' '1.4.9-R6297.1' ;;
     '.manifest_url // empty') printf '%s\n' 'https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.9-R6297.1&file=manifest.json' ;;
     *'.platforms['*) printf '%s\n' 'c4156c243860ddee43e9c200f5b3d672b447d928df5273a3c954bb15b0f8dcad' ;;
@@ -115,6 +140,10 @@ esac
 EOF
 chmod +x "$mock_bin/jaq"
 
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
+chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
+
 mkdir -p "$test_root/opencode-package"
 cat > "$test_root/opencode-package/opencode" <<'EOF'
 #!/bin/sh
@@ -122,6 +151,21 @@ cat > "$test_root/opencode-package/opencode" <<'EOF'
 EOF
 chmod +x "$test_root/opencode-package/opencode"
 tar -czf "$test_root/opencode.tar.gz" -C "$test_root/opencode-package" opencode
+
+mkdir -p "$test_root/codex-package/bin" "$test_root/codex-package/codex-path"
+printf '%s\n' '{}' > "$test_root/codex-package/codex-package.json"
+for codex_command in codex codex-code-mode-host; do
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/codex-package/bin/$codex_command"
+    chmod +x "$test_root/codex-package/bin/$codex_command"
+done
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/codex-package/codex-path/rg"
+chmod +x "$test_root/codex-package/codex-path/rg"
+tar -czf "$test_root/codex.tar.gz" -C "$test_root/codex-package" .
+if command -v sha256sum >/dev/null 2>&1; then
+    CODEX_SHA256=$(sha256sum "$test_root/codex.tar.gz" | awk '{print $1}')
+else
+    CODEX_SHA256=$(shasum -a 256 "$test_root/codex.tar.gz" | awk '{print $1}')
+fi
 
 cat > "$mock_bin/file" <<'EOF'
 #!/bin/sh
@@ -533,3 +577,18 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 [ "$(cat "$missing_file_home/.local/bin/claude")" = 'legacy Claude binary' ]
+
+codex_home="$test_root/codex-home"
+mv "$mock_bin/jaq" "$mock_bin/jaq.hidden"
+if output=$(HOME="$codex_home" XDG_STATE_HOME="$codex_home/.local/state" \
+    TMPDIR="$test_root/tmp" CODEX_SHA256="$CODEX_SHA256" CODEX_TAR="$test_root/codex.tar.gz" \
+    DL_JAQ_MOCK="$mock_bin/jaq.hidden" PATH="$mock_bin:/usr/bin:/bin" \
+    sh "$repo_root/dl" jaq codex muse 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$codex_home/.local/bin/jaq" ]
+[ -L "$codex_home/.local/bin/codex" ]
+[ -x "$codex_home/.local/bin/muse" ]
