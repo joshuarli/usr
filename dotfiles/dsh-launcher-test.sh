@@ -168,3 +168,24 @@ if output=$(env PATH="$bin:/usr/bin:/bin" HOME="$home" XDG_DATA_HOME="$data" \
 fi
 printf '%s\n' "$output" | grep -Fqx 'dsh: set DEEPSEEK_API_KEY or install vault with that entry'
 [ ! -e "$test_root/command" ]
+
+cat > "$mock_bin/dl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$@" > "$DSH_UPDATE_CAPTURE"
+EOF
+chmod +x "$mock_bin/dl"
+if output=$(HOME="$home" PATH="$mock_bin:$PATH" DSH_UPDATE_CAPTURE="$test_root/update" \
+    sh "$launcher" update 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(sed -n '1p' "$test_root/update")" = dsh ]
+
+if output=$(HOME="$home" PATH="$mock_bin:$PATH" DSH_UPDATE_CAPTURE="$test_root/update" \
+    sh "$launcher" update --check 2>&1); then
+    printf '%s\n' 'dsh update accepted an unsupported argument' >&2
+    exit 1
+fi
+[ "$(cat "$test_root/update")" = dsh ]

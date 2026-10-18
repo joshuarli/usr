@@ -29,20 +29,16 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$url" in
-    https://downloads.claude.ai/claude-code-releases/latest)
-        printf '%s\n' '2.1.300'
-        ;;
-    https://downloads.claude.ai/claude-code-releases/2.1.300/manifest.json)
-        printf '%s\n' '{"platforms":{"linux-x64":{"checksum":"c4156c243860ddee43e9c200f5b3d672b447d928df5273a3c954bb15b0f8dcad"}}}'
-        ;;
-    https://downloads.claude.ai/claude-code-releases/2.1.300/linux-x64/claude)
-        if [ "$headers" = - ]; then
-            printf '%s\n' 'ETag: claude-test-etag'
-        elif [ -n "$output" ]; then
-            printf '%s' 'claude-test-binary' > "$output"
-        else
-            exit 1
-        fi
+    https://claude.ai/install.sh)
+        [ -n "$output" ] || exit 1
+        cat > "$output" <<'INSTALLER'
+#!/bin/sh
+mkdir -p "$HOME/.claude/native" "$HOME/.local/bin"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.claude/native/claude"
+chmod +x "$HOME/.claude/native/claude"
+ln -s "$HOME/.claude/native/claude" "$HOME/.local/bin/.claude.XXXXXX"
+mv -f "$HOME/.local/bin/.claude.XXXXXX" "$HOME/.local/bin/claude"
+INSTALLER
         ;;
     https://antigravity.google/cli/install.sh)
         [ -n "$output" ] || exit 1
@@ -53,6 +49,37 @@ mkdir -p "$HOME/.local/bin"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/agy"
 chmod +x "$HOME/.local/bin/agy"
 INSTALLER
+        ;;
+    https://dev.meta.ai/install.sh)
+        [ -n "$output" ] || exit 1
+        cat > "$output" <<'INSTALLER'
+#!/bin/bash
+[ "${MUSE_INSTALL_DIR:-}" = "$HOME/.local/bin" ] || exit 1
+[ "${MUSE_NO_MODIFY_PATH:-}" = 1 ] || exit 1
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$MUSE_INSTALL_DIR/muse"
+chmod +x "$MUSE_INSTALL_DIR/muse"
+INSTALLER
+        ;;
+    https://x.ai/cli/stable)
+        printf '%s\n' '1.2.3'
+        ;;
+    https://x.ai/cli/grok-1.2.3-linux-x86_64)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: grok-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s\n' 'grok-test-binary' > "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://opencode.ai/update/api/latest/cli/opencode/opencode-linux-x64.tar.gz)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: opencode-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$OPENCODE_TAR" "$output"
+        else
+            exit 1
+        fi
         ;;
     https://api.meta.ai/muse-code/channels/muse-stable)
         printf '%s\n' '{"version":"1.4.9-R6297.1","manifest_url":"https://lookaside.facebook.com/lookaside/muse/download/?channel=muse&version=1.4.9-R6297.1&file=manifest.json"}'
@@ -87,6 +114,14 @@ case "$query" in
 esac
 EOF
 chmod +x "$mock_bin/jaq"
+
+mkdir -p "$test_root/opencode-package"
+cat > "$test_root/opencode-package/opencode" <<'EOF'
+#!/bin/sh
+[ "$1" = --version ] && printf '%s\n' 'opencode 2.0.1'
+EOF
+chmod +x "$test_root/opencode-package/opencode"
+tar -czf "$test_root/opencode.tar.gz" -C "$test_root/opencode-package" opencode
 
 cat > "$mock_bin/file" <<'EOF'
 #!/bin/sh
@@ -265,10 +300,13 @@ else
 fi
 
 case "$output" in
-    *"Installed $home/.local/bin/muse"*) ;;
+    *"Installed Muse Code launcher ($home/.local/bin/muse)"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
-[ "$(cat "$home/.local/bin/muse")" = muse-test-binary ]
+case "$(cat "$home/.local/bin/muse")" in
+    *'#!/bin/sh'*) ;;
+    *) printf '%s\n' 'Muse did not install the official launcher' >&2; exit 1 ;;
+esac
 
 antigravity_home="$test_root/antigravity-home"
 if output=$(HOME="$antigravity_home" XDG_STATE_HOME="$antigravity_home/.local/state" \
@@ -305,6 +343,94 @@ esac
 EOF
 chmod +x "$mock_bin/uname"
 
+grok_home="$test_root/grok-home"
+if output=$(HOME="$grok_home" XDG_STATE_HOME="$grok_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" grok 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$grok_home/.local/bin/grok")" = "$grok_home/.grok/bin/grok" ]
+[ "$(readlink "$grok_home/.grok/bin/grok")" = ../downloads/grok-linux-x86_64 ]
+[ "$(cat "$grok_home/.grok/downloads/grok-linux-x86_64")" = grok-test-binary ]
+
+grok_collision_home="$test_root/grok-collision-home"
+mkdir -p "$grok_collision_home/.local/bin" "$grok_collision_home/.local/state/dl" \
+    "$grok_collision_home/.grok/bin" "$grok_collision_home/.grok/downloads"
+printf '%s\n' 'legacy grok binary' > "$grok_collision_home/.local/bin/grok"
+printf '%s\n' 'native grok binary' > "$grok_collision_home/.grok/downloads/grok-linux-x86_64"
+chmod +x "$grok_collision_home/.local/bin/grok" "$grok_collision_home/.grok/downloads/grok-linux-x86_64"
+ln -s ../downloads/grok-linux-x86_64 "$grok_collision_home/.grok/bin/grok"
+printf '%s\n' 'old-grok-test-etag' > "$grok_collision_home/.local/state/dl/grok"
+if output=$(HOME="$grok_collision_home" XDG_STATE_HOME="$grok_collision_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" grok 2>&1); then
+    printf '%s\n' 'Grok migration replaced an existing native install' >&2
+    exit 1
+fi
+[ "$(cat "$grok_collision_home/.local/bin/grok")" = 'legacy grok binary' ]
+[ "$(cat "$grok_collision_home/.grok/downloads/grok-linux-x86_64")" = 'native grok binary' ]
+
+legacy_grok_home="$test_root/legacy-grok-home"
+mkdir -p "$legacy_grok_home/.local/bin" "$legacy_grok_home/.local/state/dl"
+printf '%s\n' 'legacy grok binary' > "$legacy_grok_home/.local/bin/grok"
+chmod +x "$legacy_grok_home/.local/bin/grok"
+printf '%s\n' 'old-grok-test-etag' > "$legacy_grok_home/.local/state/dl/grok"
+if output=$(HOME="$legacy_grok_home" XDG_STATE_HOME="$legacy_grok_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" grok 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$legacy_grok_home/.local/bin/grok")" = "$legacy_grok_home/.grok/bin/grok" ]
+
+muse_legacy_home="$test_root/legacy-muse-home"
+mkdir -p "$muse_legacy_home/.local/bin" "$muse_legacy_home/.local/state/dl"
+printf '%s\n' 'legacy muse binary' > "$muse_legacy_home/.local/bin/muse"
+chmod +x "$muse_legacy_home/.local/bin/muse"
+printf '%s\n' 'old-muse-test-etag' > "$muse_legacy_home/.local/state/dl/muse"
+if output=$(HOME="$muse_legacy_home" XDG_STATE_HOME="$muse_legacy_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" muse 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$(cat "$muse_legacy_home/.local/bin/muse")" in
+    *'#!/bin/sh'*) ;;
+    *) printf '%s\n' 'Muse legacy install was not migrated to the official launcher' >&2; exit 1 ;;
+esac
+
+opencode_home="$test_root/opencode-home"
+if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" opencode2 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$opencode_home/.opencode/bin/opencode" ]
+[ "$(readlink "$opencode_home/.local/bin/opencode2")" = "$opencode_home/.opencode/bin/opencode2" ]
+[ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.1' ]
+
+opencode_collision_home="$test_root/opencode-collision-home"
+mkdir -p "$opencode_collision_home/.local/bin" "$opencode_collision_home/.local/state/dl" \
+    "$opencode_collision_home/.opencode/bin"
+printf '%s\n' 'legacy opencode binary' > "$opencode_collision_home/.local/bin/opencode2"
+printf '%s\n' 'native opencode binary' > "$opencode_collision_home/.opencode/bin/opencode"
+chmod +x "$opencode_collision_home/.local/bin/opencode2" "$opencode_collision_home/.opencode/bin/opencode"
+printf '%s\n' 'old-opencode-test-etag' > "$opencode_collision_home/.local/state/dl/opencode2"
+if output=$(HOME="$opencode_collision_home" XDG_STATE_HOME="$opencode_collision_home/.local/state" \
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" opencode2 2>&1); then
+    printf '%s\n' 'OpenCode 2 migration replaced an existing native install' >&2
+    exit 1
+fi
+[ "$(cat "$opencode_collision_home/.local/bin/opencode2")" = 'legacy opencode binary' ]
+[ "$(cat "$opencode_collision_home/.opencode/bin/opencode")" = 'native opencode binary' ]
+
 claude_home="$test_root/claude-home"
 claude_data="$claude_home/share"
 claude_state="$claude_home/state"
@@ -315,13 +441,12 @@ else
     printf '%s\n' "$output" >&2
     exit 1
 fi
-claude_version="$claude_data/claude/versions/2.1.300"
+claude_version="$claude_home/.claude/native/claude"
 [ -L "$claude_home/.local/bin/claude" ]
 [ "$(readlink "$claude_home/.local/bin/claude")" = "$claude_version" ]
 [ -x "$claude_version" ]
-[ "$(cat "$claude_version")" = claude-test-binary ]
 case "$output" in
-    *"Installed $claude_home/.local/bin/claude"*) ;;
+    *"Installed Claude Code ($claude_home/.local/bin/claude)"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 if output=$(HOME="$claude_home" XDG_DATA_HOME="$claude_data" XDG_STATE_HOME="$claude_state" \
@@ -336,6 +461,24 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 
+old_claude_home="$test_root/old-claude-home"
+old_claude_data="$old_claude_home/share"
+mkdir -p "$old_claude_home/.local/bin" "$old_claude_home/.local/state/dl" \
+    "$old_claude_data/claude/versions"
+printf '%s\n' 'legacy versioned Claude binary' > "$old_claude_data/claude/versions/2.1.299"
+chmod +x "$old_claude_data/claude/versions/2.1.299"
+ln -s "$old_claude_data/claude/versions/2.1.299" "$old_claude_home/.local/bin/claude"
+printf '%s\n' 'old-claude-test-etag' > "$old_claude_home/.local/state/dl/claude"
+if output=$(HOME="$old_claude_home" XDG_DATA_HOME="$old_claude_data" \
+    XDG_STATE_HOME="$old_claude_home/.local/state" TMPDIR="$test_root/tmp" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" claude 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$old_claude_home/.local/bin/claude")" = "$old_claude_home/.claude/native/claude" ]
+
 legacy_home="$test_root/legacy-home"
 mkdir -p "$legacy_home/.local/bin" "$legacy_home/.local/state/dl"
 printf '%s' 'legacy Claude binary' > "$legacy_home/.local/bin/claude"
@@ -349,10 +492,9 @@ else
     printf '%s\n' "$output" >&2
     exit 1
 fi
-legacy_version="$legacy_home/.local/share/claude/versions/2.1.300"
+legacy_version="$legacy_home/.claude/native/claude"
 [ -L "$legacy_home/.local/bin/claude" ]
 [ "$(readlink "$legacy_home/.local/bin/claude")" = "$legacy_version" ]
-[ "$(cat "$legacy_version")" = claude-test-binary ]
 
 custom_home="$test_root/custom-home"
 mkdir -p "$custom_home/.local/bin" "$custom_home/.local/state/dl"

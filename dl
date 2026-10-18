@@ -21,6 +21,11 @@ DEST="${HOME}/.local/bin"
 mkdir -p "$DEST"
 CLAUDE_VERSIONS="${XDG_DATA_HOME:-${HOME}/.local/share}/claude/versions"
 DSH_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/dsh"
+CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
+CODEX_LEGACY_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
+GROK_HOME="${HOME}/.grok"
+MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
+OPENCODE2_HOME="${HOME}/.opencode"
 
 # One file per tool holds the ETag of the asset last installed. The binary itself
 # cannot say which release it came from, and ad-hoc signing changes its bytes, so
@@ -33,7 +38,6 @@ changed=false
 tmpzip=
 tmpbin=
 tmpbundle=
-tmpcurrentlink=
 tmpbinlink=
 worker_pids=
 worker_count=0
@@ -61,10 +65,6 @@ cleanup_temporary_files() {
     if [ -n "$tmpbundle" ]; then
         rm -rf "$tmpbundle" || printf '%s\n' "Warning: could not remove $tmpbundle" >&2
         tmpbundle=
-    fi
-    if [ -n "$tmpcurrentlink" ]; then
-        rm -f "$tmpcurrentlink" || printf '%s\n' "Warning: could not remove $tmpcurrentlink" >&2
-        tmpcurrentlink=
     fi
     if [ -n "$tmpbinlink" ]; then
         rm -f "$tmpbinlink" || printf '%s\n' "Warning: could not remove $tmpbinlink" >&2
@@ -146,7 +146,53 @@ keep_installed() {
     return 1
 }
 
-claude_launcher_is_native() {
+codex_launcher_is_legacy_dl() {
+    [ -L "${DEST}/codex" ] || return 1
+    [ -s "${STATE}/codex" ] || return 1
+    codex_launcher_target=$(readlink "${DEST}/codex") || return 1
+    [ "$codex_launcher_target" = "${CODEX_LEGACY_ROOT}/current/bin/codex" ] \
+        && [ -x "${DEST}/codex" ]
+}
+
+grok_launcher_is_legacy_dl() {
+    [ -f "${DEST}/grok" ] && [ ! -L "${DEST}/grok" ] \
+        && [ -s "${STATE}/grok" ] || return 1
+    command -v file >/dev/null 2>&1 || return 1
+    grok_file_type=$(file -b "${DEST}/grok" 2>/dev/null) || return 1
+    case "$grok_file_type" in
+        'Mach-O '*|'ELF '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+muse_launcher_is_legacy_dl() {
+    [ -f "${DEST}/muse" ] && [ ! -L "${DEST}/muse" ] \
+        && [ -s "${STATE}/muse" ] || return 1
+    command -v file >/dev/null 2>&1 || return 1
+    muse_file_type=$(file -b "${DEST}/muse" 2>/dev/null) || return 1
+    case "$muse_file_type" in
+        'Mach-O '*|'ELF '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+opencode2_launcher_is_legacy_dl() {
+    [ -f "${DEST}/opencode2" ] && [ ! -L "${DEST}/opencode2" ] \
+        && [ -s "${STATE}/opencode2" ] || return 1
+    command -v file >/dev/null 2>&1 || return 1
+    opencode2_file_type=$(file -b "${DEST}/opencode2" 2>/dev/null) || return 1
+    case "$opencode2_file_type" in
+        'Mach-O '*|'ELF '*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+claude_launcher_is_legacy_dl() {
+    [ -s "${STATE}/claude" ] || return 1
+    if claude_launcher_is_legacy_direct; then
+        claude_launcher_is_dl_binary
+        return
+    fi
     [ -L "${DEST}/claude" ] || return 1
     claude_launcher_target=$(readlink "${DEST}/claude") || return 1
     case "$claude_launcher_target" in
@@ -171,15 +217,8 @@ claude_launcher_is_dl_binary() {
 }
 
 claude_keep_installed() {
-    if claude_launcher_is_native; then
-        printf '%s\n' 'claude is installed'
-        return 0
-    fi
-    if ! installed claude; then
-        return 1
-    fi
-    if ! claude_launcher_is_legacy_direct || ! command -v file >/dev/null 2>&1 \
-        || ! claude_launcher_is_dl_binary; then
+    if claude_launcher_is_legacy_dl; then return 1; fi
+    if installed claude; then
         printf '%s\n' 'claude is installed'
         return 0
     fi
@@ -484,85 +523,15 @@ sha256_file() {
     fi
 }
 
-install_checked_direct() {
-    prog=$1
-    url=$2
-    id=$3
-    expected_sha256=$4
-    if [ -z "$id" ]; then
-        unchecked "$prog" "no asset ETag"
-        return
-    fi
-    if is_current "$prog" "$id"; then
-        printf '%s\n' "$prog is current"
-        return
-    fi
-    printf '%s\n' "Downloading $prog ..."
-    tmpbin=$(mktemp "${DEST}/.$prog.XXXXXX")
-    if ! curl -fsSL -o "$tmpbin" "$url"; then
-        rm -f "$tmpbin"
-        tmpbin=
-        skip "$prog" "download failed"
-        return
-    fi
-    actual_sha256=$(sha256_file "$tmpbin")
-    if [ "$actual_sha256" != "$expected_sha256" ]; then
-        rm -f "$tmpbin"
-        tmpbin=
-        skip "$prog" "download checksum mismatch"
-        return
-    fi
-    install_binary "$prog" "$tmpbin" "$id"
-    tmpbin=
-}
-
-install_checked_claude() {
-    url=$1
-    id=$2
-    expected_sha256=$3
-    version=$4
-    if [ -z "$id" ]; then
-        unchecked claude "no asset ETag"
-        return
-    fi
-    if [ "$(cat "${STATE}/claude" 2>/dev/null)" = "$id" ] \
-        && [ -x "${CLAUDE_VERSIONS}/${version}" ] \
-        && [ -L "${DEST}/claude" ] \
-        && [ "$(readlink "${DEST}/claude")" = "${CLAUDE_VERSIONS}/${version}" ]; then
-        printf '%s\n' "claude is current"
-        return
-    fi
-    printf '%s\n' 'Downloading claude ...'
-    mkdir -p "$CLAUDE_VERSIONS"
-    tmpbin=$(mktemp "${CLAUDE_VERSIONS}/.claude.XXXXXX")
-    if ! curl -fsSL -o "$tmpbin" "$url"; then
-        rm -f "$tmpbin"
-        tmpbin=
-        skip claude "download failed"
-        return
-    fi
-    actual_sha256=$(sha256_file "$tmpbin")
-    if [ "$actual_sha256" != "$expected_sha256" ]; then
-        rm -f "$tmpbin"
-        tmpbin=
-        skip claude "download checksum mismatch"
-        return
-    fi
-    chmod +x "$tmpbin"
-    mv -f "$tmpbin" "${CLAUDE_VERSIONS}/${version}"
-    tmpbin=
-    tmpbinlink=$(mktemp "${DEST}/.claude.XXXXXX")
-    rm -f "$tmpbinlink"
-    ln -s "${CLAUDE_VERSIONS}/${version}" "$tmpbinlink"
-    mv -f "$tmpbinlink" "${DEST}/claude"
-    tmpbinlink=
-    printf '%s\n' "$id" > "${STATE}/claude"
-    changed=true
-    printf '%s\n' "Installed ${DEST}/claude"
-}
-
 install_grok() {
-    if keep_installed grok; then return; fi
+    if installed grok && ! grok_launcher_is_legacy_dl; then
+        if [ -f "${DEST}/grok" ] && [ ! -L "${DEST}/grok" ] \
+            && [ -s "${STATE}/grok" ] && ! command -v file >/dev/null 2>&1; then
+            printf '%s\n' 'Warning: file is required to identify the existing Grok launcher; keeping it' >&2
+        fi
+        printf '%s\n' 'grok is installed'
+        return
+    fi
     case "$OS:$ARCH" in
         Darwin:x86_64) platform=macos-x86_64 ;;
         Darwin:aarch64) platform=macos-aarch64 ;;
@@ -573,7 +542,55 @@ install_grok() {
     version=$(curl -fsSL https://x.ai/cli/stable 2>/dev/null) || version=
     version=$(printf '%s\n' "$version" | sed -n '/^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/p')
     [ -n "$version" ] || { unchecked grok "no stable release found"; return; }
-    install_direct grok "https://x.ai/cli/grok-${version}-${platform}"
+    url="https://x.ai/cli/grok-${version}-${platform}"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked grok "$url is unreachable"
+        return
+    fi
+    if ! grok_launcher_is_legacy_dl && is_current grok "$id"; then
+        printf '%s\n' "grok is current (${version})"
+        return
+    fi
+    grok_bin_dir="${GROK_HOME}/bin"
+    grok_downloads="${GROK_HOME}/downloads"
+    grok_binary="${grok_downloads}/grok-${platform}"
+    if [ -e "$grok_binary" ] || [ -L "$grok_binary" ]; then
+        skip grok "$grok_binary already exists"
+        return
+    fi
+    if [ -e "${grok_bin_dir}/grok" ] || [ -L "${grok_bin_dir}/grok" ]; then
+        skip grok "${grok_bin_dir}/grok already exists"
+        return
+    fi
+    mkdir -p "$grok_bin_dir" "$grok_downloads"
+    tmpbin=$(mktemp "${grok_downloads}/.grok.XXXXXX")
+    if ! curl -fsSL -o "$tmpbin" "$url"; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip grok "download failed"
+        return
+    fi
+    if [ "$OS" = Darwin ]; then
+        xattr -d com.apple.quarantine "$tmpbin" 2>/dev/null || true
+        codesign -fs - "$tmpbin"
+    fi
+    chmod +x "$tmpbin"
+    mv -f "$tmpbin" "$grok_binary"
+    tmpbin=
+    tmpbinlink=$(mktemp "${grok_bin_dir}/.grok.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "../downloads/grok-${platform}" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${grok_bin_dir}/grok"
+    tmpbinlink=
+    tmpbinlink=$(mktemp "${DEST}/.grok.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${grok_bin_dir}/grok" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/grok"
+    tmpbinlink=
+    printf '%s\n' "$id" > "${STATE}/grok"
+    changed=true
+    printf '%s\n' "Installed ${DEST}/grok"
 }
 
 repair_dsh_tui_patch() {
@@ -728,81 +745,77 @@ install_antigravity() {
 }
 
 install_muse() {
-    if keep_installed muse; then return; fi
-    jaq_available || { unchecked muse "jaq is required"; return; }
-    case "$OS:$ARCH" in
-        Darwin:x86_64) platform=x86_macos ;;
-        Darwin:aarch64) platform=aarch64_macos ;;
-        Linux:x86_64) platform=x86_linux ;;
-        Linux:aarch64) platform=aarch64_linux ;;
-        *) skip muse "no upstream binary for ${OS}/${ARCH}"; return ;;
-    esac
-    channel_url=https://api.meta.ai/muse-code/channels/muse-stable
-    channel_json=$(curl -fsSL "$channel_url" 2>/dev/null) || channel_json=
-    version=$(printf '%s\n' "$channel_json" | run_jaq -r '.version // empty' 2>/dev/null) || version=
-    case "$version" in
-        *[!0-9R.-]*|'') unchecked muse "no stable release found"; return ;;
-    esac
-    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-R[0-9]+(\.[0-9]+)?$' \
-        || { unchecked muse "no stable release found"; return; }
-    manifest_url=$(printf '%s\n' "$channel_json" | run_jaq -r '.manifest_url // empty' 2>/dev/null) || manifest_url=
-    case "$manifest_url" in
-        https://lookaside.facebook.com/lookaside/muse/download/*) ;;
-        *) skip muse "invalid release manifest URL"; return ;;
-    esac
-    manifest_json=$(curl -fsSL "$manifest_url" 2>/dev/null) || manifest_json=
-    manifest_version=$(printf '%s\n' "$manifest_json" | run_jaq -r '.version // empty' 2>/dev/null) || manifest_version=
-    [ "$manifest_version" = "$version" ] || { skip muse "release manifest version mismatch"; return; }
-    expected_sha256=$(printf '%s\n' "$manifest_json" | run_jaq -r --arg platform "$platform" ".artifacts[\$platform].checksum // empty" 2>/dev/null) || expected_sha256=
-    url=$(printf '%s\n' "$manifest_json" | run_jaq -r --arg platform "$platform" ".artifacts[\$platform].url // empty" 2>/dev/null) || url=
-    case "$expected_sha256" in
-        *[!0-9a-f]*|'') skip muse "invalid release manifest"; return ;;
-    esac
-    [ "${#expected_sha256}" -eq 64 ] || { skip muse "invalid release manifest"; return; }
-    case "$url" in
-        https://lookaside.facebook.com/*) ;;
-        *) skip muse "invalid release manifest"; return ;;
-    esac
-    id=$(asset_id "$url")
-    install_checked_direct muse "$url" "$id" "$expected_sha256"
+    if installed muse && ! muse_launcher_is_legacy_dl; then
+        if [ -f "${DEST}/muse" ] && [ ! -L "${DEST}/muse" ] \
+            && [ -s "${STATE}/muse" ] && ! command -v file >/dev/null 2>&1; then
+            printf '%s\n' 'Warning: file is required to identify the existing Muse launcher; keeping it' >&2
+        fi
+        printf '%s\n' 'muse is installed'
+        return
+    fi
+    printf '%s\n' 'Installing Muse Code launcher ...'
+    tmpbin=$(mktemp)
+    if ! curl -fsSL -o "$tmpbin" "$MUSE_LAUNCHER_URL"; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip muse "official installer is unavailable"
+        return
+    fi
+    if ! MUSE_INSTALL_DIR="$DEST" MUSE_NO_MODIFY_PATH=1 bash "$tmpbin"; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip muse "official installer failed"
+        return
+    fi
+    rm -f "$tmpbin"
+    tmpbin=
+    if ! installed muse; then
+        skip muse "official installer did not install ${DEST}/muse"
+        return
+    fi
+    rm -f "${STATE}/muse"
+    changed=true
+    printf '%s\n' "Installed Muse Code launcher (${DEST}/muse)"
 }
 
 install_claude() {
     if claude_keep_installed; then
-        if claude_launcher_is_legacy_direct && ! command -v file >/dev/null 2>&1; then
+        if [ -f "${DEST}/claude" ] && [ ! -L "${DEST}/claude" ] \
+            && [ -s "${STATE}/claude" ] && ! command -v file >/dev/null 2>&1; then
             printf '%s\n' 'Warning: file is required to identify the existing Claude launcher; keeping it' >&2
         fi
         return
     fi
-    jaq_available || { unchecked claude "jaq is required"; return; }
-    case "$OS:$ARCH" in
-        Darwin:x86_64) platform=darwin-x64 ;;
-        Darwin:aarch64) platform=darwin-arm64 ;;
-        Linux:x86_64) platform=linux-x64 ;;
-        Linux:aarch64) platform=linux-arm64 ;;
-        *) skip claude "no upstream binary for ${OS}/${ARCH}"; return ;;
-    esac
-    if [ "$OS" = Linux ] && { [ -f /lib/libc.musl-x86_64.so.1 ] \
-        || [ -f /lib/libc.musl-aarch64.so.1 ]; }; then
-        platform="${platform}-musl"
+    printf '%s\n' 'Installing Claude Code with the native installer ...'
+    tmpbin=$(mktemp)
+    if ! curl -fsSL -o "$tmpbin" https://claude.ai/install.sh; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip claude "official installer is unavailable"
+        return
     fi
-    base=https://downloads.claude.ai/claude-code-releases
-    version=$(curl -fsSL "$base/latest" 2>/dev/null) || version=
-    version=$(printf '%s\n' "$version" | sed -n '/^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*$/p')
-    [ -n "$version" ] || { unchecked claude "no release found"; return; }
-    manifest=$(curl -fsSL "$base/$version/manifest.json" 2>/dev/null) || manifest=
-    expected_sha256=$(printf '%s\n' "$manifest" | run_jaq -r --arg platform "$platform" ".platforms[\$platform].checksum // empty" 2>/dev/null) || expected_sha256=
-    case "$expected_sha256" in
-        *[!0-9a-f]*|'') skip claude "invalid release manifest"; return ;;
-    esac
-    [ "${#expected_sha256}" -eq 64 ] || { skip claude "invalid release manifest"; return; }
-    url="$base/$version/$platform/claude"
-    id=$(asset_id "$url")
-    install_checked_claude "$url" "$id" "$expected_sha256" "$version"
+    if ! bash "$tmpbin" latest; then
+        rm -f "$tmpbin"
+        tmpbin=
+        skip claude "official installer failed"
+        return
+    fi
+    rm -f "$tmpbin"
+    tmpbin=
+    if ! installed claude; then
+        skip claude "official installer did not install ${DEST}/claude"
+        return
+    fi
+    rm -f "${STATE}/claude"
+    changed=true
+    printf '%s\n' "Installed Claude Code (${DEST}/claude)"
 }
 
 install_codex() {
-    if keep_installed codex; then return; fi
+    if installed codex && ! codex_launcher_is_legacy_dl; then
+        printf '%s\n' 'codex is installed'
+        return
+    fi
     jaq_available || { unchecked codex "jaq is required"; return; }
     case "$OS:$ARCH" in
         Darwin:x86_64) target=x86_64-apple-darwin ;;
@@ -836,13 +849,14 @@ install_codex() {
         https://releases.openai.com/codex/releases/*|https://github.com/openai/codex/releases/download/*) ;;
         *) unchecked codex "$asset is missing a SHA-256 digest"; return ;;
     esac
-    codex_root="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
+    codex_root="${CODEX_HOME}/packages/standalone"
     if [ -d "${DEST}/codex" ] && [ ! -L "${DEST}/codex" ]; then
         skip codex "${DEST}/codex is a directory"
         return
     fi
-    if [ -d "${codex_root}/current" ] && [ ! -L "${codex_root}/current" ]; then
-        skip codex "${codex_root}/current is a directory"
+    releases="${codex_root}/releases"
+    if [ -L "$releases" ] || { [ -e "$releases" ] && [ ! -d "$releases" ]; }; then
+        skip codex "$releases is not a directory"
         return
     fi
     id=$(asset_id "$url")
@@ -850,11 +864,15 @@ install_codex() {
         unchecked codex "$asset is unavailable"
         return
     fi
-    if is_current codex "$id"; then
+    if ! codex_launcher_is_legacy_dl && is_current codex "$id"; then
         printf '%s\n' "codex is current (${version})"
         return
     fi
-    releases="$codex_root/releases"
+    release_dir="${releases}/${version}-${target}"
+    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        skip codex "$release_dir already exists"
+        return
+    fi
     mkdir -p "$releases"
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
@@ -902,24 +920,17 @@ install_codex() {
         skip codex "$asset is missing required package files"
         return
     fi
-    release_dir="${releases}/${version}"
-    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then rm -rf "$release_dir"; fi
     mv "$tmpbundle" "$release_dir"
     tmpbundle=
-    tmpcurrentlink=$(mktemp "${codex_root}/.current.XXXXXX")
-    rm -f "$tmpcurrentlink"
-    ln -s "$release_dir" "$tmpcurrentlink"
-    mv -f "$tmpcurrentlink" "${codex_root}/current"
-    tmpcurrentlink=
     tmpbinlink=$(mktemp "${DEST}/.codex.XXXXXX")
     rm -f "$tmpbinlink"
-    ln -s "${codex_root}/current/bin/codex" "$tmpbinlink"
+    ln -s "${release_dir}/bin/codex" "$tmpbinlink"
     mv -f "$tmpbinlink" "${DEST}/codex"
     tmpbinlink=
     if [ "$OS" = Darwin ]; then
         tmpbinlink=$(mktemp "${DEST}/.codex-code-mode-host.XXXXXX")
         rm -f "$tmpbinlink"
-        ln -s "${codex_root}/current/bin/codex-code-mode-host" "$tmpbinlink"
+        ln -s "${release_dir}/bin/codex-code-mode-host" "$tmpbinlink"
         mv -f "$tmpbinlink" "${DEST}/codex-code-mode-host"
         tmpbinlink=
     fi
@@ -929,7 +940,14 @@ install_codex() {
 }
 
 install_opencode2() {
-    if keep_installed opencode2; then return; fi
+    if installed opencode2 && ! opencode2_launcher_is_legacy_dl; then
+        if [ -f "${DEST}/opencode2" ] && [ ! -L "${DEST}/opencode2" ] \
+            && [ -s "${STATE}/opencode2" ] && ! command -v file >/dev/null 2>&1; then
+            printf '%s\n' 'Warning: file is required to identify the existing OpenCode 2 launcher; keeping it' >&2
+        fi
+        printf '%s\n' 'opencode2 is installed'
+        return
+    fi
     case "$OS:$ARCH" in
         Darwin:x86_64) asset=opencode-darwin-x64.zip ;;
         Darwin:aarch64) asset=opencode-darwin-arm64.zip ;;
@@ -949,19 +967,26 @@ install_opencode2() {
         unchecked opencode2 "$asset is unavailable"
         return
     fi
-    if is_current opencode2 "$id"; then
+    if ! opencode2_launcher_is_legacy_dl && is_current opencode2 "$id"; then
         printf '%s\n' "opencode2 is current"
         return
     fi
+    opencode2_bin_dir="${OPENCODE2_HOME}/bin"
+    opencode2_binary="${opencode2_bin_dir}/opencode"
+    if [ -e "$opencode2_binary" ] || [ -L "$opencode2_binary" ]; then
+        skip opencode2 "$opencode2_binary already exists"
+        return
+    fi
+    mkdir -p "$opencode2_bin_dir"
     printf '%s\n' "Downloading opencode2 ..."
-    tmpzip=$(mktemp "${DEST}/.opencode2.XXXXXX")
+    tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
         tmpzip=
         skip opencode2 "download failed"
         return
     fi
-    tmpbin=$(mktemp "${DEST}/.opencode2.XXXXXX")
+    tmpbin=$(mktemp "${opencode2_bin_dir}/.opencode2.XXXXXX")
     case "$asset" in
         *.zip) unzip -p "$tmpzip" opencode > "$tmpbin" ;;
         *.tar.gz) tar -xOzf "$tmpzip" opencode > "$tmpbin" ;;
@@ -972,8 +997,29 @@ install_opencode2() {
     fi
     rm -f "$tmpzip"
     tmpzip=
-    install_binary opencode2 "$tmpbin" "$id"
+    if [ "$OS" = Darwin ]; then
+        xattr -d com.apple.quarantine "$tmpbin" 2>/dev/null || true
+        codesign -fs - "$tmpbin"
+    fi
+    chmod +x "$tmpbin"
+    mv -f "$tmpbin" "$opencode2_binary"
     tmpbin=
+    tmpbinlink=$(mktemp "${opencode2_bin_dir}/.opencode2-shim.XXXXXX")
+    cat > "$tmpbinlink" <<'EOF'
+#!/bin/sh
+exec "${HOME}/.opencode/bin/opencode" "$@"
+EOF
+    chmod +x "$tmpbinlink"
+    mv -f "$tmpbinlink" "${opencode2_bin_dir}/opencode2"
+    tmpbinlink=
+    tmpbinlink=$(mktemp "${DEST}/.opencode2.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${opencode2_bin_dir}/opencode2" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/opencode2"
+    tmpbinlink=
+    printf '%s\n' "$id" > "${STATE}/opencode2"
+    changed=true
+    printf '%s\n' "Installed ${DEST}/opencode2"
 }
 
 # Repeated tools share a binary and state file, so keep those requests serial.
@@ -1042,11 +1088,8 @@ fi
 needs_jaq=false
 for prog in "$@"; do
     case "$prog" in
-        muse|codex)
-            if ! installed "$prog"; then needs_jaq=true; fi
-            ;;
-        claude)
-            if ! claude_keep_installed >/dev/null; then needs_jaq=true; fi
+        codex)
+            if ! installed codex || codex_launcher_is_legacy_dl; then needs_jaq=true; fi
             ;;
     esac
 done

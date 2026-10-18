@@ -36,6 +36,15 @@ if [ "$#" -eq 0 ]; then
     start_tui
 fi
 
+if [ "$1" = update ]; then
+    shift
+    if [ "$#" -gt 0 ]; then
+        printf '%s\n' 'usage: dsh update' >&2
+        exit 2
+    fi
+    exec dl dsh
+fi
+
 case "$1" in
     tui|dsh-tui)
         shift
