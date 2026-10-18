@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-11 · P3 · CI cancellation reports success when listing runs fails
-
-- **Area:** Errors
-- **Where:** `dotfiles/base/.local/bin/gh-cancel-pr-runs:84-92`
-- **Problem:** If `gh run list` fails, command substitution produces an empty `run_ids`. The script then prints `no active runs found` and exits 0, so callers cannot distinguish an API or authentication failure from a successful empty result.
-- **Recommendation:** Check the `gh run list` exit status and return a failure before interpreting an empty result.
-- **Fix with:** error-model
-- **Effort:** S
-
 ### USR-12 · P3 · `sym` can loop forever for a root-level target path
 
 - **Area:** Operability

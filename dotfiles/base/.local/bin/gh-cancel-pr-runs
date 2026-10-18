@@ -81,11 +81,17 @@ if [ -z "$sha" ]; then
     exit 1
 fi
 
-run_ids=$(gh run list \
+if run_ids=$(gh run list \
     --repo "$repo" \
     --commit "$sha" \
     --json databaseId,status \
-    --jq '.[] | select(.status != "completed") | .databaseId')
+    --jq '.[] | select(.status != "completed") | .databaseId'); then
+    :
+else
+    status=$?
+    echo "error: could not list workflow runs for $sha" >&2
+    exit "$status"
+fi
 
 if [ -z "$run_ids" ]; then
     echo "no active runs found for $sha"
