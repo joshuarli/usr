@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-10 · P2 · macOS Lean skips later performance defaults
-
-- **Area:** Operability
-- **Where:** `macos/macos-lean.py:1120-1142`
-- **Problem:** `any(ensure_default(spec) for spec in PERFORMANCE_DEFAULTS)` stops at the first changed setting. Later preferences are skipped, while the script reports the group as applied. A small Python reproduction confirmed generator evaluation stopped at the first true result.
-- **Recommendation:** Attempt every preference and accumulate whether any changed.
-- **Fix with:** isolate-effects
-- **Effort:** S
-
 ### USR-1 · P3 · The local DNS cache falls back to Cloudflare in the clear
 
 - **Area:** Security

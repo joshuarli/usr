@@ -1116,7 +1116,10 @@ def apply_performance_defaults(state: State) -> None:
         run(["killall", "Dock"])
         print("  Performance defaults restored (Dock restarted)")
     else:
-        changed = any(ensure_default(spec) for spec in PERFORMANCE_DEFAULTS)
+        changed = False
+        for spec in PERFORMANCE_DEFAULTS:
+            if ensure_default(spec):
+                changed = True
         if changed:
             run(["killall", "Dock"])
             print("  Animations disabled, transparency reduced (Dock restarted)")

@@ -101,6 +101,16 @@ class CommandFailureTests(unittest.TestCase):
             self.assertEqual(lean.sw_vers("buildVersion"), "unknown")
             self.assertEqual(lean.run(["pgrep", "-x", "Dock"], check=False).returncode, 7)
 
+    def test_performance_defaults_attempt_every_preference(self):
+        values = [True] + [False] * (len(lean.PERFORMANCE_DEFAULTS) - 1)
+        state = lean.State("apply", 501, "27.0", "Golden Gate", "27")
+        with patch.object(lean, "ensure_default", side_effect=values) as ensure_default, \
+                patch.object(lean, "run") as run, \
+                contextlib.redirect_stdout(io.StringIO()):
+            lean.apply_performance_defaults(state)
+        self.assertEqual(ensure_default.call_count, len(lean.PERFORMANCE_DEFAULTS))
+        run.assert_called_once_with(["killall", "Dock"])
+
     def test_failed_cli_command_reports_failure_and_stops_keepalive(self):
         output, errors = io.StringIO(), io.StringIO()
         failure = subprocess.CalledProcessError(7, ["sudo", "mdutil"], stderr="permission denied")
