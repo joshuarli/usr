@@ -19,18 +19,20 @@ PROVIDERS = (
     ("claude", "Claude Code", "claude", []),
     ("codex", "Codex", "codex", ["app-server", "--stdio"]),
     ("muse", "Muse Code", "muse", ["serve", "--no-session-log"]),
+    ("grok", "Grok Build", "grok", []),
     ("dsh", "DeepSeek API", "dsh", []),
     # Disabled: direct Google OAuth quota access violates its terms; the supported CLI path is slow.
     # ("agy", "Antigravity", "agy", []),
 )
-HELP = """usage: usage [claude|codex|muse|dsh]
+HELP = """usage: usage [claude|codex|muse|grok|dsh]
 
-Read subscription quota usage from Claude Code, Codex, and Muse Code, plus
-the DeepSeek API credit balance. The DeepSeek balance is not a subscription
-quota. With no provider, query every supported CLI installed here. These
-reads do not submit a model prompt. Claude Code uses its undocumented OAuth
-usage endpoint and does not refresh credentials. Grok Build and OpenCode do
-not have a free-model quota reader integrated here.
+Read subscription quota usage from Claude Code, Codex, Muse Code, and Grok
+Build, plus the DeepSeek API credit balance. Grok queries its CLI billing
+extension over ACP. The DeepSeek balance is not a subscription quota. With no
+provider, query every supported CLI installed here. These reads do not submit
+a model prompt. Claude Code uses its undocumented OAuth usage endpoint and
+does not refresh credentials. OpenCode's free-model quota is not available
+through a reader integrated here.
 """
 
 
@@ -121,6 +123,95 @@ def query_codex(binary):
 
 def query_muse(binary):
     return query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
+
+
+def grok_usage(result):
+    config = result.get("config") if isinstance(result, dict) else None
+    if not isinstance(config, dict):
+        raise RuntimeError("Grok returned no subscription billing configuration")
+    current = config.get("currentPeriod")
+    current = current if isinstance(current, dict) else {}
+    prepaid = config.get("prepaidBalance")
+    usage_percent = config.get("creditUsagePercent")
+    if (
+        isinstance(usage_percent, bool)
+        or not isinstance(usage_percent, (int, float))
+        or not math.isfinite(usage_percent)
+    ):
+        raise RuntimeError("Grok returned no valid subscription usage percentage")
+    prepaid_cents = prepaid.get("val") if isinstance(prepaid, dict) else None
+    if (
+        isinstance(prepaid_cents, bool)
+        or not isinstance(prepaid_cents, (int, float))
+        or not math.isfinite(prepaid_cents)
+    ):
+        prepaid_cents = None
+    return {
+        "subscription_tier": (
+            result.get("subscription_tier")
+            if isinstance(result.get("subscription_tier"), str)
+            else None
+        ),
+        "usage_percent": usage_percent,
+        "period_type": (
+            current.get("type") if isinstance(current.get("type"), str) else None
+        ),
+        "reset_at": current.get("end") or config.get("billingPeriodEnd"),
+        "prepaid_balance_cents": prepaid_cents,
+    }
+
+
+def query_grok(binary):
+    process = subprocess.Popen(
+        [binary, "--no-auto-update", "agent", "stdio"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        bufsize=1,
+    )
+    deadline = time.monotonic() + 35
+    try:
+        send_rpc(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": 1,
+                    "clientCapabilities": {
+                        "fs": {"readTextFile": True, "writeTextFile": True},
+                        "terminal": True,
+                    },
+                },
+            },
+        )
+        initialized = read_rpc_response(process, 1, deadline)
+        auth_methods = initialized.get("authMethods", [])
+        if not any(method.get("id") == "cached_token" for method in auth_methods):
+            raise RuntimeError("Grok subscription login is unavailable; run `grok login`")
+        send_rpc(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "authenticate",
+                "params": {"methodId": "cached_token", "_meta": {"headless": True}},
+            },
+        )
+        read_rpc_response(process, 2, deadline)
+        send_rpc(
+            process,
+            {"jsonrpc": "2.0", "id": 3, "method": "_x.ai/billing", "params": {}},
+        )
+        result = read_rpc_response(process, 3, deadline)
+        return grok_usage(result)
+    except TimeoutError as error:
+        raise RuntimeError("Grok billing request timed out after 35 seconds") from error
+    finally:
+        stop_process(process)
 
 
 def read_claude_credentials():
@@ -551,6 +642,18 @@ def print_muse(result):
         print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
 
 
+def print_grok(result):
+    print_heading("Grok Build")
+    if result.get("subscription_tier"):
+        print(f"  plan: {result['subscription_tier']}")
+    period = result.get("period_type")
+    label = period.capitalize() if isinstance(period, str) else "subscription"
+    print_window(label, result.get("usage_percent"), result.get("reset_at"))
+    prepaid = result.get("prepaid_balance_cents")
+    if isinstance(prepaid, (int, float)) and not isinstance(prepaid, bool):
+        print(f"  prepaid credits: ${prepaid / 100:.2f}")
+
+
 def print_dsh(result):
     print_heading("DeepSeek API balance")
     available = result["is_available"]
@@ -598,6 +701,7 @@ def main(arguments):
         "claude": query_claude,
         "codex": query_codex,
         "muse": query_muse,
+        "grok": query_grok,
         "dsh": query_dsh,
         "agy": query_agy,
     }
@@ -605,6 +709,7 @@ def main(arguments):
         "claude": print_claude,
         "codex": print_codex,
         "muse": print_muse,
+        "grok": print_grok,
         "dsh": print_dsh,
         "agy": print_agy,
     }
