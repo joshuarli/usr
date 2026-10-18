@@ -11,16 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-6 · P2 · Release assets are installed without publisher verification
-
-- **Area:** Security
-- **Where:** `dl:121-142`, `dl:180-199`, `dl:202-242`, `dl:346-349`
-- **Problem:** `dl` downloads release archives over TLS and uses the asset ETag to detect changes, but it does not verify a publisher signature or trusted digest before installing the extracted binary. On macOS it removes quarantine and ad-hoc signs the downloaded file. A compromised release account or asset can therefore supply code that this setup installs and runs.
-- **Recommendation:** Verify every executable and application asset against an identity or digest that does not come from the same release asset.
-- **Fix with:** none
-- **Effort:** M
-- **Design:** [USR-6 RFC](docs/rfc/USR-6-release-verification.md)
-
 ### USR-7 · P2 · Firefox's RDD sandbox is disabled by default
 
 - **Area:** Security
