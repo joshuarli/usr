@@ -736,13 +736,15 @@ class State:
 
 
 def run(argv: list[str], *, sudo: bool = False,
-        check: bool = False) -> subprocess.CompletedProcess[str]:
-    """Run a command without a shell. Never raises on failure by default."""
+        check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run a command, raising on failure unless explicitly probing its status."""
     if sudo:
         argv = ["sudo", *argv]
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=check)
     except FileNotFoundError as exc:
+        if check:
+            raise
         return subprocess.CompletedProcess(argv, 127, "", str(exc))
 
 
@@ -782,7 +784,7 @@ def build_label_index(build_ver: str) -> set[str]:
             label = read_plist_label(plist_path)
             if label is None:
                 # Fall back to plutil for plists plistlib cannot parse.
-                proc = run(["plutil", "-extract", "Label", "raw", str(plist_path)])
+                proc = run(["plutil", "-extract", "Label", "raw", str(plist_path)], check=False)
                 candidate = proc.stdout.strip()
                 if proc.returncode == 0 and candidate:
                     label = candidate
@@ -807,13 +809,7 @@ def load_disabled_state(state: State) -> None:
     if state.mode != "apply":
         return
     user = run(["launchctl", "print-disabled", f"gui/{state.uid}"])
-    if user.returncode != 0:
-        print("Error: unable to read disabled user services")
-        sys.exit(1)
     system = run(["launchctl", "print-disabled", "system"], sudo=True)
-    if system.returncode != 0:
-        print("Error: unable to read disabled system services")
-        sys.exit(1)
     state.disabled_user = parse_disabled_output(user.stdout)
     state.disabled_system = parse_disabled_output(system.stdout)
 
@@ -826,15 +822,12 @@ class SudoKeepalive:
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
     def start(self) -> None:
-        proc = run(["sudo", "-v"])
-        if proc.returncode != 0:
-            print("Error: sudo required")
-            sys.exit(1)
+        run(["sudo", "-v"])
         self._thread.start()
 
     def _loop(self) -> None:
         while not self._stop.wait(50):
-            run(["sudo", "-n", "true"])
+            run(["sudo", "-n", "true"], check=False)
 
     def stop(self) -> None:
         self._stop.set()
@@ -869,16 +862,12 @@ def disable_user(state: State, label: str) -> None:
             print(f"  = {label} (already disabled)")
             state.n_unchanged += 1
             return
-        proc = run(["launchctl", "disable", f"gui/{state.uid}/{label}"])
-        if proc.returncode != 0:
-            print(f"  FAIL {label} (disable rejected)")
-            state.n_skipped += 1
-            return
+        run(["launchctl", "disable", f"gui/{state.uid}/{label}"])
         state.n_applied += 1
         state.disabled_user.add(label)
         # bootout is blocked by SIP; kill the process directly instead.
         # The disabled flag prevents MachService/LaunchEvent respawns.
-        info = run(["launchctl", "print", f"gui/{state.uid}/{label}"])
+        info = run(["launchctl", "print", f"gui/{state.uid}/{label}"], check=False)
         match = PID_RE.search(info.stdout)
         if match:
             try:
@@ -928,16 +917,12 @@ def flush_system(state: State) -> None:
             state.n_applied += 1
         return
     for label in labels:
-        proc = run(["launchctl", "disable", f"system/{label}"], sudo=True)
-        if proc.returncode != 0:
-            print(f"  FAIL {label} (disable rejected)")
-            state.n_skipped += 1
-        else:
-            state.n_applied += 1
-            state.disabled_system.add(label)
+        run(["launchctl", "disable", f"system/{label}"], sudo=True)
+        state.n_applied += 1
+        state.disabled_system.add(label)
     # Kill any that are still running.
     for label in labels:
-        proc = run(["pgrep", "-x", short_service_name(label)])
+        proc = run(["pgrep", "-x", short_service_name(label)], check=False)
         pids = proc.stdout.split()
         if pids:
             run(["kill", "-9", pids[0]], sudo=True)
@@ -962,12 +947,12 @@ def ensure_service(state: State, check: PreserveCheck) -> None:
         if not state.revert:
             # Force-enable in case it was accidentally disabled.
             run(["launchctl", "enable", target])
-        ok = run(["launchctl", "print", target]).returncode == 0
+        ok = run(["launchctl", "print", target], check=False).returncode == 0
     else:
         target = f"system/{check.label}"
         if not state.revert:
             run(["launchctl", "enable", target], sudo=True)
-        ok = run(["launchctl", "print", target], sudo=True).returncode == 0
+        ok = run(["launchctl", "print", target], sudo=True, check=False).returncode == 0
     if ok:
         print(f"  OK  {check.desc}")
     else:
@@ -980,28 +965,25 @@ def ensure_service(state: State, check: PreserveCheck) -> None:
 # ---------------------------------------------------------------------------
 
 def defaults_read(spec: DefaultSpec) -> str | None:
-    proc = run(["defaults", "read", spec.domain, spec.key], sudo=spec.system)
+    proc = run(["defaults", "read", spec.domain, spec.key], sudo=spec.system, check=False)
     if proc.returncode != 0:
         return None
     return proc.stdout.strip()
 
 
 def ensure_default(spec: DefaultSpec) -> bool:
-    """Write the preference only when it differs. Returns True if changed.
-
-    Exits(1) on write failure, mirroring `ensure_default ... || exit 1`.
-    """
+    """Write differing preferences; return True if changed or raise on failure."""
     if defaults_read(spec) == spec.expected:
         return False
-    proc = run(["defaults", "write", spec.domain, spec.key,
-                spec.type_flag, spec.value], sudo=spec.system)
-    if proc.returncode != 0:
-        print(f"FAIL defaults {spec.domain} {spec.key}")
-        sys.exit(1)
+    run(["defaults", "write", spec.domain, spec.key,
+         spec.type_flag, spec.value], sudo=spec.system)
     return True
 
 
 def defaults_delete(domain: str, key: str, *, sudo: bool = False) -> None:
+    proc = run(["defaults", "export", domain, "-"], sudo=sudo)
+    if key not in plistlib.loads(proc.stdout.encode()):
+        return
     run(["defaults", "delete", domain, key], sudo=sudo)
 
 
@@ -1163,9 +1145,7 @@ def apply_pmset(state: State) -> None:
         print("  pmset battery defaults restored")
     else:
         for scope, key, value in PMSET_APPLY:
-            proc = run(["pmset", scope, key, value], sudo=True)
-            if proc.returncode != 0:
-                print(f"  FAIL pmset {scope} {key} {value}")
+            run(["pmset", scope, key, value], sudo=True)
         # Remove existing sleepimage — no longer needed on battery, reclaims
         # RAM-sized disk space. hibernatemode 0/3 split documented above.
         run(["rm", "-f", "/private/var/vm/sleepimage"], sudo=True)
@@ -1177,8 +1157,6 @@ def apply_pmset(state: State) -> None:
 
 def list_network_services() -> list[str]:
     proc = run(["networksetup", "-listallnetworkservices"])
-    if proc.returncode != 0:
-        return []
     services: list[str] = []
     for line in proc.stdout.splitlines()[1:]:  # skip header line
         name = strip_networkservice(line).strip()
@@ -1201,19 +1179,17 @@ def apply_ipv6(state: State) -> None:
         for svc in services:
             if is_vpn_service(svc):
                 print(f"  skip {svc}")
-            elif run(["networksetup", "-setv6automatic", svc], sudo=True).returncode == 0:
-                print(f"  {svc}")
             else:
-                print(f"  FAIL {svc}")
+                run(["networksetup", "-setv6automatic", svc], sudo=True)
+                print(f"  {svc}")
         print("  IPv6 restored to automatic on all interfaces")
     else:
         for svc in services:
             if is_vpn_service(svc):
                 print(f"  skip {svc}")
-            elif run(["networksetup", "-setv6off", svc], sudo=True).returncode == 0:
-                print(f"  {svc}")
             else:
-                print(f"  FAIL {svc}")
+                run(["networksetup", "-setv6off", svc], sudo=True)
+                print(f"  {svc}")
         print("  IPv6 disabled on all non-VPN interfaces")
 
 
@@ -1312,7 +1288,7 @@ def print_summary(state: State, prog: str) -> None:
         print(f"Re-enabled {state.n_applied} service(s). Reboot required.")
     else:
         print(f"Changed: {state.n_applied} disabled, {state.n_unchanged} "
-              f"already disabled, {state.n_skipped} skipped (stale/rejected).")
+              f"already disabled, {state.n_skipped} skipped (stale).")
         if state.verify_fail > 0:
             print(f"WARNING: {state.verify_fail} preserved service(s) not loaded.")
             print("Review FAIL lines above. May need reboot or")
@@ -1365,7 +1341,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def sw_vers(key: str) -> str:
-    proc = run(["sw_vers", f"-{key}"])
+    proc = run(["sw_vers", f"-{key}"], check=False)
     return proc.stdout.strip() if proc.returncode == 0 else "unknown"
 
 
@@ -1395,10 +1371,10 @@ def main(argv: list[str] | None = None) -> int:
     state.real_labels = build_label_index(sw_vers("buildVersion"))
 
     keepalive: SudoKeepalive | None = None
-    if state.mutating:
-        keepalive = SudoKeepalive()
-        keepalive.start()
     try:
+        if state.mutating:
+            keepalive = SudoKeepalive()
+            keepalive.start()
         load_disabled_state(state)
 
         for title, domain, labels in DISABLE_SECTIONS:
@@ -1427,6 +1403,14 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_service(state, check)
 
         print_summary(state, Path(sys.argv[0]).name)
+    except subprocess.CalledProcessError as exc:
+        print(f"Error: {exc.cmd} exited with status {exc.returncode}", file=sys.stderr)
+        if exc.stderr:
+            print(exc.stderr.strip(), file=sys.stderr)
+        return 1
+    except OSError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     finally:
         if keepalive is not None:
             keepalive.stop()

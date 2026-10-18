@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-9 · P2 · macOS Lean reports success when system commands fail
-
-- **Area:** Errors
-- **Where:** `macos/macos-lean.py:738-746`, `macos/macos-lean.py:1017-1033`, `macos/macos-lean.py:1260-1272`
-- **Problem:** `run()` returns failed command results without raising by default. Mutating callers such as Spotlight, Time Machine, and unified logging ignore the return code and print success. The script can exit successfully while requested system settings remain unchanged.
-- **Recommendation:** Check mutating command results and return a failure when the requested setting was not applied.
-- **Fix with:** error-model
-- **Effort:** M
-
 ### USR-10 · P2 · macOS Lean skips later performance defaults
 
 - **Area:** Operability
