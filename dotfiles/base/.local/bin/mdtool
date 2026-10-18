@@ -25,6 +25,7 @@ from urllib.parse import unquote
 
 COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
 CHECKS = ("links", "refs", "consumers", "pointers", "dups", "router")
+README_NAMES = {"readme.md", "readme.mdx", "readme.markdown", "readme.rst"}
 MD_EXTS = {".md", ".markdown", ".mdx"}
 RST_EXTS = {".rst"}
 EXTS = MD_EXTS | RST_EXTS
@@ -1575,7 +1576,7 @@ def router_findings(files, content, max_lines=150, tracked=None):
 
     shallow = lambda paths: min(paths, key=lambda p: (p.count("/"), p), default=None)
     agents = shallow([p for p in files if Path(p).name == "AGENTS.md"])
-    readme = shallow([p for p in files if Path(p).name.lower() in {"readme.md", "readme.mdx", "readme.markdown", "readme.rst"}])
+    readme = shallow([p for p in files if Path(p).name.lower() in README_NAMES])
     docs = [p for p in files if p.startswith("docs/") and markdown(p) and p in content]
     if not agents:
         add(out,"T000","note",".",1,1,"repository has no AGENTS.md","AGENTS.md")
@@ -1931,6 +1932,8 @@ def main(argv=None):
         paths=selected(all_paths,args) if args.paths else all_paths if args.command in {"consumers","pointers","check"} else selected(all_paths,args)
 
         paths=[p for p in paths if p not in skipped]
+        router_paths=list(dict.fromkeys(paths+[p for p in all_paths if Path(p).parent==Path(".") and
+            (Path(p).name=="AGENTS.md" or Path(p).name.lower() in README_NAMES)])) if args.command=="router" else paths
         if args.command=="anchors" and args.paths:
             for requested in args.paths:
                 normalized=Path(requested).as_posix().rstrip("/")
@@ -1939,7 +1942,7 @@ def main(argv=None):
         read_paths=paths
         if args.command in {"check", "consumers"}: read_paths=all_paths
         if args.command=="links": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if markdown(p) or Path(p).name=="conf.py"]))
-        if args.command=="router": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if Path(p).name=="conf.py"]))
+        if args.command=="router": read_paths=list(dict.fromkeys(router_paths+[p for p in all_paths if Path(p).name=="conf.py"]))
         if args.command=="refs": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if (Path(p).name in {"Makefile","makefile","GNUmakefile","Cargo.toml","package.json"} or p.endswith(".mk"))]))
         read_paths=[p for p in read_paths if p not in skipped]
         contents, unreadable=read_set(root,read_paths)
@@ -1954,7 +1957,7 @@ def main(argv=None):
                 for line,level,slug,title in slug_headings(value,file,site.kind if site else None)[0]: print(f"{file}:{line}\t{level}\t{slug}\t{title}")
             return 0
         findings=(all_check_findings(root,paths,contents,args,all_paths)
-                  if args.command=="check" else check_command(args.command,root,paths,contents,args,all_paths))
+                  if args.command=="check" else check_command(args.command,root,router_paths,contents,args,all_paths))
         findings=drop_ignored(root,findings) if git else findings
         findings=demote_records(root,findings,contents)
         for path in unreadable:
@@ -1963,8 +1966,10 @@ def main(argv=None):
         if args.since:
             old=old_tree(root,args.since)
             old_paths=selected(list(old),args,require_matches=False) if args.paths else list(old)
+            old_router_paths=list(dict.fromkeys(old_paths+[p for p in old if Path(p).parent==Path(".") and
+                (Path(p).name=="AGENTS.md" or Path(p).name.lower() in README_NAMES)])) if args.command=="router" else old_paths
             oldfind=(all_check_findings(root,old_paths,old,args,list(old))
-                     if args.command=="check" else check_command(args.command,root,old_paths,old,args,list(old)))
+                     if args.command=="check" else check_command(args.command,root,old_router_paths,old,args,list(old)))
             identities={f.identity() for f in oldfind}
             findings=[f for f in findings if f.identity() not in identities]
         findings=[f for f in findings if f.code not in args.ignore]
@@ -2277,6 +2282,20 @@ class MdtoolTests(unittest.TestCase):
         content={"AGENTS.md":"[topic](docs/linked.md) [missing](docs/no.md)\n","README.md":"## Testing\n","docs/linked.md":"# Detail\n","docs/lost.md":"# Lost\n"}
         found=router_findings(files,content)
         self.assertEqual(sorted(f.code for f in found),["T001","T003","T004","T005"])
+    def test_scoped_router_uses_root_context_and_selected_docs(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            self.commit_repo(root,{
+                "AGENTS.md":"[selected](docs/selected.md)\n",
+                "README.md":"## Testing\n",
+                "docs/selected.md":"# Selected\n"+"Useful detail. "*5+"\n",
+                "docs/other.md":"# Other\n"+"Useful detail. "*5+"\n",
+            })
+            rc,found=self.run_json(root,"router","docs/selected.md")
+            self.assertEqual(rc,0)
+            self.assertNotIn("T000",[finding["code"] for finding in found])
+            self.assertIn(("T003","README.md"),[(finding["code"],finding["file"]) for finding in found])
+            self.assertNotIn("T001",[finding["code"] for finding in found])
     def test_router_skips_glob_patterns(self):
         content={"AGENTS.md":"See `docs/config/*.md` and `docs/gone.md`.\n","docs/config/a.md":"# A\n"}
         found=[(f.code,f.target) for f in router_findings(list(content),content) if f.code=="T004"]

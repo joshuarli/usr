@@ -29,7 +29,7 @@ mdtool [COMMAND] [options] [PATH...]
 | `--quiet`, `--ignore CODE` | Suppress the summary line, or drop a code. An unknown code is a usage error. |
 | `--label REGEX`, `--code`, `--max-lines N` | Extra `pointers` labels, `dups` over fenced code, and the `router` AGENTS.md limit (default 150). Each is rejected on a command that does not use it. |
 
-With no paths, a command covers every tracked Markdown, MDX, and RST file. `check` and `consumers` read all tracked text files for context, and `PATH` filters what they report. `pointers` always reads every tracked text file. A standalone `router PATH` only discovers `AGENTS.md` and README files among the selected paths.
+With no paths, a command covers every tracked Markdown, MDX, and RST file. `check` and `consumers` read all tracked text files for context, and `PATH` filters what they report. `pointers` always reads every tracked text file. A scoped `router PATH` reads the repository root `AGENTS.md` and README as context, while limiting its documentation inventory to the selected paths.
 
 Exit status is 0 for no `error` findings, 1 for at least one, and 2 for a usage, root, or Git failure. Warnings and notes never change it.
 
