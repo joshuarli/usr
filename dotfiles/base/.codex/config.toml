@@ -5,7 +5,7 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6.1-sol"
+model = "gpt-6-luna"
 model_reasoning_effort = "medium"
 
 [features]

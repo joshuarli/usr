@@ -1093,7 +1093,7 @@ run_parallel() {
 }
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jaq muse grok dsh codex claude opencode2 antigravity fastermod tm ish e fz fdu fs srv
+    set -- fd rg jaq grok codex claude opencode2 fastermod tm ish e fz fdu fs srv
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
@@ -1130,7 +1130,7 @@ for prog in "$@"; do
         fd|rg) install_fd_or_rg "$prog" ;;
         grok) install_grok ;;
         dsh) install_dsh ;;
-        antigravity) install_antigravity ;;
+        antigravity|agy) install_antigravity ;;
         muse) install_muse ;;
         claude) install_claude ;;
         codex) install_codex ;;
