@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-2 · P3 · The auto-triggered skills have never been measured
-
-- **Area:** Tests
-- **Where:** `.agents/skills/dotfiles-health/SKILL.md:33-35`, `dotfiles/base/.agents/skills/`
-- **Problem:** The repository records that auto-triggered skills have not been evaluated against real sessions. Nothing in the repository shows whether they fire at the right times or change behavior. Session data is outside this repository review.
-- **Recommendation:** Run `skill-eval` on the auto-triggered skills, inspect loads and misses in real sessions, and retune, demote, or remove each skill based on the results.
-- **Fix with:** skill-eval
-- **Effort:** M
-
 ### USR-11 · P3 · CI cancellation reports success when listing runs fails
 
 - **Area:** Errors
