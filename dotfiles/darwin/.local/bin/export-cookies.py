@@ -290,7 +290,10 @@ if __name__ == "__main__":
 
     all_rows.sort(key=lambda r: (r[0], r[5]))
     output_name = f"cookies-{hostnames[0]}.txt" if len(hostnames) == 1 else "cookies.txt"
-    with open(output_name, "w") as out:
+    output_fd = os.open(output_name, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(output_fd, "w") as out:
+        os.fchmod(out.fileno(), 0o600)
+        out.truncate(0)
         out.write("# Netscape HTTP Cookie File\n")
         for row in all_rows:
             out.write("\t".join(str(v) for v in row) + "\n")

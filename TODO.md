@@ -11,15 +11,6 @@ Next: 14
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-8 · P2 · Cookie exports are readable by other local users
-
-- **Area:** Security
-- **Where:** `dotfiles/darwin/.local/bin/export-cookies.py:292-295`
-- **Problem:** The exporter writes plaintext cookie values with `open(output_name, "w")`. Under the host's `umask 022`, a new export has mode `0644`. The call also follows an existing symlink and truncates its target.
-- **Recommendation:** Create the export with mode `0600` and refuse symlink targets.
-- **Fix with:** os-boundaries
-- **Effort:** S
-
 ### USR-9 · P2 · macOS Lean reports success when system commands fail
 
 - **Area:** Errors

@@ -1,8 +1,14 @@
 import importlib.util
+import os
+import runpy
 import sqlite3
+import stat
+import struct
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("export-cookies.py")
@@ -70,6 +76,74 @@ class HostMatchesTests(unittest.TestCase):
     def test_host_matches_does_not_match_a_suffix_without_a_label_boundary(self):
         self.assertTrue(export_cookies.host_matches(".accounts.example.com", "example.com"))
         self.assertFalse(export_cookies.host_matches("notexample.com", "example.com"))
+
+
+class ExportFileTests(unittest.TestCase):
+    def export(self, directory):
+        strings = [b"example.com\0", b"session\0", b"/\0", b"secret\0"]
+        offsets = []
+        size = 48
+        for value in strings:
+            offsets.append(size)
+            size += len(value)
+        record = struct.pack("<IIIIiiiidd", size, 0, 0, 0, *offsets, 0, 0)
+        page = struct.pack("<III", 0, 1, 12) + record + b"".join(strings)
+        source = directory / "Cookies.binarycookies"
+        source.write_bytes(b"cook" + struct.pack(">II", 1, len(page)) + page)
+        previous_directory = Path.cwd()
+        previous_umask = os.umask(0o022)
+        try:
+            os.chdir(directory)
+            with patch.object(sys, "argv", [str(SCRIPT), "safari", "example.com"]):
+                with patch("os.path.expanduser", return_value=str(source)):
+                    runpy.run_path(str(SCRIPT), run_name="__main__")
+        finally:
+            os.chdir(previous_directory)
+            os.umask(previous_umask)
+
+    def test_export_creates_private_file_under_permissive_umask(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.export(directory)
+            output = directory / "cookies-example.com.txt"
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            self.assertEqual(
+                output.read_text(),
+                "# Netscape HTTP Cookie File\n"
+                "example.com\tTRUE\t/\tFALSE\t0\tsession\tsecret\n",
+            )
+
+    def test_export_restricts_existing_file_permissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            output = directory / "cookies-example.com.txt"
+            output.write_text("old contents that must be removed" * 10)
+            output.chmod(0o644)
+            self.export(directory)
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            self.assertEqual(
+                output.read_text(),
+                "# Netscape HTTP Cookie File\n"
+                "example.com\tTRUE\t/\tFALSE\t0\tsession\tsecret\n",
+            )
+
+    def test_export_refuses_symlink_targets(self):
+        for existing in (True, False):
+            with self.subTest(existing=existing):
+                with tempfile.TemporaryDirectory() as temporary:
+                    directory = Path(temporary)
+                    target = directory / "target.txt"
+                    if existing:
+                        target.write_text("keep this")
+                    output = directory / "cookies-example.com.txt"
+                    output.symlink_to(target)
+                    with self.assertRaises(OSError):
+                        self.export(directory)
+                    self.assertTrue(output.is_symlink())
+                    if existing:
+                        self.assertEqual(target.read_text(), "keep this")
+                    else:
+                        self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":
