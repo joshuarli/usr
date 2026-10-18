@@ -245,7 +245,7 @@ install_release() {
     prog=$1
     case "$prog" in
         e|fz|fdu|fastermod|tm|fs|srv|diff-pretty) owner="laputa-systems" ;;
-        ish|mactop) owner="joshuarli" ;;
+        ish|mactop|gh) owner="joshuarli" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
     # The release workflows publish prereleases, which GitHub's /latest endpoint
@@ -1140,9 +1140,7 @@ for prog in "$@"; do
                 "https://github.com/joshuarli/vault-swift/releases/download/release-23530d9d8a6321a35d02eddda3c7f6392dacc791/vault" ;;
         jaq) install_jaq ;;
         mold) install_mold ;;
-        gh)
-            install_direct gh \
-                "https://github.com/joshuarli/gh/releases/download/debloat/gh-macos-arm" ;;
+        gh) install_release gh ;;
         *)
             install_release "$prog"
             # The app and LaunchAgent are rebuilt only for a new binary or a missing app.

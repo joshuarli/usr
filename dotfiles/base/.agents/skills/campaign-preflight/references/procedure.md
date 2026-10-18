@@ -10,7 +10,7 @@
    - **Delegated:** the executor decides inside a stated bound, using the smallest reversible assumption, and logs it.
 4. **Sequence** (below), then **make the loop fast** and **make acceptance executable**.
 5. **Prove the foundation.** Pick the one or two assumptions the whole plan stands on and prove them with `blast-radius`, by running real code, before the plan is called ready.
-6. **Compress and write** in the shape below. Verify every `path:line` you kept.
+6. **Compress and write** in the shape below. Verify every `path:line` you kept. Then compare the final plan against the source draft: revisit its mission, deliverables, user-visible behavior, edge cases, test dimensions, constraints, and completion criteria. Every material requirement must remain actionable in the sequence or acceptance, move to a reference that the executor is directed to use, or be explicitly superseded/out of scope with a reason. Preserve its scope and measurable conditions; do not replace a specific criterion with a broad test label. This is a review pass, not a second register to maintain.
 
    - When `mdtool` is installed, check a draft once with `mdtool check --untracked PATH`; it groups all checks and searches source consumers across the repo. Without it, search Markdown links with `rg -n '\[[^]]+\]\(' PATH`, then inspect each target and literal path reference manually.
 7. **Report** a verdict: `ready`, `ready after the owner answers <list>`, or `not ready` with the reason.
@@ -46,7 +46,7 @@
 3. **Decisions:** the three tiers, each with its reason.
 4. **Baseline:** known failures, loop timings, and the reference numbers the optimization phase needs.
 5. **Sequence:** the items by phase, with the dependency order.
-6. **Acceptance:** each deliverable and the command or test that proves it. Nothing waits on a person.
+6. **Acceptance:** each deliverable and the command or test that proves it. Retain distinct user-visible success and failure conditions, including limits such as per-invocation behavior or recovery after interruption; a general test category does not cover them. Nothing waits on a person.
 7. **Execution boundary:** the effects the owner authorized and the effects the executor must not take. The campaign doc cannot grant permission. Each contract change made is listed for the owner.
 8. **Non-goals:** what the campaign does not do, so the executor drops ideas instead of queueing them.
 9. **Reference:** the design, the verified code map, and the background.
