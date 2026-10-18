@@ -339,5 +339,31 @@ echo "  assertion 3: newline-split .sym-dir paths cannot escape the target"
 [ "$rc" -ne 0 ] && grep -Fq 'is not a safe source path' log && [ ! -L "$escaped_directory_destination" ] || nfailed=$((nfailed + 1))
 
 
+printf '\n23: ownership recording includes only links and target directories created by sym\n'
+ownership_file="$tmp/sym-owned"
+mkdir home
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/mpv > /dev/null
+echo "  assertion 1: a newly created link is recorded once"
+awk -F '\t' -v path="$(pwd)/home/.config/mpv/mpv.conf" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file" || nfailed=$((nfailed + 1))
+echo "  assertion 2: newly created parent directories are recorded"
+awk -F '\t' -v parent="$(pwd)/home/.config" -v child="$(pwd)/home/.config/mpv" \
+    '$1 == "E" && $2 == parent { parent_found++ } $1 == "E" && $2 == child { child_found++ } \
+    END { exit parent_found != 1 || child_found != 1 }' "$ownership_file" || nfailed=$((nfailed + 1))
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/mpv > /dev/null
+awk -F '\t' -v path="$(pwd)/home/.config/mpv/mpv.conf" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file" || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+
+printf '\n24: ownership recording leaves a pre-existing correct link unclaimed\n'
+mkdir -p home/.config/mpv
+ln -s ../../../dotfiles/mpv/.config/mpv/mpv.conf home/.config/mpv/mpv.conf
+ownership_file="$tmp/preexisting-sym-owned"
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/mpv > /dev/null
+echo "  assertion 1: the correct pre-existing link is absent from ownership records"
+[ ! -s "$ownership_file" ] || nfailed=$((nfailed + 1))
+
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

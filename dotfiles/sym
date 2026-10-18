@@ -9,6 +9,21 @@
 die()   { printf '%s\n' "$*" >&2; exit 1; }
 usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] SOURCE\n' >&2; exit 1; }
 log()   { if "$verbose"; then printf '%s\n' "$1"; fi; }
+record_owned() {
+    [ -n "${SYM_OWNED_FILE:-}" ] || return 0
+    if [ ! -f "$SYM_OWNED_FILE" ] \
+        || ! awk -F '\t' -v kind="$1" -v path="$2" \
+            '$1 == kind && $2 == path { found = 1 } END { exit !found }' "$SYM_OWNED_FILE"; then
+        printf '%s\t%s\n' "$1" "$2" >> "$SYM_OWNED_FILE"
+    fi
+}
+record_missing_target_dirs() {
+    record_dir=$1
+    while [ "$record_dir" != "$tgt_abs" ] && [ ! -d "$record_dir" ]; do
+        record_owned E "$record_dir" || return 1
+        record_dir=${record_dir%/*}
+    done
+}
 
 # relpath DEST BASE
 # Relative path from directory BASE to file DEST (both absolute, no trailing /).
@@ -121,6 +136,7 @@ trap 'exit 130' 1 2 3 15
 : > "$tmp/symlink-dirs"
 : > "$tmp/names"
 : > "$tmp/dests"
+: > "$tmp/absolute-names"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$src" -c core.quotePath=false ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
     ! grep -q '^"' "$tmp/file-relpaths" || die "a file name in $src has a character git quotes; rename it"
@@ -218,6 +234,7 @@ while IFS= read -r fp; do
 
     printf '%s\n' "$name" >> "$tmp/names"
     printf '%s\n' "$dest" >> "$tmp/dests"
+    printf '%s\n' "$name_abs" >> "$tmp/absolute-names"
 
 done < "$tmp/files"
 
@@ -271,6 +288,7 @@ while IFS= read -r sd; do
     dest="$(relpath "$fp_abs" "${name_abs%/*}")"
     printf '%s\n' "$name" >> "$tmp/names"
     printf '%s\n' "$dest" >> "$tmp/dests"
+    printf '%s\n' "$name_abs" >> "$tmp/absolute-names"
 done < "$tmp/symlink-dirs"
 
 # Report conflicts
@@ -298,15 +316,26 @@ if $delete; then
         fi
     done < "$tmp/names"
 else
-    paste "$tmp/names" "$tmp/dests" > "$tmp/jobs"
-    while IFS="$(printf '\t')" read -r name dest; do
+    paste "$tmp/names" "$tmp/dests" "$tmp/absolute-names" > "$tmp/jobs"
+    while IFS="$(printf '\t')" read -r name dest name_abs; do
         dir="${name%/*}"
         if [ ! -d "$dir" ]; then
             log "MKDIRS: $dir"
-            $dry_run || mkdir -p "$dir"
+            if ! $dry_run; then
+                if ! record_missing_target_dirs "${name_abs%/*}" || ! mkdir -p "$dir"; then
+                    failed=true
+                    continue
+                fi
+            fi
         fi
         log "LINK: $name -> $dest"
-        $dry_run || ln -s "$dest" "$name" || failed=true
+        if ! $dry_run; then
+            if ln -s "$dest" "$name"; then
+                record_owned F "$name_abs" || failed=true
+            else
+                failed=true
+            fi
+        fi
     done < "$tmp/jobs"
 fi
 

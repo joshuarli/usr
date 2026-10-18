@@ -18,7 +18,6 @@ case "$OS" in
     *) printf '%s\n' "Unsupported OS: ${OS}" >&2; exit 1 ;;
 esac
 DEST="${HOME}/.local/bin"
-mkdir -p "$DEST"
 CLAUDE_VERSIONS="${XDG_DATA_HOME:-${HOME}/.local/share}/claude/versions"
 DSH_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/dsh"
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
@@ -31,7 +30,8 @@ OPENCODE2_HOME="${HOME}/.opencode"
 # cannot say which release it came from, and ad-hoc signing changes its bytes, so
 # comparing it with a fresh download would never match on macOS.
 STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
-mkdir -p "$STATE"
+DL_OWNED_FILE=${DL_OWNED_FILE:-}
+DL_RECORD_OWNED=${DL_RECORD_OWNED:-false}
 
 failed=false
 changed=false
@@ -50,6 +50,58 @@ if [ "$_dl_worker_mode" = true ]; then
     log_count=0
 fi
 skip() { printf '%s\n' "Skipping $1: $2" >&2; failed=true; }
+own_file() {
+    if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
+        || ! awk -F '\t' -v path="$1" '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
+        printf 'F\t%s\n' "$1" >> "$DL_OWNED_FILE"
+    fi
+}
+own_dir() {
+    if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
+        || ! awk -F '\t' -v path="$1" '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
+        printf 'D\t%s\n' "$1" >> "$DL_OWNED_FILE"
+    fi
+}
+own_empty_dir() {
+    if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
+        || ! awk -F '\t' -v path="$1" '$1 == "E" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
+        printf 'E\t%s\n' "$1" >> "$DL_OWNED_FILE"
+    fi
+}
+own_missing_dirs() {
+    [ ! -d "$1" ] || return 0
+    own_empty_dir "$1"
+    own_parent=${1%/*}
+    [ -n "$own_parent" ] || own_parent=/
+    [ "$own_parent" = "$1" ] || own_missing_dirs "$own_parent"
+}
+
+own_grok_target() {
+    case "$1" in
+        ../downloads/grok-macos-x86_64|../downloads/grok-macos-aarch64|../downloads/grok-linux-x86_64|../downloads/grok-linux-aarch64)
+            own_file "${GROK_HOME}/downloads/${1##*/}"
+            ;;
+    esac
+}
+
+own_codex_release_target() {
+    codex_release_prefix="${CODEX_HOME}/packages/standalone/releases/"
+    case "$1" in
+        "${codex_release_prefix}"*/bin/codex) ;;
+        *) return 1 ;;
+    esac
+    codex_release_name=${1#"$codex_release_prefix"}
+    codex_release_name=${codex_release_name%/bin/codex}
+    case "$codex_release_name" in
+        ''|*/*|.|..) return 1 ;;
+    esac
+    own_dir "${codex_release_prefix}${codex_release_name}"
+}
+
+own_missing_dirs "$DEST"
+mkdir -p "$DEST"
+own_missing_dirs "$STATE"
+mkdir -p "$STATE"
 
 # Remove only temporary paths created by this invocation. Keep cleanup failures
 # visible without replacing the install or signal failure that caused cleanup.
@@ -131,7 +183,12 @@ asset_id() {
 
 # is_current PROG ID  True when PROG is installed from the asset with this ID.
 is_current() {
-    [ -x "${DEST}/$1" ] && [ "$(cat "${STATE}/$1" 2>/dev/null)" = "$2" ]
+    if [ -x "${DEST}/$1" ] && [ "$(cat "${STATE}/$1" 2>/dev/null)" = "$2" ]; then
+        own_file "${DEST}/$1"
+        own_file "${STATE}/$1"
+        return 0
+    fi
+    return 1
 }
 
 installed() {
@@ -236,7 +293,9 @@ install_binary() {
     fi
     chmod +x "$2"
     mv "$2" "${DEST}/$1"
+    own_file "${DEST}/$1"
     printf '%s\n' "$3" > "${STATE}/$1"
+    own_file "${STATE}/$1"
     changed=true
     printf '%s\n' "Installed ${DEST}/$1"
 }
@@ -376,7 +435,8 @@ install_mold() {
         unchecked mold "${asset}.tar.gz is not available in ${tag}"
         return
     fi
-    if is_current mold "$id" && [ -L "${DEST}/ld.mold" ]; then
+    if is_current mold "$id" && [ "$(readlink "${DEST}/ld.mold" 2>/dev/null || :)" = mold ]; then
+        own_file "${DEST}/ld.mold"
         printf '%s\n' "mold is current (${tag})"
         return
     fi
@@ -401,6 +461,7 @@ install_mold() {
     install_binary mold "$tmpbin" "$id"
     tmpbin=
     ln -sf mold "${DEST}/ld.mold"
+    own_file "${DEST}/ld.mold"
 }
 
 # mactop is a menu-bar app: mirror `make install` from joshuarli/mactop
@@ -446,7 +507,9 @@ EOF
     mv "$bundle" "$app"
     tmpbundle=
     printf '%s\n' "Installed ${app}"
+    own_dir "$app"
     agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
+    own_missing_dirs "${HOME}/Library/LaunchAgents"
     mkdir -p "${HOME}/Library/LaunchAgents"
     printf '%s\n' \
       '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -464,6 +527,7 @@ EOF
       '  <true/>' \
       '</dict>' \
       '</plist>' > "$agent"
+    own_file "$agent"
     launchctl bootout "gui/$(id -u)" "$agent" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$agent"
     launchctl kickstart -k "gui/$(id -u)/com.mactop"
@@ -549,6 +613,9 @@ install_grok() {
         return
     fi
     if ! grok_launcher_is_legacy_dl && is_current grok "$id"; then
+        own_file "${GROK_HOME}/bin/grok"
+        grok_target=$(readlink "${GROK_HOME}/bin/grok") || grok_target=
+        own_grok_target "$grok_target"
         printf '%s\n' "grok is current (${version})"
         return
     fi
@@ -563,6 +630,8 @@ install_grok() {
         skip grok "${grok_bin_dir}/grok already exists"
         return
     fi
+    own_missing_dirs "$grok_bin_dir"
+    own_missing_dirs "$grok_downloads"
     mkdir -p "$grok_bin_dir" "$grok_downloads"
     tmpbin=$(mktemp "${grok_downloads}/.grok.XXXXXX")
     if ! curl -fsSL -o "$tmpbin" "$url"; then
@@ -578,17 +647,21 @@ install_grok() {
     chmod +x "$tmpbin"
     mv -f "$tmpbin" "$grok_binary"
     tmpbin=
+    own_file "$grok_binary"
     tmpbinlink=$(mktemp "${grok_bin_dir}/.grok.XXXXXX")
     rm -f "$tmpbinlink"
     ln -s "../downloads/grok-${platform}" "$tmpbinlink"
     mv -f "$tmpbinlink" "${grok_bin_dir}/grok"
     tmpbinlink=
+    own_file "${grok_bin_dir}/grok"
     tmpbinlink=$(mktemp "${DEST}/.grok.XXXXXX")
     rm -f "$tmpbinlink"
     ln -s "${grok_bin_dir}/grok" "$tmpbinlink"
     mv -f "$tmpbinlink" "${DEST}/grok"
     tmpbinlink=
+    own_file "${DEST}/grok"
     printf '%s\n' "$id" > "${STATE}/grok"
+    own_file "${STATE}/grok"
     changed=true
     printf '%s\n' "Installed ${DEST}/grok"
 }
@@ -698,8 +771,21 @@ install_dsh() {
         && [ -x "${DSH_INSTALL_ROOT}/bin/dsh" ] \
         && [ -x "${DSH_INSTALL_ROOT}/bin/dsh-tui" ]; then
         if ! repair_dsh_tui_patch || ! remove_legacy_dsh; then return; fi
+        own_dir "$DSH_INSTALL_ROOT"
+        own_file "${STATE}/dsh"
+        own_file "${STATE}/dsh-tui"
         printf '%s\n' "dsh and dsh-tui are current (${version}, ${tui_version})"
         return
+    fi
+    if [ -e "$DSH_INSTALL_ROOT" ] || [ -L "$DSH_INSTALL_ROOT" ]; then
+        if [ ! -s "${STATE}/dsh" ] || [ ! -s "${STATE}/dsh-tui" ]; then
+            skip dsh "$DSH_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    else
+        own_parent=${DSH_INSTALL_ROOT%/*}
+        own_missing_dirs "$own_parent"
+        own_dir "$DSH_INSTALL_ROOT"
     fi
     printf '%s\n' "Installing dsh (${version}) and dsh-tui (${tui_version}) ..."
     if ! npm install --global --prefix "$DSH_INSTALL_ROOT" \
@@ -714,6 +800,8 @@ install_dsh() {
     if ! repair_dsh_tui_patch || ! remove_legacy_dsh; then return; fi
     printf '%s\n' "$version" > "${STATE}/dsh"
     printf '%s\n' "$tui_version" > "${STATE}/dsh-tui"
+    own_file "${STATE}/dsh"
+    own_file "${STATE}/dsh-tui"
     changed=true
     printf '%s\n' "Installed dsh and dsh-tui under ${DSH_INSTALL_ROOT}"
 }
@@ -728,7 +816,8 @@ install_antigravity() {
         skip antigravity "official installer is unavailable"
         return
     fi
-    if ! bash "$tmpbin" --dir "$DEST"; then
+    own_file "${DEST}/agy"
+    if ! bash "$tmpbin" --dir "$DEST" --skip-aliases --skip-path; then
         rm -f "$tmpbin"
         tmpbin=
         skip antigravity "official installer failed"
@@ -742,6 +831,7 @@ install_antigravity() {
     fi
     changed=true
     printf '%s\n' "Installed Antigravity CLI (${DEST}/agy)"
+    own_file "${DEST}/agy"
 }
 
 install_muse() {
@@ -761,6 +851,7 @@ install_muse() {
         skip muse "official installer is unavailable"
         return
     fi
+    own_file "${DEST}/muse"
     if ! MUSE_INSTALL_DIR="$DEST" MUSE_NO_MODIFY_PATH=1 bash "$tmpbin"; then
         rm -f "$tmpbin"
         tmpbin=
@@ -776,6 +867,7 @@ install_muse() {
     rm -f "${STATE}/muse"
     changed=true
     printf '%s\n' "Installed Muse Code launcher (${DEST}/muse)"
+    own_file "${DEST}/muse"
 }
 
 install_claude() {
@@ -794,6 +886,7 @@ install_claude() {
         skip claude "official installer is unavailable"
         return
     fi
+    own_file "${DEST}/claude"
     if ! bash "$tmpbin" latest; then
         rm -f "$tmpbin"
         tmpbin=
@@ -809,6 +902,15 @@ install_claude() {
     rm -f "${STATE}/claude"
     changed=true
     printf '%s\n' "Installed Claude Code (${DEST}/claude)"
+    own_file "${DEST}/claude"
+    claude_target=$(readlink "${DEST}/claude" 2>/dev/null || :)
+    case "$claude_target" in /*) ;; *) claude_target="${DEST}/${claude_target}" ;; esac
+    case "/${claude_target}/" in *"/../"*) claude_target= ;; esac
+    case "$claude_target" in
+        "${HOME}/.claude/"*|"${CLAUDE_VERSIONS}/"*)
+            own_file "$claude_target"
+            ;;
+    esac
 }
 
 install_codex() {
@@ -868,6 +970,14 @@ install_codex() {
         return
     fi
     if ! codex_launcher_is_legacy_dl && is_current codex "$id"; then
+        codex_target=$(readlink "${DEST}/codex") || codex_target=
+        if own_codex_release_target "$codex_target"; then
+            codex_mode_target=$(readlink "${DEST}/codex-code-mode-host" 2>/dev/null || :)
+            codex_release=${codex_target%/bin/codex}
+            if [ "$codex_mode_target" = "${codex_release}/bin/codex-code-mode-host" ]; then
+                own_file "${DEST}/codex-code-mode-host"
+            fi
+        fi
         printf '%s\n' "codex is current (${version})"
         return
     fi
@@ -876,6 +986,7 @@ install_codex() {
         skip codex "$release_dir already exists"
         return
     fi
+    own_missing_dirs "$releases"
     mkdir -p "$releases"
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
@@ -925,19 +1036,23 @@ install_codex() {
     fi
     mv "$tmpbundle" "$release_dir"
     tmpbundle=
+    own_dir "$release_dir"
     tmpbinlink=$(mktemp "${DEST}/.codex.XXXXXX")
     rm -f "$tmpbinlink"
     ln -s "${release_dir}/bin/codex" "$tmpbinlink"
     mv -f "$tmpbinlink" "${DEST}/codex"
     tmpbinlink=
+    own_file "${DEST}/codex"
     if [ "$OS" = Darwin ]; then
         tmpbinlink=$(mktemp "${DEST}/.codex-code-mode-host.XXXXXX")
         rm -f "$tmpbinlink"
         ln -s "${release_dir}/bin/codex-code-mode-host" "$tmpbinlink"
         mv -f "$tmpbinlink" "${DEST}/codex-code-mode-host"
         tmpbinlink=
+        own_file "${DEST}/codex-code-mode-host"
     fi
     printf '%s\n' "$id" > "${STATE}/codex"
+    own_file "${STATE}/codex"
     changed=true
     printf '%s\n' "Installed ${DEST}/codex"
 }
@@ -971,6 +1086,10 @@ install_opencode2() {
         return
     fi
     if ! opencode2_launcher_is_legacy_dl && is_current opencode2 "$id"; then
+        if [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
+            own_file "${OPENCODE2_HOME}/bin/opencode2"
+            own_file "${OPENCODE2_HOME}/bin/opencode"
+        fi
         printf '%s\n' "opencode2 is current"
         return
     fi
@@ -980,6 +1099,7 @@ install_opencode2() {
         skip opencode2 "$opencode2_binary already exists"
         return
     fi
+    own_missing_dirs "$opencode2_bin_dir"
     mkdir -p "$opencode2_bin_dir"
     printf '%s\n' "Downloading opencode2 ..."
     tmpzip=$(mktemp)
@@ -1007,6 +1127,7 @@ install_opencode2() {
     chmod +x "$tmpbin"
     mv -f "$tmpbin" "$opencode2_binary"
     tmpbin=
+    own_file "$opencode2_binary"
     tmpbinlink=$(mktemp "${opencode2_bin_dir}/.opencode2-shim.XXXXXX")
     cat > "$tmpbinlink" <<'EOF'
 #!/bin/sh
@@ -1015,12 +1136,15 @@ EOF
     chmod +x "$tmpbinlink"
     mv -f "$tmpbinlink" "${opencode2_bin_dir}/opencode2"
     tmpbinlink=
+    own_file "${opencode2_bin_dir}/opencode2"
     tmpbinlink=$(mktemp "${DEST}/.opencode2.XXXXXX")
     rm -f "$tmpbinlink"
     ln -s "${opencode2_bin_dir}/opencode2" "$tmpbinlink"
     mv -f "$tmpbinlink" "${DEST}/opencode2"
     tmpbinlink=
+    own_file "${DEST}/opencode2"
     printf '%s\n' "$id" > "${STATE}/opencode2"
+    own_file "${STATE}/opencode2"
     changed=true
     printf '%s\n' "Installed ${DEST}/opencode2"
 }
@@ -1091,6 +1215,85 @@ run_parallel() {
     if $run_failed; then return 1; fi
     return 0
 }
+
+record_managed_binary() {
+    record_prog=$1
+    if [ -f "${STATE}/${record_prog}" ]; then
+        own_file "${STATE}/${record_prog}"
+        if installed "$record_prog"; then own_file "${DEST}/${record_prog}"; fi
+    fi
+}
+
+record_managed_installs() {
+    for record_prog in fd rg jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold; do
+        record_managed_binary "$record_prog"
+    done
+    if [ -s "${STATE}/mold" ] && [ "$(readlink "${DEST}/ld.mold" 2>/dev/null || :)" = mold ]; then
+        own_file "${DEST}/ld.mold"
+    fi
+    if [ -s "${STATE}/claude" ]; then
+        claude_target=$(readlink "${DEST}/claude" 2>/dev/null || :)
+        case "/${claude_target}/" in *"/../"*) claude_target= ;; esac
+        case "$claude_target" in
+            "${HOME}/.claude/"*|"${CLAUDE_VERSIONS}/"*) own_file "$claude_target" ;;
+        esac
+    fi
+    record_managed_binary grok
+    if [ -s "${STATE}/grok" ] && [ "$(readlink "${DEST}/grok" 2>/dev/null || :)" = "${GROK_HOME}/bin/grok" ]; then
+        own_file "${GROK_HOME}/bin/grok"
+        grok_target=$(readlink "${GROK_HOME}/bin/grok" 2>/dev/null || :)
+        own_grok_target "$grok_target"
+    fi
+    record_managed_binary codex
+    if [ -s "${STATE}/codex" ]; then
+        codex_target=$(readlink "${DEST}/codex" 2>/dev/null || :)
+        if own_codex_release_target "$codex_target"; then
+            codex_mode_target=$(readlink "${DEST}/codex-code-mode-host" 2>/dev/null || :)
+            codex_release=${codex_target%/bin/codex}
+            if [ "$codex_mode_target" = "${codex_release}/bin/codex-code-mode-host" ]; then
+                own_file "${DEST}/codex-code-mode-host"
+            fi
+        fi
+    fi
+    record_managed_binary opencode2
+    if [ -s "${STATE}/opencode2" ] \
+        && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
+        own_file "${OPENCODE2_HOME}/bin/opencode2"
+        own_file "${OPENCODE2_HOME}/bin/opencode"
+    fi
+    for record_prog in dsh dsh-tui; do
+        if [ -f "${STATE}/${record_prog}" ]; then own_file "${STATE}/${record_prog}"; fi
+    done
+    if [ -s "${STATE}/dsh" ] || [ -s "${STATE}/dsh-tui" ]; then
+        if [ -d "$DSH_INSTALL_ROOT" ]; then own_dir "$DSH_INSTALL_ROOT"; fi
+    fi
+    if [ -s "${STATE}/mactop" ]; then
+        if [ -d /Applications/mactop.app ]; then own_dir /Applications/mactop.app; fi
+        agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
+        if [ -f "$agent" ]; then own_file "$agent"; fi
+    fi
+}
+
+report_unowned_launcher() {
+    report_prog=$1
+    report_path="${DEST}/${report_prog}"
+    if installed "$report_prog" && { [ ! -f "$DL_OWNED_FILE" ] \
+        || ! awk -F '\t' -v path="$report_path" \
+            '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
+        printf '%s\n' "Leaving untracked launcher: $report_path" >&2
+        if [ -L "$report_path" ]; then
+            report_target=$(readlink "$report_path" 2>/dev/null || :)
+            if [ -n "$report_target" ]; then printf '%s\n' "Its target is also untracked: $report_target" >&2; fi
+        fi
+    fi
+}
+
+if [ "$DL_RECORD_OWNED" = true ]; then
+    [ -n "$DL_OWNED_FILE" ] || { printf '%s\n' 'DL_OWNED_FILE is required to record installed paths' >&2; exit 1; }
+    record_managed_installs
+    for report_prog in agy muse claude; do report_unowned_launcher "$report_prog"; done
+    exit 0
+fi
 
 if [ $# -eq 0 ]; then
     set -- fd rg jaq grok codex claude opencode2 fastermod tm ish e fz fdu fs srv

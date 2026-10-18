@@ -44,7 +44,8 @@ INSTALLER
         [ -n "$output" ] || exit 1
         cat > "$output" <<'INSTALLER'
 #!/bin/sh
-[ "$1" = --dir ] && [ "$2" = "$HOME/.local/bin" ] || exit 1
+[ "$#" -eq 4 ] && [ "$1" = --dir ] && [ "$2" = "$HOME/.local/bin" ] \
+    && [ "$3" = --skip-aliases ] && [ "$4" = --skip-path ] || exit 1
 mkdir -p "$HOME/.local/bin"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/agy"
 chmod +x "$HOME/.local/bin/agy"
@@ -227,6 +228,26 @@ exit 0
 EOF
 chmod +x "$mock_bin/pnpm"
 
+unowned_dsh_home="$test_root/unowned-dsh-home"
+unowned_dsh_root="$unowned_dsh_home/data/dsh"
+unowned_dsh_log="$test_root/unowned-dsh-npm.log"
+mkdir -p "$unowned_dsh_root"
+if output=$(HOME="$unowned_dsh_home" XDG_DATA_HOME="$unowned_dsh_home/data" \
+    XDG_STATE_HOME="$unowned_dsh_home/state" TMPDIR="$test_root/tmp" \
+    NPM_LOG="$unowned_dsh_log" PATH="$mock_bin:$PATH" sh "$repo_root/dl" dsh 2>&1); then
+    printf '%s\n' 'dsh install accepted an existing package root without dl install records' >&2
+    exit 1
+fi
+case "$output" in
+    *"Skipping dsh: $unowned_dsh_root already exists without dl install records"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if [ -f "$unowned_dsh_log" ]; then
+    printf '%s\n' 'dsh install changed an existing package root without dl install records' >&2
+    exit 1
+fi
+[ -d "$unowned_dsh_root" ]
+
 dsh_home="$test_root/dsh-home"
 dsh_data="$dsh_home/data"
 dsh_state="$dsh_home/state"
@@ -376,6 +397,112 @@ case "$output" in
     *'agy is installed'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+
+ownership_home="$test_root/ownership-home"
+ownership_file="$ownership_home/.local/state/make/dl-owned"
+mkdir -p "$(dirname "$ownership_file")"
+if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
+    DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
+    DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+awk -F '\t' -v path="$ownership_home/.local/bin/jaq" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file"
+awk -F '\t' -v path="$ownership_home/.local/state/dl/jaq" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file"
+awk -F '\t' -v path="$ownership_home/.local/bin" \
+    '$1 == "E" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file"
+awk -F '\t' -v path="$ownership_home/.local/state/dl" \
+    '$1 == "E" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file"
+
+reconcile_home="$test_root/reconcile-home"
+reconcile_file="$reconcile_home/.local/state/make/dl-owned"
+mkdir -p "$reconcile_home/.local/bin" "$reconcile_home/.local/state/dl" \
+    "$(dirname "$reconcile_file")"
+printf '%s\n' 'managed jaq' > "$reconcile_home/.local/bin/jaq"
+chmod +x "$reconcile_home/.local/bin/jaq"
+printf '%s\n' 'jaq-test-etag' > "$reconcile_home/.local/state/dl/jaq"
+HOME="$reconcile_home" XDG_STATE_HOME="$reconcile_home/.local/state" \
+    DL_OWNED_FILE="$reconcile_file" DL_RECORD_OWNED=true \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+awk -F '\t' -v path="$reconcile_home/.local/bin/jaq" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$reconcile_file"
+awk -F '\t' -v path="$reconcile_home/.local/state/dl/jaq" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$reconcile_file"
+
+unmanaged_home="$test_root/unmanaged-home"
+unmanaged_file="$unmanaged_home/.local/state/make/dl-owned"
+mkdir -p "$unmanaged_home/.local/bin" "$(dirname "$unmanaged_file")"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$unmanaged_home/.local/bin/jaq"
+chmod +x "$unmanaged_home/.local/bin/jaq"
+HOME="$unmanaged_home" XDG_STATE_HOME="$unmanaged_home/.local/state" \
+    DL_OWNED_FILE="$unmanaged_file" DL_RECORD_OWNED=true \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+if awk -F '\t' -v path="$unmanaged_home/.local/bin/jaq" \
+    '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$unmanaged_file"; then
+    printf '%s\n' 'launcher without dl install state was recorded for removal' >&2
+    exit 1
+fi
+[ -x "$unmanaged_home/.local/bin/jaq" ]
+
+untracked_home="$test_root/untracked-home"
+mkdir -p "$untracked_home/.local/bin" "$untracked_home/.local/state/dl" \
+    "$untracked_home/.local/state/make"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$untracked_home/.local/bin/agy"
+chmod +x "$untracked_home/.local/bin/agy"
+if output=$(HOME="$untracked_home" XDG_STATE_HOME="$untracked_home/.local/state" \
+    DL_OWNED_FILE="$untracked_home/.local/state/make/dl-owned" DL_RECORD_OWNED=true \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *"Leaving untracked launcher: $untracked_home/.local/bin/agy"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ -x "$untracked_home/.local/bin/agy" ]
+
+unsafe_target_home="$test_root/unsafe-target-home"
+unsafe_target_rogue="$unsafe_target_home/.codex/packages/rogue/bin"
+unsafe_target_owned="$unsafe_target_home/.local/state/make/dl-owned"
+mkdir -p "$unsafe_target_rogue" "$unsafe_target_home/.local/bin" \
+    "$unsafe_target_home/.local/state/dl" "$(dirname "$unsafe_target_owned")"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$unsafe_target_rogue/codex"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$unsafe_target_rogue/codex-code-mode-host"
+chmod +x "$unsafe_target_rogue/codex" "$unsafe_target_rogue/codex-code-mode-host"
+printf '%s\n' 'codex-test-etag' > "$unsafe_target_home/.local/state/dl/codex"
+ln -s "$unsafe_target_home/.codex/packages/standalone/releases/../../rogue/bin/codex" \
+    "$unsafe_target_home/.local/bin/codex"
+ln -s "$unsafe_target_home/.codex/packages/standalone/releases/../../rogue/bin/codex-code-mode-host" \
+    "$unsafe_target_home/.local/bin/codex-code-mode-host"
+HOME="$unsafe_target_home" XDG_STATE_HOME="$unsafe_target_home/.local/state" \
+    DL_OWNED_FILE="$unsafe_target_owned" DL_RECORD_OWNED=true \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+if awk -F '\t' -v path="$unsafe_target_home/.codex/packages/rogue" \
+    '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$unsafe_target_owned"; then
+    printf '%s\n' 'unsafe Codex release target was recorded for recursive removal' >&2
+    exit 1
+fi
+if awk -F '\t' -v path="$unsafe_target_home/.local/bin/codex-code-mode-host" \
+    '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$unsafe_target_owned"; then
+    printf '%s\n' 'unsafe Codex companion launcher was recorded for removal' >&2
+    exit 1
+fi
+[ -x "$unsafe_target_rogue/codex" ]
+[ -x "$unsafe_target_rogue/codex-code-mode-host" ]
 
 cat > "$mock_bin/uname" <<'EOF'
 #!/bin/sh

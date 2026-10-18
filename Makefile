@@ -12,17 +12,54 @@
 
 TARGET ?= $(HOME)
 KACHE  := $(or $(CARGO_HOME),$(HOME)/.cargo)/bin/kache
+DL_OWNED_FILE := $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/make/dl-owned
+DL_TMPDIR := $(CURDIR)/.work/tmp
 OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
-.PHONY: sync plan layers check lint
+.PHONY: sync uninstall plan layers check lint
 
 sync: layers
-	status=0; sh dl || status=$$?; \
-	for layer in $(LAYERS); do $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
-	[ -x "$(KACHE)" ] || sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; \
+	mkdir -p "$(DL_TMPDIR)" || exit 1; \
+	mkdir -p "$(dir $(DL_OWNED_FILE))" || exit 1; \
+	status=0; TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || status=$$?; \
+	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
+	if [ ! -x "$(KACHE)" ]; then \
+		TMPDIR="$(DL_TMPDIR)" sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; \
+		if [ -x "$(KACHE)" ] && { [ ! -f "$(DL_OWNED_FILE)" ] || ! awk -F '\t' -v path="$(KACHE)" '$$1 == "K" && $$2 == path { found = 1 } END { exit !found }' "$(DL_OWNED_FILE)"; }; then printf 'K\t%s\n' "$(KACHE)" >> "$(DL_OWNED_FILE)" || status=$$?; fi; \
+	fi; \
 	exit $$status
+
+uninstall:
+	mkdir -p "$(DL_TMPDIR)" || exit 1
+	mkdir -p "$(dir $(DL_OWNED_FILE))" || exit 1
+	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" DL_RECORD_OWNED=true sh dl || exit 1
+	if [ -f "$(DL_OWNED_FILE)" ]; then \
+		while IFS="$$(printf '\t')" read -r kind path; do \
+			[ "$$kind" = F ] || continue; \
+			if [ "$(OS)" = darwin ] && [ "$$path" = "$(HOME)/Library/LaunchAgents/com.mactop.plist" ]; then launchctl bootout "gui/$$(id -u)" "$$path" 2>/dev/null || :; fi; \
+		rm -f "$$path" || exit 1; \
+		done < "$(DL_OWNED_FILE)"; \
+		while IFS="$$(printf '\t')" read -r kind path; do \
+			[ "$$kind" = D ] || continue; \
+			rm -rf "$$path" || exit 1; \
+		done < "$(DL_OWNED_FILE)"; \
+		while :; do \
+			removed=false; \
+			while IFS="$$(printf '\t')" read -r kind path; do \
+				[ "$$kind" = E ] || continue; \
+				if rmdir "$$path" 2>/dev/null; then removed=true; fi; \
+			done < "$(DL_OWNED_FILE)"; \
+			[ "$$removed" = true ] || break; \
+		done; \
+		while IFS="$$(printf '\t')" read -r kind path; do \
+			[ "$$kind" = K ] || continue; \
+			TMPDIR="$(DL_TMPDIR)" sh dotfiles/base/.local/bin/setup-kache uninstall --purge || exit 1; \
+		done < "$(DL_OWNED_FILE)"; \
+		rm -f "$(DL_OWNED_FILE)"; \
+		rmdir "$$(dirname "$(DL_OWNED_FILE)")" 2>/dev/null || :; \
+	fi
 
 # sym reports dry-run conflicts without failing, so check every layer and propagate them.
 plan: layers
