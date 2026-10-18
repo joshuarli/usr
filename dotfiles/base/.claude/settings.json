@@ -84,5 +84,6 @@
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark-ansi",
   "autoCompactEnabled": true,
-  "disableDeepLinkRegistration": "disable"
+  "disableDeepLinkRegistration": "disable",
+  "autoUpdatesChannel": "latest"
 }
