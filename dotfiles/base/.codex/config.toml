@@ -197,6 +197,9 @@ trust_level = "trusted"
 [projects."/Users/josh/dev/sentry-typing-hillclimb"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/h12tiny"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
