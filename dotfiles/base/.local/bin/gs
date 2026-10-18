@@ -6,7 +6,7 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     exit
 fi
 
-find . -name .git -prune -exec sh -c '
+find . -type d -name .work -prune -o -name .git -prune -exec sh -c '
     for marker do
         repo=${marker%/.git}
         printf "%s\n" "$repo"
