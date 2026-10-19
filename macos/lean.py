@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""macos-lean.py — Make macOS lean (27 Golden Gate).
+"""Service and preference policy used by ``macos lean`` (27 Golden Gate).
 
 Stdlib only. Disables ~230 unnecessary services via ``launchctl disable``
 (persists across reboots), then attempts to stop running jobs. macOS may
@@ -10,10 +10,10 @@ managed lists live below in ``DISABLE_SECTIONS``, ``PRESERVE_SECTIONS``,
 ``USER_DEFAULTS``, ``PERFORMANCE_DEFAULTS``, and ``PMSET_*``.
 
 Usage:
-    ./macos-lean.py              # apply changes (requires sudo)
-    ./macos-lean.py --dry-run    # preview; stale labels flagged, no changes
-    ./macos-lean.py --audit      # validate labels vs live OS; no sudo, no changes
-    ./macos-lean.py --revert     # re-enable everything managed
+    ./macos/macos lean              # apply changes (requires sudo)
+    ./macos/macos lean --dry-run    # preview; stale labels flagged, no changes
+    ./macos/macos lean --audit      # validate labels vs live OS; no sudo, no changes
+    ./macos/macos lean --revert     # re-enable everything managed
 
 Always run --audit first after an OS upgrade, then --dry-run, then apply.
 Apply and revert use one sudo-authenticated worker for privileged commands.
@@ -79,13 +79,13 @@ new label, read the plist's ProgramArguments/MachServices — names lie.
 Audit workflow (--audit runs the checks built in; these are the manual
 equivalents and the post-upgrade procedure):
 
-1. ``./macos-lean.py --audit`` — review STALE and NEW? lines.
-2. ``./macos-lean.py --dry-run | rg -o '(com|io)\\.[A-Za-z0-9._-]+' | sort -u``
+1. ``./macos/macos lean --audit`` — review STALE and NEW? lines.
+2. ``./macos/macos lean --dry-run | rg -o '(com|io)\\.[A-Za-z0-9._-]+' | sort -u``
    gives the effective managed-label list for manual diffing against a
    live index (``plutil -extract Label raw`` over /System and /Library
    LaunchAgents/Daemons).
 3. For each NEW? label, read ProgramArguments before touching it.
-4. ``./macos-lean.py --dry-run``, then apply, then reboot.
+4. ``./macos/macos lean --dry-run``, then apply, then reboot.
 5. Test ``tmutil``/``pmset``/``networksetup``/``defaults``/``log`` verbs per
    release (e.g. ``tmutil disablelocal`` died in Tahoe).
 6. Manual items no script can cover: Settings > General > Login Items &
@@ -1398,7 +1398,7 @@ def print_summary(state: State, prog: str) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="macos-lean.py",
+        prog="macos lean",
         description="Make macOS lean: disable unnecessary services, converge preferences.",
         epilog="Always run --audit first after an OS upgrade, then --dry-run, then apply.",
     )
@@ -1476,7 +1476,7 @@ def main(argv: list[str] | None = None) -> int:
             for check in checks:
                 ensure_service(state, check)
 
-        print_summary(state, Path(sys.argv[0]).name)
+        print_summary(state, "macos lean")
     except subprocess.CalledProcessError as exc:
         print(f"Error: {exc.cmd} exited with status {exc.returncode}", file=sys.stderr)
         if exc.stderr:

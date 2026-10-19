@@ -14,6 +14,7 @@ Run the narrowest check that covers the change:
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
 | a shell script | `shellcheck -s sh FILE` |
 | a Python script | `uvx ruff check FILE`, which reads `ruff.toml` |
+| macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I macos/lean-test.py`, and `uvx ruff check macos/macos macos/macos-test.py macos/lean.py macos/lean-test.py` |
 
 `make check` and `make lint` run all of these across the repo. Use them to close a change that crosses several areas, not to iterate.
 

@@ -23,7 +23,7 @@ Next: 16
 ### USR-15 · P3 · Failed preserved-service checks still exit successfully
 
 - **Area:** macOS
-- **Where:** `macos/macos-lean.py:955-960`, `macos/macos-lean.py:1295-1298`, `macos/macos-lean.py:1420`
+- **Where:** `macos/lean.py:955-960`, `macos/lean.py:1295-1298`, `macos/lean.py:1421`
 - **Problem:** `ensure_service()` increments `verify_fail` when `launchctl print` fails, but `main()` still returns 0 after printing a warning. Scripts and automation therefore treat an unverified preserved service as a successful apply.
 - **Recommendation:** Return a nonzero status when one or more preserved services fail verification.
 - **Fix with:** none

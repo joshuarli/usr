@@ -4,15 +4,12 @@
 # Safe to rerun. Every step reads the current state and changes only what differs.
 #
 # usage: setup-macos [-n] [STEP...]
-#        setup-macos [-n] lean [ARGS...]
 #   -n      report what would change and change nothing
 #   STEP    brew        install Homebrew if missing
 #           packages    install the packages listed in brewfile() below
 #           touchid     Touch ID for sudo, working inside tmux
 #           dns         unbound as a local caching resolver, and point the system at it
 #                       To undo: networksetup -setdnsservers SERVICE Empty
-#           lean        run macos-lean.py with ARGS; it disables macOS services, so it is
-#                       never part of the default run. Audit and dry-run it first.
 #   With no STEP the default is: brew packages touchid dns, in that order. Packages come
 #   first because touchid and dns use what they install, and touchid comes before dns so
 #   that later sudo prompts accept a fingerprint.
@@ -298,11 +295,6 @@ step_dns() {
     done
 }
 
-step_lean() {
-    if $dry; then set -- --dry-run "$@"; fi
-    exec "$here/macos-lean.py" "$@"
-}
-
 # ── main ──────────────────────────────────────────────────────────────────────
 [ "$(uname -s)" = Darwin ] || die "macOS only"
 
@@ -315,7 +307,6 @@ fi
 for step in "$@"; do
     case $step in
         brew|packages|touchid|dns) ;;
-        lean) break ;;
         *) die "unknown step: $step (see the usage at the top of this script)" ;;
     esac
 done
@@ -327,6 +318,5 @@ while [ $# -gt 0 ]; do
         packages)   step_packages ;;
         touchid)    step_touchid ;;
         dns)        step_dns ;;
-        lean)       step_lean "$@" ;;
     esac
 done

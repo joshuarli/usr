@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-spec = importlib.util.spec_from_file_location("macos_lean", Path(__file__).with_name("macos-lean.py"))
+spec = importlib.util.spec_from_file_location("macos_lean", Path(__file__).with_name("lean.py"))
 lean = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = lean
 spec.loader.exec_module(lean)
@@ -107,7 +107,8 @@ class CommandFailureTests(unittest.TestCase):
         self.assertEqual(command.call_args.args[0], ["defaults", "delete", "example", "ExistingKey"])
 
     def test_expected_unsuccessful_probes_return_status(self):
-        with patch.object(lean.subprocess, "run", side_effect=self.failed_command):
+        with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                patch.object(lean.subprocess, "run", side_effect=self.failed_command):
             self.assertIsNone(lean.defaults_read(lean.MDNS_DEFAULT))
             self.assertEqual(lean.sw_vers("buildVersion"), "unknown")
             self.assertEqual(lean.run(["pgrep", "-x", "Dock"], check=False).returncode, 7)

@@ -2,7 +2,7 @@
 
 This repository is the source of truth for my home configuration and machine setup. Edit this tree, never `~`.
 
-Use the [README](README.md) to install. See [sync](docs/sync.md), [development](docs/development.md), [agent setup](docs/agent-setup.md), the [mdtool reference](docs/mdtool.md), [deferred work](TODO.md), and [RFCs](docs/rfc/) for repository details.
+Use the [README](README.md) to install. See [sync](docs/sync.md), [development](docs/development.md), [macOS preferences](docs/macos-preferences.md), [agent setup](docs/agent-setup.md), the [mdtool reference](docs/mdtool.md), [deferred work](TODO.md), and [RFCs](docs/rfc/) for repository details.
 
 Use the global `do` skill for outcome-driven tasks. See [agent setup](docs/agent-setup.md) for each harness's invocation syntax and how `/do` differs from `/yea`.
 

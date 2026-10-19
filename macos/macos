@@ -1,0 +1,481 @@
+#!/usr/bin/env python3
+"""Snapshot and apply selected macOS user preferences."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import importlib.machinery
+import importlib.util
+import os
+import plistlib
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+
+FORMAT_VERSION = 1
+GLOBAL_DOMAIN = "-g"
+SCOPES = ("user", "currentHost")
+
+
+lean_loader = importlib.machinery.SourceFileLoader(
+    "macos_lean", str(Path(__file__).resolve().with_name("lean.py")),
+)
+lean_spec = importlib.util.spec_from_loader(lean_loader.name, lean_loader)
+lean_command = importlib.util.module_from_spec(lean_spec)
+sys.modules[lean_spec.name] = lean_command
+lean_loader.exec_module(lean_command)
+
+
+def defaults(scope: str, *arguments: str, input_data: bytes | None = None) -> bytes:
+    prefix = ["-currentHost"] if scope == "currentHost" else []
+    process = subprocess.run(
+        ["defaults", *prefix, *arguments],
+        input=input_data,
+        capture_output=True,
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.decode(errors="replace").strip()
+        raise RuntimeError(f"defaults {' '.join(arguments)} failed: {detail}")
+    return process.stdout
+
+
+def domains(scope: str) -> list[str]:
+    output = defaults(scope, "domains").decode()
+    found = {item.strip() for item in output.split(",") if item.strip()}
+    found.discard("NSGlobalDomain")
+    found.discard(GLOBAL_DOMAIN)
+    return [GLOBAL_DOMAIN, *sorted(found)]
+
+
+def export_domain(scope: str, domain: str) -> dict[str, Any]:
+    content = defaults(scope, "export", domain, "-")
+    value = plistlib.loads(content)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"defaults exported a non-dictionary domain: {domain}")
+    return value
+
+
+def capture_scope(scope: str) -> dict[str, dict[str, Any]]:
+    return {domain: export_domain(scope, domain) for domain in domains(scope)}
+
+
+def snapshot() -> dict[str, Any]:
+    version = subprocess.run(["sw_vers", "-productVersion"], capture_output=True, check=True)
+    build = subprocess.run(["sw_vers", "-buildVersion"], capture_output=True, check=True)
+    return {
+        "formatVersion": FORMAT_VERSION,
+        "capturedAt": dt.datetime.now(dt.timezone.utc),
+        "macOSVersion": version.stdout.decode().strip(),
+        "macOSBuild": build.stdout.decode().strip(),
+        "user": capture_scope("user"),
+        "currentHost": capture_scope("currentHost"),
+    }
+
+
+def load_plist(path: Path, description: str) -> dict[str, Any]:
+    try:
+        value = plistlib.loads(path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        raise RuntimeError(f"cannot read {description} {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{description} must contain a plist dictionary: {path}")
+    return value
+
+
+def write_plist(path: Path, value: dict[str, Any], mode: int, *, replace: bool = True) -> None:
+    if path.is_symlink():
+        raise RuntimeError(f"refusing to replace symlink: {path}")
+    if not path.parent.is_dir():
+        raise RuntimeError(f"parent directory does not exist: {path.parent}")
+    content = plistlib.dumps(value, fmt=plistlib.FMT_XML, sort_keys=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        if replace:
+            os.replace(temporary, path)
+        else:
+            os.link(temporary, path)
+            temporary.unlink()
+    except BaseException:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def validate_snapshot(value: dict[str, Any]) -> dict[str, Any]:
+    if type(value.get("formatVersion")) is not int or value["formatVersion"] != FORMAT_VERSION:
+        raise RuntimeError("unsupported snapshot format")
+    for scope in SCOPES:
+        if not isinstance(value.get(scope), dict):
+            raise RuntimeError(f"snapshot is missing the {scope} domains")
+        for domain, settings in value[scope].items():
+            if not isinstance(domain, str) or not isinstance(settings, dict):
+                raise RuntimeError(f"invalid {scope} preference domain")
+    return value
+
+
+def validate_manifest(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if type(value.get("formatVersion")) is not int or value["formatVersion"] != FORMAT_VERSION:
+        raise RuntimeError("unsupported manifest format")
+    selected = value.get("domains")
+    if not isinstance(selected, dict) or not selected:
+        raise RuntimeError("manifest must contain at least one preference domain")
+    if any(not isinstance(domain, str) or not isinstance(settings, dict)
+           for domain, settings in selected.items()):
+        raise RuntimeError("manifest domains must map names to preference dictionaries")
+    plistlib.dumps(value)
+    return selected
+
+
+def validate_rollback(value: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if type(value.get("formatVersion")) is not int or value["formatVersion"] != FORMAT_VERSION:
+        raise RuntimeError("unsupported rollback format")
+    if value.get("kind") != "rollback":
+        raise RuntimeError("file is not a rollback")
+    domains_before = value.get("domains")
+    if not isinstance(domains_before, dict):
+        raise RuntimeError("rollback domains must be a dictionary")
+    for domain, keys in domains_before.items():
+        if not isinstance(domain, str) or not isinstance(keys, dict):
+            raise RuntimeError("rollback domains must map names to preference dictionaries")
+        for key, previous in keys.items():
+            if not isinstance(key, str) or not isinstance(previous, dict):
+                raise RuntimeError("invalid rollback preference")
+            if type(previous.get("present")) is not bool:
+                raise RuntimeError("rollback preference must record whether its key existed")
+            if previous["present"] and "value" not in previous:
+                raise RuntimeError("rollback preference is missing its saved value")
+    plistlib.dumps(value)
+    return domains_before
+
+
+def parse_selection(selection: str) -> tuple[str, str]:
+    domain, separator, key = selection.partition(":")
+    if not separator or not domain or not key:
+        raise RuntimeError(f"selection must be DOMAIN:KEY: {selection}")
+    return domain, key
+
+
+def promote(snapshot_path: Path, manifest_path: Path, selections: list[str]) -> None:
+    captured = validate_snapshot(load_plist(snapshot_path, "snapshot"))
+    if manifest_path.exists():
+        manifest = load_plist(manifest_path, "manifest")
+        selected = validate_manifest(manifest)
+    else:
+        manifest = {"formatVersion": FORMAT_VERSION, "domains": {}}
+        selected = manifest["domains"]
+    for raw_selection in selections:
+        domain, key = parse_selection(raw_selection)
+        try:
+            value = captured["user"][domain][key]
+        except KeyError as exc:
+            raise RuntimeError(f"snapshot has no user preference {domain}:{key}") from exc
+        selected.setdefault(domain, {})[key] = value
+    validate_manifest(manifest)
+    write_plist(manifest_path, manifest, 0o644)
+
+
+def merge_preferences(current: dict[str, Any], wanted: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    for key, value in wanted.items():
+        existing = current.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = merge_preferences(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def values_equal(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(values_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(values_equal(a, b) for a, b in zip(left, right))
+    return left == right
+
+
+def preference_differences(before: Any, after: Any,
+                            prefix: tuple[str, ...] = ()) -> list[tuple[str, tuple[str, ...]]]:
+    if isinstance(before, dict) and isinstance(after, dict):
+        paths = []
+        for key in sorted(before.keys() | after.keys()):
+            if key not in before:
+                paths.append(("+", prefix + (str(key),)))
+            elif key not in after:
+                paths.append(("-", prefix + (str(key),)))
+            else:
+                paths.extend(preference_differences(before[key], after[key], prefix + (str(key),)))
+        return paths
+    return [] if values_equal(before, after) else [("~", prefix)]
+
+
+def managed_differences(wanted: dict[str, Any], current: dict[str, Any],
+                        prefix: tuple[str, ...] = ()) -> list[tuple[str, tuple[str, ...]]]:
+    paths = []
+    for key, value in sorted(wanted.items()):
+        path = prefix + (key,)
+        if key not in current:
+            paths.append(("!", path))
+        elif isinstance(value, dict) and isinstance(current[key], dict):
+            paths.extend(managed_differences(value, current[key], path))
+        elif not values_equal(value, current[key]):
+            paths.append(("~", path))
+    return paths
+
+
+def show_change(status: str, scope: str, domain: str, path: tuple[str, ...]) -> None:
+    encoded = "/".join(part.replace("~", "~0").replace("/", "~1") for part in path)
+    print(f"{status} {scope} {domain}/{encoded}")
+
+
+def quit_app_if_running(bundle_id: str) -> bool:
+    script = """on run argv
+set bundleID to item 1 of argv
+if application id bundleID is running then
+    tell application id bundleID to quit
+    return "running"
+end if
+return "stopped"
+end run"""
+    process = subprocess.run(
+        ["osascript", "-e", script, bundle_id], capture_output=True, text=True, check=False,
+    )
+    if process.returncode:
+        raise RuntimeError(f"could not quit {bundle_id}: {process.stderr.strip()}")
+    result = process.stdout.strip()
+    if result not in {"running", "stopped"}:
+        raise RuntimeError(f"unexpected response while checking {bundle_id}: {result}")
+    return result == "running"
+
+
+def open_app(bundle_id: str) -> None:
+    process = subprocess.run(["open", "-b", bundle_id], capture_output=True, text=True, check=False)
+    if process.returncode:
+        raise RuntimeError(f"could not reopen {bundle_id}: {process.stderr.strip()}")
+
+
+def update_domains(changes: list[tuple[str, dict[str, Any], list[tuple[str, tuple[str, ...]]]]],
+                   restart_apps: list[str], action: str) -> None:
+    stopped: list[str] = []
+    failure: BaseException | None = None
+    try:
+        for bundle_id in dict.fromkeys(restart_apps):
+            if quit_app_if_running(bundle_id):
+                stopped.append(bundle_id)
+        for domain, values, paths in changes:
+            defaults("user", "import", domain, "-", input_data=plistlib.dumps(values))
+            actual = export_domain("user", domain)
+            if not values_equal(actual, values):
+                raise RuntimeError(f"verification failed after {action} {domain}")
+            for status, path in paths:
+                label = "removed" if status == "-" else action
+                show_change(label, "user", domain, path)
+    except BaseException as exc:
+        failure = exc
+    restart_failures = []
+    for bundle_id in reversed(stopped):
+        try:
+            open_app(bundle_id)
+        except BaseException as exc:
+            restart_failures.append(f"{bundle_id}: {exc}")
+    if failure is not None:
+        if restart_failures:
+            raise RuntimeError(f"{failure}; app restart failed: {'; '.join(restart_failures)}") from failure
+        raise failure
+    if restart_failures:
+        raise RuntimeError(f"app restart failed: {'; '.join(restart_failures)}")
+
+
+def compare_snapshots(before_path: Path, after_path: Path) -> None:
+    before = validate_snapshot(load_plist(before_path, "snapshot"))
+    after = validate_snapshot(load_plist(after_path, "snapshot"))
+    count = 0
+    for scope in SCOPES:
+        old_domains, new_domains = before[scope], after[scope]
+        for domain in sorted(old_domains.keys() | new_domains.keys()):
+            old, new = old_domains.get(domain, {}), new_domains.get(domain, {})
+            for status, path in preference_differences(old, new):
+                show_change(status, scope, domain, path)
+                count += 1
+    if count == 0:
+        print("No preference changes.")
+
+
+def read_live_domain(domain: str, known: set[str]) -> dict[str, Any]:
+    if domain != GLOBAL_DOMAIN and domain not in known:
+        return {}
+    return export_domain("user", domain)
+
+
+def live_domains() -> set[str]:
+    return set(domains("user"))
+
+
+def compare_live(manifest_path: Path) -> None:
+    manifest = validate_manifest(load_plist(manifest_path, "manifest"))
+    known = live_domains()
+    count = 0
+    for domain, wanted in sorted(manifest.items()):
+        current = read_live_domain(domain, known)
+        for status, path in managed_differences(wanted, current):
+            show_change(status, "user", domain, path)
+            count += 1
+    if count == 0:
+        print("Managed preferences match.")
+
+
+def apply_manifest(manifest_path: Path, dry_run: bool, backup_path: Path | None,
+                   restart_apps: list[str]) -> None:
+    manifest = validate_manifest(load_plist(manifest_path, "manifest"))
+    known = live_domains()
+    changes: list[tuple[str, dict[str, Any], list[tuple[str, tuple[str, ...]]]]] = []
+    previous_values: dict[str, dict[str, dict[str, Any]]] = {}
+    for domain, wanted in sorted(manifest.items()):
+        current = read_live_domain(domain, known)
+        merged = merge_preferences(current, wanted)
+        paths = preference_differences(current, merged)
+        if paths:
+            changes.append((domain, merged, paths))
+            changed_keys = {path[0] for _, path in managed_differences(wanted, current)}
+            previous_values[domain] = {
+                key: ({"present": True, "value": current[key]}
+                      if key in current else {"present": False})
+                for key in sorted(changed_keys)
+            }
+    if dry_run:
+        for domain, _, paths in changes:
+            for _, path in paths:
+                show_change("would set", "user", domain, path)
+        if backup_path is not None:
+            print(f"would save rollback to {backup_path}")
+        if changes:
+            for bundle_id in dict.fromkeys(restart_apps):
+                print(f"would restart {bundle_id} if running")
+        if not changes:
+            print("Managed preferences already match.")
+        return
+    if backup_path is not None:
+        write_plist(backup_path, {
+            "formatVersion": FORMAT_VERSION,
+            "kind": "rollback",
+            "domains": previous_values,
+        }, 0o600, replace=False)
+    update_domains(changes, restart_apps, "set")
+    if not changes:
+        print("Managed preferences already match.")
+
+
+def rollback(backup_path: Path, dry_run: bool, restart_apps: list[str]) -> None:
+    previous_values = validate_rollback(load_plist(backup_path, "rollback"))
+    known = live_domains()
+    changes: list[tuple[str, dict[str, Any], list[tuple[str, tuple[str, ...]]]]] = []
+    for domain, keys in sorted(previous_values.items()):
+        current = read_live_domain(domain, known)
+        restored = dict(current)
+        for key, previous in keys.items():
+            if previous["present"]:
+                restored[key] = previous["value"]
+            else:
+                restored.pop(key, None)
+        paths = preference_differences(current, restored)
+        if paths:
+            changes.append((domain, restored, paths))
+    if dry_run:
+        for domain, _, paths in changes:
+            for status, path in paths:
+                show_change("would restore" if status != "-" else "would remove",
+                            "user", domain, path)
+        if changes:
+            for bundle_id in dict.fromkeys(restart_apps):
+                print(f"would restart {bundle_id} if running")
+        if not changes:
+            print("Preferences already match the rollback.")
+        return
+    update_domains(changes, restart_apps, "restored")
+    if not changes:
+        print("Preferences already match the rollback.")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="macos", description="Discover and manage macOS user preferences.")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    snapshot_parser = commands.add_parser("snapshot", help="export all defaults domains to a private snapshot")
+    snapshot_parser.add_argument("output", type=Path)
+
+    promote_parser = commands.add_parser("promote", help="select snapshot keys for a portable manifest")
+    promote_parser.add_argument("snapshot", type=Path)
+    promote_parser.add_argument("manifest", type=Path)
+    promote_parser.add_argument("--select", action="append", required=True, metavar="DOMAIN:KEY")
+
+    diff_parser = commands.add_parser("diff", help="compare snapshots or managed preferences")
+    diff_mode = diff_parser.add_mutually_exclusive_group(required=True)
+    diff_mode.add_argument("--live", type=Path, metavar="MANIFEST")
+    diff_mode.add_argument("--snapshots", nargs=2, type=Path, metavar=("BEFORE", "AFTER"))
+
+    apply_parser = commands.add_parser("apply", help="merge and verify managed preferences")
+    apply_parser.add_argument("manifest", type=Path)
+    apply_parser.add_argument("--dry-run", action="store_true")
+    apply_parser.add_argument("--backup", type=Path, metavar="PATH",
+                              help="save changed preference keys for selective rollback")
+    apply_parser.add_argument("--restart", action="append", default=[], metavar="BUNDLE_ID",
+                              help="gracefully restart this running application after applying")
+
+    rollback_parser = commands.add_parser("rollback", help="restore preference keys from an apply backup")
+    rollback_parser.add_argument("backup", type=Path)
+    rollback_parser.add_argument("--dry-run", action="store_true")
+    rollback_parser.add_argument("--restart", action="append", default=[], metavar="BUNDLE_ID",
+                                 help="gracefully restart this running application after rollback")
+
+    commands.add_parser("lean", help="audit or converge macOS services and system preferences")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments and arguments[0] == "lean":
+        return lean_command.main(arguments[1:])
+    args = parse_args(arguments)
+    if sys.platform != "darwin":
+        print("macos requires macOS", file=sys.stderr)
+        return 2
+    try:
+        if args.command == "snapshot":
+            value = snapshot()
+            write_plist(args.output, value, 0o600)
+            print(f"Wrote private snapshot to {args.output}")
+        elif args.command == "promote":
+            promote(args.snapshot, args.manifest, args.select)
+            print(f"Updated manifest {args.manifest}")
+        elif args.command == "diff" and args.live:
+            compare_live(args.live)
+        elif args.command == "diff":
+            compare_snapshots(*args.snapshots)
+        elif args.command == "apply":
+            apply_manifest(args.manifest, args.dry_run, args.backup, args.restart)
+        elif args.command == "rollback":
+            rollback(args.backup, args.dry_run, args.restart)
+    except (OSError, RuntimeError, plistlib.InvalidFileException, ValueError,
+            TypeError, subprocess.CalledProcessError) as exc:
+        print(f"macos: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
