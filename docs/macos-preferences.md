@@ -33,6 +33,8 @@ Promote only keys you want to manage across Macs. The command updates the manife
 
 `-g` selects the global user domain. Each `--select` names one top-level key that appears in the snapshot. Promotion reads only user preferences. Current-host preferences stay in snapshots and do not enter the portable manifest.
 
+Promotion copies selected values as-is; review the manifest for personal paths, account data, and device identifiers before checking it in.
+
 ## Compare and apply the manifest
 
 Compare the manifest with the current Mac, then preview its changes:

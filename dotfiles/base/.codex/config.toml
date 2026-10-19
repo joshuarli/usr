@@ -224,6 +224,9 @@ trust_level = "trusted"
 [projects."/Users/josh/d/nervegear"]
 trust_level = "trusted"
 
+[projects."/Users/josh/dev/getsentry"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]

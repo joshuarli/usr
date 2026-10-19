@@ -1497,4 +1497,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(sudo_worker_main() if sys.argv[1:] == ["--sudo-worker"] else main())
+    if sys.argv[1:] != ["--sudo-worker"]:
+        raise SystemExit("run this command as `./macos/macos lean`")
+    sys.exit(sudo_worker_main())

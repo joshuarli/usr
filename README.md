@@ -8,7 +8,7 @@ On macOS, preview the system setup with `./macos/setup-macos -n`. Run `./macos/s
 
 The service-disabling step is optional. Run `./macos/macos lean --audit`, review the report, then run `./macos/macos lean --dry-run`. Apply it with `./macos/macos lean` only after reviewing the planned changes.
 
-Use [`macos`](docs/macos-preferences.md) to snapshot, compare, and apply selected macOS user preferences. Snapshots include every user and current-host `defaults` domain and use private file permissions.
+Use [`macos`](docs/macos-preferences.md) to snapshot, compare, and apply selected macOS user preferences. Raw snapshots include every user and current-host `defaults` domain, so keep them private and out of Git; check in only selected preferences.
 
 On Linux, skip the macOS setup. On either platform, run `make plan` and resolve any reported conflicts. Then run `make` to download the supported tools, link the current OS layer into your home directory, and install kache if it is missing. On macOS, `make` installs the Brewfile packages first when kache is missing. On glibc Linux, also run `setup-mold`; musl builds expect mold at `/usr/local/libexec/mold`.
 
