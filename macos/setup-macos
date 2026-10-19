@@ -99,9 +99,16 @@ pam_dir=/usr/local/libexec/pam
 pam_module=$pam_dir/pam_reattach.so
 sudo_local=/etc/pam.d/sudo_local
 
+pam_tid_module() {
+    for module in /usr/lib/pam/pam_tid.so /usr/lib/pam/pam_tid.so.2; do
+        if [ -f "$module" ]; then printf '%s' "$module"; return 0; fi
+    done
+    return 1
+}
+
 sudo_local_wanted() {
     printf 'auth       optional       %s\n' "$pam_module"
-    printf 'auth       sufficient     pam_tid.so\n'
+    printf 'auth       sufficient     %s\n' "$tid_module"
 }
 
 # sudo_local_state  Print ok, absent, or a foreign line we refuse to overwrite.
@@ -115,6 +122,7 @@ sudo_local_state() {
 
 step_touchid() {
     find_brew || die "Homebrew is missing; run: setup-macos brew"
+    tid_module=$(pam_tid_module) || die "Touch ID PAM module not found in /usr/lib/pam"
     src="$(brew --prefix)/lib/pam/pam_reattach.so"
     [ -f "$src" ] || die "$src not found; run: setup-macos packages"
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -17,6 +18,12 @@ spec.loader.exec_module(lean)
 
 
 class CommandFailureTests(unittest.TestCase):
+    def run_sudo(self, argv, *, check):
+        return subprocess.run(argv, capture_output=True, text=True, check=check)
+
+    def sudo_worker(self):
+        return SimpleNamespace(run=self.run_sudo)
+
     def failed_command(self, argv, **kwargs):
         result = subprocess.CompletedProcess(argv, 7, "", "permission denied")
         if kwargs.get("check"):
@@ -35,7 +42,8 @@ class CommandFailureTests(unittest.TestCase):
                 with self.subTest(operation=operation.__name__, mode=mode):
                     state = lean.State(mode, 501, "27.0", "Golden Gate", "27")
                     output = io.StringIO()
-                    with patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
+                    with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                            patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
                             patch.object(lean, "list_network_services", return_value=["Wi-Fi"]), \
                             contextlib.redirect_stdout(output):
                         with self.assertRaises(subprocess.CalledProcessError) as caught:
@@ -45,7 +53,8 @@ class CommandFailureTests(unittest.TestCase):
                     self.assertNotIn(success, output.getvalue())
 
     def test_missing_mutation_executable_raises(self):
-        with patch.object(lean.subprocess, "run", side_effect=FileNotFoundError("missing tool")):
+        with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                patch.object(lean.subprocess, "run", side_effect=FileNotFoundError("missing tool")):
             with self.assertRaises(FileNotFoundError):
                 lean.run(["mdutil", "-a", "-i", "off"], sudo=True)
 
@@ -55,7 +64,8 @@ class CommandFailureTests(unittest.TestCase):
                 with self.subTest(mode=mode, domain=domain):
                     state = lean.State(mode, 501, "27.0", "Golden Gate", "27")
                     state.real_labels.add("com.apple.example")
-                    with patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
+                    with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                            patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
                             contextlib.redirect_stdout(io.StringIO()):
                         with self.assertRaises(subprocess.CalledProcessError):
                             if domain == "user":
@@ -66,7 +76,8 @@ class CommandFailureTests(unittest.TestCase):
                     self.assertEqual(state.n_applied, 0)
                     self.assertEqual(state.disabled_user, set())
                     self.assertEqual(state.disabled_system, set())
-        with patch.object(lean.subprocess, "run", side_effect=self.failed_command):
+        with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                patch.object(lean.subprocess, "run", side_effect=self.failed_command):
             with self.assertRaises(subprocess.CalledProcessError):
                 lean.ensure_default(lean.MDNS_DEFAULT)
             with self.assertRaises(subprocess.CalledProcessError):
@@ -118,12 +129,12 @@ class CommandFailureTests(unittest.TestCase):
                 patch.object(lean, "build_label_index", return_value=set()), \
                 patch.object(lean, "load_disabled_state"), \
                 patch.object(lean, "DISABLE_SECTIONS", []), \
-                patch.object(lean, "SudoKeepalive") as keepalive, \
+                patch.object(lean, "SudoWorker") as worker, \
                 patch.object(lean, "apply_spotlight_tmutil", side_effect=failure), \
                 patch.object(lean, "print_summary") as summary, \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
             self.assertEqual(lean.main([]), 1)
-        keepalive.return_value.stop.assert_called_once()
+        worker.return_value.stop.assert_called_once()
         summary.assert_not_called()
         self.assertIn("mdutil", errors.getvalue())
         self.assertIn("permission denied", errors.getvalue())

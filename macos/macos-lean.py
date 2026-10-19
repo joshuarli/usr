@@ -2,9 +2,10 @@
 """macos-lean.py — Make macOS lean (27 Golden Gate).
 
 Stdlib only. Disables ~230 unnecessary services via ``launchctl disable``
-(persists across reboots) plus process kill for immediate effect (bootout
-is blocked by SIP; the disabled flag still prevents respawn), then
-converges preferences, power, network, and logging settings. The full
+(persists across reboots), then attempts to stop running jobs. macOS may
+protect a process from termination; its disabled launchd flag still prevents
+respawn. The script also converges preferences, power, network, and logging
+settings. The full
 managed lists live below in ``DISABLE_SECTIONS``, ``PRESERVE_SECTIONS``,
 ``USER_DEFAULTS``, ``PERFORMANCE_DEFAULTS``, and ``PMSET_*``.
 
@@ -15,8 +16,7 @@ Usage:
     ./macos-lean.py --revert     # re-enable everything managed
 
 Always run --audit first after an OS upgrade, then --dry-run, then apply.
-Apply and revert authenticate with sudo once at startup and refresh that ticket
-while running.
+Apply and revert use one sudo-authenticated worker for privileged commands.
 
 Design: validate-then-act. Every label is checked against a live index of
 labels installed on THIS Mac (``Label`` keys read with plistlib, cached
@@ -136,6 +136,7 @@ Only the standard library is used.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import plistlib
 import re
@@ -143,7 +144,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -668,11 +668,6 @@ def os_name_for_major(major: str) -> str:
     }.get(major, "unvalidated (lists verified on 15/26; 27 by --audit)")
 
 
-def short_service_name(label: str) -> str:
-    """Last dotted component, mirroring `sed 's/.*\\.//'`."""
-    return label.rsplit(".", 1)[-1]
-
-
 def is_vpn_service(name: str) -> bool:
     return VPN_SKIP_RE.search(name) is not None
 
@@ -718,6 +713,7 @@ class State:
     n_applied: int = 0
     n_skipped: int = 0
     n_unchanged: int = 0
+    n_kill_denied: int = 0
     verify_fail: int = 0
 
     @property
@@ -737,11 +733,73 @@ class State:
         return self.mode in ("apply", "revert")
 
 
+class SudoWorker:
+    def __init__(self) -> None:
+        self.process: subprocess.Popen[str] | None = None
+
+    def start(self) -> None:
+        script = str(Path(__file__).resolve())
+        self.process = subprocess.Popen(
+            ["sudo", sys.executable, "-I", script, "--sudo-worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+
+    def run(self, argv: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+        process = self.process
+        if process is None or process.stdin is None or process.stdout is None:
+            raise RuntimeError("sudo worker is not running")
+        process.stdin.write(json.dumps(argv) + "\n")
+        process.stdin.flush()
+        line = process.stdout.readline()
+        if not line:
+            raise OSError("sudo worker exited before returning a command result")
+        result = json.loads(line)
+        if "error" in result:
+            message = result["error"]
+            if result.get("error_type") == "FileNotFoundError":
+                if check:
+                    raise FileNotFoundError(message)
+                return subprocess.CompletedProcess(argv, 127, "", message)
+            raise OSError(message)
+        completed = subprocess.CompletedProcess(
+            argv, result["returncode"], result["stdout"], result["stderr"]
+        )
+        if check:
+            completed.check_returncode()
+        return completed
+
+    def stop(self) -> None:
+        process = self.process
+        if process is None:
+            return
+        self.process = None
+        close_error: BrokenPipeError | None = None
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except BrokenPipeError as exc:
+                close_error = exc
+        returncode = process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
+        if returncode != 0:
+            raise OSError(f"sudo worker exited with status {returncode}")
+        if close_error is not None:
+            raise close_error
+
+
+sudo_worker: SudoWorker | None = None
+
+
 def run(argv: list[str], *, sudo: bool = False,
         check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a command, raising on failure unless explicitly probing its status."""
     if sudo:
-        argv = ["sudo", "-n", *argv]
+        if sudo_worker is None:
+            raise RuntimeError("sudo worker is not running")
+        return sudo_worker.run(argv, check=check)
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=check)
     except FileNotFoundError as exc:
@@ -804,7 +862,7 @@ def build_label_index(build_ver: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Disabled-state cache + sudo keepalive
+# Disabled-state cache
 # ---------------------------------------------------------------------------
 
 def load_disabled_state(state: State) -> None:
@@ -816,23 +874,20 @@ def load_disabled_state(state: State) -> None:
     state.disabled_system = parse_disabled_output(system.stdout)
 
 
-class SudoKeepalive:
-    """Refresh the sudo timestamp until stopped (apply/revert only)."""
-
-    def __init__(self) -> None:
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._loop, daemon=True)
-
-    def start(self) -> None:
-        run(["sudo", "-v"])
-        self._thread.start()
-
-    def _loop(self) -> None:
-        while not self._stop.wait(50):
-            run(["sudo", "-n", "-v"], check=False)
-
-    def stop(self) -> None:
-        self._stop.set()
+def sudo_worker_main() -> int:
+    for line in sys.stdin:
+        argv = json.loads(line)
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, check=False)
+            response = {
+                "returncode": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+        except OSError as exc:
+            response = {"error_type": type(exc).__name__, "error": str(exc)}
+        print(json.dumps(response), flush=True)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -922,12 +977,22 @@ def flush_system(state: State) -> None:
         run(["launchctl", "disable", f"system/{label}"], sudo=True)
         state.n_applied += 1
         state.disabled_system.add(label)
-    # Kill any that are still running.
     for label in labels:
-        proc = run(["pgrep", "-x", short_service_name(label)], check=False)
-        pids = proc.stdout.split()
-        if pids:
-            run(["kill", "-9", pids[0]], sudo=True)
+        service = run(["launchctl", "print", f"system/{label}"], sudo=True,
+                      check=False)
+        match = PID_RE.search(service.stdout)
+        if match is None:
+            continue
+        pid = match.group(1)
+        result = run(["kill", "-9", pid], sudo=True, check=False)
+        if result.returncode == 0 or "No such process" in result.stderr:
+            continue
+        if "Operation not permitted" in result.stderr:
+            state.n_kill_denied += 1
+            print(f"  ! macOS refused to stop PID {pid} for {label}; "
+                  "launchd is disabled, but the process remains running")
+            continue
+        result.check_returncode()
 
 
 def ensure_service(state: State, check: PreserveCheck) -> None:
@@ -1298,7 +1363,10 @@ def print_summary(state: State, prog: str) -> None:
             print(f"WARNING: {state.verify_fail} preserved service(s) not loaded.")
             print("Review FAIL lines above. May need reboot or")
             print("manual investigation.")
-        else:
+        if state.n_kill_denied > 0:
+            print(f"WARNING: macOS refused to stop {state.n_kill_denied} disabled "
+                  "service process(es); they remain running until they exit or reboot.")
+        if state.verify_fail == 0:
             print("All preserved services verified OK.")
         print()
         try:
@@ -1351,6 +1419,7 @@ def sw_vers(key: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global sudo_worker
     args = parse_args(argv)
     mode = "audit" if args.audit else "revert" if args.revert else \
         "dry-run" if args.dry_run else "apply"
@@ -1375,11 +1444,11 @@ def main(argv: list[str] | None = None) -> int:
                   os_name=os_name, os_major=major)
     state.real_labels = build_label_index(sw_vers("buildVersion"))
 
-    keepalive: SudoKeepalive | None = None
+    result_code = 0
     try:
         if state.mutating:
-            keepalive = SudoKeepalive()
-            keepalive.start()
+            sudo_worker = SudoWorker()
+            sudo_worker.start()
         load_disabled_state(state)
 
         for title, domain, labels in DISABLE_SECTIONS:
@@ -1412,15 +1481,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {exc.cmd} exited with status {exc.returncode}", file=sys.stderr)
         if exc.stderr:
             print(exc.stderr.strip(), file=sys.stderr)
-        return 1
+        result_code = 1
     except OSError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        result_code = 1
     finally:
-        if keepalive is not None:
-            keepalive.stop()
-    return 0
+        if sudo_worker is not None:
+            try:
+                sudo_worker.stop()
+            except OSError as exc:
+                print(f"Error stopping sudo worker: {exc}", file=sys.stderr)
+                result_code = 1 if result_code == 0 else result_code
+            sudo_worker = None
+    return result_code
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(sudo_worker_main() if sys.argv[1:] == ["--sudo-worker"] else main())
