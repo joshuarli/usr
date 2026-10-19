@@ -1,15 +1,39 @@
 #!/bin/sh
 set -eu
 
+report_worktree_changes() {
+    status=$(git -C "$1" status --porcelain=v1) || return
+    [ -n "$status" ] || return 0
+    printf '%s\n' "$status" | awk 'substr($0, 2, 1) != " " || substr($0, 1, 2) == "??"'
+}
+
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git status -sb
+    git status -sb -uall
     exit
 fi
 
-find . -type d -name .work -prune -o -name .git -prune -exec sh -c '
-    for marker do
-        repo=${marker%/.git}
-        printf "%s\n" "$repo"
-        git -C "$repo" status -sb || exit
+report_repo_statuses() {
+    if [ -e "$1/.git" ] || [ -L "$1/.git" ]; then
+        changes=$(report_worktree_changes "$1") || return
+        if [ -n "$changes" ]; then
+            printf '%s\n%s\n' "$1" "$changes"
+        fi
+        return 0
+    fi
+
+    if [ ! -r "$1" ] || [ ! -x "$1" ]; then
+        printf 'gs: cannot traverse directory: %s\n' "$1" >&2
+        return 1
+    fi
+
+    for path in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+        [ -d "$path" ] || continue
+        [ -L "$path" ] && continue
+        [ "${path##*/}" = .work ] && continue
+        report_repo_statuses "$path"
     done
-' sh {} +
+
+    return 0
+}
+
+report_repo_statuses .
