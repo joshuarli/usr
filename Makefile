@@ -7,8 +7,8 @@
 #
 # `make` first runs dl, which installs the binaries the scripts and hooks call and is a
 # no-op when they are current. A dl failure does not stop the sync, but it fails the make.
-# After the sync, `make` runs setup-kache when kache is not installed, with no terminal so
-# it skips the interactive config; the failure rule is the same.
+# After the sync, `make` installs the macOS Brewfile packages when kache is missing, then
+# runs setup-kache with no terminal so it skips the interactive config.
 
 TARGET ?= $(HOME)
 KACHE  := $(or $(CARGO_HOME),$(HOME)/.cargo)/bin/kache
@@ -26,7 +26,12 @@ sync: layers
 	status=0; TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || status=$$?; \
 	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
 	if [ ! -x "$(KACHE)" ]; then \
-		TMPDIR="$(DL_TMPDIR)" sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; \
+		if [ "$(OS)" = darwin ]; then \
+			brew_status=0; sh macos/setup-macos brew packages || brew_status=$$?; \
+			if [ $$brew_status -eq 0 ]; then PATH="/opt/homebrew/bin:/usr/local/bin:$$PATH" TMPDIR="$(DL_TMPDIR)" sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; else status=$$brew_status; fi; \
+		else \
+			TMPDIR="$(DL_TMPDIR)" sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; \
+		fi; \
 		if [ -x "$(KACHE)" ] && { [ ! -f "$(DL_OWNED_FILE)" ] || ! awk -F '\t' -v path="$(KACHE)" '$$1 == "K" && $$2 == path { found = 1 } END { exit !found }' "$(DL_OWNED_FILE)"; }; then printf 'K\t%s\n' "$(KACHE)" >> "$(DL_OWNED_FILE)" || status=$$?; fi; \
 	fi; \
 	exit $$status

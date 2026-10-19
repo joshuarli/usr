@@ -28,5 +28,5 @@ The repository's `bin` symlink points to `~/.local/bin`, where tracked scripts a
 
 Deleting a source file leaves its home-directory symlink dangling. Remove that link too, or run `sh dotfiles/sym -d` on the layer before deleting the source. To experiment with `sym`, pass a scratch target with `-t`; without it, `sym` targets `$HOME`.
 
-The `macos/` directory is not part of the layer sync. Run its setup scripts by hand. `macos/setup-macos` provisions Homebrew, packages, Touch ID for `sudo`, and local DNS. `macos/macos-lean.py` disables selected services and is never part of the default setup.
+The `macos/` directory is not part of the layer sync. `make` installs Homebrew and the Brewfile packages before setting up kache when kache is missing. Run `macos/setup-macos` by hand for Touch ID for `sudo` and local DNS. `macos/macos-lean.py` disables selected services and is never part of the default setup.
 

@@ -307,12 +307,28 @@ install_release() {
         ish|mactop|gh) owner="joshuarli" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
-    # The release workflows publish prereleases, which GitHub's /latest endpoint
-    # intentionally excludes. The releases feed is newest-first and includes them, so
-    # its first tag is the artifact set produced by the most recent dispatch. Unlike
-    # the API, the feed is not rate limited, which matters for a command run often.
     tag=$(curl -fsSL "https://github.com/${owner}/${prog}/releases.atom" \
-        | sed -n 's|.*<link[^>]*releases/tag/\([^"]*\)".*|\1|p' | head -n 1) || tag=
+        | awk '
+            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+            in_entry && /<updated>/ {
+                updated = $0
+                sub(/^.*<updated>/, "", updated)
+                sub(/<.*/, "", updated)
+            }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+            }
+            /<\/entry>/ {
+                if (updated > newest_updated && tag != "") {
+                    newest_updated = updated
+                    newest_tag = tag
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
     if [ -z "$tag" ]; then
         unchecked "$prog" "no release found"
         return

@@ -118,6 +118,24 @@ INSTALLER
             exit 1
         fi
         ;;
+    https://github.com/joshuarli/gh/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-18T17:51:43Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/gh/releases/tag/release-cce000de204a5ded499612a3fd2b8b3261fde078"/>
+</entry>
+<entry>
+<updated>2026-10-19T21:56:41Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/gh/releases/tag/release-9be88d806c91cbce8920e188f90fb6df34b45ba9"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/joshuarli/gh/releases/download/release-9be88d806c91cbce8920e188f90fb6df34b45ba9/gh-aarch64-apple-darwin.zip)
+        [ "$headers" = - ] || exit 1
+        printf '%s\n' 'ETag: gh-test-etag'
+        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -507,12 +525,30 @@ fi
 cat > "$mock_bin/uname" <<'EOF'
 #!/bin/sh
 case "$1" in
-    -s) printf '%s\n' Linux ;;
-    -m) printf '%s\n' x86_64 ;;
+    -s) printf '%s\n' "${DL_TEST_OS:-Linux}" ;;
+    -m) printf '%s\n' "${DL_TEST_ARCH:-x86_64}" ;;
     *) exit 1 ;;
 esac
 EOF
 chmod +x "$mock_bin/uname"
+
+gh_home="$test_root/gh-home"
+mkdir -p "$gh_home/.local/bin" "$gh_home/.local/state/dl"
+printf '%s\n' 'gh test binary' > "$gh_home/.local/bin/gh"
+chmod +x "$gh_home/.local/bin/gh"
+printf '%s\n' 'gh-test-etag' > "$gh_home/.local/state/dl/gh"
+if output=$(HOME="$gh_home" XDG_STATE_HOME="$gh_home/.local/state" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" gh 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'gh is current (release-9be88d806c91cbce8920e188f90fb6df34b45ba9)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
 
 grok_home="$test_root/grok-home"
 if output=$(HOME="$grok_home" XDG_STATE_HOME="$grok_home/.local/state" \
