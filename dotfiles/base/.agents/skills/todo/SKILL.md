@@ -53,4 +53,4 @@ It opens with `# ABC-123: <title>` and `Status: draft | accepted | rejected | su
 
 **The test:** a newcomer can take the top ticket, find where to start, and begin without asking what it meant, and no ID appears twice in the file's history.
 
-**Reply:** the tickets and RFCs filed (ID, title, priority, given or assumed), the files changed, and that nothing was committed.
+**Report:** the tickets and RFCs filed (ID, title, priority, given or assumed), the files changed, and that nothing was committed.

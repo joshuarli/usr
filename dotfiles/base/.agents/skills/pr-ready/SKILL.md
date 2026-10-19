@@ -38,4 +38,4 @@ A bot note that is not a review thread has nothing to resolve. Reply with `gh pr
 
 **The test:** `gh pr view` reports the head mergeable with the base, required checks are green on that head, and every bot thread has your reply, is resolved, and has your `+1` or `-1` on the bot's comment. You did not merge or approve.
 
-**Reply:** the PR URL; what you changed and pushed; bot comments fixed and bot comments you rejected, each with the reason; required checks and their conclusions; anything still blocking, including a human approval. End with whether the owner can merge it now.
+**Report:** the PR URL; what you changed and pushed; bot comments fixed and bot comments you rejected, each with the reason; required checks and their conclusions; anything still blocking, including a human approval. End with whether the owner can merge it now.

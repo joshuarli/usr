@@ -50,4 +50,4 @@ Test as a search-driven agent would:
 
 **The test:** a focused `rg` for an important concept returns its definition and reverse references without a large generic haystack.
 
-**Reply:** the vocabulary chosen, renames made, and remaining aliases or old spellings with their status.
+**Report:** the vocabulary chosen, renames made, and remaining aliases or old spellings with their status.

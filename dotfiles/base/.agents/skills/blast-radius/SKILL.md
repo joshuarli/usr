@@ -30,7 +30,7 @@ For each such fact, climb this ladder as far as is cheap and say where you stopp
 
 For a wide change, ask more than one model the same question and merge the answers. Different models catch different real bugs.
 
-## Hand back
+**Report:**
 
 - **What it does,** including the non-obvious part.
 - **The one fact it is safe because of,** and the proof. If you could not prove it, write `unproven`.

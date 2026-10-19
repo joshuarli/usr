@@ -20,4 +20,4 @@ Cite what you read for any claim about the code. Flag where your reading and the
 
 Then stop and wait for the user to confirm or correct. Do not begin the work.
 
-**Reply:** the restatement under those five headings, nothing else.
+**Report:** the restatement under those five headings, nothing else.

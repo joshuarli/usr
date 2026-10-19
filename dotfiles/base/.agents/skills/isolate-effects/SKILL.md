@@ -19,4 +19,4 @@ Effects happen at visible edges; policy stays visible in the core.
 
 Decision tests then run in milliseconds, and only the real adapters need slower integration tests, so keep those few. Search for remaining raw effect calls in scope and classify each.
 
-**Reply:** the boundaries you set, each abstraction you added and why it earns its place.
+**Report:** the boundaries you set, each abstraction you added and why it earns its place.

@@ -39,4 +39,4 @@ Keep a change when correctness holds, the benefit is reproducible, and tradeoffs
 
 **The test:** name the user outcome improved, the work removed or limiter relieved, and the representative evidence connecting them. If you can name neither the work nor the measurement, you have not optimized anything.
 
-**Reply:** what changed; baseline and candidate results with units, workload, configuration, run count, and spread; the limiting mechanism and tradeoffs; what was verified, deferred, or left unmeasured. Distinguish observed gains from predictions.
+**Report:** what changed; baseline and candidate results with units, workload, configuration, run count, and spread; the limiting mechanism and tradeoffs; what was verified, deferred, or left unmeasured. Distinguish observed gains from predictions.

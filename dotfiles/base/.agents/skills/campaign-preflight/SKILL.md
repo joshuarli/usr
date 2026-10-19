@@ -45,4 +45,4 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 
 **The test:** an agent with only this doc and the repo can run from the first item to the last without asking a question, and cannot reach a point where it works on optimization while a feature or a parity test is missing.
 
-**Reply:** the verdict; the owner's answers and the decisions you prescribed, so the owner can overrule them; the loop timings; what you cut or moved to optimization; any material source requirement you superseded and why; what you could not verify; and the one-line prompt to launch the executor on the doc.
+**Report:** the verdict; the owner's answers and the decisions you prescribed, so the owner can overrule them; the loop timings; what you cut or moved to optimization; any material source requirement you superseded and why; what you could not verify; and the one-line prompt to launch the executor on the doc.

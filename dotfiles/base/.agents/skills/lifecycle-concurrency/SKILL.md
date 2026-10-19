@@ -21,4 +21,4 @@ If code acquires or starts something, who ends it must be as explicit as who beg
 
 Test with signals, channels, and controlled clocks, never sleeps: queue saturation, cancellation, shutdown, worker failure, duplicate submission, and cleanup on each early return.
 
-**Reply:** who owns what and how it ends, the cancellation and shutdown policy, and the bounds you set.
+**Report:** who owns what and how it ends, the cancellation and shutdown policy, and the bounds you set.

@@ -26,4 +26,4 @@ An empty result is valid. Say which searches came up empty so the owner can trus
 
 **The test:** every finding has a command that reproduces it, and a second `double-take` over the same scope would find nothing new.
 
-**Reply:** the pattern; contradictions fixed; recurrences found, each with a recommendation; cleanups to your own change; searches that found nothing; checks run.
+**Report:** the pattern; contradictions fixed; recurrences found, each with a recommendation; cleanups to your own change; searches that found nothing; checks run.

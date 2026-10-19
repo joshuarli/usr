@@ -34,4 +34,4 @@ Planning only: it turns a goal into a campaign doc a coordinator can run unatten
 8. **Write** `docs/CAMPAIGN-<NAME>.md` in preflight's shape. Commit nothing.
 9. **Preflight it.** Apply `campaign-preflight` to the draft: audit, decide, sequence, make the loop fast, prove the foundation with `blast-radius`. Do not stop at a draft.
 
-**Reply:** the verdict (`ready`, `ready after the owner answers <list>`, `not ready`); the baseline numbers; the deliverables with their proofs; the widest lane counts; the decisions the owner made and the ones you prescribed, so they can overrule; what you could not verify; the doc path; and the one-line prompt that launches the executor.
+**Report:** the verdict (`ready`, `ready after the owner answers <list>`, `not ready`); the baseline numbers; the deliverables with their proofs; the widest lane counts; the decisions the owner made and the ones you prescribed, so they can overrule; what you could not verify; the doc path; and the one-line prompt that launches the executor.

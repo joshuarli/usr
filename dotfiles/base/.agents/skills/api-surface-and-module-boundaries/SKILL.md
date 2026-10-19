@@ -30,4 +30,4 @@ A public API exposes capabilities, not structure, and makes the correct call loo
 
 Test intended construction, invalid use, feature combinations, and the forwarding of any shim that exists, running those tests by name. Breaking a public contract needs the user's permission.
 
-**Reply:** symbols removed or narrowed, call sites clarified, directions fixed, and any contract change.
+**Report:** symbols removed or narrowed, call sites clarified, directions fixed, and any contract change.

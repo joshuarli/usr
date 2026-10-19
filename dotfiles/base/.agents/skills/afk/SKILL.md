@@ -18,4 +18,4 @@ Keep the agreed work moving while the user is away. AFK changes how you handle u
 
 **The test:** authorized work kept moving without routine questions, blocked steps were deferred with a clear unblock condition, and AFK ended on the first new user message.
 
-**Reply:** report the result, consequential decisions, deferred blockers, and checks. On the user's return, lead with the required `Welcome back —` brief.
+**Report:** report the result, consequential decisions, deferred blockers, and checks. On the user's return, lead with the required `Welcome back —` brief.

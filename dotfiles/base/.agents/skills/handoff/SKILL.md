@@ -24,4 +24,4 @@ Work that stops mid-flight must be recoverable from the repo and one message. `c
 
 **The test:** an agent with only the repo, its branches, and the tickets can resume at the next item and reproduce the last result you claimed.
 
-**Reply:** for pause, the branch and worktree state, the tickets filed, what is uncommitted, and the one-line prompt to resume. For pickup, what was verified, what could not be, and where you continue.
+**Report:** for pause, the branch and worktree state, the tickets filed, what is uncommitted, and the one-line prompt to resume. For pickup, what was verified, what could not be, and where you continue.

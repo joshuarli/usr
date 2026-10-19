@@ -21,4 +21,4 @@ An error is part of the program's contract, not a string on the unhappy path.
 
 Run the tests of the touched error path by name. Test category, context, retryability, exit or status mapping, cleanup, and partial completion. Do not assert full message strings unless the text is a compatibility contract. Keep observable exit behavior unless the request changes it.
 
-**Reply:** the failure categories and boundaries you set, and any change to exit or status behavior.
+**Report:** the failure categories and boundaries you set, and any change to exit or status behavior.

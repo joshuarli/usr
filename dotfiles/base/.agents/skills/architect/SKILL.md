@@ -22,4 +22,4 @@ Keep the sketch in the diff or the reply. Write no design file unless asked.
 
 **The test:** a reviewer can read the usage and the types and predict the implementation, and the rejected shape's reason is one sentence.
 
-**Reply:** the usage sketch, the two shapes and why one won, contract changes, and any deviation from the sketch found while implementing.
+**Report:** the usage sketch, the two shapes and why one won, contract changes, and any deviation from the sketch found while implementing.

@@ -27,4 +27,4 @@ Review the change in front of you, not the repository. This is `ultrareview` nar
 
 **The test:** the author can act on every finding without asking what you meant, and nothing the change breaks beyond the diff is left unexamined.
 
-**Reply:** the intent line and the change set reviewed; a verdict (`ready`, `fix P1 and P2 first`, or `rethink`); findings in the `todo` ticket shape, most severe first, and the IDs filed; docs you changed; checks run and not run; open decisions.
+**Report:** the intent line and the change set reviewed; a verdict (`ready`, `fix P1 and P2 first`, or `rethink`); findings in the `todo` ticket shape, most severe first, and the IDs filed; docs you changed; checks run and not run; open decisions.

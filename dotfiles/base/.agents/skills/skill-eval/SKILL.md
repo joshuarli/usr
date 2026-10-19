@@ -36,4 +36,4 @@ Report the decisions and edit skills only when asked.
 
 **The test:** every decision cites counts and a sampled session, and a re-run after the change shows the rate moved, or you say it is too soon to tell.
 
-**Reply:** the window and session counts; a table of skill, listed, loaded, and rate per harness (mark Grok listing and rate unavailable); each decision with its evidence; skills with too little data; what to re-measure and when.
+**Report:** the window and session counts; a table of skill, listed, loaded, and rate per harness (mark Grok listing and rate unavailable); each decision with its evidence; skills with too little data; what to re-measure and when.

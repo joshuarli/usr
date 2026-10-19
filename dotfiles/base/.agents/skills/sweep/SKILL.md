@@ -35,4 +35,4 @@ An empty sweep is valid. Say which searches came up empty so the owner can trust
 
 **The test:** the owner approved the search before it ran, a rerun of the same searches finds no unclassified hit, and every edit is an instance of the stated transformation.
 
-**Reply:** at the checkpoint, the double-take result, the transformation, and the proposed search. After the sweep, sites fixed; judgment calls with a recommendation; sites ruled out and why; directories not searched; checks run.
+**Report:** at the checkpoint, the double-take result, the transformation, and the proposed search. After the sweep, sites fixed; judgment calls with a recommendation; sites ruled out and why; directories not searched; checks run.

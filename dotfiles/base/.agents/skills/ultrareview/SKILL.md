@@ -67,4 +67,4 @@ File each finding as a `todo` ticket in `TODO.md`, in that skill's shape, priori
 
 **The test:** the owner can hand any finding to its `Fix with` skill tomorrow without more investigation, and a newcomer can follow the docs without meeting a stale command.
 
-**Reply:** the docs files changed or removed (including campaign docs rolled up and where their content went) and what was cut; finding counts by priority with the P1 titles and the ticket and RFC IDs filed; checks run and not run; open decisions.
+**Report:** the docs files changed or removed (including campaign docs rolled up and where their content went) and what was cut; finding counts by priority with the P1 titles and the ticket and RFC IDs filed; checks run and not run; open decisions.

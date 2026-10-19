@@ -40,4 +40,4 @@ Merging is outward-facing and hard to undo, so it needs an explicit ask in this 
 
 **The test:** every merged PR had a passing verdict from an agent that did not write it, matching its landed patch, and nothing above the ceiling moved.
 
-**Reply:** the mode; PR state and blockers; for ship, each PR's verdict and who produced it, what landed, the ceiling, and what verifying the next gap needs.
+**Report:** the mode; PR state and blockers; for ship, each PR's verdict and who produced it, what landed, the ceiling, and what verifying the next gap needs.

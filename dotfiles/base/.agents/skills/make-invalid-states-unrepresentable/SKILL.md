@@ -43,4 +43,4 @@ Test invalid construction, invalid transitions, boundary rejection of malformed 
 
 Done when each important type has an intended state set, any remaining superset is bounded and owned by a boundary, and the result is simpler to reason about, not merely fancier.
 
-**Reply:** each type's state set before and after, and any remaining superset with its owner.
+**Report:** each type's state set before and after, and any remaining superset with its owner.

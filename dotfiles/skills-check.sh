@@ -1,14 +1,4 @@
 #!/bin/sh
-# Checks the skills tree for drift and shape.
-# Failures (exit 1):
-#   - frontmatter name does not match the directory, or description is missing;
-#   - the Claude and Codex implicit-invocation settings disagree;
-#   - an auto-triggered skill's description has no "Skip" clause, so it would fire on
-#     every task;
-#   - a literal mdtool reference names a command the checked-in tool does not expose;
-#   - a router table whose second column is Skill names a skill that does not exist.
-# Warnings (exit 0): a skill over 8000 bytes (except ultrareview), or one with no
-# closing **Reply:**.
 set -u
 skills="${1:-base/.agents/skills}"
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
@@ -30,15 +20,13 @@ for d in "$skills"/*/; do
     if [ "$explicit" = false ] && ! sed -n 's/^description: //p' "$f" | grep -q 'Skip'; then
         echo "auto-triggered skill has no Skip clause in its description: $n"; bad=1
     fi
-    # Backticked names in the Skill column of a router table.
     # shellcheck disable=SC2016  # backticks are literal here
     refs=$(awk -F'|' '/^\|[^|]*\| *Skill *\|/ {t=1; next} t && /^\| *-/ {next} t && /^\|/ {print $3; next} {t=0}' "$f" \
         | grep -o '`[^`]*`' | tr -d '`')
     for r in $refs; do
         [ -f "$skills/$r/SKILL.md" ] || { echo "$n names a skill that does not exist: $r"; bad=1; }
     done
-    # Skill references are literal command names so they can be checked without installing mdtool.
-    # shellcheck disable=SC2016
+    # shellcheck disable=SC2016  # backticks are literal here
     commands=$(grep -Eo '`mdtool [a-z][a-z-]*' "$f" | sed 's/^`mdtool //')
     for c in $commands; do
         case " $valid_commands " in
@@ -46,12 +34,11 @@ for d in "$skills"/*/; do
             *) echo "$n references unknown mdtool command: $c"; bad=1 ;;
         esac
     done
-    # The whole-repo review keeps its lenses together in the entrypoint.
     limit=8000
     [ "$n" = orchestrate ] && limit=12000
     if [ "$n" != ultrareview ]; then
         [ "$(wc -c < "$f")" -le "$limit" ] || echo "warning: $n is over $limit bytes"
     fi
-    grep -q '^\*\*Reply:\*\*\|^## \(Hand back\|Report\|Handoff\)' "$f" || echo "warning: $n has no closing **Reply:**"
+    grep -q '^\*\*Report:\*\*' "$f" || echo "warning: $n has no closing **Report:**"
 done
 exit $bad

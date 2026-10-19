@@ -21,4 +21,4 @@ The worker inventories with `git worktree list --porcelain`, verifies each candi
 
 Return the campaign head used, removed paths, and retained paths with the exact reason each was kept. The coordinator checks the worker's evidence, runs `git worktree list --porcelain` again, and confirms each removed path is gone. Leave ambiguous cases for later review.
 
-**Reply:** report the campaign head, removed and retained paths with reasons, integration and cleanliness evidence, and anything unresolved.
+**Report:** report the campaign head, removed and retained paths with reasons, integration and cleanliness evidence, and anything unresolved.

@@ -18,4 +18,4 @@ Durable state outlives the code that wrote it, so its contracts must be explicit
 
 Test the failure windows, old-format fixtures (oldest supported, current, unknown field, malformed), and constraint rejection. The happy path proves little. Run them by name, and save the full migration suite for the end.
 
-**Reply:** the contracts you set or tightened, and any format or data compatibility impact.
+**Report:** the contracts you set or tightened, and any format or data compatibility impact.

@@ -28,4 +28,4 @@ Update every dependency and explicit version pin to its newest stable release. R
 
 Do not run formatters. Commit only when asked. Never push. Say which checks ran and which did not.
 
-**Reply:** Say what changed and which pins stayed fixed. Report check results against the baseline. List checks not run and why. Report performance measurements required by repository gates.
+**Report:** Say what changed and which pins stayed fixed. Report check results against the baseline. List checks not run and why. Report performance measurements required by repository gates.

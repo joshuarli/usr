@@ -37,4 +37,4 @@ When `mdtool` is installed, run one `mdtool check` for the refresh scope (`mdtoo
 
 **The test:** an end user can install and use the thing from README alone, a developer reaches any topic in one hop from AGENTS.md, a newcomer can follow every command and reach the code each doc points to, no sentence is there only because it used to be true, and the docs are shorter than before unless a missing topic needed new text.
 
-**Reply:** the Markdown line count before and after, the files changed, moved, or removed and what was cut, claims you could not verify, and places where the code looks wrong rather than the doc.
+**Report:** the Markdown line count before and after, the files changed, moved, or removed and what was cut, claims you could not verify, and places where the code looks wrong rather than the doc.

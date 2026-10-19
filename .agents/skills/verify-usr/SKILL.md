@@ -61,4 +61,4 @@ Update this procedure if `sym` flags, its fixture assumptions, `.work` handling,
 
 **The test:** the helper demonstrates linking, repeat-run behavior, and preservation of a conflicting destination, removes its fixture after both outcomes, keeps evidence, and passes on a second run.
 
-**Reply:** the journey run, evidence path, observed outcomes, platform, and anything not covered.
+**Report:** the journey run, evidence path, observed outcomes, platform, and anything not covered.

@@ -42,4 +42,4 @@ After: "`budget.mjs` reads the committed budget from `budget.json` and fails CI 
 
 **The test:** a reader who knows only the codebase can act on each sentence with one reading, and the document answers one kind of question.
 
-**Reply:** the mode chosen for each document, what you cut, and any claim you could not check against the code.
+**Report:** the mode chosen for each document, what you cut, and any claim you could not check against the code.

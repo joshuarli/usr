@@ -25,4 +25,4 @@ The owner has read your recommendations and accepted all of them. Do the full re
 
 **The test:** every recommendation in the last reply is done, skipped with a stated reason, or flagged as needing a separate ask, and nothing outside that list changed.
 
-**Reply:** each recommendation with done, skipped, or needs-ask; the checks run and their results; anything left uncommitted.
+**Report:** each recommendation with done, skipped, or needs-ask; the checks run and their results; anything left uncommitted.

@@ -36,7 +36,9 @@ Classify each relevant item by what the owner needs on the new host:
 
 **Prove the resume path.** Name a copy-pasteable resume command and exercise its read-only parts from a clean checkout of the transfer target; put it in the repository when the request authorizes commits. An inventory that is not exercised this way is not verified.
 
-Report:
+**The test:** after the stated transfer, the owner can recover all intended source work and required local project data without relying on the old machine's processes or unlisted files.
+
+**Report:**
 
 - what source work was integrated, preserved on a branch, or remains dirty;
 - which local files must travel and their exact paths;
@@ -45,5 +47,3 @@ Report:
 - what the chosen transfer carries and omits;
 - any manual host setup or owner action still required;
 - checks run and what could not be verified.
-
-**The test:** after the stated transfer, the owner can recover all intended source work and required local project data without relying on the old machine's processes or unlisted files.

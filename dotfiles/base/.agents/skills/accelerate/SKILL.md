@@ -42,6 +42,6 @@ this skill changes the settings, not the contract.
 slice, no lane is parked on a technical blocker, and every deferred blocker is a
 named item.
 
-**Reply:** lanes before and after, what was widened or pulled in, blockers
+**Report:** lanes before and after, what was widened or pulled in, blockers
 resolved or deferred, the load the new width runs at, and any decision that
 truly needs the owner. Keep it short.

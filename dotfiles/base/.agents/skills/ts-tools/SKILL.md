@@ -49,4 +49,4 @@ From a fresh checkout: `pnpm install --frozen-lockfile`, then each applicable `d
 - browser and server consoles are clean;
 - the production bundle holds no old framework and no server-only code or secrets.
 
-**Reply:** what was migrated and deleted, the verification run and not run, preexisting failures, and any dependency kept with its reason.
+**Report:** what was migrated and deleted, the verification run and not run, preexisting failures, and any dependency kept with its reason.

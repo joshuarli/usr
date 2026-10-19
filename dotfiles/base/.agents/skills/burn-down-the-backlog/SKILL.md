@@ -43,4 +43,4 @@ Close the tickets in `TODO.md` unattended, in priority order, one commit each. D
 
 **The test:** `git log` shows exactly one commit for each closed ID, each containing that ticket's removal and a `Closes` footer, in priority order, and no ticket both stays and has a commit.
 
-**Reply:** the branch; closed tickets with their commits and the tier that closed each, noting any escalation; parked tickets with the reason and the decision the owner owes; new tickets filed; the checks run; and that nothing was pushed.
+**Report:** the branch; closed tickets with their commits and the tier that closed each, noting any escalation; parked tickets with the reason and the decision the owner owes; new tickets filed; the checks run; and that nothing was pushed.

@@ -53,4 +53,4 @@ Claude, Codex, Muse Code, Grok, and OpenCode change regularly, and our setup enc
 
 **The test:** every key, field, and event we set is one the current docs list, nothing we carry works around something the harness now does, and each change traces to a doc page.
 
-**Reply:** each version and the window; each change with its source; what is available and not adopted; owner-held values the docs touch; and anything you could not verify.
+**Report:** each version and the window; each change with its source; what is available and not adopted; owner-held values the docs touch; and anything you could not verify.

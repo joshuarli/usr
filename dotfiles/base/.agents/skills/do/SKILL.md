@@ -29,4 +29,4 @@ metadata:
 
 **The test:** the requested outcome is complete or has a specific remaining blocker, and the work stayed within the owner's task and authority.
 
-**Reply:** changed behavior, decisive checks and results, remaining limitations, contract changes, and commit or publication state.
+**Report:** changed behavior, decisive checks and results, remaining limitations, contract changes, and commit or publication state.

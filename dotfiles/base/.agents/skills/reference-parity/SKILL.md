@@ -18,4 +18,4 @@ A rewrite is done when it is indistinguishable from the reference on every behav
 
 **The test:** pick any behavior of the reference at random. A test covers it, fails if the port gets it wrong, and passes.
 
-**Reply:** the reference, behaviors still open, intentional differences, the narrow and full commands run, and what the corpus does not cover.
+**Report:** the reference, behaviors still open, intentional differences, the narrow and full commands run, and what the corpus does not cover.

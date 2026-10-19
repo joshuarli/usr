@@ -55,4 +55,4 @@ Measure representative workloads, not isolated hash functions unless hashing is 
 
 Remove `fxhash`, unused hasher and collection crates, and run the dependency checks. Every remaining dependency must match a chosen implementation; add no `ahash`, `foldhash`, `rustc-hash`, or bitmap crate speculatively.
 
-**Reply:** each collection representation changed; why each `BTreeMap`/`BTreeSet` changed or stayed, naming those deliberately kept; the hashing strategy; specialized representations adopted; before and after numbers; remaining collection bottlenecks.
+**Report:** each collection representation changed; why each `BTreeMap`/`BTreeSet` changed or stayed, naming those deliberately kept; the hashing strategy; specialized representations adopted; before and after numbers; remaining collection bottlenecks.

@@ -17,7 +17,7 @@ FIXTURE_TOOL = ROOT / "dotfiles" / "skill-evals" / "fixtures.py"
 VERIFY_SKILL = ROOT / ".agents" / "skills" / "verify-usr"
 VERIFY_HELPER = VERIFY_SKILL / "scripts" / "sym-journey.sh"
 SCRATCH_CHECK = ROOT / "dotfiles" / "scratch-check.sh"
-EXPLICIT_SKILL = "---\nname: sample\ndescription: Test explicit invocation.\ndisable-model-invocation: true\nmetadata:\n  opencode/slash: \"true\"\n  opencode/autoinvoke: \"false\"\n---\n\n**The test:** the sample is explicit.\n\n**Reply:** the sample passed.\n"
+EXPLICIT_SKILL = "---\nname: sample\ndescription: Test explicit invocation.\ndisable-model-invocation: true\nmetadata:\n  opencode/slash: \"true\"\n  opencode/autoinvoke: \"false\"\n---\n\n**The test:** the sample is explicit.\n\n**Report:** the sample passed.\n"
 CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
 OPENCODE_POLICY = '  opencode/slash: "true"\n  opencode/autoinvoke: "false"\n'
 
@@ -140,6 +140,23 @@ class SkillCampaignTests(unittest.TestCase):
             skill_file.write_text(EXPLICIT_SKILL.replace("disable-model-invocation: true\n", ""), encoding="utf-8")
             result = run("sh", str(CHECKER), str(skills))
             self.assertNotEqual(0, result.returncode)
+        finally:
+            shutil.rmtree(work)
+
+    def test_skill_checker_requires_report_marker(self):
+        work = Path(tempfile.mkdtemp(prefix="skills-report-", dir=WORK_TMP))
+        try:
+            skills = work / "skills"
+            skill = install_fixture_skill(skills)
+            report = run("sh", str(CHECKER), str(skills))
+            self.assertEqual(0, report.returncode, report.stdout + report.stderr)
+            self.assertNotIn("no closing **Report:**", report.stdout)
+
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(EXPLICIT_SKILL.replace("**Report:**", "**Reply:**"), encoding="utf-8")
+            reply = run("sh", str(CHECKER), str(skills))
+            self.assertEqual(0, reply.returncode, reply.stdout + reply.stderr)
+            self.assertIn("warning: sample has no closing **Report:**", reply.stdout)
         finally:
             shutil.rmtree(work)
 

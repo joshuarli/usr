@@ -19,4 +19,4 @@ A fix without an established cause is a guess that happens to pass. Find the cau
 
 **The test:** state the cause in one sentence, name the observation that proves it, and show the repro failing before the fix and passing after.
 
-**Reply:** the cause, how it was established and which hypotheses were refuted, where the fix is, the regression test, and the checks run. When the cause is a shape likely to recur beyond sibling code, say that `sweep` can search the wider repo for it.
+**Report:** the cause, how it was established and which hypotheses were refuted, where the fix is, the regression test, and the checks run. When the cause is a shape likely to recur beyond sibling code, say that `sweep` can search the wider repo for it.

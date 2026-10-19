@@ -22,4 +22,4 @@ Owner-directed complete removals without compatibility belong to `delete`. Use t
 
 Do not delete compatibility code before checking external and persisted consumers. When unsure, report it as unproven rather than removing it.
 
-**Reply:** what you deleted, what you quarantined and why, and what you could not prove either way.
+**Report:** what you deleted, what you quarantined and why, and what you could not prove either way.

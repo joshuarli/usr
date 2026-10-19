@@ -23,4 +23,4 @@ Create or maintain a compact repository-local procedure for exercising a project
 
 **The test:** a fresh run can follow exact instructions through the public surface, observe the stated success and failure, clean up its own resources, retain useful evidence, and run again without collision.
 
-**Reply:** the skill and helpers changed, the journeys and evidence exercised, the surface and platform covered, what remains unverified, and any blocker.
+**Report:** the skill and helpers changed, the journeys and evidence exercised, the surface and platform covered, what remains unverified, and any blocker.

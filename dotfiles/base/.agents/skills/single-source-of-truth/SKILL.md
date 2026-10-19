@@ -20,4 +20,4 @@ Afterward, search for each retired copy and spelling and classify what remains. 
 
 When `mdtool` is installed, use `mdtool dups` to find repeated documentation blocks; otherwise compare the relevant documentation sections manually and search distinctive phrases with `rg -n`.
 
-**Reply:** each fact and its new owner, plus intentional duplicates and the drift test that guards each.
+**Report:** each fact and its new owner, plus intentional duplicates and the drift test that guards each.

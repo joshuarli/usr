@@ -25,6 +25,6 @@ A ballpark the user asked for needs one run: still answer questions 4 and 7, and
 6. **Does it matter?** Put the micro result beside the end-to-end path a user waits on, with realistic sizes and concurrency, and report it as a share of the whole.
 7. **Did the work happen?** Confirm it ran inside the timed region: the rows were written, the bytes were read, the result was used. Lazy iterators, unawaited futures, and discarded results produce numbers for work that never ran.
 
-## Report
+**Report:**
 
 Lead with the verdict: faster, slower, no measurable difference, or inconclusive. Give the number with unit, run count, range, and limiter ("p50 41 ms to 33 ms, median of 7 runs per side, range 32 to 35 ms, bound by JSON parsing on one core"). Call it inconclusive when you cannot name the limiter, a side ran untuned, or you could not answer 4 and 7, and name the gap.

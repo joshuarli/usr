@@ -31,5 +31,5 @@ work, not just the tone of progress updates.
 **The test:** optional rigor has actually been cut, and the requested deliverable
 is finished with an honest account of the evidence.
 
-**Reply:** what is done, what was skipped or remains uncertain, and any decision
+**Report:** what is done, what was skipped or remains uncertain, and any decision
 that truly blocks completion. Keep it short.

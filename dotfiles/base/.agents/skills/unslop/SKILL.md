@@ -37,4 +37,4 @@ Scan the text for the patterns below, then rewrite them. Preserve the meaning an
 
 **The test:** every sentence states a fact, an instruction, or a number the reader can use, and a sentence from it would be wrong or meaningless in another project's docs.
 
-**Reply:** what you rewrote and the patterns that recurred, and anything you left because cutting it would change the meaning.
+**Report:** what you rewrote and the patterns that recurred, and anything you left because cutting it would change the meaning.

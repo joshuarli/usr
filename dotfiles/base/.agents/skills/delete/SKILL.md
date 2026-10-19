@@ -18,4 +18,4 @@ Deletion is complete when the retired capability and its support paths are gone.
 
 **The test:** no live execution path or supported surface implements the retired behavior, no compatibility path accepts or emits its old form, and every remaining match has a clear non-live owner.
 
-**Reply:** what was removed, remaining historical or unrelated matches, verification run and not run, and any breaking contract or data migration.
+**Report:** what was removed, remaining historical or unrelated matches, verification run and not run, and any breaking contract or data migration.

@@ -19,4 +19,4 @@ The filesystem is a concurrent, stateful external system, and operating systems 
 
 Test on the real filesystem (a temp directory, the test by name), not a mock: symlinks, replacement, permissions, non-UTF-8 names, interruption. For native code, test zero length, max size, an invalid handle, and short I/O.
 
-**Reply:** the semantics you made explicit (symlink policy, atomicity, supported targets, safety preconditions).
+**Report:** the semantics you made explicit (symlink policy, atomicity, supported targets, safety preconditions).

@@ -92,4 +92,4 @@ artifact reuse; it does not weaken final acceptance. Re-evaluate this bottleneck
 after merges and failed gates instead of assuming the initial tooling remains
 adequate.
 
-**Reply:** what was delegated and integrated, checks and measurements, contract changes, and any blockers or decisions the owner needs to resolve.
+**Report:** what was delegated and integrated, checks and measurements, contract changes, and any blockers or decisions the owner needs to resolve.

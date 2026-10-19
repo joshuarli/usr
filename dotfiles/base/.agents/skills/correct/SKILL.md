@@ -29,4 +29,4 @@ Fix the most frequent classes now, one logical change each, and commit only if a
 
 A rule nothing enforces is a repeat: fix it higher in the same change. Drop a rule once its mistake can no longer happen.
 
-**Reply:** each class with its evidence, the level chosen, and why a higher level did not work.
+**Report:** each class with its evidence, the level chosen, and why a higher level did not work.

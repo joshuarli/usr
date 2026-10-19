@@ -45,4 +45,4 @@ Append one campaign-log line, commit the doc alone as a Conventional Commit (`do
 
 **The test:** after a reboot, an agent with only the repo, its branches, and the doc can resume at the next item, and every file the campaign created in `/tmp` is one it could lose without noticing.
 
-**Reply:** what merged, what is parked or in flight and where, the audit results (any check you could not run), and the path to the handoff.
+**Report:** what merged, what is parked or in flight and where, the audit results (any check you could not run), and the path to the handoff.

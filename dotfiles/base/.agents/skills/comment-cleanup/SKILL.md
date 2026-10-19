@@ -32,4 +32,4 @@ Search the scope for comments and for documentation pointers before and after. W
 
 **The test:** a reader who deleted every remaining comment would lose only an external quirk or a public contract, and every deleted excuse is gone from the code or reported open.
 
-**Reply:** comments deleted by count; fixes made and what each replaced; constraints now enforced by a test or check; hacks and constraints left open, with symbols; keeps with the reason each stays.
+**Report:** comments deleted by count; fixes made and what each replaced; constraints now enforced by a test or check; hacks and constraints left open, with symbols; keeps with the reason each stays.
