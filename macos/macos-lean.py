@@ -15,6 +15,8 @@ Usage:
     ./macos-lean.py --revert     # re-enable everything managed
 
 Always run --audit first after an OS upgrade, then --dry-run, then apply.
+Apply and revert authenticate with sudo once at startup and refresh that ticket
+while running.
 
 Design: validate-then-act. Every label is checked against a live index of
 labels installed on THIS Mac (``Label`` keys read with plistlib, cached
@@ -739,7 +741,7 @@ def run(argv: list[str], *, sudo: bool = False,
         check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a command, raising on failure unless explicitly probing its status."""
     if sudo:
-        argv = ["sudo", *argv]
+        argv = ["sudo", "-n", *argv]
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=check)
     except FileNotFoundError as exc:
@@ -827,7 +829,7 @@ class SudoKeepalive:
 
     def _loop(self) -> None:
         while not self._stop.wait(50):
-            run(["sudo", "-n", "true"], check=False)
+            run(["sudo", "-n", "-v"], check=False)
 
     def stop(self) -> None:
         self._stop.set()
