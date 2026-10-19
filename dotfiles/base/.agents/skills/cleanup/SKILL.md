@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: Safely clean up completed campaign worktrees after confirming their work is integrated. Use when an active campaign has accumulated stale worktrees or the user asks to remove merged campaign checkouts.
+description: Safely clean up completed campaign worktrees after confirming integration. Use when an active campaign has stale worktrees or the user asks to remove merged campaign checkouts. Skip general repository cleanup and in-flight or parked worktrees.
 ---
 
 # Cleanup
@@ -20,3 +20,5 @@ Keep the integration checkout, in-flight or parked work, dirty checkouts, unknow
 The worker inventories with `git worktree list --porcelain`, verifies each candidate against the supplied campaign head and active-worktree list, then removes verified paths with `git worktree remove <path>`. If removal refuses, retain the path and report the reason. Do not expand to other repositories or recursively spawn workers.
 
 Return the campaign head used, removed paths, and retained paths with the exact reason each was kept. The coordinator checks the worker's evidence, runs `git worktree list --porcelain` again, and confirms each removed path is gone. Leave ambiguous cases for later review.
+
+**Reply:** report the campaign head, removed and retained paths with reasons, integration and cleanliness evidence, and anything unresolved.

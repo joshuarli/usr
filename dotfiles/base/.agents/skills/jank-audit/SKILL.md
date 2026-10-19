@@ -1,6 +1,6 @@
 ---
 name: jank-audit
-description: Audit a software product for concrete user-facing rough edges, confusing flows, weak feedback, and inconsistent behavior. Use when asked for a broad UX or product-polish audit; skip ordinary code review and subjective visual critique.
+description: Audit a software product for concrete user-facing rough edges, confusing flows, weak feedback, and inconsistent behavior. Use for broad UX or product-polish audits. Skip ordinary code review, subjective visual critique, and single-flow bug reports.
 ---
 
 # Jank Audit
@@ -20,6 +20,4 @@ Find user-visible friction that materially slows, confuses, blocks, or surprises
 
 Do not edit code, docs, configuration, or tests during the audit. Return the numbered findings and wait for the owner to select which items to fix or skip. A request to audit does not authorize implementation. After the owner selects items, implement only those items and follow the repository's instructions for the changes.
 
-## Reply
-
-Report the audit scope, numbered findings from highest impact down, what you observed versus inferred, and what you did not inspect or run. End by asking which finding numbers the owner wants fixed or skipped. Do not start fixes in the same turn.
+**Reply:** report the audit scope, numbered findings from highest impact down, what you observed versus inferred, and what you did not inspect or run. End by asking which finding numbers the owner wants fixed or skipped. Do not start fixes in the same turn.
