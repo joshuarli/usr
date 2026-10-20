@@ -19,8 +19,8 @@ jobs:
       - name: Run repository checks
         shell: bash
         run: |
-          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make check
-          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make lint
+          PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make check
+          PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make lint
 
   macos:
     runs-on: macos-26
