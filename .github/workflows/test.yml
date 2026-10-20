@@ -19,6 +19,10 @@ jobs:
       - name: Run repository checks
         shell: bash
         run: |
+          GIT_AUTHOR_NAME=CI \
+          GIT_AUTHOR_EMAIL=ci@example.invalid \
+          GIT_COMMITTER_NAME=CI \
+          GIT_COMMITTER_EMAIL=ci@example.invalid \
           PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make check
           PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make lint
 
