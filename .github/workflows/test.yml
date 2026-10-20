@@ -1,0 +1,24 @@
+name: test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove preinstalled Homebrew
+        shell: bash
+        run: |
+          if [[ -x /opt/homebrew/bin/brew || -x /usr/local/bin/brew ]]; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)" -- --force
+          fi
+
+      - name: Run make with a fresh home
+        shell: bash
+        run: |
+          printf '/.work/\n' >> .git/info/exclude
+          mkdir -p .work/tmp .work/ci-home
+          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make
