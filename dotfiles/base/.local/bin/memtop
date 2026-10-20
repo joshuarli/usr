@@ -66,10 +66,11 @@ case $platform in
         ;;
 esac
 
-set -- $(printf '%s\n' "$proctable" | awk '
+read -r procount procmb topmb toppid <<EOF
+$(printf '%s\n' "$proctable" | awk '
     NF >= 3 { n++; sum += $2; if ($2 > max) { max = $2; pid = $1 } }
     END { print n+0, sum+0, max+0, pid+0 }')
-procount=$1 procmb=$2 topmb=$3 toppid=$4
+EOF
 topname=$(printf '%s\n' "$proctable" | head -n 1 | cut -d' ' -f3-)
 
 case $platform in

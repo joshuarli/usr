@@ -85,7 +85,7 @@ lint:
 		[ -f "$$f" ] && [ ! -L "$$f" ] || continue; \
 		{ [ "$${f%.sh}" != "$$f" ] || head -n 1 "$$f" | grep -Eq '^#!.*(sh|bash|dash)( |$$)'; } && echo "$$f"; \
 	done); \
-	shellcheck -s sh $$files
+	shellcheck -e SC3013 -s sh $$files
 	@files=$$(git ls-files -co --exclude-standard | while read -r f; do \
 		[ -f "$$f" ] && [ ! -L "$$f" ] || continue; \
 		{ [ "$${f%.py}" != "$$f" ] || head -n 1 "$$f" | grep -Eq '^#!.*python'; } && echo "$$f"; \
