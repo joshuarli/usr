@@ -341,7 +341,6 @@ else
         dir="${name%/*}"
         [ -n "$dir" ] || dir=/
         if [ ! -d "$dir" ]; then
-            log "MKDIRS: $dir"
             if ! $dry_run; then
                 if ! record_missing_target_dirs "${name_abs%/*}" || ! mkdir -p "$dir"; then
                     failed=true

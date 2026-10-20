@@ -33,6 +33,12 @@ case "$url" in
         [ -n "$output" ] || exit 1
         cat > "$output" <<'INSTALLER'
 #!/bin/sh
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) exit 8 ;; esac
+printf '%s\n' 'native installer output'
+if [ "${CLAUDE_INSTALLER_FAIL:-false}" = true ]; then
+    printf '%s\n' 'native installer failure'
+    exit 7
+fi
 mkdir -p "$HOME/.claude/native" "$HOME/.local/bin"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.claude/native/claude"
 chmod +x "$HOME/.claude/native/claude"
@@ -64,34 +70,11 @@ INSTALLER
     https://x.ai/cli/stable)
         printf '%s\n' '1.2.3'
         ;;
-    https://github.com/laputa-systems/jaq/releases.atom)
-        cat <<'FEED'
-<feed>
-<entry>
-<updated>2026-10-18T17:51:43Z</updated>
-<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/jaq/releases/tag/release-old"/>
-</entry>
-<entry>
-<updated>2026-10-19T21:56:41Z</updated>
-<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/jaq/releases/tag/release-jaqtest"/>
-</entry>
-</feed>
-FEED
-        ;;
-    https://github.com/laputa-systems/jaq/releases/download/release-jaqtest/jaq-aarch64-apple-darwin.zip)
+    https://github.com/01mf02/jaq/releases/latest/download/jaq-*)
         if [ "$headers" = - ]; then
             printf '%s\n' 'ETag: jaq-test-etag'
         elif [ -n "$output" ]; then
-            cp "$DL_JAQ_ZIP" "$output"
-        else
-            exit 1
-        fi
-        ;;
-    https://github.com/laputa-systems/jaq/releases/download/release-jaqtest/jaq-x86_64-unknown-linux-musl.zip)
-        if [ "$headers" = - ]; then
-            printf '%s\n' 'ETag: jaq-test-etag'
-        elif [ -n "$output" ]; then
-            cp "$DL_JAQ_ZIP" "$output"
+            cp "$DL_JAQ_MOCK" "$output"
         else
             exit 1
         fi
@@ -181,12 +164,6 @@ case "$query" in
 esac
 EOF
 chmod +x "$mock_bin/jaq"
-mkdir -p "$test_root/jaq-package"
-cp "$mock_bin/jaq" "$test_root/jaq-package/jaq-aarch64-apple-darwin"
-cp "$mock_bin/jaq" "$test_root/jaq-package/jaq-x86_64-unknown-linux-musl"
-zip -q "$test_root/jaq.zip" -j "$test_root/jaq-package/jaq-aarch64-apple-darwin"
-zip -q "$test_root/jaq.zip" -j "$test_root/jaq-package/jaq-x86_64-unknown-linux-musl"
-
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
 chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
@@ -448,7 +425,7 @@ ownership_home="$test_root/ownership-home"
 ownership_file="$ownership_home/.local/state/make/dl-owned"
 mkdir -p "$(dirname "$ownership_file")"
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
-    DL_OWNED_FILE="$ownership_file" DL_JAQ_ZIP="$test_root/jaq.zip" \
+    DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
     TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
     :
 else
@@ -456,7 +433,7 @@ else
     exit 1
 fi
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
-    DL_OWNED_FILE="$ownership_file" DL_JAQ_ZIP="$test_root/jaq.zip" \
+    DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
     TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
     :
 else
@@ -684,6 +661,9 @@ case "$output" in
     *"Installed Claude Code ($claude_home/.local/bin/claude)"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+case "$output" in
+    *'native installer output'*) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
 if output=$(HOME="$claude_home" XDG_DATA_HOME="$claude_data" XDG_STATE_HOME="$claude_state" \
     TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" claude 2>&1); then
     :
@@ -693,6 +673,18 @@ else
 fi
 case "$output" in
     *'claude is installed'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+
+claude_failure_home="$test_root/claude-failure-home"
+if output=$(HOME="$claude_failure_home" XDG_STATE_HOME="$claude_failure_home/.local/state" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" CLAUDE_INSTALLER_FAIL=true \
+    sh "$repo_root/dl" claude 2>&1); then
+    printf '%s\n' 'Claude installer failure was ignored' >&2
+    exit 1
+fi
+case "$output" in
+    *'native installer failure'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 
@@ -773,7 +765,7 @@ codex_home="$test_root/codex-home"
 mv "$mock_bin/jaq" "$mock_bin/jaq.hidden"
 if output=$(HOME="$codex_home" XDG_STATE_HOME="$codex_home/.local/state" \
     TMPDIR="$test_root/tmp" CODEX_SHA256="$CODEX_SHA256" CODEX_TAR="$test_root/codex.tar.gz" \
-    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 DL_JAQ_ZIP="$test_root/jaq.zip" \
+    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 DL_JAQ_MOCK="$mock_bin/jaq.hidden" \
     PATH="$mock_bin:/usr/bin:/bin" \
     sh "$repo_root/dl" jaq codex muse 2>&1); then
     :

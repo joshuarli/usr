@@ -65,7 +65,6 @@ cd ../../..
 $sym -t home -v dotfiles/bash > log 2>&1
 $sym -t home -v dotfiles/mpv >> log 2>&1
 expected="LINK: home/.bashrc -> ../dotfiles/bash/.bashrc
-MKDIRS: home/.config/mpv
 LINK: home/.config/mpv/mpv.conf -> ../../../dotfiles/mpv/.config/mpv/mpv.conf"
 echo "  assertion 1: expected output"; assert_output "$expected"
 echo "  assertion 2: expected result"; diff -r --no-dereference home expected-home || nfailed=$((nfailed + 1))
