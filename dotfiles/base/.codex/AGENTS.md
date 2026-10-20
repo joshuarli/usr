@@ -58,6 +58,29 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 
 macOS and Linux. Use `rg` and `fd` for search. Use `jaq` for all JSON and YAML work, in place of `jq` and `yq` (`jaq --from yaml` reads YAML, `--to yaml` writes it). Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
 
+## Query structured data with jaq
+
+Use jaq's `--from FORMAT` and `--to FORMAT` options to query XML, TOML, CSV, and TSV instead of writing a parser script. File extensions select the input format when you omit `--from`.
+
+```sh
+jaq --from xml '.. | select(.t? == "a") | .a.href' page.xml
+jaq --from toml '.dependencies' Cargo.toml
+jaq --from csv '.[0]' data.csv
+jaq --from tsv '.[0]' data.tsv
+```
+
+XML elements use `.t` for the tag, `.a` for attributes, and `.c` for children. CSV and TSV records are arrays. A header is an ordinary first row. Use `--slurp` to collect all records into one array.
+
+Use `--to FORMAT` to serialize filter results. Each output array becomes one CSV or TSV row. TOML output needs an object at the root. XML output uses jaq's XML node representation.
+
+```sh
+jaq --from xml --to xml '(.. | select(.t? == "em") | .t) = "i"' page.xml
+jaq -n --to toml '{name: "jaq"}'
+jaq -n --to csv '[["name", "count"], ["jaq", 1]][]'
+```
+
+Replace `csv` with `tsv` to write tab-separated rows.
+
 ## Working files
 
 - Every worktree, scratch file, and piece of working state you create lives under `.work/` at the root of the repo you are working in, never `/tmp`, `$TMPDIR`, or `/var/folders`. `/tmp` is often RAM-backed on my Linux machines, so large trees there cause OOM kills, and it does not survive a reboot.

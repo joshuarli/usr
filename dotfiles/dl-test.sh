@@ -64,11 +64,34 @@ INSTALLER
     https://x.ai/cli/stable)
         printf '%s\n' '1.2.3'
         ;;
-    https://github.com/01mf02/jaq/releases/latest/download/jaq-*)
+    https://github.com/laputa-systems/jaq/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-18T17:51:43Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/jaq/releases/tag/release-old"/>
+</entry>
+<entry>
+<updated>2026-10-19T21:56:41Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/jaq/releases/tag/release-jaqtest"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/laputa-systems/jaq/releases/download/release-jaqtest/jaq-aarch64-apple-darwin.zip)
         if [ "$headers" = - ]; then
             printf '%s\n' 'ETag: jaq-test-etag'
         elif [ -n "$output" ]; then
-            cp "$DL_JAQ_MOCK" "$output"
+            cp "$DL_JAQ_ZIP" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/laputa-systems/jaq/releases/download/release-jaqtest/jaq-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: jaq-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$DL_JAQ_ZIP" "$output"
         else
             exit 1
         fi
@@ -158,6 +181,11 @@ case "$query" in
 esac
 EOF
 chmod +x "$mock_bin/jaq"
+mkdir -p "$test_root/jaq-package"
+cp "$mock_bin/jaq" "$test_root/jaq-package/jaq-aarch64-apple-darwin"
+cp "$mock_bin/jaq" "$test_root/jaq-package/jaq-x86_64-unknown-linux-musl"
+zip -q "$test_root/jaq.zip" -j "$test_root/jaq-package/jaq-aarch64-apple-darwin"
+zip -q "$test_root/jaq.zip" -j "$test_root/jaq-package/jaq-x86_64-unknown-linux-musl"
 
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
@@ -420,7 +448,7 @@ ownership_home="$test_root/ownership-home"
 ownership_file="$ownership_home/.local/state/make/dl-owned"
 mkdir -p "$(dirname "$ownership_file")"
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
-    DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
+    DL_OWNED_FILE="$ownership_file" DL_JAQ_ZIP="$test_root/jaq.zip" \
     TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
     :
 else
@@ -428,7 +456,7 @@ else
     exit 1
 fi
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
-    DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
+    DL_OWNED_FILE="$ownership_file" DL_JAQ_ZIP="$test_root/jaq.zip" \
     TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
     :
 else
@@ -745,7 +773,8 @@ codex_home="$test_root/codex-home"
 mv "$mock_bin/jaq" "$mock_bin/jaq.hidden"
 if output=$(HOME="$codex_home" XDG_STATE_HOME="$codex_home/.local/state" \
     TMPDIR="$test_root/tmp" CODEX_SHA256="$CODEX_SHA256" CODEX_TAR="$test_root/codex.tar.gz" \
-    DL_JAQ_MOCK="$mock_bin/jaq.hidden" PATH="$mock_bin:/usr/bin:/bin" \
+    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 DL_JAQ_ZIP="$test_root/jaq.zip" \
+    PATH="$mock_bin:/usr/bin:/bin" \
     sh "$repo_root/dl" jaq codex muse 2>&1); then
     :
 else

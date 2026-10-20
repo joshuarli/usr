@@ -303,7 +303,7 @@ install_binary() {
 install_release() {
     prog=$1
     case "$prog" in
-        e|fz|fdu|fastermod|tm|fs|srv|diff-pretty) owner="laputa-systems" ;;
+        e|fz|fdu|fastermod|tm|fs|srv|diff-pretty|jaq) owner="laputa-systems" ;;
         ish|mactop|gh) owner="joshuarli" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
@@ -334,7 +334,7 @@ install_release() {
         return
     fi
     case "${OS}:${prog}" in
-        Linux:e|Linux:ish|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:e|Linux:ish|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:jaq) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
@@ -574,13 +574,7 @@ install_direct() {
 }
 
 install_jaq() {
-    case "${OS}:${ARCH}" in
-        Linux:x86_64) jaq_target=x86_64-unknown-linux-musl ;;
-        Linux:*) jaq_target="${ARCH}-unknown-linux-gnu" ;;
-        *) jaq_target="${ARCH}-apple-darwin" ;;
-    esac
-    install_direct jaq \
-        "https://github.com/01mf02/jaq/releases/latest/download/jaq-${jaq_target}"
+    install_release jaq
 }
 
 jaq_available() {
