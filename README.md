@@ -10,7 +10,7 @@ The service-disabling step is optional. Run `./macos/macos lean --audit`, review
 
 Use [`macos`](docs/macos-preferences.md) to snapshot, compare, and apply selected macOS user preferences. Raw snapshots include every user and current-host `defaults` domain, so keep them private and out of Git; check in only selected preferences.
 
-On Linux, skip the macOS setup. On either platform, run `make plan` and resolve any reported conflicts. Then run `make` to download the supported tools, link the current OS layer into your home directory, and install kache if it is missing. On macOS, `make` installs the Brewfile packages first when kache is missing. On glibc Linux, also run `setup-mold`; musl builds expect mold at `/usr/local/libexec/mold`.
+On Linux, skip the macOS setup. On either platform, run `make plan` and resolve any reported conflicts. Then run `make` to link the current OS layer into your home directory, download the supported tools, and install kache if it is missing. On macOS, `make` runs `macos/setup-macos brew packages` every time. That command installs Homebrew and any missing Brewfile packages. On glibc Linux, also run `setup-mold`; musl builds expect mold at `/usr/local/libexec/mold`.
 
 See [sync details](docs/sync.md) for what `make` changes and how the layers work.
 

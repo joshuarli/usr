@@ -288,6 +288,19 @@ fi
 
 export PATH="$cargo_bin:$PATH"
 
+if [ "$os" = Darwin ]; then
+    for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        if [ -x "$brew_bin" ]; then
+            rustup_prefix=$("$brew_bin" --prefix rustup 2>/dev/null || :)
+            if [ -n "$rustup_prefix" ] && [ -x "$rustup_prefix/bin/rustup" ]; then
+                PATH="$rustup_prefix/bin:$PATH"
+                break
+            fi
+        fi
+    done
+fi
+export PATH
+
 # Ensure the preferred nightly toolchain exists with rust-src (matches
 # rust-toolchain.toml files that pin channel + rust-src component).
 if ! rustup toolchain list 2>/dev/null | grep -q "^${nightly}"; then
@@ -299,19 +312,23 @@ quiet rustup run "$nightly" rustc -vV
 # Cargo config first (idempotent, preserves user content), then init for the
 # daemon/service plus its own validation of the wrapper setup.
 ensure_cargo_config
-quiet kache init --yes
+quiet kache init --yes --no-shell
 quiet kache install-shims
 # Init may preserve a previously configured path; normalize it after shims exist.
 ensure_cargo_config
 
-# Doctor must pass on this machine.
-quiet kache doctor
+check_doctor() {
+    doctor_out=$("$@" 2>&1) || { printf '%s\n' "$doctor_out" >&2; die "kache doctor failed: $*"; }
+    printf '%s\n' "$doctor_out" | grep -Eq '"issues"[[:space:]]*:[[:space:]]*0([,}]|$)' \
+        || { printf '%s\n' "$doctor_out" >&2; die "kache doctor reported issues: $*"; }
+}
+
+check_doctor kache doctor --json
 
 # Doctor must also see the preferred nightly when run under it. This is the
 # check that matters for rust-toolchain.toml pins: the wrapper binary (built
 # from the prebuilt release) has to interoperate with nightly rustc.
-doctor_out=$(rustup run "$nightly" kache doctor 2>&1) || die "kache doctor failed under $nightly"
-printf '%s\n' "$doctor_out" | grep -q "1.0" || die "unexpected doctor output under $nightly"
+check_doctor rustup run "$nightly" kache doctor --json
 
 # End-to-end probe: fresh cargo project pinned to the nightly via
 # rust-toolchain.toml (same mechanism as the user's projects), built once

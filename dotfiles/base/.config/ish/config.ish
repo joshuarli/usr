@@ -51,6 +51,7 @@ alias gdc git dc
 alias gl  git l
 alias gp  git push -u
 alias grv git remote -v
+alias gs  git status -sb -uall
 
 alias tl tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" ls
 alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s

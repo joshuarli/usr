@@ -1,5 +1,4 @@
 [build]
-rustdoc = ".local/lib/kache/shims/rustdoc"
 rustc-wrapper = "kache"
 
 [env]

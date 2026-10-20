@@ -4,7 +4,7 @@
 
 Each relative path can belong to one layer. The `layers` target rejects duplicate claims before sync. `sym` creates relative symlinks for files. A directory with a `.sym-dir` marker is linked as one unit. Git ignore rules determine which files `sym` sees.
 
-Run `make plan` to preview the links. It does not run `dl`. A `CONFLICT` means the target contains a path that `sym` cannot safely replace. Resolve it before syncing. `make` runs `dl` and then applies each layer. If a download fails, sync still runs and `make` returns a failure. The `TARGET` variable changes the symlink destination; `dl` still installs into `$HOME/.local/bin`.
+Run `make plan` to preview the links. It does not run `dl`. A `CONFLICT` means the target contains a path that `sym` cannot safely replace. Resolve it before syncing. `make` applies each layer before running `dl`, so installers see managed configuration in place. If a download fails, the links remain synced and `make` returns a failure. The `TARGET` variable changes the symlink destination; `dl` still installs into `$HOME/.local/bin`.
 
 Run `make uninstall` to remove the layer links and paths recorded by `make` while installing tools. The ownership list lives at `${XDG_STATE_HOME:-$HOME/.local/state}/make/dl-owned`. `make` records layer links and parent directories only when it creates them, along with tool paths it installs or confirms as current from install records. Before uninstalling, `dl` also adopts existing downloads with ETag records. Pre-existing or older unrecorded layer links and older Claude, Muse, or Antigravity launchers without ownership records are left in place; untracked native launchers are reported. If `make` installed kache, the target runs kache's uninstaller with `--purge` to remove its cache and setup.
 
@@ -28,5 +28,5 @@ The repository's `bin` symlink points to `~/.local/bin`, where tracked scripts a
 
 Deleting a source file leaves its home-directory symlink dangling. Remove that link too, or run `sh dotfiles/sym -d` on the layer before deleting the source. To experiment with `sym`, pass a scratch target with `-t`; without it, `sym` targets `$HOME`.
 
-The `macos/` directory is not part of the layer sync. `make` installs Homebrew and the Brewfile packages before setting up kache when kache is missing. Run `macos/setup-macos` by hand for Touch ID for `sudo` and local DNS. Run `macos/macos lean` to audit or converge selected services and system preferences. It is never part of the default setup.
+The `macos/` directory is not part of the layer sync. Every macOS run of `make` invokes `macos/setup-macos brew packages`, which installs Homebrew and missing Brewfile packages. `make` sets up kache if kache is missing. Run `macos/setup-macos touchid dns` by hand to configure Touch ID for `sudo` and local DNS. Run `macos/macos lean` to audit or converge selected system preferences. Lean is never part of the default setup.
 
