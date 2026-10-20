@@ -399,7 +399,8 @@ def find_sites(names):
             if not m: continue
             root = name[:m.start()].rstrip("/")
             if "node_modules" in root.split("/"): continue
-            join = lambda b: "/".join(x for x in (root, b) if x)
+            def join(base, root=root):
+                return "/".join(x for x in (root, base) if x)
             sites[root] = Site(kind, root, tuple(join(b) for b in bases), tuple(join(b) for b in assets))
     return sites
 
@@ -577,7 +578,7 @@ def rst_link_findings(root, file, text, all_files, file_case, content):
         if entry == "self" or "*" in entry or not local(entry): continue
         if not resolve_doc(file, entry, exists):
             add(out, "L001", "error", file, n, col, "toctree entry does not exist", entry)
-    body = "\n".join("" if RST_TARGET.match(l) or re.match(r"^\s*\.\.\s+\|", l) else l for l in clean)
+    body = "\n".join("" if RST_TARGET.match(line) or re.match(r"^\s*\.\.\s+\|", line) else line for line in clean)
     starts = [0] + [i + 1 for i, c in enumerate(body) if c == "\n"]
 
     def where(offset):
@@ -850,7 +851,8 @@ def link_findings(root, files, content, tracked=None):
         lines, clean = visible_lines(text)
         defs = {}
         refs_used = Counter()
-        label_key = lambda value: " ".join(value.split()).casefold()
+        def label_key(value):
+            return " ".join(value.split()).casefold()
         definitions = {}
         for n, line in enumerate(clean, 1):
             d = re.match(r"^\s{0,3}\[([^]]+)\]:(?:\s*(?:<([^>]+)>|(\S+)))?", line)
@@ -1215,7 +1217,7 @@ def ref_findings(files, content, tracked=None, root=None):
         start = len(out)
         source_lines = content[file].splitlines()
         created = set()
-        for n, col, token, shell_line in spans:
+        for n, col, _token, shell_line in spans:
             ctx = source_lines[n - 1] if n <= len(source_lines) else ""
             if shell_line:
                 if foreign: elsewhere.setdefault(n, "the skill may run in another repo")
@@ -1238,7 +1240,7 @@ def ref_findings(files, content, tracked=None, root=None):
             if not shell_line and len(words) == 1 and (words[0][:1] in "'\"" or re.fullmatch(r"\./[\w.-]+", words[0])):
 
                 invoked = []
-            for i, word in enumerate(words):
+            for word in words:
                 if word.strip("'\"") in invoked: continue
                 if "=" in word: word = word.split("=", 1)[1]
                 elif word.startswith("-"): continue
@@ -1465,7 +1467,8 @@ def pointer_findings(files, content, labels=()):
         here = PurePosixPath(file).parent
         for n, comment in comment_blocks(file, text):
             breaks = [i for i, c in enumerate(comment) if c == "\n"] if "\n" in comment else []
-            at = lambda pos: n + bisect_right(breaks, pos - 1)
+            def line_at_offset(pos, start_line=n, line_breaks=breaks):
+                return start_line + bisect_right(line_breaks, pos - 1)
             for m in DOC_POINTER.finditer(comment):
                 target = m.group().rstrip("./")
                 start = max(comment.rfind(" ", 0, m.start()), comment.rfind("\n", 0, m.start())) + 1
@@ -1473,7 +1476,7 @@ def pointer_findings(files, content, labels=()):
 
                 if re.search(r"://|[*{}$<>]", token) or token.startswith(("/", "~")): continue
                 beside = os.path.normpath(str(here / target)).replace("\\", "/")
-                line = at(m.start())
+                line = line_at_offset(m.start())
                 if target in tracked or beside in tracked:
                     add(out, "P001", "note", file, line, 1, "comment points to repository documentation", target)
                 elif "/" not in target:
@@ -1490,12 +1493,12 @@ def pointer_findings(files, content, labels=()):
 
                 context = comment if m.group().startswith("§") else sentence_around(comment, m.start(), m.end())
                 if quoted or STANDARD.search(context): continue
-                add(out, "P002", "warn", file, at(m.start()), 1, "comment points to a numbered section", " ".join(m.group().split()))
+                add(out, "P002", "warn", file, line_at_offset(m.start()), 1, "comment points to a numbered section", " ".join(m.group().split()))
             for m in PLAN_LABEL.finditer(comment):
                 if PLAN_WORDS.search(sentence_around(comment, m.start(), m.end())):
-                    add(out, "P003", "warn", file, at(m.start()), 1, "comment uses a planning label", m.group())
+                    add(out, "P003", "warn", file, line_at_offset(m.start()), 1, "comment uses a planning label", m.group())
             for m in (custom_re.finditer(comment) if custom_re else ()):
-                add(out, "P003", "warn", file, at(m.start()), 1, "comment uses a planning label", m.group())
+                add(out, "P003", "warn", file, line_at_offset(m.start()), 1, "comment uses a planning label", m.group())
     return out
 
 
@@ -1574,7 +1577,8 @@ def dup_findings(files, content, code=False):
 def router_findings(files, content, max_lines=150, tracked=None):
     out=[]
 
-    shallow = lambda paths: min(paths, key=lambda p: (p.count("/"), p), default=None)
+    def shallow(paths):
+        return min(paths, key=lambda path: (path.count("/"), path), default=None)
     agents = shallow([p for p in files if Path(p).name == "AGENTS.md"])
     readme = shallow([p for p in files if Path(p).name.lower() in README_NAMES])
     docs = [p for p in files if p.startswith("docs/") and markdown(p) and p in content]
@@ -1585,8 +1589,8 @@ def router_findings(files, content, max_lines=150, tracked=None):
     if len(at.splitlines()) > max_lines:
         add(out,"T002","note",agents,max_lines+1,1,"AGENTS.md exceeds the line limit",str(len(at.splitlines())))
     _raw, lines = visible_lines(at)
-    lines = [l if l or not r.strip() else "\0" for r, l in zip(_raw, lines)]
-    titles = sum(1 for l in lines if re.match(r"^#\s+", l))
+    lines = [line if line or not raw.strip() else "\0" for raw, line in zip(_raw, lines)]
+    titles = sum(1 for line in lines if re.match(r"^#\s+", line))
     for i,line in enumerate(lines):
         heading=re.match(r"^(#{1,6})\s+(.+)",line)
         if not heading or re.search(r"\b(map|layout)\b",heading.group(2),re.I): continue
@@ -1607,7 +1611,8 @@ def router_findings(files, content, max_lines=150, tracked=None):
     for source in sources:
         text=content[source]
         candidates=[]
-        line_of=lambda offset: text.count("\n",0,offset)+1
+        def line_of(offset, source_text=text):
+            return source_text.count("\n", 0, offset) + 1
         for m in re.finditer(r"\[[^]]*\]\(([^)#]+)(?:#[^)]*)?\)|`((?:docs/)?[^`]+\.(?:mdx?|markdown|rst))`",text):
 
             if m.group(2) and "/" not in m.group(2): continue
@@ -1644,7 +1649,8 @@ def router_findings(files, content, max_lines=150, tracked=None):
 
     site_dirs=sorted({b for site in find_sites(set(files) | set(tracked or ())).values() for b in site.bases if b.startswith("docs/") or b=="docs"}
                      | {src for src,*_ in sphinx_projects(content) if src.startswith("docs")}, key=len, reverse=True)
-    site_of_doc=lambda doc: next((d for d in site_dirs if doc.startswith(d+"/")), None)
+    def site_of_doc(doc):
+        return next((directory for directory in site_dirs if doc.startswith(directory + "/")), None)
     routed_sites={site_of_doc(t) for t in targets} | {t for t in targets if t in site_dirs}
     unlinked=[]
     for doc in docs:
@@ -1764,7 +1770,7 @@ def drop_ignored(root, findings):
         p = subprocess.CompletedProcess(p.args, 0, out, b"")
     ignored = {x.decode("utf-8", "surrogateescape") for x in p.stdout.split(b"\0") if x}
     ignored |= {x.rstrip("/") for x in ignored}
-    return [f for f in findings if not ((ignored_key(f) or "\0").rstrip("/") in ignored)]
+    return [f for f in findings if (ignored_key(f) or "\0").rstrip("/") not in ignored]
 
 
 def managed_skills(root, content):
