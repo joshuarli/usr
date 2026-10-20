@@ -126,89 +126,6 @@ step_touchid() {
     esac
 }
 
-unbound_conf() {
-    threads=$(sysctl -n hw.physicalcpu)
-    slabs=1
-    while [ "$slabs" -lt "$threads" ]; do slabs=$((slabs * 2)); done
-    cat <<EOF
-server:
-    # ── Interface ───────────────────────────────────────────────────────────────
-    interface: 127.0.0.1
-    interface: ::1
-    port: 53
-    do-ip4: yes
-    do-ip6: yes
-    do-udp: yes
-    do-tcp: yes
-
-    # ── Access control ──────────────────────────────────────────────────────────
-    access-control: 0.0.0.0/0 refuse
-    access-control: ::0/0 refuse
-    access-control: 127.0.0.0/8 allow
-    access-control: ::1 allow
-
-    # ── Identity ────────────────────────────────────────────────────────────────
-    hide-identity: yes
-    hide-version: yes
-    username: ""  # don't drop priv
-
-    # ── No DNSSEC, no qname minimisation ────────────────────────────────────────
-    qname-minimisation: no
-
-    # ── Cache ───────────────────────────────────────────────────────────────────
-    cache-min-ttl: 300          # ignore TTLs under 5 min, stops cache thrashing
-    cache-max-ttl: 86400
-    cache-max-negative-ttl: 30
-    prefetch: yes               # refresh records before expiry in background
-    neg-cache-size: 8m
-
-    # ── Serve stale ─────────────────────────────────────────────────────────────
-    # answer instantly from cache while refreshing in background
-    serve-expired: yes
-    serve-expired-ttl: 86400
-    serve-expired-reply-ttl: 30
-
-    # ── Threading (one thread per physical core, slabs a power of two) ──────────
-    num-threads: $threads
-    msg-cache-slabs: $slabs
-    rrset-cache-slabs: $slabs
-    infra-cache-slabs: $slabs
-    key-cache-slabs: $slabs
-
-    # ── Memory ──────────────────────────────────────────────────────────────────
-    msg-cache-size: 64m
-    rrset-cache-size: 128m
-
-    # ── Network buffers ─────────────────────────────────────────────────────────
-    so-rcvbuf: 4m
-    so-sndbuf: 4m
-    edns-buffer-size: 1472      # 1500 MTU - 28 byte headers, avoids fragmentation
-
-    # ── Misc ────────────────────────────────────────────────────────────────────
-    minimal-responses: yes
-    rrset-roundrobin: yes
-
-    # ── DNS rebinding protection ────────────────────────────────────────────────
-    private-address: 10.0.0.0/8
-    private-address: 172.16.0.0/12
-    private-address: 192.168.0.0/16
-    private-address: 169.254.0.0/16
-    private-address: fd00::/8
-    private-address: fe80::/10
-
-    # ── Logging ─────────────────────────────────────────────────────────────────
-    verbosity: 0
-    log-queries: no
-    log-replies: no
-
-# ── Forward all queries to Cloudflare ───────────────────────────────────────────
-forward-zone:
-    name: "."
-    forward-addr: 1.1.1.1
-    forward-addr: 1.0.0.1
-EOF
-}
-
 resolver_answers() {
     [ -n "$(dig +time=2 +tries=1 +short @127.0.0.1 example.com 2>/dev/null)" ]
 }
@@ -229,15 +146,69 @@ dns_servers() {
 
 dns_wanted='127.0.0.1'
 
+ensure_macos_unbound_account() {
+    user=$1
+    case $user in
+        ''|*[!A-Za-z0-9_-]*) die "invalid Unbound account name: $user" ;;
+    esac
+
+    uid=$(dscl . -list /Users UniqueID | awk -v account="$user" '$1 == account { print $2; exit }')
+    if [ -n "$uid" ]; then
+        shell=$(dscl . -read "/Users/$user" UserShell | sed 's/^UserShell: //')
+        case $uid in *[!0-9]*) die "invalid uid for Unbound account $user" ;; esac
+        [ "$uid" -gt 0 ] && [ "$uid" -lt 500 ] && [ "$shell" = /usr/bin/false ] \
+            || die "existing account $user is not an unprivileged service account"
+        return
+    fi
+
+    if $dry; then
+        account_will_be_created=true
+        info "Would create the Unbound service account $user"
+        return
+    fi
+
+    uid=$(dscl . -list /Users UniqueID | awk '$2 ~ /^[0-9]+$/ { used[$2] = 1 } END { for (candidate = 300; candidate < 500; candidate++) if (!(candidate in used)) { print candidate; exit } }')
+    [ -n "$uid" ] || die "no free macOS service uid between 300 and 499"
+    info "Creating the Unbound service account $user"
+    need_sudo
+    act sudo dscl . -create "/Users/$user"
+    act sudo dscl . -create "/Users/$user" RealName "Unbound DNS"
+    act sudo dscl . -create "/Users/$user" UniqueID "$uid"
+    act sudo dscl . -create "/Users/$user" PrimaryGroupID 1
+    act sudo dscl . -create "/Users/$user" NFSHomeDirectory /var/empty
+    act sudo dscl . -create "/Users/$user" UserShell /usr/bin/false
+    act sudo dscl . -create "/Users/$user" Password '*'
+    act sudo dscl . -create "/Users/$user" IsHidden 1
+    act sudo dscl . -create "/Users/$user" GeneratedUID "$(uuidgen)"
+    [ "$(id -u "$user")" = "$uid" ] || die "failed to create the Unbound account $user"
+}
+
 step_dns() {
     find_brew || die "Homebrew is missing; run: setup-macos brew"
     conf_dir="$(brew --prefix)/etc/unbound"
     conf=$conf_dir/unbound.conf
     [ -d "$conf_dir" ] || die "$conf_dir not found; run: setup-macos packages"
+    conf_source=$here/../dns/unbound.conf
+    [ -f "$conf_source" ] || die "shared Unbound config is missing: $conf_source"
 
     new=$(mktemp "${TMPDIR:-/tmp}/unbound.conf.XXXXXX")
     trap 'rm -f "$new"' 0
-    unbound_conf > "$new"
+    cp "$conf_source" "$new"
+    unbound_user=$(unbound-checkconf -o username "$new")
+    [ -n "$unbound_user" ] || die "Unbound has no privilege-drop account configured"
+    account_will_be_created=false
+    ensure_macos_unbound_account "$unbound_user"
+    if $account_will_be_created; then
+        info "Would validate the config after creating $unbound_user"
+    else
+        unbound-checkconf "$new"
+    fi
+    unbound_chroot=$(unbound-checkconf -o chroot "$new")
+    if [ -n "$unbound_chroot" ]; then
+        info "Unbound will run as $unbound_user with chroot $unbound_chroot"
+    else
+        info "Unbound will run as $unbound_user without a package chroot"
+    fi
 
     changed=false
     if cmp -s "$new" "$conf"; then

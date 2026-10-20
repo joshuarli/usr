@@ -1,0 +1,166 @@
+#!/bin/sh
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+conf_source=$here/dns/unbound.conf
+resolv_source=$here/dns/resolv.conf
+conf=/etc/unbound/unbound.conf
+resolv_conf=/etc/resolv.conf
+prog=${0##*/}
+staged_resolv=
+
+die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+info() { printf '%s: %s\n' "$prog" "$*"; }
+
+cleanup_staged_resolv() {
+    if [ -n "$staged_resolv" ]; then
+        as_root rm -f "$staged_resolv" >/dev/null 2>&1 || :
+    fi
+}
+
+trap cleanup_staged_resolv 0
+
+if [ "$(uname -s)" != Linux ]; then
+    die "Linux only"
+fi
+
+[ -r /etc/os-release ] || die "/etc/os-release is missing"
+os_id=$(awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release)
+[ -n "$os_id" ] || os_id=unknown
+
+package_manager=
+for candidate in apk apt-get dnf yum pacman zypper xbps-install emerge; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        package_manager=$candidate
+        break
+    fi
+done
+[ -n "$package_manager" ] || die "no supported package manager found"
+info "Detected $os_id Linux with $package_manager"
+
+[ "$os_id" = alpine ] || die "installation is currently supported only on Alpine Linux"
+[ "$package_manager" = apk ] || die "Alpine Linux requires apk"
+[ -f "$conf_source" ] || die "shared Unbound config is missing: $conf_source"
+[ -f "$resolv_source" ] || die "shared resolver config is missing: $resolv_source"
+
+as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    elif command -v doas >/dev/null 2>&1; then
+        doas "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        die "run as root or install doas or sudo"
+    fi
+}
+
+if apk info -e unbound >/dev/null 2>&1 \
+    && apk info -e unbound-openrc >/dev/null 2>&1 \
+    && apk info -e ca-certificates >/dev/null 2>&1; then
+    info "Unbound and its OpenRC service are installed"
+else
+    info "Installing Unbound, its OpenRC service, and CA certificates"
+    as_root apk add --interactive=no unbound unbound-openrc ca-certificates
+fi
+
+command -v unbound-checkconf >/dev/null 2>&1 || die "unbound-checkconf is missing after installation"
+command -v rc-service >/dev/null 2>&1 || die "OpenRC rc-service is missing"
+command -v rc-update >/dev/null 2>&1 || die "OpenRC rc-update is missing"
+command -v nslookup >/dev/null 2>&1 || die "nslookup is required to verify DNS"
+
+config_changed=false
+if cmp -s "$conf_source" "$conf"; then
+    info "$conf is up to date"
+else
+    config_changed=true
+    info "Installing $conf"
+    as_root install -o root -g root -m 644 "$conf_source" "$conf"
+fi
+
+unbound-checkconf "$conf"
+unbound_user=$(unbound-checkconf -o username "$conf")
+[ -n "$unbound_user" ] || die "Unbound has no privilege-drop account configured"
+unbound_uid=$(id -u "$unbound_user") || die "Unbound account does not exist: $unbound_user"
+unbound_account=$(awk -F: -v account="$unbound_user" '$1 == account { print $3 ":" $7; exit }' /etc/passwd)
+[ -n "$unbound_account" ] || die "Unbound account is not a local system account: $unbound_user"
+account_uid=${unbound_account%%:*}
+account_shell=${unbound_account#*:}
+[ "$unbound_uid" = "$account_uid" ] || die "Unbound account lookup does not match /etc/passwd"
+[ "$unbound_uid" -gt 0 ] && [ "$unbound_uid" -lt 1000 ] || die "Unbound must use an unprivileged system account"
+case $account_shell in
+    /sbin/nologin|/usr/sbin/nologin|/bin/false|/usr/bin/false) ;;
+    *) die "Unbound account must have a disabled login shell: $account_shell" ;;
+esac
+unbound_chroot=$(unbound-checkconf -o chroot "$conf")
+if [ -n "$unbound_chroot" ]; then
+    info "Unbound will run as $unbound_user with chroot $unbound_chroot"
+else
+    info "Unbound will run as $unbound_user without a package chroot"
+fi
+
+as_root rc-update add unbound default
+if rc-service unbound status >/dev/null 2>&1; then
+    if $config_changed; then
+        as_root rc-service unbound restart
+    else
+        info "Unbound is already running"
+    fi
+else
+    as_root rc-service unbound start
+fi
+
+attempt=1
+unbound_ready=false
+while [ "$attempt" -le 10 ]; do
+    if nslookup -type=A example.com 127.0.0.1; then
+        info "Unbound answered a localhost DNS query"
+        unbound_ready=true
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+done
+$unbound_ready || die "Unbound did not resolve example.com through 127.0.0.1"
+
+command -v lsattr >/dev/null 2>&1 || die "lsattr is required to verify $resolv_conf"
+[ ! -L "$resolv_conf" ] || die "$resolv_conf is a symlink; replace it with a regular file before setup"
+if [ -e "$resolv_conf" ] && [ ! -f "$resolv_conf" ]; then
+    die "$resolv_conf is not a regular file"
+fi
+
+resolv_flags=
+if [ -e "$resolv_conf" ]; then
+    resolv_flags=$(as_root lsattr -d "$resolv_conf" | awk 'NR == 1 { print $1 }')
+    [ -n "$resolv_flags" ] || die "could not read attributes for $resolv_conf"
+    case $resolv_flags in
+        *i*)
+            command -v chattr >/dev/null 2>&1 || die "chattr is required to make $resolv_conf writable"
+            as_root chattr -i "$resolv_conf"
+            info "Removed the immutable flag from $resolv_conf"
+            ;;
+    esac
+fi
+
+if cmp -s "$resolv_source" "$resolv_conf"; then
+    info "$resolv_conf already points to Unbound"
+else
+    staged_resolv=$(as_root mktemp /etc/.resolv.conf.XXXXXX)
+    as_root install -o root -g root -m 644 "$resolv_source" "$staged_resolv"
+    if ! as_root mv -f "$staged_resolv" "$resolv_conf"; then
+        die "could not replace $resolv_conf"
+    fi
+    staged_resolv=
+    info "Installed localhost DNS in writable $resolv_conf"
+fi
+
+resolv_flags=$(as_root lsattr -d "$resolv_conf" | awk 'NR == 1 { print $1 }')
+case $resolv_flags in
+    *i*) die "$resolv_conf is still immutable" ;;
+esac
+
+if nslookup -type=A example.com; then
+    info "System DNS resolved example.com through Unbound"
+else
+    die "system DNS did not resolve example.com through Unbound"
+fi
