@@ -15,7 +15,11 @@ sync: layers
 	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
 	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || status=$$?; \
 	brew_status=0; \
-	if [ "$(OS)" = darwin ]; then sh macos/setup-macos brew packages || { brew_status=$$?; [ $$status -ne 0 ] || status=$$brew_status; }; fi; \
+	if [ "$(OS)" = darwin ]; then TMPDIR="$(DL_TMPDIR)" sh macos/setup-macos brew packages dns || { brew_status=$$?; [ $$status -ne 0 ] || status=$$brew_status; }; fi; \
+	if [ "$(OS)" = linux ] && [ -r /etc/os-release ]; then \
+		. /etc/os-release; \
+		if [ "$${ID:-}" = alpine ]; then TMPDIR="$(DL_TMPDIR)" sh setup-linux || status=$$?; fi; \
+	fi; \
 	if [ ! -x "$(KACHE)" ]; then \
 		if [ "$(OS)" != darwin ] || [ $$brew_status -eq 0 ]; then \
 			if [ "$(OS)" = darwin ]; then PATH="/opt/homebrew/bin:/usr/local/bin:$$PATH" TMPDIR="$(DL_TMPDIR)" sh dotfiles/base/.local/bin/setup-kache </dev/null || status=$$?; else \
