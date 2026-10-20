@@ -6,7 +6,7 @@
 # usage: setup-macos [-n] [STEP...]
 #   -n      report what would change and change nothing
 #   STEP    brew        install Homebrew if missing
-#           packages    install the packages listed in brewfile() below
+#           packages    install the packages listed in macos/Brewfile
 #           touchid     Touch ID for sudo, working inside tmux
 #           dns         unbound as a local caching resolver, and point the system at it
 #                       To undo: networksetup -setdnsservers SERVICE Empty
@@ -30,27 +30,6 @@ act() {
 # need_sudo  Ask for the password once, up front, before a step that needs it.
 need_sudo() {
     $dry || sudo -v
-}
-
-# ── packages ──────────────────────────────────────────────────────────────────
-# The Brewfile lives here so there is one file to copy to a new Mac.
-brewfile() {
-    cat <<'EOF'
-cask "font-hack"
-
-brew "git"
-brew "rustup"
-brew "prek"
-brew "pstree"
-brew "hyperfine"
-brew "shellcheck"
-
-# touchid step
-brew "pam-reattach"
-
-# dns step
-brew "unbound"
-EOF
 }
 
 # ── steps ─────────────────────────────────────────────────────────────────────
@@ -77,16 +56,16 @@ step_brew() {
 
 step_packages() {
     find_brew || die "Homebrew is missing; run: setup-macos brew"
-    if brewfile | brew bundle check --file=- >/dev/null 2>&1; then
+    if brew bundle check --file="$here/Brewfile" >/dev/null 2>&1; then
         info "Packages are installed"
         return
     fi
     info "Installing packages"
     if $dry; then
-        brewfile | brew bundle check --file=- --verbose 2>&1 | sed 's/^/   /' || true
+        brew bundle check --file="$here/Brewfile" --verbose 2>&1 | sed 's/^/   /' || true
         return
     fi
-    brewfile | brew bundle --file=-
+    brew bundle --file="$here/Brewfile"
 }
 
 # The module is copied out of Homebrew's tree because root's sudo loads it, and everything

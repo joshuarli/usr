@@ -227,6 +227,9 @@ trust_level = "trusted"
 [projects."/Users/josh/dev/getsentry"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/rustybench"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]

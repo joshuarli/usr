@@ -1,0 +1,10 @@
+cask "font-hack"
+
+brew "git"
+brew "rustup"
+brew "prek"
+brew "pstree"
+brew "hyperfine"
+brew "shellcheck"
+brew "pam-reattach"
+brew "unbound"

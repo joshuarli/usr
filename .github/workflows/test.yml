@@ -9,12 +9,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Remove preinstalled Homebrew
+      - name: Remove preinstalled Brewfile packages
         shell: bash
         run: |
-          if [[ -x /opt/homebrew/bin/brew || -x /usr/local/bin/brew ]]; then
-            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)" -- --force
-          fi
+          brew=/opt/homebrew/bin/brew
+          [[ -x "$brew" ]] || brew=/usr/local/bin/brew
+          [[ -x "$brew" ]]
+          while IFS= read -r package; do
+            if "$brew" list --formula --versions "$package" >/dev/null 2>&1; then
+              "$brew" uninstall --force --ignore-dependencies --formula "$package"
+            fi
+          done < <("$brew" bundle list --file=macos/Brewfile --formula)
+          while IFS= read -r package; do
+            if "$brew" list --cask --versions "$package" >/dev/null 2>&1; then
+              "$brew" uninstall --force --cask "$package"
+            fi
+          done < <("$brew" bundle list --file=macos/Brewfile --cask)
 
       - name: Run make with a fresh home
         shell: bash
