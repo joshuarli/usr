@@ -23,6 +23,7 @@ Close the tickets in `TODO.md` unattended, in priority order, one commit each. D
   - **Any other P3 or P4:** the normal row (`worker`; `gpt-6-luna`, `xhigh`).
   - A ticket whose `Recommendation` offers a choice ("A or B") is not mechanical. Park it if the choice is the owner's, otherwise use the normal row.
 - **Attempts escalate.** A lane gets two attempts at its tier, the second briefed with the integrator's rejection and the command output. A third attempt runs one row up. After that the ticket parks with the failures reported. Never skip a row, and never go above the difficult row for P3 and P4.
+- **Steer the backlog.** Apply the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint) without changing ticket priority, commit authority, or required per-ticket checks. Bound prepared work by integration capacity. A shared missing prerequisite gets one owner and a retry condition, not fresh attempts from every ticket. An unchanged environment or permission failure does not trigger the model-escalation rule.
 - **A lane never writes `TODO.md`.** It reports the diff, the narrowest checks it ran, and any defect it found outside its ticket.
 - **The integrator checks every lane, at every tier, before committing.** The lane's report is a claim, not evidence. For each lane, in the priority order above:
   1. Read the whole diff against the ticket's `Recommendation`. Reject edits outside the ticket's `Where` files, unrelated cleanups, new dependencies the brief did not name, and a weakened or deleted test.
@@ -37,8 +38,8 @@ Close the tickets in `TODO.md` unattended, in priority order, one commit each. D
 ## Steps
 
 1. Read `AGENTS.md` and `TODO.md`. Sort the tickets by priority, then ID, and sort each into run or park.
-2. Cut the branch and prepare the lanes, then launch them in priority order as wide as ownership and the machine allow.
-3. Integrate each report as above. Run a wider check only at the end, for an area the tickets crossed, and report it first.
+2. Cut the branch and prepare the lanes, then launch them in priority order within ownership, machine, and integration-capacity limits.
+3. Integrate each report as above. Run broader checks at bounded integration milestones for areas the tickets cross and at the end, reporting their scope first. Keep the per-ticket focused proof above; do not mark a ticket globally verified while its required milestone is pending.
 4. File the new tickets, then confirm `TODO.md` holds only parked and new tickets.
 
 **The test:** `git log` shows exactly one commit for each closed ID, each containing that ticket's removal and a `Closes` footer, in priority order, and no ticket both stays and has a commit.

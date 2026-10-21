@@ -13,10 +13,10 @@ An execution-ready plan records an authority boundary; it does not authorize the
 ## The bar
 
 - **Unattended.** No question is left for runtime. Every decision is made in the doc, or delegated with a bound and a tie-break, so the executor has judgment inside the bounds and nothing to wait for. It stops only when every deliverable is met or every remaining item is parked behind a hard stop.
-- **Parity first, optimization last.** Feature-completeness and test parity come first, because a campaign that polishes before it works is too slow. Optimization, size, and polish items are the final phases, and until then performance budgets are measured and logged, not gating.
+- **Parity first, optimization last.** Feature-completeness and test parity come first, because a campaign that polishes before it works is too slow. Optimization, size, and polish items are the final phases, and until then product-performance budgets are measured and logged, not gating unless the owner requires them. Repairs to the execution loop may happen earlier when needed for useful delivery, with a bounded exit test.
 - **Autonomy with a floor.** The executor makes the judgment calls and logs each. It also fixes anything egregiously slow or plainly broken that it meets, to thresholds the doc states in numbers.
 - **Checkable.** Every deliverable has a proof an agent can run, and "done" never waits on the owner.
-- **Saturated.** The doc states the lane-count floor and the machine limits that bound it, tells the executor to replace or resume a stopped lane in the same turn, to overlap integration with the next wave, and to parallelize verification on disjoint inputs (see the campaigns reference, "Keep every stage busy"). An owner prompt to add lanes or stagger work means the doc failed this bar.
+- **Actively steered.** The doc invokes the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint) at bounded milestones and on drift. It names substantive progress, the next delivery, provisional-work limits, and authority to revise agent-chosen methods while preserving owner requirements. Width follows the limiting stage and shared resources, not a saturation floor. A coordinator must correct an unproductive method before the owner has to notice it.
 
 ## Rules
 
@@ -36,13 +36,13 @@ For each area the campaign touches, load the skill and ask what decisions it wou
 
 | Area | Skill | Pre-answer |
 | --- | --- | --- |
-| Lanes, waves, ownership, merges | `orchestrate` | Workstreams, prerequisites across them, files each lane owns, who integrates and verifies |
+| Lanes, waves, ownership, steering | `orchestrate` | Workstreams, prerequisites, owned files, acceptance capacity, parent checkpoints, and who may revise methods |
 | Parity with a reference | `reference-parity` | The reference, and the behaviors and corpus that cover it |
 | Failures | `root-cause` | The executor's rule for a failing item: cause before retry |
 | Optimization | `make-it-fast`, `benchmark-checklist` | What is measured, how, against what baseline, and the targets |
 | Cleanup | `dead-code-archaeology` | What is deleted at the end and how liveness is proven |
 | Repeat failures | `correct` | Guards for mistakes the campaign is likely to repeat |
 
-**The test:** an agent with only this doc and the repo can run from the first item to the last without asking a question, and cannot reach a point where it works on optimization while a feature or a parity test is missing.
+**The test:** an agent with only this doc and the repo can execute within authority, recognize when activity has stopped producing substantive progress, and correct the method without waiving proof. Optional product optimization cannot displace missing features or parity tests; bounded loop repairs must return to delivery.
 
 **Report:** the verdict; the owner's answers and the decisions you prescribed, so the owner can overrule them; the loop timings; what you cut or moved to optimization; any material source requirement you superseded and why; what you could not verify; and the one-line prompt to launch the executor on the doc.

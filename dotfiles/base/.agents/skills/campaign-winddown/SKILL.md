@@ -34,9 +34,10 @@ Run each check and fix what fails. Do not report from memory.
 
 Replace any earlier one, placed directly under the header with status `paused <date>`:
 
-- **Resume:** the one-line prompt that restarts the executor on the doc, and the first command to run.
-- **State:** the campaign branch, what merged this session, and the known red on it.
-- **Open lanes:** for each unmerged branch, its item IDs, its state (`parked` with the finding, or `wip` with what remains), and the next step. Worktrees are recreated at `.work/wt/<lane>` from the branch.
+- **Resume:** the one-line prompt and first command. Before dispatch, re-read current instructions and perform the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint); do not blindly resume the old queue or rebaseline unchanged inputs.
+- **State:** the branch, last accepted revision, provisional commits awaiting proof, what merged, and known red. A clean checkout or completed measurement does not mean accepted or completed work.
+- **Direction:** substantive progress since the last checkpoint, the limiting stage, current ruling and superseded tactics, next delivery, and next steering checkpoint. Keep owner requirements and authority explicit.
+- **Open lanes:** for each unmerged branch, its item IDs, its state (`parked` with the finding, or `wip` with what remains), the prerequisite or condition that permits a retry, and the next step. Worktrees are recreated at `.work/wt/<lane>` from the branch.
 - **Cleanup:** how many worktrees were removed, disk space recovered, where preserved logs/caches/artifacts remain, and each remaining non-baseline worktree's path, branch or HEAD, clean status, and concrete consumer. Record parked branches so their checkouts can be recreated.
 - **Not started:** the next items in order, and the decisions the owner owes.
 - **Verified:** the audit checks that passed, and anything that could not be checked.

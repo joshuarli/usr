@@ -5,7 +5,7 @@ description: "Route substantial, routine, mechanical, exploratory, or context-he
 
 # Orchestrate
 
-Delegate when specification and verification cost less than doing the work locally. Keep the parent responsive and responsible for integration and final verification.
+Delegate when specification and verification cost less than doing the work locally. The parent owns direction, integration, and final verification; delegating execution does not delegate that accountability.
 
 ## Routing
 
@@ -59,15 +59,16 @@ The DeepSeek TUI column is the only permitted model and effort route for DSH ski
 
 Delegate coherent component-sized work; do not delegate a one-command or one-edit task when the handoff costs more than doing it locally. Batch related trivial work into one assignment. When one script or codemod can apply the change to every unit in a single pass, write and run it yourself instead of fanning out children to hand-apply it, and prove it by rerunning it on the unit you did by hand.
 
-Maximize parallel work without overlap. Split the task by what each piece owns, and run one child per disjoint ownership set, as wide as the machine's headroom allows. Width follows the task: one child for a single coupled change, many for a wide one. Overlapping writes are the only limit on width, so serialize them inside one child. Give each child the largest coherent slice it can finish end to end, not a fragment that needs a second handoff.
+Size concurrency for accepted progress. Give parallel writers disjoint ownership, but also bound shared-service contention, review work, and the verification queue. Resource headroom is a ceiling, not a target. Stagger independent preparation when it helps; reduce or pause writers when acceptance is saturated. Give each child a coherent end-to-end slice, not a fragment requiring another handoff.
 
-Idle capacity is a defect. Whenever a child reports, a merge lands, a check finishes, or the owner asks, list the ready work that has no owner and launch it before starting anything slow yourself. Stagger rather than wait: a child may start on the current base while other children are unmerged, when the files it owns are disjoint from theirs; the parent merges and resolves conflicts later, which costs less than an idle child. A child that parks on a technical blocker has handed the parent work: resolve it (make the cross-boundary change, widen the contract, fix the rule or tool, or give a stronger child the extra ownership) instead of leaving it in a report or asking the owner. Ask the owner only about product behavior, public contracts, or authorization.
+When a child reports, a merge lands, or a check fails, reassess the ready work and the limiting stage before launching more. The parent investigates technical blockers within authority, assigns shared prerequisites once, and changes agent-authored tactics when they obstruct the goal. Do not requeue unchanged failures or escalate models merely for missing infrastructure. Owner intent, public contracts, required proof, and permission limits remain fixed unless the owner changes them.
 
 Carry forward findings and failed approaches. Every child gets:
 
 - Clear ownership and write boundaries.
 - A concrete deliverable with only the needed context.
-- Proportionate checks and a stopping condition.
+- Proportionate checks, an attempt limit, and a stopping condition.
+- The current campaign ruling, plus a duty to report misleading metrics, repeated gate failures, or shared blockers rather than work around them.
 - No further delegation unless the brief grants it, and then only to lower tiers (Claude and Grok) within the depth cap. Codex children are all one tier, so `agents.max_depth` is the only limit.
 
 ## Worktree lifecycle
@@ -84,12 +85,10 @@ When you park unfinished work and commits are authorized, commit the work, remov
 
 For a backlog run as parallel lanes, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work.
 
-Treat the iteration loop as shared campaign infrastructure. When serialized
-build or verification work becomes the critical path, assign a loop-speed lane
-before adding more implementation width. It owns measuring selected work,
-removing unexpectedly broad gates, exposing exact checks, and preserving safe
-artifact reuse; it does not weaken final acceptance. Re-evaluate this bottleneck
-after merges and failed gates instead of assuming the initial tooling remains
-adequate.
+The parent must perform the [steering checkpoint](references/campaigns.md#parent-steering-checkpoint), not just replenish lanes. It reviews substantive outcomes and rejected proposals, distinguishes new regressions from newly exposed debt, and corrects the limiting stage within authority. Apply it after validation waves, on resume, and when repeated failures or queue growth appear; do not wait for the owner to complain.
 
-**Report:** what was delegated and integrated, checks and measurements, contract changes, and any blockers or decisions the owner needs to resolve.
+Commit size and global verification size need not match. Use the reference's bounded validation waves, exact accepted checkpoints, and qualified evidence reuse. A loop-speed repair must unblock a named real deliverable; stop expanding infrastructure once that path works. Record rulings in the existing campaign artifact and notify affected children.
+
+**The test:** the parent can show verified progress toward the owner's goal, explain the current bottleneck and next milestone, and intervene without weakening required acceptance or manufacturing authority.
+
+**Report:** substantive work accepted, provisional work, decisive checks, the bottleneck and steering decision, contract changes, and blockers needing the owner. Report tooling and metadata cleanup separately; lane counts alone are not progress.
