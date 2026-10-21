@@ -18,6 +18,16 @@ cleanup_staged_resolv() {
     fi
 }
 
+find_apk() {
+    for candidate in /sbin/apk /usr/sbin/apk /usr/bin/apk /bin/apk; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done
+    command -v apk
+}
+
 trap cleanup_staged_resolv 0
 
 if [ "$(uname -s)" != Linux ]; then
@@ -28,18 +38,10 @@ fi
 os_id=$(awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release)
 [ -n "$os_id" ] || os_id=unknown
 
-package_manager=
-for candidate in apk apt-get dnf yum pacman zypper xbps-install emerge; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-        package_manager=$candidate
-        break
-    fi
-done
-[ -n "$package_manager" ] || die "no supported package manager found"
-info "Detected $os_id Linux with $package_manager"
-
 [ "$os_id" = alpine ] || die "installation is currently supported only on Alpine Linux"
-[ "$package_manager" = apk ] || die "Alpine Linux requires apk"
+package_manager=$(find_apk 2>/dev/null || :)
+[ -n "$package_manager" ] || die "Alpine Linux requires apk"
+info "Detected $os_id Linux with apk"
 [ -f "$conf_source" ] || die "shared Unbound config is missing: $conf_source"
 [ -f "$resolv_source" ] || die "shared resolver config is missing: $resolv_source"
 
@@ -55,13 +57,13 @@ as_root() {
     fi
 }
 
-if apk info -e unbound >/dev/null 2>&1 \
-    && apk info -e unbound-openrc >/dev/null 2>&1 \
-    && apk info -e ca-certificates >/dev/null 2>&1; then
+if "$package_manager" info -e unbound >/dev/null 2>&1 \
+    && "$package_manager" info -e unbound-openrc >/dev/null 2>&1 \
+    && "$package_manager" info -e ca-certificates >/dev/null 2>&1; then
     info "Unbound and its OpenRC service are installed"
 else
     info "Installing Unbound, its OpenRC service, and CA certificates"
-    as_root apk add --interactive=no unbound unbound-openrc ca-certificates
+    as_root "$package_manager" add --interactive=no unbound unbound-openrc ca-certificates
 fi
 
 command -v unbound-checkconf >/dev/null 2>&1 || die "unbound-checkconf is missing after installation"

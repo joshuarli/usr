@@ -12,6 +12,7 @@ Run the narrowest check that covers the change:
 | a skill or agent definition | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` (or `.agents/skills` for the repo-only ones), then `python3 -I dotfiles/skills-campaign-test.py` |
 | a hook or `mdtool` | the matching `dotfiles/*-test.sh`, or `python3 -I dotfiles/base/.local/bin/mdtool selftest` and `skill-usage selftest` |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
+| `setup-linux` | `sh setup-linux-test.sh` and `shellcheck -s sh setup-linux setup-linux-test.sh` |
 | a shell script | `shellcheck -s sh FILE` |
 | a Python script | `uvx ruff check FILE`, which reads `ruff.toml` |
 | macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I macos/lean-test.py`, and `uvx ruff check macos/macos macos/macos-test.py macos/lean.py macos/lean-test.py` |

@@ -233,6 +233,12 @@ trust_level = "trusted"
 [projects."/Users/josh/d/jaq"]
 trust_level = "trusted"
 
+[projects."/home/josh/d/h12tiny"]
+trust_level = "trusted"
+
+[projects."/home/josh/d/vault"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
