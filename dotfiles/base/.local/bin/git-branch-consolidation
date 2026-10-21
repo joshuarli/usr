@@ -1,0 +1,75 @@
+#!/bin/sh
+set -eu
+
+usage() {
+  echo "usage: git-branch-consolidation [REMOTE] [MAIN]" >&2
+}
+
+if [ "$#" -gt 2 ]; then
+  usage
+  exit 2
+fi
+
+remote=${1:-origin}
+main=${2:-main}
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root"
+
+git show-ref --verify --quiet "refs/heads/$main" || {
+  echo "git-branch-consolidation: local branch '$main' does not exist" >&2
+  exit 1
+}
+
+git remote get-url "$remote" >/dev/null 2>&1 || {
+  echo "git-branch-consolidation: remote '$remote' does not exist" >&2
+  exit 1
+}
+
+git fetch "$remote"
+git show-ref --verify --quiet "refs/remotes/$remote/$main" || {
+  echo "git-branch-consolidation: remote branch '$remote/$main' does not exist" >&2
+  exit 1
+}
+
+current=$(git branch --show-current)
+local_candidates=
+for branch in $(git for-each-ref --format='%(refname:short)' --merged="$main" refs/heads); do
+  [ "$branch" = "$main" ] && continue
+  [ "$branch" = "$current" ] && continue
+  if git worktree list --porcelain | grep -Fqx "branch refs/heads/$branch"; then
+    continue
+  fi
+  local_candidates="$local_candidates $branch"
+done
+
+if [ -z "$local_candidates" ]; then
+  echo "No local branches merged into '$main' to delete."
+  exit 0
+fi
+
+remote_candidates=
+for branch in $local_candidates; do
+  if git show-ref --verify --quiet "refs/remotes/$remote/$branch" &&
+    git merge-base --is-ancestor "$remote/$branch" "$remote/$main"; then
+    remote_candidates="$remote_candidates $branch"
+  fi
+done
+
+printf 'Deleting local branches merged into %s:\n' "$main"
+for branch in $local_candidates; do
+  printf '  %s\n' "$branch"
+done
+
+if [ -n "$remote_candidates" ]; then
+  printf 'Deleting matching remote branches merged into %s/%s:\n' "$remote" "$main"
+  for branch in $remote_candidates; do
+    printf '  %s\n' "$branch"
+    git push "$remote" --delete "$branch"
+  done
+else
+  echo "No matching remote branches are merged into '$remote/$main'; remote branches were kept."
+fi
+
+for branch in $local_candidates; do
+  git branch -d "$branch"
+done
