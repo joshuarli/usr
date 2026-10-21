@@ -1,6 +1,0 @@
-#!/bin/sh
-# Run a one-shot prompt on the repo in the current directory, billed to API
-# credits. Same as claude-api, but the one argument is a prompt, not a skill.
-# Usage: claude-api-oneshot [--budget usd] [--model name] <prompt>
-# Example: claude-api-oneshot --budget 5 "find dead code in src/"
-exec claude-api --prompt "$@"

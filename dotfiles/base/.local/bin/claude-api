@@ -1,76 +1,44 @@
 #!/bin/sh
-# Run a skill on the repo in the current directory, billed to API credits.
-# Only programmatic mode (`claude -p`) with a Console API key draws on the
-# credits; the subscription login would use subscription limits.
-# The key lives in vault as ANTHROPIC_API_KEY and is scoped to this process.
-# Usage: claude-api [--budget usd] [--model name] <skill> [skill arguments...]
-# The default budget is 20 USD, the default model is Sonnet 5.5 at high effort. Example: claude-api ultrareview
-# With --prompt, the one remaining argument is a prompt instead of a skill
-# (claude-api-oneshot passes it): claude-api --prompt [options] <prompt>
-# Exits nonzero unless the session ends with a successful result.
-
 set -eu
 
 unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
 
+help() {
+	echo "usage: claude-api [--budget usd] [--model name] [--] <prompt...>"
+	echo "       claude-api --help"
+	echo "Print mode (claude -p) invokes only the first /skill-name at the start of the prompt."
+	echo "Remaining text, including later /skill-name tokens, is passed as arguments to the first skill, not invoked separately."
+}
+
 usage() {
-	echo "usage: claude-api [--budget usd] [--model name] <skill> [skill arguments...]" >&2
-	echo "       claude-api --prompt [--budget usd] [--model name] <prompt>" >&2
+	help >&2
 	exit 2
 }
 
-budget=20
+budget=100
 model=claude-sonnet-5-5
-oneshot=
 while [ $# -gt 0 ]; do
 	case $1 in
+	--help|-h) help; exit 0 ;;
 	--budget) [ $# -ge 2 ] || usage; budget=$2; shift 2 ;;
 	--model) [ $# -ge 2 ] || usage; model=$2; shift 2 ;;
-	--prompt) oneshot=1; shift ;;
+	--) shift; break ;;
 	-*) usage ;;
 	*) break ;;
 	esac
 done
-if [ -n "$oneshot" ]; then
-	[ $# -eq 1 ] || usage
-	skill=oneshot
-	prompt=$1
-else
-	skill=$1
-	shift
-	case $skill in
-	*[!A-Za-z0-9:_-]*) echo "claude-api: invalid skill name: $skill" >&2; exit 2 ;;
-	esac
-	prompt="/$skill${*:+ $*}"
-fi
+[ $# -gt 0 ] || usage
+prompt=$*
+[ -n "$prompt" ] || usage
 
 # The key is not scoped to a workspace, so the API requires this header. The
 # ID only names the workspace and grants no access without the key.
 export ANTHROPIC_CUSTOM_HEADERS="anthropic-workspace-id: wrkspc_01AD5KAnLMgJB9A97WHG28DY"
 
-# Fail before spending credits. A skill may edit files, so a clean tree makes
-# the final diff show only what the run changed.
 vault ls | grep -qx ANTHROPIC_API_KEY || {
 	echo "claude-api: no ANTHROPIC_API_KEY in vault (vault set ANTHROPIC_API_KEY)" >&2
 	exit 1
 }
-# Claude Code reads the skill list at startup and reports it in the first
-# event, before any model request. The key here is deliberately invalid so this
-# check can never bill anything, and it runs in the current directory so
-# project skills are included. An unknown "/name" would otherwise be sent to
-# the model as plain text.
-if [ -z "$oneshot" ]; then
-	available=$(ANTHROPIC_API_KEY=sk-ant-preflight claude -p x --output-format stream-json --verbose 2>/dev/null |
-		jaq -r 'select(.type == "system" and .subtype == "init") | (.skills + .slash_commands)[]')
-	[ -n "$available" ] || {
-		echo "claude-api: could not list skills from claude" >&2
-		exit 1
-	}
-	printf '%s\n' "$available" | grep -qxF -- "$skill" || {
-		echo "claude-api: no skill named $skill here" >&2
-		exit 1
-	}
-fi
 root=$(git rev-parse --show-toplevel)
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	echo "claude-api: working tree is not clean; commit or stash first" >&2
@@ -81,7 +49,7 @@ fi
 exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
 mkdir -p "$root/.work/logs" "$(dirname "$exclude")"
 grep -qxF .work/ "$exclude" 2>/dev/null || echo .work/ >>"$exclude"
-log="$root/.work/logs/$(echo "$skill" | tr : -)-$(date +%Y%m%dT%H%M%S).jsonl"
+log="$root/.work/logs/claude-api-$(date +%Y%m%dT%H%M%S)-$$.jsonl"
 echo "raw log: $log" >&2
 
 # Estimated spend for the live display. List prices in $/MTok (input, output,
