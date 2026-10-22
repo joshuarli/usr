@@ -52,9 +52,93 @@ Codex stores trusted projects in `dotfiles/base/.codex/config.toml` and the Open
 
 Claude retains its `agent-tier-gate` subagent hook and the official Slack plugin. The configured OpenCode `permissions` allow-all rule applies globally; there are no per-agent permission overrides in this tree.
 
-`claude-api [--budget usd] [--model name] [--] <prompt...>` runs Claude Code with API credits. The default budget is `$100`, passed to `--max-budget-usd`. Claude Code estimates this cap, and actual spend can exceed it ([CLI reference](https://code.claude.com/docs/en/cli-reference)). Put `/skill-name` at the start of the prompt to invoke a skill. In print mode, Claude Code loads only the first skill and treats the remaining prompt as that skill's arguments. Run `claude-api --help` to see this caveat from the command.
+`claude-api [--budget usd] [--model name] [--] <prompt...>` runs Claude Code with API credits. The default budget is `$100`, passed to `--max-budget-usd`. Claude Code estimates this cap, and actual spend can exceed it ([CLI reference](https://code.claude.com/docs/en/cli-reference)). The running display shows an estimate. The final result uses Claude's reported total. Put `/skill-name` at the start of the prompt to invoke a skill. In print mode, Claude Code loads only the first skill and treats the remaining prompt as that skill's arguments. Run `claude-api --help` to see this caveat from the command. The launcher writes the raw event stream to `<repo>/.work/logs` and prints its path. File permissions follow the shell's `umask`; with `umask 022`, log files are readable by other local accounts that can access the repository. Treat these logs as sensitive.
 
 `claude-or` and `claude-ds` start Claude Code through the OpenRouter and DeepSeek profiles with `--dangerously-skip-permissions`, taking the key from `vault`, so no permission prompt or deny rule applies in those sessions. `codex-or` starts Codex with the OpenRouter profile. `skill-usage` reads existing Claude, Codex, Muse, and Grok sessions; Grok does not persist its skill catalog, so `skill-eval` cannot calculate its listed-to-loaded rate.
 
 `reset-agents` clears harness state under `$HOME`. With no argument it resets Claude, Codex, Grok, Muse, and OpenCode. Pass one name to reset only that harness, such as `reset-agents claude`. Muse follows `XDG_CONFIG_HOME` and `XDG_DATA_HOME`, defaulting to `~/.config/muse` and `~/.local/share/muse`. OpenCode resets `~/.config/opencode`, `~/.local/share/opencode`, and the `XDG_CACHE_HOME` `opencode` directory, defaulting to `~/.cache/opencode`. The command keeps dotfiles-managed files and the credential files `.credentials.json`, `auth.json`, and `mcp_credentials.json`. It resolves a symlinked `HOME`, then refuses target paths outside that resolved home or with symlinked components beneath it. Do not run it without an explicit request.
+
+## Configure optional Workers AI decisions
+
+`decide` sends one validated request to Cloudflare Workers AI. It uses the Workers AI REST API directly and does not deploy a Worker. `cf` login authenticates the administration CLI; it does not give `decide` a runtime token.
+
+### Create a scoped token
+
+1. If `cf` is not authenticated, run `cf auth login`. Run `cf auth whoami` to check the CLI session.
+2. Run `cf accounts list` and choose the account that owns Workers AI. Copy that account ID for the current shell session.
+3. Confirm that the token permission groups include `Workers AI Read` and `Workers AI Write`.
+
+   ```sh
+   cf user tokens permission-groups list | jaq -r '.[] | select(.name == "Workers AI Read" or .name == "Workers AI Write") | .name'
+   ```
+
+4. Build an account-only policy and create a token. Choose a future UTC expiry when you repeat these steps.
+
+   ```sh
+   (
+     set -eu
+     printf '%s' 'Paste the account ID and press Enter: '
+     IFS= read -r account_id
+     expires_on='2027-10-22T00:00:00Z'
+     workers_ai_groups=$(
+       cf user tokens permission-groups list |
+         jaq -e -c '[.[] | select(.name == "Workers AI Read" or .name == "Workers AI Write") | {id}] | select(length == 2)'
+     )
+     policies=$(jaq -n --arg account "$account_id" --argjson groups "$workers_ai_groups" '[{effect:"allow",resources:{("com.cloudflare.api.account." + $account):"*"},permission_groups:$groups}]')
+     cf user tokens create --name usr-decision-models --expires-on "$expires_on" --policies "$policies"
+   )
+   ```
+
+   The policy grants Workers AI access on the selected account only. The token command prints the token once.
+5. Copy that token into `vault`, then store the account ID. `vault set` prompts for each value.
+
+   ```sh
+   vault set CLOUDFLARE_API_TOKEN
+   vault set CLOUDFLARE_ACCOUNT_ID
+   vault isset CLOUDFLARE_API_TOKEN
+   vault isset CLOUDFLARE_ACCOUNT_ID
+   vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide doctor
+   ```
+
+`doctor` checks local configuration only. It sends no request. `decide` reads `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` from its environment. Use `vault` to inject them for a command without putting the token in shell history.
+
+### Ask a decision question
+
+Pass one JSON object on standard input. The client prints one JSON result. `clef-flash` is the default model; use `--model clef` to select Clef.
+
+```sh
+vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide <<'JSON'
+{"state":"A sanitized brief","questions":{"tier":{"type":"choice","instructions":"Which eligible tier fits this uncertainty?","criteria":{"worker":"Known method and acceptance","expert":"Unknown path with costly failure"}}}}
+JSON
+```
+
+`choice` returns one option and its probabilities. `noul` returns the probability that a statement is true.
+
+```json
+{"state":"A sanitized brief","questions":{"urgent":{"type":"noul","instructions":"Is this blocking the requested outcome?","criteria":{"true":"A required step cannot proceed","false":"The workflow can continue"}}}}
+```
+
+`orchestrate` consults `decide` only when `USR_DECIDE_TIER` is `shadow` or `advisory`. An unset variable makes no request. `shadow` records advice without changing the parent choice. `advisory` may inform judgment, but the parent retains authority and must justify any policy deviation. Unsupported values, unavailable advice, and invalid advice keep the existing route. The skill guidance is not runtime-enforced. Send only sanitized state, and skip a request when sensitive details cannot be removed.
+
+### Evaluate labeled cases
+
+Offline evaluation reads recorded predictions from a JSONL file and makes no requests. Each line has a unique `case_id`, a `source_group`, optional `split` (`development` or `held-out`), sanitized `state`, a Clef `choice` question, `expected_tier` or `acceptable_tiers`, optional `existing_choice`, and a recorded `prediction`. Keep all cases from one source group in the same split. Mark synthetic cases as synthetic.
+
+```json
+{"case_id":"synthetic-1","source_group":"synthetic-demo","split":"development","state":"Synthetic sanitized brief","question":{"type":"choice","instructions":"Choose the tier.","criteria":{"worker":"Known method","expert":"Unknown path"}},"expected_tier":"worker","existing_choice":"worker","prediction":{"status":"ok","tier":"worker","confidence":0.8,"input_tokens":16,"elapsed_ms":120.0,"model":"clef-flash"}}
+```
+
+Run the offline report with `decide eval cases.jsonl`. The report contains aggregate metrics only. It does not save prompts or results. Latency percentiles are `unknown` below 20 successful cases. Cost and missing usage are `unknown`.
+
+Exact agreement counts cases with one `expected_tier`. Acceptable agreement and confidence correctness count predictions that match `expected_tier` or one of `acceptable_tiers`.
+
+Live evaluation requires separate owner authorization. It accepts cases without recorded predictions and requires a maximum of 1 to 50 calls. The number of cases cannot exceed that maximum.
+
+```sh
+vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide eval --live --max-calls 30 cases.jsonl
+```
+
+### Stay within Workers AI Free
+
+Workers AI Free currently allows 10,000 Neurons per day, resets at 00:00 UTC, and rejects requests after that allowance is used ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)). This account has no Workers Paid subscription. Do not upgrade Workers or enable AI Gateway credits. Quota exhaustion returns unavailable advice, and the client does not retry. No account-wide budget alert was created because alerts notify but do not cap spending ([budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/)). The existing R2 Paid subscription was left unchanged. No Worker or AI Gateway resource was deployed. No inference or savings measurement has been run.
 

@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 16
+Next: 17
 
 ### USR-5 · P2 · Push rules do not require user approval
 
@@ -23,8 +23,17 @@ Next: 16
 ### USR-15 · P3 · Failed preserved-service checks still exit successfully
 
 - **Area:** macOS
-- **Where:** `macos/lean.py:955-960`, `macos/lean.py:1295-1298`, `macos/lean.py:1421`
+- **Where:** `macos/lean.py:979-1007`, `macos/lean.py:1322-1330`, `macos/lean.py:1451`
 - **Problem:** `ensure_service()` increments `verify_fail` when `launchctl print` fails, but `main()` still returns 0 after printing a warning. Scripts and automation therefore treat an unverified preserved service as a successful apply.
 - **Recommendation:** Return a nonzero status when one or more preserved services fail verification.
 - **Fix with:** none
+- **Effort:** S
+
+### USR-16 · P3 · Claude API logs inherit permissive permissions
+
+- **Area:** Security
+- **Where:** `dotfiles/base/.local/bin/claude-api:48-52`, `dotfiles/base/.local/bin/claude-api:105`
+- **Problem:** The launcher writes raw prompt and tool events under `.work/logs` without setting directory or file permissions. A synthetic file created under the current shell's `umask 022` had mode `0644`. Any local account that can traverse the repository can read the event stream, which may contain sensitive prompts, tool input, and results.
+- **Recommendation:** Set a private umask before creating the log directory and file, then enforce private permissions on existing log paths.
+- **Fix with:** `security`
 - **Effort:** S

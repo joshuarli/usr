@@ -26,9 +26,6 @@ GROK_HOME="${HOME}/.grok"
 MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
 OPENCODE2_HOME="${HOME}/.opencode"
 
-# One file per tool holds the ETag of the asset last installed. The binary itself
-# cannot say which release it came from, and ad-hoc signing changes its bytes, so
-# comparing it with a fresh download would never match on macOS.
 STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
 DL_OWNED_FILE=${DL_OWNED_FILE:-}
 DL_RECORD_OWNED=${DL_RECORD_OWNED:-false}
@@ -104,8 +101,6 @@ mkdir -p "$DEST"
 own_missing_dirs "$STATE"
 mkdir -p "$STATE"
 
-# Remove only temporary paths created by this invocation. Keep cleanup failures
-# visible without replacing the install or signal failure that caused cleanup.
 cleanup_temporary_files() {
     if [ -n "$tmpzip" ]; then
         rm -f "$tmpzip" || printf '%s\n' "Warning: could not remove $tmpzip" >&2
@@ -134,7 +129,6 @@ cleanup_temporary_files() {
     return 0
 }
 
-# Replay worker output only after all writers have closed their logs.
 replay_worker_logs() {
     log_index=1
     while [ "$log_index" -le "$log_count" ]; do
@@ -146,7 +140,6 @@ replay_worker_logs() {
     done
 }
 
-# A parent owns every worker it starts and stops them if it is interrupted.
 terminate_workers() {
     for worker_pid in $worker_pids; do
         kill "$worker_pid" 2>/dev/null || :
@@ -170,7 +163,6 @@ trap 'on_signal 129' HUP
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 
-# unchecked PROG REASON  Keep an installed tool we could not check; fail if there is none.
 unchecked() {
     if [ -x "${DEST}/$1" ]; then
         printf '%s\n' "Warning: could not check $1 ($2); keeping the installed one" >&2
@@ -179,14 +171,12 @@ unchecked() {
     fi
 }
 
-# asset_id URL  Print the ETag of the asset URL finally serves, or nothing if unreachable.
 # A one-byte ranged GET, because release URLs redirect to signed storage URLs that reject HEAD.
 asset_id() {
     curl -fsSL -r 0-0 -D - -o /dev/null "$1" 2>/dev/null \
         | tr -d '\r' | sed -n 's/^[Ee][Tt][Aa][Gg]: *//p' | tail -n 1
 }
 
-# is_current PROG ID  True when PROG is installed from the asset with this ID.
 is_current() {
     if [ -x "${DEST}/$1" ] && [ "$(cat "${STATE}/$1" 2>/dev/null)" = "$2" ]; then
         own_file "${DEST}/$1"
@@ -287,10 +277,6 @@ claude_keep_installed() {
     return 1
 }
 
-# install_binary PROG FILE ID
-# Strip quarantine and ad-hoc sign on macOS, make executable, and move into place.
-# Signing happens before the move so a failure never leaves an unsigned binary installed.
-# The ID is recorded last, so an interrupted install is retried on the next run.
 install_binary() {
     if [ "$OS" = Darwin ]; then
         xattr -d com.apple.quarantine "$2" 2>/dev/null || true
@@ -376,7 +362,6 @@ install_release() {
     tmpbin=
 }
 
-# fd and ripgrep use upstream archives so Linux always gets the static musl build.
 install_fd_or_rg() {
     prog=$1
     case "$prog" in
@@ -432,9 +417,6 @@ install_fd_or_rg() {
     tmpbin=
 }
 
-# install_mold  Install mold from the newest musl prerelease of joshuarli/mold.
-# The release is a tarball, and only x86_64 Linux is published (no macOS yet). ld.mold
-# is a link to mold, which is what `-fuse-ld=mold` looks for.
 install_mold() {
     if [ "${OS}:${ARCH}" != Linux:x86_64 ]; then
         skip mold "only x86_64 Linux is published"
@@ -446,7 +428,6 @@ install_mold() {
         unchecked mold "no release found"
         return
     fi
-    # The tag is mold-musl-<version>-<commit>; the asset names carry the version.
     version=${tag#mold-musl-}
     version=${version%-*}
     asset="mold-${version}-x86_64-linux-musl"
@@ -485,8 +466,6 @@ install_mold() {
     own_file "${DEST}/ld.mold"
 }
 
-# mactop is a menu-bar app: mirror `make install` from joshuarli/mactop
-# (app bundle in /Applications plus LaunchAgent) on top of the installed binary.
 install_mactop_app() {
     app="/Applications/mactop.app"
     printf '%s\n' "Installing ${app} ..."
@@ -555,7 +534,6 @@ EOF
     printf '%s\n' "Loaded ${agent}"
 }
 
-# install_direct NAME URL  Download one binary from a fixed URL.
 install_direct() {
     id=$(asset_id "$2")
     if [ -z "$id" ]; then
@@ -1189,7 +1167,6 @@ wait_for_workers() {
     return 0
 }
 
-# Each child handles one tool, so its result and failure state stay independent.
 run_parallel_wave() {
     max_workers=$#
     parallel_failed=false
@@ -1374,7 +1351,6 @@ for prog in "$@"; do
         gh) install_release gh ;;
         *)
             install_release "$prog"
-            # The app and LaunchAgent are rebuilt only for a new binary or a missing app.
             if [ "$prog" = mactop ] && [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ] \
                 && { $changed || [ ! -d /Applications/mactop.app ]; }; then
                 install_mactop_app

@@ -6,7 +6,7 @@ This repository installs my home configuration, personal commands, and machine s
 
 On macOS, preview setup with `./macos/setup-macos -n`. Run `./macos/setup-macos` to install Homebrew and its packages, configure Touch ID for `sudo`, and start Unbound. The script changes system settings and uses `sudo`. Unbound listens on loopback and forwards to Cloudflare over authenticated DNS-over-TLS. System DNS has no public fallback when Unbound stops.
 
-The service-disabling step is optional. Run `./macos/macos lean --audit`, review the report, then run `./macos/macos lean --dry-run`. Apply it with `./macos/macos lean` only after reviewing the planned changes.
+The service-disabling step is optional. Run `./macos/macos lean --audit`, review the report, then run `./macos/macos lean --dry-run`. Apply it with `./macos/macos lean` only after reviewing the planned changes. Lean disables IPv6 on non-VPN interfaces, captive-portal probes, mDNS advertisements, and unified logging. Captive Wi-Fi login pages need manual browser navigation, this Mac may stop appearing as an AirPlay target, and Console or `log show` lose unified logs. Lean also uses hibernation mode 0 on battery and removes the sleep image, so unsaved memory state is lost if the battery drains during sleep. `./macos/macos lean --revert` restores the tool's defaults, not the settings that existed before apply.
 
 Use [`macos`](docs/macos-preferences.md) to snapshot, compare, and apply selected macOS user preferences. Raw snapshots include every user and current-host `defaults` domain, so keep them private and out of Git; check in only selected preferences.
 

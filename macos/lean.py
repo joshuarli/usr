@@ -148,11 +148,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# Managed label lists (audited per the docstring; keep in label order).
-# ---------------------------------------------------------------------------
 
-# (section title, domain, labels) — domain is "user" (gui/UID) or "system".
 DISABLE_SECTIONS: list[tuple[str, str, list[str]]] = [
     ("Siri & Assistant", "user", [
         "com.apple.assistant_service",
@@ -443,7 +439,6 @@ class PreserveCheck:
     optional: bool = False
 
 
-# (section title, checks) — order defines verify output order.
 PRESERVE_SECTIONS: list[tuple[str, list[PreserveCheck]]] = [
     ("Verify: QuickLook", [
         PreserveCheck("com.apple.quicklook", "QuickLook", "user"),
@@ -610,7 +605,6 @@ CAPTIVE_DEFAULT = DefaultSpec(
     "/Library/Preferences/SystemConfiguration/com.apple.captive.control",
     "Active", "0", "-bool", "false", system=True)
 
-# (pmset scope, key, value) for `sudo pmset <scope> <key> <value>`.
 PMSET_APPLY: list[tuple[str, str, str]] = [
     ("-b", "powernap", "0"),
     ("-b", "tcpkeepalive", "0"),
@@ -653,7 +647,6 @@ LAUNCHD_DIRS = (
 
 DISABLED_RE = re.compile(r'"([^"]+)"\s*=>\s*(disabled|true)\b')
 PID_RE = re.compile(r"pid\s*=\s*(\d+)")
-# Case pattern: *[Tt]ailscale*|*VPN*|*[Vv]pn*|*utun* (case-sensitive as shown).
 VPN_SKIP_RE = re.compile(r"[Tt]ailscale|VPN|[Vv]pn|utun")
 AUDIT_CANDIDATE_RE = re.compile(
     r"intellig|siri|analytic|telemetry|biome|trial|diagnos|genmoji|playground"
@@ -693,9 +686,6 @@ def audit_findings(real: set[str], targets: set[str],
     return stale_targets, stale_preserve, candidates
 
 
-# ---------------------------------------------------------------------------
-# Runtime state
-# ---------------------------------------------------------------------------
 
 @dataclass
 class State:
@@ -813,9 +803,6 @@ def section(title: str) -> None:
     print(f"=== {title} ===")
 
 
-# ---------------------------------------------------------------------------
-# Live label index (plistlib, cached per OS build)
-# ---------------------------------------------------------------------------
 
 def read_plist_label(path: Path) -> str | None:
     try:
@@ -861,9 +848,6 @@ def build_label_index(build_ver: str) -> set[str]:
     return labels
 
 
-# ---------------------------------------------------------------------------
-# Disabled-state cache
-# ---------------------------------------------------------------------------
 
 def load_disabled_state(state: State) -> None:
     if state.mode != "apply":
@@ -890,9 +874,6 @@ def sudo_worker_main() -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# launchctl disable/enable + verify
-# ---------------------------------------------------------------------------
 
 def disable_user(state: State, label: str) -> None:
     if state.audit:
@@ -1012,7 +993,6 @@ def ensure_service(state: State, check: PreserveCheck) -> None:
     if check.domain == "user":
         target = f"gui/{state.uid}/{check.label}"
         if not state.revert:
-            # Force-enable in case it was accidentally disabled.
             run(["launchctl", "enable", target])
         ok = run(["launchctl", "print", target], check=False).returncode == 0
     else:
@@ -1027,9 +1007,6 @@ def ensure_service(state: State, check: PreserveCheck) -> None:
         state.verify_fail += 1
 
 
-# ---------------------------------------------------------------------------
-# defaults helpers (convergent: write only when the value differs)
-# ---------------------------------------------------------------------------
 
 def defaults_read(spec: DefaultSpec) -> str | None:
     proc = run(["defaults", "read", spec.domain, spec.key], sudo=spec.system, check=False)
@@ -1054,9 +1031,6 @@ def defaults_delete(domain: str, key: str, *, sudo: bool = False) -> None:
     run(["defaults", "delete", domain, key], sudo=sudo)
 
 
-# ---------------------------------------------------------------------------
-# Sections: Spotlight/Time Machine, defaults, power, network, logging
-# ---------------------------------------------------------------------------
 
 def apply_spotlight_tmutil(state: State) -> None:
     section("Spotlight Indexing (mdutil)")
@@ -1078,7 +1052,6 @@ def apply_spotlight_tmutil(state: State) -> None:
         run(["tmutil", "enable"], sudo=True)
         print("  Time Machine re-enabled")
     else:
-        # Belt-and-suspenders alongside backupd/backupd-helper being disabled.
         run(["tmutil", "disable"], sudo=True)
         print("  Time Machine disabled")
 
@@ -1160,7 +1133,6 @@ def apply_user_defaults(state: State) -> None:
                 defaults_delete(domain, key)
             print(USER_DEFAULTS_RESTORED[title])
         else:
-            # Don't write window/document state to disk on every app quit, etc.
             for spec in specs:
                 ensure_default(spec)
             print("\n".join(USER_DEFAULTS_DONE[title]))
@@ -1216,8 +1188,6 @@ def apply_pmset(state: State) -> None:
     else:
         for scope, key, value in PMSET_APPLY:
             run(["pmset", scope, key, value], sudo=True)
-        # Remove existing sleepimage — no longer needed on battery, reclaims
-        # RAM-sized disk space. hibernatemode 0/3 split documented above.
         run(["rm", "-f", "/private/var/vm/sleepimage"], sudo=True)
         print("  Power Nap, TCP keepalive, proximity wake, WoL, TTY keepawake disabled")
         print("  Standby: 600s / auto power-off: 1800s")
@@ -1273,8 +1243,6 @@ def apply_mdns_captive(state: State) -> None:
         run(["killall", "mDNSResponder"], sudo=True)
         print("  mDNS multicast advertisements restored")
     else:
-        # Stops Mac broadcasting its own services. Mac can still discover
-        # others. Note: breaks this Mac as an AirPlay receiver target.
         if ensure_default(MDNS_DEFAULT):
             run(["killall", "mDNSResponder"], sudo=True)
             print("  mDNS multicast advertisements disabled (mDNSResponder restarted)")
@@ -1289,8 +1257,6 @@ def apply_mdns_captive(state: State) -> None:
                         "Active", sudo=True)
         print("  Captive network detection restored")
     else:
-        # Stops background HTTP probes for hotel/airport captive portals.
-        # Side effect: no auto-popup — open a browser manually to log in.
         if ensure_default(CAPTIVE_DEFAULT):
             print("  Captive network detection disabled")
         else:
@@ -1311,16 +1277,10 @@ def apply_logging(state: State) -> None:
         run([*log_command(), "config", "--mode", "level:default"], sudo=True)
         print("  Unified logging restored to default")
     else:
-        # Shuts down the log subsystem — eliminates constant SSD writes to
-        # /var/db/diagnostics. Trade-off: Console.app goes dark, `log show`
-        # returns nothing, crash diagnosis is harder.
         run([*log_command(), "config", "--mode", "level:off"], sudo=True)
         print("  Unified logging disabled")
 
 
-# ---------------------------------------------------------------------------
-# Audit report + summary
-# ---------------------------------------------------------------------------
 
 def audit_report(state: State) -> None:
     stale_targets, stale_preserve, candidates = audit_findings(
@@ -1392,9 +1352,6 @@ def print_summary(state: State, prog: str) -> None:
     print("============================================")
 
 
-# ---------------------------------------------------------------------------
-# CLI + main
-# ---------------------------------------------------------------------------
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -1459,8 +1416,6 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     disable_system(state, label)
 
-        # One flush batches every system label: prints happen at disable
-        # time, sudo + kills happen here.
         flush_system(state)
 
         apply_spotlight_tmutil(state)

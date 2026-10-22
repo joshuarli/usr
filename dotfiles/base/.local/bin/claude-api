@@ -45,20 +45,12 @@ if [ -n "$(git -C "$root" status --porcelain)" ]; then
 	exit 1
 fi
 
-# The raw event stream is kept under the repo's .work/, which stays untracked.
 exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
 mkdir -p "$root/.work/logs" "$(dirname "$exclude")"
 grep -qxF .work/ "$exclude" 2>/dev/null || echo .work/ >>"$exclude"
 log="$root/.work/logs/claude-api-$(date +%Y%m%dT%H%M%S)-$$.jsonl"
 echo "raw log: $log" >&2
 
-# Estimated spend for the live display. List prices in $/MTok (input, output,
-# cache read); cache writes are 1.25x input for the 5-minute TTL and 2x for
-# the 1-hour TTL. Models missing here count as $0 and flag the total with "?".
-# Haiku 5.5's higher rate above 100K prompt tokens is not modelled. The result
-# event's total_cost_usd is authoritative and is printed beside the estimate.
-# A message can arrive as several events sharing one id with the same usage,
-# so each id counts once, at its latest usage.
 # shellcheck disable=SC2016 # $vars are jaq's, not the shell's
 filter='
 def price:
@@ -103,10 +95,6 @@ foreach inputs as $e ({seen: {}, total: 0, unknown: false};
 		"> cost: estimated `~$\($s.total | money)\(if $s.unknown then "?" else "" end)`, actual `$\(.total_cost_usd)`\n"
 	  else empty end)'
 
-# stream-json emits one event per line as the session runs. The filter prints
-# assistant text, one blockquote per tool call with the running cost, and only
-# failed tool results (all of them would drown the review). The loop stamps
-# elapsed time into the blockquotes.
 start=$(date +%s)
 vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 	--max-budget-usd "$budget" \
@@ -127,7 +115,6 @@ vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 		esac
 	done
 
-# The pipeline's status is the loop's, so judge the run by its result event.
 # shellcheck disable=SC2016 # $vars are jaq's, not the shell's
 summary=$(jaq -rs '
 	([.[] | select(.type == "assistant") | .message.content[] | select(.type == "tool_use") | .name]

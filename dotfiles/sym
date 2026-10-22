@@ -1,11 +1,4 @@
 #!/bin/sh
-# sym - batch symlinker for dotfiles
-#
-# Mirrors the files of SOURCE into TARGET as relative symlinks. A directory
-# holding a .sym-dir marker file is linked as a whole instead of file by file.
-# Enumeration follows Git's ignore rules, so ignored files are never linked.
-# Every conflict is reported before anything is written.
-
 die()   { printf '%s\n' "$*" >&2; exit 1; }
 usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] SOURCE\n' >&2; exit 1; }
 log()   { if "$verbose"; then printf '%s\n' "$1"; fi; }
@@ -25,8 +18,6 @@ record_missing_target_dirs() {
     done
 }
 
-# relpath DEST BASE
-# Relative path from directory BASE to file DEST (both absolute, no trailing /).
 relpath() {
     _d="$1" _b="$2" _up=''
     while [ "$_b" != / ]; do
@@ -42,8 +33,6 @@ target_path() {
     if [ "$1" = / ]; then _target_path="/$2"; else _target_path="$1/$2"; fi
 }
 
-# planned_directory LINK_TEXT TARGET_DIR
-# Succeed if LINK_TEXT points at a whole-directory link this run will create.
 planned_directory() {
     _link_text=$1 _target_dir=$2
     while IFS= read -r _sd; do
@@ -67,8 +56,6 @@ planned_directory() {
     return 1
 }
 
-# physical_parent PATH
-# Physical path of the nearest existing ancestor directory of PATH.
 physical_parent() {
     _p="${1%/*}"
     [ -n "$_p" ] || _p=/
@@ -129,8 +116,6 @@ done
 [ -d "$1" ]      || die "source directory $1 is not a directory or does not exist"
 [ -d "$target" ] || die "target directory $target is not a directory or does not exist"
 
-# src/tgt: user-supplied strings, used for output paths
-# src_abs/tgt_abs: canonical absolute paths, used only for relpath computation
 src="${1%/}"
 tgt="${target%/}"
 [ -n "$tgt" ] || tgt=/
@@ -144,8 +129,6 @@ mkdir "$tmp" || die 'failed to create temp directory'
 trap 'rm -rf "$tmp"' 0
 trap 'exit 130' 1 2 3 15
 
-# Enumerate files using Git's ignore rules when src is inside a Git worktree.
-# Exclude .sym-dir marker files themselves (their parent dirs are handled in pass 1b).
 : > "$tmp/files"
 : > "$tmp/symlink-dirs"
 : > "$tmp/names"
@@ -179,9 +162,7 @@ else
     find "$src" \( -type f -o -type l \) ! -name '.sym-dir' > "$tmp/files"
 fi
 
-# Pass 1: compute jobs and detect conflicts
 while IFS= read -r fp; do
-    # Skip files inside whole-symlink directories
     if [ -s "$tmp/symlink-dirs" ]; then
         _in_sd=false
         while IFS= read -r sd; do
@@ -197,7 +178,6 @@ while IFS= read -r fp; do
     rel=$source_rel
     target_path "$tgt" "$rel"
     name=$_target_path
-    # Absolute versions for relpath computation only
     fp_abs="$src_abs/$rel"
     target_path "$tgt_abs" "$rel"
     name_abs=$_target_path
@@ -255,11 +235,9 @@ while IFS= read -r fp; do
 
 done < "$tmp/files"
 
-# Pass 1b: process whole-directory symlinks
 while IFS= read -r sd; do
     [ -z "$sd" ] && continue
 
-    # Skip directories that are nested inside another symlink-dir
     _nested=false
     while IFS= read -r sd2; do
         [ "$sd2" = "$sd" ] && continue
@@ -310,7 +288,6 @@ while IFS= read -r sd; do
     printf '%s\n' "$name_abs" >> "$tmp/absolute-names"
 done < "$tmp/symlink-dirs"
 
-# Report conflicts
 if [ -s "$tmp/conflicts" ]; then
     cat "$tmp/conflicts" >&2
     $dry_run || die "sym will not start until all conflicts are resolved."
@@ -320,7 +297,6 @@ $dry_run && printf 'dry-run; the following operations are what would have been e
 
 [ -s "$tmp/names" ] || exit 0
 
-# Pass 2: execute
 if $delete; then
     while IFS= read -r name; do
         log "UNLINK: $name"

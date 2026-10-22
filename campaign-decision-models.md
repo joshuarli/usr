@@ -2,13 +2,13 @@
 
 ## Status
 
-- **Status:** Preflight complete. Campaign not started.
+- **Status:** Complete. P0 through D4 accepted; the closeout acceptance gate passes.
 - **Goal:** Add a local `decide` command backed by Cloudflare Workers AI, an opt-in `orchestrate` consultation, and a bounded evaluation path.
 - **Deliverables:** 1. Typed, credential-safe REST client. 2. Offline tests for all client behavior. 3. Optional shadow/advisory tier consultation. 4. JSONL evaluation and concise setup documentation.
-- **Last accepted checkpoint:** Repository and Cloudflare setup inspected. No implementation changes made. The only changed file is this campaign plan.
-- **Provisional work:** None.
+- **Last accepted checkpoint:** D4 setup documentation, repository review, and the focused closeout gate pass.
+- **Provisional work:** None. Optional P3 real-data qualification needs separately authorized, owner-provided data and live calls.
 - **Current ruling:** One executor in the current checkout, no parallel lanes or concurrent validation. Memory budget is not applicable. Keep API client, orchestration policy, and evaluator in sequence. Accept each item only with its named proof.
-- **Next substantive milestone:** Implement `decide` and pass its offline protocol tests.
+- **Next substantive milestone:** None in this campaign. P3 qualification remains optional and owner-authorized.
 
 ## Charter
 
@@ -49,7 +49,7 @@ The parent records the baseline and each accepted milestone in this document. At
 - The only acceptable product-performance gate is evidence from actual agent sessions. Do not claim savings from classifier accuracy or token list prices.
 - No added dependency means no dependency, build-time, binary-size, or startup impact.
 - Keep the repo's no-formatter rule. Apply `dotfiles-health` to the `orchestrate` change and use its focused checks. Do not change agent permission posture.
-- The `correct` lens named by campaign-preflight is unavailable in the skill catalog. Use the charter's bounded root-cause attempts and park rule instead.
+- The `correct` lens is available at `dotfiles/base/.agents/skills/correct/SKILL.md` and was included in closeout review. The earlier preflight note that it was unavailable was stale.
 
 ### Delegated within bounds
 
@@ -65,6 +65,21 @@ At preflight, `decide` and its tests do not exist. No relevant implementation te
 The final preflight documentation loop, `mdtool check --untracked campaign-decision-models.md`, took 0.38 seconds wall and 0.33 seconds CPU while checking 247 files. It reported nine expected `R001` warnings for the future paths `dotfiles/base/.local/bin/decide` and `dotfiles/base/.local/bin/decide-test.py`; it reported no errors. This is not a code-loop timing. At P0, record the first focused CLI test and lint timings before fixing their output. Reuse them while inputs remain unchanged. If a focused loop exceeds 120 seconds and blocks delivery, make one bounded loop repair and return to the next item.
 
 No baseline product latency, live model quality, agent-session cost, or savings are known. Do not invent values. Treat live model integration and savings as unverified and outside campaign completion.
+
+### P0 record — 2026-10-22
+
+- `git rev-parse HEAD`: `964472855fb9d5d8196be8a94a3a773782d28fc0`; `git status --short`: clean.
+- `rg --files dotfiles/base/.local/bin` confirmed that `decide` and its test were absent. `rg -n 'decide|USR_DECIDE_TIER' dotfiles/base/.agents/skills docs` found no consumer or existing runtime setting; its hits were unrelated words and skill text.
+- `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` passed with exit 0 and no output.
+- `.work/` is excluded by `.git/info/exclude:7`. The active Cloudflare token is present in `vault`; `cf user tokens verify` reports it active through 2027-10-22. No Cloudflare inference was run.
+- First behavioral test run: 0.48 seconds wall, 0.38 CPU, 0.05 system. The extensionless executable import was corrected after an initial 0.14-second loader setup failure. The behavioral run found two issues: overlong provider bodies were misclassified, and the test expected a narrower missing-configuration object than the contract requires.
+- First Ruff run: 1.56 seconds wall, 0.09 CPU, passed. Ruff was fetched into the tool cache; no project dependency was added.
+
+### D1 accepted — 2026-10-22
+
+- Added the executable standard-library CLI and mocked transport boundary. It validates the three typed question forms, provider envelope and result schemas, request/response bounds, stable failure reasons, and local-only diagnostics.
+- The first post-fix focused run passed 16 offline tests; Ruff passed. `sym` installed the command into `.work/tmp/decision-models-home`; `decide --help` worked from that path, and the saved vault configuration passed `decide doctor` without a network request.
+- No live model call was made. Linux behavior remains unverified on this macOS host.
 
 ## Sequence
 
@@ -155,9 +170,9 @@ Only after classification review, ask the owner to authorize a matched-session c
 
 ## Execution boundary and contract changes
 
-This preflight authorized only editing this campaign document and creating the token described above. It did not authorize implementation, inference, a live evaluation, a commit, or a push. The owner must separately start the campaign. Starting it authorizes the listed repository edits, the closeout `ultrareview` procedure, and targeted local checks. It does not authorize inference, account billing changes, or publication.
+The owner started the campaign on 2026-10-22 and authorized its listed repository edits, closeout `ultrareview`, and targeted local checks. Live inference, live evaluation, account billing changes, commits, pushes, and publication remain outside this authorization.
 
-When started, the campaign changes a local CLI contract and adds the `USR_DECIDE_TIER` environment control. It may edit the target CLI, its focused tests/evaluator, `orchestrate`, `docs/agent-setup.md`, `TODO.md`, and `docs/rfc/` for findings produced by closeout `ultrareview`. It does not change the shared global contract, default model settings, permissions, `agent-tier-gate`, or Cloudflare account configuration.
+The campaign changes a local CLI contract and adds the `USR_DECIDE_TIER` environment control. It may edit the target CLI, its focused tests/evaluator, `orchestrate`, `docs/agent-setup.md`, `TODO.md`, and `docs/rfc/` for findings produced by closeout `ultrareview`. It does not change the shared global contract, default model settings, permissions, `agent-tier-gate`, or Cloudflare account configuration.
 
 The Workers AI account currently has no Workers Paid subscription. Workers AI Free includes 10,000 Neurons daily, resets at 00:00 UTC, and rejects further operations after the allowance. Exceeding the free allocation requires Workers Paid, where excess usage is billed. The user selected Workers AI only; leave R2 Paid untouched. Do not add an account-wide budget alert: Cloudflare says alerts notify but do not cap usage, and they include all usage-based products. Do not upgrade Workers or enable AI Gateway credits. [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) · [Budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/).
 
@@ -180,15 +195,20 @@ No MCP or harness adapters, hooks, router skill, new tier hierarchy, main-model 
 
 ## Decision and campaign log
 
-- **2026-10-22:** Replaced the draft’s request to “implement now” with a sequenced campaign plan because the requested workflow is preflight and does not start execution.
+- **2026-10-22:** Replaced the draft’s request to “implement now” with a sequenced campaign plan because the requested workflow was preflight and did not start execution.
+- **2026-10-22:** Owner started execution, authorized listed repository changes and local closeout checks, and prohibited live inference and commits.
 - **2026-10-22:** User narrowed billing protection to Workers AI and explicitly said to leave R2 alone. Current Free allocation is the Workers AI hard stop; no alert or paid-plan change is appropriate.
 - **2026-10-22:** Created and verified a one-account Workers AI token using `cf`; stored the token and account ID in `vault`. Verified token status and a non-inference read. No model call was made.
-- **Accepted checkpoint:** Plan edited in place. No implementation has been accepted.
+- **P0 accepted:** Initial tree and CLI absence confirmed. `.work/` is ignored. Recorded initial offline-test and Ruff timings in the P0 notes.
+- **D1 accepted:** The standard-library client and its 16-test offline contract suite pass. Ruff passes. Scratch `sym` installation, CLI help, and vault-backed local `doctor` pass. No inference was sent.
+- **D2 accepted:** Added opt-in shadow/advisory guidance to `orchestrate`. `skills-check.sh` exits 0 with the existing over-12,000-byte warning. Manual traces cover unset and unsupported values, shadow and advisory decisions, read-only and mutating eligibility, user choices, unavailable advice, sensitive state, and brief changes. The independent review found missing fail-open and policy-justification wording; both are fixed. This is reviewed instruction flow, not runtime enforcement.
+- **D3 accepted:** Added `decide eval` with offline recorded predictions, development and held-out grouping, split leakage rejection, exact and acceptable agreement, confusion matrix, down-tier and escalation counts, abstentions, unavailable results, confidence groups, current-choice comparison, known token use, model identity, and latency metrics. Live mode requires `--live` and an explicit 1–50 `--max-calls`, rejects larger datasets before making requests, and uses the validated D1 client. Twenty offline tests and Ruff pass. A synthetic CLI report runs through the source tree and scratch `sym` installation with credentials unset; both report zero requests. The live path was tested only with mocked transport.
+- **D4 accepted:** Added setup and usage guidance to `docs/agent-setup.md`, including a repeatable `cf` token command scoped to one account and Workers AI Read/Write, vault storage, runtime invocation, privacy, evaluator, and Free quota behavior. The token command was checked with `cf --dry-run` using dummy IDs. No billing setting, paid product, R2 setting, Worker, or AI Gateway resource changed.
+- **Closeout review:** Refreshed the README's `macos lean` side-effect guidance and documented `claude-api` raw-log sensitivity. Removed internal narration comments from `dl`, `dotfiles/sym`, `macos/lean.py`, and `claude-api`, retaining protocol, platform, and lint-required comments. Filed `USR-16` P3 for raw logs inheriting permissive umask permissions. Reverified existing `USR-5` P2 and `USR-14`/`USR-15` P3 tickets; `USR-5` remains open with owner decisions in its RFC. No new P1/P2 finding was filed.
+- **Acceptance gate:** `python3 -I dotfiles/base/.local/bin/decide-test.py` passed all 20 tests; Ruff passed for `decide`, its tests, and `macos/lean.py`; ShellCheck passed for the four changed shell scripts; `skills-check.sh` exited 0 with its existing over-12,000-byte warning. `mdtool check --untracked campaign-decision-models.md docs/agent-setup.md` reported 0 findings across 249 files. Whole-repository `mdtool check` reported 22 findings (0 errors, 4 warnings, 18 notes), one fewer note than the earlier 23-finding baseline. `git diff --check` passed. No `make`, inference, live evaluation, commits, or pushes were run.
 
 ## For the owner
 
 The campaign report must name implementation and architecture, integration and failure behavior, exact verification and unavailable checks, measured economics, operational setup, the smallest real-data follow-up, contract changes, and repository state.
 
-Read this plan before starting the campaign. No branch, worktree, or cherry-pick is prepared. The account setup is ready for local `doctor`; inference remains unverified and was not run. The campaign will not start from this preflight.
-
-Launch prompt: `Execute campaign-decision-models.md from P0 through acceptance. Follow its charter and checks, preserve the Workers AI Free boundary, and stop without live inference or commits.`
+Execution is complete in the current checkout. The `cf` token and account ID are in the local vault. Runtime inference, live evaluation, Linux behavior, real-data quality, and measured economics remain unverified. No inference, live evaluation, commits, or pushes were run.

@@ -244,6 +244,9 @@ trust_level = "trusted"
 [projects."/Users/josh/d/python-build"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/view"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
