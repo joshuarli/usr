@@ -2,6 +2,8 @@
 name: campaign-preflight
 description: "Use for /campaign-preflight on a campaign design doc draft: turn it into a final, sequenced plan an agent can execute unattended, with every major decision answered, feature and test parity before optimization, and a fast verification loop. ultrareview for a campaign doc."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Campaign Preflight

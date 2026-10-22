@@ -1,6 +1,6 @@
 # Do playbooks
 
-Choose the route from the user's request and the evidence in the repository. Each route names its entry condition, proof obligations, optional stages, and exit condition. Read only the selected route and leaf skills.
+Choose the route from the user's request and repository evidence. Each route names its entry condition, proof obligations, optional stages, and exit condition. Read only the selected route and leaf skills.
 
 ## Small change
 
@@ -22,11 +22,19 @@ Reproduce the failure and keep a short feedback loop. Use [root-cause](../../roo
 
 **Entry:** the request adds an observable capability.
 
-Inspect existing behavior and define observable acceptance. Use [architect](../../architect/SKILL.md) for a consequential new boundary, invariant, or structure. Implement a complete vertical slice, exercise its public surface, handle applicable errors, and update affected docs.
+Inspect existing behavior and define observable acceptance. Use [architect](../../architect/SKILL.md) for a consequential new boundary, invariant, or structure. For consequential changes whose uncertainty and impact justify independent scrutiny, use [review](../../review/SKILL.md) for a focused completion review; routine changes do not need an extra review lane. Implement a complete vertical slice, exercise its public surface, handle applicable errors, and update affected docs.
 
 **Proof:** user-facing behavior or the public API, plus focused tests for required outcomes and errors.
 
 **Exit:** the requested capability and its acceptance evidence are complete.
+
+## Consequential design
+
+**Entry:** the request chooses a significant structure, boundary, or invariant with multiple plausible shapes and material tradeoffs, including a design-only request. Skip routine changes and clear local choices.
+
+Use [architect](../../architect/SKILL.md) to ground the decision in callers and existing contracts, set criteria before comparing structurally different options, and choose one coherent base. Respect request mode: design-only and plan-only requests end with the requested analysis; implementation continues only when requested.
+
+**Exit:** the requested recommendation or implementation is complete, with the compared choices and acceptance evidence that matter to the decision.
 
 ## Removal
 
@@ -52,7 +60,7 @@ Name the contracts that must remain unchanged. Use [reference-parity](../../refe
 
 **Entry:** the request aims to reduce time, memory, allocations, or artifact size.
 
-Use [make-it-fast](../../make-it-fast/SKILL.md) and [benchmark-checklist](../../benchmark-checklist/SKILL.md). Establish correctness and a comparable baseline, test a grounded hypothesis, and keep a change only when measured gains justify its costs. Follow the repository's host-readiness rules.
+Use [make-it-fast](../../make-it-fast/SKILL.md) and [benchmark-checklist](../../benchmark-checklist/SKILL.md). Establish correctness and a comparable baseline, test a mechanism-based hypothesis, and keep a change only when measured gains justify its costs. Confirm useful work completed, use a statistic suited to the claim, and follow host-readiness rules.
 
 **Proof:** representative before-and-after evidence, correctness checks, and relevant resource limits.
 
@@ -62,11 +70,25 @@ Use [make-it-fast](../../make-it-fast/SKILL.md) and [benchmark-checklist](../../
 
 **Entry:** the user asks to explain, compare, diagnose, or review without implementation.
 
-Read the relevant sources and run only authorized read-only experiments. Report evidence and uncertainty. A negative finding can complete the task. For a narrow read-only review, do not invoke [ultrareview](../../ultrareview/SKILL.md), whose full workflow changes documentation and tickets.
+For a focused read-only review, use [review](../../review/SKILL.md) to assess correctness, safety, and completeness while keeping the requested scope. For explanations and diagnoses, use source and execution evidence to establish current behavior. When the question is why the implementation acquired its shape, consult relevant history, PR discussions, issues, design records, or operational evidence if available and useful. Do not infer historical intent from code alone. Label inferred rationale, and check whether an odd-looking mechanism still protects a contract before removing it. Keep research proportional to the question.
 
-**Proof:** every conclusion points to an observed source, output, or experiment.
+Run only authorized read-only experiments. Apply [bounded experiments](#bounded-experiments) when an observable fact would change the answer. Report evidence and uncertainty. A negative finding can complete the task. A review stays read-only, including docs and tickets. Do not invoke [ultrareview](../../ultrareview/SKILL.md), whose broader workflow can change documentation and tickets.
+
+**Proof:** every conclusion points to source, output, relevant history, or an experiment, with inference identified.
 
 **Exit:** the requested explanation or findings are delivered without tracked edits or ticket changes.
+
+## Bounded experiments
+
+**Entry:** a decision depends on an observable fact that source inspection alone cannot settle.
+
+Before running anything, state internally the question, alternatives, observation that distinguishes them, and result that would change the recommendation. Use the smallest safe experiment and an isolated artifact under `.work/tmp` or the task's disposable fixture. An experiment is evidence for a decision, not a production implementation. Promote a chosen approach only through the normal implementation and verification route.
+
+Respect the task's effect boundary. A read-only request permits experiments on isolated local fixtures, not live hot-patching or external writes. Do not change production code or the user's working tree just to experiment. If the needed observation is unavailable, qualify the answer. Ask only about intent, preference, authority, or a consequential tradeoff that evidence cannot settle.
+
+**Proof:** the observation distinguishes the stated alternatives and was gathered within the authorized effect boundary.
+
+**Exit:** the decision is evidence-based, or its unresolved uncertainty is explicit.
 
 ## Ticket or backlog
 

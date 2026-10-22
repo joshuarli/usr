@@ -2,6 +2,8 @@
 name: debloat
 description: "Use for /debloat: a deep review of a repo, path, or change that weighs each mechanism's cost against what it buys, and finds what to delete, inline, merge, or walk back (dead code, speculative layers, config, dependencies, tests, tooling, docs, CI steps). Reports ranked findings, then applies the ones the owner confirms. The restrained sibling of ultrareview. Skip performance work, hardening, new features, and bug hunting."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Debloat

@@ -2,6 +2,8 @@
 name: correct
 description: "Find the mistakes agents keep repeating in this repo and make each one impossible. Fix at the highest level that works: architecture, then types, then a lint whose error names the fix, then a test, docs last. Prove each check against a real past mistake. Use for /correct, or when the user corrects the same thing twice."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Correct

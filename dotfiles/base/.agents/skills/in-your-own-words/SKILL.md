@@ -2,6 +2,8 @@
 name: in-your-own-words
 description: "Restate in your own words what the user is trying to achieve and why, so a misread surfaces before any work starts. Use for /in-your-own-words."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # In Your Own Words

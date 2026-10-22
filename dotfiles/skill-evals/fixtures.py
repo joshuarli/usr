@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import io
 import shutil
 import subprocess
 import tempfile
+import tarfile
 from pathlib import Path
 
 
@@ -23,6 +25,10 @@ CASES = (
     "deferred-performance",
     "unavailable-check",
     "verify",
+    "empirical",
+    "design",
+    "review",
+    "stale-verifier",
 )
 
 
@@ -32,9 +38,50 @@ def write(root: Path, name: str, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def prepare(case: str) -> Path:
+def source_contract(version: str) -> str:
+    if version == "candidate":
+        return (REPO / "dotfiles" / "base" / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+    return git(REPO, "show", "HEAD:dotfiles/base/.codex/AGENTS.md")
+
+
+def copy_skills(destination: Path, version: str) -> None:
+    if version == "candidate":
+        shutil.copytree(SKILL_TREE, destination, symlinks=False)
+        return
+    archive = subprocess.run(
+        ["git", "-C", str(REPO), "archive", "--format=tar", "HEAD", "dotfiles/base/.agents/skills"],
+        capture_output=True,
+        check=True,
+    ).stdout
+    prefix = Path("dotfiles/base/.agents/skills")
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as bundle:
+        for member in bundle.getmembers():
+            member_path = Path(member.name)
+            if member_path.parts == prefix.parts[: len(member_path.parts)]:
+                continue
+            relative = member_path.relative_to(prefix)
+            if not relative.parts:
+                continue
+            target = destination / relative
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+            elif member.isfile():
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise RuntimeError(f"cannot read baseline skill file: {member.name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source.read())
+                if member.mode & 0o111:
+                    target.chmod(member.mode & 0o777)
+            else:
+                raise RuntimeError(f"unsupported baseline skill entry: {member.name}")
+
+
+def prepare(case: str, version: str) -> Path:
     if case not in CASES:
         raise SystemExit(f"unknown fixture {case!r}; choose one of {', '.join(CASES)}")
+    if version not in ("baseline", "candidate"):
+        raise SystemExit(f"unknown instruction version {version!r}")
     subprocess.run(["sh", str(SCRATCH_CHECK), str(REPO)], check=True)
     work = REPO / ".work" / "tmp"
     workspace = Path(tempfile.mkdtemp(prefix=f"do-eval-{case}-", dir=work))
@@ -44,23 +91,24 @@ def prepare(case: str) -> Path:
     git(workspace, "config", "core.filemode", "true")
     git(workspace, "config", "core.symlinks", "true")
     git(workspace, "config", "core.excludesFile", "/dev/null")
-    write(workspace, "AGENTS.md", "# Evaluation fixture\n\nUse Python's standard library. Keep this fixture offline. Run Python checks with `-B -I` to avoid bytecode artifacts. Do not publish. Follow any task-specific authority in the campaign file. Use Conventional Commit subjects for commits.\n")
-    write(workspace, "README.md", "# Evaluation fixture\n\nA disposable repository for /do workflow checks.\n")
+    fixture_rules = "## Evaluation fixture\n\nUse Python's standard library. Keep this fixture offline. Run Python checks with `-B -I` to avoid bytecode artifacts. Do not publish. Follow task-specific authority in fixture files. Use Conventional Commit subjects for commits.\n"
+    write(workspace, "AGENTS.md", source_contract(version).rstrip() + "\n\n" + fixture_rules)
+    write(workspace, "README.md", "# Evaluation fixture\n\nA disposable repository for coding tasks.\n")
     write(workspace, ".git/info/exclude", ".work/\n")
     (workspace / ".agents").mkdir()
-    shutil.copytree(SKILL_TREE, workspace / ".agents" / "skills", symlinks=False)
+    copy_skills(workspace / ".agents" / "skills", version)
 
     if case == "trivial":
         write(workspace, "notes.txt", "Existing note.\n")
     elif case == "bug":
         write(workspace, "src/notifier.py", "class Notifier:\n    def __init__(self):\n        self.listeners = []\n\n    def connect(self, listener):\n        self.listeners.append(listener)\n\n    def reconnect(self, listener):\n        self.listeners.append(listener)\n\n    def notify(self, value):\n        for listener in self.listeners:\n            listener(value)\n")
-        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_does_not_duplicate_notification(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('connected')\n        self.assertEqual(['connected'], received)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
+        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_delivers_once(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('ready')\n        self.assertEqual(['ready'], received)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
     elif case == "read-only":
         write(workspace, "src/startup.py", "import json\n\n\ndef read_settings(path):\n    return json.loads(path.read_text(encoding='utf-8'))\n\n\ndef start(path):\n    display_settings = read_settings(path)\n    runtime_settings = read_settings(path)\n    return {'display': display_settings, 'runtime': runtime_settings}\n")
         write(workspace, "settings.json", '{"mode": "fixture"}\n')
     elif case == "unreproduced":
         write(workspace, "src/notifier.py", "class Notifier:\n    def __init__(self):\n        self.listeners = []\n\n    def connect(self, listener):\n        if listener not in self.listeners:\n            self.listeners.append(listener)\n\n    def reconnect(self, listener):\n        self.connect(listener)\n\n    def notify(self, value):\n        for listener in self.listeners:\n            listener(value)\n")
-        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_does_not_duplicate_notification(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('connected')\n        self.assertEqual(['connected'], received)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
+        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_delivers_once(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('ready')\n        self.assertEqual(['ready'], received)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
     elif case == "feature":
         write(workspace, "cli.py", "import argparse\n\n\ndef main():\n    parser = argparse.ArgumentParser()\n    parser.add_argument('values', nargs='+', type=int)\n    args = parser.parse_args()\n    print(f'total: {sum(args.values)}')\n\n\nif __name__ == '__main__':\n    main()\n")
         write(workspace, "tests/test_cli.py", "import subprocess\nimport sys\nimport unittest\nfrom pathlib import Path\n\n\nclass CliTests(unittest.TestCase):\n    def test_text_output(self):\n        root = Path(__file__).resolve().parents[1]\n        result = subprocess.run([sys.executable, '-I', str(root / 'cli.py'), '2', '3'], capture_output=True, text=True, check=True)\n        self.assertEqual('total: 5\\n', result.stdout)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
@@ -68,7 +116,7 @@ def prepare(case: str) -> Path:
     elif case == "ticket":
         write(workspace, "TODO.md", "Prefix: USR\nNext: 3\n\n### USR-11 · P2 · Prevent duplicate reconnect delivery\n\n- **Area:** Tests\n- **Where:** src/notifier.py\n- **Problem:** reconnect registers an existing listener twice.\n- **Recommendation:** avoid duplicate registration.\n- **Fix with:** root-cause\n- **Effort:** S (hours)\n\n### USR-12 · P3 · Add JSON totals\n\n- **Area:** Build\n- **Where:** cli.py\n- **Problem:** the CLI has no JSON output.\n- **Recommendation:** add an opt-in JSON mode.\n- **Fix with:** none\n- **Effort:** S (hours)\n")
         write(workspace, "src/notifier.py", "class Notifier:\n    def __init__(self):\n        self.listeners = []\n\n    def connect(self, listener):\n        self.listeners.append(listener)\n\n    def reconnect(self, listener):\n        self.listeners.append(listener)\n\n    def notify(self, value):\n        for listener in self.listeners:\n            listener(value)\n")
-        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_does_not_duplicate_listener(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('connected')\n        self.assertEqual(['connected'], received)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
+        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_delivers_once(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('ready')\n        self.assertEqual(['ready'], received)\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
     elif case == "rfc":
         write(workspace, "docs/rfc/SEARCH.md", "# USR-20: Search migration\n\nStatus: draft\n\n## Summary\n\nReplace the current search backend.\n\n## Open questions\n\n- Which backend should own ranking?\n")
         write(workspace, "src/search.py", "def search(query):\n    return []\n")
@@ -78,7 +126,7 @@ def prepare(case: str) -> Path:
             if case == "campaign-authorized"
             else "Do not commit or push. Complete the work in the working tree.\n"
         )
-        write(workspace, "AGENTS.md", f"# Evaluation fixture\n\nUse Python's standard library. Keep this fixture offline. Run Python checks with `-B -I` to avoid bytecode artifacts. {authority}")
+        write(workspace, "AGENTS.md", source_contract(version).rstrip() + "\n\n" + fixture_rules + "\n" + authority)
         write(workspace, "docs/CAMPAIGN-SAMPLE.md", f"# Sample campaign\n\nStatus: ready\n\n## Acceptance\n\n- Implement `is_positive(value: int) -> bool`, returning true exactly when `value > 0`.\n- `python3 -B -I -m unittest discover -s tests` passes tests for 1, 0, and -1.\n\n## Authority\n\n{authority}")
         write(workspace, "src/value.py", "def is_positive(value: int) -> bool:\n    raise NotImplementedError\n")
         write(workspace, "tests/test_value.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.value import is_positive\n\n\nclass ValueTests(unittest.TestCase):\n    def test_positive_values(self):\n        self.assertTrue(is_positive(1))\n\n    def test_zero_is_not_positive(self):\n        self.assertFalse(is_positive(0))\n\n    def test_negative_values_are_not_positive(self):\n        self.assertFalse(is_positive(-1))\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
@@ -168,9 +216,25 @@ if __name__ == '__main__':
         write(workspace, "src/labels.py", "def format_label(value):\n    return value.strip().upper()\n")
         write(workspace, "tests/test_labels.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.labels import format_label\n\n\nclass LabelTests(unittest.TestCase):\n    def test_formats_label(self):\n        self.assertEqual('ALPHA', format_label(' alpha '))\n\n\nif __name__ == '__main__':\n    unittest.main()\n")
         write(workspace, "tools/required_check.py", "import sys\n\nprint('required check unavailable', file=sys.stderr)\nraise SystemExit(86)\n")
-        write(workspace, "HANDOFF.md", "# Worker handoff\n\nThe implementation in `src/labels.py` is complete and its unit test passed. The required acceptance command `python3 -B -I tools/required_check.py` remains open. The parent must run it and retain the exact command, exit status, and output. If unavailable, report `partial`; do not claim `done`.\n")
+        write(workspace, "TASK.md", "# Acceptance status\n\nThe implementation in `src/labels.py` is complete and its unit test passed. The required acceptance command `python3 -B -I tools/required_check.py` remains open. Run it and retain the exact command, exit status, and output. If unavailable, report `partial`; do not claim `done`.\n")
     elif case == "verify":
         write(workspace, "tools/slugify.py", "import re\nimport sys\n\n\ndef main():\n    if len(sys.argv) != 2 or not sys.argv[1].strip():\n        print('usage: slugify.py TEXT', file=sys.stderr)\n        return 2\n    slug = re.sub(r'[^a-z0-9]+', '-', sys.argv[1].strip().lower()).strip('-')\n    if not slug:\n        print('error: text has no slug characters', file=sys.stderr)\n        return 2\n    print(slug)\n    return 0\n\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n")
+    elif case == "empirical":
+        write(workspace, "src/backend.py", "import os\n\n\ndef selected_backend():\n    return os.environ.get('CACHE_MODE', 'disk')\n")
+        write(workspace, "cli.py", "import sys\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parent))\nfrom src.backend import selected_backend\n\n\nif __name__ == '__main__':\n    print(selected_backend())\n")
+        write(workspace, "README.md", "# Cache selection\n\nThe startup command chooses a cache backend. The default should be disk.\n")
+    elif case == "design":
+        write(workspace, "README.md", "# Preferences storage\n\n`src/preferences.py` reads and writes `~/.app/preferences.json`. Existing files are UTF-8 JSON objects with a `version` field and user-defined keys. The CLI and background worker can update the file at the same time. Keep the current file format readable by existing releases. The tool must keep working without network access or new installed packages.\n")
+        write(workspace, "src/preferences.py", "import json\nfrom pathlib import Path\n\n\ndef load(path):\n    return json.loads(Path(path).read_text(encoding='utf-8'))\n\n\ndef save(path, preferences):\n    Path(path).write_text(json.dumps(preferences), encoding='utf-8')\n")
+    elif case == "review":
+        write(workspace, "src/notifier.py", "class Notifier:\n    def __init__(self):\n        self.listeners = []\n\n    def connect(self, listener):\n        self.listeners.append(listener)\n\n    def reconnect(self, listener):\n        self.listeners.append(listener)\n\n    def notify(self, value):\n        for listener in self.listeners:\n            listener(value)\n")
+        write(workspace, "docs/usage.md", "# Notifications\n\nReconnecting the same listener never causes duplicate delivery.\n")
+        write(workspace, "TODO.md", "Prefix: USR\nNext: 2\n\n### USR-11 · P2 · Prevent duplicate reconnect delivery\n\n- **Area:** Tests\n- **Where:** src/notifier.py\n- **Problem:** reconnect may register a listener more than once.\n- **Recommendation:** check whether reconnect is idempotent.\n")
+        write(workspace, "tests/test_notifier.py", "import sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nfrom src.notifier import Notifier\n\n\nclass NotifierTests(unittest.TestCase):\n    def test_reconnect_delivers_once(self):\n        received = []\n        notifier = Notifier()\n        notifier.connect(received.append)\n        notifier.reconnect(received.append)\n        notifier.notify('ready')\n        self.assertEqual(['ready'], received)\n")
+    elif case == "stale-verifier":
+        write(workspace, "tools/slugify.py", "import re\nimport sys\n\n\ndef slugify(value):\n    return re.sub(r'[^a-z0-9]+', '-', value.strip().lower()).strip('-')\n\n\nif __name__ == '__main__':\n    print(slugify(sys.argv[1]))\n")
+        write(workspace, "tests/test_slugify.py", "import unittest\nfrom tools.slugify import slugify\n\n\nclass SlugTests(unittest.TestCase):\n    def test_uses_hyphens(self):\n        self.assertEqual('hello-world', slugify('Hello, World'))\n")
+        write(workspace, ".agents/skills/verify-fixture/SKILL.md", "---\nname: verify-fixture\ndescription: Verify the fixture's slug command through its command line.\ndisable-model-invocation: true\n---\n\nRun `python3 -B -I tools/slugify.py 'Hello, World'`. Expect `hello_world`.\n")
 
     git(workspace, "add", "--all")
     git(workspace, "commit", "-m", "test(fixtures): seed evaluation repository")
@@ -217,12 +281,13 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="action", required=True)
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("case", choices=CASES)
+    prepare_parser.add_argument("--version", choices=("baseline", "candidate"), default="candidate")
     score_parser = subparsers.add_parser("score-unchanged")
     score_parser.add_argument("fixture", type=Path)
     score_parser.add_argument("baseline_head")
     args = parser.parse_args()
     if args.action == "prepare":
-        print(prepare(args.case))
+        print(prepare(args.case, args.version))
     else:
         try:
             score_unchanged(args.fixture, args.baseline_head)

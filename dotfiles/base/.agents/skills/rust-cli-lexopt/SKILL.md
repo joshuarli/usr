@@ -2,6 +2,8 @@
 name: rust-cli-lexopt
 description: Rewrite a Rust CLI to use lexopt only, driven by one declarative command schema that generates help and version output, with parser and metadata tests.
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Declarative, Lexopt-Only Rust CLI

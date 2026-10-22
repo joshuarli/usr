@@ -2,6 +2,8 @@
 name: campaign-plan
 description: "Use for /campaign-plan <goal>: plan a new campaign from a goal. Survey the repo, measure the baseline, settle decisions, split the work into workstreams and phases, make every deliverable provable by a command, and write the campaign doc in campaign-preflight's final shape."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Campaign Plan

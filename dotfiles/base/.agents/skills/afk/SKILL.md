@@ -3,6 +3,7 @@ name: afk
 description: "Use when the user asks you to keep working while they are away or unattended; make bounded decisions and defer owner-dependent blockers. Skip ordinary work while the user is available."
 disable-model-invocation: true
 metadata:
+  opencode/autoinvoke: "false"
   opencode/slash: "true"
 ---
 

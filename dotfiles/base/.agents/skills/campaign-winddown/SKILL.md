@@ -2,6 +2,8 @@
 name: campaign-winddown
 description: "Use for /campaign-winddown on a running campaign: pause it, let the lanes already working finish and integrate, start nothing new, leave a handoff in the campaign doc that survives a machine reboot, and stop."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Campaign Winddown

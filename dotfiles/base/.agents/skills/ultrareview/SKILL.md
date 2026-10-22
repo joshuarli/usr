@@ -2,6 +2,8 @@
 name: ultrareview
 description: "Use for /ultrareview: a thorough review of one whole repository that refreshes its docs to match the code and files prioritized findings as tickets and RFCs. A router to the other skills, not a restatement of them."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Ultrareview

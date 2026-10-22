@@ -2,6 +2,8 @@
 name: rust-hash
 description: Migrate Rust map and set usage to hashbrown with a deliberately chosen hasher, auditing every BTreeMap and BTreeSet and benchmarking changes.
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Rust Hash Migration

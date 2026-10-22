@@ -2,6 +2,8 @@
 name: make-code-search-a-reliable-navigation-boundary
 description: Rename and restructure code so ordinary filename and text search reaches definitions, callers, tests, and docs in few hops.
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Make Code Search a Reliable Navigation Boundary

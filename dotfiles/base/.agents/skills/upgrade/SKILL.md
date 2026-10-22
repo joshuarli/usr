@@ -2,6 +2,8 @@
 name: upgrade
 description: "Use for /upgrade to update repository dependencies and explicit pins to newest stable versions, then run focused checks. Investigate a bump only when an upgrade causes a check to fail."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Upgrade

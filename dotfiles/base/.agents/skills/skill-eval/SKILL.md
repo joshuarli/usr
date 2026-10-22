@@ -2,6 +2,8 @@
 name: skill-eval
 description: "Use for /skill-eval: judge whether skills earn their place from real usage in existing Claude, Codex, Muse, and Grok sessions, and decide keep, retune, demote, fold, or delete."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Skill Eval

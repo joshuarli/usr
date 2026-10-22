@@ -2,6 +2,8 @@
 name: pr-stack
 description: "Use for /pr-stack: drive a PR or stack to merge-ready (check, threads, drive), or land a verified stack bottom-up (ship). Merging happens only on an explicit ask."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # PR Stack

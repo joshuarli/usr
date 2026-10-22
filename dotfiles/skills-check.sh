@@ -13,10 +13,12 @@ for d in "$skills"/*/; do
     n=$(basename "$d"); f="$d/SKILL.md"
     [ "$(sed -n 's/^name: //p' "$f" | head -1)" = "$n" ] || { echo "name does not match directory: $n"; bad=1; }
     grep -q '^description:' "$f" || { echo "missing description: $n"; bad=1; }
-    explicit=false; codex_off=false
+    explicit=false; codex_off=false; opencode_off=false
     grep -q '^disable-model-invocation: true' "$f" && explicit=true
     grep -q 'allow_implicit_invocation: false' "$d/agents/openai.yaml" 2>/dev/null && codex_off=true
+    grep -q '^  opencode/autoinvoke: "false"$' "$f" && opencode_off=true
     [ "$explicit" = "$codex_off" ] || { echo "Claude and Codex invocation policy differ: $n (explicit=$explicit, codex_off=$codex_off)"; bad=1; }
+    [ "$explicit" = "$opencode_off" ] || { echo "Claude and OpenCode invocation policy differ: $n (explicit=$explicit, opencode_off=$opencode_off)"; bad=1; }
     if [ "$explicit" = false ] && ! sed -n 's/^description: //p' "$f" | grep -q 'Skip'; then
         echo "auto-triggered skill has no Skip clause in its description: $n"; bad=1
     fi

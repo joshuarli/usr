@@ -1,25 +1,28 @@
 ---
 name: architect
-description: "Use for /architect or 'design this' on non-trivial work: sketch usage, types, signatures, and module boundaries before code, design it twice, implement against the sketch, and scrap it when workarounds repeat."
-disable-model-invocation: true
+description: "Use for consequential, genuinely uncertain design or boundary changes, including design-only requests; compare structurally different options against existing caller and invariant constraints. Skip routine edits and clear local repairs."
+metadata:
+  opencode/slash: "true"
+  opencode/autoinvoke: "true"
 ---
 
 # Architect
 
-Jumping to code locks in the first shape you thought of. Sketch the shape cheaply, compare it with a structurally different one, and only then fill it in. The contract is the sketch, so a deviation is a signal, not friction to absorb.
+Ground the decision in current callers, existing contracts, tests, and constraints. A second design earns its cost only when the choice is consequential and the evidence leaves meaningful uncertainty.
 
 ## Steps
 
-1. **Ground.** Read the code the change touches, its callers, its tests, and `git log` for why it is shaped this way. Naming a file is not grounding. Skip only for greenfield work with nothing to integrate.
+1. **Ground.** Read the code the change touches, its callers, tests, and constraints. Use `git log` or other relevant records when the question includes why it acquired this shape. Naming a file is not grounding. Skip only for greenfield work with nothing to integrate.
 2. **Usage first.** Write the caller's code as you want it to read. Derive the types from that, not the other way round.
 3. **Sketch** types, signatures, and the module map with `todo!` or `not implemented` bodies and no logic. Use `make-invalid-states-unrepresentable` for the types and `api-surface-and-module-boundaries` for the edges.
-4. **Design it twice.** Produce at least two structurally different whole shapes, even when the first looks sufficient. A point fix inside one shape is not a second candidate. Prefer the shape that hides more behind a smaller interface, and where a change that looks right from one file is right for the whole repo. Assume the next contributor is an agent that sees only the files it opened, copies the nearest example, and takes the shortest path that compiles.
-5. **Choose and state the contract change.** Say why the loser lost. Surface any API, type, schema, or invariant change to the owner. Proceed without a checkpoint unless asked to stop.
-6. **Implement against the sketch.** If a function needs a parameter the sketch did not foresee, decide whether the sketch, the requirement, or the implementation is wrong, and say which.
-7. **Scrap when the pattern shows,** not on one edge case: the same workaround repeating across unrelated code, special-case branches for unrelated cases, types needing escape hatches (casts, optionals always set in practice), a lock added where the sketch said nothing was shared, callers needing the abstraction's internal rules. Subtract first, redesign as if the new constraints were day-one, and return to step 4. Complexity in the data is not complexity in the design.
+4. **Set criteria before comparing.** Name the requirements, compatibility obligations, invariants, operational constraints, and costs that decide the shape. For a consequential and genuinely uncertain decision, compare at least two structurally different whole designs. A point fix inside one design is not another candidate.
+5. **Get independent candidates when justified.** Give each candidate the same task, constraints, and relevant source context without revealing a preferred design. Follow [orchestrate](../orchestrate/SKILL.md) for model, effort, ownership, and worktree rules. Sequential attempts by one model are alternatives, not independent confirmation. When delegation is unavailable, compare the designs directly and state that limit only if it affects confidence.
+6. **Choose one coherent base.** Explain how it meets the criteria and why a competing design loses. Integrate another candidate's idea only when it improves the selected design without weakening its invariants. Do not average incompatible designs. Surface API, type, schema, or invariant changes to the owner.
+7. **Respect request mode.** A design-only or plan-only request ends with the requested analysis. Otherwise implement against the selected sketch. If the code needs a shape the sketch did not foresee, decide whether the sketch, requirement, or implementation is wrong.
+8. **Redesign when evidence shows a pattern:** repeated workarounds across unrelated code, unrelated special-case branches, escape hatches in types, a lock where no sharing was expected, or callers that need internal abstraction rules. Reassess against the same criteria. Complexity in the data is not complexity in the design.
 
-Keep the sketch in the diff or the reply. Write no design file unless asked.
+Keep a useful sketch in the reply. Write no design file unless asked. Do not produce competing designs for routine changes or clear local repairs.
 
-**The test:** a reviewer can read the usage and the types and predict the implementation, and the rejected shape's reason is one sentence.
+**The test:** the selected design fits observed callers and invariants, and every compared design was judged against criteria set before the comparison.
 
-**Report:** the usage sketch, the two shapes and why one won, contract changes, and any deviation from the sketch found while implementing.
+**Report:** the usage sketch, criteria, compared shapes when warranted, contract changes, and any implementation deviation.

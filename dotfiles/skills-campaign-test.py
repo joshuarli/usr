@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import os
 import re
 import shutil
@@ -92,17 +94,61 @@ def score_fixture(repo: Path, baseline: str, env: dict[str, str] | None = None) 
 
 
 class SkillCampaignTests(unittest.TestCase):
-    def test_new_skills_keep_host_specific_explicit_only_metadata(self):
-        skills = (
-            ROOT / "dotfiles" / "base" / ".agents" / "skills" / "do",
-            ROOT / "dotfiles" / "base" / ".agents" / "skills" / "create-verification-skill",
-            VERIFY_SKILL,
+    def test_changed_skills_reconcile_automatic_and_explicit_host_metadata(self):
+        source = ROOT / "dotfiles" / "base" / ".agents" / "skills"
+        automatic = ("do", "architect", "review", "blast-radius")
+        explicit = (
+            "afk",
+            "burn-down-the-backlog",
+            "campaign-plan",
+            "campaign-preflight",
+            "campaign-winddown",
+            "create-verification-skill",
+            "docs-refresh",
+            "double-take",
+            "pr-stack",
+            "sweep",
+            "ultrareview",
+            "yea",
         )
-        for skill in skills:
+        for name in automatic:
+            skill = source / name
+            content = (skill / "SKILL.md").read_text(encoding="utf-8")
+            codex = (skill / "agents" / "openai.yaml").read_text(encoding="utf-8")
+            self.assertNotIn("disable-model-invocation: true", content)
+            self.assertIn('opencode/slash: "true"', content)
+            self.assertIn('opencode/autoinvoke: "true"', content)
+            self.assertIn("allow_implicit_invocation: true", codex)
+        for name in explicit:
+            skill = source / name
+            content = (skill / "SKILL.md").read_text(encoding="utf-8")
+            codex = (skill / "agents" / "openai.yaml").read_text(encoding="utf-8")
+            self.assertIn("disable-model-invocation: true", content)
+            self.assertIn('opencode/autoinvoke: "false"', content)
+            self.assertIn("allow_implicit_invocation: false", codex)
+        for skill in (VERIFY_SKILL, ROOT / ".agents" / "skills" / "agent-config-refresh"):
             content = (skill / "SKILL.md").read_text(encoding="utf-8")
             self.assertIn("disable-model-invocation: true", content)
-            self.assertIn('opencode/slash: "true"', content)
             self.assertIn('opencode/autoinvoke: "false"', content)
+            self.assertIn("allow_implicit_invocation: false", (skill / "agents" / "openai.yaml").read_text(encoding="utf-8"))
+
+    def test_global_instruction_adapters_resolve_to_the_canonical_contract(self):
+        base = ROOT / "dotfiles" / "base"
+        canonical = base / ".codex" / "AGENTS.md"
+        adapters = (
+            base / ".claude" / "CLAUDE.md",
+            base / ".claude" / "AGENTS.md",
+            base / ".config" / "muse" / "AGENTS.md",
+            base / ".grok" / "AGENTS.md",
+            base / ".dsh" / "AGENTS.md",
+            base / ".config" / "opencode" / "AGENTS.md",
+            base / ".gemini" / "config" / "AGENTS.md",
+        )
+        for adapter in adapters:
+            with self.subTest(adapter=adapter):
+                self.assertTrue(adapter.is_symlink())
+                self.assertFalse(adapter.readlink().is_absolute())
+                self.assertEqual(canonical.resolve(), adapter.resolve())
 
     def test_known_global_and_local_skill_trees_pass(self):
         for skills in (
@@ -131,15 +177,24 @@ class SkillCampaignTests(unittest.TestCase):
         finally:
             shutil.rmtree(work)
 
-    def test_skill_checker_rejects_missing_explicit_skill_metadata(self):
+    def test_skill_checker_rejects_cross_host_invocation_metadata_drift(self):
         work = Path(tempfile.mkdtemp(prefix="skills-policy-", dir=WORK_TMP))
         try:
             skills = work / "skills"
             skill = install_fixture_skill(skills)
-            skill_file = skill / "SKILL.md"
-            skill_file.write_text(EXPLICIT_SKILL.replace("disable-model-invocation: true\n", ""), encoding="utf-8")
-            result = run("sh", str(CHECKER), str(skills))
-            self.assertNotEqual(0, result.returncode)
+            mutations = (
+                (skill / "SKILL.md", "disable-model-invocation: true\n", ""),
+                (skill / "SKILL.md", 'opencode/autoinvoke: "false"', 'opencode/autoinvoke: "true"'),
+                (skill / "agents" / "openai.yaml", "allow_implicit_invocation: false", "allow_implicit_invocation: true"),
+            )
+            for path, original, replacement in mutations:
+                with self.subTest(path=path.relative_to(skills), original=original):
+                    current = path.read_text(encoding="utf-8")
+                    self.assertIn(original, current)
+                    path.write_text(current.replace(original, replacement), encoding="utf-8")
+                    result = run("sh", str(CHECKER), str(skills))
+                    self.assertNotEqual(0, result.returncode)
+                    path.write_text(current, encoding="utf-8")
         finally:
             shutil.rmtree(work)
 
@@ -387,7 +442,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual(0, score_fixture(workspace, baseline).returncode)
             failure = run(sys.executable, "-B", "-I", "tests/test_notifier.py", cwd=workspace)
             self.assertNotEqual(0, failure.returncode)
-            self.assertIn("test_reconnect_does_not_duplicate_notification", failure.stderr + failure.stdout)
+            self.assertIn("test_reconnect_delivers_once", failure.stderr + failure.stdout)
         finally:
             shutil.rmtree(workspace)
 
@@ -399,7 +454,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual("1\n", run("git", "rev-list", "--count", "HEAD", cwd=ticket_workspace).stdout)
             failure = run(sys.executable, "-B", "-I", "tests/test_notifier.py", cwd=ticket_workspace)
             self.assertNotEqual(0, failure.returncode)
-            self.assertIn("test_reconnect_does_not_duplicate_listener", failure.stderr + failure.stdout)
+            self.assertIn("test_reconnect_delivers_once", failure.stderr + failure.stdout)
         finally:
             shutil.rmtree(ticket_workspace)
 
@@ -532,9 +587,40 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual(86, required.returncode)
             self.assertEqual("required check unavailable\n", required.stderr)
             self.assertEqual("", required.stdout)
-            self.assertIn("partial", (unavailable_repo / "HANDOFF.md").read_text(encoding="utf-8"))
+            self.assertIn("partial", (unavailable_repo / "TASK.md").read_text(encoding="utf-8"))
         finally:
             shutil.rmtree(unavailable_repo)
+
+    def test_eval_fixtures_load_matching_contract_and_project_skills(self):
+        baseline_result = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "trivial", "--version", "baseline")
+        candidate_result = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "trivial", "--version", "candidate")
+        self.assertEqual(0, baseline_result.returncode, baseline_result.stdout + baseline_result.stderr)
+        self.assertEqual(0, candidate_result.returncode, candidate_result.stdout + candidate_result.stderr)
+        baseline = Path(baseline_result.stdout.strip())
+        candidate = Path(candidate_result.stdout.strip())
+        try:
+            canonical = ROOT / "dotfiles" / "base" / ".codex" / "AGENTS.md"
+            suffix = "\n\n## Evaluation fixture\n"
+            candidate_prefix = (candidate / "AGENTS.md").read_text(encoding="utf-8").split(suffix, 1)[0]
+            self.assertEqual(canonical.read_text(encoding="utf-8").rstrip(), candidate_prefix)
+            committed_contract = run("git", "show", "HEAD:dotfiles/base/.codex/AGENTS.md")
+            self.assertEqual(0, committed_contract.returncode, committed_contract.stderr)
+            baseline_prefix = (baseline / "AGENTS.md").read_text(encoding="utf-8").split(suffix, 1)[0]
+            self.assertEqual(committed_contract.stdout.rstrip(), baseline_prefix)
+
+            baseline_skill = run("git", "show", "HEAD:dotfiles/base/.agents/skills/do/SKILL.md")
+            self.assertEqual(0, baseline_skill.returncode, baseline_skill.stderr)
+            baseline_do = (baseline / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8")
+            candidate_do = (candidate / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8")
+            self.assertEqual(baseline_skill.stdout, baseline_do)
+            self.assertIn("disable-model-invocation: true", baseline_do)
+            self.assertEqual((ROOT / "dotfiles" / "base" / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8"), candidate_do)
+            self.assertNotIn("disable-model-invocation: true", candidate_do)
+            self.assertTrue((baseline / ".agents" / "skills").is_dir())
+            self.assertTrue((candidate / ".agents" / "skills").is_dir())
+        finally:
+            shutil.rmtree(baseline)
+            shutil.rmtree(candidate)
 
     def test_verification_fixture_distinguishes_success_from_negative_input(self):
         result = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "verify")

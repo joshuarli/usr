@@ -2,6 +2,8 @@
 name: yea
 description: "Use for /yea: accept every recommendation from your last reply and carry all of them out, in full, instead of the smallest change you proposed."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Yea

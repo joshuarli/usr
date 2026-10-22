@@ -1,7 +1,9 @@
 ---
 name: blast-radius
-description: "Use for 'blast radius of X', 'what could this break', or reviewing a small diff you do not trust. Find what a change breaks beyond the diff, and prove the one fact it is safe because of by running real code."
-disable-model-invocation: true
+description: "Use when a consequential change has a downstream safety question that source search cannot settle; trace and exercise the assumption against relevant callers or runtime. Skip routine changes, clear local repairs, and broad repository audits."
+metadata:
+  opencode/slash: "true"
+  opencode/autoinvoke: "true"
 ---
 
 # Blast Radius
@@ -20,6 +22,8 @@ For each such fact, climb this ladder as far as is cheap and say where you stopp
 4. You ran a script or test that calls the real code and fails loudly if you are wrong.
 5. You reproduced it in the running app.
 
+Use existing commands first. If a focused probe is needed, keep it in `.work/tmp` or a disposable fixture. Do not edit the product under review, and respect read-only scope.
+
 ## Steps
 
 1. **Read the change:** the symbols it adds, changes, and deletes, and what behaves differently, including what the diff does not spell out.
@@ -28,7 +32,7 @@ For each such fact, climb this ladder as far as is cheap and say where you stopp
 4. **Rate each risk honestly** with a real likelihood and a real cost. Cite a real `file:line`. A search that finds nothing is still an answer. Never invent a caller or an API. List what you checked and cleared separately.
 5. **Prove the one fact:** write a script or test against the real code, run it, and paste what happened.
 
-For a wide change, ask more than one model the same question and merge the answers. Different models catch different real bugs.
+For a consequential change with meaningful uncertainty, an independent review may catch a missed risk. Follow [review](../review/SKILL.md) and [orchestrate](../orchestrate/SKILL.md). Do not use several reviewers for routine changes.
 
 **Report:**
 

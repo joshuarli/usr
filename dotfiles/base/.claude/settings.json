@@ -79,11 +79,11 @@
   },
   "emojiCompletionEnabled": false,
   "awaySummaryEnabled": false,
+  "autoUpdatesChannel": "latest",
   "tui": "fullscreen",
   "autoMemoryEnabled": false,
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark-ansi",
   "autoCompactEnabled": true,
-  "disableDeepLinkRegistration": "disable",
-  "autoUpdatesChannel": "latest"
+  "disableDeepLinkRegistration": "disable"
 }

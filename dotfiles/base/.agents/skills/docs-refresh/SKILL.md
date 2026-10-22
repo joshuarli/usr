@@ -2,6 +2,8 @@
 name: docs-refresh
 description: "Use for /docs-refresh: bring a repository's docs up to date with its code and make them shorter. Scope is the whole repo, or only the docs a change touched. Edits docs and comments, never behavior."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Docs Refresh

@@ -19,7 +19,7 @@ Create or maintain a compact repository-local procedure for exercising a project
 - **Cover the whole journey.** Document scope and prerequisites, safe fixture boundaries, launch and readiness, a focused doctor, actions through the real public surface, expected results and persisted side effects, evidence and its limits, and cleanup of only resources created by this run.
 - **Keep it small.** Do not add smoke tests or CI steps; the procedure is for an agent exercising the real interface by hand. Put a few useful journeys inline. Add a helper only when repeated work benefits from it. Make helpers executable, document their actual invocation, and exercise them. Do not create a generic test framework or exhaustive feature catalog.
 - **Control effects.** Prefer explicit-only metadata when the verifier starts processes or mutates fixtures. Preserve project-specific metadata. A referenced skill provides a procedure, not permission for effects outside the request.
-- **Prove and maintain.** Run one meaningful success path and one failure or negative path. Exercise cleanup after both, confirm evidence remains, then repeat a run to check for stale-state collisions. Update the skill when code changes its commands, fixtures, selectors, or assumptions.
+- **Prove and maintain.** Follow [verifier assessment](../do/references/verification.md) to compare assumptions with current code, classify disagreement, exercise success and failure, and check cleanup and repeatability. Update instructions only when supported behavior or the procedure has changed.
 
 **The test:** a fresh run can follow exact instructions through the public surface, observe the stated success and failure, clean up its own resources, retain useful evidence, and run again without collision.
 

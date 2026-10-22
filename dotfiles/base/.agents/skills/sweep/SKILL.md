@@ -2,6 +2,8 @@
 name: sweep
 description: "Use for /sweep: double-take the last turn's fix or improvement, then with the owner's confirmation search the wider repo for other places it applies. Fix the mechanical ones and report the rest."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Sweep

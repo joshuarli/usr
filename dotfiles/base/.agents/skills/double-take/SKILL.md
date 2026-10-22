@@ -2,6 +2,8 @@
 name: double-take
 description: "Use for /double-take or 'dig deeper': treat the last change or review as the pattern, find what still contradicts it and where the same defect shape recurs, fix the trivial ones, and report the rest."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Double Take

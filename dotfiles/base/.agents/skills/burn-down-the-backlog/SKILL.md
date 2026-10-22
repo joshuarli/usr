@@ -2,6 +2,8 @@
 name: burn-down-the-backlog
 description: "Use for /burn-down-the-backlog: work every ticket in TODO.md through orchestrate, one commit per ticket that also deletes the ticket, and park what needs the owner."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Burn Down the Backlog

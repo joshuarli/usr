@@ -2,6 +2,8 @@
 name: ts-tools
 description: Migrate a TypeScript codebase to the Node.js, pnpm, TypeScript 7, Vite 8, Solid 2, Effect 4, Oxlint, and Vitest 5 stack.
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # TypeScript Stack Migration
