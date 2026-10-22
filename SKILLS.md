@@ -57,6 +57,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
+| `test-heirarchy` | Explicit | Audit one repo's test, performance and memory hierarchy, then use `campaign-plan` to design change-selected, manual-only full gates. Planning only. |
 | `campaign-plan <goal>` | Explicit | Plan a campaign from a goal: survey, baseline, workstreams, and a command that proves each deliverable. |
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
 | `burn-down-the-backlog` | Explicit | Work the starting `TODO.md` queue through `orchestrate`, honoring prerequisites and priority, one commit per closed ticket, with unattended execution. |
