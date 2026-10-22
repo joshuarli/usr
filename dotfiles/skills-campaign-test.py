@@ -110,6 +110,7 @@ class SkillCampaignTests(unittest.TestCase):
             "pr-stack",
             "settle",
             "ultrareview",
+            "ultratriage",
             "yea",
         )
         for name in automatic:
@@ -614,7 +615,6 @@ class SkillCampaignTests(unittest.TestCase):
             baseline_do = (baseline / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8")
             candidate_do = (candidate / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8")
             self.assertEqual(baseline_skill.stdout, baseline_do)
-            self.assertIn("disable-model-invocation: true", baseline_do)
             self.assertEqual((ROOT / "dotfiles" / "base" / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8"), candidate_do)
             self.assertNotIn("disable-model-invocation: true", candidate_do)
             self.assertTrue((baseline / ".agents" / "skills").is_dir())

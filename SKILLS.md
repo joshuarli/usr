@@ -43,6 +43,14 @@ Rule of thumb:
 
 `review` never edits. Everything else in the table can.
 
+## Decide the backlog
+
+| Skill | Mode | Use it to |
+| --- | --- | --- |
+| `ultratriage` | Explicit | Act as the owner: settle every open RFC and unresolved ticket, update docs and tickets, and report each decision with its reason and next action. |
+
+Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-the-backlog` to implement it. Each can run on its own. `ultratriage` ends open to feedback or the choice to start burn-down; it continues straight into implementation only when you have already asked for both. Accepted designs remain open until implemented, and prerequisite work lands before its dependents.
+
 ## Campaigns
 
 A campaign is a long, multi-lane effort run from a design doc. Use them in this order.
@@ -51,7 +59,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 | --- | --- | --- |
 | `campaign-plan <goal>` | Explicit | Plan a campaign from a goal: survey, baseline, workstreams, and a command that proves each deliverable. |
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
-| `burn-down-the-backlog` | Explicit | Work every ticket in `TODO.md` through `orchestrate`, one commit per ticket, with AFK. |
+| `burn-down-the-backlog` | Explicit | Work eligible tickets in `TODO.md` through `orchestrate`, respecting prerequisites and priority, one commit per ticket, with AFK. |
 | `accelerate` | Auto | Speed up a running campaign: find the limiting stage, then adjust lane width, batching, or scope. |
 | `campaign-winddown` | Explicit | Pause a running campaign cleanly: finish in-flight lanes, start nothing new, leave a handoff that survives a reboot. |
 | `cleanup` | Auto | Remove campaign worktrees once their work is confirmed integrated. |
