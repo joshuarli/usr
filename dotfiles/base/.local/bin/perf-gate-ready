@@ -14,7 +14,6 @@
 # never decides the status verdict; a loaded host is slower, not unsafe.
 #
 # Usage: perf-gate-ready [-1] | perf-gate-ready -s [PATH]
-#   Default retries while busy: PERF_GATE_ATTEMPTS (3) checks, PERF_GATE_WAIT (60) seconds apart.
 #   -1 checks once; use it right after a measurement to discard a run that
 #   overlapped a load spike.
 #   -s PATH names the directory whose filesystem is checked for free disk (default: .).
@@ -68,14 +67,13 @@ EOF
 	fi
 }
 
-cores="$(getconf _NPROCESSORS_ONLN)" || die 'cannot read core count'
-
 status () {
 	path="${1:-.}"
 	min_mem="${PERF_GATE_MIN_MEM_PCT:-15}"
 	max_swap="${PERF_GATE_MAX_SWAP_PCT:-50}"
 	min_disk="${PERF_GATE_MIN_DISK_GIB:-20}"
 	lane_gib="${PERF_GATE_LANE_GIB:-4}"
+	cores="$(getconf _NPROCESSORS_ONLN)" || die 'cannot read core count'
 	load="$(load1)" || die 'cannot read load average'
 	memory
 	disk_kib="$(df -Pk "$path" | awk 'NR == 2 { print $4 }')"
@@ -107,11 +105,112 @@ status () {
 	exit 75
 }
 
+report_hot_processes () {
+	hot_threshold=100
+	processes="$(LC_ALL=C ps -Aww -o uid=,pid=,ppid=,pgid=,%cpu=,%mem=,rss=,vsz=,etime=,stat=,command=)" || die 'cannot read process list'
+	printf '%s\n' "$processes" | LC_ALL=C awk -v threshold="$hot_threshold" '
+	{
+		uid[$2] = $1
+		parent[$2] = $3
+		pgid[$2] = $4
+		cpu[$2] = $5
+		mem[$2] = $6
+		rss[$2] = $7
+		vsz[$2] = $8
+		elapsed[$2] = $9
+		state[$2] = $10
+		command = ""
+		for (field = 11; field <= NF; field++) command = command (field == 11 ? "" : " ") $field
+		command_line[$2] = command
+		children[parent[$2]] = children[parent[$2]] (children[parent[$2]] == "" ? "" : " ") $2
+		order[++count] = $2
+		if (cpu[$2] >= threshold) {
+			hot[$2] = 1
+			included[$2] = 1
+		}
+	}
+	END {
+		for (i = 1; i <= count; i++) {
+			pid = order[i]
+			if (!hot[pid]) continue
+			found = 1
+			current = parent[pid]
+			while (current in parent && !included[current]) {
+				included[current] = 1
+				current = parent[current]
+			}
+			stack[1] = pid
+			top = 1
+			while (top > 0) {
+				current = stack[top--]
+				if (children[current] == "") continue
+				child_count = split(children[current], child_pids, " ")
+				for (child_index = 1; child_index <= child_count; child_index++) {
+					child = child_pids[child_index]
+					if (included[child]) continue
+					included[child] = 1
+					stack[++top] = child
+				}
+			}
+		}
+		if (!found) exit
+		printf "perf-gate-ready: hot process tree (>= %.0f%% CPU)\n", threshold
+		for (root_index = 1; root_index <= count; root_index++) {
+			root = order[root_index]
+			if (!included[root] || (parent[root] in included)) continue
+			print_stack_pid[1] = root
+			print_stack_depth[1] = 0
+			print_top = 1
+			while (print_top > 0) {
+				pid = print_stack_pid[print_top]
+				depth = print_stack_depth[print_top]
+				print_top--
+				for (space = 0; space < depth; space++) printf "  "
+				printf "%s pid=%s ppid=%s pgid=%s uid=%s cpu=%s%% mem=%s%% rss=%sKiB vsz=%sKiB elapsed=%s state=%s command=%s\n",
+					hot[pid] ? "*" : "-", pid, parent[pid], pgid[pid], uid[pid], cpu[pid], mem[pid],
+					rss[pid], vsz[pid], elapsed[pid], state[pid], command_line[pid]
+				if (children[pid] == "") continue
+				child_count = split(children[pid], child_pids, " ")
+				for (child_index = child_count; child_index >= 1; child_index--) {
+					child = child_pids[child_index]
+					if (!included[child]) continue
+					print_stack_pid[++print_top] = child
+					print_stack_depth[print_top] = depth + 1
+				}
+		}
+		}
+	}'
+	hot_pids="$(printf '%s\n' "$processes" | LC_ALL=C awk -v threshold="$hot_threshold" '$5 >= threshold { print $2 }')"
+	for hot_pid in $hot_pids; do
+		report_resource_coalition "$hot_pid"
+	done
+}
+
+report_resource_coalition () {
+	command -v launchctl >/dev/null 2>&1 || return 0
+	bundle_id="$(launchctl print "pid/$1" | LC_ALL=C awk '
+		/resource coalition = \{/ { resource = 1; next }
+		resource && /bundle ID =/ {
+			sub(/^[[:space:]]*bundle ID = /, "")
+			print
+			exit
+		}
+		resource && /^[[:space:]]*}/ { exit }
+	')"
+	if [ -n "$bundle_id" ]; then
+		printf 'perf-gate-ready: app bundle attribution pid=%s bundle_id=%s\n' "$1" "$bundle_id" >&2
+	else
+		printf 'perf-gate-ready: macOS resource coalition unavailable for pid=%s\n' "$1" >&2
+	fi
+}
+
+report_hot_processes >&2
 [ "$1" = -s ] && status "$2"
+cores="$(getconf _NPROCESSORS_ONLN)" || die 'cannot read core count'
 
 max="${PERF_GATE_MAX_LOAD:-0.7}"
 attempts="${PERF_GATE_ATTEMPTS:-3}"
-wait_s="${PERF_GATE_WAIT:-60}"
+wait_s="${PERF_GATE_WAIT:-1}"
 [ "$1" = -1 ] && attempts=1
 
 i=1
