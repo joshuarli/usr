@@ -51,7 +51,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 | --- | --- | --- |
 | `campaign-plan <goal>` | Explicit | Plan a campaign from a goal: survey, baseline, workstreams, and a command that proves each deliverable. |
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
-| `burn-down-the-backlog` | Explicit | Work every ticket in `TODO.md` through `orchestrate`, one commit per ticket. |
+| `burn-down-the-backlog` | Explicit | Work every ticket in `TODO.md` through `orchestrate`, one commit per ticket, with AFK. |
 | `accelerate` | Auto | Speed up a running campaign: find the limiting stage, then adjust lane width, batching, or scope. |
 | `campaign-winddown` | Explicit | Pause a running campaign cleanly: finish in-flight lanes, start nothing new, leave a handoff that survives a reboot. |
 | `cleanup` | Auto | Remove campaign worktrees once their work is confirmed integrated. |
@@ -62,8 +62,8 @@ Repo upkeep and getting work merged.
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `pr-ready` | Explicit | Bring one open PR to mergeable: resolve conflicts, judge bot comments, reply on GitHub, and loop until required CI is green. It never merges. |
-| `pr-stack` | Explicit | Drive a PR or stack to merge-ready, or land a verified stack bottom-up. It merges only when you ask. |
+| `pr-ready` | Explicit | Bring one open PR to mergeable under AFK: resolve conflicts, judge bot comments, reply on GitHub, and loop until required CI is green. It never merges. |
+| `pr-stack` | Explicit | Drive a PR or stack to merge-ready under AFK, or land a verified stack bottom-up. It merges only when you ask. |
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
 | `settle` | Explicit | Before moving to another computer: find unmerged and local-only work and separate what must travel from what regenerates. |

@@ -10,6 +10,8 @@ metadata:
 
 Get the named pull request into a state where the owner can merge it by hand. Stop there. Merging, approving, enabling auto-merge, and clicking the merge button are the owner's, even when they say "finish", "land", or "get it over the line".
 
+Read and follow [afk](../afk/SKILL.md) for this workflow.
+
 ## Rules
 
 - **Do not merge.** Do not run `gh pr merge`, do not push to the base branch, and do not turn on auto-merge. Say when it is ready and leave the merge to the owner.

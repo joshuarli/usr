@@ -10,6 +10,8 @@ metadata:
 
 Close the tickets in `TODO.md` unattended, in priority order, one commit each. Delegation, lanes, and merging follow `orchestrate`; read `~/.agents/skills/orchestrate/references/campaigns.md` for the lane contract before launching. Ticket format and ID rules belong to `todo`.
 
+Read and follow [afk](../afk/SKILL.md) for this workflow.
+
 ## Rules
 
 - **Invoking this skill asks for the commits,** one per ticket, on a branch named `backlog-<date>` cut from the current one. It never pushes, merges to the default branch, or formats.

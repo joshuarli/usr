@@ -29,7 +29,11 @@ The layout, the commands, and where each piece of agent configuration lives are 
 
 ## After a substantive change
 
-Have fresh reviewers look, because the author misses things: an adversarial pass on `sym`, which rewrites `~` (an independent review found a source-deleting bug here that its author did not), and a consistency pass on skills against AGENTS.md. Triage each claim against the files before applying it; one review claim here was wrong. When compressing a prompt, diff its backticked tokens against the old version so no decision is lost. Judge whether an auto-triggered skill earns its place with `skill-eval`, not by how well it reads. Leave commits to the owner and never push.
+- For changes to `sym` that rewrite home paths, get a fresh adversarial review of source preservation. An independent review found a source-deleting bug here.
+- For substantive changes to skill behavior, agent definitions, or harness policy, get a fresh consistency review against `AGENTS.md`. Skip wording and reference-only edits that do not change behavior, invocation, or authority. Check every review claim against the files; a past claim here was wrong.
+- When compressing a prompt, diff its backticked tokens against the old version so no decision is lost.
+- Use `skill-eval` to judge whether an auto-triggered skill earns its place.
+- Leave commits to the owner and never push.
 
 ## Known gaps
 

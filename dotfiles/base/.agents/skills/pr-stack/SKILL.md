@@ -14,7 +14,7 @@ Clear the lowest unmerged PR, and land only what someone other than the author v
 
 - **check:** one status pass and a report. The default for a small or docs-only PR and for "is it green".
 - **threads:** answer review comments and touch nothing else.
-- **drive:** loop until merge-ready. The default for "babysit this" and "get it green".
+- **drive:** loop until merge-ready. The default for "babysit this" and "get it green". Read and follow [afk](../afk/SKILL.md) in this mode.
 - **ship:** land a verified run. Only when the user asked to merge, land, or ship.
 
 ## Babysit rules (check, threads, drive)

@@ -10,7 +10,8 @@ Run the narrowest check that covers the change:
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
-| a skill or agent definition | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` (or `.agents/skills` for the repo-only ones), then `python3 -I dotfiles/skills-campaign-test.py` |
+| a skill or agent definition | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` (or `.agents/skills` for repo-only skills); use the focused check for other agent configuration |
+| skill invocation or discovery metadata, global instruction adapters, checker behavior, or campaign workflow and fixture behavior | also run `python3 -I dotfiles/skills-campaign-test.py` |
 | a hook or `mdtool` | the matching `dotfiles/*-test.sh`, or `python3 -I dotfiles/base/.local/bin/mdtool selftest` and `skill-usage selftest` |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
 | `setup-linux` | `sh setup-linux-test.sh` and `shellcheck -s sh setup-linux setup-linux-test.sh` |
@@ -20,7 +21,7 @@ Run the narrowest check that covers the change:
 
 `make check` and `make lint` run all of these across the repo. Use them to close a change that crosses several areas, not to iterate.
 
-Run `python3 -I dotfiles/base/.local/bin/mdtool check` after changing repository docs. It checks links, references, consumers, source pointers, duplicate blocks, and the docs router. Warnings and notes do not change its exit status.
+After changing Markdown, run `python3 -I dotfiles/base/.local/bin/mdtool check PATH...` with the changed files. Add `--untracked` for new files. It reads repository context and limits reported findings to the selected paths. It checks links, references, consumers, source pointers, duplicate blocks, and the docs router.
 
 ## Conventions
 
