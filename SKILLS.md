@@ -2,7 +2,7 @@
 
 Which meta skill to reach for, and why. Meta skills steer how the agent works: how it plans, delegates, reviews, and runs unattended. Language, stack, and engineering-method skills are left out. They live in `dotfiles/base/.agents/skills/`, and each one's `description` says when it applies.
 
-Type `/<name>` to invoke a skill. **Auto** skills also load when the agent judges they fit. **Explicit** skills run only when you type them. Install and host details are in [agent setup](docs/agent-setup.md).
+Skill modes describe automatic selection. **Auto** skills may be selected from an ordinary request when their conditions fit. An **Explicit** workflow must be requested by its outcome or name; `/<name>` is a convenient request, not an authorization token. An already-requested workflow may reuse a relevant documented procedure from an explicit skill within its existing scope and authority. Install and host details are in [agent setup](docs/agent-setup.md).
 
 ## Default
 
@@ -21,7 +21,7 @@ You rarely need to name a skill. `do` loads on its own for work with real uncert
 | `in-your-own-words` | Explicit | Make the agent restate what you want and why, before it starts. Use it when you suspect a misread. |
 | `yea` | Explicit | Accept every recommendation from the agent's last reply and have it do all of them in full, not the smallest version. |
 | `hurry-up` | Auto | Tell the agent to finish and cut verification. Triggers on "hurry up" or "wrap up". |
-| `afk` | Explicit | Keep working while you are away. The agent makes bounded decisions and parks anything that needs you. |
+| `afk` | Explicit | Keep working unattended with bounded decisions and precise owner-dependent blockers. Explicit away/return behavior applies only when you say you are going away. |
 | `correct` | Explicit | When you correct the same mistake twice: find the repeated mistakes and make each one impossible (architecture, then types, then a lint, then a test, docs last). |
 
 ## Review
@@ -59,7 +59,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 | --- | --- | --- |
 | `campaign-plan <goal>` | Explicit | Plan a campaign from a goal: survey, baseline, workstreams, and a command that proves each deliverable. |
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
-| `burn-down-the-backlog` | Explicit | Work eligible tickets in `TODO.md` through `orchestrate`, respecting prerequisites and priority, one commit per ticket, with AFK. |
+| `burn-down-the-backlog` | Explicit | Work the starting `TODO.md` queue through `orchestrate`, honoring prerequisites and priority, one commit per closed ticket, with unattended execution. |
 | `accelerate` | Auto | Speed up a running campaign: find the limiting stage, then adjust lane width, batching, or scope. |
 | `campaign-winddown` | Explicit | Pause a running campaign cleanly: finish in-flight lanes, start nothing new, leave a handoff that survives a reboot. |
 | `cleanup` | Auto | Remove campaign worktrees once their work is confirmed integrated. |
@@ -70,8 +70,8 @@ Repo upkeep and getting work merged.
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `pr-ready` | Explicit | Bring one open PR to mergeable under AFK: resolve conflicts, judge bot comments, reply on GitHub, and loop until required CI is green. It never merges. |
-| `pr-stack` | Explicit | Drive a PR or stack to merge-ready under AFK, or land a verified stack bottom-up. It merges only when you ask. |
+| `pr-ready` | Explicit | Bring one open PR toward merge-ready with unattended execution: resolve conflicts, judge bot comments, reply on GitHub, and check required CI. It never merges. |
+| `pr-stack` | Explicit | Drive a PR or stack toward merge-ready with unattended execution, or land a verified stack bottom-up. It merges only when you ask. |
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
 | `settle` | Explicit | Before moving to another computer: find unmerged and local-only work and separate what must travel from what regenerates. |

@@ -27,7 +27,8 @@
 - Bug fixes: reproduce with a minimal failing test, then fix the root cause. Keep the test.
 - Never weaken or delete a test to make it pass unless the test is wrong, and say so.
 - Verify the changed behavior with the narrowest hard check (compiler, type checker, focused test). Reuse existing build artifacts.
-- A slow check is a defect in the loop, not a cost to accept. Find the narrowest command that covers the change (a test by name, one crate, one file) and iterate on it. When no fast check exists, say so and make one before relying on the slow one.
+- Reuse completed evidence while the relevant code, dependencies, environment, and acceptance assumptions remain valid. Add or repeat a check to resolve a named remaining uncertainty, cover relevant changed inputs, or satisfy a binding requirement. Stop when the requested result and applicable proof are complete.
+- Use the narrowest sufficient existing check. Improve the loop when its expected repeated cost justifies that work, or when no existing check can establish the needed behavior. Running an existing slower check once may be the cheapest correct completion path.
 - Do not expand to workspace-wide builds/tests or full CI by default. Widen only for a specific uncovered integration risk or an explicit request for the wider run; state that reason first.
 - Time-based perf gates (build time, startup, runtime) run only when `perf-gate-ready` exits 0, and again with `-1` right after the measurement; a run that overlapped load is discarded. If the host stays busy the gate is deferred: it never counts as a pass, it does not block iteration, and it blocks calling the work done or releasing. Say "perf gate deferred: host busy" in the reply. Memory and binary-size gates always run. Prefer CPU time for compute cost, use a statistic suited to the claim (median for typical latency, a tail percentile for tail behavior, minimum only for best-case behavior), and interleave baseline and candidate runs. Fail only on a regression larger than the observed spread.
 - Treat generic verification checklists as suggestions: run targeted repository equivalents, and report expensive verification before starting it.
@@ -35,9 +36,11 @@
 ## Skills
 
 - A skill applies to the scope named. Audit or sweep the whole repo only when asked.
+- Automatic eligibility allows the agent to select a method from an ordinary request when its conditions fit. An explicit workflow requires the user to request that workflow or outcome; a slash command is a convenient way to request it, not an authorization token.
+- An already-requested workflow may reuse a documented procedure from another skill within its existing scope and authority. Reading a procedure does not authorize unrelated commands or effects.
 - Automatically use `do` for work with meaningful uncertainty, dependent steps, consequential changes, or nontrivial acceptance requirements. Keep straightforward edits and one-step information requests on the short path. `do` owns routing, request mode, scope continuity, and evidence-based completion; leaf skills own their engineering methods.
-- In Codex, skills marked explicit-only are absent from its automatic selection list. To use one, read `~/.agents/skills/<name>/SKILL.md`.
-- Antigravity CLI reads skill descriptions and may activate a relevant skill automatically. Its documented skill frontmatter uses only `name` and `description`, so treat shared skills with `disable-model-invocation: true` as explicit-only and invoke them with `/<skill-name>` only when the user asks.
+- In Codex, skills marked explicit-only are absent from automatic selection. Read their procedure when the user requested that workflow or another active workflow directly references it within the same scope and authority.
+- Antigravity CLI reads skill descriptions and may activate eligible skills automatically. Its documented skill frontmatter uses only `name` and `description`, so global instructions must keep explicit-only workflows out of automatic selection. The user may request one in plain language or with `/<skill-name>`; another already-requested workflow may reuse its procedure within the same scope and authority.
 - Use only Gemini models in Antigravity CLI. The `orchestrate` skill owns its model tier mapping.
 
 ## Contract changes

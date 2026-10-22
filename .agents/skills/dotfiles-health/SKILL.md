@@ -30,7 +30,13 @@ The layout, the commands, and where each piece of agent configuration lives are 
 ## After a substantive change
 
 - For changes to `sym` that rewrite home paths, get a fresh adversarial review of source preservation. An independent review found a source-deleting bug here.
-- For substantive changes to skill behavior, agent definitions, or harness policy, get a fresh consistency review against `AGENTS.md`. Skip wording and reference-only edits that do not change behavior, invocation, or authority. Check every review claim against the files; a past claim here was wrong.
+- **Choose proof by the mechanism changed.**
+  - Wording with unchanged meaning: inspect the diff and relevant references; stop when checked.
+  - Renames, removals, or heading and anchor changes: check the changed files and inbound references.
+  - Local workflow composition: read the directly composed procedures and applicable global rules, then check the specific transitions and effects. A short instruction that composes workflows is a behavior change, not cosmetic wording.
+  - Invocation metadata, discovery adapters, checkers, or fixture code: run the corresponding existing named structural tests and relevant metadata or link checks.
+  - Broad shared policy, authority, or consequential uncertain behavior: get one focused independent consistency review and run the smallest behavioral scenario that can resolve the uncertainty.
+- Check review claims against the files; a past claim here was wrong. Do not stack reviews that address the same uncertainty, repeat successful checks on unchanged relevant inputs, or create a process artifact just to report that checking is complete.
 - When compressing a prompt, diff its backticked tokens against the old version so no decision is lost.
 - Use `skill-eval` to judge whether an auto-triggered skill earns its place.
 - Leave commits to the owner and never push.

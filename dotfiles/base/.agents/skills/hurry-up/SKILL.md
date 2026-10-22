@@ -12,14 +12,9 @@ work, not just the tone of progress updates.
 
 - **Freeze scope.** Finish the agreed deliverable. Drop optional polish, new
   hardening, refactors, audits, and follow-up work. Reuse decisions already made.
-- **Spend existing evidence.** Accept completed checks that cover the change.
-  Skip repeated runs, broader suites, additional reviewers, and extra benchmark
-  samples when they are quality preferences rather than binding requirements.
-  A skill's preferred sample count or checklist is not a reason to keep going.
-- **Shrink the last check.** Run a narrow check only when its result could change
-  whether the deliverable works. Use fewer benchmark samples and label the
-  evidence preliminary when appropriate. Stop optional work already running
-  when it can be interrupted safely.
+- **Qualify preliminary measurements.** Use fewer benchmark samples when time is
+  the constraint and label the result preliminary. Stop optional work already
+  running when it can be interrupted safely.
 - **Preserve the real boundaries.** Urgency does not authorize new external
   actions, data loss, hidden contract changes, or false claims. Do not weaken
   assertions to manufacture a pass. If a binding requirement cannot be waived,

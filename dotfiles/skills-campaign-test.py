@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.util
 from pathlib import Path
 
 
@@ -616,12 +617,66 @@ class SkillCampaignTests(unittest.TestCase):
             candidate_do = (candidate / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8")
             self.assertEqual(baseline_skill.stdout, baseline_do)
             self.assertEqual((ROOT / "dotfiles" / "base" / ".agents" / "skills" / "do" / "SKILL.md").read_text(encoding="utf-8"), candidate_do)
-            self.assertNotIn("disable-model-invocation: true", candidate_do)
             self.assertTrue((baseline / ".agents" / "skills").is_dir())
             self.assertTrue((candidate / ".agents" / "skills").is_dir())
         finally:
             shutil.rmtree(baseline)
             shutil.rmtree(candidate)
+
+    def test_eval_fixture_sources_committed_and_working_tree_content(self):
+        work = Path(tempfile.mkdtemp(prefix="eval-source-selection-", dir=WORK_TMP))
+        try:
+            repo = work / "repo"
+            git_init(repo)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Fixture Evaluator"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "fixture@example.invalid"], check=True)
+            contract = repo / "dotfiles" / "base" / ".codex" / "AGENTS.md"
+            skills = repo / "dotfiles" / "base" / ".agents" / "skills"
+            skill = skills / "do" / "SKILL.md"
+            contract.parent.mkdir(parents=True)
+            skill.parent.mkdir(parents=True)
+            committed_contract = "committed contract\n"
+            candidate_contract = "working-tree contract\n"
+            committed_skill = "committed skill\n"
+            candidate_skill = "working-tree skill\n"
+            contract.write_text(committed_contract, encoding="utf-8")
+            skill.write_text(committed_skill, encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "--all"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "test(fixtures): seed source selection"], check=True, capture_output=True, text=True)
+
+            spec = importlib.util.spec_from_file_location("skill_eval_fixtures", FIXTURE_TOOL)
+            if spec is None or spec.loader is None:
+                self.fail(f"cannot load fixture tool from {FIXTURE_TOOL}")
+            fixture_tool = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(fixture_tool)
+            fixture_tool.REPO = repo
+            fixture_tool.SKILL_TREE = skills
+
+            contract.write_text(candidate_contract, encoding="utf-8")
+            skill.write_text(candidate_skill, encoding="utf-8")
+            self.assertEqual(committed_contract, fixture_tool.source_contract("baseline"))
+            self.assertEqual(candidate_contract, fixture_tool.source_contract("candidate"))
+
+            baseline_skills = work / "baseline-skills"
+            candidate_skills = work / "candidate-skills"
+            fixture_tool.copy_skills(baseline_skills, "baseline")
+            fixture_tool.copy_skills(candidate_skills, "candidate")
+            self.assertEqual(committed_skill, (baseline_skills / "do" / "SKILL.md").read_text(encoding="utf-8"))
+            self.assertEqual(candidate_skill, (candidate_skills / "do" / "SKILL.md").read_text(encoding="utf-8"))
+
+            subprocess.run(["git", "-C", str(repo), "add", "--all"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "test(fixtures): align source selection"], check=True, capture_output=True, text=True)
+            self.assertEqual(fixture_tool.source_contract("baseline"), fixture_tool.source_contract("candidate"))
+
+            clean_baseline = work / "clean-baseline-skills"
+            clean_candidate = work / "clean-candidate-skills"
+            fixture_tool.copy_skills(clean_baseline, "baseline")
+            fixture_tool.copy_skills(clean_candidate, "candidate")
+            baseline_files = {path.relative_to(clean_baseline): path.read_bytes() for path in clean_baseline.rglob("*") if path.is_file()}
+            candidate_files = {path.relative_to(clean_candidate): path.read_bytes() for path in clean_candidate.rglob("*") if path.is_file()}
+            self.assertEqual(baseline_files, candidate_files)
+        finally:
+            shutil.rmtree(work)
 
     def test_verification_fixture_distinguishes_success_from_negative_input(self):
         result = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "verify")

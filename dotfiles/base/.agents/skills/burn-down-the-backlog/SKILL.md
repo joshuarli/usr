@@ -1,6 +1,6 @@
 ---
 name: burn-down-the-backlog
-description: "Use for /burn-down-the-backlog: work every ticket in TODO.md through orchestrate, one commit per ticket that also deletes the ticket, and park what needs the owner."
+description: "Use for /burn-down-the-backlog: work the starting TODO.md queue through orchestrate, honoring prerequisites and priority, one commit per closed ticket, and park blocked work."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"
@@ -8,46 +8,31 @@ metadata:
 
 # Burn Down the Backlog
 
-Close the tickets in `TODO.md` unattended, in dependency order, then priority order, one commit each. Delegation, lanes, and merging follow `orchestrate`; read `~/.agents/skills/orchestrate/references/campaigns.md` for the lane contract before launching. Ticket format and ID rules belong to `todo`. Use an existing `ultratriage` result as the decision handoff; do not invoke that decision workflow unless asked.
-
-Read and follow [afk](../afk/SKILL.md) for this workflow.
+Close the bounded queue captured from `TODO.md`. Dependencies and existing ownership determine readiness; priority chooses the next ready ticket. A ticket is a delivery and accounting unit, not an agent unit. Use an existing [ultratriage](../ultratriage/SKILL.md) result as the decision handoff; do not invoke that workflow unless asked. Use [AFK unattended execution](../afk/SKILL.md#unattended-execution) for this workflow.
 
 ## Rules
 
-- **Invoking this skill asks for the commits,** one per ticket, on a branch named `backlog-<date>` cut from the current one. It never pushes, merges to the default branch, or formats.
-- **Only eligible tickets run.** Park a ticket, leaving it in `TODO.md`, when it:
-  - links a draft RFC, or otherwise needs a decision only the owner can make;
-  - has a recorded blocker or deferral whose unblock condition or revisit trigger is still unmet; honor it unless current evidence satisfies it or the owner changes the decision;
-  - needs an outward or irreversible step: a push, a download, `sudo`, a system or `~` mutation, or deleting outside the repo;
-  - stays `unproven` after one attempt to prove its fact (the first attempt on an `unproven` ticket proves the fact with a failing test or a command, and reports it before changing code).
-- **Prerequisites gate readiness.** Read dependencies in the tickets and accepted RFCs. A settled design does not implement its prerequisite. Hold a dependent until the prerequisite commit is integrated and verified, then reconsider it; do not park it permanently while its prerequisite is runnable. If a prerequisite parks, park its dependents with that same blocker. A missing prerequisite or cycle gets one bounded investigation; if it cannot be resolved within scope, park the affected work with the exact gap.
-- **Priority orders ready work.** P1 first, then P2, P3, and P4, and by ID within a priority. Launch and commit in that order among runnable tickets; a finished lane waits for higher-priority runnable work. A ticket blocked by an existing lane's file ownership is not runnable; integrate or park that owning lane first. A prerequisite may commit before its higher-priority dependent. Report ordering forced by prerequisites or existing ownership without changing priorities. Recompute readiness after each integration so newly unblocked work takes its proper place.
-- **One lane per ticket,** in its own worktree at `.work/wt/<ID>`, by orchestrate's ownership rules. Tickets that touch the same files run one after another: follow dependency order, then priority, and brief the next on the updated branch. Tickets never share a lane, so a lane's tier is its own ticket's. The brief is the ticket, its prerequisites and accepted decisions, its `Fix with` skill, and the rule that a bug gets a failing test first.
-- **The ticket sets the tier,** using orchestrate's routing table for the harness in use:
-  - **P1 and P2:** the difficult row (`expert`; `gpt-6.1-sol` on Codex).
-  - **P3 and P4, Effort S, and a `Recommendation` that names one change:** the mechanical row (`mechanic`; `gpt-6-luna`, `high`).
-  - **Any other P3 or P4:** the normal row (`worker`; `gpt-6-luna`, `xhigh`).
-  - A ticket whose `Recommendation` offers a choice ("A or B") is not mechanical. Park it if the choice is the owner's, otherwise use the normal row.
-- **Attempts escalate.** A lane gets two attempts at its tier, the second briefed with the integrator's rejection and the command output. A third attempt runs one row up. After that the ticket parks with the failures reported. Never skip a row, and never go above the difficult row for P3 and P4.
-- **Steer the backlog.** Apply the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint) without changing ticket priority, commit authority, or required per-ticket checks. Bound prepared work by integration capacity. A shared missing prerequisite gets one owner and a retry condition, not fresh attempts from every ticket. An unchanged environment or permission failure does not trigger the model-escalation rule.
-- **A lane never writes `TODO.md`.** It reports the diff, the narrowest checks it ran, and any defect it found outside its ticket.
-- **The integrator checks every lane, at every tier, before committing.** The lane's report is a claim, not evidence. For each lane, in the dependency and priority order above:
-  1. Read the whole diff against the ticket's `Recommendation`. Reject edits outside the ticket's `Where` files, unrelated cleanups, new dependencies the brief did not name, and a weakened or deleted test.
-  2. For a bug, check out the base commit with only the new test applied and confirm it fails, then confirm it passes with the fix.
-  3. Apply the diff to the branch, rerun the lane's named tests, and run the narrowest lint and type checks for the touched files on the merged tree.
-  4. Delete the ticket from `TODO.md`. Delete its RFC in that same commit when `todo` counts the RFC done. Commit once, so the fix and those removals are one commit.
-  A failed check goes back to the lane under the attempt rule above. A weaker tier gets the same checks, never fewer.
-- **Commit message:** a Conventional Commit, `type(scope): subject` with the body saying why, a `!` or `BREAKING CHANGE:` footer for a contract change, and `Closes ABC-123` last.
-- **A ticket that exhausts its attempts parks.** Nothing is committed for it and the ticket is untouched.
-- **New defects become new tickets** at the end, in one `docs(todo)` commit, with IDs from `Next`. Never reuse a deleted ID.
+- **The workflow request authorizes local commits.** Work on a branch named `backlog-<date>` cut from the current branch. Never push, merge to the default branch, or format.
+- **Keep the active queue bounded.** Capture the tickets already in `TODO.md` at the start. Record newly discovered tickets for a later run; do not add them to the active queue unless the user asks. Keep incomplete tickets open.
+- **Honor prerequisites and recorded deferrals.** Read dependencies in tickets and accepted RFCs. Hold a dependent until its prerequisites are integrated and verified. If a prerequisite parks, keep its dependents open with the same blocker. Revisit a recorded deferral only when its trigger or evidence changes, or the owner changes the decision. Keep an unresolved owner decision or draft RFC parked. An accepted design does not replace prerequisite implementation.
+- **Let priority schedule ready work.** Start the highest-priority ready ticket first, then work down by priority and ID. Dependencies, file conflicts, and acceptance determine integration. A ticket blocked by active lane ownership is not ready; integrate or park that owner before starting conflicting work. Recompute readiness after integrations. Do not delay an independent verified fix solely to make commit history follow priority order.
+- **Choose lanes economically.** Complete a trivial ticket directly when that costs less than a handoff. A worker may take a coherent group of small related tickets when that reduces briefing and integration cost. Use separate worktrees when concurrency, isolation, or conflict risk justifies them; do not create one per ticket by default. For multiple lanes, follow [orchestrate](../orchestrate/SKILL.md) and its [lane contract](../orchestrate/references/campaigns.md#lane-contract).
+- **Route by difficulty.** Follow `orchestrate` for model choice. Actual difficulty, uncertainty, and consequences determine implementation effort. Priority affects scheduling and proportionate scrutiny, not the model tier. Escalate when evidence shows the task is harder than briefed, not because another attempt slot exists.
+- **Prove uncertain reports before fixing.** For an `unproven` ticket, establish its fact with a failing test or command and report that evidence before changing code. If the fact cannot be established within scope, leave the ticket open and explain what would prove it.
+- **Park blocked actions precisely.** Assess each required action against the current request, prior authorization, repository rules, and available means. A routine download alone is not a reason to park a ticket. Park only work that requires an unavailable action, missing authority, or an owner decision. Continue independent authorized work. Do not close a ticket while its required acceptance remains blocked.
+- **Give shared prerequisites one owner.** Retry only when evidence or conditions change. An unchanged environment or permission failure does not trigger another attempt or model escalation.
+- **Keep ticket ownership clear.** Workers do not edit `TODO.md`. They report each ticket's diff, checks, acceptance evidence, and any defect outside the ticket. The parent owns integration and ticket accounting.
+- **Reuse valid acceptance evidence.** Read each diff against the ticket's `Recommendation`. Reject unrelated edits, changes outside its `Where` files, unbriefed dependencies, and weakened or deleted tests. Reuse successful checks while relevant inputs and assumptions remain valid. Repeat them only when integration, changed inputs, or a binding requirement could invalidate them. Retain before-fix failure evidence for bug fixes and rerun it only when the source, test, or assumptions changed, or the evidence is unavailable.
+- **Commit each closed ticket separately.** Put the accepted change and ticket removal in the same commit. Delete a linked RFC in that commit only when `todo` defines the ticket as complete. Use a Conventional Commit with a `Closes ABC-123` footer. A worker handling several tickets still delivers a separate commit for each. Do not close an incomplete ticket.
+- **Record discoveries for later.** Add newly found defects under `Next` in `TODO.md` in one `docs(todo)` commit after the active queue. Do not work those tickets in this run unless requested.
 
 ## Steps
 
-1. Read `AGENTS.md`, `TODO.md`, and linked decisions. Map prerequisites, sort by priority then ID, and distinguish runnable, waiting, and parked tickets.
-2. Cut the branch and prepare the lanes, then launch ready work in priority order within ownership, machine, and integration-capacity limits. Revisit waiting tickets as prerequisites land.
-3. Integrate each report as above. Run broader checks at bounded integration milestones for areas the tickets cross and at the end, reporting their scope first. Keep the per-ticket focused proof above; do not mark a ticket globally verified while its required milestone is pending.
-4. File the new tickets, then confirm `TODO.md` holds only parked and new tickets.
+1. Read `AGENTS.md`, `TODO.md`, linked decisions, and any existing ultratriage result. Capture the active queue and map prerequisites, conflicts, and owner decisions.
+2. Start the highest-priority ready work. Choose direct work, a coherent worker group, and worktrees according to `orchestrate` economics.
+3. Integrate accepted work when its dependencies and acceptance allow. Keep one accepted commit and ticket removal for each closed ticket. Reuse valid proof and run the narrowest check when integration changes relevant inputs.
+4. Record new defects for later, then confirm `TODO.md` contains only open, parked, and newly filed tickets.
 
-**The test:** `git log` shows exactly one commit for each closed ID, each containing that ticket's removal and a `Closes` footer, with prerequisites before dependents and priority order among runnable tickets, and no ticket both stays and has a commit.
+**The test:** each closed ticket has exactly one commit containing its accepted change and removal with a `Closes` footer; incomplete tickets remain open; prerequisites land before their dependents; priority schedules ready work without imposing priority-sorted history or one lane per ticket; and nothing was pushed.
 
-**Report:** the branch; closed tickets with their commits and the tier that closed each, noting escalation or ordering forced by prerequisites or ownership; parked tickets with the reason and exact unblock condition; new tickets filed; the checks run; and that nothing was pushed.
+**Report:** the branch; closed tickets and commits; parked tickets with the exact blocker and unblock condition; newly filed tickets; checks and reused evidence; and confirmation that nothing was pushed.
