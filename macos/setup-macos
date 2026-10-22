@@ -170,16 +170,19 @@ ensure_macos_unbound_account() {
     uid=$(dscl . -list /Users UniqueID | awk '$2 ~ /^[0-9]+$/ { used[$2] = 1 } END { for (candidate = 300; candidate < 500; candidate++) if (!(candidate in used)) { print candidate; exit } }')
     [ -n "$uid" ] || die "no free macOS service uid between 300 and 499"
     info "Creating the Unbound service account $user"
-    need_sudo
-    act sudo dscl . -create "/Users/$user"
-    act sudo dscl . -create "/Users/$user" RealName "Unbound DNS"
-    act sudo dscl . -create "/Users/$user" UniqueID "$uid"
-    act sudo dscl . -create "/Users/$user" PrimaryGroupID 1
-    act sudo dscl . -create "/Users/$user" NFSHomeDirectory /var/empty
-    act sudo dscl . -create "/Users/$user" UserShell /usr/bin/false
-    act sudo dscl . -create "/Users/$user" Password '*'
-    act sudo dscl . -create "/Users/$user" IsHidden 1
-    act sudo dscl . -create "/Users/$user" GeneratedUID "$(uuidgen)"
+    sudo /bin/sh -c '
+        set -eu
+        user=$1
+        uid=$2
+        /usr/bin/dscl . -create "/Users/$user"
+        /usr/bin/dscl . -create "/Users/$user" RealName "Unbound DNS"
+        /usr/bin/dscl . -create "/Users/$user" UniqueID "$uid"
+        /usr/bin/dscl . -create "/Users/$user" PrimaryGroupID 1
+        /usr/bin/dscl . -create "/Users/$user" NFSHomeDirectory /var/empty
+        /usr/bin/dscl . -create "/Users/$user" UserShell /usr/bin/false
+        /usr/bin/dscl . -create "/Users/$user" Password "*"
+        /usr/bin/dscl . -create "/Users/$user" IsHidden 1
+    ' setup-macos "$user" "$uid"
     [ "$(id -u "$user")" = "$uid" ] || die "failed to create the Unbound account $user"
 }
 
