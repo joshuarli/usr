@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import select
+import signal
 import shutil
 import subprocess
 import sys
@@ -24,15 +25,21 @@ PROVIDERS = (
     # Disabled: direct Google OAuth quota access violates its terms; the supported CLI path is slow.
     # ("agy", "Antigravity", "agy", []),
 )
-HELP = """usage: usage [claude|codex|muse|grok|dsh]
+CLOUDFLARE_PROVIDER = ("cloudflare", "Cloudflare Workers AI", "cf", [])
+WORKERS_AI_DAILY_FREE_NEURONS = 10_000
+WORKERS_AI_USAGE_WINDOW_DAYS = 31
+HELP = """usage: usage [claude|codex|muse|grok|dsh|cloudflare]
 
 Read subscription quota usage from Claude Code, Codex, Muse Code, and Grok
 Build, plus the DeepSeek API credit balance. Grok queries its CLI billing
 extension over ACP. The DeepSeek balance is not a subscription quota. With no
-provider, query every supported CLI installed here. These reads do not submit
-a model prompt. Claude Code uses its undocumented OAuth usage endpoint and
-does not refresh credentials. OpenCode's free-model quota is not available
-through a reader integrated here.
+provider, query every supported CLI installed here except Cloudflare, which
+is opt-in. `usage cloudflare` reads the latest complete Workers AI usage day
+from Cloudflare's daily billable-usage data, so it does not show a live quota.
+It requires `cf`, `vault`, `CLOUDFLARE_BILLING_API_TOKEN`, and
+`CLOUDFLARE_ACCOUNT_ID`. These reads do not submit a model prompt. Claude Code
+uses its undocumented OAuth usage endpoint and does not refresh credentials.
+OpenCode's free-model quota is not available through a reader integrated here.
 """
 
 
@@ -429,6 +436,148 @@ def query_dsh(_binary):
     return result
 
 
+def cloudflare_run(binary, arguments):
+    vault = shutil.which("vault")
+    if not vault:
+        raise RuntimeError("`vault` is required for CLOUDFLARE_BILLING_API_TOKEN")
+    command = [
+        vault,
+        "CLOUDFLARE_BILLING_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "--",
+        "/bin/sh",
+        "-c",
+        'export CLOUDFLARE_API_TOKEN="$CLOUDFLARE_BILLING_API_TOKEN"; '
+        'unset CLOUDFLARE_BILLING_API_TOKEN; exec "$@"',
+        "usage-cloudflare",
+        binary,
+        *arguments,
+    ]
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=35)
+    except subprocess.TimeoutExpired as error:
+        stop_cloudflare_process_group(process)
+        raise RuntimeError("Cloudflare billable-usage query timed out after 35 seconds") from error
+    except BaseException:
+        stop_cloudflare_process_group(process)
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def stop_cloudflare_process_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+
+
+def cloudflare_response_rows(response):
+    if isinstance(response, list):
+        return response
+    if isinstance(response, dict) and response.get("success", True) is True:
+        rows = response.get("result")
+        if isinstance(rows, list):
+            return rows
+    raise RuntimeError("Cloudflare returned an invalid billable-usage response")
+
+
+def is_workers_ai_usage(row):
+    family = row.get("ServiceFamilyName")
+    name = row.get("ServiceName")
+    return (
+        isinstance(family, str) and family.casefold() == "workers ai"
+    ) or (
+        isinstance(name, str)
+        and (name.casefold() == "workers ai" or name.casefold().startswith("workers ai "))
+    )
+
+
+def cloudflare_timestamp(value):
+    if not isinstance(value, str):
+        raise RuntimeError("Cloudflare returned a Workers AI row without a charge period")
+    try:
+        timestamp = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RuntimeError("Cloudflare returned an invalid Workers AI charge period") from error
+    if timestamp.tzinfo is None:
+        raise RuntimeError("Cloudflare returned a Workers AI charge period without a time zone")
+    return timestamp.astimezone(datetime.timezone.utc)
+
+
+def cloudflare_daily_workers_ai_usage(response, now):
+    rows = cloudflare_response_rows(response)
+    daily_rows = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RuntimeError("Cloudflare returned an invalid billable-usage row")
+        if not is_workers_ai_usage(row):
+            continue
+        start = cloudflare_timestamp(row.get("ChargePeriodStart"))
+        end = cloudflare_timestamp(row.get("ChargePeriodEnd"))
+        if end <= start:
+            raise RuntimeError("Cloudflare returned an invalid Workers AI charge period")
+        if start.date() >= now.date() or end > now:
+            continue
+        daily_rows.setdefault(start.date(), []).append(row)
+    if not daily_rows:
+        return None
+    usage_day = max(daily_rows)
+    quantities = []
+    for row in daily_rows[usage_day]:
+        unit = row.get("ConsumedUnit")
+        if not isinstance(unit, str) or unit.casefold() not in ("neuron", "neurons"):
+            raise RuntimeError("Cloudflare returned Workers AI usage in an unsupported unit")
+        quantity = row.get("ConsumedQuantity")
+        if (
+            isinstance(quantity, bool)
+            or not isinstance(quantity, (int, float))
+            or not math.isfinite(quantity)
+            or quantity < 0
+        ):
+            raise RuntimeError("Cloudflare returned an invalid Workers AI usage quantity")
+        quantities.append(quantity)
+    return {"date": usage_day, "neurons": sum(quantities)}
+
+
+def query_cloudflare(binary):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    first_day = now.date() - datetime.timedelta(days=WORKERS_AI_USAGE_WINDOW_DAYS - 1)
+    arguments = [
+        "billing",
+        "usage",
+        "get-v1",
+        "--from",
+        first_day.isoformat(),
+        "--to",
+        now.date().isoformat(),
+    ]
+    process = cloudflare_run(binary, arguments)
+    if process.returncode:
+        detail = process.stderr.strip() or f"command exited with status {process.returncode}"
+        raise RuntimeError(f"cf billing usage get-v1 failed: {detail}")
+    try:
+        response = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("cf billing usage get-v1 returned invalid JSON") from error
+    return {"daily_usage": cloudflare_daily_workers_ai_usage(response, now)}
+
+
 def query_agy(binary):
     process = subprocess.run(
         [binary, "-p", "/usage", "--output-format", "json", "--print-timeout", "30s"],
@@ -666,6 +815,33 @@ def print_dsh(result):
         )
 
 
+def neuron_quantity_text(quantity):
+    if isinstance(quantity, int) or quantity.is_integer():
+        return f"{quantity:,.0f}"
+    return f"{quantity:,.12g}"
+
+
+def print_cloudflare(result):
+    print_heading("Cloudflare Workers AI")
+    daily_usage = result.get("daily_usage")
+    if not isinstance(daily_usage, dict):
+        print(
+            "  remaining free quota: unknown "
+            f"(no Workers AI usage record in the last {WORKERS_AI_USAGE_WINDOW_DAYS} days)"
+        )
+        print("  Cloudflare updates billable usage daily; this is not a live quota count.")
+        return
+    used = daily_usage["neurons"]
+    remaining = max(0, WORKERS_AI_DAILY_FREE_NEURONS - used)
+    print(f"  last reported day: {daily_usage['date'].isoformat()} UTC")
+    print(
+        f"  reported use: {neuron_quantity_text(used)} / "
+        f"{WORKERS_AI_DAILY_FREE_NEURONS:,} Neurons"
+    )
+    print(f"  estimated remaining: {neuron_quantity_text(remaining)} Neurons")
+    print("  Cloudflare updates billable usage daily; this is not a live quota count.")
+
+
 def print_agy(report):
     print_heading("Antigravity")
     for line in str(report).strip().splitlines():
@@ -680,14 +856,14 @@ def main(arguments):
         print(HELP, end="", file=sys.stderr)
         return 2
     selected = arguments[0] if arguments else None
-    providers = {item[0]: item for item in PROVIDERS}
+    all_providers = (*PROVIDERS, CLOUDFLARE_PROVIDER)
+    providers = {item[0]: item for item in all_providers}
     if selected is not None and selected not in providers:
         print(HELP, end="", file=sys.stderr)
         return 2
+    candidates = (providers[selected],) if selected is not None else PROVIDERS
     available = []
-    for item in PROVIDERS:
-        if selected is not None and item[0] != selected:
-            continue
+    for item in candidates:
         binary = shutil.which(item[2])
         if binary:
             available.append((item, binary))
@@ -704,6 +880,7 @@ def main(arguments):
         "grok": query_grok,
         "dsh": query_dsh,
         "agy": query_agy,
+        "cloudflare": query_cloudflare,
     }
     render = {
         "claude": print_claude,
@@ -712,6 +889,7 @@ def main(arguments):
         "grok": print_grok,
         "dsh": print_dsh,
         "agy": print_agy,
+        "cloudflare": print_cloudflare,
     }
     results = {}
     failures = {}
@@ -726,7 +904,7 @@ def main(arguments):
                 results[key] = future.result()
             except Exception as error:
                 failures[key] = str(error)
-    for key, title, _, _ in PROVIDERS:
+    for key, title, _, _ in all_providers:
         if key not in results and key not in failures:
             continue
         if key in failures:

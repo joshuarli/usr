@@ -138,7 +138,48 @@ Live evaluation requires separate owner authorization. It accepts cases without 
 vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide eval --live --max-calls 30 cases.jsonl
 ```
 
+### Read Workers AI quota with usage
+
+`usage cloudflare` runs `cf billing usage get-v1`. The response contains account-wide billable usage. The command displays Workers AI rows only. Cloudflare updates this data daily ([Billable Usage API](https://developers.cloudflare.com/billing/manage/billable-usage/)). The output compares the latest complete reported day with the daily Free allowance. It does not show today's live quota.
+
+1. Confirm that `cf` is authenticated with `cf auth whoami`. Use the account ID stored as `CLOUDFLARE_ACCOUNT_ID`.
+2. Create an account-scoped token with Billing Read. Choose a future UTC expiry when you repeat these steps.
+
+   ```sh
+   (
+     set -eu
+     printf '%s' 'Paste the account ID and press Enter: '
+     IFS= read -r account_id
+     printf '%s' 'Paste a future UTC expiry and press Enter: '
+     IFS= read -r expires_on
+     billing_read_group=$(
+       cf user tokens permission-groups list |
+         jaq -e -c '[.[] | select(.name == "Billing Read") | {id}] | select(length == 1)'
+     )
+     policies=$(jaq -n --arg account "$account_id" --argjson groups "$billing_read_group" '[{effect:"allow",resources:{("com.cloudflare.api.account." + $account):"*"},permission_groups:$groups}]')
+     cf user tokens create --name usr-usage-billing-read --expires-on "$expires_on" --policies "$policies"
+   )
+   ```
+
+   The token command prints its value once. The `cf` identity needs permission to create user tokens ([Cloudflare token creation requirements](https://developers.cloudflare.com/fundamentals/api/how-to/create-via-api/)).
+3. Store the token and account ID in `vault`. `vault set` prompts for each value. Skip the account ID command if that value is already stored.
+
+   ```sh
+   vault set CLOUDFLARE_BILLING_API_TOKEN
+   vault set CLOUDFLARE_ACCOUNT_ID
+   vault isset CLOUDFLARE_BILLING_API_TOKEN
+   vault isset CLOUDFLARE_ACCOUNT_ID
+   ```
+
+4. Run `usage cloudflare`.
+
+Billing Read exposes the account's billing profile, subscriptions, usage, invoices, and entitlements ([Billing permissions](https://developers.cloudflare.com/billing/understand/billing-permissions/#api-access-for-billing)). The usage query returns all billable products. `usage cloudflare` filters the response to Workers AI before printing it. It does not read or change R2 settings.
+
 ### Stay within Workers AI Free
 
-Workers AI Free currently allows 10,000 Neurons per day, resets at 00:00 UTC, and rejects requests after that allowance is used ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)). This account has no Workers Paid subscription. Do not upgrade Workers or enable AI Gateway credits. Quota exhaustion returns unavailable advice, and the client does not retry. No account-wide budget alert was created because alerts notify but do not cap spending ([budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/)). The existing R2 Paid subscription was left unchanged. No Worker or AI Gateway resource was deployed. No inference or savings measurement has been run.
+Workers AI Free's daily Neuron allowance resets at 00:00 UTC ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)). Cloudflare rejects requests after the allowance is used. `usage cloudflare` compares the latest complete billing day with that allowance. Cloudflare updates billing data daily, so this command does not show today's live quota.
+
+This account has no Workers Paid subscription. Do not upgrade Workers or enable AI Gateway credits. `decide` returns unavailable advice at quota exhaustion and does not retry.
+
+No account-wide budget alert was created. Alerts notify but do not cap spending ([budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/)). The existing R2 Paid subscription was left unchanged. No Worker or AI Gateway resource was deployed. No inference or savings measurement has been run.
 
