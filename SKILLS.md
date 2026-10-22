@@ -26,20 +26,18 @@ You rarely need to name a skill. `do` loads on its own for work with real uncert
 
 ## Review
 
-These five overlap on purpose. They differ in what they touch and how wide they look.
+These four overlap on purpose. They differ in what they touch and how wide they look.
 
 | Skill | Mode | Touches files | Scope | Use it when |
 | --- | --- | --- | --- | --- |
 | `review` | Auto | No | The change you name: a diff, branch, or finished high-risk work | You want a verdict with evidence on any change, including one you did not write. |
-| `double-take` | Explicit | Trivial fixes only | This session's last change or review | The agent just finished something and you want it to look again. It names the pattern, finds what still contradicts it and where the same defect recurs, then fixes the trivial ones. |
-| `sweep` | Explicit | Mechanical fixes, after your confirmation | The last fix, then the wider repo | `double-take`, plus a search of the rest of the repo for other places the fix applies. |
+| `double-take` | Explicit | Trivial fixes only | This session's last change or review, then the wider repo if you say yes | The agent just finished something and you want it to look again. It names the pattern, finds what still contradicts it and where the same defect recurs, and fixes the trivial ones. It then asks whether to search the rest of the repo for other places the change applies. |
 | `debloat` | Explicit | Only what you confirm | A repo, path, or change | You want to know what to delete, inline, or merge: each mechanism's cost against what it buys. |
 | `ultrareview` | Explicit | Docs, tickets, RFCs | One whole repository | A thorough audit that refreshes docs and files ranked findings in `TODO.md` and `docs/rfc/`. |
 
 Rule of thumb:
 - **Read a change** with `review`.
-- **Re-check your own just-finished work** with `double-take`.
-- **Spread a fix** with `sweep`.
+- **Re-check your own just-finished work, and spread the fix** with `double-take`. Answer its widening question yes to search the wider repo.
 - **Cut weight** with `debloat`.
 - **Audit everything** with `ultrareview`.
 

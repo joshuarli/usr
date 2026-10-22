@@ -109,7 +109,6 @@ class SkillCampaignTests(unittest.TestCase):
             "pr-ready",
             "pr-stack",
             "settle",
-            "sweep",
             "ultrareview",
             "yea",
         )
