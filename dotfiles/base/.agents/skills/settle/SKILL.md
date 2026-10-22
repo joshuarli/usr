@@ -1,6 +1,9 @@
 ---
 name: settle
-description: Prepare a repository to move to another computer by finding unmerged and local-only work, identifying what must travel, and separating it from regenerable data. Skip campaign shutdown, routine cleanup, and generic session handoffs.
+description: "Use for /settle: prepare a repository to move to another computer by finding unmerged and local-only work, identifying what must travel, and separating it from regenerable data. Skip campaign shutdown, routine cleanup, and generic session handoffs."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Settle

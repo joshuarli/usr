@@ -20,6 +20,8 @@ The repository-specific skills live under `.agents/skills/`; `.claude/skills` li
 
 ## Outcome-driven work
 
+[SKILLS.md](../SKILLS.md) is the owner's guide to the meta skills: which to reach for, and how review, steering, and campaign skills fit together.
+
 Skill descriptions determine when an agent loads a reusable method. Plain requests can select the global `do` workflow when uncertainty, dependent steps, consequences, or acceptance requirements warrant it. Small edits and one-step questions stay on the short path. `do` preserves the request mode and authority through completion. `yea` remains explicit-only; it accepts every recommendation in the previous reply and carries out authorized effects within its rules.
 
 `/do` remains available as an explicit shortcut:

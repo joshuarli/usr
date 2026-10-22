@@ -1,6 +1,9 @@
 ---
 name: pr-ready
-description: "Bring an open pull request up to mergeable: resolve conflicts, judge bot review comments, reply and react on GitHub, and loop on gh until required CI is green. Use when finishing, landing, or unblocking a PR, or when CI, reviews, or conflicts are what stand in the way. Skip drafting a PR, reviewing code nobody asked to land, and any request to merge, approve, or enable auto-merge."
+description: "Use for /pr-ready: bring an open pull request up to mergeable. Resolve conflicts, judge bot review comments, reply and react on GitHub, and loop on gh until required CI is green. Never merges, approves, or enables auto-merge."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # PR ready
