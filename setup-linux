@@ -12,20 +12,13 @@ staged_resolv=
 die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
 info() { printf '%s: %s\n' "$prog" "$*"; }
 
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
 cleanup_staged_resolv() {
     if [ -n "$staged_resolv" ]; then
         as_root rm -f "$staged_resolv" >/dev/null 2>&1 || :
     fi
-}
-
-find_apk() {
-    for candidate in /sbin/apk /usr/sbin/apk /usr/bin/apk /bin/apk; do
-        if [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return
-        fi
-    done
-    command -v apk
 }
 
 trap cleanup_staged_resolv 0
@@ -39,8 +32,7 @@ os_id=$(awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; 
 [ -n "$os_id" ] || os_id=unknown
 
 [ "$os_id" = alpine ] || die "installation is currently supported only on Alpine Linux"
-package_manager=$(find_apk 2>/dev/null || :)
-[ -n "$package_manager" ] || die "Alpine Linux requires apk"
+package_manager=$(command -v apk) || die "Alpine Linux requires apk"
 info "Detected $os_id Linux with apk"
 [ -f "$conf_source" ] || die "shared Unbound config is missing: $conf_source"
 [ -f "$resolv_source" ] || die "shared resolver config is missing: $resolv_source"

@@ -8,12 +8,11 @@ if [ "$(uname -s)" != Linux ] || [ "$os_id" != alpine ]; then
     exit 0
 fi
 
-find_apk_source=$(sed -n '/^find_apk() {$/,/^}$/p' "$root/setup-linux")
-[ -n "$find_apk_source" ] || { printf 'setup-linux: find_apk is missing\n' >&2; exit 1; }
-eval "$find_apk_source"
+path_line=$(awk '/^PATH=/ { print; exit }' "$root/setup-linux")
+[ -n "$path_line" ] || { printf 'setup-linux: PATH is not set\n' >&2; exit 1; }
 
 expected=
-for candidate in /sbin/apk /usr/sbin/apk /usr/bin/apk /bin/apk; do
+for candidate in /usr/local/sbin/apk /usr/local/bin/apk /usr/sbin/apk /usr/bin/apk /sbin/apk /bin/apk; do
     if [ -x "$candidate" ]; then
         expected=$candidate
         break
@@ -24,8 +23,9 @@ done
 # shellcheck disable=SC2123
 PATH=/nonexistent
 export PATH
-actual=$(find_apk)
+eval "$path_line"
+actual=$(command -v apk)
 [ "$actual" = "$expected" ] || {
-    printf 'setup-linux: expected %s with restricted PATH, got %s\n' "$expected" "$actual" >&2
+    printf 'setup-linux: expected %s with restricted PATH, got %s\n' "$expected" "${actual:-nothing}" >&2
     exit 1
 }
