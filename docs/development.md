@@ -8,6 +8,7 @@ Run the narrowest check that covers the change:
 | --- | --- |
 | `dotfiles/sym` | `cd dotfiles && sh sym-test.sh`, and `dash sym-test.sh` |
 | `dotfiles/base/.local/bin/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/decide-test.py` and `uvx ruff check dotfiles/base/.local/bin/decide dotfiles/base/.local/bin/decide-test.py` |
+| Agent learning ops | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-ops-test.py` and `uvx ruff check dotfiles/base/.local/bin/agent_learning_ops.py dotfiles/agent-learning-ops-test.py` |
 | `dotfiles/base/.local/bin/agent-vm` | `python3 -I dotfiles/agent-vm-test.py`; on macOS with smolvm, `python3 -I dotfiles/agent-vm-test.py --live` for mount/symlink integration |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |

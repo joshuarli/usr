@@ -258,6 +258,13 @@ command = '"$HOME/.local/bin/codex-campaign-closeout.py" hook'
 timeout = 30
 statusMessage = "Checking campaign worktrees"
 
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = '"$HOME/.local/bin/agent-learn" hook'
+timeout = 2
+
 [hooks.state]
 
 [hooks.state."/Users/josh/.codex/config.toml:stop:0:0"]

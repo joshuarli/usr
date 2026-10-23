@@ -2,6 +2,8 @@
 
 Which meta skill to reach for, and why. Meta skills steer how the agent works: how it plans, delegates, reviews, and runs unattended. Language, stack, and engineering-method skills are left out. They live in `dotfiles/base/.agents/skills/`, and each one's `description` says when it applies.
 
+Opt-in project retrieval and review metrics live outside skill routing. See [agent learning](docs/agent-learning.md).
+
 Skill modes describe automatic selection. **Auto** skills may be selected from an ordinary request when their conditions fit. An **Explicit** workflow must be requested by its outcome or name; `/<name>` is a convenient request, not an authorization token. An already-requested workflow may reuse a relevant documented procedure from an explicit skill within its existing scope and authority. Install and host details are in [agent setup](docs/agent-setup.md).
 
 ## Default

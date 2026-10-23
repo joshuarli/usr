@@ -26,6 +26,8 @@ Use each tool's normal updater after installation:
 
 The repository's `bin` symlink points to `~/.local/bin`, where tracked scripts and downloaded tools live together. Only the scripts under `dotfiles/*/.local/bin` are tracked.
 
+`agent-learn` and its Codex hook come from the base layer. The LaunchAgent template under `dotfiles/launchd/` is not synced or loaded. On macOS, pass `--schedule` to `agent-learn enable` to write and bootstrap the user LaunchAgent. Linux has no bundled scheduler.
+
 Deleting a source file leaves its home-directory symlink dangling. Remove that link too, or run `sh dotfiles/sym -d` on the layer before deleting the source. To experiment with `sym`, pass a scratch target with `-t`; without it, `sym` targets `$HOME`.
 
 The `macos/` directory is not part of the layer sync. Every macOS run of `make` invokes `macos/setup-macos brew packages dns`, which installs Homebrew and missing packages from `macos/Brewfile`, then applies the shared Unbound config and ensures local DNS answers. On Alpine Linux, `make` runs `setup-linux` to install or update Unbound, configure `/etc/resolv.conf`, and verify local and system DNS. These setup steps can use `sudo`. Other Linux distributions skip the Unbound setup. `make` sets up kache if kache is missing. Run `macos/setup-macos touchid` by hand to configure Touch ID for `sudo`. Run `macos/macos lean` to audit or converge selected system preferences. Lean is never part of the default setup.
