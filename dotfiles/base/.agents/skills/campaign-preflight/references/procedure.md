@@ -5,7 +5,7 @@
 1. **Read.** The draft, the repo's AGENTS.md, every document the draft depends on, and the code it names.
 2. **Audit the draft against the bar and the lenses.** Collect every open decision: hedges ("consider", "maybe", "TBD", "if time", "owner to decide"), questions in the doc, and the decisions the skill's lens table would force the executor to make.
 3. **Decide.** Classify each decision and write it into the doc's Decisions section, in three tiers:
-   - **Owner-decided:** ask with `AskUserQuestion`, at most four to a call and each with a recommendation, then write the answer into the doc. Ask only what changes the outcome.
+   - **Owner-decided:** ask in one batch of at most four, recommend each answer, then write the answers into the doc. Ask only what changes the outcome.
    - **Prescribed:** you settle it from the code or the principles, with the reason and what would reverse it.
    - **Delegated:** the executor decides inside a stated bound, using the smallest reversible assumption, and logs it.
 4. **Sequence** (below), then **make the loop fast** and **make acceptance executable**. Check the proposed gate against a real improvement, a genuine regression, newly exposed existing debt, and a change benefiting unchanged consumers. Plan a substantive pilot, not a complete new evaluator as the entry fee for every kind of work.

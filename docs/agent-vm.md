@@ -2,7 +2,7 @@
 
 `agent-vm` is a small macOS wrapper around [smolvm](https://github.com/smol-machines/smolvm). It launches an ephemeral Linux VM with the host's current working directory mounted **read/write at the same absolute path**. A project at `~/d/project` therefore appears at `~/d/project` inside the VM, and shell `$HOME` uses the same path string. The guest home itself is private VM storage, **not** a mount of the host home.
 
-Install smolvm separately (v1.28.1 or newer for `--block-private`):
+Install smolvm 1.28.1 or newer separately. That release added `--block-private`.
 
 ```sh
 brew install smol-machines/tap/smolvm
@@ -69,4 +69,4 @@ python3 -I dotfiles/agent-vm-test.py
 python3 -I dotfiles/agent-vm-test.py --live    # macOS + installed smolvm; pulls alpine
 ```
 
-The automated tests here cover wrapper arguments, collision rejection and guest config bootstrap. A real macOS 27 / smolvm smoke run is still required; a passing argument test is not proof of hypervisor isolation.
+The wrapper tests cover arguments, collision rejection, and guest config bootstrap. A real macOS/smolvm run is still required to verify hypervisor isolation; passing argument checks does not prove that boundary.

@@ -19,7 +19,7 @@ Planning only: it turns a goal into a campaign doc a coordinator can run unatten
 - **Plan for steering, not just dispatch.** Use the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint). Separate owner requirements from revisable agent tactics, define substantive progress, and name the next milestone, review cadence, and response to stalled progress. Reuse the campaign log; no separate management framework.
 - **Read the prior campaigns** in `docs/CAMPAIGN-*.md` and `DECISIONS.md`. Reuse their house style. Find why the weak ones fell short (a goal judged by words, not artifacts) and design that out.
 - **Technical blockers are not questions.** Anything the evidence and the code can settle (a type design, a rule the campaign wrote for itself, a cross-file change) goes in the plan as parent work. Ask only what changes the product, the contract, or authorization.
-- **Ask once.** Batch the owner's decisions into one `AskUserQuestion`: at most four, each with a recommendation, only for choices that change the product or the contract or carry real risk. Everything else is prescribed (with the reason) or delegated (with a bound).
+- **Ask once.** Batch the owner's decisions into one question round of at most four. Recommend each answer, and ask only about choices that change the product or contract or carry real risk. Prescribe or delegate the rest with a reason and a bound.
 - **No code, no commits, no pushes, no formatters.** Write the doc and the files it needs to be executable, nothing else.
 
 ## Steps

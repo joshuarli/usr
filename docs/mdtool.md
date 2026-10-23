@@ -18,7 +18,7 @@ mdtool [COMMAND] [options] [PATH...]
 | `pointers` | Finds source comments that point at docs, sections, or plan labels. |
 | `dups` | Finds near-identical documentation blocks. |
 | `router` | Checks the mechanical parts of the AGENTS.md, README, and `docs/` format. |
-| `commands`, `selftest` | Print the command names, or run the embedded tests. |
+| `commands`, `selftest` | Print check names, or run the embedded tests. |
 
 | Option | Meaning |
 | --- | --- |
@@ -35,7 +35,7 @@ Exit status is 0 for no `error` findings, 1 for at least one, and 2 for a usage,
 
 ## Bounds
 
-Nothing is written, no network is used, and the only subprocess is read-only `git`. Outside Git it walks the root and skips `.git`, `.work`, `target`, `node_modules`, and other dot-directories. It skips files over 2 MiB or with a NUL byte in the first 8 KiB, never reads outside the root, and reads an in-root symlink once without recursing. An unreadable or missing file is an `IO01` note.
+Audit commands write nothing and use no network. Their only subprocess is read-only `git`. Outside Git the tool walks the root and skips `.git`, `.work`, `target`, `node_modules`, and other dot-directories. It skips files over 2 MiB or with a NUL byte in the first 8 KiB, never reads outside the root, and reads an in-root symlink once without recursing. An unreadable or missing file is an `IO01` note.
 
 ## Findings
 

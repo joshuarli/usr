@@ -44,7 +44,7 @@ Compare the manifest with the current Mac, then preview its changes:
 ./macos/macos apply macos/preferences.plist --dry-run
 ```
 
-Pass `--restart` with each affected application's bundle ID. The command gracefully quits running apps before applying preferences, then reopens them. If an app has unsaved work, macOS may ask you to save it or let the terminal control the app.
+Pass `--restart` with each affected application's bundle ID. The command quits running apps before applying preferences, then reopens them. macOS may ask you to save unsaved work.
 
 ```sh
 ./macos/macos apply macos/preferences.plist \
@@ -59,8 +59,8 @@ Pass `--restart` with each affected application's bundle ID. The command gracefu
 ./macos/macos rollback .work/macos/pre-apply.plist --restart com.apple.dock
 ```
 
-Apply merges managed dictionary values into the current domain, preserves other keys, writes only changed domains, and verifies each write. Rollback restores only top-level keys that changed during that apply. Use `--restart` only for applications affected by the selected preferences. macOS may overwrite preference changes if an affected application stays open.
+Apply merges managed dictionary values into the current domain, preserves other keys, writes only changed domains, and verifies each write. Rollback restores only top-level keys that changed during that apply. An affected app can overwrite preferences if it stays open.
 
 ## Limits
 
-`macos` manages values exposed through the `defaults` command. It does not capture or restore privacy permissions, Keychain data, power settings, network configuration, login items, or device-specific state outside the defaults domains. The tool uses only the Python standard library.
+`macos` manages values exposed through the `defaults` command. It does not capture or restore privacy permissions, Keychain data, power settings, network configuration, login items, or device-specific state outside the defaults domains.
