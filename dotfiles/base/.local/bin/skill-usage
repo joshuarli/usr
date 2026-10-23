@@ -14,6 +14,9 @@ import unittest
 from pathlib import Path
 from urllib.parse import unquote
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent_session_store import normalize
+
 HARNESSES = ("claude", "codex", "muse", "grok")
 LISTING = re.compile(r"^- ([a-z0-9][a-z0-9-]*):", re.M)
 SKILL_PATH = re.compile(r"/skills/([a-z0-9][a-z0-9-]*)/SKILL\.md")
@@ -22,14 +25,8 @@ SLASH = re.compile(r"<command-name>/([^<]+)</command-name>")
 GROK_SLASH = re.compile(r"^\s*/([a-z0-9][a-z0-9:_-]*)(?:\s|$)")
 
 
-def text_of(content):
-    if isinstance(content, str):
-        return content
-    return " ".join(
-        b if isinstance(b, str) else b.get("text", "")
-        for b in content
-        if isinstance(b, str) or (isinstance(b, dict) and b.get("type") in ("text", "input_text"))
-    )
+def normalized_text(obj, harness):
+    return "\n".join(record["text"] for record in normalize(obj, harness) if record["text"])
 
 
 def bare(name):
@@ -82,7 +79,7 @@ def scan_claude(root, since, use):
                 message = obj.get("message", {}) if isinstance(obj.get("message"), dict) else {}
                 content = message.get("content", [])
                 if obj.get("type") == "user":
-                    text = text_of(content)
+                    text = normalized_text(obj, "claude")
                     match = SLASH.search(text)
                     if match:
                         use.load(match.group(1), "claude", session, when, project, "slash", prompt)
@@ -118,11 +115,11 @@ def scan_codex(root, since, use):
                     project = os.path.basename(payload.get("cwd", "") or "")
                     use.sessions["codex"].add(session)
                 elif payload.get("type") == "message" and payload.get("role") == "developer" and listing:
-                    section = text_of(payload.get("content", []))
+                    section = normalized_text(obj, "codex")
                     for name in LISTING.findall(section[section.find("Available skills"):]):
                         use.listed[name].add(("codex", session))
                 elif payload.get("type") == "message" and payload.get("role") == "user":
-                    text = text_of(payload.get("content", []))
+                    text = normalized_text(obj, "codex")
                     if text and not text.lstrip().startswith("<") and "AGENTS.md instructions" not in text:
                         prompt = text
                 elif payload.get("type") in ("function_call", "custom_tool_call") and read:
@@ -175,7 +172,7 @@ def scan_muse(root, since, use):
                         for name in set(SKILL_PATH.findall(text)):
                             use.listed[bare(name)].add(("muse", session))
                 elif kind == "model_user_messages":
-                    prompt = text_of(event.get("messages", []))
+                    prompt = normalized_text(obj, "muse")
                 elif kind == "skill_read_observed":
                     name = bare(str(event.get("skill_id", "")))
                     if name:
@@ -201,7 +198,7 @@ def scan_grok(root, since, use, known_skills):
                     continue
                 when = str(obj.get("timestamp", ""))[:10] or session_date
                 if obj.get("type") == "user":
-                    text = text_of(obj.get("content", []))
+                    text = normalized_text(obj, "grok")
                     command = GROK_SLASH.match(text)
                     if command:
                         name = bare(command.group(1))
