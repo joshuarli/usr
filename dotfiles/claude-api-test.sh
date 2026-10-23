@@ -50,6 +50,7 @@ chmod +x "$bin/vault" "$bin/claude" "$bin/notify-sound"
 run() {
 	(
 		cd "$repo"
+		umask 022
 		PATH="$bin:$PATH" CLAUDE_API_ARGS="$args" CLAUDE_API_CALLS="$calls" "$launcher" "$@"
 	) >"$output" 2>"$error"
 }
@@ -69,7 +70,11 @@ grep -q 'only the first /skill-name' "$output" || fail "help omitted the print-m
 grep -q 'later /skill-name tokens' "$output" || fail "help omitted how later skill tokens are handled"
 
 : >"$calls"
+mkdir -p "$repo/.work/logs"
+chmod 777 "$repo/.work/logs"
 run --budget 7 --model test-model Review the cache /skill1 /skill2
+log=$(sed -n 's/^raw log: //p' "$error")
+python3 -c 'import os, sys; assert os.stat(sys.argv[1]).st_mode & 0o777 == 0o700; assert os.stat(sys.argv[2]).st_mode & 0o777 == 0o600' "$repo/.work/logs" "$log" || fail "log paths were not private"
 cat >"$expected" <<'EOF'
 -p
 Review the cache /skill1 /skill2

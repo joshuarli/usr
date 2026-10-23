@@ -46,9 +46,14 @@ if [ -n "$(git -C "$root" status --porcelain)" ]; then
 fi
 
 exclude=$(git rev-parse --path-format=absolute --git-path info/exclude)
-mkdir -p "$root/.work/logs" "$(dirname "$exclude")"
+mkdir -p "$(dirname "$exclude")"
+umask 077
+mkdir -p "$root/.work/logs"
+chmod 700 "$root/.work/logs"
 grep -qxF .work/ "$exclude" 2>/dev/null || echo .work/ >>"$exclude"
 log="$root/.work/logs/claude-api-$(date +%Y%m%dT%H%M%S)-$$.jsonl"
+: >"$log"
+chmod 600 "$log"
 echo "raw log: $log" >&2
 
 # shellcheck disable=SC2016 # $vars are jaq's, not the shell's
