@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _SKIP_TEXT_KEYS = frozenset((
     "encrypted_content", "internal_chat_message_metadata_passthrough", "id", "call_id",
     "type", "status", "role", "timestamp", "ordinal",
@@ -189,7 +189,9 @@ def normalize(obj, harness="codex"):
     raise ValueError("unsupported transcript harness: " + str(harness))
 
 
-def _run_git(path, *args):
+def _run_git(path, *args, stats=None):
+    if stats is not None:
+        stats["git_processes"] += 1
     try:
         result = subprocess.run(
             ["git", "-C", str(path), *args],
@@ -204,11 +206,11 @@ def _run_git(path, *args):
     return result.stdout.strip()
 
 
-def project_identity(path):
+def project_identity(path, stats=None):
     candidate = Path(path).expanduser().resolve()
-    common_dir = _run_git(candidate, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    common_dir = _run_git(candidate, "rev-parse", "--path-format=absolute", "--git-common-dir", stats=stats)
     if not common_dir:
-        common_dir = _run_git(candidate, "rev-parse", "--git-common-dir")
+        common_dir = _run_git(candidate, "rev-parse", "--git-common-dir", stats=stats)
         if common_dir and not Path(common_dir).is_absolute():
             common_dir = str(candidate / common_dir)
     if common_dir:
@@ -224,9 +226,30 @@ def _json_line(raw):
     return json.loads(raw.decode("utf-8-sig"))
 
 
-def _open_source(path):
+def _open_source(path, stats=None):
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    return os.fdopen(os.open(path, flags), "rb")
+    fd = os.open(path, flags)
+    if stats is not None:
+        stats["content_opens"] += 1
+    return os.fdopen(fd, "rb")
+
+
+def _stat_source(path, stats):
+    stats["stat_operations"] += 1
+    return os.stat(path, follow_symlinks=False)
+
+
+def _fstat_source(stream, stats):
+    if stats is not None:
+        stats["stat_operations"] += 1
+    return os.fstat(stream.fileno())
+
+
+def _readline(stream, stats):
+    data = stream.readline()
+    if stats is not None:
+        stats["bytes_read"] += len(data)
+    return data
 
 
 def _prepare_state_dir(state_dir):
@@ -256,11 +279,11 @@ def _prepare_database(path):
     os.chmod(path, 0o600)
 
 
-def _metadata(path, harness, project_cache):
+def _metadata(path, harness, project_cache, stats=None):
     try:
-        with _open_source(path) as stream:
-            stat = os.fstat(stream.fileno())
-            first = stream.readline()
+        with _open_source(path, stats) as stream:
+            file_stat = _fstat_source(stream, stats)
+            first = _readline(stream, stats)
     except OSError as exc:
         return None, "source_unreadable:" + exc.__class__.__name__
     obj = {}
@@ -278,7 +301,7 @@ def _metadata(path, harness, project_cache):
     project = None
     if cwd:
         if cwd not in project_cache:
-            project_cache[cwd] = project_identity(cwd)
+            project_cache[cwd] = project_identity(cwd, stats=stats)
         project = project_cache[cwd]
     source = payload.get("source")
     thread_source = payload.get("thread_source")
@@ -302,12 +325,13 @@ def _metadata(path, harness, project_cache):
         "thread_source": str(thread_source) if thread_source is not None else None,
         "harness": harness,
         "source_path": str(path.absolute()),
-        "file_size": stat.st_size,
-        "file_mtime_ns": stat.st_mtime_ns,
-        "file_dev": stat.st_dev,
-        "file_ino": stat.st_ino,
+        "file_size": file_stat.st_size,
+        "file_mtime_ns": file_stat.st_mtime_ns,
+        "file_ctime_ns": file_stat.st_ctime_ns,
+        "file_dev": file_stat.st_dev,
+        "file_ino": file_stat.st_ino,
         "header_digest": _sha256(first) if first else "",
-        "updated": stat.st_mtime,
+        "updated": file_stat.st_mtime,
     }, None
 
 
@@ -393,10 +417,15 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, SCHEMA_VERSION):
+            if version not in (0, 1, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
+            if version == 1:
+                if not self._schema_ready(1):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v1()
+                return
             if version == SCHEMA_VERSION:
-                if not self._schema_ready():
+                if not self._schema_ready(SCHEMA_VERSION):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 return
             self._create_schema()
@@ -411,7 +440,7 @@ class Store:
             self.db.rollback()
             raise StoreError("session index database is unreadable; preserve learning data and run `agent-sessions doctor`: " + str(exc)) from exc
 
-    def _schema_ready(self):
+    def _schema_ready(self, expected_version=SCHEMA_VERSION):
         try:
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -421,12 +450,24 @@ class Store:
         except sqlite3.DatabaseError:
             return False
         return (
-            version == SCHEMA_VERSION
+            version == expected_version
             and {"sessions", "events", "events_fts", "index_issues"} <= existing
             and {"events_ai", "events_ad", "events_au"} <= triggers
             and {"id", "project", "cwd", "parent", "source", "thread_source", "harness", "source_path", "updated", "indexed_bytes"} <= session_columns
             and {"id", "session", "position", "kind", "text", "timestamp", "call_id", "digest"} <= event_columns
+            and (expected_version < 2 or "file_ctime_ns" in session_columns)
         )
+
+    def _migrate_v1(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "ALTER TABLE sessions ADD COLUMN file_ctime_ns INTEGER;"
+                "PRAGMA user_version = 2;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
 
     def _create_schema(self):
         self.db.executescript(
@@ -434,7 +475,7 @@ class Store:
             "CREATE TABLE sessions ("
             "id TEXT PRIMARY KEY, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, "
             "thread_source TEXT, harness TEXT NOT NULL, source_path TEXT NOT NULL, updated REAL NOT NULL, "
-            "file_size INTEGER NOT NULL, file_mtime_ns INTEGER NOT NULL, file_dev INTEGER NOT NULL, "
+            "file_size INTEGER NOT NULL, file_mtime_ns INTEGER NOT NULL, file_ctime_ns INTEGER, file_dev INTEGER NOT NULL, "
             "file_ino INTEGER NOT NULL, indexed_bytes INTEGER NOT NULL DEFAULT 0, header_digest TEXT NOT NULL, "
             "checkpoint_position INTEGER, checkpoint_digest TEXT, malformed_lines INTEGER NOT NULL DEFAULT 0, "
             "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete');"
@@ -459,7 +500,9 @@ class Store:
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
-    def refresh(self, roots=None, project=None):
+    def refresh(self, roots=None, project=None, projects=None):
+        if project is not None and projects is not None:
+            raise ValueError("choose either project or projects")
         if roots is None:
             codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
             roots = [codex_home / "sessions", codex_home / "archived_sessions"]
@@ -468,14 +511,22 @@ class Store:
         else:
             roots = [Path(root) for root in roots]
         project = str(project) if project is not None else None
+        projects = frozenset(str(value) for value in projects) if projects is not None else None
         cache = {}
         grouped = {}
         unreadable_paths = set()
+        sqlite_changes = self.db.total_changes
         stats = {
             "sessions_seen": 0, "sessions_indexed": 0, "events_added": 0,
             "malformed_lines": 0, "partial_files": 0, "resets": 0,
             "deleted": 0, "skipped_project": 0, "skipped_ephemeral": 0,
             "skipped_learning_workers": 0, "unreadable": 0,
+            "stat_operations": 0, "content_opens": 0, "bytes_read": 0,
+            "git_processes": 0, "sqlite_changes": 0,
+        }
+        indexed_by_path = {
+            row["source_path"]: dict(row)
+            for row in self.db.execute("SELECT * FROM sessions")
         }
         for root_order, root in enumerate(roots):
             if not root.is_dir():
@@ -497,11 +548,26 @@ class Store:
                 if any(part == ".ephemeral" for part in path.parts):
                     stats["skipped_ephemeral"] += 1
                     continue
-                meta, error = _metadata(path, "codex", cache)
-                if error:
+                source_path = str(path.absolute())
+                try:
+                    source_stat = _stat_source(path, stats)
+                except OSError:
                     stats["unreadable"] += 1
-                    unreadable_paths.add(str(path.absolute()))
+                    unreadable_paths.add(source_path)
                     continue
+                if not stat.S_ISREG(source_stat.st_mode):
+                    stats["unreadable"] += 1
+                    unreadable_paths.add(source_path)
+                    continue
+                existing = indexed_by_path.get(source_path)
+                if self._cached_metadata_matches(existing, source_stat):
+                    meta = existing
+                else:
+                    meta, error = _metadata(path, "codex", cache, stats)
+                    if error:
+                        stats["unreadable"] += 1
+                        unreadable_paths.add(source_path)
+                        continue
                 if _ephemeral(meta):
                     stats["skipped_ephemeral"] += 1
                     continue
@@ -516,10 +582,10 @@ class Store:
             candidates[session_id] = selected[2]
         stats["sessions_seen"] = len(candidates)
         for meta in candidates.values():
-            if project is not None and meta["project"] != project:
+            if project is not None and meta["project"] != project or projects is not None and meta["project"] not in projects:
                 stats["skipped_project"] += 1
                 continue
-            changed, added, malformed, partial = self._refresh_file(meta)
+            changed, added, malformed, partial = self._refresh_file(meta, stats)
             stats["sessions_indexed"] += 1
             stats["events_added"] += added
             stats["malformed_lines"] += malformed
@@ -533,12 +599,18 @@ class Store:
         for row in rows:
             if target_project is not None and row["project"] != target_project:
                 continue
+            if projects is not None and row["project"] not in projects:
+                continue
             if not any(_under(row["source_path"], root) for root in scanned_roots):
                 continue
             if any(row["source_path"] == path or _under(row["source_path"], path) for path in unreadable_paths):
                 degraded.append(row["id"])
                 continue
-            if row["id"] not in candidates or (target_project is not None and candidates[row["id"]]["project"] != target_project):
+            if row["id"] not in candidates or (
+                target_project is not None and candidates[row["id"]]["project"] != target_project
+            ) or (
+                projects is not None and candidates[row["id"]]["project"] not in projects
+            ):
                 remove.append(row["id"])
         if remove:
             with self.db:
@@ -547,9 +619,27 @@ class Store:
         if degraded:
             with self.db:
                 self.db.executemany("UPDATE sessions SET coverage = 'degraded' WHERE id = ?", ((value,) for value in degraded))
+        stats["sqlite_changes"] = self.db.total_changes - sqlite_changes
         return stats
 
-    def _refresh_file(self, meta):
+    @staticmethod
+    def _cached_metadata_matches(existing, source_stat):
+        return Store._file_metadata_matches(existing, {
+            "file_size": source_stat.st_size,
+            "file_mtime_ns": source_stat.st_mtime_ns,
+            "file_ctime_ns": source_stat.st_ctime_ns,
+            "file_dev": source_stat.st_dev,
+            "file_ino": source_stat.st_ino,
+        })
+
+    @staticmethod
+    def _file_metadata_matches(existing, meta):
+        return existing is not None and existing["file_ctime_ns"] is not None and all(
+            existing[key] == meta[key]
+            for key in ("file_size", "file_mtime_ns", "file_ctime_ns", "file_dev", "file_ino")
+        )
+
+    def _refresh_file(self, meta, stats):
         existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
         reset = existing is not None and (
             existing["source_path"] != meta["source_path"]
@@ -557,24 +647,30 @@ class Store:
             or existing["file_ino"] != meta["file_ino"]
             or meta["file_size"] < existing["indexed_bytes"]
             or existing["header_digest"] != meta["header_digest"]
-            or (meta["file_size"] == existing["file_size"] and meta["file_mtime_ns"] != existing["file_mtime_ns"])
-            or not self._checkpoint_valid(meta, existing)
+            or (meta["file_size"] == existing["file_size"] and (
+                meta["file_mtime_ns"] != existing["file_mtime_ns"]
+                or existing["file_ctime_ns"] is not None and meta["file_ctime_ns"] != existing["file_ctime_ns"]
+            ))
         )
+        if existing is not None and not reset and existing["project"] == meta["project"] and self._file_metadata_matches(existing, meta):
+            return False, 0, 0, 0
+        if existing is not None and not reset and not self._checkpoint_valid(meta, existing, stats):
+            reset = True
         if existing is not None and (reset or existing["project"] != meta["project"]):
             with self.db:
                 self.db.execute("DELETE FROM sessions WHERE id = ?", (meta["id"],))
             existing = None
-        if existing is not None and existing["indexed_bytes"] == meta["file_size"] and existing["file_mtime_ns"] == meta["file_mtime_ns"]:
+        if existing is not None and existing["indexed_bytes"] == meta["file_size"] and self._file_metadata_matches(existing, meta):
             return False, 0, 0, 0
         if existing is None:
             with self.db:
                 self.db.execute(
                     "INSERT INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
-                    "file_size, file_mtime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded')",
+                    "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded')",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
-                     meta["file_dev"], meta["file_ino"], meta["header_digest"]),
+                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"]),
                 )
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
         offset = existing["indexed_bytes"]
@@ -584,15 +680,17 @@ class Store:
         checkpoint_digest = existing["checkpoint_digest"]
         partial = 0
         try:
-            with _open_source(meta["source_path"]) as stream:
-                opened = os.fstat(stream.fileno())
-                if opened.st_dev != meta["file_dev"] or opened.st_ino != meta["file_ino"]:
+            with _open_source(meta["source_path"], stats) as stream:
+                opened = _fstat_source(stream, stats)
+                if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
+                    meta["file_dev"], meta["file_ino"], meta["file_size"], meta["file_mtime_ns"], meta["file_ctime_ns"]
+                ):
                     raise StoreError("transcript changed while refresh was starting; retry refresh")
                 stream.seek(offset)
                 with self.db:
                     while True:
                         position = stream.tell()
-                        raw = stream.readline()
+                        raw = _readline(stream, stats)
                         if not raw:
                             break
                         if not raw.endswith(b"\n"):
@@ -623,29 +721,36 @@ class Store:
                     malformed_total = self.db.execute(
                         "SELECT count(*) FROM index_issues WHERE session = ?", (meta["id"],)
                     ).fetchone()[0]
-                    size = os.fstat(stream.fileno()).st_size
-                    mtime_ns = os.fstat(stream.fileno()).st_mtime_ns
-                    updated = os.fstat(stream.fileno()).st_mtime
+                    final_stat = _fstat_source(stream, stats)
+                    size = final_stat.st_size
+                    mtime_ns = final_stat.st_mtime_ns
+                    ctime_ns = final_stat.st_ctime_ns
+                    updated = final_stat.st_mtime
                     coverage = "degraded" if malformed_total or partial else "complete"
                     self.db.execute(
-                        "UPDATE sessions SET updated = ?, file_size = ?, file_mtime_ns = ?, indexed_bytes = ?, "
+                        "UPDATE sessions SET updated = ?, file_size = ?, file_mtime_ns = ?, file_ctime_ns = ?, indexed_bytes = ?, "
                         "checkpoint_position = ?, checkpoint_digest = ?, malformed_lines = ?, partial_bytes = ?, coverage = ? "
                         "WHERE id = ?",
-                        (updated, size, mtime_ns, offset, checkpoint_position, checkpoint_digest, malformed_total, partial, coverage, meta["id"]),
+                        (updated, size, mtime_ns, ctime_ns, offset, checkpoint_position, checkpoint_digest, malformed_total, partial, coverage, meta["id"]),
                     )
         except OSError as exc:
             raise StoreError("cannot read transcript " + meta["source_path"] + ": " + str(exc)) from exc
         return reset, added, malformed, partial
 
-    def _checkpoint_valid(self, meta, existing):
+    def _checkpoint_valid(self, meta, existing, stats):
         position = existing["checkpoint_position"]
         digest = existing["checkpoint_digest"]
         if position is None or digest is None:
             return True
         try:
-            with _open_source(meta["source_path"]) as stream:
+            with _open_source(meta["source_path"], stats) as stream:
+                opened = _fstat_source(stream, stats)
+                if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
+                    meta["file_dev"], meta["file_ino"], meta["file_size"], meta["file_mtime_ns"], meta["file_ctime_ns"]
+                ):
+                    return False
                 stream.seek(position)
-                raw = stream.readline()
+                raw = _readline(stream, stats)
         except OSError:
             return False
         return bool(raw and hmac.compare_digest(_sha256(raw), digest))

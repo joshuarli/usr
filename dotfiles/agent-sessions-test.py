@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
 import json
+import os
 import sqlite3
 import stat
 import subprocess
@@ -95,9 +96,50 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.search("almanacneedle", self.project_id)[0]["session"], "a1")
             self.assertEqual(store.search("unrelatedneedle", self.project_id), [])
             other_id = project_identity(other)
-            store.refresh([self.transcripts], project=other_id)
+            second = store.refresh([self.transcripts], project=other_id)
+            self.assertGreater(second["content_opens"], 0)
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 2)
             self.assertEqual(store.search("almanacneedle", other_id), [])
+
+    def test_projects_refresh_reuses_metadata_for_shared_roots(self):
+        others = []
+        project_ids = [self.project_id]
+        for index in range(2):
+            project = self.root / ("other-%d" % index)
+            project.mkdir()
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            others.append(project)
+            project_ids.append(project_identity(project))
+        for index, project in enumerate((self.project, *others)):
+            self.transcript("shared-%d" % index, project, [message("sharedneedle%d" % index)])
+        with Store(self.state) as store:
+            first = store.refresh([self.transcripts], projects=project_ids)
+            self.assertEqual(first["sessions_seen"], 3)
+            self.assertEqual(first["sessions_indexed"], 3)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 3)
+            before = store.db.total_changes
+            noop = store.refresh([self.transcripts], projects=iter(project_ids))
+            self.assertEqual(noop["stat_operations"], 3)
+            self.assertEqual(noop["content_opens"], 0)
+            self.assertEqual(noop["bytes_read"], 0)
+            self.assertEqual(noop["git_processes"], 0)
+            self.assertEqual(noop["sqlite_changes"], 0)
+            self.assertEqual(store.db.total_changes, before)
+            selected = store.refresh([self.transcripts], projects={project_ids[1]})
+            self.assertEqual(selected["sessions_seen"], 3)
+            self.assertEqual(selected["sessions_indexed"], 1)
+            self.assertEqual(selected["skipped_project"], 2)
+            self.assertEqual(selected["content_opens"], 0)
+            with self.assertRaisesRegex(ValueError, "either project or projects"):
+                store.refresh([self.transcripts], project=project_ids[0], projects=project_ids)
+            moved = self.root / "moved"
+            moved.mkdir()
+            subprocess.run(["git", "init", "-q", str(moved)], check=True)
+            moved_path = self.transcripts / "rollout-shared-0.jsonl"
+            moved_path.write_bytes(line(metadata("shared-0", moved)) + line(message("movedneedle")))
+            moved_stats = store.refresh([self.transcripts], projects={project_ids[0]})
+            self.assertEqual(moved_stats["deleted"], 1)
+            self.assertIsNone(store.db.execute("SELECT 1 FROM sessions WHERE id='shared-0'").fetchone())
 
     def test_append_partial_malformed_and_noop_refresh(self):
         path = self.transcript("append", records=[message("firstneedle")])
@@ -107,21 +149,41 @@ class SessionStoreTests(unittest.TestCase):
         with Store(self.state) as store:
             first = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(first["partial_files"], 1)
+            self.assertEqual(first["content_opens"], 2)
             self.assertEqual(store.db.execute("SELECT partial_bytes FROM sessions WHERE id='append'").fetchone()[0], len(partial))
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='append'").fetchone()[0], 2)
             with path.open("ab") as stream:
                 stream.write(b"\nnot-json\n")
             second = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(second["events_added"], 1)
+            self.assertEqual(second["content_opens"], 3)
             self.assertEqual(second["malformed_lines"], 1)
             row = store.db.execute("SELECT malformed_lines, partial_bytes, coverage FROM sessions WHERE id='append'").fetchone()
             self.assertEqual(tuple(row), (1, 0, "degraded"))
             changes = store.db.total_changes
             noop = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(noop["events_added"], 0)
+            self.assertEqual(noop["content_opens"], 0)
+            self.assertEqual(noop["bytes_read"], 0)
+            self.assertEqual(noop["git_processes"], 0)
+            self.assertEqual(noop["sqlite_changes"], 0)
             self.assertEqual(store.db.total_changes, changes)
             self.assertEqual(noop["malformed_lines"], 0)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='append'").fetchone()[0], 3)
+
+    def test_same_size_rewrite_with_restored_mtime_resets_index(self):
+        path = self.transcript("rewrite", records=[message("oldneedle")])
+        with Store(self.state) as store:
+            store.refresh([self.transcripts], project=self.project_id)
+            previous = path.stat()
+            changed = path.read_bytes().replace(b"oldneedle", b"newneedle")
+            path.write_bytes(changed)
+            os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+            stats = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(stats["resets"], 1)
+            self.assertGreater(stats["content_opens"], 0)
+            self.assertEqual(store.search("oldneedle", self.project_id), [])
+            self.assertEqual(len(store.search("newneedle", self.project_id)), 1)
 
     def test_replacement_archive_move_deletion_and_evidence_digest(self):
         path = self.transcript("move", records=[message("oldneedle")])
@@ -187,6 +249,47 @@ class SessionStoreTests(unittest.TestCase):
             Store(self.state)
         with sqlite3.connect(path) as db:
             self.assertEqual(db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
+
+    def test_schema_v1_migrates_metadata_without_rebuilding_index(self):
+        self.transcript("legacy", records=[message("legacyevidence")])
+        with Store(self.state) as store:
+            store.db.execute("CREATE TABLE learning_hints (id TEXT PRIMARY KEY, text TEXT)")
+            store.db.execute("INSERT INTO learning_hints VALUES ('h1', 'keep')")
+            store.refresh([self.transcripts], project=self.project_id)
+        path = Store.database_path(self.state)
+        with sqlite3.connect(path) as db:
+            db.execute("PRAGMA foreign_keys = OFF")
+            db.execute("PRAGMA legacy_alter_table = ON")
+            db.execute("DROP INDEX sessions_project_updated")
+            db.execute("DROP INDEX sessions_parent")
+            db.execute("ALTER TABLE sessions RENAME TO sessions_v2")
+            db.execute(
+                "CREATE TABLE sessions ("
+                "id TEXT PRIMARY KEY, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, "
+                "thread_source TEXT, harness TEXT NOT NULL, source_path TEXT NOT NULL, updated REAL NOT NULL, "
+                "file_size INTEGER NOT NULL, file_mtime_ns INTEGER NOT NULL, file_dev INTEGER NOT NULL, "
+                "file_ino INTEGER NOT NULL, indexed_bytes INTEGER NOT NULL DEFAULT 0, header_digest TEXT NOT NULL, "
+                "checkpoint_position INTEGER, checkpoint_digest TEXT, malformed_lines INTEGER NOT NULL DEFAULT 0, "
+                "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete')"
+            )
+            db.execute(
+                "INSERT INTO sessions SELECT id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
+                "file_size, file_mtime_ns, file_dev, file_ino, indexed_bytes, header_digest, checkpoint_position, "
+                "checkpoint_digest, malformed_lines, partial_bytes, coverage FROM sessions_v2"
+            )
+            db.execute("DROP TABLE sessions_v2")
+            db.execute("CREATE INDEX sessions_project_updated ON sessions(project, updated DESC)")
+            db.execute("CREATE INDEX sessions_parent ON sessions(parent)")
+            db.execute("PRAGMA user_version = 1")
+        with Store(self.state) as store:
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertIsNone(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0])
+            self.assertEqual(store.db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
+            self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy'").fetchone()[0], 2)
+            stats = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(stats["events_added"], 0)
+            self.assertEqual(stats["resets"], 0)
+            self.assertEqual(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0], self.transcripts.joinpath("rollout-legacy.jsonl").stat().st_ctime_ns)
 
     def test_git_worktrees_share_project_identity(self):
         repo = self.root / "git-repo"
