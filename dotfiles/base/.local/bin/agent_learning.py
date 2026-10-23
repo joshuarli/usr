@@ -345,12 +345,10 @@ class Learner:
             roots.add(row["root_session"])
             candidates.append(row)
         candidates.sort(key=lambda row: (row["project"] != owner["project"], -row["observed_at"]))
-        evidence, projects = [], set()
-        selected = []
-        for row in candidates:
-            if row["project"] not in projects:
-                selected.append(row)
-                projects.add(row["project"])
+        evidence = []
+        local = [row for row in candidates if row["project"] == owner["project"]]
+        foreign = [row for row in candidates if row["project"] != owner["project"]]
+        selected = local[:2] + foreign[:1]
         selected.extend(row for row in candidates if row not in selected)
         for row in selected[:6]:
             row = dict(row)

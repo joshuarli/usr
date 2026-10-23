@@ -1365,6 +1365,8 @@ class CodexReviewer:
             "project_doc_fallback_filenames=[]",
             "project_doc_max_bytes=0",
             "history.persistence=\"none\"",
+            "analytics.enabled=false",
+            "feedback.enabled=false",
             "hide_agent_reasoning=true",
             "web_search=\"disabled\"",
             "tools.web_search=false",

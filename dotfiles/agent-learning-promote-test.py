@@ -234,6 +234,17 @@ class PromotionTest(unittest.TestCase):
         self.assertIn("Skip failures whose cause the error message already states.", content)
         self.assertIn(proposal["future_action"], content)
 
+    def test_existing_action_is_not_appended_to_another_paragraph(self):
+        proposal = self.proposal()
+        path = self.repo / "dotfiles/base/.agents/skills/root-cause/SKILL.md"
+        path.write_text(self.skill_text()+"\n"+proposal["future_action"]+"\n", encoding="utf-8")
+        self.commit_base()
+        self.base_head = self.head()
+        result = self.promote(proposal)
+        self.assertEqual(result["status"], "blocked", result)
+        self.assertIn("already represents", result["reason"])
+        self.assertEqual(self.head(), self.base_head)
+
     def test_evidence_changed_during_validation_prevents_integration(self):
         checks = []
 

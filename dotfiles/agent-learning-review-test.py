@@ -213,6 +213,8 @@ else:
             self.assertIn(list(pair), [args[index:index + 2] for index in range(len(args) - 1)])
         config_values = [args[index + 1] for index, value in enumerate(args[:-1]) if value == "--config"]
         self.assertIn('approval_policy="never"', config_values)
+        self.assertIn("analytics.enabled=false", config_values)
+        self.assertIn("feedback.enabled=false", config_values)
         self.assertNotIn("tools.view_image=false", config_values)
         for flag in ("--ignore-user-config", "--ignore-rules", "--ephemeral", "--strict-config", "--output-schema", "--json"):
             self.assertIn(flag, args)

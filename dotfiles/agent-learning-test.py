@@ -424,6 +424,10 @@ class LearningTest(unittest.TestCase):
 
     def test_project_memory_can_select_two_local_roots_despite_foreign_corroboration(self):
         self.global_pattern()
+        third = self.base / "third-project"
+        git(self.base, "clone", "--quiet", str(self.repo), str(third))
+        self.learn.enable(third, self.repo, 0)
+        self.transcript("third-project-root", cwd=third)
         self.model.target = "memory"
         original = self.model.review
 
@@ -436,6 +440,7 @@ class LearningTest(unittest.TestCase):
             return result
 
         self.model.review = local
+        self.run_cycle()
         self.run_cycle()
         self.assertEqual(len(self.learn.recall(project_identity(self.repo), "test driver")), 1)
         self.assertNotIn(self.new, self.skill.read_text())

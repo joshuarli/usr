@@ -1758,6 +1758,8 @@ def promote(
                     if edit_mode == "description":
                         start = _edit_is_description(text, old)
                     else:
+                        if " ".join(proposal["future_action"].split()).lower() in " ".join(text.split()).lower():
+                            raise _PromotionFailure("owning skill already represents the proposed action")
                         start = _edit_is_paragraph(text, old)
                     updated = text[:start] + new + text[start + len(old) :]
                     encoded = updated.encode("utf-8")
