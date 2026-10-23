@@ -199,7 +199,8 @@ def http_post(url, headers, body, timeout):
         with opener.open(request, timeout=timeout) as response:
             return HttpResponse(response.status, response.read(MAX_RESPONSE_BYTES + 1))
     except urllib.error.HTTPError as error:
-        return HttpResponse(error.code, error.read(MAX_RESPONSE_BYTES + 1))
+        body = b"" if 300 <= error.code < 400 else error.read(MAX_RESPONSE_BYTES + 1)
+        return HttpResponse(error.code, body)
 
 
 def config_status(env):

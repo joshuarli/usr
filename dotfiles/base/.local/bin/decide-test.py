@@ -344,6 +344,19 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(len(output.getvalue().splitlines()), 1)
         self.assertEqual(json.loads(output.getvalue()), outcome)
 
+    def test_http_redirect_does_not_read_response_body(self):
+        body = mock.Mock()
+        body.read.side_effect = AssertionError("redirect body must not be read")
+        error = urllib.error.HTTPError("https://example.invalid", 302, "Found", {}, body)
+        opener = mock.Mock()
+        opener.open.side_effect = error
+        with mock.patch.object(DECIDE.urllib.request, "build_opener", return_value=opener):
+            response = DECIDE.http_post(
+                "https://example.invalid", {"Authorization": "Bearer test"}, b"{}", 1
+            )
+        self.assertEqual(response, DECIDE.HttpResponse(302, b""))
+        body.read.assert_not_called()
+
     def test_http_redirect_does_not_forward_authorization_or_change_cli_output(self):
         origin_authorization = []
         destination_requests = []
