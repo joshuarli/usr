@@ -58,6 +58,8 @@ Claude retains its `agent-tier-gate` subagent hook and the official Slack plugin
 
 `claude-or` and `claude-ds` start Claude Code through the OpenRouter and DeepSeek profiles with `--dangerously-skip-permissions`, taking the key from `vault`, so no permission prompt or deny rule applies in those sessions. `codex-or` starts Codex with the OpenRouter profile. `skill-usage` reads existing Claude, Codex, Muse, and Grok sessions; Grok does not persist its skill catalog, so `skill-eval` cannot calculate its listed-to-loaded rate.
 
+`usage` queries supported harnesses found on `PATH`, including optional Muse, DeepSeek, and Antigravity installations. Missing harnesses are skipped. Pass a provider name, such as `usage agy`, to query only that provider. An explicitly selected provider missing from `PATH` returns an error.
+
 `reset-agents` clears harness state under `$HOME`. With no argument it resets Claude, Codex, Grok, Muse, and OpenCode. Pass one name to reset only that harness, such as `reset-agents claude`. Muse follows `XDG_CONFIG_HOME` and `XDG_DATA_HOME`, defaulting to `~/.config/muse` and `~/.local/share/muse`. OpenCode resets `~/.config/opencode`, `~/.local/share/opencode`, and the `XDG_CACHE_HOME` `opencode` directory, defaulting to `~/.cache/opencode`. The command keeps dotfiles-managed files and the credential files `.credentials.json`, `auth.json`, and `mcp_credentials.json`. It resolves a symlinked `HOME`, then refuses target paths outside that resolved home or with symlinked components beneath it. Do not run it without an explicit request.
 
 ## Configure optional Workers AI decisions

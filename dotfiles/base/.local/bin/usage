@@ -16,20 +16,19 @@ import unicodedata
 
 
 PROVIDERS = (
-    ("claude", "Claude Code", "claude", []),
-    ("codex", "Codex", "codex", ["app-server", "--stdio"]),
-    ("muse", "Muse Code", "muse", ["serve", "--no-session-log"]),
-    ("grok", "Grok Build", "grok", []),
-    ("dsh", "DeepSeek API", "dsh", []),
-    # Disabled: direct Google OAuth quota access violates its terms; the supported CLI path is slow.
-    # ("agy", "Antigravity", "agy", []),
+    ("claude", "Claude Code", "claude"),
+    ("codex", "Codex", "codex"),
+    ("muse", "Muse Code", "muse"),
+    ("grok", "Grok Build", "grok"),
+    ("dsh", "DeepSeek API", "dsh"),
+    ("agy", "Antigravity", "agy"),
 )
-HELP = """usage: usage [claude|codex|muse|grok|dsh]
+HELP = """usage: usage [claude|codex|muse|grok|dsh|agy]
 
-Read subscription quota usage from Claude Code, Codex, Muse Code, and Grok
-Build, plus the DeepSeek API credit balance. Grok queries its CLI billing
-extension over ACP. The DeepSeek balance is not a subscription quota. With no
-provider, query every supported CLI installed here. These reads do not submit
+Read subscription quota usage from Claude Code, Codex, Muse Code, Grok
+Build, and Antigravity, plus the DeepSeek API credit balance. Grok queries its
+CLI billing extension over ACP. The DeepSeek balance is not a subscription quota.
+With no provider, query every supported CLI installed here. These reads do not submit
 a model prompt. Claude Code uses its undocumented OAuth usage endpoint and
 does not refresh credentials. OpenCode's free-model quota is not available
 through a reader integrated here.
@@ -717,7 +716,7 @@ def main(arguments):
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(available)) as pool:
         futures = {
             pool.submit(query[key], binary): key
-            for (key, _, _, _), binary in available
+            for (key, _, _), binary in available
         }
         for future in concurrent.futures.as_completed(futures):
             key = futures[future]
@@ -725,7 +724,7 @@ def main(arguments):
                 results[key] = future.result()
             except Exception as error:
                 failures[key] = str(error)
-    for key, title, _, _ in providers.values():
+    for key, title, _ in providers.values():
         if key not in results and key not in failures:
             continue
         if key in failures:
