@@ -185,6 +185,11 @@ class PromotionTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn(proposal["future_action"], content)
+        recovered = promotion.recover_promotion(self.repo, proposal)
+        self.assertEqual(
+            recovered,
+            {"status": "promoted", "commit": promotion_commit, "reason": "proposal was already integrated"},
+        )
         message = run(
             ["git", "-C", str(self.repo), "show", "-s", "--format=%B", promotion_commit],
             self.repo,
@@ -207,6 +212,14 @@ class PromotionTest(unittest.TestCase):
         self.assertEqual(second_rollback["status"], "blocked")
         self.assertEqual(self.head(), reverted_head)
 
+    def test_recover_promotion_reports_absent_without_creating_staging_state(self):
+        proposal, _evidence = self.evidence()
+
+        result = promotion.recover_promotion(self.repo, proposal)
+
+        self.assertEqual(result, {"status": "absent", "commit": None, "reason": None})
+        self.assertFalse((self.repo / ".work/wt").exists())
+
     def test_description_trigger_refinement_preserves_metadata_and_skip(self):
         proposal, evidence = self.evidence()
         proposal = self.proposal(mode="description")
@@ -225,12 +238,14 @@ class PromotionTest(unittest.TestCase):
         proposal, evidence = self.evidence(same_root=True)
         result = self.promote(proposal, evidence)
         self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "invalid_proposal")
         self.assertIn("two independent root sessions", result["reason"])
         self.assertEqual(self.head(), self.base_head)
 
         proposal, evidence = self.evidence()
         result = self.promote(proposal, evidence, verifier=lambda _refs, _records: False)
         self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "invalid_proposal")
         self.assertIn("verification failed", result["reason"])
         self.assertEqual(self.head(), self.base_head)
 
@@ -239,6 +254,7 @@ class PromotionTest(unittest.TestCase):
         local.write_text("keep me", encoding="utf-8")
         result = self.promote()
         self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "repository_dirty")
         self.assertEqual(local.read_text(encoding="utf-8"), "keep me")
         self.assertEqual(self.head(), self.base_head)
         local.unlink()
@@ -248,13 +264,16 @@ class PromotionTest(unittest.TestCase):
         run(["git", "-C", str(self.repo), "add", "--", "staged.txt"], self.repo)
         result = self.promote()
         self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "repository_dirty")
         self.assertEqual(self.head(), self.base_head)
         self.assertTrue(run(["git", "-C", str(self.repo), "diff", "--cached", "--quiet"], self.repo, check=False).returncode)
 
     def test_rejects_path_escape_and_authority_weakening(self):
         proposal, evidence = self.evidence()
         proposal["target_skill"] = "../../AGENTS"
-        self.assertEqual(self.promote(proposal, evidence)["status"], "blocked")
+        result = self.promote(proposal, evidence)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "invalid_proposal")
         self.assertEqual(self.head(), self.base_head)
 
         proposal, evidence = self.evidence()
@@ -292,20 +311,154 @@ class PromotionTest(unittest.TestCase):
         self.assertEqual(external.read_text(encoding="utf-8"), self.skill_text())
         self.assertEqual(self.head(), self.base_head)
 
-    def test_cleans_only_registered_stale_worktrees_and_refuses_unowned_paths(self):
+    def test_unrelated_registered_worktree_is_preserved_without_blocking_promotion(self):
         worktree_root = self.repo / ".work/wt"
         worktree_root.mkdir(parents=True)
-        stale = worktree_root / "agent-learning-promote-orphan"
+        unrelated = worktree_root / "agent-learning-promote-orphan"
         run(
-            ["git", "-C", str(self.repo), "worktree", "add", "--detach", str(stale), self.base_head],
+            ["git", "-C", str(self.repo), "worktree", "add", "--detach", str(unrelated), self.base_head],
             self.repo,
         )
-        (stale / "unfinished.txt").write_text("discarded candidate state", encoding="utf-8")
+        unfinished = unrelated / "unfinished.txt"
+        unfinished.write_text("candidate state that must survive", encoding="utf-8")
         result = self.promote()
         self.assertEqual(result["status"], "promoted", result)
-        self.assertFalse(stale.exists())
+        self.assertEqual(unfinished.read_text(encoding="utf-8"), "candidate state that must survive")
 
         self.assertEqual(self.head(), result["commit"])
+
+    def test_unowned_deterministic_worktree_is_preserved_and_blocks_only_its_proposal(self):
+        worktree_root = self.repo / ".work/wt"
+        worktree_root.mkdir(parents=True)
+        occupied = worktree_root / "agent-learning-promote-finding-0001"
+        run(
+            ["git", "-C", str(self.repo), "worktree", "add", "--detach", str(occupied), self.base_head],
+            self.repo,
+        )
+        unfinished = occupied / "unfinished.txt"
+        unfinished.write_text("candidate state that must survive", encoding="utf-8")
+
+        result = self.promote()
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "worktree_occupied")
+        self.assertEqual(result["blocked_path"], str(occupied))
+        self.assertEqual(unfinished.read_text(encoding="utf-8"), "candidate state that must survive")
+        self.assertEqual(self.head(), self.base_head)
+
+    def test_worktree_removal_preserves_tracked_staged_untracked_and_ignored_changes(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        ignored_exclude = self.repo / ".git/info/exclude"
+        ignored_exclude.write_text(".work/\nignored.txt\n", encoding="utf-8")
+
+        for identity, change in (
+            ("modified-tracked", "modified"),
+            ("staged", "staged"),
+            ("untracked", "untracked"),
+            ("ignored", "ignored"),
+        ):
+            with self.subTest(change=change):
+                worktree = promotion._staging_worktree(
+                    self.repo, self.base_head, worktree_root, "promote", identity
+                )
+                target = worktree / "dotfiles/base/.agents/skills/root-cause/SKILL.md"
+                if change == "modified":
+                    target.write_text(target.read_text(encoding="utf-8") + "local edit\n", encoding="utf-8")
+                else:
+                    name = "ignored.txt" if change == "ignored" else "local.txt"
+                    local = worktree / name
+                    local.write_text("keep " + change, encoding="utf-8")
+                    if change == "staged":
+                        run(["git", "-C", str(worktree), "add", "--", name], self.repo)
+
+                with self.assertRaises(promotion._PromotionFailure) as failure:
+                    promotion._remove_worktree(self.repo, worktree, "promote", identity)
+
+                self.assertEqual(failure.exception.reason_code, "worktree_occupied")
+                self.assertEqual(failure.exception.blocked_path, worktree)
+                self.assertTrue(worktree.is_dir())
+                if change == "modified":
+                    self.assertTrue(target.read_text(encoding="utf-8").endswith("local edit\n"))
+                else:
+                    self.assertEqual(local.read_text(encoding="utf-8"), "keep " + change)
+
+    def test_ignored_file_added_during_cleanup_preflight_is_preserved(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        worktree = promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "concurrent"
+        )
+        ignored = worktree / "ignored.txt"
+        (self.repo / ".git/info/exclude").write_text(".work/\nignored.txt\n", encoding="utf-8")
+        original_git_bytes = promotion._git_bytes
+
+        def add_ignored_before_scan(repository, *args, **kwargs):
+            if args and args[0] == "ls-files":
+                ignored.write_text("keep concurrent ignored data", encoding="utf-8")
+            return original_git_bytes(repository, *args, **kwargs)
+
+        with patch.object(promotion, "_git_bytes", side_effect=add_ignored_before_scan):
+            with self.assertRaises(promotion._PromotionFailure) as failure:
+                promotion._remove_worktree(self.repo, worktree, "promote", "concurrent")
+
+        self.assertEqual(failure.exception.reason_code, "worktree_occupied")
+        self.assertEqual(ignored.read_text(encoding="utf-8"), "keep concurrent ignored data")
+        self.assertTrue(worktree.is_dir())
+
+    def test_untracked_file_added_at_remove_is_rejected_by_git(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        worktree = promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "remove-race"
+        )
+        concurrent = worktree / "concurrent.txt"
+        original_git = promotion._git
+
+        def add_untracked_before_remove(repository, *args, **kwargs):
+            if args[:2] == ("worktree", "remove"):
+                worktree.mkdir()
+                concurrent.write_text("keep concurrent data", encoding="utf-8")
+            return original_git(repository, *args, **kwargs)
+
+        with patch.object(promotion, "_git", side_effect=add_untracked_before_remove):
+            with self.assertRaises(promotion._PromotionFailure) as failure:
+                promotion._remove_worktree(self.repo, worktree, "promote", "remove-race")
+
+        self.assertEqual(failure.exception.reason_code, "worktree_occupied")
+        self.assertEqual(concurrent.read_text(encoding="utf-8"), "keep concurrent data")
+        self.assertTrue(worktree.is_dir())
+
+    def test_failed_validation_preserves_owned_candidate_diff_for_recovery(self):
+        proposal, evidence = self.evidence()
+        with patch.object(
+            promotion,
+            "_run_skill_check",
+            side_effect=promotion._PromotionFailure("candidate validation failed"),
+        ):
+            result = self.promote(proposal, evidence)
+
+        candidate = self.repo / ".work/wt/agent-learning-promote-finding-0001"
+        candidate_text = (
+            candidate / "dotfiles/base/.agents/skills/root-cause/SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "validation_failed")
+        self.assertEqual(result["blocked_path"], str(candidate))
+        self.assertIn(proposal["future_action"], candidate_text)
+        self.assertNotEqual(
+            run(["git", "-C", str(candidate), "diff", "--quiet"], self.repo, check=False).returncode,
+            0,
+        )
+
+        retry = self.promote(proposal, evidence)
+
+        self.assertEqual(retry["status"], "blocked")
+        self.assertEqual(retry["reason_code"], "worktree_occupied")
+        self.assertEqual(
+            (candidate / "dotfiles/base/.agents/skills/root-cause/SKILL.md").read_text(
+                encoding="utf-8"
+            ),
+            candidate_text,
+        )
+        self.assertEqual(self.head(), self.base_head)
 
     def test_lock_and_head_checks_refuse_concurrent_or_stale_work(self):
         common = Path(
@@ -318,10 +471,12 @@ class PromotionTest(unittest.TestCase):
         with promotion._promotion_lock(self.repo):
             result = self.promote()
         self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "lock_contended")
         self.assertIn("another promotion is active", result["reason"])
 
         result = self.promote(expected_head="0" * 40)
         self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "repository_changed")
         self.assertEqual(self.head(), self.base_head)
 
     def test_merge_race_preserves_a_user_edit_and_refuses_a_moved_branch(self):

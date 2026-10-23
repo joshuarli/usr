@@ -108,7 +108,10 @@ _WORKTREE_PREFIXES = (
 
 
 class _PromotionFailure(Exception):
-    pass
+    def __init__(self, reason, reason_code="validation_failed", blocked_path=None):
+        super().__init__(reason)
+        self.reason_code = reason_code
+        self.blocked_path = blocked_path
 
 
 class _CommandFailure(_PromotionFailure):
@@ -140,8 +143,12 @@ def _result(status, commit=None, reason=None):
     return {"status": status, "commit": commit, "reason": reason}
 
 
-def _blocked(reason):
-    return _result("blocked", reason=reason)
+def _blocked(reason, reason_code="validation_failed", blocked_path=None):
+    result = _result("blocked", reason=reason)
+    result["reason_code"] = reason_code
+    if blocked_path is not None:
+        result["blocked_path"] = os.fspath(blocked_path)
+    return result
 
 
 def _environment(overrides=None):
@@ -222,10 +229,10 @@ def _head(repository):
 
 def _expected_head(repository, expected_head):
     if not isinstance(expected_head, str) or not _HEX.fullmatch(expected_head):
-        raise _PromotionFailure("expected_head must be a full commit identifier")
+        raise _PromotionFailure("expected_head must be a full commit identifier", "invalid_proposal")
     actual = _head(repository)
     if actual != expected_head:
-        raise _PromotionFailure("repository HEAD changed")
+        raise _PromotionFailure("repository HEAD changed", "repository_changed")
     return actual
 
 
@@ -238,13 +245,13 @@ def _worktree_clean(repository):
         config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
     )
     if result:
-        raise _PromotionFailure("repository has local or staged changes")
+        raise _PromotionFailure("repository has local or staged changes", "repository_dirty")
 
 
 def _current_branch(repository):
     branch = _git(repository, "symbolic-ref", "--quiet", "HEAD", check=False)
     if not branch.startswith("refs/heads/"):
-        raise _PromotionFailure("repository HEAD is not on a branch")
+        raise _PromotionFailure("repository HEAD is not on a branch", "repository_changed")
     return branch
 
 
@@ -271,7 +278,7 @@ def _promotion_lock(repository):
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise _PromotionFailure("another promotion is active") from exc
+            raise _PromotionFailure("another promotion is active", "lock_contended") from exc
         yield
     finally:
         os.close(descriptor)
@@ -488,57 +495,385 @@ def _safe_worktree_root(repository):
         try:
             mode = path.lstat().st_mode
         except FileNotFoundError:
-            path.mkdir(mode=0o700)
+            try:
+                path.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
             mode = path.lstat().st_mode
         if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
             raise _PromotionFailure(".work/wt must contain real directories")
+        try:
+            resolved = path.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise _PromotionFailure(".work/wt must contain real directories") from exc
+        if resolved != path:
+            raise _PromotionFailure(".work/wt must not resolve through another path")
     return root / "wt"
+
+
+def _worktree_path_identity(repository, path):
+    worktree_root = _safe_worktree_root(repository)
+    if path.parent != worktree_root:
+        raise _PromotionFailure("promotion worktree path is outside .work/wt", "worktree_occupied")
+    identities = []
+    for directory in (repository / ".work", worktree_root):
+        try:
+            metadata = directory.lstat()
+        except OSError as exc:
+            raise _PromotionFailure("promotion worktree ancestry changed", "worktree_occupied") from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise _PromotionFailure("promotion worktree ancestry is not real", "worktree_occupied")
+        try:
+            resolved = directory.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise _PromotionFailure("promotion worktree ancestry changed", "worktree_occupied") from exc
+        if resolved != directory:
+            raise _PromotionFailure("promotion worktree ancestry changed", "worktree_occupied")
+        identities.append((metadata.st_dev, metadata.st_ino))
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise _PromotionFailure("promotion worktree path is unavailable", "worktree_occupied") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise _PromotionFailure("promotion worktree path is not a real directory", "worktree_occupied")
+    try:
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise _PromotionFailure("promotion worktree path changed physical identity", "worktree_occupied") from exc
+    if resolved != path:
+        raise _PromotionFailure("promotion worktree path changed physical identity", "worktree_occupied")
+    identities.append((metadata.st_dev, metadata.st_ino))
+    return tuple(identities)
 
 
 def _registered_worktree(repository, path):
     try:
+        _worktree_path_identity(repository, path)
         top = Path(_git(path, "rev-parse", "--show-toplevel")).resolve(strict=True)
         git_dir = Path(
             _git(path, "rev-parse", "--path-format=absolute", "--git-dir")
         ).resolve(strict=True)
         common = _common_git_dir(repository)
         managed_root = common / "worktrees"
-        git_dir.relative_to(managed_root.resolve(strict=True))
-        return top == path.resolve(strict=True)
-    except (OSError, ValueError, _PromotionFailure):
+        managed_stat = managed_root.lstat()
+        if (
+            stat.S_ISLNK(managed_stat.st_mode)
+            or not stat.S_ISDIR(managed_stat.st_mode)
+            or managed_root.resolve(strict=True) != managed_root
+            or top != path
+            or git_dir.parent != managed_root
+        ):
+            return None
+        git_dir_stat = git_dir.lstat()
+        if stat.S_ISLNK(git_dir_stat.st_mode) or not stat.S_ISDIR(git_dir_stat.st_mode):
+            return None
+        metadata_pointer = git_dir / "gitdir"
+        worktree_pointer = path / ".git"
+        metadata_stat = metadata_pointer.lstat()
+        worktree_stat = worktree_pointer.lstat()
+        if (
+            stat.S_ISLNK(metadata_stat.st_mode)
+            or not stat.S_ISREG(metadata_stat.st_mode)
+            or stat.S_ISLNK(worktree_stat.st_mode)
+            or not stat.S_ISREG(worktree_stat.st_mode)
+            or metadata_pointer.read_bytes() != os.fsencode(path / ".git") + b"\n"
+            or worktree_pointer.read_bytes()
+            != b"gitdir: " + os.fsencode(git_dir) + b"\n"
+        ):
+            return None
+        return git_dir
+    except (OSError, RuntimeError, ValueError, _PromotionFailure):
+        return None
+
+
+def _worktree_owner_record(repository, path, operation, identity):
+    values = (
+        b"agent-learning-promotion-v1",
+        os.fsencode(repository),
+        os.fsencode(path),
+        operation.encode("ascii"),
+        identity.encode("ascii"),
+    )
+    return b"".join(len(value).to_bytes(8, "big") + value for value in values)
+
+
+def _owned_worktree(repository, path, operation, identity, git_dir=None):
+    git_dir = git_dir or _registered_worktree(repository, path)
+    if git_dir is None:
+        return False
+    expected = _worktree_owner_record(repository, path, operation, identity)
+    directory_flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        directory_flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        directory_flags |= os.O_NOFOLLOW
+    try:
+        directory_descriptor = os.open(os.fspath(git_dir), directory_flags)
+    except OSError:
+        return False
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(
+            "agent-learning-promotion-owner",
+            flags,
+            dir_fd=directory_descriptor,
+        )
+    except OSError:
+        os.close(directory_descriptor)
+        return False
+    try:
+        stream = os.fdopen(descriptor, "rb")
+        metadata = os.fstat(stream.fileno())
+        with stream:
+            return (
+                stat.S_ISREG(metadata.st_mode)
+                and metadata.st_nlink == 1
+                and stream.read(len(expected) + 1) == expected
+            )
+    finally:
+        os.close(directory_descriptor)
+
+
+def _write_worktree_owner(repository, path, operation, identity, git_dir):
+    directory_flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        directory_flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        directory_flags |= os.O_NOFOLLOW
+    directory_descriptor = os.open(os.fspath(git_dir), directory_flags)
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(
+            "agent-learning-promotion-owner",
+            flags,
+            0o600,
+            dir_fd=directory_descriptor,
+        )
+    except OSError:
+        os.close(directory_descriptor)
+        raise
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(_worktree_owner_record(repository, path, operation, identity))
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        try:
+            os.unlink("agent-learning-promotion-owner", dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            pass
+        os.close(directory_descriptor)
+        raise
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+
+
+def _worktree_cleanup_path(path, operation, identity):
+    return path.parent / (".agent-learning-cleanup-{}-{}".format(operation, identity))
+
+
+def _path_entry_exists(path):
+    try:
+        path.lstat()
+        return True
+    except FileNotFoundError:
         return False
 
 
-def _remove_worktree(repository, path):
+def _worktree_parent_descriptor(repository, worktree_root):
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(os.fspath(worktree_root), flags)
+    metadata = os.fstat(descriptor)
+    expected = worktree_root.lstat()
+    if (metadata.st_dev, metadata.st_ino) != (expected.st_dev, expected.st_ino):
+        os.close(descriptor)
+        raise _PromotionFailure("promotion worktree ancestry changed", "worktree_occupied")
+    if worktree_root != _safe_worktree_root(repository):
+        os.close(descriptor)
+        raise _PromotionFailure("promotion worktree ancestry changed", "worktree_occupied")
+    return descriptor
+
+
+def _restore_worktree(repository, path, cleanup_path, parent_descriptor):
+    if _path_entry_exists(path):
+        return False
+    os.rename(
+        cleanup_path.name,
+        path.name,
+        src_dir_fd=parent_descriptor,
+        dst_dir_fd=parent_descriptor,
+    )
+    _git(repository, "worktree", "repair", os.fspath(path))
+    return True
+
+
+def _remove_worktree(repository, path, operation, identity):
     try:
-        mode = path.lstat().st_mode
+        path.lstat()
     except FileNotFoundError:
         return
-    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
-        raise _PromotionFailure("promotion worktree path is not a real directory")
-    if _registered_worktree(repository, path):
-        _git(repository, "worktree", "remove", "--force", "--", os.fspath(path))
-    else:
+    identity_before = _worktree_path_identity(repository, path)
+    git_dir = _registered_worktree(repository, path)
+    if git_dir is None or not _owned_worktree(repository, path, operation, identity, git_dir):
+        raise _PromotionFailure(
+            "unowned data occupies a promotion worktree path",
+            "worktree_occupied",
+            path,
+        )
+    cleanup_path = _worktree_cleanup_path(path, operation, identity)
+    if _path_entry_exists(cleanup_path):
+        raise _PromotionFailure("promotion cleanup path is occupied", "worktree_occupied", cleanup_path)
+    worktree_root = path.parent
+    parent_descriptor = _worktree_parent_descriptor(repository, worktree_root)
+    try:
         try:
-            path.rmdir()
-        except OSError as exc:
-            raise _PromotionFailure("unrecognized data occupies a promotion worktree path") from exc
-
-
-def _cleanup_stale_worktrees(repository, worktree_root):
-    for path in worktree_root.iterdir():
-        if path.name.startswith(_WORKTREE_PREFIXES):
-            _remove_worktree(repository, path)
+            status = _git_bytes(
+                path,
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
+            )
+            ignored = _git_bytes(
+                path,
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "-z",
+                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
+            )
+        except _PromotionFailure as exc:
+            raise _PromotionFailure(
+                "could not verify promotion worktree cleanup state",
+                "worktree_occupied",
+                path,
+            ) from exc
+        if status or ignored:
+            reason = "promotion worktree contains ignored files" if ignored else "promotion worktree contains local or staged changes"
+            raise _PromotionFailure(reason, "worktree_occupied", path)
+        if _worktree_path_identity(repository, path) != identity_before:
+            raise _PromotionFailure("promotion worktree path changed during cleanup", "worktree_occupied", path)
+        if not _owned_worktree(repository, path, operation, identity, git_dir):
+            raise _PromotionFailure("promotion worktree ownership changed during cleanup", "worktree_occupied", path)
+        os.rename(
+            path.name,
+            cleanup_path.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+        cleanup_identity = _worktree_path_identity(repository, cleanup_path)
+        if cleanup_identity != identity_before:
+            try:
+                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
+            except (OSError, _PromotionFailure):
+                pass
+            raise _PromotionFailure(
+                "promotion worktree identity changed during cleanup",
+                "worktree_occupied",
+                cleanup_path,
+            )
+        if _path_entry_exists(path):
+            try:
+                _git(repository, "worktree", "repair", os.fspath(cleanup_path))
+                _git(repository, "worktree", "remove", "--", os.fspath(cleanup_path))
+            except _PromotionFailure as exc:
+                raise _PromotionFailure(
+                    "promotion worktree cleanup was blocked; concurrent path data was preserved",
+                    "worktree_occupied",
+                    path,
+                ) from exc
+            raise _PromotionFailure(
+                "a path was created during promotion worktree cleanup",
+                "worktree_occupied",
+                path,
+            )
+        try:
+            _git(repository, "worktree", "repair", os.fspath(cleanup_path))
+            repaired_git_dir = _registered_worktree(repository, cleanup_path)
+            if (
+                repaired_git_dir != git_dir
+                or not _owned_worktree(repository, path, operation, identity, repaired_git_dir)
+            ):
+                raise _PromotionFailure("promotion worktree ownership changed during cleanup")
+            status = _git_bytes(
+                cleanup_path,
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
+            )
+            ignored = _git_bytes(
+                cleanup_path,
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "-z",
+                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
+            )
+            if status or ignored:
+                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
+                reason = "promotion worktree contains ignored files" if ignored else "promotion worktree contains local or staged changes"
+                raise _PromotionFailure(reason, "worktree_occupied", path)
+            if _worktree_path_identity(repository, cleanup_path) != identity_before:
+                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
+                raise _PromotionFailure("promotion worktree changed during cleanup", "worktree_occupied", path)
+            _git(repository, "worktree", "remove", "--", os.fspath(cleanup_path))
+        except _PromotionFailure as exc:
+            if _path_entry_exists(cleanup_path):
+                try:
+                    _restore_worktree(repository, path, cleanup_path, parent_descriptor)
+                except (OSError, _PromotionFailure):
+                    pass
+            if _path_entry_exists(path):
+                raise _PromotionFailure(
+                    "promotion worktree changed during cleanup and was preserved",
+                    "worktree_occupied",
+                    path,
+                ) from exc
+            if _path_entry_exists(cleanup_path):
+                raise _PromotionFailure(
+                    "promotion worktree changed during cleanup and was preserved",
+                    "worktree_occupied",
+                    cleanup_path,
+                ) from exc
+            raise
+        if _path_entry_exists(path):
+            raise _PromotionFailure("a path was created during promotion worktree cleanup", "worktree_occupied", path)
+    finally:
+        os.close(parent_descriptor)
 
 
 def _staging_worktree(repository, expected_head, worktree_root, operation, identity):
     prefix = "agent-learning-{}-".format(operation)
     if operation not in ("promote", "rollback"):
         raise _PromotionFailure("unsupported staging operation")
-    _cleanup_stale_worktrees(repository, worktree_root)
+    if worktree_root != _safe_worktree_root(repository):
+        raise _PromotionFailure("promotion worktree root changed", "worktree_occupied")
     path = worktree_root / (prefix + identity)
+    cleanup_path = _worktree_cleanup_path(path, operation, identity)
+    if _path_entry_exists(cleanup_path):
+        raise _PromotionFailure("promotion cleanup path requires recovery", "worktree_occupied", cleanup_path)
     if path.exists() or path.is_symlink():
-        raise _PromotionFailure("promotion worktree path is occupied")
+        _worktree_path_identity(repository, path)
+        owned = _owned_worktree(repository, path, operation, identity)
+        reason = (
+            "owned promotion worktree state requires recovery"
+            if owned
+            else "unowned data occupies a promotion worktree path"
+        )
+        raise _PromotionFailure(reason, "worktree_occupied", path)
     try:
         _git(
             repository,
@@ -549,13 +884,30 @@ def _staging_worktree(repository, expected_head, worktree_root, operation, ident
             expected_head,
             config=(("core.hooksPath", "/dev/null"),),
         )
-    except _PromotionFailure:
-        if path.exists():
-            _remove_worktree(repository, path)
+    except _PromotionFailure as exc:
+        if path.exists() or path.is_symlink():
+            _worktree_path_identity(repository, path)
+            raise _PromotionFailure(
+                "promotion worktree path became occupied during creation",
+                "worktree_occupied",
+                path,
+            ) from exc
         raise
-    if not _registered_worktree(repository, path):
-        _remove_worktree(repository, path)
-        raise _PromotionFailure("Git did not register the promotion worktree")
+    git_dir = _registered_worktree(repository, path)
+    if git_dir is None:
+        raise _PromotionFailure(
+            "Git did not register the promotion worktree",
+            "worktree_occupied",
+            path,
+        )
+    try:
+        _write_worktree_owner(repository, path, operation, identity, git_dir)
+    except OSError as exc:
+        raise _PromotionFailure(
+            "could not record promotion worktree ownership",
+            "worktree_occupied",
+            path,
+        ) from exc
     return path
 
 
@@ -756,20 +1108,51 @@ def _commit_candidate(worktree, message, trailers):
 
 def _integrate(repository, candidate_commit, expected_head, branch):
     if _head(repository) != expected_head:
-        raise _PromotionFailure("repository HEAD changed before integration")
+        raise _PromotionFailure("repository HEAD changed before integration", "repository_changed")
     if _current_branch(repository) != branch:
-        raise _PromotionFailure("repository branch changed before integration")
+        raise _PromotionFailure("repository branch changed before integration", "repository_changed")
     _worktree_clean(repository)
-    _git(
-        repository,
-        "merge",
-        "--ff-only",
-        "--no-edit",
-        candidate_commit,
-        config=(("core.hooksPath", "/dev/null"),),
-    )
+    try:
+        _git(
+            repository,
+            "merge",
+            "--ff-only",
+            "--no-edit",
+            candidate_commit,
+            config=(("core.hooksPath", "/dev/null"),),
+        )
+    except _PromotionFailure as exc:
+        raise _PromotionFailure("repository changed during integration", "repository_changed") from exc
     if _head(repository) != candidate_commit:
-        raise _PromotionFailure("fast-forward integration did not reach the candidate commit")
+        raise _PromotionFailure("fast-forward integration did not reach the candidate commit", "repository_changed")
+
+
+def recover_promotion(repository: Path, proposal: dict) -> dict:
+    if not isinstance(proposal, dict):
+        return _blocked("proposal has an unsupported shape", "invalid_proposal")
+    if proposal.get("action") != "improve":
+        return _blocked("proposal action is unsupported", "invalid_proposal")
+    try:
+        try:
+            proposal_id, skill, old, new, _added, _edit_mode, _refs = _validate_proposal(proposal)
+        except _PromotionFailure as exc:
+            return _blocked(str(exc), "invalid_proposal")
+        root = _repository_root(repository)
+        with _promotion_lock(root):
+            existing = _promotion_commit_for(
+                root,
+                proposal_id,
+                _edit_digest(old, new),
+                skill,
+                new,
+            )
+            if existing is None:
+                return _result("absent")
+            return _result("promoted", existing, "proposal was already integrated")
+    except _PromotionFailure as exc:
+        return _blocked(str(exc), exc.reason_code, exc.blocked_path)
+    except (OSError, ValueError, UnicodeError) as exc:
+        return _blocked("promotion recovery failed: {}".format(type(exc).__name__))
 
 
 def promote(
@@ -781,17 +1164,20 @@ def promote(
     verify_evidence: Callable[[list, list], bool],
 ) -> dict:
     if not isinstance(proposal, dict):
-        return _blocked("proposal has an unsupported shape")
+        return _blocked("proposal has an unsupported shape", "invalid_proposal")
     action = proposal.get("action")
     if proposal.get("target") == "memory":
         return _result("not_applicable", reason="memory targets use the parent memory path")
     if action in ("defer", "reject", "supersede"):
         return _result("not_applicable", reason="proposal action is not improve")
     if action != "improve":
-        return _blocked("proposal action is unsupported")
+        return _blocked("proposal action is unsupported", "invalid_proposal")
     try:
-        proposal_id, skill, old, new, _added, edit_mode, refs = _validate_proposal(proposal)
-        _verify_evidence(refs, evidence, verify_evidence)
+        try:
+            proposal_id, skill, old, new, _added, edit_mode, refs = _validate_proposal(proposal)
+            _verify_evidence(refs, evidence, verify_evidence)
+        except _PromotionFailure as exc:
+            return _blocked(str(exc), "invalid_proposal")
         root = _repository_root(repository)
         with _promotion_lock(root):
             _worktree_clean(root)
@@ -811,6 +1197,9 @@ def promote(
             worktree = _staging_worktree(
                 root, head, worktree_root, "promote", proposal_id
             )
+            integrated_commit = None
+            cleanup_failure = None
+            primary_failure = None
             try:
                 relative, path = _skill_file(worktree, skill)
                 original = path.read_bytes()
@@ -843,11 +1232,35 @@ def promote(
                 if parents != [candidate_commit, head]:
                     raise _PromotionFailure("candidate commit does not directly follow expected_head")
                 _integrate(root, candidate_commit, head, branch)
-                return _result("promoted", candidate_commit)
+                integrated_commit = candidate_commit
+            except Exception as exc:
+                primary_failure = exc
+                raise
             finally:
-                _remove_worktree(root, worktree)
+                try:
+                    _remove_worktree(root, worktree, "promote", proposal_id)
+                except _PromotionFailure as cleanup_exc:
+                    if primary_failure is not None:
+                        if isinstance(primary_failure, _PromotionFailure):
+                            reason_code = primary_failure.reason_code
+                        else:
+                            reason_code = "validation_failed"
+                        raise _PromotionFailure(
+                            "{}; candidate worktree preserved: {}".format(primary_failure, cleanup_exc),
+                            reason_code,
+                            cleanup_exc.blocked_path,
+                        ) from primary_failure
+                    if integrated_commit is None:
+                        raise
+                    cleanup_failure = cleanup_exc
+            reason = (
+                "promotion integrated; staging worktree preserved: {}".format(cleanup_failure)
+                if cleanup_failure is not None
+                else None
+            )
+            return _result("promoted", integrated_commit, reason)
     except _PromotionFailure as exc:
-        return _blocked(str(exc))
+        return _blocked(str(exc), exc.reason_code, exc.blocked_path)
     except (OSError, ValueError, UnicodeError) as exc:
         return _blocked("promotion failed: {}".format(type(exc).__name__))
 
@@ -855,7 +1268,7 @@ def promote(
 def rollback(repository: Path, commit: str, expected_head: str) -> dict:
     try:
         if not isinstance(commit, str) or not _HEX.fullmatch(commit):
-            raise _PromotionFailure("promotion commit is invalid")
+            raise _PromotionFailure("promotion commit is invalid", "invalid_proposal")
         root = _repository_root(repository)
         with _promotion_lock(root):
             head = _expected_head(root, expected_head)
@@ -911,6 +1324,9 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
                 "rollback",
                 commit[:16],
             )
+            integrated_commit = None
+            cleanup_failure = None
+            primary_failure = None
             try:
                 _git(
                     worktree,
@@ -947,10 +1363,34 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
                 if parents != [revert_commit, head]:
                     raise _PromotionFailure("rollback commit does not directly follow expected_head")
                 _integrate(root, revert_commit, head, branch)
-                return _result("reverted", revert_commit)
+                integrated_commit = revert_commit
+            except Exception as exc:
+                primary_failure = exc
+                raise
             finally:
-                _remove_worktree(root, worktree)
+                try:
+                    _remove_worktree(root, worktree, "rollback", commit[:16])
+                except _PromotionFailure as cleanup_exc:
+                    if primary_failure is not None:
+                        if isinstance(primary_failure, _PromotionFailure):
+                            reason_code = primary_failure.reason_code
+                        else:
+                            reason_code = "validation_failed"
+                        raise _PromotionFailure(
+                            "{}; candidate worktree preserved: {}".format(primary_failure, cleanup_exc),
+                            reason_code,
+                            cleanup_exc.blocked_path,
+                        ) from primary_failure
+                    if integrated_commit is None:
+                        raise
+                    cleanup_failure = cleanup_exc
+            reason = (
+                "rollback integrated; staging worktree preserved: {}".format(cleanup_failure)
+                if cleanup_failure is not None
+                else None
+            )
+            return _result("reverted", integrated_commit, reason)
     except _PromotionFailure as exc:
-        return _blocked(str(exc))
+        return _blocked(str(exc), exc.reason_code, exc.blocked_path)
     except (OSError, ValueError, UnicodeError) as exc:
         return _blocked("rollback failed: {}".format(type(exc).__name__))
