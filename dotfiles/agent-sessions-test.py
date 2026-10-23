@@ -141,6 +141,53 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(moved_stats["deleted"], 1)
             self.assertIsNone(store.db.execute("SELECT 1 FROM sessions WHERE id='shared-0'").fetchone())
 
+    def test_unindexed_header_cache_avoids_disabled_and_worker_content_reads(self):
+        other_projects = []
+        project_ids = [self.project_id]
+        for index in range(2):
+            project = self.root / ("cache-project-%d" % index)
+            project.mkdir()
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            other_projects.append(project)
+            project_ids.append(project_identity(project))
+        projects = [self.project, *other_projects]
+        for project_index, project in enumerate(projects):
+            for session_index in range(2):
+                self.transcript(
+                    "cached-%d-%d" % (project_index, session_index),
+                    project,
+                    [message("cachemarker%d%d" % (project_index, session_index))],
+                )
+        worker = self.transcripts / "rollout-cache-worker.jsonl"
+        worker.write_bytes(
+            line(metadata("cache-worker", self.project, source={"learning_worker": True}))
+            + line(message("workerbodymustnotindex"))
+        )
+        with Store(self.state) as store:
+            first = store.refresh([self.transcripts], projects={project_ids[0]})
+            self.assertEqual(first["sessions_indexed"], 2)
+            self.assertEqual(first["skipped_learning_workers"], 1)
+            self.assertEqual(first["content_opens"], 9)
+            self.assertEqual(first["git_processes"], 3)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 2)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 5)
+            self.assertEqual(store.search("workerbodymustnotindex"), [])
+            self.assertEqual(store.search("cachemarker10"), [])
+            noop = store.refresh([self.transcripts], projects={project_ids[0]})
+            self.assertEqual(noop["content_opens"], 0)
+            self.assertEqual(noop["bytes_read"], 0)
+            self.assertEqual(noop["git_processes"], 0)
+            self.assertEqual(noop["sqlite_changes"], 0)
+            self.assertEqual(noop["stat_operations"], 7)
+            enabled = store.refresh([self.transcripts], projects={project_ids[1]})
+            self.assertEqual(enabled["sessions_indexed"], 2)
+            self.assertEqual(enabled["content_opens"], 2)
+            self.assertEqual(enabled["git_processes"], 0)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 3)
+            self.assertEqual(len(store.search("cachemarker10", project_ids[1])), 1)
+            self.assertEqual(store.search("cachemarker20"), [])
+            self.assertEqual(store.search("workerbodymustnotindex"), [])
+
     def test_append_partial_malformed_and_noop_refresh(self):
         path = self.transcript("append", records=[message("firstneedle")])
         partial = json.dumps(message("secondneedle"), separators=(",", ":")).encode()
@@ -152,6 +199,11 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(first["content_opens"], 2)
             self.assertEqual(store.db.execute("SELECT partial_bytes FROM sessions WHERE id='append'").fetchone()[0], len(partial))
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='append'").fetchone()[0], 2)
+            partial_noop = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(partial_noop["partial_files"], 1)
+            self.assertEqual(partial_noop["content_opens"], 0)
+            self.assertEqual(partial_noop["bytes_read"], 0)
+            self.assertEqual(partial_noop["sqlite_changes"], 0)
             with path.open("ab") as stream:
                 stream.write(b"\nnot-json\n")
             second = store.refresh([self.transcripts], project=self.project_id)
@@ -170,6 +222,52 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.db.total_changes, changes)
             self.assertEqual(noop["malformed_lines"], 0)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='append'").fetchone()[0], 3)
+
+    def test_incomplete_index_progress_retries_with_matching_metadata(self):
+        path = self.transcript("interrupted", records=[message("recoverme")])
+        with Store(self.state) as store:
+            store.refresh([self.transcripts], project=self.project_id)
+            with store.db:
+                store.db.execute("DELETE FROM events WHERE session='interrupted'")
+                store.db.execute(
+                    "UPDATE sessions SET indexed_bytes=0, checkpoint_position=NULL, checkpoint_digest=NULL, partial_bytes=0 "
+                    "WHERE id='interrupted'"
+                )
+            stats = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(stats["resets"], 0)
+            self.assertEqual(stats["events_added"], 2)
+            self.assertEqual(stats["content_opens"], 1)
+            self.assertEqual(store.db.execute("SELECT indexed_bytes=file_size FROM sessions WHERE id='interrupted'").fetchone()[0], 1)
+            self.assertEqual(len(store.search("recoverme", self.project_id)), 1)
+
+    def test_append_after_eof_before_final_stat_is_read_next_refresh(self):
+        path = self.transcript("eof-race", records=[message("beforeappend")])
+        appended = line(message("afterappend"))
+        original_fstat = STORE_MODULE._fstat_source
+        did_append = [False]
+
+        def append_before_final_stat(stream, stats):
+            if not did_append[0] and stream.tell() == path.stat().st_size:
+                with path.open("ab") as source:
+                    source.write(appended)
+                did_append[0] = True
+            return original_fstat(stream, stats)
+
+        with Store(self.state) as store:
+            STORE_MODULE._fstat_source = append_before_final_stat
+            try:
+                first = store.refresh([self.transcripts], project=self.project_id)
+            finally:
+                STORE_MODULE._fstat_source = original_fstat
+            self.assertTrue(did_append[0])
+            self.assertEqual(first["events_added"], 2)
+            progress = store.db.execute(
+                "SELECT indexed_bytes, partial_bytes, file_size FROM sessions WHERE id='eof-race'"
+            ).fetchone()
+            self.assertLess(progress["indexed_bytes"] + progress["partial_bytes"], progress["file_size"])
+            second = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(second["events_added"], 1)
+            self.assertEqual(len(store.search("afterappend", self.project_id)), 1)
 
     def test_same_size_rewrite_with_restored_mtime_resets_index(self):
         path = self.transcript("rewrite", records=[message("oldneedle")])
@@ -262,6 +360,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("PRAGMA legacy_alter_table = ON")
             db.execute("DROP INDEX sessions_project_updated")
             db.execute("DROP INDEX sessions_parent")
+            db.execute("DROP TABLE unindexed_sources")
             db.execute("ALTER TABLE sessions RENAME TO sessions_v2")
             db.execute(
                 "CREATE TABLE sessions ("
@@ -282,14 +381,34 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("CREATE INDEX sessions_parent ON sessions(parent)")
             db.execute("PRAGMA user_version = 1")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 3)
             self.assertIsNone(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0])
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy'").fetchone()[0], 2)
             stats = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(stats["events_added"], 0)
             self.assertEqual(stats["resets"], 0)
+            self.assertGreater(stats["content_opens"], 0)
             self.assertEqual(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0], self.transcripts.joinpath("rollout-legacy.jsonl").stat().st_ctime_ns)
+
+    def test_schema_v2_migrates_unindexed_header_cache(self):
+        self.transcript("legacy-v2", records=[message("v2evidence")])
+        with Store(self.state) as store:
+            store.refresh([self.transcripts], project=self.project_id)
+        path = Store.database_path(self.state)
+        with sqlite3.connect(path) as db:
+            db.execute("DROP TABLE unindexed_sources")
+            db.execute("PRAGMA user_version = 2")
+        with Store(self.state) as store:
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy-v2'").fetchone()[0], 2)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 0)
+            stats = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(stats["events_added"], 0)
+            self.assertEqual(stats["resets"], 0)
+            self.assertEqual(stats["content_opens"], 0)
+            self.assertEqual(stats["bytes_read"], 0)
+            self.assertEqual(stats["git_processes"], 0)
 
     def test_git_worktrees_share_project_identity(self):
         repo = self.root / "git-repo"

@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _SKIP_TEXT_KEYS = frozenset((
     "encrypted_content", "internal_chat_message_metadata_passthrough", "id", "call_id",
     "type", "status", "role", "timestamp", "ordinal",
@@ -413,16 +413,21 @@ class Store:
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
             if version > SCHEMA_VERSION:
                 raise StoreError("session index schema is newer than this tool; upgrade agent-sessions before opening it")
-            owned = {"sessions", "events", "events_fts", "index_issues"}
+            owned = {"sessions", "events", "events_fts", "index_issues", "unindexed_sources"}
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, SCHEMA_VERSION):
+            if version not in (0, 1, 2, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v1()
+                version = 2
+            if version == 2:
+                if not self._schema_ready(2):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v2()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -456,6 +461,7 @@ class Store:
             and {"id", "project", "cwd", "parent", "source", "thread_source", "harness", "source_path", "updated", "indexed_bytes"} <= session_columns
             and {"id", "session", "position", "kind", "text", "timestamp", "call_id", "digest"} <= event_columns
             and (expected_version < 2 or "file_ctime_ns" in session_columns)
+            and (expected_version < 3 or "unindexed_sources" in existing)
         )
 
     def _migrate_v1(self):
@@ -464,6 +470,21 @@ class Store:
                 "BEGIN IMMEDIATE;"
                 "ALTER TABLE sessions ADD COLUMN file_ctime_ns INTEGER;"
                 "PRAGMA user_version = 2;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
+    def _migrate_v2(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "CREATE TABLE unindexed_sources ("
+                "id TEXT NOT NULL, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, thread_source TEXT, "
+                "harness TEXT NOT NULL, source_path TEXT PRIMARY KEY, updated REAL NOT NULL, file_size INTEGER NOT NULL, "
+                "file_mtime_ns INTEGER NOT NULL, file_ctime_ns INTEGER NOT NULL, file_dev INTEGER NOT NULL, "
+                "file_ino INTEGER NOT NULL, header_digest TEXT NOT NULL);"
+                "PRAGMA user_version = 3;COMMIT;"
             )
         except sqlite3.DatabaseError:
             self.db.rollback()
@@ -479,6 +500,11 @@ class Store:
             "file_ino INTEGER NOT NULL, indexed_bytes INTEGER NOT NULL DEFAULT 0, header_digest TEXT NOT NULL, "
             "checkpoint_position INTEGER, checkpoint_digest TEXT, malformed_lines INTEGER NOT NULL DEFAULT 0, "
             "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete');"
+            "CREATE TABLE unindexed_sources ("
+            "id TEXT NOT NULL, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, thread_source TEXT, "
+            "harness TEXT NOT NULL, source_path TEXT PRIMARY KEY, updated REAL NOT NULL, file_size INTEGER NOT NULL, "
+            "file_mtime_ns INTEGER NOT NULL, file_ctime_ns INTEGER NOT NULL, file_dev INTEGER NOT NULL, "
+            "file_ino INTEGER NOT NULL, header_digest TEXT NOT NULL);"
             "CREATE INDEX sessions_project_updated ON sessions(project, updated DESC);"
             "CREATE INDEX sessions_parent ON sessions(parent);"
             "CREATE TABLE events ("
@@ -528,6 +554,11 @@ class Store:
             row["source_path"]: dict(row)
             for row in self.db.execute("SELECT * FROM sessions")
         }
+        unindexed_by_path = {
+            row["source_path"]: dict(row)
+            for row in self.db.execute("SELECT * FROM unindexed_sources")
+        }
+        present_paths = set()
         for root_order, root in enumerate(roots):
             if not root.is_dir():
                 continue
@@ -559,9 +590,11 @@ class Store:
                     stats["unreadable"] += 1
                     unreadable_paths.add(source_path)
                     continue
+                present_paths.add(source_path)
                 existing = indexed_by_path.get(source_path)
-                if self._cached_metadata_matches(existing, source_stat):
-                    meta = existing
+                cached = existing or unindexed_by_path.get(source_path)
+                if self._cached_metadata_matches(cached, source_stat):
+                    meta = cached
                 else:
                     meta, error = _metadata(path, "codex", cache, stats)
                     if error:
@@ -571,7 +604,13 @@ class Store:
                 if _ephemeral(meta):
                     stats["skipped_ephemeral"] += 1
                     continue
-                if _is_learning_worker(meta):
+                selected = (project is None or meta["project"] == project) and (
+                    projects is None or meta["project"] in projects
+                )
+                learning_worker = _is_learning_worker(meta)
+                if existing is None and (learning_worker or not selected):
+                    self._cache_unindexed_metadata(meta, unindexed_by_path)
+                if learning_worker:
                     stats["skipped_learning_workers"] += 1
                     continue
                 grouped.setdefault(meta["id"], []).append((root_order, path, meta))
@@ -619,8 +658,32 @@ class Store:
         if degraded:
             with self.db:
                 self.db.executemany("UPDATE sessions SET coverage = 'degraded' WHERE id = ?", ((value,) for value in degraded))
+        stale_headers = [
+            row["source_path"]
+            for row in self.db.execute("SELECT source_path FROM unindexed_sources")
+            if any(_under(row["source_path"], root) for root in scanned_roots)
+            and row["source_path"] not in present_paths
+            and not any(row["source_path"] == path or _under(row["source_path"], path) for path in unreadable_paths)
+        ]
+        if stale_headers:
+            with self.db:
+                self.db.executemany("DELETE FROM unindexed_sources WHERE source_path = ?", ((value,) for value in stale_headers))
         stats["sqlite_changes"] = self.db.total_changes - sqlite_changes
         return stats
+
+    def _cache_unindexed_metadata(self, meta, cached):
+        if self._file_metadata_matches(cached.get(meta["source_path"]), meta):
+            return
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO unindexed_sources (id, project, cwd, parent, source, thread_source, harness, "
+                "source_path, updated, file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, header_digest) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
+                 meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
+                 meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"]),
+            )
+        cached[meta["source_path"]] = meta
 
     @staticmethod
     def _cached_metadata_matches(existing, source_stat):
@@ -652,16 +715,26 @@ class Store:
                 or existing["file_ctime_ns"] is not None and meta["file_ctime_ns"] != existing["file_ctime_ns"]
             ))
         )
-        if existing is not None and not reset and existing["project"] == meta["project"] and self._file_metadata_matches(existing, meta):
-            return False, 0, 0, 0
+        if (
+            existing is not None
+            and not reset
+            and existing["project"] == meta["project"]
+            and self._file_metadata_matches(existing, meta)
+            and existing["indexed_bytes"] + existing["partial_bytes"] == meta["file_size"]
+        ):
+            return False, 0, 0, existing["partial_bytes"]
         if existing is not None and not reset and not self._checkpoint_valid(meta, existing, stats):
             reset = True
         if existing is not None and (reset or existing["project"] != meta["project"]):
             with self.db:
                 self.db.execute("DELETE FROM sessions WHERE id = ?", (meta["id"],))
             existing = None
-        if existing is not None and existing["indexed_bytes"] == meta["file_size"] and self._file_metadata_matches(existing, meta):
-            return False, 0, 0, 0
+        if (
+            existing is not None
+            and existing["indexed_bytes"] + existing["partial_bytes"] == meta["file_size"]
+            and self._file_metadata_matches(existing, meta)
+        ):
+            return False, 0, 0, existing["partial_bytes"]
         if existing is None:
             with self.db:
                 self.db.execute(
@@ -672,6 +745,7 @@ class Store:
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
                      meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"]),
                 )
+                self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
         offset = existing["indexed_bytes"]
         added = 0
@@ -909,7 +983,7 @@ def rebuild_index(state_dir):
         with db:
             for name in ("events_ai", "events_ad", "events_au"):
                 db.execute("DROP TRIGGER IF EXISTS " + name)
-            for name in ("events_fts", "index_issues", "events", "sessions"):
+            for name in ("events_fts", "index_issues", "events", "sessions", "unindexed_sources"):
                 db.execute("DROP TABLE IF EXISTS " + name)
             db.execute("PRAGMA user_version = 0")
         db.close()
