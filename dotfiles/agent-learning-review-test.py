@@ -47,6 +47,8 @@ def sample_proposal(context, with_edit=True):
     return {
         "action": "improve",
         "target": "skill",
+        "scope": "global",
+        "scope_reason": "The same instruction applies in the synthetic projects represented by the evidence.",
         "owner": "technical-writing",
         "observation": "A repeated command failure exposed an unclear prerequisite.",
         "original_action": "The procedure retried the command without checking its prerequisites.",
@@ -58,6 +60,7 @@ def sample_proposal(context, with_edit=True):
         "confidence": 0.83,
         "evidence_refs": [{"session": ref["session"], "position": ref["position"], "digest": ref["digest"]}],
         "edit": edit,
+        "validity": [],
         "supersedes": 0,
     }
 
@@ -94,6 +97,8 @@ import os
 import signal
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 CAPTURE = """ + capture + """
@@ -103,13 +108,28 @@ args = sys.argv[1:]
 if args == ["--version"]:
     print("codex-cli 0.164.0")
 elif args[:2] == ["exec", "--help"]:
-    print("--config --disable --ephemeral --ignore-rules --ignore-user-config --model --output-schema --sandbox --strict-config --thread-source")
+    print("--config --cd --disable --ephemeral --ignore-rules --ignore-user-config --json --model --output-schema --sandbox --skip-git-repo-check --strict-config --thread-source")
 elif args == ["features", "list"]:
     print(""" + json.dumps(feature_lines) + """)
 elif args and args[0] == "exec":
     prompt = sys.stdin.read()
     Path(CAPTURE, "input.txt").write_text(prompt, encoding="utf-8")
     ARGS_FILE.write_text(json.dumps(args), encoding="utf-8")
+    config_values = [args[index + 1] for index, value in enumerate(args[:-1]) if value == "--config"]
+    if any(value == 'model_provider="agent_learning_probe"' for value in config_values):
+        endpoint = next(value.split("=", 1)[1] for value in config_values if value.startswith("model_providers.agent_learning_probe.base_url="))
+        endpoint = json.loads(endpoint).rstrip("/") + "/responses"
+        schema_path = args[args.index("--output-schema") + 1]
+        schema = json.loads(Path(schema_path).read_text(encoding="utf-8"))
+        model = args[args.index("--model") + 1]
+        effort = json.loads(next(value.split("=", 1)[1] for value in config_values if value.startswith("model_reasoning_effort=")))
+        body = {"model": model, "reasoning": {"effort": effort}, "tools": [], "text": {"format": {"type": "json_schema", "schema": schema}}}
+        request = urllib.request.Request(endpoint, data=json.dumps(body).encode("utf-8"), headers={"Authorization": "Bearer " + os.environ["OPENAI_API_KEY"], "Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(request, timeout=2)
+        except urllib.error.HTTPError as error:
+            print("HTTP %s Unauthorized" % error.code, file=sys.stderr)
+            raise SystemExit(1)
     if "synthetic_stall" in prompt:
         child = subprocess.Popen([sys.executable, "-c", "import signal; signal.pause()"])
         Path(CHILD_PID).write_text(str(child.pid), encoding="utf-8")
@@ -119,7 +139,8 @@ elif args and args[0] == "exec":
     if context.get("synthetic_tool_activity"):
         print(json.dumps({"type": "item.completed", "item": {"type": "command_execution", "command": "synthetic"}}))
     elif "proposal" in payload:
-        answer = {"approves": True, "risks": [], "owner": payload["proposal"]["owner"], "does_not_weaken": True}
+        proposal = payload["proposal"]
+        answer = {"approves": True, "risks": [], "owner": proposal["owner"], "does_not_weaken": True, "globally_applicable": proposal["scope"] == "global", "scope_reason": proposal["scope_reason"]}
         item = {"type": "agent_message", "text": json.dumps(answer)}
         print(json.dumps({"type": "item.completed", "item": item}))
         print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 21, "output_tokens": 9}}))
@@ -145,6 +166,8 @@ else:
             result = self.reviewer.capabilities()
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["version"], "codex-cli 0.164.0")
+        self.assertEqual(result["static_cli"], "verified")
+        self.assertEqual(result["live_model"], "unverified")
         self.assertEqual(set(result["disabled_features"]), set(REVIEW.DISABLED_FEATURES))
 
     def test_review_uses_untrusted_bounded_context_and_restricted_invocation(self):
@@ -170,6 +193,7 @@ else:
             self.assertIn(list(pair), [args[index:index + 2] for index in range(len(args) - 1)])
         config_values = [args[index + 1] for index, value in enumerate(args[:-1]) if value == "--config"]
         self.assertIn('approval_policy="never"', config_values)
+        self.assertNotIn("tools.view_image=false", config_values)
         for flag in ("--ignore-user-config", "--ignore-rules", "--ephemeral", "--strict-config", "--output-schema", "--json"):
             self.assertIn(flag, args)
         disabled = {args[index + 1] for index, value in enumerate(args[:-1]) if value == "--disable"}
@@ -193,8 +217,14 @@ else:
 
     def test_review_rejects_unexpected_tool_activity(self):
         context = sample_context(synthetic_tool_activity=True)
-        with self.use_fake_codex(), self.assertRaisesRegex(REVIEW.ReviewError, "unexpected_tool_activity"):
+        with self.use_fake_codex(), self.assertRaisesRegex(REVIEW.ReviewError, "unexpected_tool_activity") as caught:
             self.reviewer.review(context)
+        self.assertEqual(caught.exception.category, "invalid_response")
+
+    def test_review_rejects_unknown_jsonl_event(self):
+        with self.assertRaisesRegex(REVIEW.ReviewError, "unexpected_tool_activity") as caught:
+            REVIEW._jsonl_response(b'{"type":"mcp_tool_call"}\n')
+        self.assertEqual(caught.exception.category, "invalid_response")
 
     def test_owner_catalog_can_route_to_a_second_review_without_an_edit(self):
         context = sample_context(owning_guidance={"other-owner": "Unrelated guide."})
@@ -242,8 +272,60 @@ else:
     def test_memory_proposal_has_no_skill_owner(self):
         context = sample_context()
         proposal = sample_proposal(context, with_edit=False)
-        proposal.update({"target": "memory", "owner": ""})
+        proposal.update({"target": "memory", "scope": "project", "owner": ""})
         self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
+
+    def test_project_memory_validity_requires_exact_tracked_evidence(self):
+        context = sample_context(
+            tracked_project_files=[{"path": "docs/runbook.md", "evidence": "Restart the worker after each migration."}]
+        )
+        proposal = sample_proposal(context, with_edit=False)
+        proposal.update(
+            {
+                "target": "memory",
+                "scope": "project",
+                "owner": "",
+                "validity": [{"path": "docs/runbook.md", "contains": "after each migration"}],
+            }
+        )
+        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
+        proposal["validity"][0]["contains"] = "after each deployment"
+        with self.assertRaisesRegex(REVIEW.ReviewError, "validity_not_in_context") as caught:
+            REVIEW._validate_proposal(proposal, context)
+        self.assertEqual(caught.exception.category, "unsafe")
+
+    def test_scope_must_match_an_improvement_target(self):
+        proposal = sample_proposal(sample_context())
+        proposal["scope"] = "project"
+        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_scope") as caught:
+            REVIEW._validate_proposal(proposal, sample_context())
+        self.assertEqual(caught.exception.category, "unsafe")
+
+    def test_review_error_categories_are_stable(self):
+        self.assertEqual(REVIEW.ReviewError("codex_exit_nonzero").category, "transient")
+        self.assertEqual(REVIEW.ReviewError("timeout").category, "transient")
+        self.assertEqual(REVIEW.ReviewError("unsupported_codex_isolation").category, "capability")
+        self.assertEqual(REVIEW.ReviewError("invalid_response").category, "invalid_response")
+        self.assertEqual(REVIEW._codex_exit_reason(b"HTTP 401 invalid_api_key"), "codex_authentication_failed")
+        self.assertEqual(REVIEW._codex_exit_reason(b"unknown configuration field"), "unsupported_codex_invocation")
+
+    def test_local_probe_verifies_both_command_modes_without_live_auth(self):
+        with self.use_fake_codex():
+            result = self.reviewer.probe_cli()
+            self.assertEqual(os.environ["HOME"], self.env["HOME"])
+            self.assertEqual(os.environ["CODEX_HOME"], self.env["CODEX_HOME"])
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["static_cli"], "verified")
+        self.assertEqual(result["live_model"], "unverified")
+        self.assertEqual(result["actual_invocation"], "verified")
+        self.assertEqual(result["reasoning_effort"], "verified")
+        self.assertEqual(result["structured_output"], "verified")
+        self.assertEqual(result["tools_advertised"], "empty")
+        self.assertEqual(result["effective_tool_dispatch"], "unverified")
+        self.assertEqual(result["user_config_ignored"], "verified")
+        self.assertEqual([request["model"] for request in result["requests"]], ["gpt-6-luna", "gpt-6-luna"])
+        self.assertEqual([request["reasoning_effort"] for request in result["requests"]], ["medium", "xhigh"])
+        self.assertEqual([request["tools"] for request in result["requests"]], [[], []])
 
     def test_adversarial_review_returns_independent_verdict_and_combines_usage(self):
         context = sample_context(
@@ -254,7 +336,17 @@ else:
             proposal.update({"proposal_id": "synthetic-id", "target_skill": "technical-writing"})
             adversarial_context = dict(context, proposal=proposal)
             result = self.reviewer.adversarial(adversarial_context, proposal)
-        self.assertEqual(result, {"approves": True, "risks": [], "owner": "technical-writing", "does_not_weaken": True})
+        self.assertEqual(
+            result,
+            {
+                "approves": True,
+                "risks": [],
+                "owner": "technical-writing",
+                "does_not_weaken": True,
+                "globally_applicable": True,
+                "scope_reason": proposal["scope_reason"],
+            },
+        )
         self.assertEqual(
             self.reviewer.usage,
             {
@@ -268,10 +360,20 @@ else:
     def test_memory_adversarial_review_uses_empty_owner(self):
         context = sample_context(owning_guidance="Project-specific memory.")
         proposal = sample_proposal(context, with_edit=False)
-        proposal.update({"target": "memory", "owner": "", "proposal_id": "synthetic-id", "target_skill": ""})
+        proposal.update({"target": "memory", "scope": "project", "owner": "", "proposal_id": "synthetic-id", "target_skill": ""})
         with self.use_fake_codex():
             result = self.reviewer.adversarial(context, proposal)
-        self.assertEqual(result, {"approves": True, "risks": [], "owner": "", "does_not_weaken": True})
+        self.assertEqual(
+            result,
+            {
+                "approves": True,
+                "risks": [],
+                "owner": "",
+                "does_not_weaken": True,
+                "globally_applicable": False,
+                "scope_reason": proposal["scope_reason"],
+            },
+        )
 
     def test_timeout_stops_the_model_process_group(self):
         context = sample_context(synthetic_stall=True)
