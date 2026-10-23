@@ -31,21 +31,26 @@ sys.modules[SPEC.name] = SKILL_USAGE
 SPEC.loader.exec_module(SKILL_USAGE)
 PERF_GATE = ROOT / "dotfiles" / "base" / ".local" / "bin" / "perf-gate-ready"
 QUERY = "retentionmarker"
+sys.path.insert(0, str(BIN_DIR))
 
 
 def _line(value):
     return (json.dumps(value, separators=(",", ":")) + "\n").encode()
 
 
-def _make_corpus(root, session_count, message_count):
-    project = root / "project"
-    project.mkdir()
-    subprocess.run(["git", "init", "-q", str(project)], check=True)
+def _make_corpus(root, session_count, message_count, project_count):
+    projects = []
+    for project_number in range(project_count):
+        project = root / ("project-%03d" % project_number)
+        project.mkdir()
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        projects.append(project)
     transcripts = root / "sessions"
     transcripts.mkdir()
     event_count = 0
     for session_number in range(session_count):
         session = "bench-%05d" % session_number
+        project = projects[session_number % len(projects)]
         path = transcripts / ("rollout-%s.jsonl" % session)
         with path.open("wb") as stream:
             stream.write(_line({"type": "session_meta", "payload": {
@@ -70,7 +75,7 @@ def _make_corpus(root, session_count, message_count):
                 "arguments": json.dumps({"path": "/synthetic/.agents/skills/benchmark/SKILL.md"}),
             }}))
             event_count += 1
-    return project, transcripts, event_count
+    return projects, transcripts, event_count
 
 
 def _direct_search(root, query):
@@ -94,26 +99,6 @@ def _direct_search(root, query):
     return matches, bytes_read
 
 
-def _source_read_baseline(store):
-    total = 0
-    sessions = store.db.execute("SELECT source_path, indexed_bytes, checkpoint_position FROM sessions").fetchall()
-    for session in sessions:
-        path = Path(session["source_path"])
-        with path.open("rb") as stream:
-            total += len(stream.readline())
-        if session["checkpoint_position"] is not None:
-            total += session["indexed_bytes"] - session["checkpoint_position"]
-    return total
-
-
-def _first_line_bytes(root):
-    total = 0
-    for path in Path(root).rglob("rollout-*.jsonl"):
-        with path.open("rb") as stream:
-            total += len(stream.readline())
-    return total
-
-
 def _skill_usage(root):
     usage = SKILL_USAGE.Usage(False)
     SKILL_USAGE.scan_codex(root, 0, usage)
@@ -131,11 +116,18 @@ class NoModel:
         raise RuntimeError("uneventful benchmark unexpectedly requested a model")
 
 
-def _learner(store, project, project_id):
+def _learner(store, projects, project_ids):
     learner = importlib.import_module("agent_learning").Learner(store, NoModel())
     with store.db:
-        store.db.execute("INSERT OR REPLACE INTO learning_projects VALUES(?,?,1,0,?)", (project_id, str(project), str(ROOT)))
+        store.db.executemany(
+            "INSERT OR REPLACE INTO learning_projects VALUES(?,?,1,0,?)",
+            ((project_id, str(project), str(ROOT)) for project, project_id in zip(projects, project_ids)),
+        )
     return learner
+
+
+def _work_counters(stats_list):
+    return {key: sum(stats[key] for stats in stats_list) for key in ("stat_operations", "content_opens", "bytes_read", "git_processes", "sqlite_changes")}
 
 
 def _timed(operation, action, timings, deferred):
@@ -149,7 +141,7 @@ def _timed(operation, action, timings, deferred):
     cpu_elapsed = time.process_time() - cpu_started
     if not _gate(after=True):
         deferred[0] = True
-        return None
+        return result
     timings.setdefault(operation, []).append({"wall": elapsed, "cpu": cpu_elapsed})
     return result
 
@@ -166,110 +158,120 @@ def _summary(values):
 
 
 def run(args):
-    if args.sessions < 1 or args.messages < 1:
-        raise ValueError("sessions and messages must be positive")
+    if args.sessions < 1 or args.messages < 1 or args.projects < 1:
+        raise ValueError("sessions, messages, and projects must be positive")
     with tempfile.TemporaryDirectory(dir=str(WORK_TMP), prefix="agent-sessions-bench-") as temporary:
         root = Path(temporary)
-        project, transcripts, generated_events = _make_corpus(root, args.sessions, args.messages)
-        project_id = project_identity(project)
+        projects, transcripts, generated_events = _make_corpus(root, args.sessions, args.messages, min(args.projects, args.sessions))
+        project_ids = [project_identity(project) for project in projects]
         source_bytes = sum(path.stat().st_size for path in transcripts.rglob("rollout-*.jsonl"))
         direct, direct_bytes = _direct_search(transcripts, QUERY)
         usage_sessions, usage_loads = _skill_usage(transcripts)
         state = root / "state"
         with Store(state) as store:
-            build = store.refresh([transcripts], project=project_id)
-            indexed = store.search(QUERY, project_id, limit=args.sessions * args.messages)
+            fresh = store.refresh([transcripts], projects=project_ids)
+            indexed = store.search(QUERY, limit=args.sessions * args.messages)
             indexed_keys = {(row["session"], row["position"]) for row in indexed}
             if set(direct) != indexed_keys:
                 raise RuntimeError("direct scan and FTS search returned different source events")
-            database_path = store.path
-            database_bytes = database_path.stat().st_size
-            hit = indexed[0]
-            evidence = store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
-            if QUERY not in evidence["text"].casefold():
-                raise RuntimeError("resolved evidence does not contain the indexed query")
-        target = transcripts / "rollout-bench-00000.jsonl"
-        with Store(state) as store:
-            increment_read_baseline = _source_read_baseline(store)
-        appended = _line({"type": "response_item", "timestamp": "2026-10-23T00:00:01Z", "payload": {
-            "type": "message", "role": "user", "content": [{"type": "input_text", "text": "incrementmarker"}],
-        }})
-        with target.open("ab") as stream:
-            stream.write(appended)
-        with Store(state) as store:
-            increment = store.refresh([transcripts], project=project_id)
-            noop = store.refresh([transcripts], project=project_id)
-            if increment["events_added"] != 1 or noop["events_added"] != 0:
-                raise RuntimeError("incremental or no-op refresh processed the wrong number of events")
-            fts_after = len(store.search(QUERY, project_id, limit=args.sessions * args.messages))
-            if fts_after != len(direct):
+            if indexed:
+                hit = indexed[0]
+                evidence = store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+                if QUERY not in evidence["text"].casefold():
+                    raise RuntimeError("resolved evidence does not contain the indexed query")
+            database_bytes = store.path.stat().st_size
+            target = transcripts / "rollout-bench-00000.jsonl"
+            appended = _line({"type": "response_item", "timestamp": "2026-10-23T00:00:01Z", "payload": {
+                "type": "message", "role": "user", "content": [{"type": "input_text", "text": "incrementmarker"}],
+            }})
+            with target.open("ab") as stream:
+                stream.write(appended)
+            append = store.refresh([transcripts], projects=project_ids)
+            unchanged = store.refresh([transcripts], projects=project_ids)
+            many_projects = store.refresh([transcripts], projects=project_ids)
+            if append["events_added"] != 1 or unchanged["events_added"] != 0:
+                raise RuntimeError("append or unchanged refresh processed the wrong number of events")
+            if len(store.search(QUERY, limit=args.sessions * args.messages)) != len(direct):
                 raise RuntimeError("FTS result count changed after unrelated append")
-            final_database_bytes = store.path.stat().st_size
-            noop_read_estimate = _source_read_baseline(store)
-        results = {
-            "corpus": {"sessions": args.sessions, "messages_per_session": args.messages, "events": generated_events, "source_bytes": source_bytes},
-            "correctness": {"direct_hits": len(direct), "fts_hits": len(indexed), "skill_usage_sessions": usage_sessions, "skill_usage_loads": usage_loads},
-            "source_reads_bytes": {
-                "direct_scan": direct_bytes,
-                "skill_usage_scan": source_bytes,
-            "initial_build_estimate": source_bytes + _first_line_bytes(transcripts),
-            "increment_estimate": increment_read_baseline + len(appended),
-            "no_op_estimate": noop_read_estimate,
-                "fts_search": 0,
-            },
-            "index": {"build_sessions": build["sessions_indexed"], "build_events_added": build["events_added"], "increment_events_added": increment["events_added"], "no_op_events_added": noop["events_added"], "database_bytes": database_bytes, "database_bytes_after_increment": final_database_bytes},
-        }
-        with Store(state) as store:
-            learner = _learner(store, project, project_id)
-            learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+            learner = _learner(store, projects, project_ids)
+            first_reconcile = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+            while first_reconcile["processed"]:
+                first_reconcile = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
             learning_noop = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
             if learning_noop != {"processed": 0, "signals": 0, "reviews": 0}:
                 raise RuntimeError("learning no-op repeated work")
-            results["learning_no_op"] = learning_noop
-            results["index"]["database_bytes_with_learning_tables"] = store.path.stat().st_size
+            missed_hook = transcripts / "rollout-missed-hook.jsonl"
+            missed_hook.write_bytes(_line({"type": "session_meta", "payload": {
+                "id": "missed-hook", "cwd": str(projects[0]), "source": "cli", "thread_source": "user",
+            }}) + _line({"type": "response_item", "timestamp": "2026-10-23T00:00:03Z", "payload": {
+                "type": "message", "role": "user", "content": [{"type": "input_text", "text": "synthetic prompt for a stable transcript"}],
+            }}))
+            observed_refreshes = []
+            original_refresh = store.refresh
+            def observe_refresh(*refresh_args, **refresh_kwargs):
+                stats = original_refresh(*refresh_args, **refresh_kwargs)
+                observed_refreshes.append(stats)
+                return stats
+            store.refresh = observe_refresh
+            missed_reconcile = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+            store.refresh = original_refresh
+            if missed_reconcile["processed"] != 1 or not observed_refreshes:
+                raise RuntimeError("missed-hook reconciliation did not process the unindexed session")
+            database_bytes_with_learning = store.path.stat().st_size
+            final_database_bytes = store.path.stat().st_size
+        results = {
+            "corpus": {"sessions": args.sessions, "projects": len(projects), "messages_per_session": args.messages, "events": generated_events, "source_bytes": source_bytes},
+            "correctness": {"direct_hits": len(direct), "fts_hits": len(indexed), "direct_scan_bytes": direct_bytes, "skill_usage_sessions": usage_sessions, "skill_usage_loads": usage_loads},
+            "refresh_work": {
+                "fresh": _work_counters([fresh]),
+                "append": _work_counters([append]),
+                "unchanged": _work_counters([unchanged]),
+                "many_enabled_projects": _work_counters([many_projects]),
+                "missed_hook_reconciliation": _work_counters(observed_refreshes),
+            },
+            "index": {"build_sessions": fresh["sessions_indexed"], "build_events_added": fresh["events_added"], "increment_events_added": append["events_added"], "unchanged_events_added": unchanged["events_added"], "database_bytes": database_bytes, "database_bytes_after_increment": final_database_bytes, "database_bytes_with_learning_tables": database_bytes_with_learning},
+            "learning_no_op": learning_noop,
+            "missed_hook_reconcile": missed_reconcile,
+        }
         if args.timings:
             timings = {}
             deferred = [False]
-            expected = set(direct)
-            for _ in range(5):
-                direct_result = _timed("direct_search", lambda: _direct_search(transcripts, QUERY)[0], timings, deferred)
-                if direct_result is not None and set(direct_result) != expected:
-                    raise RuntimeError("timed direct search returned different source events")
-                with Store(state) as store:
-                    fts_result = _timed("fts_search", lambda: store.search(QUERY, project_id, limit=args.sessions * args.messages), timings, deferred)
-                    if fts_result is not None and {(row["session"], row["position"]) for row in fts_result} != expected:
-                        raise RuntimeError("timed FTS search returned different source events")
             for index in range(5):
                 build_state = root / ("timed-build-%d" % index)
-
                 def build_once(path=build_state):
-                    with Store(path) as store:
-                        stats = store.refresh([transcripts], project=project_id)
-                        return stats["events_added"]
-
-                built_events = _timed("build", build_once, timings, deferred)
-                if built_events is not None and built_events != generated_events + 1 + index:
-                    raise RuntimeError("timed build indexed an unexpected number of events")
-                appended_line = _line({"type": "response_item", "timestamp": "2026-10-23T00:00:02Z", "payload": {
+                    with Store(path) as timed_store:
+                        return timed_store.refresh([transcripts], projects=project_ids)["events_added"]
+                built_events = _timed("fresh", build_once, timings, deferred)
+                if built_events is not None and built_events != generated_events + 3 + 3 * index:
+                    raise RuntimeError("timed fresh refresh indexed an unexpected number of events")
+                appended_line = _line({"type": "response_item", "timestamp": "2026-10-23T00:00:04Z", "payload": {
                     "type": "message", "role": "user", "content": [{"type": "input_text", "text": "timedincrement%d" % index}],
                 }})
                 with target.open("ab") as stream:
                     stream.write(appended_line)
-                with Store(state) as store:
-                    incremented_events = _timed("increment", lambda: store.refresh([transcripts], project=project_id)["events_added"], timings, deferred)
-                    if incremented_events is not None and incremented_events != 1:
-                        raise RuntimeError("timed append processed an unexpected number of events")
-                    noop_events = _timed("no_op", lambda: store.refresh([transcripts], project=project_id)["events_added"], timings, deferred)
-                    if noop_events is not None and noop_events != 0:
-                        raise RuntimeError("timed no-op refresh processed events")
-                    learner = _learner(store, project, project_id)
-                    learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
-                    learned = _timed("learning_no_op", lambda learner=learner: learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0), timings, deferred)
-                    if learned is not None and learned != {"processed": 0, "signals": 0, "reviews": 0}:
-                        raise RuntimeError("timed learning no-op repeated work")
-                skill_counts = _timed("skill_usage", lambda: _skill_usage(transcripts), timings, deferred)
-                if skill_counts is not None and skill_counts != (args.sessions, args.sessions):
-                    raise RuntimeError("timed skill-usage scan returned different counts")
+                with Store(state) as timed_store:
+                    incremented = _timed("append", lambda: timed_store.refresh([transcripts], projects=project_ids)["events_added"], timings, deferred)
+                    if incremented is None:
+                        incremented = timed_store.refresh([transcripts], projects=project_ids)["events_added"]
+                    if incremented != 1:
+                        raise RuntimeError("timed append indexed an unexpected event count")
+                    unchanged_events = _timed("unchanged", lambda: timed_store.refresh([transcripts], projects=project_ids)["events_added"], timings, deferred)
+                    if unchanged_events is not None and unchanged_events != 0:
+                        raise RuntimeError("timed unchanged refresh processed events")
+                    multi_events = _timed("many_enabled_projects", lambda: timed_store.refresh([transcripts], projects=project_ids)["events_added"], timings, deferred)
+                    if multi_events is not None and multi_events != 0:
+                        raise RuntimeError("timed multi-project refresh processed events")
+                    timed_learner = _learner(timed_store, projects, project_ids)
+                    timed_learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+                    missed_path = transcripts / ("rollout-missed-%d.jsonl" % index)
+                    missed_path.write_bytes(_line({"type": "session_meta", "payload": {
+                        "id": "missed-%d" % index, "cwd": str(projects[0]), "source": "cli", "thread_source": "user",
+                    }}) + _line({"type": "response_item", "timestamp": "2026-10-23T00:00:05Z", "payload": {
+                        "type": "message", "role": "user", "content": [{"type": "input_text", "text": "synthetic missed hook"}],
+                    }}))
+                    reconciled = _timed("missed_hook_reconciliation", lambda: timed_learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0), timings, deferred)
+                    if reconciled is not None and reconciled["processed"] != 1:
+                        raise RuntimeError("timed missed-hook reconciliation processed an unexpected count")
                 shutil.rmtree(build_state, ignore_errors=True)
             results["timings"] = {name: _summary(values) for name, values in timings.items()}
             results["timing_status"] = "perf gate deferred: host busy" if deferred[0] else "gate passed"
@@ -280,10 +282,11 @@ def run(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Compare synthetic direct transcript scans with the incremental FTS index.")
-    parser.add_argument("--sessions", type=int, default=100)
-    parser.add_argument("--messages", type=int, default=50)
-    parser.add_argument("--timings", action="store_true", help="run gated, interleaved timing samples")
+    parser = argparse.ArgumentParser(description="Measure incremental session discovery and indexing work.")
+    parser.add_argument("--sessions", type=int, default=1000)
+    parser.add_argument("--messages", type=int, default=10)
+    parser.add_argument("--projects", type=int, default=20)
+    parser.add_argument("--timings", action="store_true", help="run five perf-gated samples per case")
     args = parser.parse_args(argv)
     try:
         return run(args)
