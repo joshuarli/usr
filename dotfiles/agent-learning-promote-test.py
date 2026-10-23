@@ -346,6 +346,178 @@ class PromotionTest(unittest.TestCase):
         self.assertEqual(unfinished.read_text(encoding="utf-8"), "candidate state that must survive")
         self.assertEqual(self.head(), self.base_head)
 
+    def test_owned_pristine_worktree_is_recovered_for_the_same_proposal(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "finding-0001"
+        )
+
+        result = self.promote()
+
+        self.assertEqual(result["status"], "promoted", result)
+        self.assertEqual(self.head(), result["commit"])
+        self.assertEqual(list(worktree_root.glob("agent-learning-*")), [])
+        self.assertEqual(list(worktree_root.glob(".agent-learning-cleanup-*")), [])
+
+    def test_committed_promotion_candidate_is_verified_and_integrated_once(self):
+        proposal, evidence = self.evidence()
+        worktree = promotion._staging_worktree(
+            self.repo,
+            self.base_head,
+            promotion._safe_worktree_root(self.repo),
+            "promote",
+            proposal["proposal_id"],
+        )
+        relative, target = promotion._skill_file(worktree, proposal["target_skill"])
+        original = target.read_text(encoding="utf-8")
+        old = proposal["edit"]["old"]
+        start = promotion._edit_is_paragraph(original, old)
+        updated = original[:start] + proposal["edit"]["new"] + original[start + len(old) :]
+        promotion._replace_atomically(target, updated.encode("utf-8"))
+        promotion._run_skill_check(worktree)
+        candidate = promotion._commit_candidate(
+            worktree,
+            ("docs(skills): improve skill guidance", relative.as_posix()),
+            (
+                "Learning-Proposal: " + proposal["proposal_id"],
+                "Learning-Edit: " + promotion._edit_digest(old, proposal["edit"]["new"]),
+            ),
+        )
+
+        result = self.promote(proposal, evidence)
+
+        self.assertEqual(result["status"], "promoted", result)
+        self.assertEqual(result["commit"], candidate)
+        self.assertEqual(self.head(), candidate)
+        matching = run(
+            [
+                "git",
+                "-C",
+                str(self.repo),
+                "log",
+                "--format=%H",
+                "--fixed-strings",
+                "--grep=Learning-Proposal: finding-0001",
+            ],
+            self.repo,
+        ).stdout.decode().splitlines()
+        self.assertEqual(matching, [candidate])
+
+    def test_owned_quarantine_from_interrupted_cleanup_is_restored(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        worktree = promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "finding-0001"
+        )
+        cleanup_path = promotion._worktree_cleanup_path(worktree, "promote", "finding-0001")
+        worktree.rename(cleanup_path)
+
+        result = self.promote()
+
+        self.assertEqual(result["status"], "promoted", result)
+        self.assertEqual(self.head(), result["commit"])
+        self.assertFalse(cleanup_path.exists())
+
+    def test_repaired_owned_quarantine_from_interrupted_cleanup_is_restored(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        worktree = promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "finding-0001"
+        )
+        cleanup_path = promotion._worktree_cleanup_path(worktree, "promote", "finding-0001")
+        worktree.rename(cleanup_path)
+        run(["git", "-C", str(self.repo), "worktree", "repair", str(cleanup_path)], self.repo)
+
+        result = self.promote()
+
+        self.assertEqual(result["status"], "promoted", result)
+        self.assertEqual(self.head(), result["commit"])
+        self.assertFalse(cleanup_path.exists())
+
+    def test_unowned_cleanup_path_stays_blocked_and_preserved(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        cleanup_path = worktree_root / ".agent-learning-cleanup-promote-finding-0001"
+        cleanup_path.mkdir()
+        unfinished = cleanup_path / "unfinished.txt"
+        unfinished.write_text("keep unknown data", encoding="utf-8")
+
+        result = self.promote()
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "worktree_occupied")
+        self.assertEqual(result["blocked_path"], str(cleanup_path))
+        self.assertEqual(unfinished.read_text(encoding="utf-8"), "keep unknown data")
+        self.assertEqual(self.head(), self.base_head)
+
+    def test_dirty_owned_quarantine_stays_blocked_and_preserved(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        worktree = promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "finding-0001"
+        )
+        unfinished = worktree / "unfinished.txt"
+        unfinished.write_text("candidate state that must survive", encoding="utf-8")
+        cleanup_path = promotion._worktree_cleanup_path(worktree, "promote", "finding-0001")
+        worktree.rename(cleanup_path)
+
+        result = self.promote()
+
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason_code"], "worktree_occupied")
+        self.assertEqual(result["blocked_path"], str(cleanup_path))
+        self.assertEqual((cleanup_path / "unfinished.txt").read_text(encoding="utf-8"), "candidate state that must survive")
+        self.assertEqual(self.head(), self.base_head)
+
+    def test_committed_rollback_candidate_is_verified_and_integrated_once(self):
+        proposal, evidence = self.evidence()
+        promoted = self.promote(proposal, evidence)
+        promotion_commit = promoted["commit"]
+        expected_head = self.head()
+        worktree = promotion._staging_worktree(
+            self.repo,
+            expected_head,
+            promotion._safe_worktree_root(self.repo),
+            "rollback",
+            promotion_commit[:16],
+        )
+        target = "dotfiles/base/.agents/skills/root-cause/SKILL.md"
+        promotion._git(
+            worktree,
+            "revert",
+            "--no-commit",
+            promotion_commit,
+            config=(
+                ("core.hooksPath", "/dev/null"),
+                ("user.name", "Learning Promotion"),
+                ("user.email", "agent-learning-promotion@localhost"),
+            ),
+        )
+        promotion._run_skill_check(worktree)
+        promotion._git(worktree, "add", "--", target)
+        promotion._git(
+            worktree,
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Learning Promotion",
+            "-c",
+            "user.email=agent-learning-promotion@localhost",
+            "commit",
+            "--no-gpg-sign",
+            "-m",
+            "revert(skills): restore prior skill guidance",
+            "-m",
+            "Reverts-Learning-Promotion: " + promotion_commit,
+        )
+        candidate = promotion._head(worktree)
+
+        result = promotion.rollback(self.repo, promotion_commit, expected_head)
+
+        self.assertEqual(result["status"], "reverted", result)
+        self.assertEqual(result["commit"], candidate)
+        self.assertEqual(self.head(), candidate)
+        restored = (self.repo / target).read_text(encoding="utf-8")
+        self.assertNotIn(proposal["future_action"], restored)
+
     def test_worktree_removal_preserves_tracked_staged_untracked_and_ignored_changes(self):
         worktree_root = promotion._safe_worktree_root(self.repo)
         ignored_exclude = self.repo / ".git/info/exclude"

@@ -546,7 +546,7 @@ def _worktree_path_identity(repository, path):
     return tuple(identities)
 
 
-def _registered_worktree(repository, path):
+def _registered_worktree(repository, path, alternate_path=None):
     try:
         _worktree_path_identity(repository, path)
         top = Path(_git(path, "rev-parse", "--show-toplevel")).resolve(strict=True)
@@ -569,6 +569,9 @@ def _registered_worktree(repository, path):
             return None
         metadata_pointer = git_dir / "gitdir"
         worktree_pointer = path / ".git"
+        allowed_metadata_pointers = {os.fsencode(path / ".git") + b"\n"}
+        if alternate_path is not None:
+            allowed_metadata_pointers.add(os.fsencode(alternate_path / ".git") + b"\n")
         metadata_stat = metadata_pointer.lstat()
         worktree_stat = worktree_pointer.lstat()
         if (
@@ -576,7 +579,7 @@ def _registered_worktree(repository, path):
             or not stat.S_ISREG(metadata_stat.st_mode)
             or stat.S_ISLNK(worktree_stat.st_mode)
             or not stat.S_ISREG(worktree_stat.st_mode)
-            or metadata_pointer.read_bytes() != os.fsencode(path / ".git") + b"\n"
+            or metadata_pointer.read_bytes() not in allowed_metadata_pointers
             or worktree_pointer.read_bytes()
             != b"gitdir: " + os.fsencode(git_dir) + b"\n"
         ):
@@ -702,6 +705,80 @@ def _worktree_parent_descriptor(repository, worktree_root):
         os.close(descriptor)
         raise _PromotionFailure("promotion worktree ancestry changed", "worktree_occupied")
     return descriptor
+
+
+def _worktree_changes(path):
+    status = _git_bytes(
+        path,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
+    )
+    ignored = _git_bytes(
+        path,
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "-z",
+        config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
+    )
+    return status, ignored
+
+
+def _worktree_parent(worktree, expected_head):
+    head = _head(worktree)
+    if head == expected_head:
+        return head
+    parents = _git(worktree, "rev-list", "--parents", "-n", "1", head).split()
+    if parents != [head, expected_head]:
+        raise _PromotionFailure(
+            "owned promotion worktree has an unexpected commit",
+            "worktree_occupied",
+            worktree,
+        )
+    return head
+
+
+def _restore_cleanup_worktree(repository, path, cleanup_path, operation, identity, expected_head):
+    if _path_entry_exists(path) and _path_entry_exists(cleanup_path):
+        raise _PromotionFailure("promotion and cleanup paths are both occupied", "worktree_occupied", cleanup_path)
+    physical_path = cleanup_path if _path_entry_exists(cleanup_path) else path
+    alternate_path = path if physical_path == cleanup_path else cleanup_path
+    identity_before = _worktree_path_identity(repository, physical_path)
+    git_dir = _registered_worktree(repository, physical_path, alternate_path)
+    if git_dir is None or not _owned_worktree(repository, path, operation, identity, git_dir):
+        raise _PromotionFailure("unowned promotion cleanup path requires recovery", "worktree_occupied", physical_path)
+    status, ignored = _worktree_changes(physical_path)
+    if status or ignored:
+        raise _PromotionFailure("promotion cleanup worktree contains unreviewed changes", "worktree_occupied", physical_path)
+    _worktree_parent(physical_path, expected_head)
+    if _worktree_path_identity(repository, physical_path) != identity_before:
+        raise _PromotionFailure("promotion cleanup path changed physical identity", "worktree_occupied", physical_path)
+    _git(repository, "worktree", "repair", os.fspath(physical_path))
+    if _registered_worktree(repository, physical_path) != git_dir:
+        raise _PromotionFailure("promotion cleanup registration could not be repaired", "worktree_occupied", physical_path)
+    if physical_path == path:
+        return
+    parent_descriptor = _worktree_parent_descriptor(repository, path.parent)
+    try:
+        if _path_entry_exists(path):
+            raise _PromotionFailure("promotion worktree path became occupied", "worktree_occupied", path)
+        os.rename(
+            cleanup_path.name,
+            path.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+        )
+    finally:
+        os.close(parent_descriptor)
+    _git(repository, "worktree", "repair", os.fspath(path))
+    if (
+        _registered_worktree(repository, path) != git_dir
+        or not _owned_worktree(repository, path, operation, identity, git_dir)
+    ):
+        raise _PromotionFailure("promotion worktree restoration could not be verified", "worktree_occupied", path)
 
 
 def _restore_worktree(repository, path, cleanup_path, parent_descriptor):
@@ -863,17 +940,15 @@ def _staging_worktree(repository, expected_head, worktree_root, operation, ident
         raise _PromotionFailure("promotion worktree root changed", "worktree_occupied")
     path = worktree_root / (prefix + identity)
     cleanup_path = _worktree_cleanup_path(path, operation, identity)
-    if _path_entry_exists(cleanup_path):
-        raise _PromotionFailure("promotion cleanup path requires recovery", "worktree_occupied", cleanup_path)
-    if path.exists() or path.is_symlink():
-        _worktree_path_identity(repository, path)
-        owned = _owned_worktree(repository, path, operation, identity)
-        reason = (
-            "owned promotion worktree state requires recovery"
-            if owned
-            else "unowned data occupies a promotion worktree path"
-        )
-        raise _PromotionFailure(reason, "worktree_occupied", path)
+    if _path_entry_exists(path) or _path_entry_exists(cleanup_path):
+        _restore_cleanup_worktree(repository, path, cleanup_path, operation, identity, expected_head)
+        git_dir = _registered_worktree(repository, path)
+        if git_dir is None or not _owned_worktree(repository, path, operation, identity, git_dir):
+            raise _PromotionFailure("unowned data occupies a promotion worktree path", "worktree_occupied", path)
+        existing_head = _worktree_parent(path, expected_head)
+        if existing_head != expected_head:
+            return path
+        _remove_worktree(repository, path, operation, identity)
     try:
         _git(
             repository,
@@ -999,9 +1074,9 @@ def _run_skill_check(worktree):
             or stat.S_ISLNK(mdtool_mode)
             or not stat.S_ISREG(mdtool_mode)
         ):
-            raise _PromotionFailure("trusted skill checker paths are not regular project files")
+            raise _PromotionFailure("trusted skill checker paths are not regular project files", "validation_failed")
     except OSError as exc:
-        raise _PromotionFailure("trusted skill checker is unavailable") from exc
+        raise _PromotionFailure("trusted skill checker is unavailable", "validation_failed") from exc
     result = _command(
         ["sh", os.fspath(checker), os.fspath(skills)],
         worktree,
@@ -1012,7 +1087,8 @@ def _run_skill_check(worktree):
         message = (result.stderr or result.stdout).decode("utf-8", "replace").strip()
         raise _PromotionFailure(
             "trusted skill checker rejected the candidate"
-            + (": " + message[:240] if message else "")
+            + (": " + message[:240] if message else ""),
+            "validation_failed",
         )
 
 
@@ -1104,6 +1180,124 @@ def _commit_candidate(worktree, message, trailers):
         args.extend(("-m", trailer))
     _git(worktree, *args, config=config)
     return _head(worktree)
+
+
+def _recovered_promotion_candidate(worktree, expected_head, proposal_id, skill, old, new, edit_mode):
+    candidate = _head(worktree)
+    parents = _git(worktree, "rev-list", "--parents", "-n", "1", candidate).split()
+    edit_digest = _edit_digest(old, new)
+    message = _commit_message(worktree, candidate).splitlines()
+    expected_path = "dotfiles/base/.agents/skills/{}/SKILL.md".format(skill)
+    changed = _git_bytes(
+        worktree,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        "-z",
+        candidate,
+    ).split(b"\0")
+    paths = [item.decode("utf-8", "surrogateescape") for item in changed if item]
+    expected_message = [
+        "docs(skills): improve skill guidance",
+        "",
+        "Learning-Proposal: " + proposal_id,
+        "",
+        "Learning-Edit: " + edit_digest,
+    ]
+    if (
+        parents != [candidate, expected_head]
+        or message != expected_message
+        or paths != [expected_path]
+    ):
+        raise _PromotionFailure(
+            "owned candidate commit does not match this proposal",
+            "worktree_occupied",
+            worktree,
+        )
+    relative, candidate_path = _skill_file(worktree, skill)
+    try:
+        original = _git_bytes(worktree, "show", "{}:{}".format(expected_head, relative.as_posix()))
+        if len(original) > _MAX_SKILL_FILE:
+            raise _PromotionFailure("skill file exceeds the promotion size limit")
+        text = original.decode("utf-8")
+        if edit_mode == "description":
+            start = _edit_is_description(text, old)
+        else:
+            start = _edit_is_paragraph(text, old)
+        expected = (text[:start] + new + text[start + len(old) :]).encode("utf-8")
+        if len(expected) > _MAX_SKILL_FILE:
+            raise _PromotionFailure("candidate skill file exceeds the size limit")
+        actual = candidate_path.read_bytes()
+    except (OSError, UnicodeError, _PromotionFailure) as exc:
+        raise _PromotionFailure(
+            "owned candidate could not be matched to this proposal",
+            "worktree_occupied",
+            worktree,
+        ) from exc
+    if actual != expected:
+        raise _PromotionFailure(
+            "owned candidate content does not match this proposal",
+            "worktree_occupied",
+            worktree,
+        )
+    try:
+        _run_skill_check(worktree)
+    except _PromotionFailure as exc:
+        raise _PromotionFailure(str(exc), "validation_failed", worktree) from exc
+    return candidate
+
+
+def _recovered_rollback_candidate(worktree, expected_head, promotion_commit, target):
+    candidate = _head(worktree)
+    parents = _git(worktree, "rev-list", "--parents", "-n", "1", candidate).split()
+    message = _commit_message(worktree, candidate).splitlines()
+    changed = _git_bytes(
+        worktree,
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        "-z",
+        candidate,
+    ).split(b"\0")
+    paths = [item.decode("utf-8", "surrogateescape") for item in changed if item]
+    trailer = "Reverts-Learning-Promotion: " + promotion_commit
+    expected_message = [
+        "revert(skills): restore prior skill guidance",
+        "",
+        trailer,
+    ]
+    if (
+        parents != [candidate, expected_head]
+        or message != expected_message
+        or paths != [target]
+    ):
+        raise _PromotionFailure(
+            "owned rollback commit does not match this promotion",
+            "worktree_occupied",
+            worktree,
+        )
+    try:
+        expected = _git_bytes(worktree, "show", "{}^:{}".format(promotion_commit, target))
+        actual = (worktree / target).read_bytes()
+    except (OSError, _PromotionFailure) as exc:
+        raise _PromotionFailure(
+            "owned rollback content could not be verified",
+            "worktree_occupied",
+            worktree,
+        ) from exc
+    if actual != expected:
+        raise _PromotionFailure(
+            "owned rollback content does not match this promotion",
+            "worktree_occupied",
+            worktree,
+        )
+    try:
+        _run_skill_check(worktree)
+    except _PromotionFailure as exc:
+        raise _PromotionFailure(str(exc), "validation_failed", worktree) from exc
+    return candidate
 
 
 def _integrate(repository, candidate_commit, expected_head, branch):
@@ -1200,59 +1394,86 @@ def promote(
             integrated_commit = None
             cleanup_failure = None
             primary_failure = None
+            cleanup_allowed = False
             try:
-                relative, path = _skill_file(worktree, skill)
-                original = path.read_bytes()
-                if len(original) > _MAX_SKILL_FILE:
-                    raise _PromotionFailure("skill file exceeds the promotion size limit")
-                try:
-                    text = original.decode("utf-8")
-                except UnicodeDecodeError as exc:
-                    raise _PromotionFailure("skill file is not UTF-8") from exc
-                if edit_mode == "description":
-                    start = _edit_is_description(text, old)
+                recovered_candidate = _head(worktree) != head
+                cleanup_allowed = not recovered_candidate
+                if recovered_candidate:
+                    candidate_commit = _recovered_promotion_candidate(
+                        worktree,
+                        head,
+                        proposal_id,
+                        skill,
+                        old,
+                        new,
+                        edit_mode,
+                    )
                 else:
-                    start = _edit_is_paragraph(text, old)
-                updated = text[:start] + new + text[start + len(old) :]
-                encoded = updated.encode("utf-8")
-                if len(encoded) > _MAX_SKILL_FILE:
-                    raise _PromotionFailure("candidate skill file exceeds the size limit")
-                _replace_atomically(path, encoded)
-                _run_skill_check(worktree)
-                edit_digest = _edit_digest(old, new)
-                candidate_commit = _commit_candidate(
-                    worktree,
-                    ("docs(skills): improve skill guidance", relative.as_posix()),
-                    (
-                        "Learning-Proposal: " + proposal_id,
-                        "Learning-Edit: " + edit_digest,
-                    ),
-                )
+                    relative, path = _skill_file(worktree, skill)
+                    original = path.read_bytes()
+                    if len(original) > _MAX_SKILL_FILE:
+                        raise _PromotionFailure("skill file exceeds the promotion size limit")
+                    try:
+                        text = original.decode("utf-8")
+                    except UnicodeDecodeError as exc:
+                        raise _PromotionFailure("skill file is not UTF-8") from exc
+                    if edit_mode == "description":
+                        start = _edit_is_description(text, old)
+                    else:
+                        start = _edit_is_paragraph(text, old)
+                    updated = text[:start] + new + text[start + len(old) :]
+                    encoded = updated.encode("utf-8")
+                    if len(encoded) > _MAX_SKILL_FILE:
+                        raise _PromotionFailure("candidate skill file exceeds the size limit")
+                    _replace_atomically(path, encoded)
+                    _run_skill_check(worktree)
+                    edit_digest = _edit_digest(old, new)
+                    cleanup_allowed = False
+                    candidate_commit = _commit_candidate(
+                        worktree,
+                        ("docs(skills): improve skill guidance", relative.as_posix()),
+                        (
+                            "Learning-Proposal: " + proposal_id,
+                            "Learning-Edit: " + edit_digest,
+                        ),
+                    )
                 parents = _git(worktree, "rev-list", "--parents", "-n", "1", candidate_commit).split()
                 if parents != [candidate_commit, head]:
                     raise _PromotionFailure("candidate commit does not directly follow expected_head")
                 _integrate(root, candidate_commit, head, branch)
                 integrated_commit = candidate_commit
+                cleanup_allowed = True
             except Exception as exc:
                 primary_failure = exc
                 raise
             finally:
-                try:
-                    _remove_worktree(root, worktree, "promote", proposal_id)
-                except _PromotionFailure as cleanup_exc:
-                    if primary_failure is not None:
-                        if isinstance(primary_failure, _PromotionFailure):
-                            reason_code = primary_failure.reason_code
-                        else:
-                            reason_code = "validation_failed"
-                        raise _PromotionFailure(
-                            "{}; candidate worktree preserved: {}".format(primary_failure, cleanup_exc),
-                            reason_code,
-                            cleanup_exc.blocked_path,
-                        ) from primary_failure
-                    if integrated_commit is None:
-                        raise
-                    cleanup_failure = cleanup_exc
+                if cleanup_allowed:
+                    try:
+                        _remove_worktree(root, worktree, "promote", proposal_id)
+                    except _PromotionFailure as cleanup_exc:
+                        if primary_failure is not None:
+                            if isinstance(primary_failure, _PromotionFailure):
+                                reason_code = primary_failure.reason_code
+                            else:
+                                reason_code = "validation_failed"
+                            raise _PromotionFailure(
+                                "{}; candidate worktree preserved: {}".format(primary_failure, cleanup_exc),
+                                reason_code,
+                                cleanup_exc.blocked_path,
+                            ) from primary_failure
+                        if integrated_commit is None:
+                            raise
+                        cleanup_failure = cleanup_exc
+                elif primary_failure is not None:
+                    if isinstance(primary_failure, _PromotionFailure):
+                        reason_code = primary_failure.reason_code
+                    else:
+                        reason_code = "validation_failed"
+                    raise _PromotionFailure(
+                        "{}; candidate worktree preserved".format(primary_failure),
+                        reason_code,
+                        worktree,
+                    ) from primary_failure
             reason = (
                 "promotion integrated; staging worktree preserved: {}".format(cleanup_failure)
                 if cleanup_failure is not None
@@ -1327,63 +1548,87 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
             integrated_commit = None
             cleanup_failure = None
             primary_failure = None
+            cleanup_allowed = False
             try:
-                _git(
-                    worktree,
-                    "revert",
-                    "--no-commit",
-                    commit,
-                    config=(("core.hooksPath", "/dev/null"), ("user.name", "Learning Promotion"), ("user.email", "agent-learning-promotion@localhost")),
-                )
-                _run_skill_check(worktree)
-                _git(worktree, "add", "--", target)
-                staged = _git_bytes(worktree, "diff", "--cached", "--name-only", "-z")
-                paths = [item.decode("utf-8", "surrogateescape") for item in staged.split(b"\0") if item]
-                if paths != [target] or _git_bytes(worktree, "diff", "--name-only", "-z"):
-                    raise _PromotionFailure("rollback candidate has unexpected changes")
-                _git(
-                    worktree,
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "-c",
-                    "commit.gpgsign=false",
-                    "-c",
-                    "user.name=Learning Promotion",
-                    "-c",
-                    "user.email=agent-learning-promotion@localhost",
-                    "commit",
-                    "--no-gpg-sign",
-                    "-m",
-                    "revert(skills): restore prior skill guidance",
-                    "-m",
-                    "Reverts-Learning-Promotion: " + commit,
-                )
-                revert_commit = _head(worktree)
+                recovered_candidate = _head(worktree) != head
+                cleanup_allowed = not recovered_candidate
+                if recovered_candidate:
+                    revert_commit = _recovered_rollback_candidate(
+                        worktree,
+                        head,
+                        commit,
+                        target,
+                    )
+                else:
+                    _git(
+                        worktree,
+                        "revert",
+                        "--no-commit",
+                        commit,
+                        config=(("core.hooksPath", "/dev/null"), ("user.name", "Learning Promotion"), ("user.email", "agent-learning-promotion@localhost")),
+                    )
+                    _run_skill_check(worktree)
+                    _git(worktree, "add", "--", target)
+                    staged = _git_bytes(worktree, "diff", "--cached", "--name-only", "-z")
+                    paths = [item.decode("utf-8", "surrogateescape") for item in staged.split(b"\0") if item]
+                    if paths != [target] or _git_bytes(worktree, "diff", "--name-only", "-z"):
+                        raise _PromotionFailure("rollback candidate has unexpected changes")
+                    cleanup_allowed = False
+                    _git(
+                        worktree,
+                        "-c",
+                        "core.hooksPath=/dev/null",
+                        "-c",
+                        "commit.gpgsign=false",
+                        "-c",
+                        "user.name=Learning Promotion",
+                        "-c",
+                        "user.email=agent-learning-promotion@localhost",
+                        "commit",
+                        "--no-gpg-sign",
+                        "-m",
+                        "revert(skills): restore prior skill guidance",
+                        "-m",
+                        "Reverts-Learning-Promotion: " + commit,
+                    )
+                    revert_commit = _head(worktree)
                 parents = _git(worktree, "rev-list", "--parents", "-n", "1", revert_commit).split()
                 if parents != [revert_commit, head]:
                     raise _PromotionFailure("rollback commit does not directly follow expected_head")
                 _integrate(root, revert_commit, head, branch)
                 integrated_commit = revert_commit
+                cleanup_allowed = True
             except Exception as exc:
                 primary_failure = exc
                 raise
             finally:
-                try:
-                    _remove_worktree(root, worktree, "rollback", commit[:16])
-                except _PromotionFailure as cleanup_exc:
-                    if primary_failure is not None:
-                        if isinstance(primary_failure, _PromotionFailure):
-                            reason_code = primary_failure.reason_code
-                        else:
-                            reason_code = "validation_failed"
-                        raise _PromotionFailure(
-                            "{}; candidate worktree preserved: {}".format(primary_failure, cleanup_exc),
-                            reason_code,
-                            cleanup_exc.blocked_path,
-                        ) from primary_failure
-                    if integrated_commit is None:
-                        raise
-                    cleanup_failure = cleanup_exc
+                if cleanup_allowed:
+                    try:
+                        _remove_worktree(root, worktree, "rollback", commit[:16])
+                    except _PromotionFailure as cleanup_exc:
+                        if primary_failure is not None:
+                            if isinstance(primary_failure, _PromotionFailure):
+                                reason_code = primary_failure.reason_code
+                            else:
+                                reason_code = "validation_failed"
+                            raise _PromotionFailure(
+                                "{}; candidate worktree preserved: {}".format(primary_failure, cleanup_exc),
+                                reason_code,
+                                cleanup_exc.blocked_path,
+                            ) from primary_failure
+                        if integrated_commit is None:
+                            raise
+                        cleanup_failure = cleanup_exc
+                elif primary_failure is not None:
+                    if isinstance(primary_failure, _PromotionFailure):
+                        reason_code = primary_failure.reason_code
+                    else:
+                        reason_code = "validation_failed"
+                    raise _PromotionFailure(
+                        "{}; candidate worktree preserved".format(primary_failure),
+                        reason_code,
+                        worktree,
+                    ) from primary_failure
             reason = (
                 "rollback integrated; staging worktree preserved: {}".format(cleanup_failure)
                 if cleanup_failure is not None
