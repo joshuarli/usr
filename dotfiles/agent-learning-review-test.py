@@ -151,7 +151,7 @@ else:
         context = sample_context(
             owning_guidance={"technical-writing": "Use direct verbs in docs.\nKeep procedures scoped."}
         )
-        with self.use_fake_codex():
+        with self.use_fake_codex(), mock.patch.object(REVIEW.os, "killpg", wraps=REVIEW.os.killpg) as killpg:
             proposal = self.reviewer.review(context)
         self.assertEqual(proposal["target"], "skill")
         self.assertEqual(proposal["edit"]["new"], proposal["edit"]["old"] + " " + proposal["future_action"])
@@ -172,6 +172,7 @@ else:
         disabled = {args[index + 1] for index, value in enumerate(args[:-1]) if value == "--disable"}
         self.assertEqual(disabled, set(REVIEW.DISABLED_FEATURES))
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", args)
+        self.assertFalse(killpg.called)
 
     def test_review_rejects_oversized_context_without_model_invocation(self):
         context = sample_context(observation="x" * (REVIEW.MAX_CONTEXT_CHARS + 1))

@@ -440,7 +440,10 @@ def _kill_process_group(process):
     except ProcessLookupError:
         pass
     if process.poll() is None:
-        process.wait()
+        try:
+            process.wait(timeout=PROCESS_STOP_SECONDS)
+        except subprocess.TimeoutExpired as error:
+            raise ReviewError("process_cleanup_failed") from error
 
 
 def _read_process(process, input_bytes, timeout):
@@ -494,11 +497,17 @@ def _read_process(process, input_bytes, timeout):
         for stream in (process.stdin, process.stdout, process.stderr):
             if not stream.closed:
                 stream.close()
-        try:
-            _kill_process_group(process)
-        except OSError as cleanup_error:
-            if primary is None:
-                raise ReviewError("process_cleanup_failed") from cleanup_error
+        if primary is not None or process.returncode is None:
+            try:
+                _kill_process_group(process)
+            except Exception as cleanup_error:
+                if primary is None:
+                    raise ReviewError("process_cleanup_failed") from cleanup_error
+                if isinstance(primary, ReviewError):
+                    primary.reason += "_and_process_cleanup_failed"
+                    primary.args = (primary.reason,)
+                else:
+                    raise ReviewError("process_cleanup_failed_after_operation_error") from primary
 
 
 def _jsonl_response(output):
