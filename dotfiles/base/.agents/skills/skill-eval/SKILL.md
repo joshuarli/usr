@@ -17,7 +17,7 @@ A skill that reads well proves nothing. Sessions you already ran show whether it
 - `skill-usage [--days N] [--all]` prints each skill's kind (auto or explicit-only), the sessions that listed it, and the sessions that loaded it, for Claude, Codex, Muse, and Grok.
 - `skill-usage --show NAME` prints each load with its date, harness, project, how it loaded, and a clipped excerpt of the preceding prompt.
 
-`agent-learn status` and `agent-learn findings` expose persisted review counters and outcomes. They do not show whether a skill loaded or followed its rules. Keep those judgments grounded in session records. See [agent learning](../../../../../docs/agent-learning.md).
+`agent-learn status` adds before and after counts of relevant skill invocation and recurring corrections for automatic promotions. `agent-learn show ID` exposes evidence and follow-up assessments. These are observational samples; confirm relevance and procedure adherence against the source records using the steps below. Setup and limits live in `~/usr/docs/agent-learning.md`.
 
 A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex or Grok, or Muse's recorded skill-read event. Grok does not save the session skill catalog, so its listed count is unavailable and its firing rate cannot be calculated. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. The misses decide it.
 

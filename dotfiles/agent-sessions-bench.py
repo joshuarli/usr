@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import importlib
 import importlib.machinery
 import importlib.util
 import json
@@ -125,6 +126,18 @@ def _gate(after=False):
     return result.returncode == 0
 
 
+class NoModel:
+    def review(self, context):
+        raise RuntimeError("uneventful benchmark unexpectedly requested a model")
+
+
+def _learner(store, project, project_id):
+    learner = importlib.import_module("agent_learning").Learner(store, NoModel())
+    with store.db:
+        store.db.execute("INSERT OR REPLACE INTO learning_projects VALUES(?,?,1,0,?)", (project_id, str(project), str(ROOT)))
+    return learner
+
+
 def _timed(operation, action, timings, deferred):
     if not _gate():
         deferred[0] = True
@@ -206,6 +219,14 @@ def run(args):
             },
             "index": {"build_sessions": build["sessions_indexed"], "build_events_added": build["events_added"], "increment_events_added": increment["events_added"], "no_op_events_added": noop["events_added"], "database_bytes": database_bytes, "database_bytes_after_increment": final_database_bytes},
         }
+        with Store(state) as store:
+            learner = _learner(store, project, project_id)
+            learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+            learning_noop = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+            if learning_noop != {"processed": 0, "signals": 0, "reviews": 0}:
+                raise RuntimeError("learning no-op repeated work")
+            results["learning_no_op"] = learning_noop
+            results["index"]["database_bytes_with_learning_tables"] = store.path.stat().st_size
         if args.timings:
             timings = {}
             deferred = [False]
@@ -241,6 +262,11 @@ def run(args):
                     noop_events = _timed("no_op", lambda: store.refresh([transcripts], project=project_id)["events_added"], timings, deferred)
                     if noop_events is not None and noop_events != 0:
                         raise RuntimeError("timed no-op refresh processed events")
+                    learner = _learner(store, project, project_id)
+                    learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
+                    learned = _timed("learning_no_op", lambda learner=learner: learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0), timings, deferred)
+                    if learned is not None and learned != {"processed": 0, "signals": 0, "reviews": 0}:
+                        raise RuntimeError("timed learning no-op repeated work")
                 skill_counts = _timed("skill_usage", lambda: _skill_usage(transcripts), timings, deferred)
                 if skill_counts is not None and skill_counts != (args.sessions, args.sessions):
                     raise RuntimeError("timed skill-usage scan returned different counts")

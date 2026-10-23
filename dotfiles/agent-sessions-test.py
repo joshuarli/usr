@@ -116,8 +116,10 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(second["malformed_lines"], 1)
             row = store.db.execute("SELECT malformed_lines, partial_bytes, coverage FROM sessions WHERE id='append'").fetchone()
             self.assertEqual(tuple(row), (1, 0, "degraded"))
+            changes = store.db.total_changes
             noop = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(noop["events_added"], 0)
+            self.assertEqual(store.db.total_changes, changes)
             self.assertEqual(noop["malformed_lines"], 0)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='append'").fetchone()[0], 3)
 

@@ -564,6 +564,8 @@ class Store:
             with self.db:
                 self.db.execute("DELETE FROM sessions WHERE id = ?", (meta["id"],))
             existing = None
+        if existing is not None and existing["indexed_bytes"] == meta["file_size"] and existing["file_mtime_ns"] == meta["file_mtime_ns"]:
+            return False, 0, 0, 0
         if existing is None:
             with self.db:
                 self.db.execute(
