@@ -1,5 +1,7 @@
 # Agent setup
 
+For disposable, isolated Linux coding-agent sessions on macOS, run [`agent-vm`](agent-vm.md) from a project directory. It loads tracked skills and global instructions without mounting host authentication state.
+
 `dotfiles/base/.codex/AGENTS.md` is the canonical global instruction file. Each harness adapter links to it; the table gives the installed path and shared skill discovery path.
 
 | Harness | Global instructions | Shared skills |

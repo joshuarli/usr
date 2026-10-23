@@ -81,6 +81,7 @@ check:
 	cd dotfiles && sh worktree-remove-test.sh
 	sh dotfiles/mdtool-test.sh
 	python3 -I dotfiles/base/.local/bin/decide-test.py
+	python3 -I dotfiles/agent-vm-test.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
