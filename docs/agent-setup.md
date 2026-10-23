@@ -118,7 +118,7 @@ JSON
 {"state":"A sanitized brief","questions":{"urgent":{"type":"noul","instructions":"Is this blocking the requested outcome?","criteria":{"true":"A required step cannot proceed","false":"The workflow can continue"}}}}
 ```
 
-`orchestrate` consults `decide` only when `USR_DECIDE_TIER` is `shadow` or `advisory`. An unset variable makes no request. `shadow` records advice without changing the parent choice. `advisory` may inform judgment, but the parent retains authority and must justify any policy deviation. Unsupported values, unavailable advice, and invalid advice keep the existing route. The skill guidance is not runtime-enforced. Send only sanitized state, and skip a request when sensitive details cannot be removed.
+`orchestrate` consults `decide` only when `USR_DECIDE_TIER` is `shadow` or `advisory`. An unset variable disables requests. An unsupported value makes no request and leaves ordinary routing in place. Consult once after a concrete brief when a bounded uncertainty has real cost. Offer no `god` tier or `scout` for mutating work. Send only the objective, effect, known facts, uncertainty, scope and coupling, and acceptance. Remove transcripts, diffs, source files, environment values, secret traces, and session histories. Skip the request if sensitive details cannot be separated. `shadow` never changes routing. `advisory` informs routing only within existing tier, model, permission, and authorization rules. Unavailable or invalid advice returns to ordinary routing. The skill guidance is not runtime-enforced.
 
 ### Evaluate labeled cases
 
@@ -131,6 +131,8 @@ Offline evaluation reads recorded predictions from a JSONL file and makes no req
 Run the offline report with `decide eval cases.jsonl`. The report contains aggregate metrics only. It does not save prompts or results. Latency percentiles are `unknown` below 20 successful cases. Cost and missing usage are `unknown`.
 
 Exact agreement counts cases with one `expected_tier`. Acceptable agreement and confidence correctness count predictions that match `expected_tier` or one of `acceptable_tiers`.
+
+When `existing_choice` is present, `policy_comparison` reports existing-policy agreement on all labeled cases, standalone Clef agreement on successful decisions, the paired correctness delta on cases where Clef returned a tier, and fallback-policy agreement across all matched cases. The fallback uses `existing_choice` when Clef is unavailable or abstains. Cases without `existing_choice` and unavailable decisions are counted separately. The report keeps development and held-out splits separate. Synthetic cases exercise the evaluator; they are not session evidence. Incomplete usage and cost remain unknown, and classification accuracy alone does not establish session savings.
 
 Live evaluation requires separate owner authorization. It accepts cases without recorded predictions and requires a maximum of 1 to 50 calls. The number of cases cannot exceed that maximum.
 

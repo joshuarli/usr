@@ -23,11 +23,7 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 ### Optional tier advice
 
-Only `USR_DECIDE_TIER=shadow` or `USR_DECIDE_TIER=advisory` enables consultation; unset means no request. After writing a concrete brief, consult once per unchanged brief only for bounded uncertainty with real cost. Unsupported values are configuration errors with no request; continue existing routing. Skip when the user chose a model, thinking level, or explicit escalation.
-
-Ask one compact `choice` from current tier definitions. Include only eligible `scout`, `mechanic`, `worker`, or `expert` options; never offer `god` or `scout` for mutating work. Send only objective, read-only or mutating effect, known facts, uncertainty, scope and coupling, and acceptance. Omit transcripts, diffs, source files, environment values, secret traces, and whole histories; skip if sensitive data cannot be separated. Invoke through `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide`.
-
-Any non-`ok` result keeps the original policy. `shadow` records advice in the parent context without changing the choice. `advisory` may inform the parent's judgment but does not transfer authority; justify any choice that differs from policy against existing policy. Preserve permissions, providers, `agent-tier-gate`, required methods, verification, and completion requirements. This guidance does not alter the tier table or runtime-enforce these rules.
+`USR_DECIDE_TIER=shadow|advisory` enables one sanitized consult per unchanged brief for bounded costly uncertainty. No god or mutating scout. Shadow never routes; advisory obeys rules. Advice errors return to normal routing.
 
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent, except for the Codex profile and the Grok pins below. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
 

@@ -65,19 +65,39 @@ def object_without_duplicates(pairs):
     return result
 
 
+def has_unpaired_surrogate(value):
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            if any(0xD800 <= ord(character) <= 0xDFFF for character in current):
+                return True
+        elif isinstance(current, dict):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    return False
+
+
 def parse_json_bytes(data):
     try:
-        return json.loads(
+        value = json.loads(
             data.decode("utf-8"),
             parse_constant=reject_constant,
             parse_float=parse_float,
             object_pairs_hook=object_without_duplicates,
         )
+        if has_unpaired_surrogate(value):
+            raise ValueError("invalid Unicode scalar")
+        return value
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as error:
         raise InvalidInput("invalid_json") from error
 
 
 def validate_json_values(value):
+    if has_unpaired_surrogate(value):
+        raise InvalidInput("invalid_unicode")
     pending = [(value, 1)]
     while pending:
         current, depth = pending.pop()
@@ -167,10 +187,16 @@ def endpoint(account_id, model):
     return f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{MODELS[model]}"
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
 def http_post(url, headers, body, timeout):
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    opener = urllib.request.build_opener(NoRedirectHandler)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             return HttpResponse(response.status, response.read(MAX_RESPONSE_BYTES + 1))
     except urllib.error.HTTPError as error:
         return HttpResponse(error.code, error.read(MAX_RESPONSE_BYTES + 1))
@@ -587,6 +613,107 @@ def agreement(correct, total):
     }
 
 
+def compare_routing_cases(cases, tier_ranks):
+    cases_with_choice = [case for case in cases if case["existing_choice"] is not None]
+    cases_without_choice = len(cases) - len(cases_with_choice)
+    available = [
+        case for case in cases_with_choice if case["prediction"]["status"] == "ok"
+    ]
+
+    def is_acceptable(case, tier):
+        return tier in case["acceptable_tiers"]
+
+    existing_correct = [
+        is_acceptable(case, case["existing_choice"]) for case in cases_with_choice
+    ]
+    fallback_tiers = [
+        case["prediction"]["tier"]
+        if case["prediction"]["status"] == "ok"
+        else case["existing_choice"]
+        for case in cases_with_choice
+    ]
+    fallback_correct = [
+        is_acceptable(case, tier) for case, tier in zip(cases_with_choice, fallback_tiers)
+    ]
+    existing_matched_correct = [
+        is_acceptable(case, case["existing_choice"]) for case in available
+    ]
+    clef_matched_correct = [
+        is_acceptable(case, case["prediction"]["tier"]) for case in available
+    ]
+    clef_correct_count = sum(clef_matched_correct)
+    existing_correct_count = sum(existing_matched_correct)
+    matched_count = len(available)
+    down_tier = sum(
+        tier_ranks[case["prediction"]["tier"]]
+        < min(tier_ranks[tier] for tier in case["acceptable_tiers"])
+        for case in available
+    )
+    unavailable_with_choice = sum(
+        case["prediction"]["status"] == "unavailable" for case in cases_with_choice
+    )
+    unavailable_without_choice = sum(
+        case["prediction"]["status"] == "unavailable"
+        for case in cases
+        if case["existing_choice"] is None
+    )
+    return {
+        "cases_with_existing_choice": len(cases_with_choice),
+        "cases_without_existing_choice": cases_without_choice,
+        "unavailable_clef_decisions": {
+            "with_existing_choice": unavailable_with_choice,
+            "without_existing_choice": unavailable_without_choice,
+        },
+        "existing_policy_acceptable_agreement": agreement(
+            sum(existing_correct), len(existing_correct)
+        ),
+        "standalone_clef": {
+            "acceptable_tier_agreement": agreement(clef_correct_count, matched_count),
+            "successful_cases": matched_count,
+            "unavailable_cases": unavailable_with_choice,
+            "wrong_down_tier_recommendations": down_tier,
+        },
+        "matched_successful_comparison": {
+            "cases": matched_count,
+            "existing_policy_acceptable_agreement": agreement(
+                existing_correct_count, matched_count
+            ),
+            "clef_acceptable_tier_agreement": agreement(
+                clef_correct_count, matched_count
+            ),
+            "correctness_delta": {
+                "correct": clef_correct_count - existing_correct_count,
+                "cases": matched_count,
+                "rate": round(
+                    (clef_correct_count - existing_correct_count) / matched_count, 3
+                )
+                if matched_count
+                else "unknown",
+            },
+            "clef_improves_existing_policy": sum(
+                clef and not existing
+                for clef, existing in zip(clef_matched_correct, existing_matched_correct)
+            ),
+            "clef_makes_correct_existing_policy_worse": sum(
+                existing and not clef
+                for clef, existing in zip(clef_matched_correct, existing_matched_correct)
+            ),
+            "both_wrong": sum(
+                not clef and not existing
+                for clef, existing in zip(clef_matched_correct, existing_matched_correct)
+            ),
+            "wrong_down_tier_recommendations": down_tier,
+        },
+        "fallback_policy": {
+            "acceptable_tier_agreement": agreement(
+                sum(fallback_correct), len(fallback_correct)
+            ),
+            "cases": len(cases_with_choice),
+            "used_existing_choice": len(cases_with_choice) - matched_count,
+        },
+    }
+
+
 def summarize_eval_cases(cases, request_count):
     successful = [case for case in cases if case["prediction"]["status"] == "ok"]
     exact_cases = [case for case in cases if case["expected_tier"] is not None]
@@ -714,6 +841,7 @@ def summarize_eval_cases(cases, request_count):
         "unknown_model_cases": unknown_model_cases,
         "request_count": request_count,
         "existing_choice_comparison": existing_comparison,
+        "policy_comparison": compare_routing_cases(cases, tier_ranks),
     }
 
 

@@ -2,13 +2,17 @@
 
 import importlib.util
 import importlib.machinery
+import http.server
+import io
 import json
 import os
 import socket
 import ssl
 import subprocess
 import sys
+import threading
 import unittest
+from unittest import mock
 import urllib.error
 from pathlib import Path
 
@@ -185,6 +189,79 @@ class DecideTests(unittest.TestCase):
         with self.assertRaises(DECIDE.InvalidInput):
             DECIDE.parse_request_bytes(b" " * (DECIDE.MAX_REQUEST_BYTES + 1))
 
+    def test_input_accepts_unicode_scalars_and_rejects_unpaired_surrogates(self):
+        unicode_request = (
+            b'{"state":"caf\xc3\xa9 \\ud83d\\ude00","questions":{"q":'
+            b'{"type":"noul","instructions":"Is this true?"}}}'
+        )
+        request = DECIDE.parse_request_bytes(unicode_request)
+        self.assertEqual(request["state"], "café 😀")
+        serialized = []
+        outcome = DECIDE.run_decision(
+            request,
+            env=self.env,
+            transport=lambda url, headers, body, timeout: (
+                serialized.append(body.decode("utf-8"))
+                or DECIDE.HttpResponse(200, envelope(sample_result(request)))
+            ),
+        )
+        self.assertEqual(outcome["status"], "ok")
+        self.assertIn("café 😀", serialized[0])
+
+        for escaped in (b"\\ud800", b"\\udfff"):
+            data = b'{"state":"' + escaped + b'","questions":{"q":' + (
+                b'{"type":"noul","instructions":"Is this true?"}}}'
+            )
+            with self.subTest(escaped=escaped):
+                with self.assertRaises(DECIDE.InvalidInput):
+                    DECIDE.parse_request_bytes(data)
+
+        with self.assertRaises(DECIDE.InvalidInput):
+            DECIDE.parse_request_bytes(
+                b'{"state":"safe","questions":{"q":{"type":"noul",'
+                b'"instructions":"\xff"}}}'
+            )
+
+    def test_jsonl_evaluation_rejects_surrogates_and_malformed_utf8(self):
+        case = sample_eval_case(
+            "unicode", "synthetic-unicode", prediction=recorded_prediction("ok", "worker")
+        )
+        case["state"] = "\ud800"
+        with self.assertRaises(DECIDE.InvalidInput):
+            DECIDE.load_eval_cases(eval_jsonl(case))
+
+        case["state"] = "sensitive-state"
+        malformed = eval_jsonl(case).replace(b'"sensitive-state"', b'"\xff"')
+        with self.assertRaises(DECIDE.InvalidInput):
+            DECIDE.load_eval_cases(malformed)
+
+    def test_cli_malformed_unicode_has_one_safe_invalid_result(self):
+        env = dict(os.environ)
+        env.pop("CLOUDFLARE_ACCOUNT_ID", None)
+        env.pop("CLOUDFLARE_API_TOKEN", None)
+        inputs = (
+            b'{"state":"private \\ud800","questions":{"q":'
+            b'{"type":"noul","instructions":"Is this true?"}}}',
+            b'{"state":"private \\udfff","questions":{"q":'
+            b'{"type":"noul","instructions":"Is this true?"}}}',
+            b'{"state":"private \xff","questions":{"q":'
+            b'{"type":"noul","instructions":"Is this true?"}}}',
+        )
+        for data in inputs:
+            with self.subTest(data=data):
+                process = subprocess.run(
+                    [sys.executable, "-I", str(SCRIPT)],
+                    env=env,
+                    input=data,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(process.returncode, 2)
+                self.assertEqual(len(process.stdout.splitlines()), 1)
+                self.assertEqual(json.loads(process.stdout)["status"], "invalid")
+                self.assertNotIn(b"private", process.stdout + process.stderr)
+                self.assertEqual(process.stderr, b"")
+
     def test_input_rejects_unhashable_question_types_and_null_criteria(self):
         with self.assertRaises(DECIDE.InvalidInput):
             DECIDE.parse_request_bytes(
@@ -251,6 +328,96 @@ class DecideTests(unittest.TestCase):
         huge_score["answers"]["severity"]["score"] = 10**4000
         with self.assertRaises(DECIDE.InvalidProviderResponse):
             DECIDE.validate_result(self.request, "clef-flash", huge_score)
+
+    def test_provider_response_with_unpaired_surrogate_is_unavailable(self):
+        result = sample_result(self.request)
+        result["answers"]["severity"]["legend"]["0"] = "\ud800"
+        outcome = DECIDE.run_decision(
+            self.request,
+            env=self.env,
+            transport=lambda *args: DECIDE.HttpResponse(200, envelope(result)),
+        )
+        self.assertEqual(outcome, {"status": "unavailable", "reason": "invalid_provider_response"})
+        self.assertNotIn("\\ud800", json.dumps(outcome))
+        output = io.StringIO()
+        DECIDE.print_json(outcome, output)
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
+        self.assertEqual(json.loads(output.getvalue()), outcome)
+
+    def test_http_redirect_does_not_forward_authorization_or_change_cli_output(self):
+        origin_authorization = []
+        destination_requests = []
+
+        class DestinationHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                destination_requests.append(("GET", self.headers.get("Authorization")))
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def do_POST(self):
+                destination_requests.append(("POST", self.headers.get("Authorization")))
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, format_string, *args):
+                return
+
+        destination = http.server.ThreadingHTTPServer(("127.0.0.1", 0), DestinationHandler)
+        destination_thread = None
+        destination_url = f"http://localhost:{destination.server_port}/collect"
+
+        class OriginHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                origin_authorization.append(self.headers.get("Authorization"))
+                self.send_response(302)
+                self.send_header("Location", destination_url)
+                self.end_headers()
+
+            def log_message(self, format_string, *args):
+                return
+
+        origin = None
+        origin_thread = None
+        try:
+            destination_thread = threading.Thread(target=destination.serve_forever, daemon=True)
+            destination_thread.start()
+            origin = http.server.ThreadingHTTPServer(("127.0.0.1", 0), OriginHandler)
+            origin_thread = threading.Thread(target=origin.serve_forever, daemon=True)
+            origin_thread.start()
+            output = io.StringIO()
+            with mock.patch.object(
+                DECIDE, "endpoint", return_value=f"http://127.0.0.1:{origin.server_port}/run"
+            ):
+                status = DECIDE.main(
+                    [],
+                    env=self.env,
+                    stdin=io.BytesIO(json.dumps(self.request).encode()),
+                    stdout=output,
+                )
+            self.assertEqual(status, 0)
+            self.assertEqual(len(origin_authorization), 1)
+            self.assertEqual(origin_authorization, ["Bearer test-secret-value"])
+            self.assertEqual(destination_requests, [])
+            self.assertEqual(len(output.getvalue().splitlines()), 1)
+            self.assertEqual(
+                json.loads(output.getvalue()),
+                {"status": "unavailable", "reason": "provider_failure"},
+            )
+            self.assertNotIn("test-secret-value", output.getvalue())
+        finally:
+            if origin_thread is not None and origin_thread.is_alive():
+                origin.shutdown()
+            if origin is not None:
+                origin.server_close()
+            if origin_thread is not None:
+                origin_thread.join()
+            if destination_thread is not None and destination_thread.is_alive():
+                destination.shutdown()
+            destination.server_close()
+            if destination_thread is not None:
+                destination_thread.join()
 
     def test_client_serializes_selected_model_and_uses_one_bounded_request(self):
         calls = []
@@ -457,6 +624,7 @@ class DecideTests(unittest.TestCase):
                 prediction=recorded_prediction(
                     "ok", "mechanic", 0.3, input_tokens=8, model="clef"
                 ),
+                existing_choice="expert",
             ),
             sample_eval_case(
                 "escalation",
@@ -466,6 +634,15 @@ class DecideTests(unittest.TestCase):
                     "ok", "god", 0.8, input_tokens=4, model="clef"
                 ),
                 existing_choice="mechanic",
+            ),
+            sample_eval_case(
+                "both-wrong",
+                "synthetic-source-f",
+                expected_tier="expert",
+                prediction=recorded_prediction(
+                    "ok", "mechanic", 0.4, model="clef-flash"
+                ),
+                existing_choice="worker",
             ),
             sample_eval_case(
                 "abstain",
@@ -478,7 +655,7 @@ class DecideTests(unittest.TestCase):
                 "synthetic-source-e",
                 prediction=recorded_prediction("unavailable"),
                 split="held-out",
-                existing_choice=None,
+                existing_choice="worker",
             ),
         ]
         report = DECIDE.evaluate_jsonl(
@@ -486,10 +663,10 @@ class DecideTests(unittest.TestCase):
         )
         self.assertEqual(report["mode"], "offline")
         self.assertEqual(report["request_count"], 0)
-        self.assertEqual(report["cases"], 6)
-        self.assertEqual(report["exact_agreement"], {"correct": 1, "cases": 5, "rate": 0.2})
-        self.assertEqual(report["acceptable_agreement"], {"correct": 2, "cases": 6, "rate": 0.333})
-        self.assertEqual(report["wrong_down_tier_choices"], 1)
+        self.assertEqual(report["cases"], 7)
+        self.assertEqual(report["exact_agreement"], {"correct": 1, "cases": 6, "rate": 0.167})
+        self.assertEqual(report["acceptable_agreement"], {"correct": 2, "cases": 7, "rate": 0.286})
+        self.assertEqual(report["wrong_down_tier_choices"], 2)
         self.assertEqual(report["unnecessary_escalations"], 1)
         self.assertEqual(report["abstentions"], 1)
         self.assertEqual(report["unavailable"], 1)
@@ -500,13 +677,52 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(report["models"], ["clef", "clef-flash"])
         self.assertEqual(report["latency"]["median_ms"], "unknown")
         self.assertEqual(report["existing_choice_comparison"]["higher"], 3)
+        policy = report["policy_comparison"]
+        self.assertEqual(policy["cases_with_existing_choice"], 6)
+        self.assertEqual(policy["cases_without_existing_choice"], 1)
+        self.assertEqual(
+            policy["existing_policy_acceptable_agreement"],
+            {"correct": 4, "cases": 6, "rate": 0.667},
+        )
+        self.assertEqual(
+            policy["standalone_clef"]["acceptable_tier_agreement"],
+            {"correct": 2, "cases": 5, "rate": 0.4},
+        )
+        self.assertEqual(policy["standalone_clef"]["unavailable_cases"], 1)
+        self.assertEqual(
+            policy["unavailable_clef_decisions"],
+            {"with_existing_choice": 1, "without_existing_choice": 0},
+        )
+        comparison = policy["matched_successful_comparison"]
+        self.assertEqual(
+            comparison["existing_policy_acceptable_agreement"],
+            {"correct": 3, "cases": 5, "rate": 0.6},
+        )
+        self.assertEqual(
+            comparison["clef_acceptable_tier_agreement"],
+            {"correct": 2, "cases": 5, "rate": 0.4},
+        )
+        self.assertEqual(comparison["correctness_delta"], {"correct": -1, "cases": 5, "rate": -0.2})
+        self.assertEqual(comparison["clef_improves_existing_policy"], 1)
+        self.assertEqual(comparison["clef_makes_correct_existing_policy_worse"], 2)
+        self.assertEqual(comparison["both_wrong"], 1)
+        self.assertEqual(comparison["wrong_down_tier_recommendations"], 2)
+        self.assertEqual(
+            policy["fallback_policy"]["acceptable_tier_agreement"],
+            {"correct": 3, "cases": 6, "rate": 0.5},
+        )
+        self.assertEqual(policy["fallback_policy"]["used_existing_choice"], 1)
         self.assertEqual(report["by_split"]["held-out"]["unavailable"], 1)
+        self.assertEqual(
+            report["by_split"]["held-out"]["policy_comparison"]["fallback_policy"]["acceptable_tier_agreement"],
+            {"correct": 1, "cases": 1, "rate": 1.0},
+        )
         self.assertNotIn("synthetic", json.dumps(report))
         matrix = {tuple(row["expected"]): row["predicted"] for row in report["confusion_matrix"]}
         self.assertEqual(matrix[("worker",)]["worker"], 1)
         self.assertEqual(matrix[("worker",)]["abstain"], 1)
         self.assertEqual(matrix[("worker",)]["unavailable"], 1)
-        self.assertEqual(sum(sum(row.values()) for row in matrix.values()), 6)
+        self.assertEqual(sum(sum(row.values()) for row in matrix.values()), 7)
 
     def test_evaluation_rejects_duplicate_ids_source_leakage_and_bad_labels(self):
         first = sample_eval_case(
