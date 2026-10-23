@@ -11,15 +11,6 @@ Next: 17
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-14 · P3 · PR lookup errors look like missing pull requests
-
-- **Area:** CLI
-- **Where:** `dotfiles/base/.local/bin/gh-cancel-pr-runs:60-80`
-- **Problem:** `gh pr view` stderr is discarded and its failure is treated as an empty head SHA. Authentication and API failures are reported as “no PR found,” hiding the cause from the caller.
-- **Recommendation:** Preserve the `gh pr view` status and diagnostic; report a missing PR only when the lookup succeeds without a result.
-- **Fix with:** none
-- **Effort:** S
-
 ### USR-15 · P3 · Failed preserved-service checks still exit successfully
 
 - **Area:** macOS

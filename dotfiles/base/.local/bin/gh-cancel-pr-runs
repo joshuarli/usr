@@ -59,16 +59,20 @@ fi
 
 if [ "$branch_set" -eq 1 ]; then
     if [ "$repo_option" -eq 1 ]; then
-        sha=$(gh pr view "$branch" --repo "$repo" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+        sha=$(gh pr view "$branch" --repo "$repo" --json headRefOid --jq '.headRefOid')
     else
-        sha=$(gh pr view "$branch" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+        sha=$(gh pr view "$branch" --json headRefOid --jq '.headRefOid')
     fi
 else
     if [ "$repo_option" -eq 1 ]; then
-        sha=$(gh pr view --repo "$repo" --json headRefOid --jq '.headRefOid' 2>/dev/null)
+        sha=$(gh pr view --repo "$repo" --json headRefOid --jq '.headRefOid')
     else
-        sha=$(gh pr view --json headRefOid --jq '.headRefOid' 2>/dev/null)
+        sha=$(gh pr view --json headRefOid --jq '.headRefOid')
     fi
+fi
+pr_status=$?
+if [ "$pr_status" -ne 0 ]; then
+    exit "$pr_status"
 fi
 
 if [ -z "$sha" ]; then
