@@ -1,0 +1,66 @@
+#!/bin/sh
+set -eu
+
+die() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    printf 'Usage: %s [-n|--dry-run] [NETWORK_SERVICE...]\n' "$0"
+    printf 'Restore DNS to automatic for Wi-Fi and Tailscale by default.\n'
+}
+
+dry=false
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+    -n|--dry-run)
+        dry=true
+        shift
+        ;;
+esac
+
+[ "$(uname -s)" = Darwin ] || die 'macOS only'
+
+if [ "$#" -eq 0 ]; then
+    set -- 'Wi-Fi' 'Tailscale'
+fi
+
+dns_state() {
+    out=$(networksetup -getdnsservers "$1") || return 1
+    case $out in
+        *"aren't any DNS Servers set on"*) printf 'automatic' ;;
+        *) printf '%s' "$out" | tr '\n' ' ' | sed 's/ $//' ;;
+    esac
+}
+
+needs_change=false
+for service do
+    case $service in
+        -*|'') die "invalid network service name: $service" ;;
+    esac
+    current=$(dns_state "$service") || die "cannot read DNS settings for $service"
+    if [ "$current" = automatic ]; then
+        printf 'DNS for %s: already automatic\n' "$service"
+    else
+        printf 'DNS for %s: %s -> automatic\n' "$service" "$current"
+        needs_change=true
+    fi
+done
+
+if $dry || ! $needs_change; then
+    exit 0
+fi
+
+sudo -v
+for service do
+    current=$(dns_state "$service") || die "cannot read DNS settings for $service"
+    if [ "$current" != automatic ]; then
+        sudo networksetup -setdnsservers "$service" Empty
+    fi
+    after=$(dns_state "$service") || die "cannot verify DNS settings for $service"
+    [ "$after" = automatic ] || die "DNS for $service did not return to automatic"
+done

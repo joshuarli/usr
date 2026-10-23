@@ -109,6 +109,7 @@ class SkillCampaignTests(unittest.TestCase):
             "double-take",
             "pr-ready",
             "pr-stack",
+            "self-contained-prompt",
             "settle",
             "ultrareview",
             "ultratriage",

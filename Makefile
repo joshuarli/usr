@@ -15,7 +15,7 @@ sync: layers
 	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
 	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || status=$$?; \
 	brew_status=0; \
-	if [ "$(OS)" = darwin ]; then TMPDIR="$(DL_TMPDIR)" sh macos/setup-macos brew packages dns || { brew_status=$$?; [ $$status -ne 0 ] || status=$$brew_status; }; fi; \
+	if [ "$(OS)" = darwin ]; then TMPDIR="$(DL_TMPDIR)" sh macos/setup-macos brew packages || { brew_status=$$?; [ $$status -ne 0 ] || status=$$brew_status; }; fi; \
 	if [ "$(OS)" = linux ] && [ -r /etc/os-release ]; then \
 		. /etc/os-release; \
 		if [ "$${ID:-}" = alpine ]; then TMPDIR="$(DL_TMPDIR)" sh setup-linux || status=$$?; fi; \
@@ -73,6 +73,7 @@ layers:
 	[ -z "$$dup" ] || { printf 'in more than one layer:\n%s\n' "$$dup" >&2; exit 1; }
 
 check:
+	python3 -I macos/make-sync-test.py
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
 	cd dotfiles && sh agent-tier-gate-test.sh
 	sh dotfiles/reset-agents-test.sh
