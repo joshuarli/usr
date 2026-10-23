@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import importlib
 import importlib.machinery
 import importlib.util
@@ -130,6 +131,111 @@ def _work_counters(stats_list):
     return {key: sum(stats[key] for stats in stats_list) for key in ("stat_operations", "content_opens", "bytes_read", "git_processes", "sqlite_changes")}
 
 
+def _load_baseline(ref, scratch_root):
+    result = subprocess.run(
+        ["git", "show", ref + ":dotfiles/base/.local/bin/agent_session_store.py"],
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    path = Path(scratch_root) / "agent_session_store_baseline.py"
+    path.write_bytes(result.stdout)
+    spec = importlib.util.spec_from_file_location("agent_session_store_baseline", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _legacy_refresh(module, store, roots, project_ids, transcripts):
+    counters = {"stat_operations": 0, "content_opens": 0, "bytes_read": 0, "git_processes": 0}
+    original_open = module._open_source
+    original_stat = module.os.stat
+    original_fstat = module.os.fstat
+    original_run = module.subprocess.run
+    source_fds = set()
+
+    class CountedStream:
+        def __init__(self, stream):
+            self.stream = stream
+            self.fd = stream.fileno()
+            source_fds.add(self.fd)
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            try:
+                return self.stream.__exit__(*args)
+            finally:
+                source_fds.discard(self.fd)
+
+        def readline(self, *args):
+            data = self.stream.readline(*args)
+            counters["bytes_read"] += len(data)
+            return data
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+    def source_path(path):
+        try:
+            candidate = Path(os.fspath(path)).absolute()
+            candidate.relative_to(Path(transcripts).absolute())
+            return candidate.name.startswith("rollout-") and candidate.suffix == ".jsonl"
+        except (TypeError, ValueError, OSError):
+            return False
+
+    def counted_open(path):
+        stream = original_open(path)
+        counters["content_opens"] += 1
+        return CountedStream(stream)
+
+    def counted_stat(path, *args, **kwargs):
+        if source_path(path):
+            counters["stat_operations"] += 1
+        return original_stat(path, *args, **kwargs)
+
+    def counted_fstat(fd):
+        result = original_fstat(fd)
+        if fd in source_fds:
+            counters["stat_operations"] += 1
+        return result
+
+    def counted_run(args, *call_args, **kwargs):
+        is_git = bool(args and args[0] == "git")
+        try:
+            result = original_run(args, *call_args, **kwargs)
+        except subprocess.SubprocessError:
+            if is_git:
+                counters["git_processes"] += 1
+            raise
+        else:
+            if is_git:
+                counters["git_processes"] += 1
+            return result
+
+    changes_before = store.db.total_changes
+    module._open_source = counted_open
+    module.os.stat = counted_stat
+    module.os.fstat = counted_fstat
+    module.subprocess.run = counted_run
+    try:
+        for project_id in project_ids:
+            store.refresh(roots, project=project_id)
+    finally:
+        module._open_source = original_open
+        module.os.stat = original_stat
+        module.os.fstat = original_fstat
+        module.subprocess.run = original_run
+    counters["sqlite_changes"] = store.db.total_changes - changes_before
+    return counters
+
+
+def _legacy_refresh_plain(store, roots, project_ids):
+    return sum(store.refresh(roots, project=project_id)["events_added"] for project_id in project_ids)
+
+
 def _timed(operation, action, timings, deferred):
     if not _gate():
         deferred[0] = True
@@ -164,12 +270,45 @@ def run(args):
         root = Path(temporary)
         projects, transcripts, generated_events = _make_corpus(root, args.sessions, args.messages, min(args.projects, args.sessions))
         project_ids = [project_identity(project) for project in projects]
+        mixed_count = max(1, len(project_ids) // 2)
+        mixed_project_ids = project_ids[:mixed_count]
         source_bytes = sum(path.stat().st_size for path in transcripts.rglob("rollout-*.jsonl"))
         direct, direct_bytes = _direct_search(transcripts, QUERY)
         usage_sessions, usage_loads = _skill_usage(transcripts)
         state = root / "state"
-        with Store(state) as store:
+        baseline_module = _load_baseline(args.baseline_ref, root) if args.baseline_ref else None
+        baseline_state = root / "baseline-state"
+        baseline_context = baseline_module.Store(baseline_state) if baseline_module else contextlib.nullcontext(None)
+        baseline_work = {}
+        mixed_state = root / "mixed-state"
+        mixed_baseline_state = root / "mixed-baseline-state"
+        mixed_baseline_context = baseline_module.Store(mixed_baseline_state) if baseline_module else contextlib.nullcontext(None)
+        with Store(mixed_state) as mixed_store, mixed_baseline_context as mixed_baseline:
+            mixed_fresh = mixed_store.refresh([transcripts], projects=mixed_project_ids)
+            if mixed_baseline:
+                baseline_work["mixed_enabled_initial"] = _legacy_refresh(
+                    baseline_module, mixed_baseline, [transcripts], mixed_project_ids, transcripts
+                )
+            expected_mixed_sessions = sum(index % len(project_ids) < mixed_count for index in range(args.sessions))
+            if mixed_fresh["sessions_indexed"] != expected_mixed_sessions:
+                raise RuntimeError("mixed enabled-project refresh indexed an unexpected session count")
+            mixed_noop = mixed_store.refresh([transcripts], projects=mixed_project_ids)
+            if mixed_baseline:
+                baseline_work["mixed_enabled_noop"] = _legacy_refresh(
+                    baseline_module, mixed_baseline, [transcripts], mixed_project_ids, transcripts
+                )
+            if mixed_noop["content_opens"] or mixed_noop["bytes_read"] or mixed_noop["git_processes"] or mixed_noop["sqlite_changes"]:
+                raise RuntimeError("mixed enabled-project no-op repeated content or database work")
+            mixed_database_bytes = mixed_store.path.stat().st_size
+            mixed_baseline_database_bytes = mixed_baseline.path.stat().st_size if mixed_baseline else None
+        with Store(state) as store, baseline_context as baseline_store:
             fresh = store.refresh([transcripts], projects=project_ids)
+            if baseline_store:
+                baseline_work["fresh"] = _legacy_refresh(baseline_module, baseline_store, [transcripts], project_ids, transcripts)
+                if baseline_store.db.execute("SELECT count(*) FROM sessions").fetchone()[0] != args.sessions:
+                    raise RuntimeError("baseline refresh indexed an unexpected session count")
+                if baseline_store.db.execute("SELECT count(*) FROM events").fetchone()[0] != generated_events:
+                    raise RuntimeError("baseline refresh indexed an unexpected event count")
             indexed = store.search(QUERY, limit=args.sessions * args.messages)
             indexed_keys = {(row["session"], row["position"]) for row in indexed}
             if set(direct) != indexed_keys:
@@ -187,8 +326,14 @@ def run(args):
             with target.open("ab") as stream:
                 stream.write(appended)
             append = store.refresh([transcripts], projects=project_ids)
+            if baseline_store:
+                baseline_work["append"] = _legacy_refresh(baseline_module, baseline_store, [transcripts], project_ids, transcripts)
             unchanged = store.refresh([transcripts], projects=project_ids)
+            if baseline_store:
+                baseline_work["unchanged"] = _legacy_refresh(baseline_module, baseline_store, [transcripts], project_ids, transcripts)
             many_projects = store.refresh([transcripts], projects=project_ids)
+            if baseline_store:
+                baseline_work["many_enabled_projects"] = _legacy_refresh(baseline_module, baseline_store, [transcripts], project_ids, transcripts)
             if append["events_added"] != 1 or unchanged["events_added"] != 0:
                 raise RuntimeError("append or unchanged refresh processed the wrong number of events")
             if len(store.search(QUERY, limit=args.sessions * args.messages)) != len(direct):
@@ -206,6 +351,10 @@ def run(args):
             }}) + _line({"type": "response_item", "timestamp": "2026-10-23T00:00:03Z", "payload": {
                 "type": "message", "role": "user", "content": [{"type": "input_text", "text": "synthetic prompt for a stable transcript"}],
             }}))
+            if baseline_store:
+                baseline_work["missed_hook_reconciliation"] = _legacy_refresh(
+                    baseline_module, baseline_store, [transcripts], project_ids, transcripts
+                )
             observed_refreshes = []
             original_refresh = store.refresh
             def observe_refresh(*refresh_args, **refresh_kwargs):
@@ -227,15 +376,32 @@ def run(args):
                 "append": _work_counters([append]),
                 "unchanged": _work_counters([unchanged]),
                 "many_enabled_projects": _work_counters([many_projects]),
+                "mixed_enabled_noop": _work_counters([mixed_noop]),
                 "missed_hook_reconciliation": _work_counters(observed_refreshes),
             },
+            "baseline_ref": args.baseline_ref,
+            "baseline_refresh_work": baseline_work or None,
             "index": {"build_sessions": fresh["sessions_indexed"], "build_events_added": fresh["events_added"], "increment_events_added": append["events_added"], "unchanged_events_added": unchanged["events_added"], "database_bytes": database_bytes, "database_bytes_after_increment": final_database_bytes, "database_bytes_with_learning_tables": database_bytes_with_learning},
+            "mixed_history_database_bytes": {"candidate": mixed_database_bytes, "baseline": mixed_baseline_database_bytes},
             "learning_no_op": learning_noop,
             "missed_hook_reconcile": missed_reconcile,
         }
         if args.timings:
             timings = {}
             deferred = [False]
+            if baseline_module:
+                with Store(state) as timed_store, baseline_module.Store(baseline_state) as timed_baseline:
+                    for index in range(5):
+                        variants = (
+                            ("baseline_noop_per_project", lambda: _legacy_refresh_plain(timed_baseline, [transcripts], project_ids)),
+                            ("shared_projects_noop", lambda: timed_store.refresh([transcripts], projects=project_ids)["events_added"]),
+                        )
+                        if index % 2:
+                            variants = tuple(reversed(variants))
+                        for name, action in variants:
+                            result = _timed(name, action, timings, deferred)
+                            if result is not None and result != 0:
+                                raise RuntimeError("timed comparison no-op changed the index")
             for index in range(5):
                 build_state = root / ("timed-build-%d" % index)
                 def build_once(path=build_state):
@@ -286,6 +452,7 @@ def main(argv=None):
     parser.add_argument("--sessions", type=int, default=1000)
     parser.add_argument("--messages", type=int, default=10)
     parser.add_argument("--projects", type=int, default=20)
+    parser.add_argument("--baseline-ref", help="compare with a committed agent_session_store.py revision")
     parser.add_argument("--timings", action="store_true", help="run five perf-gated samples per case")
     args = parser.parse_args(argv)
     try:
