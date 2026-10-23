@@ -170,6 +170,26 @@ else:
         self.assertEqual(result["live_model"], "unverified")
         self.assertEqual(set(result["disabled_features"]), set(REVIEW.DISABLED_FEATURES))
 
+    def test_runtime_home_isolated_from_global_skills_and_preserves_codex_auth_home(self):
+        with mock.patch.dict(os.environ, {"HOME": "/host/home", "CODEX_HOME": "/host/codex"}):
+            environment = self.reviewer._runtime_environment(self.root / "scratch")
+        self.assertEqual(environment["HOME"], str(self.root / "scratch"))
+        self.assertEqual(environment["CODEX_HOME"], "/host/codex")
+
+    def test_review_workspace_gets_an_isolated_git_root(self):
+        working = self.root / "isolated"
+        working.mkdir()
+        self.reviewer._initialize_workspace(working, self.root)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=working,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(Path(result.stdout.strip()), working)
+
     def test_review_uses_untrusted_bounded_context_and_restricted_invocation(self):
         context = sample_context(
             owning_guidance={"technical-writing": "Use direct verbs in docs.\nKeep procedures scoped."}
@@ -323,6 +343,8 @@ else:
         self.assertEqual(result["tools_advertised"], "empty")
         self.assertEqual(result["effective_tool_dispatch"], "unverified")
         self.assertEqual(result["user_config_ignored"], "verified")
+        self.assertEqual(result["ambient_context"], "isolated")
+        self.assertEqual(result["ambient_skill_boundary"], "unverified")
         self.assertEqual([request["model"] for request in result["requests"]], ["gpt-6-luna", "gpt-6-luna"])
         self.assertEqual([request["reasoning_effort"] for request in result["requests"]], ["medium", "xhigh"])
         self.assertEqual([request["tools"] for request in result["requests"]], [[], []])
@@ -384,7 +406,9 @@ else:
 
         def track_process(*args, **kwargs):
             process = real_popen(*args, **kwargs)
-            created.append(process)
+            command = args[0] if args else kwargs.get("args")
+            if isinstance(command, list) and command and Path(command[0]) == self.codex:
+                created.append(process)
             return process
 
         with self.use_fake_codex(), mock.patch.object(REVIEW, "RUN_TIMEOUT_SECONDS", 0.5), mock.patch.object(

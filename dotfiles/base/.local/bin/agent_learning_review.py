@@ -190,6 +190,8 @@ class ReviewError(ValueError):
                 "orchestration_tier_unavailable",
                 "unsupported_codex_invocation",
                 "unexpected_tool_activity",
+                "git_not_found_for_isolated_workspace",
+                "isolated_workspace_setup_failed",
             }
         ),
         "transient": frozenset(
@@ -865,7 +867,7 @@ class CodexReviewer:
     def _runtime_environment(self, scratch, overrides=None):
         env = {
             "PATH": os.environ.get("PATH", os.defpath),
-            "HOME": os.environ.get("HOME", str(Path.home())),
+            "HOME": str(scratch),
             "CODEX_HOME": os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"),
             "TMPDIR": str(scratch),
             "AGENT_LEARN_WORKER": "1",
@@ -888,6 +890,37 @@ class CodexReviewer:
         if overrides:
             env.update(overrides)
         return env
+
+    def _initialize_workspace(self, working, scratch):
+        git = shutil.which("git")
+        if git is None:
+            raise ReviewError("git_not_found_for_isolated_workspace")
+        template = scratch / "empty-git-template"
+        template.mkdir(mode=0o700)
+        git_config = scratch / "empty-gitconfig"
+        git_config.touch(mode=0o600)
+        environment = {
+            "PATH": os.environ.get("PATH", os.defpath),
+            "HOME": str(scratch),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": str(git_config),
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+        try:
+            result = subprocess.run(
+                [git, "init", "--quiet", "--template=" + str(template)],
+                cwd=str(working),
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ReviewError("isolated_workspace_setup_failed") from error
+        if result.returncode != 0:
+            raise ReviewError("isolated_workspace_setup_failed")
 
     def capabilities(self):
         if self._capability_cache is not None:
@@ -992,6 +1025,8 @@ class CodexReviewer:
             "tools_advertised": "unverified",
             "effective_tool_dispatch": "unverified",
             "user_config_ignored": "unverified",
+            "ambient_context": "unverified",
+            "ambient_skill_boundary": "unverified",
         }
         if capability.get("status") != "ok":
             result["reason"] = capability.get("reason", "codex_unavailable")
@@ -1110,6 +1145,16 @@ class CodexReviewer:
                 result["reason"] = "local_probe_cleanup_failed"
                 return result
             requests = list(server.requests)
+            ambient_markers = (
+                str(self.repository / ".agents" / "skills"),
+                str(self.repository / "AGENTS.md"),
+                "Working Contract",
+            )
+            ambient_context = not any(
+                marker in json.dumps(request.get("body", {}).get("input"), ensure_ascii=False)
+                for request in requests
+                for marker in ambient_markers
+            )
             expected = (
                 ("scout", PROPOSAL_SCHEMA, PROPOSAL_FIELDS),
                 ("worker", INDEPENDENT_REVIEW_SCHEMA, frozenset(INDEPENDENT_REVIEW_SCHEMA["required"])),
@@ -1170,6 +1215,8 @@ class CodexReviewer:
                     "tools_advertised": "empty" if tools_advertised else "unexpected",
                     "effective_tool_dispatch": "unverified",
                     "user_config_ignored": "verified" if user_config_ignored else "failed",
+                    "ambient_context": "isolated" if ambient_context else "unexpected",
+                    "ambient_skill_boundary": "unverified",
                     "requests": summaries,
                     "local_probe_rejections": sum(failure["category"] == "transient" for failure in failures),
                 }
@@ -1183,6 +1230,8 @@ class CodexReviewer:
                 result["reason"] = "unexpected_tools_advertised"
             elif not user_config_ignored:
                 result["reason"] = "codex_user_config_not_ignored"
+            elif not ambient_context:
+                result["reason"] = "ambient_context_present"
             elif len(failures) != 2 or any(failure["category"] != "transient" for failure in failures):
                 result["reason"] = failures[0]["reason"] if failures else "local_auth_rejection_not_observed"
             elif not reasoning_effort:
@@ -1345,6 +1394,7 @@ class CodexReviewer:
             scratch = Path(temp)
             working = scratch / "cwd"
             working.mkdir(mode=0o700)
+            self._initialize_workspace(working, scratch)
             schema_path = scratch / "response-schema.json"
             schema_path.write_text(json.dumps(schema, separators=(",", ":")), encoding="utf-8")
             command = self._command(mode, schema_path, working, provider_overrides=provider_overrides)
