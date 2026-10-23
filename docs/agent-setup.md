@@ -132,56 +132,25 @@ Run the offline report with `decide eval cases.jsonl`. The report contains aggre
 
 Exact agreement counts cases with one `expected_tier`. Acceptable agreement and confidence correctness count predictions that match `expected_tier` or one of `acceptable_tiers`.
 
-When `existing_choice` is present, `policy_comparison` reports existing-policy agreement on all labeled cases, standalone Clef agreement on successful decisions, the paired correctness delta on cases where Clef returned a tier, and fallback-policy agreement across all matched cases. The fallback uses `existing_choice` when Clef is unavailable or abstains. Cases without `existing_choice` and unavailable decisions are counted separately. The report keeps development and held-out splits separate. Synthetic cases exercise the evaluator; they are not session evidence. Incomplete usage and cost remain unknown, and classification accuracy alone does not establish session savings.
+With `existing_choice`, `policy_comparison` reports existing-policy agreement, standalone Clef agreement, and paired correctness delta on successful decisions. `hypothetical_unconditional_adoption` assumes every successful Clef prediction is adopted. It keeps `existing_choice` when advice is unavailable or abstains. This is a hypothetical simulation, not measured advisory behavior. The parent decides whether to apply each recommendation. The format does not record the parent's actual advisory choice or task verification outcome. Cases without baselines and unavailable decisions are counted separately. Development and held-out splits stay separate. Synthetic cases are not session evidence. Incomplete usage and cost remain unknown. Classification accuracy alone does not establish session savings.
 
 Live evaluation requires separate owner authorization. It accepts cases without recorded predictions and requires a maximum of 1 to 50 calls. The number of cases cannot exceed that maximum.
+
+Live cases may offer only `mechanic`, `worker`, and `expert`. `decide` rejects `scout` because a case cannot establish that the work is read-only, and rejects `god` because automatic selection is forbidden.
 
 ```sh
 vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide eval --live --max-calls 30 cases.jsonl
 ```
 
-### Read Workers AI quota with usage
+### Workers AI quota reporting
 
-`usage cloudflare` runs `cf billing usage get-v1`. The response contains account-wide billable usage. The command displays Workers AI rows only. Cloudflare updates this data daily ([Billable Usage API](https://developers.cloudflare.com/billing/manage/billable-usage/)). The output compares the latest complete reported day with the daily Free allowance. It does not show today's live quota.
+We do not provide a remaining-quota estimate in `usage`. Cloudflare does not document an authoritative live counter. GraphQL analytics is sampled ([sampling](https://developers.cloudflare.com/analytics/graphql-api/sampling/)). Billable usage updates daily ([API](https://developers.cloudflare.com/billing/manage/billable-usage/)). Neither source establishes whether the next request fits.
 
-1. Confirm that `cf` is authenticated with `cf auth whoami`. Use the account ID stored as `CLOUDFLARE_ACCOUNT_ID`.
-2. Create an account-scoped token with Billing Read. Choose a future UTC expiry when you repeat these steps.
-
-   ```sh
-   (
-     set -eu
-     printf '%s' 'Paste the account ID and press Enter: '
-     IFS= read -r account_id
-     printf '%s' 'Paste a future UTC expiry and press Enter: '
-     IFS= read -r expires_on
-     billing_read_group=$(
-       cf user tokens permission-groups list |
-         jaq -e -c '[.[] | select(.name == "Billing Read") | {id}] | select(length == 1)'
-     )
-     policies=$(jaq -n --arg account "$account_id" --argjson groups "$billing_read_group" '[{effect:"allow",resources:{("com.cloudflare.api.account." + $account):"*"},permission_groups:$groups}]')
-     cf user tokens create --name usr-usage-billing-read --expires-on "$expires_on" --policies "$policies"
-   )
-   ```
-
-   The token command prints its value once. The `cf` identity needs permission to create user tokens ([Cloudflare token creation requirements](https://developers.cloudflare.com/fundamentals/api/how-to/create-via-api/)).
-3. Store the token and account ID in `vault`. `vault set` prompts for each value. Skip the account ID command if that value is already stored.
-
-   ```sh
-   vault set CLOUDFLARE_BILLING_API_TOKEN
-   vault set CLOUDFLARE_ACCOUNT_ID
-   vault isset CLOUDFLARE_BILLING_API_TOKEN
-   vault isset CLOUDFLARE_ACCOUNT_ID
-   ```
-
-4. Run `usage cloudflare`.
-
-Billing Read exposes the account's billing profile, subscriptions, usage, invoices, and entitlements ([Billing permissions](https://developers.cloudflare.com/billing/understand/billing-permissions/#api-access-for-billing)). The usage query returns all billable products. `usage cloudflare` filters the response to Workers AI before printing it. It does not read or change R2 settings.
-
-### Stay within Workers AI Free
-
-Workers AI Free's daily Neuron allowance resets at 00:00 UTC ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)). Cloudflare rejects requests after the allowance is used. `usage cloudflare` compares the latest complete billing day with that allowance. Cloudflare updates billing data daily, so this command does not show today's live quota.
+Workers AI Free provides 10,000 Neurons per day and resets at 00:00 UTC ([pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)). Use the Free allocation until Cloudflare returns HTTP 429, code 3036 ([Workers AI errors](https://developers.cloudflare.com/workers-ai/platform/errors/)). `decide` reports unavailable advice. `orchestrate` notifies the user and continues ordinary routing.
 
 This account has no Workers Paid subscription. Do not upgrade Workers or enable AI Gateway credits. `decide` returns unavailable advice at quota exhaustion and does not retry.
 
-No account-wide budget alert was created. Alerts notify but do not cap spending ([budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/)). The existing R2 Paid subscription was left unchanged. No Worker or AI Gateway resource was deployed. No inference or savings measurement has been run.
+No account-wide budget alert was created. Alerts notify but do not cap spending ([budget alerts](https://developers.cloudflare.com/billing/manage/budget-alerts/)). The existing R2 Paid subscription was left unchanged. No Worker or AI Gateway resource was deployed.
+
+One synthetic Clef-flash request verified the live REST envelope and all three answer types. It used 346 input tokens, 0 output tokens, and 214 ms. No live task evaluation or savings measurement has been run.
 

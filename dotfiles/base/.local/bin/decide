@@ -24,6 +24,7 @@ MODELS = {
     "clef": "@cf/cloudflare/clef",
 }
 EVAL_TIERS = ("scout", "mechanic", "worker", "expert", "god")
+LIVE_EVAL_TIERS = ("mechanic", "worker", "expert")
 EVAL_SPLITS = ("development", "held-out")
 QUESTION_ID = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 ACCOUNT_ID = re.compile(r"[A-Fa-f0-9]{32}\Z")
@@ -527,6 +528,8 @@ def parse_eval_case(value, live):
     candidate_tiers = set(question.get("criteria", {})) if isinstance(question.get("criteria"), dict) else set()
     if len(candidate_tiers) < 2 or not candidate_tiers <= set(EVAL_TIERS):
         raise InvalidInput("invalid_evaluation_case")
+    if live and not candidate_tiers <= set(LIVE_EVAL_TIERS):
+        raise InvalidInput("invalid_live_evaluation_case")
     if ("expected_tier" in value) == ("acceptable_tiers" in value):
         raise InvalidInput("invalid_evaluation_case")
     if "expected_tier" in value:
@@ -627,14 +630,15 @@ def compare_routing_cases(cases, tier_ranks):
     existing_correct = [
         is_acceptable(case, case["existing_choice"]) for case in cases_with_choice
     ]
-    fallback_tiers = [
+    hypothetical_tiers = [
         case["prediction"]["tier"]
         if case["prediction"]["status"] == "ok"
         else case["existing_choice"]
         for case in cases_with_choice
     ]
-    fallback_correct = [
-        is_acceptable(case, tier) for case, tier in zip(cases_with_choice, fallback_tiers)
+    hypothetical_correct = [
+        is_acceptable(case, tier)
+        for case, tier in zip(cases_with_choice, hypothetical_tiers)
     ]
     existing_matched_correct = [
         is_acceptable(case, case["existing_choice"]) for case in available
@@ -705,12 +709,13 @@ def compare_routing_cases(cases, tier_ranks):
             ),
             "wrong_down_tier_recommendations": down_tier,
         },
-        "fallback_policy": {
+        "hypothetical_unconditional_adoption": {
             "acceptable_tier_agreement": agreement(
-                sum(fallback_correct), len(fallback_correct)
+                sum(hypothetical_correct), len(hypothetical_correct)
             ),
             "cases": len(cases_with_choice),
-            "used_existing_choice": len(cases_with_choice) - matched_count,
+            "fallback_cases_to_existing_choice": len(cases_with_choice)
+            - matched_count,
         },
     }
 

@@ -211,4 +211,4 @@ No MCP or harness adapters, hooks, router skill, new tier hierarchy, main-model 
 
 The campaign report must name implementation and architecture, integration and failure behavior, exact verification and unavailable checks, measured economics, operational setup, the smallest real-data follow-up, contract changes, and repository state.
 
-Execution is complete in the current checkout. The `cf` token and account ID are in the local vault. Runtime inference, live evaluation, Linux behavior, real-data quality, and measured economics remain unverified. No inference, live evaluation, commits, or pushes were run.
+Execution is complete in the current checkout. The `cf` token and account ID are in the local vault. One synthetic Clef-flash request verified the live REST envelope and the `choice`, `noul`, and `score` answers. It used 346 input tokens, 0 output tokens, and 214 ms. Live task evaluation, Linux behavior, real-data quality, and measured economics remain unverified. No live evaluation, commits, or pushes were run.

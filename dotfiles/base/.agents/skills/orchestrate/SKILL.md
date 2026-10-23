@@ -5,7 +5,7 @@ description: "Route substantial, routine, mechanical, exploratory, or context-he
 
 # Orchestrate
 
-Delegate when specification and verification cost less than doing the work locally. The parent owns direction, integration, and final verification; delegating execution does not delegate that accountability.
+Delegate only when specification and verification cost less than local work. The parent owns direction, integration, and final verification.
 
 ## Routing
 
@@ -23,7 +23,7 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 ### Optional tier advice
 
-Explicitly set `USR_DECIDE_TIER=shadow|advisory` for one sanitized consult per unchanged brief on bounded, costly uncertainty. No god/mutating scout. Shadow never routes; advisory cannot override existing rules; justify any changed choice against policy. Failure: notify user; route normally.
+Consult once per unchanged decision only when `USR_DECIDE_TIER` is already `shadow` or `advisory`; never set it. For bounded, consequential uncertainty, use `decide` only when your harness has a meaningful cheaper-tier choice; skip OpenCode's same-model children. Run `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide` with sanitized JSON on stdin; read its structured result. Shadow never routes. Advisory is parent-assessed within existing tier/model/permission/authorization rules and cannot override user-selected models or mandatory escalation. Exclude `god` and mutating `scout`. Unavailable or invalid advice leaves routing unchanged; notify the user. Details: `~/usr/docs/agent-setup.md`.
 
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except for the Codex profile and Grok pins below. If a model is unavailable, use a suitable allowed model at the same or lower tier or report it. Failed commands, missing dependencies, or unavailable environments alone do not justify model escalation.
 
@@ -41,9 +41,7 @@ Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that ord
 
 ### OpenCode
 
-There is no tiering: every child runs the model already in use, and OpenCode supplies the only two child types, `explore` for read-only scouting and `general` for everything else. Pass no model override and invent no hierarchy. Size is still not difficulty, so default to `general`.
-
-A child does not get a different model, so report rather than substitute if the running model is unavailable. Briefs stay self-contained, and parallel writers still get disjoint worktrees owned and created by the parent.
+OpenCode has no tiering: children run the same model. `explore` is read-only; use `general` otherwise. Pass no model override; default to `general`. Report unavailable models and keep briefs self-contained.
 
 Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
 
@@ -57,7 +55,7 @@ Select the model from the Antigravity CLI column with `agy --model <model>`. Use
 
 ### DeepSeek TUI
 
-The DeepSeek TUI column is the only permitted model and effort route for DSH skill work. DeepSeek exposes `off`, `low`, `high`, and `max`, with no `medium`; use `high` for workers as the medium analogue and `max` for experts and gods as the high analogue. Do not switch providers or substitute another model; if the assigned model or effort is unavailable, report it.
+Use only the DeepSeek TUI table route for DSH work. DSH has `off`, `low`, `high`, and `max`, not `medium`: use `high` for workers and `max` for experts and gods. Do not switch providers or substitute; report unavailable models or efforts.
 
 ## Delegation
 

@@ -721,13 +721,18 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(comparison["both_wrong"], 1)
         self.assertEqual(comparison["wrong_down_tier_recommendations"], 2)
         self.assertEqual(
-            policy["fallback_policy"]["acceptable_tier_agreement"],
+            policy["hypothetical_unconditional_adoption"]["acceptable_tier_agreement"],
             {"correct": 3, "cases": 6, "rate": 0.5},
         )
-        self.assertEqual(policy["fallback_policy"]["used_existing_choice"], 1)
+        self.assertEqual(
+            policy["hypothetical_unconditional_adoption"][
+                "fallback_cases_to_existing_choice"
+            ],
+            1,
+        )
         self.assertEqual(report["by_split"]["held-out"]["unavailable"], 1)
         self.assertEqual(
-            report["by_split"]["held-out"]["policy_comparison"]["fallback_policy"]["acceptable_tier_agreement"],
+            report["by_split"]["held-out"]["policy_comparison"]["hypothetical_unconditional_adoption"]["acceptable_tier_agreement"],
             {"correct": 1, "cases": 1, "rate": 1.0},
         )
         self.assertNotIn("synthetic", json.dumps(report))
@@ -768,6 +773,9 @@ class DecideTests(unittest.TestCase):
                 "live-1", "synthetic-live-1", expected_tier="worker", prediction=None
             )
         ]
+        cases[0]["question"]["criteria"] = {
+            tier: tier for tier in DECIDE.LIVE_EVAL_TIERS
+        }
         with self.assertRaises(DECIDE.InvalidInput):
             DECIDE.evaluate_jsonl(eval_jsonl(*cases), transport=lambda *args: self.fail("network used"))
         with self.assertRaises(DECIDE.InvalidInput):
@@ -790,7 +798,11 @@ class DecideTests(unittest.TestCase):
             calls.append((url, headers, body, timeout))
             request = json.loads(body)
             tiers = list(request["questions"]["tier"]["criteria"])
-            probabilities = {tier: (0.6 if tier == "worker" else 0.1) for tier in tiers}
+            other_probability = 0.4 / (len(tiers) - 1)
+            probabilities = {
+                tier: (0.6 if tier == "worker" else other_probability)
+                for tier in tiers
+            }
             result = {
                 "model": "clef-flash",
                 "answers": {
@@ -817,6 +829,39 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(report["request_count"], 1)
         self.assertEqual(report["acceptable_agreement"]["correct"], 1)
         self.assertEqual(report["input_tokens"]["total"], 10)
+
+    def test_live_evaluation_rejects_ineligible_tier_options(self):
+        for forbidden_tier in ("scout", "god"):
+            with self.subTest(forbidden_tier=forbidden_tier):
+                case = sample_eval_case(
+                    f"live-{forbidden_tier}",
+                    f"synthetic-live-{forbidden_tier}",
+                    prediction=None,
+                    existing_choice="worker",
+                )
+                case["question"]["criteria"] = {
+                    "worker": "Known method",
+                    "expert": "Uncertain path",
+                    forbidden_tier: "Not eligible for live routing",
+                }
+                with self.assertRaises(DECIDE.InvalidInput):
+                    DECIDE.load_eval_cases(
+                        eval_jsonl(case), live=True, max_calls=1
+                    )
+
+        case = sample_eval_case(
+            "live-eligible",
+            "synthetic-live-eligible",
+            prediction=None,
+        )
+        case["question"]["criteria"] = {
+            tier: tier for tier in DECIDE.LIVE_EVAL_TIERS
+        }
+        loaded = DECIDE.load_eval_cases(eval_jsonl(case), live=True, max_calls=1)
+        self.assertEqual(
+            set(loaded[0]["request"]["questions"]["tier"]["criteria"]),
+            set(DECIDE.LIVE_EVAL_TIERS),
+        )
 
     def test_latency_uses_median_and_nearest_rank_p95_only_after_twenty_successes(self):
         cases = [
