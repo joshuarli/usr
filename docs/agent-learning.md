@@ -20,6 +20,8 @@ On macOS, `--schedule` installs a user LaunchAgent that runs `agent-learn run --
 
 Run `agent-learn status` to inspect grants, findings, and scheduler state. Use `agent-learn findings` to list findings, `agent-learn show ID` to inspect one, and `agent-learn recall 'question' --project "$PWD"` to retrieve relevant retained findings. Check each result against current code and instructions before using it.
 
+Run `agent-learn undo ID` to withdraw one promoted skill edit or approved project memory without quoting it. A promotion can be reversed after later commits when its paragraph is unchanged; otherwise the reversal is refused and `agent-learn status` lists the finding under `unresolved_regressions`. The scheduled monitor records the same state when it finds an attributed regression it cannot reverse.
+
 Run `agent-learn disable --project "$PWD"` to stop review for one project. Under the wildcard, this also excludes that project. Run `agent-learn disable --all-projects` to revoke the wildcard. Projects enabled individually remain enabled. Pass `--schedule` to either disable command to remove the macOS LaunchAgent; this stops scheduled reviews for every project.
 
 ## Codex hook and data boundaries
@@ -49,6 +51,12 @@ Use the full session ID and byte offset printed with a search hit. `show` verifi
 
 ## Promotion policy
 
-Recurring findings can propose a contextual sentence in an existing allowlisted skill or a trigger before its `Skip` clause. Two independent originating sessions in two enabled repositories must support a global skill edit. Commands and conventions belong in project memory. The applier uses an ignored `.work/wt/` worktree and the existing skill checker, and integrates only into a clean, unchanged branch. It does not push. See [`agent_learning_promote.py`](../dotfiles/base/.local/bin/agent_learning_promote.py) for validation, staging, and recovery rules.
+Recurring findings can propose a contextual sentence in an existing allowlisted skill or a trigger before its `Skip` clause. Two independent originating sessions in two enabled repositories must support a global skill edit. Findings in other repositories with similar wording and the same direction nominate evidence for review; the reviewer decides whether it supports the same action, and distinct projects and root sessions establish independence. Commands and conventions belong in project memory. The applier uses an ignored `.work/wt/` worktree and the existing skill checker, and integrates only into a clean, unchanged branch. It does not push. See [`agent_learning_promote.py`](../dotfiles/base/.local/bin/agent_learning_promote.py) for validation, staging, and recovery rules.
 
-Global instructions, routers, security and permission policy, dependencies, unrelated projects, and broad new skills cannot be auto-promoted. Project memories are advisory and checked against current files. Current code, tests, and instructions take precedence. Invocation counts and recurring corrections are observational measurements; they do not establish that an edit caused improvement.
+Each run starts at most two finding reviews and stops starting reviews once the previous 24 hours hold 24 recorded model calls. One review may exceed that by its own calls, and a review that crashes before recording usage is not counted. `agent-learn status` reports `model_calls_24h` and the budget. Deferred findings resume when calls free up.
+
+A malformed edit, or an independent approval that lists risks, goes back to the proposer with the reason and is retried up to three times against unchanged evidence. An independent reviewer that declines holds the finding.
+
+A proposal that contradicts approved advice for the same owner and applicability goes back to the reviewer with that advice attached. The reviewer may withdraw an approved project memory. Otherwise the new finding is held with reason `conflict`, the approved advice stays, and new independent evidence reopens the review. Project memories are stored exactly as reviewed, at most 600 characters of action and 400 of applicability.
+
+Global instructions, routers, security and permission policy, dependencies, unrelated projects, and broad new skills cannot be auto-promoted. Project memories are advisory and checked against current files. Current code, tests, and instructions take precedence. `recurring_mistakes` counts later sessions whose correction clusters with the original finding; `regressions_reported` counts complaints that quote the promoted advice. Neither counts an unrelated correction. Invocation counts and recurrences are observational measurements; they do not establish that an edit caused improvement.

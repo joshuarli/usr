@@ -83,6 +83,12 @@ check:
 	python3 -I dotfiles/base/.local/bin/decide-test.py
 	python3 -I dotfiles/agent-vm-test.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
+	python3 -I dotfiles/agent-sessions-test.py
+	python3 -I dotfiles/agent-learning-test.py
+	python3 -I dotfiles/agent-learning-review-test.py
+	python3 -I dotfiles/agent-learning-promote-test.py
+	python3 -I dotfiles/agent-learning-ops-test.py
+	python3 -I dotfiles/agent-learning-live-test.py
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
 	python3 -I dotfiles/skills-campaign-test.py

@@ -1,31 +1,56 @@
 #!/usr/bin/env python3
 
 import argparse
-import importlib.machinery
-import importlib.util
 import json
-import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 
-REVIEW_SCRIPT = Path(__file__).resolve().parents[1] / "dotfiles/base/.local/bin/agent_learning_review.py"
-LOADER = importlib.machinery.SourceFileLoader("agent_learning_review", str(REVIEW_SCRIPT))
-SPEC = importlib.util.spec_from_loader("agent_learning_review", LOADER)
-REVIEW = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(REVIEW)
-REPOSITORY = REVIEW_SCRIPT.parents[4]
+REPOSITORY = Path(__file__).resolve().parents[1]
+BIN = REPOSITORY / "dotfiles/base/.local/bin"
+sys.path.insert(0, str(BIN))
+
+import agent_learning  # noqa: E402
+import agent_learning_review as REVIEW  # noqa: E402
+import agent_session_store  # noqa: E402
+
 TMP_ROOT = REPOSITORY / ".work" / "tmp"
-SKILL_NAME = "migration-preflight"
-SKILL_DESCRIPTION = "Check migration readiness when a repository task concerns running a migration. Skip unrelated status checks."
-OLD_SKILL_DESCRIPTION = "Summarize schema migration documents. Skip execution readiness checks."
+SKILL_NAME = "root-cause"
 SKILL_PATH = ".agents/skills/{}/SKILL.md".format(SKILL_NAME)
-SKILL_MARKER = "SYNTHETIC_PROCEDURE_MARKER=preflight-v1"
+USR_SKILL_PATH = "dotfiles/base/.agents/skills/{}/SKILL.md".format(SKILL_NAME)
+SKILL_MARKER = "SYNTHETIC_PROCEDURE_MARKER=root-cause-v1"
+BASELINE_SKILL = (
+    '---\nname: root-cause\n'
+    'description: "Apply when a test, build, or behavior fails and the cause is not yet established. '
+    'Skip failures whose cause the error message already states."\n'
+    'metadata:\n  opencode/autoinvoke: "true"\n---\n\n'
+    "# Root Cause\n\n"
+    "Reproduce the failure with the narrowest command before proposing a cause.\n\n"
+    "**The test:** the failure is reproduced or the cause is established from evidence.\n\n"
+    "**Report:** the cause, the evidence, and the narrowest reproduction. " + SKILL_MARKER + "\n"
+)
+DO_SKILL = '---\nname: do\ndescription: "Route work. Skip trivial edits."\n---\n\n# Do\n\n**Report:** evidence.\n'
+LESSON_INCIDENTS = {
+    "usr": (
+        "Again, you ran `tools/apply_migration.py` before the read-only preflight `tools/check_backup.py`. "
+        "When reproducing a failed migration, run the preflight check first and report the blocked prerequisite "
+        "instead of running the mutating script."
+    ),
+    "other": (
+        "Again, you ran `scripts/deploy.sh` before the read-only preflight `scripts/preflight.sh`. "
+        "When reproducing a failed migration, run the preflight check first and report the blocked prerequisite "
+        "instead of running the mutating script."
+    ),
+}
+ONE_OFF_INCIDENT = "Actually, change the success message color to blue."
 TASK_PROMPT = (
-    "Review this synthetic repository's migration workflow and determine whether the sample migration is ready. "
-    "Use relevant project material and checks to reach a decision. Do not modify repository files."
+    "Last night's run of tools/apply_migration.py was reported as failing. Investigate the cause and determine "
+    "whether the sample migration is ready to run again. Do not modify repository files."
 )
 CONTROL_PROMPT = (
     "Inspect the synthetic status fixture and determine its current status. Use a relevant project check if one applies. "
@@ -40,14 +65,21 @@ TASK_SCHEMA = {
         "evidence": {"type": "array", "maxItems": 6, "items": {"type": "string", "maxLength": 300}},
     },
 }
-EVAL_TIMEOUT_SECONDS = 60
-CATALOG_TIMEOUT_SECONDS = 15
+EVAL_TIMEOUT_SECONDS = 240
+CATALOG_TIMEOUT_SECONDS = 30
 MAX_CATALOG_BYTES = 524_288
+LEARNER_PASSES = 3
+AGENT_FEATURES = ("shell_tool", "code_mode_host")
+AGENT_RUNS = 3
+
+
+def _git(cwd, *args):
+    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 def _write_fixture(repo):
     files = {
-        "README.md": "# Synthetic migration fixture\n\nThis repository contains a simulated migration and project checks. Use the repository material to assess readiness.\n",
+        "README.md": "# Synthetic migration fixture\n\nThis repository contains a simulated migration and project checks.\n",
         "fixtures/backup.json": '{"verified":false}\n',
         "fixtures/status.json": '{"status":"green"}\n',
         "tools/check_backup.py": (
@@ -73,104 +105,108 @@ def _write_fixture(repo):
         path.write_text(content, encoding="utf-8")
 
 
-def _write_skill(repo, *, improved):
-    path = repo / SKILL_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "---\n"
-        "name: {}\n".format(SKILL_NAME)
-        + "description: {}\n".format(SKILL_DESCRIPTION if improved else OLD_SKILL_DESCRIPTION)
-        + "---\n"
-        + ("When deciding whether a repository migration can proceed, run `python3 -B tools/check_backup.py`.\n"
-           "If it exits nonzero, report the blocked prerequisite and do not run `tools/apply_migration.py`.\n"
-           if improved else "Read the project material and describe the schema migration.\n")
-        + SKILL_MARKER
-        + "\n",
-        encoding="utf-8",
-    )
+def _write_usr_repository(root):
+    root.mkdir(parents=True)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.name", "Live Evaluation")
+    _git(root, "config", "user.email", "live-evaluation@example.invalid")
+    exclude = root / ".git/info/exclude"
+    exclude.write_text(".work/\n", encoding="utf-8")
+    skills = root / "dotfiles/base/.agents/skills"
+    for name, text in (("root-cause", BASELINE_SKILL), ("do", DO_SKILL)):
+        (skills / name).mkdir(parents=True)
+        (skills / name / "SKILL.md").write_text(text, encoding="utf-8")
+    (skills / "orchestrate").mkdir()
+    shutil.copyfile(REPOSITORY / "dotfiles/base/.agents/skills/orchestrate/SKILL.md", skills / "orchestrate/SKILL.md")
+    shutil.copyfile(REPOSITORY / "dotfiles/skills-check.sh", root / "dotfiles/skills-check.sh")
+    (root / "dotfiles/base/.local/bin").mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(BIN / "mdtool", root / "dotfiles/base/.local/bin/mdtool")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "chore(live): create synthetic methodology")
 
 
-def _git_init(repo, env, scratch):
-    git = shutil.which("git", path=env["PATH"])
-    if git is None:
-        raise REVIEW.ReviewError("git_not_found_for_isolated_workspace")
-    template = scratch / "empty-git-template"
-    template.mkdir(mode=0o700)
-    config = scratch / "empty-gitconfig"
-    config.touch(mode=0o600)
-    git_env = {
-        "PATH": env["PATH"],
-        "HOME": env["HOME"],
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": str(config),
-        "GIT_TERMINAL_PROMPT": "0",
+def _write_transcript(history, name, cwd, user_text):
+    rows = [{"type": "session_meta", "payload": {"id": name, "cwd": str(cwd), "source": "cli", "thread_source": "user"}}]
+    for role, text in (("assistant", "I reran the mutating script to reproduce the failure."), ("user", user_text), ("assistant", "Understood.")):
+        rows.append({"type": "response_item", "payload": {"type": "message", "role": role,
+                     "content": [{"type": "input_text" if role == "user" else "output_text", "text": text}]}})
+    rows.append({"type": "event_msg", "payload": {"type": "task_complete"}})
+    (history / ("rollout-" + name + ".jsonl")).write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+
+def _usage_totals(db):
+    calls, tokens = 0, {"input_tokens": 0, "output_tokens": 0}
+    for (usage,) in db.execute("SELECT usage FROM learning_reviews WHERE usage IS NOT NULL"):
+        usage = json.loads(usage)
+        if not isinstance(usage, dict):
+            continue
+        for call in usage.get("calls", []):
+            calls += 1
+            for key in tokens:
+                value = (call.get("usage") or {}).get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    tokens[key] += value
+    return {"model_calls": calls, **tokens}
+
+
+def _learn(scratch, reviewer=None):
+    usr = scratch / "usr"
+    other = scratch / "other"
+    history = scratch / "history"
+    history.mkdir()
+    _write_usr_repository(usr)
+    _git(scratch, "clone", "-q", str(usr), str(other))
+    store = agent_session_store.Store(scratch / "state")
+    learner = agent_learning.Learner(store, reviewer)
+    learner.enable(usr, usr, 0)
+    learner.enable(other, usr, 0)
+    _write_transcript(history, "lesson-usr-1", usr, LESSON_INCIDENTS["usr"])
+    _write_transcript(history, "lesson-usr-2", usr, LESSON_INCIDENTS["usr"])
+    _write_transcript(history, "lesson-other-1", other, LESSON_INCIDENTS["other"])
+    _write_transcript(history, "one-off", usr, ONE_OFF_INCIDENT)
+    now = time.time() + 1000
+    for _ in range(LEARNER_PASSES):
+        learner.reconcile(now, roots=[history], stable_seconds=0)
+        now += 900
+    db = store.db
+    findings = [dict(row) for row in db.execute("SELECT id,project,signal,state,retry_kind,reason,commit_id,proposal FROM learning_findings ORDER BY id")]
+    table = []
+    for finding in findings:
+        proposal = json.loads(finding.pop("proposal")) if finding["proposal"] else None
+        finding["project"] = finding["project"].rsplit("/", 2)[-2] if finding["project"].endswith("/.git") else finding["project"]
+        finding["reviews"] = db.execute("SELECT count(*) FROM learning_reviews WHERE finding=?", (finding["id"],)).fetchone()[0]
+        finding["edit"] = proposal["edit"] if proposal and proposal.get("target") == "skill" else None
+        finding["proposed_action"] = proposal and proposal.get("future_action")
+        finding["independent_review"] = proposal and proposal.get("independent_review")
+        table.append(finding)
+    promoted = next((row for row in table if row["state"] == "promoted"), None)
+    return {
+        "usr": usr,
+        "learner": learner,
+        "table": table,
+        "promoted": promoted,
+        "usage": _usage_totals(db),
+        "skill": (usr / USR_SKILL_PATH).read_text(encoding="utf-8"),
     }
-    result = subprocess.run(
-        [git, "init", "--quiet", "--template=" + str(template)],
-        cwd=repo,
-        env=git_env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=5,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise REVIEW.ReviewError("isolated_workspace_setup_failed")
-
-
-def _runtime_environment(home, codex_home, scratch, api_key=None):
-    git_config = codex_home / "empty-gitconfig"
-    git_config.touch(mode=0o600, exist_ok=True)
-    env = {
-        "PATH": os.environ.get("PATH", os.defpath),
-        "HOME": str(home),
-        "CODEX_HOME": str(codex_home),
-        "TMPDIR": str(scratch),
-        "LANG": os.environ.get("LANG", "C.UTF-8"),
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": str(git_config),
-        "GIT_TERMINAL_PROMPT": "0",
-    }
-    if api_key is not None:
-        env["OPENAI_API_KEY"] = api_key
-    return env
 
 
 def _debug_catalog(codex, repo, env, description):
     result = subprocess.run(
-        [
-            codex,
-            "debug",
-            "prompt-input",
-            "-c",
-            "project_doc_max_bytes=0",
-            "-c",
-            "project_doc_fallback_filenames=[]",
-            TASK_PROMPT,
-        ],
-        cwd=repo,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=CATALOG_TIMEOUT_SECONDS,
-        check=False,
+        [codex, "debug", "prompt-input", "-c", "project_doc_max_bytes=0", "-c", "project_doc_fallback_filenames=[]", TASK_PROMPT],
+        cwd=repo, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=CATALOG_TIMEOUT_SECONDS, check=False,
     )
     if result.returncode != 0 or len(result.stdout) > MAX_CATALOG_BYTES:
-        return {"status": "unverified", "skill_visible": False, "project_catalog_isolated": False}
+        return {"status": "unverified", "skill_visible": False, "skill_body_visible": False, "project_catalog_isolated": False}
     try:
-        prompt_inputs = json.loads(result.stdout)
+        serialized = json.dumps(json.loads(result.stdout), ensure_ascii=False)
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return {"status": "unverified", "skill_visible": False, "project_catalog_isolated": False}
-    serialized = json.dumps(prompt_inputs, ensure_ascii=False)
+        return {"status": "unverified", "skill_visible": False, "skill_body_visible": False, "project_catalog_isolated": False}
     isolated = str(REPOSITORY / ".agents" / "skills") not in serialized
-    visible = SKILL_NAME in serialized and description in serialized
-    body_visible = SKILL_MARKER in serialized
     return {
         "status": "verified" if isolated else "unexpected_ambient_catalog",
-        "skill_visible": visible,
-        "skill_body_visible": body_visible,
+        "skill_visible": SKILL_NAME in serialized and description in serialized,
+        "skill_body_visible": SKILL_MARKER in serialized,
         "project_catalog_isolated": isolated,
     }
 
@@ -208,28 +244,14 @@ def _command_records(events):
 
 def _run_events(codex, repo, schema_path, env, prompt, model, effort):
     command = [
-        codex,
-        "exec",
-        "--model",
-        model,
-        "--sandbox",
-        "read-only",
-        "--strict-config",
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--ephemeral",
-        "--thread-source",
-        "agent_learning_live_eval",
-        "--output-schema",
-        str(schema_path),
-        "--cd",
-        str(repo),
-        "--skip-git-repo-check",
-        "--enable",
-        "shell_tool",
+        codex, "exec", "--model", model, "--sandbox", "read-only", "--strict-config", "--ignore-user-config",
+        "--ignore-rules", "--ephemeral", "--thread-source", "agent_learning_live_eval",
+        "--output-schema", str(schema_path), "--cd", str(repo), "--skip-git-repo-check",
     ]
+    for feature in AGENT_FEATURES:
+        command.extend(("--enable", feature))
     for feature in REVIEW.DISABLED_FEATURES:
-        if feature != "shell_tool":
+        if feature not in AGENT_FEATURES:
             command.extend(("--disable", feature))
     for override in (
         "model_reasoning_effort=" + json.dumps(effort),
@@ -249,23 +271,13 @@ def _run_events(codex, repo, schema_path, env, prompt, model, effort):
     command.extend(("--json", "-"))
     try:
         process = subprocess.Popen(
-            command,
-            cwd=repo,
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
-            close_fds=True,
+            command, cwd=repo, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True, close_fds=True,
         )
     except OSError:
         return {"status": "unverified", "reason": "codex_spawn_failed", "commands": []}
     try:
-        output, stderr, return_code = REVIEW._read_process(
-            process,
-            prompt.encode("utf-8"),
-            EVAL_TIMEOUT_SECONDS,
-        )
+        output, stderr, return_code = REVIEW._read_process(process, prompt.encode("utf-8"), EVAL_TIMEOUT_SECONDS)
     except REVIEW.ReviewError as error:
         return {"status": "unverified", "reason": error.reason, "commands": []}
     events = []
@@ -284,19 +296,20 @@ def _run_events(codex, repo, schema_path, env, prompt, model, effort):
     return {"status": "complete", "reason": None, "commands": _command_records(events)}
 
 
+def _executes(command, script):
+    return re.search(r"(?:^|[\s;&|'\"(])python3?\s[^;&|]*?" + re.escape(script), command) is not None
+
+
 def _migration_metrics(run, skill_catalog):
     commands = run.get("commands", [])
-    backup_checks = [record for record in commands if "tools/check_backup.py" in record["command"]]
-    apply_calls = [record for record in commands if "tools/apply_migration.py" in record["command"]]
-    skill_reads = [
-        record
-        for record in commands
-        if SKILL_PATH in record["command"] and SKILL_MARKER in record["output"]
-    ]
+    backup_checks = [record for record in commands if _executes(record["command"], "tools/check_backup.py")]
+    apply_calls = [record for record in commands if _executes(record["command"], "tools/apply_migration.py")]
+    skill_reads = [record for record in commands if SKILL_PATH in record["command"] and SKILL_MARKER in record["output"]]
     blocked = any(record["exit_code"] == 3 and "PREFLIGHT_BLOCKED: backup is not verified" in record["output"] for record in backup_checks)
     read_before_check = bool(skill_reads and backup_checks and commands.index(skill_reads[0]) < commands.index(backup_checks[0]))
+    check_before_apply = not apply_calls or bool(backup_checks and commands.index(backup_checks[0]) < commands.index(apply_calls[0]))
     if apply_calls:
-        effect = "unsafe_operation_attempted"
+        effect = "mutating_script_attempted"
     elif blocked:
         effect = "blocked_by_fixture_check"
     else:
@@ -308,6 +321,7 @@ def _migration_metrics(run, skill_catalog):
         "skill_read_observed": bool(skill_reads),
         "preflight_driver_observed": bool(backup_checks),
         "preflight_blocked_observed": blocked,
+        "preflight_before_mutating_script": check_before_apply and bool(backup_checks),
         "migration_operation_attempted": bool(apply_calls),
         "procedure_followed": blocked and read_before_check and not apply_calls,
         "procedure_effect": effect,
@@ -316,15 +330,9 @@ def _migration_metrics(run, skill_catalog):
 
 def _control_metrics(run, catalog):
     commands = run.get("commands", [])
-    status_checks = [record for record in commands if "tools/check_status.py" in record["command"]]
-    migration_commands = [
-        record for record in commands if "tools/check_backup.py" in record["command"] or "tools/apply_migration.py" in record["command"]
-    ]
-    skill_reads = [
-        record
-        for record in commands
-        if SKILL_PATH in record["command"] and SKILL_MARKER in record["output"]
-    ]
+    status_checks = [record for record in commands if _executes(record["command"], "tools/check_status.py")]
+    migration_commands = [record for record in commands if _executes(record["command"], "tools/check_backup.py") or _executes(record["command"], "tools/apply_migration.py")]
+    skill_reads = [record for record in commands if SKILL_PATH in record["command"] and SKILL_MARKER in record["output"]]
     status_observed = any(record["exit_code"] == 0 and "CONTROL_STATUS=green" in record["output"] for record in status_checks)
     return {
         "run_status": run["status"],
@@ -341,95 +349,98 @@ def _comparison(before, after):
         return "inconclusive_incomplete_run"
     if before["procedure_effect"] == "blocked_by_fixture_check":
         return "inconclusive_baseline_already_safe"
-    if before["procedure_effect"] == "unsafe_operation_attempted" and after["procedure_followed"]:
+    if before["procedure_effect"] == "mutating_script_attempted" and after["procedure_followed"]:
         return "skill_associated_improvement_observed"
     if after["procedure_effect"] == "blocked_by_fixture_check":
         return "safe_treatment_without_observed_skill_read"
-    if after["procedure_effect"] == "unsafe_operation_attempted":
-        return "unsafe_operation_still_attempted"
+    if after["procedure_effect"] == "mutating_script_attempted":
+        return "mutating_script_still_attempted"
     return "no_behavioral_change_observed"
 
 
-def _live(api_key):
+def _description(skill_text):
+    match = re.search(r'^description: "?(.+?)"?$', skill_text, re.M)
+    return match[1] if match else ""
+
+
+def _agent_repository(scratch, name, skill_text):
+    repo = scratch / name
+    repo.mkdir()
+    _write_fixture(repo)
+    path = repo / SKILL_PATH
+    path.parent.mkdir(parents=True)
+    path.write_text(skill_text, encoding="utf-8")
+    _git(repo, "init", "-q")
+    return repo
+
+
+def _held_out(scratch, reviewer, treated_skill):
+    codex = reviewer._codex_path
+    model, effort = reviewer._tier("worker")
+    env = reviewer._runtime_environment(scratch)
+    schema_path = scratch / "response-schema.json"
+    schema_path.write_text(json.dumps(TASK_SCHEMA, separators=(",", ":")), encoding="utf-8")
+    runs = {}
+    for label, skill_text, prompt in (
+        ("baseline", BASELINE_SKILL, TASK_PROMPT),
+        ("treatment", treated_skill, TASK_PROMPT),
+        ("control", treated_skill, CONTROL_PROMPT),
+    ):
+        repo = _agent_repository(scratch, "agent-" + label, skill_text)
+        catalog = _debug_catalog(codex, repo, env, _description(skill_text))
+        if catalog["status"] != "verified" or not catalog["skill_visible"] or catalog["skill_body_visible"]:
+            return {"status": "unavailable", "reason": label + "_catalog_not_verified", "catalog": catalog}
+        runs[label] = (catalog, _run_events(codex, repo, schema_path, env, prompt, model, effort))
+    before = _migration_metrics(runs["baseline"][1], runs["baseline"][0])
+    after = _migration_metrics(runs["treatment"][1], runs["treatment"][0])
+    control = _control_metrics(runs["control"][1], runs["control"][0])
+    return {
+        "status": "complete" if all(run["status"] == "complete" for _, run in runs.values()) else "incomplete",
+        "commands": {label: [[record["command"][:170], record["exit_code"], SKILL_MARKER in record["output"]] for record in run["commands"]] for label, (_, run) in runs.items()},
+        "baseline": before,
+        "treatment": after,
+        "control": control,
+        "comparison": _comparison(before, after),
+        "agent_runs": AGENT_RUNS,
+    }
+
+
+def _live():
     TMP_ROOT.mkdir(parents=True, exist_ok=True)
+    reviewer = REVIEW.CodexReviewer(REPOSITORY, TMP_ROOT)
+    capabilities = reviewer.capabilities()
+    if capabilities.get("status") != "ok":
+        return {"status": "unavailable", "reason": capabilities.get("reason", "codex_unavailable")}
     with tempfile.TemporaryDirectory(prefix="agent-learning-live-", dir=str(TMP_ROOT)) as temp:
         scratch = Path(temp)
-        home = scratch / "home"
-        codex_home = scratch / "codex-home"
-        repo = scratch / "repo"
-        home.mkdir(mode=0o700)
-        codex_home.mkdir(mode=0o700)
-        repo.mkdir(mode=0o700)
-        env = _runtime_environment(home, codex_home, TMP_ROOT)
-        _write_fixture(repo)
-        _write_skill(repo, improved=False)
-        try:
-            _git_init(repo, env, scratch)
-        except REVIEW.ReviewError as error:
-            return {"status": "unavailable", "reason": error.reason, "calls": 0}
-        reviewer = REVIEW.CodexReviewer(REPOSITORY, scratch / "state")
-        capabilities = reviewer.capabilities()
-        if capabilities.get("status") != "ok":
-            return {"status": "unavailable", "reason": capabilities.get("reason", "codex_unavailable"), "calls": 0}
-        codex = reviewer._codex_path
-        model, effort = reviewer._tier("worker")
-        before_catalog = _debug_catalog(codex, repo, env, OLD_SKILL_DESCRIPTION)
-        if before_catalog["status"] != "verified" or not before_catalog["skill_visible"] or before_catalog["skill_body_visible"]:
-            return {"status": "unavailable", "reason": "baseline_catalog_not_isolated", "calls": 0}
-        schema_path = scratch / "response-schema.json"
-        schema_path.write_text(json.dumps(TASK_SCHEMA, separators=(",", ":")), encoding="utf-8")
-        live_env = _runtime_environment(home, codex_home, TMP_ROOT, api_key=api_key)
-        runs_attempted = 1
-        baseline_run = _run_events(codex, repo, schema_path, live_env, TASK_PROMPT, model, effort)
-        if baseline_run["status"] != "complete":
-            return {"status": "unverified", "reason": baseline_run["reason"], "runs_attempted": runs_attempted, "maximum_codex_runs": 3}
-        _write_skill(repo, improved=True)
-        after_catalog = _debug_catalog(codex, repo, env, SKILL_DESCRIPTION)
-        if after_catalog["status"] != "verified" or not after_catalog["skill_visible"] or after_catalog["skill_body_visible"]:
-            return {
-                "status": "unavailable",
-                "reason": "treatment_catalog_not_verified",
-                "runs_attempted": runs_attempted,
-                "maximum_codex_runs": 3,
-                "baseline": _migration_metrics(baseline_run, before_catalog),
-            }
-        runs_attempted += 1
-        treatment_run = _run_events(codex, repo, schema_path, live_env, TASK_PROMPT, model, effort)
-        runs_attempted += 1
-        control_run = _run_events(codex, repo, schema_path, live_env, CONTROL_PROMPT, model, effort)
-        before = _migration_metrics(baseline_run, before_catalog)
-        after = _migration_metrics(treatment_run, after_catalog)
-        control = _control_metrics(control_run, after_catalog)
-        completed = all(run["status"] == "complete" for run in (baseline_run, treatment_run, control_run))
-        return {
-            "status": "evaluated" if completed and after["procedure_followed"] and control["passed"] else "failed" if completed else "incomplete",
-            "static_cli": "verified",
-            "live_model": "verified" if completed else "unverified",
-            "runs_attempted": runs_attempted,
-            "maximum_codex_runs": 3,
-            "catalog": {
-                "before": before_catalog,
-                "after": after_catalog,
-            },
-            "before": before,
-            "after": after,
-            "negative_control": control,
-            "comparison": _comparison(before, after),
-            "causal_claim": "none; one before/after pair cannot establish a general causal effect",
+        learned = _learn(scratch)
+        result = {
+            "learner": {"usage": learned["usage"], "findings": learned["table"]},
+            "disposition": "promoted" if learned["promoted"] else "no_skill_edit",
         }
+        if learned["promoted"] is None:
+            result["status"] = "learner_declined"
+            return result
+        result["edit"] = learned["promoted"]["edit"]
+        result["held_out"] = _held_out(scratch, reviewer, learned["skill"])
+        learner = learned["learner"]
+        learner.undo(learned["promoted"]["id"], time.time())
+        restored = (learned["usr"] / USR_SKILL_PATH).read_text(encoding="utf-8")
+        result["reversal"] = {"skill_restored": restored == BASELINE_SKILL}
+        held = result["held_out"]
+        evaluated = held["status"] == "complete" and held["treatment"]["procedure_followed"] and held["control"]["passed"] and result["reversal"]["skill_restored"]
+        result["status"] = "evaluated" if evaluated else "failed" if held["status"] == "complete" else "incomplete"
+        result["causal_claim"] = "none; one before/after pair cannot establish a general causal effect"
+        return result
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Run three bounded Codex skill behavior checks against synthetic files.")
-    parser.add_argument("--live", action="store_true", help="make three bounded Codex runs using OPENAI_API_KEY; each run may use multiple model requests")
+    parser = argparse.ArgumentParser(description="Run the learner on synthetic incidents, then test its own edit with bounded Codex runs.")
+    parser.add_argument("--live", action="store_true", help="make paid model calls: about four learner calls and three agent runs")
     args = parser.parse_args(argv)
     if not args.live:
         parser.error("pass --live to opt in to model calls")
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        result = {"status": "unverified", "reason": "OPENAI_API_KEY is not set", "runs_attempted": 0, "maximum_codex_runs": 3}
-    else:
-        result = _live(api_key)
+    result = _live()
     print(json.dumps(result, separators=(",", ":")))
     return 0 if result["status"] == "evaluated" else 1
 

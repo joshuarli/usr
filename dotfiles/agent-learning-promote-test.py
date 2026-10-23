@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import os
 import shutil
 import subprocess
 import tempfile
@@ -174,7 +175,7 @@ class PromotionTest(unittest.TestCase):
             verify_evidence=verifier or self.verify,
         )
 
-    def test_promotes_once_and_rolls_back_only_at_current_head(self):
+    def test_promotes_once_and_rolls_back_once(self):
         proposal, evidence = self.evidence()
         result = self.promote(proposal, evidence)
         self.assertEqual(result["status"], "promoted", result)
@@ -211,6 +212,84 @@ class PromotionTest(unittest.TestCase):
         second_rollback = promotion.rollback(self.repo, promotion_commit, reverted_head)
         self.assertEqual(second_rollback["status"], "blocked")
         self.assertEqual(self.head(), reverted_head)
+
+    SKILL = "dotfiles/base/.agents/skills/root-cause/SKILL.md"
+
+    def promote_and_develop(self, edit):
+        proposal, evidence = self.evidence()
+        promoted = self.promote(proposal, evidence)
+        self.assertEqual(promoted["status"], "promoted", promoted)
+        (self.repo / "unrelated.txt").write_text("ordinary development\n", encoding="utf-8")
+        path = self.repo / self.SKILL
+        path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
+        self.commit_base()
+        return proposal, promoted["commit"]
+
+    def test_rollback_survives_later_commits_and_keeps_unrelated_edits(self):
+        proposal, promotion_commit = self.promote_and_develop(
+            lambda text: text.replace("**Report:** Say what changed.", "**Report:** Say what changed and why.")
+        )
+        head = self.head()
+        reverted = promotion.rollback(self.repo, promotion_commit, head)
+        self.assertEqual(reverted["status"], "reverted", reverted)
+        self.assertEqual(self.head(), reverted["commit"])
+        restored = (self.repo / self.SKILL).read_text(encoding="utf-8")
+        self.assertNotIn(proposal["future_action"], restored)
+        self.assertIn("Say what changed and why.", restored)
+        self.assertEqual(list((self.repo / ".work/wt").glob("agent-learning-*")), [])
+
+    def test_rollback_refuses_when_the_promoted_paragraph_changed_since(self):
+        proposal, promotion_commit = self.promote_and_develop(
+            lambda text: text.replace("use that driver.", "use that driver. Also keep the log.")
+        )
+        head = self.head()
+        before = (self.repo / self.SKILL).read_bytes()
+        result = promotion.rollback(self.repo, promotion_commit, head)
+        self.assertEqual((result["status"], result["reason_code"]), ("blocked", "paragraph_changed"), result)
+        self.assertEqual(self.head(), head)
+        self.assertEqual((self.repo / self.SKILL).read_bytes(), before)
+        self.assertEqual(list((self.repo / ".work/wt").glob("agent-learning-*")), [])
+
+    def test_committed_rollback_candidate_after_later_commits_is_verified_and_integrated_once(self):
+        proposal, promotion_commit = self.promote_and_develop(
+            lambda text: text.replace("**Report:** Say what changed.", "**Report:** Say what changed and why.")
+        )
+        head = self.head()
+        worktree = promotion._staging_worktree(
+            self.repo, head, promotion._safe_worktree_root(self.repo), "rollback", promotion_commit[:16]
+        )
+        inverse = promotion._inverse_patch(self.repo, promotion_commit, self.SKILL)
+        promotion._command(["git", "-C", str(worktree), "apply", "-R", "--index", "-"], worktree, input_bytes=inverse)
+        promotion._git(
+            worktree,
+            "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+            "-c", "user.name=Learning Promotion", "-c", "user.email=agent-learning-promotion@localhost",
+            "commit", "--no-gpg-sign",
+            "-m", "revert(skills): restore prior skill guidance",
+            "-m", "Reverts-Learning-Promotion: " + promotion_commit,
+        )
+        candidate = promotion._head(worktree)
+        result = promotion.rollback(self.repo, promotion_commit, head)
+        self.assertEqual((result["status"], result["commit"]), ("reverted", candidate), result)
+        self.assertEqual(self.head(), candidate)
+
+    def test_rollback_refuses_a_promotion_outside_branch_history(self):
+        proposal, promotion_commit = self.promote_and_develop(lambda text: text)
+        run(["git", "-C", str(self.repo), "reset", "--hard", self.base_head], self.repo)
+        result = promotion.rollback(self.repo, promotion_commit, self.head())
+        self.assertEqual(result["status"], "blocked", result)
+
+    def test_user_rerere_setting_leaves_no_staging_state_after_promotion_or_rollback(self):
+        config = Path(self.temp.name) / "gitconfig"
+        config.write_text("[rerere]\n\tenabled = true\n", encoding="utf-8")
+        with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            proposal, evidence = self.evidence()
+            promoted = self.promote(proposal, evidence)
+            self.assertEqual((promoted["status"], promoted["reason"]), ("promoted", None), promoted)
+            self.assertEqual(list((self.repo / ".work/wt").iterdir()), [])
+            reverted = promotion.rollback(self.repo, promoted["commit"], self.head())
+            self.assertEqual((reverted["status"], reverted["reason"]), ("reverted", None), reverted)
+            self.assertEqual(list((self.repo / ".work/wt").iterdir()), [])
 
     def test_recover_promotion_reports_absent_without_creating_staging_state(self):
         proposal, _evidence = self.evidence()

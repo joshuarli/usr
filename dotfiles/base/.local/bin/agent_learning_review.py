@@ -76,6 +76,9 @@ REQUIRED_EXEC_FLAGS = (
 )
 SCOPE_VALUES = ("project", "global")
 MAX_SCOPE_REASON_LENGTH = 1_000
+CODE_MODE_DISABLED_NOTICE = "Code Mode is unavailable because code-mode host is disabled."
+MEMORY_ACTION_LIMIT = 600
+MEMORY_APPLICABILITY_LIMIT = 400
 MAX_VALIDITY_CONDITIONS = 3
 MAX_VALIDITY_PATH_LENGTH = 240
 MAX_VALIDITY_EXCERPT_LENGTH = 240
@@ -215,6 +218,11 @@ class ReviewError(ValueError):
                 "proposal_too_large",
                 "invalid_independent_review",
                 "independent_review_too_large",
+                "edit_not_grounded_in_guidance",
+                "invalid_future_action",
+                "edit_without_owning_guidance",
+                "owner_not_in_context",
+                "unexpected_edit",
             }
         ),
     }
@@ -406,6 +414,10 @@ def _validate_proposal_shape(proposal, allow_core_fields=False):
         limit = 1_000 if field == "applicability" else 2_000
         if not isinstance(proposal[field], str) or len(proposal[field]) > limit:
             raise ReviewError("invalid_proposal")
+    if proposal["target"] == "memory" and (
+        len(proposal["future_action"]) > MEMORY_ACTION_LIMIT or len(proposal["applicability"]) > MEMORY_APPLICABILITY_LIMIT
+    ):
+        raise ReviewError("invalid_proposal")
     if not _finite_number(proposal["confidence"]) or not 0 <= proposal["confidence"] <= 1:
         raise ReviewError("invalid_proposal")
     if isinstance(proposal["supersedes"], bool) or not isinstance(proposal["supersedes"], int) or proposal["supersedes"] < 0:
@@ -507,6 +519,14 @@ def _owner_names(context):
     return names
 
 
+def _is_complete_paragraph(text, old):
+    if text.count(old) != 1 or "\n\n" in old:
+        return False
+    start = text.index(old)
+    end = start + len(old)
+    return (start == 0 or text[start - 2:start] == "\n\n") and (end == len(text) or text[end:].startswith("\n\n"))
+
+
 def _description_edit_matches(old, new, future_action):
     if "\n" in old or "\n" in new or not old.startswith("description:") or len(future_action) > 120:
         return False
@@ -576,10 +596,12 @@ def _validate_proposal(proposal, context):
                 future = proposal["future_action"]
                 if not re.match(r"^(When|If|For|Before|After|During|On)\b .+", future):
                     raise ReviewError("invalid_future_action")
+                appends_sentence = proposal["edit"]["new"] == old + " " + future
                 if (
                     not old
                     or old not in owner_guidance
-                    or (proposal["edit"]["new"] != old + " " + future and not _description_edit_matches(old, proposal["edit"]["new"], future))
+                    or (not appends_sentence and not _description_edit_matches(old, proposal["edit"]["new"], future))
+                    or (appends_sentence and not old.startswith("description:") and not _is_complete_paragraph(owner_guidance, old))
                 ):
                     raise ReviewError("edit_not_grounded_in_guidance")
         elif proposal["action"] == "improve":
@@ -623,7 +645,7 @@ def _validate_independent_review(review, proposal):
         raise ReviewError("invalid_independent_review")
     if not isinstance(review["scope_reason"], str) or not review["scope_reason"].strip() or len(review["scope_reason"]) > MAX_SCOPE_REASON_LENGTH:
         raise ReviewError("invalid_independent_review")
-    if review["globally_applicable"] is not (proposal["scope"] == "global"):
+    if review["approves"] and review["globally_applicable"] is not (proposal["scope"] == "global"):
         raise ReviewError("invalid_independent_review")
     _serialized_json(review, MAX_PROPOSAL_LENGTH, "independent_review_too_large")
     return review
@@ -766,7 +788,10 @@ def _read_process(process, input_bytes, timeout):
                     target.extend(chunk)
                     if len(target) > limit:
                         raise ReviewError("response_too_large" if key.data == "stdout" else "diagnostic_too_large")
-        return_code = process.wait()
+        try:
+            return_code = process.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired as error:
+            raise ReviewError("timeout") from error
         return bytes(stdout), bytes(stderr), return_code
     except BaseException as error:
         primary = error
@@ -787,6 +812,11 @@ def _read_process(process, input_bytes, timeout):
                     primary.args = (primary.reason,)
                 else:
                     raise ReviewError("process_cleanup_failed_after_operation_error") from primary
+
+
+def _is_disabled_code_mode_notice(item):
+    message = item.get("message")
+    return isinstance(message, str) and message.startswith(CODE_MODE_DISABLED_NOTICE)
 
 
 def _jsonl_response(output):
@@ -815,6 +845,8 @@ def _jsonl_response(output):
             if not isinstance(item, dict):
                 raise ReviewError("invalid_response")
             item_type = item.get("type")
+            if item_type == "error" and _is_disabled_code_mode_notice(item):
+                continue
             if item_type not in {"agent_message", "reasoning"}:
                 raise ReviewError("unexpected_tool_activity")
             if event_type == "item.completed" and item_type == "agent_message":
@@ -1289,7 +1321,8 @@ class CodexReviewer:
                 "projects. For an improvement that applies only to this repository, set scope=project and target="
                 "memory. Explain the evidence for scope in scope_reason. With "
                 "full owning_guidance, edit only one exact existing paragraph by appending one sentence: "
-                "edit.new must equal edit.old + one space + future_action. You may instead refine only the exact "
+                "edit.old must be the entire paragraph between blank lines, copied exactly with every sentence and "
+                "marker it contains, never a single sentence of it. edit.new must equal edit.old + one space + future_action. You may instead refine only the exact "
                 "one-line description field: preserve all existing wording and its Skip clause, inserting the "
                 "exact future_action immediately before Skip. That sentence must be at most 120 characters. In "
                 "both edit modes, the added sentence must begin with When, If, For, Before, After, During, or On "
@@ -1299,7 +1332,14 @@ class CodexReviewer:
                 "the advice depends on that tracked project artifact; use an empty array for advice that stays "
                 "valid across file changes. Never invent a path or excerpt. Skill proposals must have empty "
                 "validity. For target=memory or defer and reject actions, leave edit "
-                "empty. Use owner empty for memory. Use supersedes=0 except when superseding an existing memory "
+                "empty. Use owner empty for memory, with future_action at most " + str(MEMORY_ACTION_LIMIT) +
+                " characters and applicability at most " + str(MEMORY_APPLICABILITY_LIMIT) + ". "
+                "When context.previous_failure is present, your last response was rejected for that reason; "
+                "correct that defect and change nothing else. "
+                "When context.conflicting_advice is present, the evidence may contradict that approved advice. "
+                "Return supersede with supersedes equal to its id when the new evidence invalidates a memory, "
+                "defer when the conflict is unresolved, and improve only when your applicability is disjoint "
+                "from it. Use supersedes=0 except when superseding an existing memory "
                 "or reviewing context.prior_promotion. For a skill rollback, return supersede only when supplied "
                 "evidence directly attributes a regression to that prior promotion, set supersedes to "
                 "context.finding_id, keep its owner, and return the exact inverse edit with old equal to "

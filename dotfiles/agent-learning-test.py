@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "dotfiles/base/.local/bin"
 sys.path.insert(0, str(BIN))
 learning = importlib.import_module("agent_learning")
+review_module = importlib.import_module("agent_learning_review")
 store_module = importlib.import_module("agent_session_store")
 Store, project_identity = store_module.Store, store_module.project_identity
 
@@ -27,6 +28,7 @@ class FakeReviewer:
         self.malicious, self.target = malicious, target
         self.validity = []
         self.usage = None
+        self.future_action = "When reproducing failing tests in a repository with a test driver, run the focused reproduction with that driver."
 
     def review(self, context):
         self.calls += 1
@@ -38,7 +40,7 @@ class FakeReviewer:
                 "observation": "Repeated command discovery obscures the supported reproduction path.",
                 "original_action": "Ran the underlying test runner without the repository driver.",
                 "better_action": "Use the repository driver when reproducing the failing test.",
-                "future_action": "When reproducing failing tests in a repository with a test driver, run the focused reproduction with that driver.",
+                "future_action": self.future_action,
                 "applicability": "Reproducing failing tests in a repository with a test driver.",
                 "alternatives": "Exploratory direct invocation can still be appropriate without a driver.",
                 "uncertainty": "Synthetic repeated incidents establish the driver convention, not live behavior.",
@@ -49,6 +51,7 @@ class FakeReviewer:
         return proposal
 
     def adversarial(self, context, proposal):
+        review_module._validate_proposal_shape(proposal, allow_core_fields=True)
         return {"approves": True, "risks": [], "owner": proposal["owner"], "does_not_weaken": True,
                 "globally_applicable": proposal["scope"] == "global", "scope_reason": proposal["scope_reason"]}
 
@@ -327,6 +330,7 @@ class LearningTest(unittest.TestCase):
                 return adapter._validate_proposal(result, context)
 
             def adversarial(inner, context, proposal):
+                review_module._validate_proposal_shape(proposal, allow_core_fields=True)
                 return {"approves": True, "owner": "root-cause", "does_not_weaken": True, "risks": [], "globally_applicable": True, "scope_reason": "Exact inverse of an attributed global regression."}
 
         self.learn.reviewer = RegressionReviewer()
@@ -339,6 +343,178 @@ class LearningTest(unittest.TestCase):
         head = git(self.repo, "rev-parse", "HEAD")
         self.run_cycle()
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+
+    def promoted_finding(self):
+        self.global_pattern()
+        self.run_cycle()
+        finding = self.store.db.execute("SELECT * FROM learning_findings WHERE state='promoted'").fetchone()
+        return finding, json.loads(finding["proposal"])
+
+    def report_regression(self, prior, *names):
+        for name in names:
+            path = self.transcript(name, [("user", "Again, the instruction '"+prior["future_action"]+"' caused a regression.")])
+            os.utime(path, (self.now+1, self.now+1))
+        self.now += 2
+
+    def supersede_reviewer(self, finding, prior):
+        fake = self.model
+
+        class RegressionReviewer:
+            calls = 0
+            usage = None
+
+            def review(inner, context):
+                inner.calls += 1
+                result = fake.review(context)
+                result.update(action="supersede", supersedes=finding["id"], edit={"old": prior["edit"]["new"], "new": prior["edit"]["old"]})
+                return review_module._validate_proposal(result, context)
+
+            def adversarial(inner, context, proposal):
+                return fake.adversarial(context, proposal)
+
+        return RegressionReviewer()
+
+    def test_regression_reversal_survives_unrelated_commits(self):
+        finding, prior = self.promoted_finding()
+        (self.repo / "unrelated.txt").write_text("ordinary development\n")
+        git(self.repo, "add", "unrelated.txt")
+        git(self.repo, "commit", "-m", "chore(test): continue unrelated development")
+        self.report_regression(prior, "regression-one", "regression-two")
+        self.learn.reviewer = self.supersede_reviewer(finding, prior)
+        self.run_cycle()
+        row = self.store.db.execute("SELECT state FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()
+        self.assertEqual(row["state"], "reversed")
+        self.assertNotIn(self.new, self.skill.read_text())
+        self.assertTrue((self.repo / "unrelated.txt").is_file())
+
+    def test_refused_reversal_remains_an_unresolved_regression(self):
+        finding, prior = self.promoted_finding()
+        self.skill.write_text(self.skill.read_text().replace(prior["future_action"], prior["future_action"] + " Also keep the log."))
+        git(self.repo, "commit", "-am", "docs(skills): extend the promoted paragraph")
+        self.report_regression(prior, "regression-one", "regression-two")
+        reviewer = self.supersede_reviewer(finding, prior)
+        self.learn.reviewer = reviewer
+        self.run_cycle()
+        row = self.store.db.execute("SELECT state,retry_kind,reason FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()
+        self.assertEqual((row["state"], row["retry_kind"]), ("promoted", "regression"), dict(row))
+        self.assertIn("could not be reversed", row["reason"])
+        self.assertEqual(self.learn.status()["unresolved_regressions"], [finding["id"]])
+        self.run_cycle()
+        self.assertEqual(reviewer.calls, 1)
+
+    def test_user_can_withdraw_a_promotion_without_quoting_it(self):
+        finding, prior = self.promoted_finding()
+        self.assertIn(self.new, self.skill.read_text())
+        self.learn.undo(finding["id"], self.now)
+        row = self.store.db.execute("SELECT state,reason FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()
+        self.assertEqual(row["state"], "reversed")
+        self.assertNotIn(self.new, self.skill.read_text())
+        with self.assertRaisesRegex(learning.LearningError, "only promoted guidance"):
+            self.learn.undo(finding["id"], self.now)
+
+    def test_refused_withdrawal_is_kept_as_an_unresolved_regression(self):
+        finding, prior = self.promoted_finding()
+        self.skill.write_text(self.skill.read_text().replace(prior["future_action"], prior["future_action"] + " Also keep the log."))
+        git(self.repo, "commit", "-am", "docs(skills): extend the promoted paragraph")
+        with self.assertRaisesRegex(learning.LearningError, "reversal refused"):
+            self.learn.undo(finding["id"], self.now)
+        row = self.store.db.execute("SELECT state,retry_kind FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()
+        self.assertEqual((row["state"], row["retry_kind"]), ("promoted", "regression"))
+
+    def test_user_can_withdraw_project_memory(self):
+        memory = self.establish_driver_memory()
+        self.learn.undo(memory["finding"], self.now)
+        self.assertEqual(self.learn.recall(project_identity(self.repo), "test driver"), [])
+        self.assertEqual(self.store.db.execute("SELECT state FROM learning_findings WHERE id=?", (memory["finding"],)).fetchone()[0], "superseded")
+
+    def test_recurrence_is_the_same_mistake_and_not_any_later_correction(self):
+        finding, prior = self.promoted_finding()
+        unrelated = self.transcript("unrelated-correction", [("user", "Reproduce failing tests using the repository test driver."), ("assistant", "Used the driver."), ("user", "Actually, change the success message color to blue.")])
+        repeat = self.transcript("same-mistake")
+        for path in (unrelated, repeat):
+            os.utime(path, (self.now+1, self.now+1))
+        self.now += 2
+        self.run_cycle()
+        rows = {row["session"]: row for row in self.store.db.execute("SELECT * FROM learning_evaluations WHERE finding=? AND phase='after'", (finding["id"],))}
+        self.assertEqual((rows["unrelated-correction"]["relevant"], rows["unrelated-correction"]["repeated"]), (1, 0))
+        self.assertEqual(rows["same-mistake"]["repeated"], 1)
+        self.assertEqual(self.learn.status()["recurring_mistakes"], 1)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE signal='correction' AND project=?", (project_identity(self.repo),)).fetchone()[0], 2)
+
+    def test_regression_reports_are_not_counted_as_recurrence(self):
+        finding, prior = self.promoted_finding()
+        self.report_regression(prior, "regression-one")
+        self.run_cycle()
+        row = self.store.db.execute("SELECT repeated,regressed FROM learning_evaluations WHERE finding=? AND session='regression-one'", (finding["id"],)).fetchone()
+        self.assertEqual((row["repeated"], row["regressed"]), (0, 1))
+        status = self.learn.status()
+        self.assertEqual((status["recurring_mistakes"], status["regressions_reported"]), (0, 1))
+
+    def other_project(self, text):
+        other = self.base / "other-project"
+        git(self.base, "clone", "--quiet", str(self.repo), str(other))
+        self.learn.enable(other, self.repo, 0)
+        self.transcript("independent-project", [("assistant", "I ran the direct test runner."), ("user", text), ("assistant", "The driver reproduces the original failure.")], cwd=other)
+
+    def test_similar_wording_in_another_project_reaches_review(self):
+        self.transcript("first")
+        self.transcript("second")
+        self.other_project("Again, use the supported repository test driver when reproducing failing tests instead of invoking the underlying test runner directly.")
+        self.run_cycle()
+        states = sorted(row[0] for row in self.store.db.execute("SELECT state FROM learning_findings WHERE signal='correction'"))
+        self.assertEqual(states, ["promoted", "superseded"])
+        self.assertIn(self.new, self.skill.read_text())
+        self.assertEqual(self.model.calls, 1)
+
+    def test_opposite_advice_in_another_project_is_not_corroboration(self):
+        self.transcript("first")
+        self.transcript("second")
+        self.other_project("Again, never use the repository test driver when reproducing failing tests; invoke the underlying test runner directly.")
+        self.run_cycle()
+        self.assertNotIn(self.new, self.skill.read_text())
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE state='promoted'").fetchone()[0], 0)
+
+    def test_model_call_budget_defers_reviews_without_losing_them(self):
+        self.global_pattern()
+        self.model.usage = {"calls": [{"mode": "proposal"}, {"mode": "adversarial"}]}
+        self.learn.reconcile(self.now, roots=[self.history], stable_seconds=0, max_model_calls=0)
+        self.assertEqual(self.model.calls, 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE state='promoted'").fetchone()[0], 0)
+        self.run_cycle()
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE state='promoted'").fetchone()[0], 1)
+        status = self.learn.status()
+        self.assertEqual(status["model_call_budget_24h"], learning.MAX_MODEL_CALLS_PER_DAY)
+        self.assertEqual(self.learn._model_calls_since(0), 2)
+        calls = self.model.calls
+        self.learn.reconcile(self.now + 1, roots=[self.history], stable_seconds=0, max_model_calls=2)
+        self.assertEqual(self.model.calls, calls)
+
+    def test_one_lesson_is_learned_used_and_withdrawn_when_proven_wrong(self):
+        def agent():
+            runner = "test-driver.py" if "repository with a test driver" in self.skill.read_text() else "focused-test.py"
+            return subprocess.run([sys.executable, runner], cwd=self.repo, capture_output=True).returncode
+
+        fake = self.model
+
+        class ValidatedReviewer:
+            usage = None
+
+            def review(inner, context):
+                return review_module._validate_proposal(fake.review(context), context)
+
+            def adversarial(inner, context, proposal):
+                review_module._validate_proposal_shape(proposal, allow_core_fields=True)
+                return review_module._validate_independent_review(fake.adversarial(context, proposal), proposal)
+
+        self.learn.reviewer = ValidatedReviewer()
+        self.assertEqual(agent(), 2)
+        finding, prior = self.promoted_finding()
+        self.assertEqual(agent(), 0)
+        self.report_regression(prior, "regression-one", "regression-two")
+        self.learn.reviewer = self.supersede_reviewer(finding, prior)
+        self.run_cycle()
+        self.assertEqual(self.store.db.execute("SELECT state FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()[0], "reversed")
+        self.assertEqual(agent(), 2)
 
     def test_local_modification_survives_promotion(self):
         self.global_pattern()
@@ -485,6 +661,88 @@ class LearningTest(unittest.TestCase):
             findings = {self.learn._cluster(identity, "correction", text, self.now) for text in examples}
         self.assertEqual(len(findings), 3)
 
+    def contradicting_reviewer(self, withdraws):
+        fake = self.model
+        negated = "When reproducing failing tests in a repository with a test driver, do not run the focused reproduction with that driver."
+
+        class Contradicting:
+            usage = None
+
+            def __init__(inner):
+                inner.contexts = []
+
+            def review(inner, context):
+                inner.contexts.append(context)
+                fake.future_action = negated
+                result = fake.review(context)
+                if withdraws and context.get("conflicting_advice"):
+                    result.update(action="supersede", supersedes=context["conflicting_advice"][0]["id"])
+                return review_module._validate_proposal(result, context)
+
+            def adversarial(inner, context, proposal):
+                return fake.adversarial(context, proposal)
+
+        return Contradicting()
+
+    def establish_driver_memory(self):
+        self.model.target = "memory"
+        self.transcript("one")
+        self.transcript("two")
+        self.run_cycle()
+        memory = self.store.db.execute("SELECT * FROM learning_memories").fetchone()
+        self.assertEqual(memory["state"], "approved")
+        return memory
+
+    def report_driver_harm(self, *names):
+        for name in names:
+            self.transcript(name, [("user", "Again, do not use the repository test driver when reproducing failing tests because it hides diagnostics.")])
+
+    def test_contradicting_correction_withdraws_the_advice_it_contradicts(self):
+        memory = self.establish_driver_memory()
+        reviewer = self.contradicting_reviewer(withdraws=True)
+        self.learn.reviewer = reviewer
+        self.report_driver_harm("harm-one", "harm-two")
+        self.run_cycle()
+        self.assertTrue(reviewer.contexts[-1]["conflicting_advice"])
+        self.assertEqual(self.store.db.execute("SELECT state FROM learning_memories WHERE finding=?", (memory["finding"],)).fetchone()[0], "superseded")
+        self.assertEqual(self.store.db.execute("SELECT state FROM learning_findings WHERE id=?", (memory["finding"],)).fetchone()[0], "superseded")
+        self.assertEqual(self.learn.recall(project_identity(self.repo), "test driver"), [])
+
+    def test_unresolved_contradiction_keeps_both_pieces_of_evidence(self):
+        memory = self.establish_driver_memory()
+        reviewer = self.contradicting_reviewer(withdraws=False)
+        self.learn.reviewer = reviewer
+        self.report_driver_harm("harm-one", "harm-two")
+        self.run_cycle()
+        held = self.store.db.execute("SELECT * FROM learning_findings WHERE id!=? AND signal='correction'", (memory["finding"],)).fetchone()
+        self.assertEqual((held["state"], held["retry_kind"]), ("held", "conflict"))
+        self.assertIn(str(memory["finding"]), held["reason"])
+        self.assertEqual([row[0] for row in self.store.db.execute("SELECT state FROM learning_memories")], ["approved"])
+        self.assertEqual(len(self.learn.recall(project_identity(self.repo), "test driver")), 1)
+        reviews = len(reviewer.contexts)
+        self.report_driver_harm("harm-three")
+        self.now += 1
+        self.run_cycle()
+        self.assertGreater(len(reviewer.contexts), reviews)
+
+    def test_recurrence_of_the_oldest_correction_advances_past_the_cluster_window(self):
+        identity = project_identity(self.repo)
+        text = "Again, use `driver-%d.py` to reproduce the failing database test."
+        with self.store.db:
+            for index in range(301):
+                self.learn._cluster(identity, "correction", text % index, self.now)
+        other = self.base / "other-project"
+        git(self.base, "clone", "--quiet", str(self.repo), str(other))
+        self.learn.enable(other, self.repo, 0)
+        self.transcript("recurrence", [("user", text % 0)])
+        self.transcript("elsewhere", [("user", "Stop, wrong command; use the other repository's driver instead.")], cwd=other)
+        self.run_cycle()
+        self.run_cycle()
+        processed = {row[0] for row in self.store.db.execute("SELECT session FROM learning_processed")}
+        self.assertEqual(processed, {"recurrence", "elsewhere"})
+        incident = self.store.db.execute("SELECT finding FROM learning_incidents WHERE session='recurrence'").fetchone()
+        self.assertEqual(incident[0], 1)
+
     def test_dirty_to_clean_promotion_reuses_the_reviewed_proposal(self):
         self.global_pattern()
         path = self.repo / "focused-test.py"
@@ -570,6 +828,7 @@ class LearningTest(unittest.TestCase):
 
             def adversarial(inner, context, proposal):
                 challenges.append(1)
+                review_module._validate_proposal_shape(proposal, allow_core_fields=True)
                 if len(challenges) == 1:
                     raise OSError("temporary review outage")
                 return fake.adversarial(context, proposal)
@@ -671,6 +930,76 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         row = self.store.db.execute("SELECT retry_kind,reason FROM learning_findings").fetchone()
         self.assertEqual(row["retry_kind"], "invalid_response")
+
+    def test_malformed_edit_is_retried_with_the_reason_it_failed(self):
+        self.model.target = "memory"
+        fake = self.model
+        contexts = []
+
+        class Malformed:
+            usage = None
+
+            def review(inner, context):
+                contexts.append(context)
+                if not context.get("previous_failure"):
+                    raise review_module.ReviewError("edit_not_grounded_in_guidance")
+                return review_module._validate_proposal(fake.review(context), context)
+
+            def adversarial(inner, context, proposal):
+                return fake.adversarial(context, proposal)
+
+        self.learn.reviewer = Malformed()
+        self.transcript("first")
+        self.transcript("second")
+        self.run_cycle()
+        row = self.store.db.execute("SELECT state,retry_kind FROM learning_findings").fetchone()
+        self.assertEqual((row["state"], row["retry_kind"]), ("deferred", "invalid_response"))
+        self.now += 900
+        self.run_cycle()
+        self.assertEqual(contexts[-1]["previous_failure"], "edit_not_grounded_in_guidance")
+        self.assertEqual(self.store.db.execute("SELECT state FROM learning_findings").fetchone()[0], "memory")
+
+    def test_approval_with_listed_risks_is_revised_with_those_risks_and_then_promoted(self):
+        fake = self.model
+        contexts, cautious = [], [True]
+
+        class Cautious:
+            usage = None
+
+            def review(inner, context):
+                contexts.append(context)
+                return review_module._validate_proposal(fake.review(context), context)
+
+            def adversarial(inner, context, proposal):
+                verdict = dict(fake.adversarial(context, proposal))
+                if cautious[0]:
+                    verdict["risks"] = ["The wording could be read too broadly."]
+                return review_module._validate_independent_review(verdict, proposal)
+
+        self.learn.reviewer = Cautious()
+        self.global_pattern()
+        self.run_cycle()
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE state='promoted'").fetchone()[0], 0)
+        row = self.store.db.execute("SELECT retry_kind,reason FROM learning_findings WHERE retry_kind='invalid_response'").fetchone()
+        self.assertIn("The wording could be read too broadly.", row["reason"])
+        cautious[0] = False
+        self.now += 900
+        self.run_cycle()
+        self.assertIn("The wording could be read too broadly.", contexts[-1]["previous_failure"])
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE state='promoted'").fetchone()[0], 1)
+
+    def test_failed_reviews_still_count_against_the_model_call_budget(self):
+        class Spends:
+            usage = {"calls": [{"mode": "proposal"}, {"mode": "adversarial"}]}
+
+            def review(inner, context):
+                raise review_module.ReviewError("edit_not_grounded_in_guidance", usage=None)
+
+        self.learn.reviewer = Spends()
+        self.transcript("first")
+        self.transcript("second")
+        self.run_cycle()
+        self.assertEqual(self.learn._model_calls_since(0), 2)
 
     def test_crashed_review_records_interruption_and_can_retry(self):
         original = self.model.review

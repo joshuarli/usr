@@ -166,6 +166,9 @@ def _environment(overrides=None):
         } or key.startswith(("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")):
             env.pop(key, None)
     env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "rerere.enabled"
+    env["GIT_CONFIG_VALUE_0"] = "false"
     if overrides:
         env.update(overrides)
     return env
@@ -973,6 +976,7 @@ def _remove_owned_worktree_metadata(
             raise _PromotionFailure("owned Git metadata path changed", "worktree_occupied", git_dir)
         names = set(os.listdir(directory_descriptor))
         known = {
+            "COMMIT_EDITMSG",
             "HEAD",
             "ORIG_HEAD",
             "commondir",
@@ -1586,6 +1590,42 @@ def _recovered_promotion_candidate(worktree, expected_head, proposal_id, skill, 
     return candidate
 
 
+def _changed_lines(repository, before, after, target):
+    output = _git_bytes(
+        repository,
+        "diff",
+        "-U0",
+        "--no-color",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        before,
+        after,
+        "--",
+        target,
+    )
+    lines = output.split(b"\n")
+    added = sorted(line[1:] for line in lines if line.startswith(b"+") and not line.startswith(b"+++"))
+    removed = sorted(line[1:] for line in lines if line.startswith(b"-") and not line.startswith(b"---"))
+    return added, removed
+
+
+def _inverse_patch(repository, commit, target):
+    return _git_bytes(
+        repository,
+        "diff",
+        "-U1",
+        "--no-color",
+        "--no-ext-diff",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        commit + "^",
+        commit,
+        "--",
+        target,
+    )
+
+
 def _recovered_rollback_candidate(worktree, expected_head, promotion_commit, target):
     candidate = _head(worktree)
     parents = _git(worktree, "rev-list", "--parents", "-n", "1", candidate).split()
@@ -1617,15 +1657,20 @@ def _recovered_rollback_candidate(worktree, expected_head, promotion_commit, tar
             worktree,
         )
     try:
-        expected = _git_bytes(worktree, "show", "{}^:{}".format(promotion_commit, target))
-        actual = (worktree / target).read_bytes()
+        if expected_head == promotion_commit:
+            expected = _git_bytes(worktree, "show", "{}^:{}".format(promotion_commit, target))
+            actual = (worktree / target).read_bytes()
+            matches = actual == expected
+        else:
+            added, removed = _changed_lines(worktree, promotion_commit + "^", promotion_commit, target)
+            matches = _changed_lines(worktree, expected_head, candidate, target) == (removed, added)
     except (OSError, _PromotionFailure) as exc:
         raise _PromotionFailure(
             "owned rollback content could not be verified",
             "worktree_occupied",
             worktree,
         ) from exc
-    if actual != expected:
+    if not matches:
         raise _PromotionFailure(
             "owned rollback content does not match this promotion",
             "worktree_occupied",
@@ -1839,10 +1884,15 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
         root = _repository_root(repository)
         with _promotion_lock(root):
             head = _expected_head(root, expected_head)
-            if commit != head:
-                raise _PromotionFailure("rollback is allowed only for the current HEAD commit")
             branch = _current_branch(root)
             _worktree_clean(root)
+            in_history = _command(
+                ["git", "-C", os.fspath(root), "merge-base", "--is-ancestor", commit, head],
+                root,
+                check=False,
+            )
+            if in_history.returncode != 0:
+                raise _PromotionFailure("promotion commit is not in the current branch history")
             message = _commit_message(root, commit)
             proposal_lines = [
                 line.partition(": ")[2]
@@ -1883,6 +1933,18 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
             parents = _git(root, "rev-list", "--parents", "-n", "1", commit).split()
             if len(parents) != 2:
                 raise _PromotionFailure("promotion commit is not a single-parent commit")
+            inverse = _inverse_patch(root, commit, target)
+            applies = _command(
+                ["git", "-C", os.fspath(root), "apply", "-R", "--check", "-"],
+                root,
+                input_bytes=inverse,
+                check=False,
+            )
+            if applies.returncode != 0:
+                raise _PromotionFailure(
+                    "the promoted paragraph changed since promotion",
+                    "paragraph_changed",
+                )
             worktree_root = _safe_worktree_root(root)
             worktree = _staging_worktree(
                 root,
@@ -1906,12 +1968,10 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
                         target,
                     )
                 else:
-                    _git(
+                    _command(
+                        ["git", "-C", os.fspath(worktree), "apply", "-R", "--index", "-"],
                         worktree,
-                        "revert",
-                        "--no-commit",
-                        commit,
-                        config=(("core.hooksPath", "/dev/null"), ("user.name", "Learning Promotion"), ("user.email", "agent-learning-promotion@localhost")),
+                        input_bytes=inverse,
                     )
                     _run_skill_check(worktree)
                     _git(worktree, "add", "--", target)
