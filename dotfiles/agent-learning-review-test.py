@@ -219,12 +219,12 @@ else:
         context = sample_context(synthetic_tool_activity=True)
         with self.use_fake_codex(), self.assertRaisesRegex(REVIEW.ReviewError, "unexpected_tool_activity") as caught:
             self.reviewer.review(context)
-        self.assertEqual(caught.exception.category, "invalid_response")
+        self.assertEqual(caught.exception.category, "capability")
 
     def test_review_rejects_unknown_jsonl_event(self):
         with self.assertRaisesRegex(REVIEW.ReviewError, "unexpected_tool_activity") as caught:
             REVIEW._jsonl_response(b'{"type":"mcp_tool_call"}\n')
-        self.assertEqual(caught.exception.category, "invalid_response")
+        self.assertEqual(caught.exception.category, "capability")
 
     def test_owner_catalog_can_route_to_a_second_review_without_an_edit(self):
         context = sample_context(owning_guidance={"other-owner": "Unrelated guide."})

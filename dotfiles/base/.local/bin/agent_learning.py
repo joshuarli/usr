@@ -17,7 +17,7 @@ from agent_learning_ops import SchedulerError
 from agent_session_store import Store, StoreError, default_state_dir, project_identity, redact
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_EVENTS = 2000
 MAX_REVIEWS = 2
 STABLE_SECONDS = 120
@@ -29,6 +29,10 @@ STOP_WORDS = frozenset("a an the to in of for and or is it this that you i we pl
 
 class LearningError(Exception):
     pass
+
+
+class RetryableLearningError(LearningError):
+    category = "transient"
 
 
 def initialize(db):
@@ -80,8 +84,27 @@ def initialize(db):
     row = db.execute("SELECT version FROM learning_schema").fetchone()
     if row is None:
         db.execute("INSERT INTO learning_schema VALUES(?)", (SCHEMA_VERSION,))
-    elif row[0] != SCHEMA_VERSION:
+    elif row[0] not in (1, SCHEMA_VERSION):
         raise LearningError("incompatible learning schema; preserve database and upgrade the tool")
+    with db:
+        additions = {
+            "learning_findings": {"retry_kind": "TEXT NOT NULL DEFAULT 'evidence'", "failure_count": "INTEGER NOT NULL DEFAULT 0", "input_key": "TEXT", "checked_head": "TEXT"},
+            "learning_memories": {"validity": "TEXT NOT NULL DEFAULT '[]'"},
+            "learning_reviews": {"proposal": "TEXT"},
+        }
+        for table, columns in additions.items():
+            existing = {column[1] for column in db.execute("PRAGMA table_info("+table+")")}
+            for column, declaration in columns.items():
+                if column not in existing:
+                    db.execute("ALTER TABLE "+table+" ADD COLUMN "+column+" "+declaration)
+        if row is not None and row[0] == 1:
+            for finding in db.execute("SELECT id,state,reason FROM learning_findings WHERE state IN ('deferred','held')").fetchall():
+                reason = finding["reason"] or ""
+                if re.search(r"codex_exit|timeout|unavailable|authentication|interrupted review", reason, re.I):
+                    db.execute("UPDATE learning_findings SET retry_kind='transient',attempts=0 WHERE id=?", (finding["id"],))
+                elif re.search(r"local or staged|HEAD changed|branch changed|worktree.*occupied|promotion is active", reason, re.I):
+                    db.execute("UPDATE learning_findings SET retry_kind='git' WHERE id=?", (finding["id"],))
+        db.execute("UPDATE learning_schema SET version=? WHERE version!=?", (SCHEMA_VERSION, SCHEMA_VERSION))
     db.commit()
 
 
@@ -90,7 +113,54 @@ def words(text):
 
 
 def similarity(left, right):
-    return len(left & right) / max(1, min(len(left), len(right)))
+    return len(left & right) / max(1, len(left | right))
+
+
+def correction_direction(text):
+    return bool(re.search(r"\b(?:never|avoid|not)\b|don't", text, re.I))
+
+
+def artifact_text(cwd, path):
+    relative = Path(path)
+    if relative.is_absolute() or not relative.parts or any(part in ("..", ".git", ".work") for part in relative.parts):
+        raise LearningError("memory condition must name a tracked project file")
+    top = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"], capture_output=True, timeout=10, check=True)
+    root = Path(top.stdout.decode().strip()).resolve(strict=True)
+    candidate = root
+    for part in relative.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise LearningError("memory condition may not traverse symlinks")
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative)], capture_output=True, timeout=10)
+    if tracked.returncode or not candidate.is_file() or candidate.stat().st_size > 262144:
+        raise LearningError("memory condition source is unavailable or too large")
+    return candidate.read_text()
+
+
+def bounded_context(context, limit=22000):
+    result = json.loads(json.dumps(context))
+    while len(json.dumps(result)) > limit:
+        for key in ("related_findings", "existing_memories", "existing_instructions", "tracked_project_files"):
+            if result.get(key):
+                result[key].pop()
+                break
+        else:
+            guidance = result.get("owning_guidance", {})
+            if isinstance(guidance, dict) and len(guidance) > 1:
+                guidance.pop(next(reversed(guidance)))
+                continue
+            for record in result.get("evidence", []):
+                window = record.get("window", [])
+                if len(window) > 3:
+                    anchor = next(index for index, event in enumerate(window) if event["position"] == record["position"])
+                    record["window"] = window[max(0, anchor-1):anchor+2]
+                    break
+            else:
+                if result.get("existing_owners"):
+                    result["existing_owners"].pop()
+                    continue
+                raise LearningError("review context cannot fit the bounded evidence budget")
+    return result
 
 
 def canonical_command(text):
@@ -127,6 +197,14 @@ def git_revision(path):
 def repository_state(path):
     status = subprocess.run(["git", "-C", str(path), "status", "--porcelain", "--untracked-files=all"], capture_output=True, timeout=10, check=True)
     return hashlib.sha256(git_revision(path).encode() + status.stdout).hexdigest()
+
+
+def instruction_digest(repository):
+    path = Path(repository) / "dotfiles/base/.codex/AGENTS.md"
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return "missing"
 
 
 @contextlib.contextmanager
@@ -173,10 +251,19 @@ class Learner:
         return [dict(row) for row in reversed(rows[:MAX_EVENTS])], truncated
 
     def _cluster(self, project, signal, text, now):
-        terms = words(text)
+        if signal == "correction" and re.search(r"\b(caused|regression|contradicts)\b", text, re.I):
+            for promoted in self.db.execute("SELECT id,proposal FROM learning_findings WHERE state='promoted' AND proposal IS NOT NULL"):
+                action = json.loads(promoted["proposal"])["future_action"]
+                if action in text:
+                    return promoted["id"]
+        anchors = {"literal-"+hashlib.sha256(value.encode()).hexdigest()[:16] for value in re.findall(r"`([^`]+)`", text)}
+        terms = words(text) | anchors | {"negative-correction" if correction_direction(text) else "positive-correction"}
         fingerprint = hashlib.sha256((signal + " " + " ".join(sorted(terms))).encode()).hexdigest()
         for row in self.db.execute("SELECT * FROM learning_findings WHERE project=? AND signal=? ORDER BY id DESC LIMIT 300", (project, signal)):
-            if row["fingerprint"] == fingerprint or (len(terms) >= 3 and similarity(terms, words(row["terms"])) >= .72):
+            previous = words(row["terms"])
+            same_direction = ("negative-correction" in terms) == ("negative-correction" in previous)
+            same_literals = {value for value in previous if value.startswith("literal-")} == anchors
+            if row["fingerprint"] == fingerprint or (same_direction and same_literals and len(terms) >= 4 and similarity(terms, previous) >= .82):
                 return row["id"]
         cursor = self.db.execute("""INSERT INTO learning_findings(project,signal,fingerprint,terms,state,created_at,updated_at)
             VALUES(?,?,?,?,'pending',?,?)""", (project, signal, fingerprint, " ".join(sorted(terms)), now, now))
@@ -228,23 +315,52 @@ class Learner:
                         (finding, session["id"], self._root_session(session["id"]), event["position"], event["digest"], signal, now))
                     if cursor.rowcount:
                         found += 1
+                        root = self._root_session(session["id"])
+                        new_root = root != "unresolved-ancestry" and self.db.execute("SELECT count(*) FROM learning_incidents WHERE finding=? AND root_session=?", (finding, root)).fetchone()[0] == 1
                         self.db.execute("""UPDATE learning_findings SET updated_at=?,
-                            state=CASE WHEN state IN ('deferred','rejected') THEN 'pending' ELSE state END
-                            WHERE id=?""", (now, finding))
+                            state=CASE WHEN ? AND state IN ('deferred','rejected','held') AND retry_kind IN ('evidence','invalid_response','unsafe') THEN 'pending' ELSE state END,
+                            attempts=CASE WHEN ? AND state IN ('deferred','rejected','held') AND retry_kind IN ('evidence','invalid_response','unsafe') THEN 0 ELSE attempts END,
+                            retry_at=CASE WHEN ? AND state IN ('deferred','rejected','held') AND retry_kind IN ('evidence','invalid_response','unsafe') THEN 0 ELSE retry_at END
+                            WHERE id=?""", (now, new_root, new_root, new_root, finding))
                 self.db.execute("INSERT OR REPLACE INTO learning_processed VALUES(?,?,?,?)", (session["id"], signature, now, int(truncated)))
                 self.evaluate(session, events)
             processed += 1
         return {"processed": processed, "signals": found}
 
-    def _evidence(self, finding):
-        evidence = []
-        for row in self.db.execute("SELECT * FROM learning_incidents WHERE finding=? ORDER BY id DESC LIMIT 6", (finding,)):
+    def _evidence(self, finding, *, related=True, after=None, verify=True):
+        owner = self.db.execute("SELECT project,fingerprint FROM learning_findings WHERE id=?", (finding,)).fetchone()
+        rows = self.db.execute("""WITH incidents AS (SELECT i.*,s.project,s.cwd FROM learning_incidents i
+            JOIN learning_findings f ON f.id=i.finding JOIN sessions s ON s.id=i.session
+            JOIN learning_projects p ON p.project=s.project WHERE p.enabled=1 AND (f.id=? OR (? AND f.fingerprint=?))
+            AND (? IS NULL OR i.observed_at>?)) SELECT * FROM incidents
+            WHERE id IN (SELECT max(id) FROM incidents GROUP BY root_session)
+            ORDER BY observed_at DESC,id DESC LIMIT 120""",
+            (finding, int(related), owner["fingerprint"], after, after)).fetchall()
+        candidates, roots = [], set()
+        for record in rows:
+            row = dict(record)
+            row["root_session"] = self._root_session(row["session"])
+            if row["root_session"] == "unresolved-ancestry" or row["root_session"] in roots:
+                continue
+            roots.add(row["root_session"])
+            candidates.append(row)
+        candidates.sort(key=lambda row: (row["project"] != owner["project"], -row["observed_at"]))
+        evidence, projects = [], set()
+        selected = []
+        for row in candidates:
+            if row["project"] not in projects:
+                selected.append(row)
+                projects.add(row["project"])
+        selected.extend(row for row in candidates if row not in selected)
+        for row in selected[:6]:
             row = dict(row)
+            if not verify:
+                evidence.append(row)
+                continue
             self.store.resolve_evidence(row["session"], row["position"], row["digest"])
-            window = self.db.execute("""SELECT * FROM events WHERE session=? AND position>=
-                COALESCE((SELECT position FROM events WHERE session=? AND position<? ORDER BY position DESC LIMIT 1 OFFSET 3),0)
-                ORDER BY position LIMIT 9""", (row["session"], row["session"], row["position"]))
-            row["window"] = [{"kind": e["kind"], "text": redact(e["text"])[:650], "position": e["position"]} for e in list(window)[:5]]
+            before = list(self.db.execute("SELECT * FROM events WHERE session=? AND position<? ORDER BY position DESC LIMIT 2", (row["session"], row["position"])))
+            after_rows = list(self.db.execute("SELECT * FROM events WHERE session=? AND position>=? ORDER BY position LIMIT 3", (row["session"], row["position"])))
+            row["window"] = [{"kind": e["kind"], "text": redact(e["text"])[:650], "position": e["position"], "digest": e["digest"]} for e in list(reversed(before))+after_rows]
             evidence.append(row)
         return evidence
 
@@ -275,14 +391,90 @@ class Learner:
             for paragraph in sorted(paragraphs, key=lambda text: len(words(text) & words(finding["terms"])), reverse=True):
                 if sum(map(len, existing_guidance)) + len(paragraph) <= 2500:
                     existing_guidance.append(redact(paragraph))
-        context = {"signal": finding["signal"], "evidence": evidence[:2], "existing_owners": descriptions,
+        context = {"signal": finding["signal"], "evidence": evidence[:3], "existing_owners": descriptions,
+                "project": finding["project"],
                 "owning_guidance": owning_guidance,
                 "existing_instructions": existing_guidance,
-                "related_findings": related, "existing_memories": self.recall(finding["project"], finding["terms"], check_revision=False),
-                "policy": "Structural fixes before prose. Hold unrelated code changes. Inspect owning guidance before edits. Never change permissions, security, authorization, model routing or verification requirements. Existing rule ignored means improve execution or discovery, not duplicate rules."}
-        while len(json.dumps(context)) > 22000 and context["related_findings"]:
-            context["related_findings"].pop()
-        return context
+                "related_findings": related, "existing_memories": self.recall(finding["project"], finding["terms"]),
+                "policy": "Structural fixes before prose. Hold unrelated code changes. Inspect owning guidance before edits. Never change permissions, security, authorization, model routing or verification requirements. Existing rule ignored means improve execution or discovery, not duplicate rules. Project commands and conventions belong in project memory. Global skill improvements require corroboration from two enabled repositories; recurrence in one repository is insufficient. Explain the applicability beyond the observed repository, not merely generic wording."}
+        context["tracked_project_files"] = self._project_sources(finding["project"], evidence)
+        return bounded_context(context)
+
+    def _project_sources(self, project, evidence):
+        row = self.db.execute("SELECT cwd FROM learning_projects WHERE project=?", (project,)).fetchone()
+        text = " ".join(event["text"] for item in evidence if item["project"] == project for event in item["window"])
+        sources = []
+        for path in sorted(set(re.findall(r"[\w./-]+\.(?:py|sh|toml|md|json|yaml|yml|rs|ts|js)\b", text)))[:6]:
+            try:
+                content = artifact_text(row["cwd"], path)
+            except (LearningError, OSError, UnicodeError):
+                continue
+            sources.append({"path": path, "evidence": redact(content[:1600])})
+            if len(sources) == 3:
+                break
+        return sources
+
+    def _failure(self, finding, error, now, review_id=None):
+        kind = getattr(error, "category", "unsafe")
+        if isinstance(error, (OSError, subprocess.TimeoutExpired)):
+            kind = "transient"
+        row = self.db.execute("SELECT * FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()
+        failures = row["failure_count"]+1
+        attempts = row["attempts"] + int(kind == "invalid_response")
+        delay = min(21600, 300 * 2**min(failures-1, 7))
+        state = "held" if kind in ("unsafe", "capability") or (kind == "invalid_response" and attempts >= 3) else "deferred"
+        if finding["state"] in ("promoted", "memory"):
+            state = finding["state"]
+        key = None
+        if kind == "capability":
+            project = self.db.execute("SELECT repository FROM learning_projects WHERE project=?", (finding["project"],)).fetchone()
+            key = self._capability_key(project[0])
+        with self.db:
+            self.db.execute("UPDATE learning_findings SET state=?,retry_kind=?,failure_count=?,attempts=?,retry_at=?,input_key=?,reason=?,updated_at=? WHERE id=?",
+                            (state, kind, failures, attempts, now+delay if kind != "unsafe" else 0, key, redact(str(error))[:600], now, finding["id"]))
+            if review_id is not None:
+                self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome=? WHERE id=?", (now, kind, review_id))
+            if finding["state"] in ("promoted", "memory") and (kind == "unsafe" or (kind == "invalid_response" and attempts >= 3)):
+                self.db.execute("UPDATE learning_findings SET reviewed_incidents=? WHERE id=?", (self._incident_count(finding), finding["id"]))
+
+    def _capability_key(self, repository):
+        reviewer = self.reviewer
+        if reviewer is None:
+            from agent_learning_review import CodexReviewer
+            reviewer = CodexReviewer(Path(repository), self.store.state_dir)
+        capability = reviewer.capabilities() if hasattr(reviewer, "capabilities") else {"status": "unknown"}
+        digest = hashlib.sha256(json.dumps(capability, sort_keys=True).encode())
+        for path in (Path(repository) / "dotfiles/base/.agents/skills/orchestrate/SKILL.md", Path(__file__).with_name("agent_learning_review.py")):
+            try:
+                digest.update(path.read_bytes())
+            except FileNotFoundError:
+                digest.update(b"missing")
+        return digest.hexdigest()
+
+    def _promotion_payload(self, proposal):
+        fields = {"proposal_id", "action", "owner", "target", "target_skill", "observation", "original_action", "better_action", "future_action", "applicability", "alternatives", "uncertainty", "evidence_refs", "edit", "independent_review"}
+        payload = {key: value for key, value in proposal.items() if key in fields}
+        payload["independent_review"] = {key: proposal["independent_review"][key] for key in ("approves", "risks", "owner", "does_not_weaken")}
+        return payload
+
+    def _global_evidence(self, proposal, evidence):
+        refs = {(ref["session"], ref["position"], ref["digest"]) for ref in proposal["evidence_refs"]}
+        selected = [row for row in evidence if (row["session"], row["position"], row["digest"]) in refs]
+        return (proposal.get("scope") == "global" and bool(proposal.get("scope_reason"))
+                and len({row["project"] for row in selected}) >= 2
+                and len({row["root_session"] for row in selected if row["root_session"] != "unresolved-ancestry"}) >= 2)
+
+    def _promotion_outcome(self, result):
+        code = result.get("reason_code")
+        if result["status"] == "promoted":
+            return "promoted", "none"
+        if code == "lock_contended":
+            return "held", "lock"
+        if code in ("repository_dirty", "repository_changed", "worktree_occupied"):
+            return "held", "git"
+        if code == "validation_failed":
+            return "held", "validation"
+        return "held", "unsafe"
 
     def _verify(self, refs, evidence):
         if not refs or not isinstance(refs, list):
@@ -293,6 +485,9 @@ class Learner:
                 if (ref["session"], ref["position"], ref["digest"]) not in allowed:
                     return False
                 self.store.resolve_evidence(ref["session"], ref["position"], ref["digest"])
+                record = next(item for item in evidence if (item["session"], item["position"], item["digest"]) == (ref["session"], ref["position"], ref["digest"]))
+                for event in record.get("window", []):
+                    self.store.resolve_evidence(ref["session"], event["position"], event["digest"])
         except (KeyError, OSError, ValueError, StoreError, sqlite3.Error):
             return False
         return True
@@ -307,10 +502,14 @@ class Learner:
             with self.db:
                 self.db.execute("UPDATE learning_findings SET state='rejected',reason=? WHERE id=?", (redact(str(error))[:600], finding["id"]))
             return
+        if len(evidence) < 2:
+            with self.db:
+                self.db.execute("UPDATE learning_findings SET state='deferred',retry_kind='evidence',retry_at=0,reason='awaiting independent corroboration' WHERE id=?", (finding["id"],))
+            return
         context = self._context(finding, repository, evidence)
         with self.db:
-            self.db.execute("UPDATE learning_findings SET state='reviewing',attempts=attempts+1,reviewed_incidents=? WHERE id=?",
-                            (len(evidence), finding["id"]))
+            count = self._incident_count(finding)
+            self.db.execute("UPDATE learning_findings SET state='reviewing',reviewed_incidents=? WHERE id=?", (count, finding["id"]))
             review_id = self.db.execute("INSERT INTO learning_reviews(finding,started_at) VALUES(?,?)", (finding["id"], now)).lastrowid
         reviewer = self.reviewer
         try:
@@ -318,15 +517,20 @@ class Learner:
                 from agent_learning_review import CodexReviewer
                 reviewer = CodexReviewer(repository, self.store.state_dir)
             proposal = reviewer.review(context)
+            with self.db:
+                self.db.execute("UPDATE learning_reviews SET proposal=? WHERE id=?", (json.dumps(proposal), review_id))
             if not self._verify(proposal.get("evidence_refs"), evidence):
                 raise LearningError("proposal evidence does not resolve to the selected original records")
-            state, reason, commit = "deferred", "insufficient independent evidence", None
+            state, reason, commit, retry_kind = "deferred", "insufficient independent evidence", None, "evidence"
             proposal["proposal_id"] = finding["fingerprint"]
             proposal["target_skill"] = proposal["owner"]
             proposal["blocked_state"] = repository_state(repository)
             proposal["base_head"] = expected_head
+            if proposal.get("scope") not in ("project", "global") or not proposal.get("scope_reason"):
+                raise LearningError("review must establish project or global applicability")
             ref_keys = {(ref["session"], ref["position"], ref["digest"]) for ref in proposal["evidence_refs"]}
             independent = len({e["root_session"] for e in evidence if e["root_session"] != "unresolved-ancestry" and (e["session"], e["position"], e["digest"]) in ref_keys}) >= 2
+            referenced_projects = {e["project"] for e in evidence if (e["session"], e["position"], e["digest"]) in ref_keys}
             represented = False
             for previous in self.db.execute("SELECT project,proposal FROM learning_findings WHERE id!=? AND state IN ('promoted','memory') AND proposal IS NOT NULL", (finding["id"],)):
                 prior = json.loads(previous["proposal"])
@@ -338,6 +542,7 @@ class Learner:
                 state, reason = "superseded", "an approved finding already represents this action"
             elif proposal["action"] == "reject":
                 state, reason = "rejected", proposal["uncertainty"]
+                retry_kind = "unsafe"
             elif proposal["action"] == "supersede":
                 older = proposal.get("supersedes", 0)
                 with self.db:
@@ -345,8 +550,18 @@ class Learner:
                 state, reason = "superseded", "new evidence supersedes project memory; skill reversal needs attributable regression"
             elif proposal["action"] == "improve" and independent:
                 if proposal["target"] == "memory":
+                    if proposal["scope"] != "project" or referenced_projects != {finding["project"]}:
+                        raise LearningError("project memory requires evidence and applicability from its own project")
                     state, reason = self._approve_memory(finding, project, proposal, evidence, now)
+                    retry_kind = "none" if state == "memory" else "unsafe"
                 elif proposal["target"] == "skill":
+                    if not self._global_evidence(proposal, evidence):
+                        state, reason = "deferred", "global applicability needs corroboration in a second enabled project; retain local conventions as project memory"
+                        with self.db:
+                            self.db.execute("UPDATE learning_findings SET state=?,proposal=?,reason=?,retry_kind='evidence',retry_at=0,attempts=attempts+1 WHERE id=?",
+                                            (state, json.dumps(proposal), reason, finding["id"]))
+                            self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome='project_scope' WHERE id=?", (now, review_id))
+                        return
                     owner = proposal["owner"]
                     from agent_learning_promote import KNOWN_LEAF_SKILLS
                     if owner not in KNOWN_LEAF_SKILLS:
@@ -357,6 +572,8 @@ class Learner:
                         proposal = reviewer.review(context)
                         if proposal["owner"] != owner or proposal["target"] != "skill" or proposal["action"] != "improve" or not self._verify(proposal["evidence_refs"], evidence):
                             raise LearningError("proposal changed owner or evidence after inspecting guidance")
+                        if not self._global_evidence(proposal, evidence):
+                            raise LearningError("refined proposal lost independent global applicability")
                         proposal["proposal_id"] = finding["fingerprint"]
                         proposal["target_skill"] = owner
                         proposal["blocked_state"] = repository_state(repository)
@@ -364,18 +581,25 @@ class Learner:
                     skill = repository / "dotfiles/base/.agents/skills" / owner / "SKILL.md"
                     context["owning_guidance"] = {owner: skill.read_text()}
                     reviewer_proposal = {key: value for key, value in proposal.items() if key not in ("blocked_state", "base_head")}
-                    proposal["independent_review"] = reviewer.adversarial(context, reviewer_proposal)
+                    challenge = bounded_context(context, 28000-len(json.dumps(reviewer_proposal)))
+                    proposal["independent_review"] = reviewer.adversarial(challenge, reviewer_proposal)
+                    if proposal["independent_review"].get("globally_applicable") is not True or not proposal["independent_review"].get("scope_reason"):
+                        raise LearningError("independent review did not establish global applicability")
+                    proposal["owner_digest"] = hashlib.sha256(skill.read_bytes()).hexdigest()
+                    proposal["instructions_digest"] = instruction_digest(repository)
                     with self.db:
                         self.db.execute("UPDATE learning_findings SET proposal=?,reason='promotion prepared' WHERE id=?", (json.dumps(proposal), finding["id"]))
-                    promotion_proposal = {key: value for key, value in proposal.items() if key not in ("blocked_state", "base_head", "confidence", "supersedes")}
+                    promotion_proposal = self._promotion_payload(proposal)
                     refs = {(ref["session"], ref["position"], ref["digest"]) for ref in proposal["evidence_refs"]}
                     selected_evidence = [item for item in evidence if (item["session"], item["position"], item["digest"]) in refs]
                     result = promote(repository, promotion_proposal, selected_evidence, expected_head, verify_evidence=self._verify)
-                    state = "promoted" if result["status"] == "promoted" else "held"
+                    state, retry_kind = self._promotion_outcome(result)
                     reason, commit = result.get("reason"), result.get("commit")
+                    proposal["blocked_path"] = result.get("blocked_path")
+            condition_key = self._blocking_state(repository, proposal) if retry_kind in ("git", "lock", "validation") else None
             with self.db:
-                self.db.execute("""UPDATE learning_findings SET state=?,proposal=?,reason=?,commit_id=?,integrated_at=?,updated_at=? WHERE id=?""",
-                                (state, json.dumps(proposal), reason, commit, now if state in ("promoted", "memory") else None, now, finding["id"]))
+                self.db.execute("""UPDATE learning_findings SET state=?,proposal=?,reason=?,commit_id=?,integrated_at=?,updated_at=?,retry_kind=?,attempts=attempts+1,failure_count=0,retry_at=?,input_key=? WHERE id=?""",
+                                (state, json.dumps(proposal), reason, commit, now if state in ("promoted", "memory") else None, now, retry_kind, now+300 if retry_kind == "lock" else 0, condition_key, finding["id"]))
                 self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome=?,usage=? WHERE id=?",
                                 (now, state, json.dumps(getattr(reviewer, "usage", None)), review_id))
                 if state in ("promoted", "memory"):
@@ -384,10 +608,7 @@ class Learner:
                         if session:
                             self.evaluate(dict(session), self._events(session_id)[0])
         except (LearningError, StoreError, OSError, ValueError, sqlite3.Error, subprocess.SubprocessError) as error:
-            with self.db:
-                self.db.execute("UPDATE learning_findings SET state='deferred',reason=?,retry_at=?,updated_at=? WHERE id=?",
-                                (redact(str(error))[:600], now + 3600, now, finding["id"]))
-                self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome='error' WHERE id=?", (now, review_id))
+            self._failure(finding, error, now, review_id)
 
     def _approve_memory(self, finding, project, proposal, evidence, now):
         from agent_learning_promote import protected_text, safe_action
@@ -395,7 +616,10 @@ class Learner:
             return "held", "project memory may not change protected policies"
         if not proposal["future_action"].strip() or not proposal["applicability"].strip():
             return "rejected", "memory needs an action and applicability"
-        context = {"owning_guidance": "Project-specific memory. Never overrides repository rules.", "evidence": evidence[:2]}
+        refs = {(ref["session"], ref["position"], ref["digest"]) for ref in proposal["evidence_refs"]}
+        selected = [row for row in evidence if (row["session"], row["position"], row["digest"]) in refs]
+        context = {"owning_guidance": "Project-specific memory. Never overrides repository rules.", "evidence": selected,
+                   "tracked_project_files": self._project_sources(finding["project"], evidence)}
         reviewer = self.reviewer
         if reviewer is None:
             from agent_learning_review import CodexReviewer
@@ -404,21 +628,37 @@ class Learner:
         if not verdict.get("approves") or verdict.get("risks") or not verdict.get("does_not_weaken"):
             return "held", "independent review did not approve project memory"
         action = proposal["future_action"][:600]
+        validity = self._memory_conditions(project["cwd"], proposal.get("validity", []))
+        if not self._verify(proposal["evidence_refs"], selected):
+            raise LearningError("memory evidence changed during independent review")
         for memory in self.db.execute("SELECT action FROM learning_memories WHERE project=? AND state='approved'", (finding["project"],)):
-            if similarity(words(action), words(memory[0])) > .8:
+            if correction_direction(action) == correction_direction(memory[0]) and similarity(words(action), words(memory[0])) > .8:
                 return "superseded", "existing memory already represents this action"
         with self.db:
-            self.db.execute("INSERT OR REPLACE INTO learning_memories VALUES(?,?,?,?,?,'approved',?)",
-                            (finding["id"], finding["project"], action, proposal["applicability"][:400], git_revision(project["cwd"]), now))
+            self.db.execute("""INSERT OR REPLACE INTO learning_memories
+                (finding,project,action,applicability,revision,state,created_at,validity) VALUES(?,?,?,?,?,'approved',?,?)""",
+                            (finding["id"], finding["project"], action, proposal["applicability"][:400], git_revision(project["cwd"]), now, json.dumps(validity)))
         return "memory", "approved project-scoped action"
+
+    def _memory_conditions(self, cwd, conditions):
+        if not isinstance(conditions, list) or len(conditions) > 3:
+            raise LearningError("memory has invalid freshness conditions")
+        for condition in conditions:
+            if not isinstance(condition, dict) or set(condition) != {"path", "contains"} or any(not isinstance(value, str) or not value or len(value) > 800 for value in condition.values()):
+                raise LearningError("memory freshness requires a path and exact source excerpt")
+            if condition["contains"] not in artifact_text(cwd, condition["path"]):
+                raise LearningError("memory freshness condition is contradicted by current source")
+        return conditions
 
     def monitor(self, finding, project, now):
         proposal = json.loads(finding["proposal"])
-        incident_count = self.db.execute("SELECT count(*) FROM learning_incidents WHERE finding=?", (finding["id"],)).fetchone()[0]
-        if incident_count <= finding["reviewed_incidents"]:
+        incident_count = self._incident_count(finding)
+        if incident_count <= finding["reviewed_incidents"] or finding["retry_at"] > now:
+            return False
+        if finding["retry_kind"] == "capability" and finding["input_key"] == self._capability_key(project["repository"]):
             return False
         try:
-            evidence = [row for row in self._evidence(finding["id"]) if row["observed_at"] > finding["integrated_at"]]
+            evidence = self._evidence(finding["id"], related=finding["state"] == "promoted", after=finding["integrated_at"])
         except (StoreError, ValueError, OSError) as error:
             with self.db:
                 self.db.execute("UPDATE learning_findings SET reason=? WHERE id=?", (redact(str(error))[:600], finding["id"]))
@@ -434,45 +674,67 @@ class Learner:
         context = {"evidence": evidence[:2], "prior_promotion": proposal,
                    "policy": "Investigate attribution, alternatives and procedure adherence. Repeated corrections alone do not establish harm. Return supersede only for a clearly attributable regression, with the exact inverse edit and supersedes finding ID.",
                    "finding_id": finding["id"]}
+        previous = self.db.execute("SELECT proposal FROM learning_reviews WHERE finding=? AND outcome IN ('transient','interrupted') AND proposal IS NOT NULL ORDER BY id DESC LIMIT 1", (finding["id"],)).fetchone()
+        reusable = json.loads(previous[0]) if previous else None
+        if reusable is not None and not self._verify(reusable["evidence_refs"], evidence[:2]):
+            reusable = None
         with self.db:
-            self.db.execute("UPDATE learning_findings SET reviewed_incidents=? WHERE id=?", (incident_count, finding["id"]))
             review_id = self.db.execute("INSERT INTO learning_reviews(finding,started_at) VALUES(?,?)", (finding["id"], now)).lastrowid
+        concluded = False
         try:
-            review = reviewer.review(context)
+            review = reusable if reusable is not None else reviewer.review(context)
             with self.db:
+                self.db.execute("UPDATE learning_reviews SET proposal=? WHERE id=?", (json.dumps(review), review_id))
                 for item in evidence:
                     self.db.execute("UPDATE learning_evaluations SET assessment=? WHERE finding=? AND session=?",
                                     (json.dumps(review), finding["id"], item["session"]))
             if review["action"] != "supersede" or review.get("supersedes") != finding["id"] or not self._verify(review["evidence_refs"], evidence):
+                concluded = True
                 return True
             if finding["state"] == "memory":
                 with self.db:
                     self.db.execute("UPDATE learning_memories SET state='superseded' WHERE finding=?", (finding["id"],))
                     self.db.execute("UPDATE learning_findings SET state='superseded',reason='new evidence contradicts memory' WHERE id=?", (finding["id"],))
+                concluded = True
                 return True
             added_action = proposal["future_action"]
             attributed = all(any(added_action in e["text"] and re.search(r"\b(caused|regression|contradicts)\b", e["text"], re.I)
                                  for e in row["window"] if e["kind"] == "user") for row in evidence[:2])
             if not attributed or review["edit"] != {"old": proposal["edit"]["new"], "new": proposal["edit"]["old"]}:
+                concluded = True
                 return True
             verdict = reviewer.adversarial(context, review)
             if not verdict.get("approves") or verdict.get("risks") or not verdict.get("does_not_weaken"):
+                concluded = True
                 return True
             from agent_learning_promote import rollback
+            if not self._verify(review["evidence_refs"], evidence):
+                raise LearningError("regression evidence changed before rollback")
             result = rollback(repository, finding["commit_id"], git_revision(repository))
             if result["status"] == "reverted":
                 with self.db:
                     self.db.execute("UPDATE learning_findings SET state='reversed',reason=?,updated_at=? WHERE id=?",
                                     ("attributed regression reversed: " + str(result.get("commit")), now, finding["id"]))
+                concluded = True
+            elif result.get("reason_code") in ("repository_dirty", "repository_changed", "lock_contended", "worktree_occupied"):
+                raise RetryableLearningError(result["reason"])
+            else:
+                concluded = True
             return True
-        except (StoreError, ValueError, OSError, subprocess.SubprocessError) as error:
-            with self.db:
-                self.db.execute("UPDATE learning_findings SET reason=? WHERE id=?", (redact(str(error))[:600], finding["id"]))
+        except (LearningError, StoreError, ValueError, OSError, subprocess.SubprocessError) as error:
+            self._failure(finding, error, now, review_id)
             return True
         finally:
             with self.db:
-                self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome='monitor',usage=? WHERE id=?",
+                if concluded:
+                    self.db.execute("UPDATE learning_findings SET reviewed_incidents=?,failure_count=0,retry_kind='none',retry_at=0 WHERE id=?", (incident_count, finding["id"]))
+                self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome=coalesce(outcome,'monitor'),usage=? WHERE id=?",
                                 (now, json.dumps(getattr(reviewer, "usage", None)), review_id))
+
+    def _incident_count(self, finding):
+        return self.db.execute("""SELECT count(*) FROM learning_incidents i JOIN learning_findings f ON f.id=i.finding
+            JOIN sessions s ON s.id=i.session JOIN learning_projects p ON p.project=s.project
+            WHERE p.enabled=1 AND f.fingerprint=?""", (finding["fingerprint"],)).fetchone()[0]
 
     def reconcile(self, now, roots=None, stable_seconds=STABLE_SECONDS, max_reviews=MAX_REVIEWS):
         totals = {"processed": 0, "signals": 0, "reviews": 0}
@@ -480,78 +742,141 @@ class Learner:
             WHERE p.enabled=1 ORDER BY coalesce(h.observed_at,0) DESC,p.project"""))
         if not projects:
             return totals
+        self.store.refresh(roots=roots, projects={project["project"] for project in projects})
         self.resume_promotions(now)
         self.recover_rollbacks()
         with self.db:
-            self.db.execute("UPDATE learning_findings SET state='deferred',reason='interrupted review',retry_at=? WHERE state='reviewing'", (now + 3600,))
+            self.db.execute("UPDATE learning_findings SET state='deferred',retry_kind='transient',reason='interrupted review',retry_at=? WHERE state='reviewing'", (now + 300,))
+            self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome='interrupted' WHERE finished_at IS NULL", (now,))
         for project in projects:
-            self.store.refresh(roots=roots, project=project["project"])
             stats = self.discover(project["project"], now, stable_seconds)
             with self.db:
                 self.db.execute("DELETE FROM learning_hints WHERE project=? AND observed_at<=?", (project["project"], now))
             for key in stats:
                 totals[key] += stats[key]
-            with self.db:
-                for row in self.db.execute("SELECT * FROM learning_findings WHERE project=? AND state='held' AND proposal IS NOT NULL AND attempts<3", (project["project"],)).fetchall():
-                    if json.loads(row["proposal"]).get("blocked_state") != repository_state(project["repository"]):
-                        self.db.execute("UPDATE learning_findings SET state='pending' WHERE id=?", (row["id"],))
+        for project in projects:
             for row in self.db.execute("SELECT * FROM learning_findings WHERE project=? AND state IN ('promoted','memory')", (project["project"],)).fetchall():
                 if totals["reviews"] < max_reviews and self.monitor(row, project, now):
                     totals["reviews"] += 1
             pending = list(self.db.execute("""SELECT f.* FROM learning_findings f WHERE project=?
-                AND state IN ('pending','deferred') AND attempts<3 AND retry_at<=?
-                AND (state='pending' OR reason='interrupted review' OR reason LIKE '%unavailable%' OR retry_at>0)
+                AND (state IN ('pending','deferred') OR (state='held' AND retry_kind='capability')) AND retry_at<=?
+                AND NOT (retry_kind='invalid_response' AND attempts>=3)
                 ORDER BY (SELECT count(DISTINCT root_session) FROM learning_incidents WHERE finding=f.id) DESC,created_at
-                LIMIT ?""", (project["project"], now, max(0, max_reviews-totals["reviews"]))))
+                """, (project["project"], now)))
             for finding in pending:
+                if totals["reviews"] >= max_reviews:
+                    break
+                represented = self.db.execute("SELECT id FROM learning_findings WHERE id!=? AND fingerprint=? AND state='promoted' LIMIT 1", (finding["id"], finding["fingerprint"])).fetchone()
+                if represented:
+                    with self.db:
+                        self.db.execute("UPDATE learning_findings SET state='superseded',reason='equivalent global finding is already promoted' WHERE id=?", (finding["id"],))
+                    continue
+                if finding["retry_kind"] == "capability" and finding["input_key"] == self._capability_key(project["repository"]):
+                    continue
+                if finding["state"] == "deferred" and finding["retry_kind"] == "evidence" and finding["proposal"]:
+                    previous = json.loads(finding["proposal"])
+                    if "scope" in previous and self._incident_count(finding) <= finding["reviewed_incidents"]:
+                        continue
+                evidence = self._evidence(finding["id"], verify=False)
+                if len(evidence) < 2:
+                    if finding["state"] == "pending":
+                        with self.db:
+                            self.db.execute("UPDATE learning_findings SET state='deferred',retry_kind='evidence',reason='awaiting independent corroboration' WHERE id=?", (finding["id"],))
+                    continue
+                if finding["proposal"] and finding["retry_kind"] == "evidence":
+                    previous = json.loads(finding["proposal"])
+                    if previous.get("target") == "skill" and previous.get("scope") == "global" and len({row["project"] for row in evidence}) < 2:
+                        continue
                 self.review(finding, project, now)
                 totals["reviews"] += 1
         return totals
 
     def resume_promotions(self, now):
-        from agent_learning_promote import promote
+        from agent_learning_promote import promote, recover_promotion
         rows = self.db.execute("""SELECT f.*,p.repository FROM learning_findings f
             JOIN learning_projects p ON p.project=f.project WHERE p.enabled=1
-            AND f.state='reviewing' AND f.reason='promotion prepared' AND f.proposal IS NOT NULL LIMIT 2""").fetchall()
+            AND ((f.state='reviewing' AND f.reason='promotion prepared') OR
+                 (f.state='held' AND f.retry_kind IN ('git','lock','validation')))
+            AND f.proposal IS NOT NULL AND f.retry_at<=? ORDER BY f.updated_at LIMIT 2""", (now,)).fetchall()
         for row in rows:
             proposal = json.loads(row["proposal"])
             try:
-                evidence = self._evidence(row["id"])
-                refs = {(ref["session"], ref["position"], ref["digest"]) for ref in proposal["evidence_refs"]}
-                evidence = [item for item in evidence if (item["session"], item["position"], item["digest"]) in refs]
-                payload = {key: value for key, value in proposal.items() if key not in ("blocked_state", "base_head", "confidence", "supersedes")}
-                result = promote(Path(row["repository"]), payload, evidence, proposal["base_head"], verify_evidence=self._verify)
-                state = "promoted" if result["status"] == "promoted" else "held"
+                payload = self._promotion_payload(proposal)
+                result = recover_promotion(Path(row["repository"]), payload)
+                if result["status"] == "absent":
+                    key = self._blocking_state(row["repository"], proposal)
+                    if row["state"] == "held" and row["retry_kind"] != "lock" and key == row["input_key"]:
+                        continue
+                    evidence = self._evidence(row["id"])
+                    refs = {(ref["session"], ref["position"], ref["digest"]) for ref in proposal["evidence_refs"]}
+                    evidence = [item for item in evidence if (item["session"], item["position"], item["digest"]) in refs]
+                    skill = Path(row["repository"]) / "dotfiles/base/.agents/skills" / proposal["owner"] / "SKILL.md"
+                    same_owner = hashlib.sha256(skill.read_bytes()).hexdigest() == proposal.get("owner_digest")
+                    same_instructions = proposal.get("instructions_digest", "missing") == instruction_digest(row["repository"])
+                    if not self._global_evidence(proposal, evidence) or not same_owner or not same_instructions:
+                        with self.db:
+                            self.db.execute("UPDATE learning_findings SET state='pending',retry_kind='git',retry_at=?,reason='prepared proposal needs fresh applicability or owner review' WHERE id=?", (now+300, row["id"]))
+                        continue
+                    result = promote(Path(row["repository"]), payload, evidence, git_revision(row["repository"]), verify_evidence=self._verify)
+                state, kind = self._promotion_outcome(result)
+                proposal["blocked_path"] = result.get("blocked_path")
+                key = self._blocking_state(row["repository"], proposal) if state == "held" else None
                 with self.db:
-                    self.db.execute("UPDATE learning_findings SET state=?,commit_id=?,integrated_at=?,reason=?,updated_at=? WHERE id=?",
-                                    (state, result.get("commit"), now if state == "promoted" else None, result.get("reason"), now, row["id"]))
+                    self.db.execute("UPDATE learning_findings SET state=?,commit_id=?,integrated_at=?,reason=?,updated_at=?,retry_kind=?,input_key=?,retry_at=?,proposal=? WHERE id=?",
+                                    (state, result.get("commit"), now if state == "promoted" else None, result.get("reason"), now, kind, key, now+300 if kind == "lock" else 0, json.dumps(proposal), row["id"]))
                     self.db.execute("UPDATE learning_reviews SET finished_at=?,outcome=? WHERE finding=? AND finished_at IS NULL", (now, state, row["id"]))
-            except (StoreError, ValueError, OSError) as error:
-                with self.db:
-                    self.db.execute("UPDATE learning_findings SET state='held',reason=? WHERE id=?", (redact(str(error))[:600], row["id"]))
+            except (LearningError, StoreError, ValueError, OSError) as error:
+                self._failure(row, error, now)
+
+    def _blocking_state(self, repository, proposal):
+        state = repository_state(repository)
+        path = proposal.get("blocked_path")
+        if path:
+            candidate = Path(path)
+            allowed = Path(repository).resolve() / ".work/wt"
+            if candidate.parent != allowed or candidate.is_symlink():
+                return state + ":untrusted-path"
+            if candidate.exists():
+                info = candidate.stat()
+                result = subprocess.run(["git", "-C", str(candidate), "status", "--porcelain", "--ignored=matching", "--untracked-files=all"], capture_output=True, timeout=10)
+                state += hashlib.sha256(str((info.st_dev, info.st_ino, info.st_mtime_ns)).encode()+result.stdout).hexdigest()
+            else:
+                state += ":removed"
+        return state
 
     def recover_rollbacks(self):
-        for row in self.db.execute("""SELECT f.id,f.commit_id,p.repository FROM learning_findings f
+        heads = {}
+        for row in self.db.execute("""SELECT f.id,f.commit_id,f.checked_head,p.repository FROM learning_findings f
             JOIN learning_projects p ON p.project=f.project
             WHERE p.enabled=1 AND f.state='promoted' AND f.commit_id IS NOT NULL""").fetchall():
+            if row["repository"] not in heads:
+                heads[row["repository"]] = git_revision(row["repository"])
+            if row["checked_head"] == heads[row["repository"]]:
+                continue
             marker = "Reverts-Learning-Promotion: " + row["commit_id"]
             result = subprocess.run(["git", "-C", row["repository"], "log", "--format=%B", "--fixed-strings", "--grep="+marker], capture_output=True, timeout=10, check=True)
             if marker in result.stdout.decode().splitlines():
                 with self.db:
                     self.db.execute("UPDATE learning_findings SET state='reversed',reason='recovered committed rollback' WHERE id=?", (row["id"],))
+            with self.db:
+                self.db.execute("UPDATE learning_findings SET checked_head=? WHERE id=?", (heads[row["repository"]], row["id"]))
 
-    def recall(self, project, query, check_revision=True):
+    def recall(self, project, query, cwd=None):
         row = self.db.execute("SELECT cwd FROM learning_projects WHERE project=? AND enabled=1", (project,)).fetchone()
         if row is None:
             return []
-        revision = git_revision(row[0]) if check_revision else None
+        current = Path(cwd) if cwd is not None else Path(row[0])
+        if cwd is not None and project_identity(current) != project:
+            raise LearningError("memory retrieval directory belongs to another project")
         terms, matches = words(query), []
         for memory in self.db.execute("SELECT * FROM learning_memories WHERE project=? AND state='approved'", (project,)):
-            if revision and memory["revision"] != revision:
+            try:
+                self._memory_conditions(current, json.loads(memory["validity"]))
+            except (LearningError, OSError, UnicodeError, ValueError):
                 continue
             score = len(terms & words(memory["action"] + " " + memory["applicability"]))
             if score:
-                matches.append((score, {"id": memory["finding"], "action": redact(memory["action"]), "when": redact(memory["applicability"])}))
+                matches.append((score, {"id": memory["finding"], "action": redact(memory["action"]), "when": redact(memory["applicability"]), "authority": "Historical advice; current source, tests, and instructions take precedence."}))
         return [value for _, value in sorted(matches, key=lambda entry: -entry[0])[:3]]
 
     def evaluate(self, session, events):
@@ -561,8 +886,10 @@ class Learner:
                 loaded.update(SKILL_PATH.findall(event["text"]))
         repeated = {kind for _, kind, _ in signals(events)}
         task_words = words(" ".join(e["text"] for e in events if e["kind"] == "user")[:12000])
-        for finding in self.db.execute("SELECT * FROM learning_findings WHERE project=? AND state IN ('promoted','memory','reversed') AND proposal IS NOT NULL", (session["project"],)).fetchall():
+        for finding in self.db.execute("SELECT * FROM learning_findings WHERE state IN ('promoted','memory','reversed') AND proposal IS NOT NULL").fetchall():
             proposal = json.loads(finding["proposal"])
+            if finding["project"] != session["project"] and proposal.get("scope") != "global":
+                continue
             relevant = len(task_words & words(proposal["applicability"])) >= 2
             phase = "after" if session["updated"] > (finding["integrated_at"] or 0) else "before"
             self.db.execute("INSERT OR REPLACE INTO learning_evaluations VALUES(?,?,?,?,?,?,?)", (
@@ -576,6 +903,7 @@ class Learner:
             "candidate_signals": self.db.execute("SELECT count(*) FROM learning_incidents").fetchone()[0],
             "pending_hook_hints": self.db.execute("SELECT count(*) FROM learning_hints").fetchone()[0],
             "findings": {row[0]: row[1] for row in self.db.execute("SELECT state,count(*) FROM learning_findings GROUP BY state")},
+            "waiting_by_reason": {row[0]: row[1] for row in self.db.execute("SELECT retry_kind,count(*) FROM learning_findings WHERE state IN ('pending','deferred','held') GROUP BY retry_kind")},
             "deduplicated_incidents": self.db.execute("SELECT count(*)-count(DISTINCT finding) FROM learning_incidents").fetchone()[0],
             "model_reviews": self.db.execute("SELECT count(*) FROM learning_reviews").fetchone()[0],
             "promotions_rejected_by_validation": self.db.execute("SELECT count(*) FROM learning_findings WHERE state='held'").fetchone()[0],
@@ -593,8 +921,9 @@ def parser():
     commands = cli.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run")
     run.add_argument("--scheduled", action="store_true")
-    for command in ("status", "doctor", "findings"):
+    for command in ("status", "findings"):
         commands.add_parser(command)
+    commands.add_parser("doctor").add_argument("--probe-cli", action="store_true", help="verify the actual CLI against an unpaid loopback endpoint")
     commands.add_parser("show").add_argument("finding", type=int)
     for command in ("enable", "disable"):
         operation = commands.add_parser(command)
@@ -624,6 +953,7 @@ def main(argv=None):
     try:
         store = Store(args.state_dir)
         learner = Learner(store)
+        exit_code = 0
         if args.command == "run":
             if os.environ.get("AGENT_LEARN_WORKER"):
                 return 0
@@ -654,11 +984,15 @@ def main(argv=None):
                 result["database"] = store.db.execute("PRAGMA quick_check").fetchone()[0]
                 repository = Path(__file__).resolve().parents[4]
                 result["reviewer"] = CodexReviewer(repository, args.state_dir).capabilities()
+                if args.probe_cli:
+                    result["reviewer_probe"] = CodexReviewer(repository, args.state_dir).probe_cli()
+                    if result["reviewer_probe"].get("status") != "ok":
+                        exit_code = 1
                 result["redaction"] = "heuristic, cannot guarantee removal of all secrets"
                 result["hook_trust"] = "inspect /hooks in Codex; never inferred from configured commands"
             print(redact(json.dumps(result, indent=2)))
         elif args.command == "recall":
-            print(json.dumps(learner.recall(project_identity(args.project), args.query), indent=2))
+            print(json.dumps(learner.recall(project_identity(args.project), args.query, cwd=args.project), indent=2))
         elif args.command == "findings":
             print(redact(json.dumps([dict(row) for row in learner.db.execute("SELECT id,signal,state,reason,commit_id FROM learning_findings ORDER BY id DESC LIMIT 50")], indent=2)))
         elif args.command == "show":
@@ -668,7 +1002,7 @@ def main(argv=None):
             evaluations = [dict(item) for item in learner.db.execute("SELECT * FROM learning_evaluations WHERE finding=? ORDER BY session LIMIT 20", (args.finding,))]
             print(redact(json.dumps({"finding": dict(row), "evidence": learner._evidence(args.finding), "evaluations": evaluations}, indent=2)))
         store.db.close()
-        return 0
+        return exit_code
     except (LearningError, StoreError, SchedulerError, OSError, ValueError, sqlite3.Error, subprocess.SubprocessError) as error:
         print("agent-learn: " + redact(str(error))[:600], file=sys.stderr)
         return 1

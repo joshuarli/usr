@@ -189,6 +189,7 @@ class ReviewError(ValueError):
                 "orchestration_tiers_unavailable",
                 "orchestration_tier_unavailable",
                 "unsupported_codex_invocation",
+                "unexpected_tool_activity",
             }
         ),
         "transient": frozenset(
@@ -207,7 +208,6 @@ class ReviewError(ValueError):
                 "invalid_response",
                 "response_too_large",
                 "diagnostic_too_large",
-                "unexpected_tool_activity",
                 "missing_final_message",
                 "invalid_proposal",
                 "proposal_too_large",

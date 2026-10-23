@@ -1778,6 +1778,7 @@ def promote(
                 parents = _git(worktree, "rev-list", "--parents", "-n", "1", candidate_commit).split()
                 if parents != [candidate_commit, head]:
                     raise _PromotionFailure("candidate commit does not directly follow expected_head")
+                _verify_evidence(refs, evidence, verify_evidence)
                 _integrate(root, candidate_commit, head, branch)
                 integrated_commit = candidate_commit
                 cleanup_allowed = True

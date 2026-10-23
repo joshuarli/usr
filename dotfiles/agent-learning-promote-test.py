@@ -234,6 +234,18 @@ class PromotionTest(unittest.TestCase):
         self.assertIn("Skip failures whose cause the error message already states.", content)
         self.assertIn(proposal["future_action"], content)
 
+    def test_evidence_changed_during_validation_prevents_integration(self):
+        checks = []
+
+        def changed(refs, evidence):
+            checks.append(1)
+            return len(checks) == 1
+
+        result = self.promote(verifier=changed)
+        self.assertEqual(result["status"], "blocked", result)
+        self.assertEqual(self.head(), self.base_head)
+        self.assertEqual(len(checks), 2)
+
     def test_blocks_non_independent_or_unverified_evidence(self):
         proposal, evidence = self.evidence(same_root=True)
         result = self.promote(proposal, evidence)
