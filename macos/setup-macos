@@ -238,14 +238,37 @@ step_dns() {
         info "unbound is running and answering"
     fi
 
-    network_services | while IFS= read -r svc; do
+    services_to_update=$(network_services | while IFS= read -r svc; do
         have=$(dns_servers "$svc")
-        [ "$have" = "$dns_wanted" ] && continue
-        info "DNS for $svc: $have -> $dns_wanted"
-        need_sudo
-        # shellcheck disable=SC2086  # the list is two words by construction
-        act sudo networksetup -setdnsservers "$svc" $dns_wanted
-    done
+        [ "$have" = "$dns_wanted" ] || printf '%s\n' "$svc"
+    done; :)
+    [ -n "$services_to_update" ] || return
+
+    if $dry; then
+        printf '%s\n' "$services_to_update" | while IFS= read -r svc; do
+            [ -n "$svc" ] || continue
+            have=$(dns_servers "$svc")
+            [ "$have" = "$dns_wanted" ] && continue
+            info "DNS for $svc: $have -> $dns_wanted"
+            act sudo networksetup -setdnsservers "$svc" "$dns_wanted"
+        done
+    else
+        printf '%s\n' "$services_to_update" | sudo /bin/sh -c '
+            set -eu
+            dns_wanted=$1
+            while IFS= read -r svc; do
+                [ -n "$svc" ] || continue
+                out=$(networksetup -getdnsservers "$svc")
+                case $out in
+                    *"any DNS Servers set on"*) have=Empty ;;
+                    *) have=$(printf "%s" "$out" | tr "\n" " " | sed "s/ $//") ;;
+                esac
+                [ "$have" = "$dns_wanted" ] && continue
+                printf "\\033[1;32m==> \\033[0mDNS for %s: %s -> %s\\n" "$svc" "$have" "$dns_wanted"
+                networksetup -setdnsservers "$svc" "$dns_wanted"
+            done
+        ' setup-macos "$dns_wanted"
+    fi
 }
 
 # ── main ──────────────────────────────────────────────────────────────────────
