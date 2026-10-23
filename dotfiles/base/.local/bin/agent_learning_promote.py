@@ -727,6 +727,356 @@ def _worktree_changes(path):
     return status, ignored
 
 
+def _tracked_worktree_entries(worktree, head):
+    output = _git_bytes(worktree, "ls-tree", "-r", "-z", "--full-tree", head)
+    files = []
+    directories = set()
+    for record in output.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise _PromotionFailure("tracked worktree tree is malformed", "worktree_occupied", worktree)
+        mode, kind, raw_oid = fields
+        relative = Path(os.fsdecode(raw_path))
+        if relative.is_absolute() or not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
+            raise _PromotionFailure("tracked worktree path is unsafe", "worktree_occupied", worktree)
+        for count in range(1, len(relative.parts)):
+            directories.add(Path(*relative.parts[:count]))
+        if mode == b"160000" and kind == b"commit":
+            directories.add(relative)
+            continue
+        if mode not in (b"100644", b"100755", b"120000") or kind != b"blob":
+            raise _PromotionFailure("tracked worktree entry has an unsupported type", "worktree_occupied", worktree)
+        oid = raw_oid.decode("ascii")
+        if not _HEX.fullmatch(oid):
+            raise _PromotionFailure("tracked worktree object ID is invalid", "worktree_occupied", worktree)
+        files.append((relative, mode.decode("ascii"), oid))
+    return files, directories
+
+
+def _relative_parent_descriptor(root_descriptor, relative):
+    if relative.is_absolute() or not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
+        raise _PromotionFailure("tracked worktree path is unsafe", "worktree_occupied")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.dup(root_descriptor)
+    try:
+        for component in relative.parts[:-1]:
+            child = os.open(component, flags, dir_fd=descriptor)
+            metadata = os.fstat(child)
+            if not stat.S_ISDIR(metadata.st_mode):
+                os.close(child)
+                raise _PromotionFailure("tracked worktree ancestry is not a real directory", "worktree_occupied")
+            os.close(descriptor)
+            descriptor = child
+        return descriptor, relative.parts[-1]
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _tracked_file_signature(metadata):
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _tracked_file_snapshot(root_descriptor, relative, mode, expected_oid):
+    parent_descriptor, name = _relative_parent_descriptor(root_descriptor, relative)
+    try:
+        metadata = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        if mode == "120000":
+            if not stat.S_ISLNK(metadata.st_mode):
+                raise _PromotionFailure("tracked symlink changed type", "worktree_occupied")
+            contents = os.fsencode(os.readlink(name, dir_fd=parent_descriptor))
+            hasher = hashlib.new("sha1" if len(expected_oid) == 40 else "sha256")
+            hasher.update(b"blob " + str(len(contents)).encode("ascii") + b"\0")
+            hasher.update(contents)
+            if hasher.hexdigest() != expected_oid:
+                raise _PromotionFailure("tracked symlink changed during cleanup", "worktree_occupied")
+            return _tracked_file_signature(metadata)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise _PromotionFailure("tracked file changed type", "worktree_occupied")
+        if bool(metadata.st_mode & 0o111) != (mode == "100755"):
+            raise _PromotionFailure("tracked file mode changed", "worktree_occupied")
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+        try:
+            before = os.fstat(descriptor)
+            if _tracked_file_signature(before) != _tracked_file_signature(metadata):
+                raise _PromotionFailure("tracked file changed during cleanup", "worktree_occupied")
+            hasher = hashlib.new("sha1" if len(expected_oid) == 40 else "sha256")
+            hasher.update(b"blob " + str(before.st_size).encode("ascii") + b"\0")
+            while True:
+                contents = os.read(descriptor, 1024 * 1024)
+                if not contents:
+                    break
+                hasher.update(contents)
+            after = os.fstat(descriptor)
+            if _tracked_file_signature(before) != _tracked_file_signature(after):
+                raise _PromotionFailure("tracked file changed during cleanup", "worktree_occupied")
+            if hasher.hexdigest() != expected_oid:
+                raise _PromotionFailure("tracked file differs from its commit", "worktree_occupied")
+            return _tracked_file_signature(after)
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(parent_descriptor)
+
+
+def _unlink_tracked_worktree_file(root_descriptor, relative, mode, expected_oid, expected_signature):
+    current_signature = _tracked_file_snapshot(root_descriptor, relative, mode, expected_oid)
+    if current_signature != expected_signature:
+        raise _PromotionFailure("tracked file changed during cleanup", "worktree_occupied")
+    parent_descriptor, name = _relative_parent_descriptor(root_descriptor, relative)
+    try:
+        metadata = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+        if _tracked_file_signature(metadata) != expected_signature:
+            raise _PromotionFailure("tracked file path changed during cleanup", "worktree_occupied")
+        os.unlink(name, dir_fd=parent_descriptor)
+    finally:
+        os.close(parent_descriptor)
+
+
+def _remove_empty_tracked_directory(root_descriptor, relative):
+    parent_descriptor, name = _relative_parent_descriptor(root_descriptor, relative)
+    try:
+        os.rmdir(name, dir_fd=parent_descriptor)
+    finally:
+        os.close(parent_descriptor)
+
+
+def _unlink_worktree_git_pointer(root_descriptor, git_dir):
+    signature, contents = _read_private_file(root_descriptor, ".git")
+    if contents != b"gitdir: " + os.fsencode(git_dir) + b"\n":
+        raise _PromotionFailure("promotion worktree Git pointer changed", "worktree_occupied")
+    _unlink_private_file(root_descriptor, ".git", signature)
+
+
+def _restore_worktree_git_pointer(root_descriptor, git_dir):
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(".git", flags, 0o600, dir_fd=root_descriptor)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(b"gitdir: " + os.fsencode(git_dir) + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _prune_tracked_worktree(root_descriptor, worktree, head):
+    entries, directories = _tracked_worktree_entries(worktree, head)
+    snapshots = []
+    try:
+        for relative, mode, oid in entries:
+            snapshots.append((relative, mode, oid, _tracked_file_snapshot(root_descriptor, relative, mode, oid)))
+    except _PromotionFailure as exc:
+        raise _PromotionFailure(str(exc), "worktree_occupied", worktree) from exc
+    for relative, mode, oid, signature in snapshots:
+        try:
+            _unlink_tracked_worktree_file(root_descriptor, relative, mode, oid, signature)
+        except _PromotionFailure as exc:
+            raise _PromotionFailure(str(exc), "worktree_occupied", worktree) from exc
+    for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        try:
+            _remove_empty_tracked_directory(root_descriptor, directory)
+        except OSError as exc:
+            raise _PromotionFailure(
+                "unknown data prevents promotion worktree cleanup",
+                "worktree_occupied",
+                worktree,
+            ) from exc
+
+
+def _read_private_file(directory_descriptor, name):
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise _PromotionFailure("owned Git metadata changed type", "worktree_occupied")
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return _tracked_file_signature(metadata), b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _open_verified_directory(path):
+    metadata = path.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode) or path.resolve(strict=True) != path:
+        raise _PromotionFailure("owned directory changed physical identity", "worktree_occupied", path)
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(os.fspath(path), flags)
+    opened = os.fstat(descriptor)
+    if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+        os.close(descriptor)
+        raise _PromotionFailure("owned directory changed during cleanup", "worktree_occupied", path)
+    return descriptor
+
+
+def _unlink_private_file(directory_descriptor, name, expected_signature):
+    metadata = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
+    if _tracked_file_signature(metadata) != expected_signature:
+        raise _PromotionFailure("owned Git metadata changed during cleanup", "worktree_occupied")
+    os.unlink(name, dir_fd=directory_descriptor)
+
+
+def _remove_owned_worktree_metadata(
+    repository,
+    git_dir,
+    owner_path,
+    registered_path,
+    operation,
+    identity,
+    head,
+):
+    if not _owned_worktree(repository, owner_path, operation, identity, git_dir):
+        raise _PromotionFailure("owned Git metadata could not be verified", "worktree_occupied", git_dir)
+    managed_root = git_dir.parent
+    managed_descriptor = _open_verified_directory(managed_root)
+    directory_flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        directory_flags |= os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        directory_flags |= os.O_NOFOLLOW
+    try:
+        directory_descriptor = os.open(git_dir.name, directory_flags, dir_fd=managed_descriptor)
+    except OSError as exc:
+        os.close(managed_descriptor)
+        raise _PromotionFailure("owned Git metadata path changed", "worktree_occupied", git_dir) from exc
+    try:
+        metadata = os.fstat(directory_descriptor)
+        if (metadata.st_dev, metadata.st_ino) != (git_dir.lstat().st_dev, git_dir.lstat().st_ino):
+            raise _PromotionFailure("owned Git metadata path changed", "worktree_occupied", git_dir)
+        names = set(os.listdir(directory_descriptor))
+        known = {
+            "HEAD",
+            "ORIG_HEAD",
+            "commondir",
+            "gitdir",
+            "index",
+            "logs",
+            "refs",
+            "agent-learning-promotion-owner",
+        }
+        if "agent-learning-promotion-owner" not in names or names - known:
+            raise _PromotionFailure("unknown data occupies owned Git metadata", "worktree_occupied", git_dir)
+        expected_marker = _worktree_owner_record(repository, owner_path, operation, identity)
+        marker_signature, marker_contents = _read_private_file(
+            directory_descriptor, "agent-learning-promotion-owner"
+        )
+        if marker_contents != expected_marker:
+            raise _PromotionFailure("owned Git metadata marker changed", "worktree_occupied", git_dir)
+        file_records = {}
+        for name in names - {"logs", "refs", "agent-learning-promotion-owner"}:
+            signature, contents = _read_private_file(directory_descriptor, name)
+            file_records[name] = signature
+            if name == "HEAD" and contents.strip() != head.encode("ascii"):
+                raise _PromotionFailure("owned Git HEAD metadata changed", "worktree_occupied", git_dir)
+            if name == "commondir":
+                expected_common = os.path.relpath(_common_git_dir(repository), git_dir).encode("utf-8")
+                if contents.strip() != expected_common:
+                    raise _PromotionFailure("owned Git common directory changed", "worktree_occupied", git_dir)
+            if name == "gitdir" and contents != os.fsencode(registered_path / ".git") + b"\n":
+                raise _PromotionFailure("owned Git worktree pointer changed", "worktree_occupied", git_dir)
+            if name == "ORIG_HEAD" and not _HEX.fullmatch(contents.strip().decode("ascii", "ignore")):
+                raise _PromotionFailure("owned Git original HEAD metadata changed", "worktree_occupied", git_dir)
+        for directory in ("logs", "refs"):
+            if directory not in names:
+                continue
+            entry = os.stat(directory, dir_fd=directory_descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(entry.st_mode) or not stat.S_ISDIR(entry.st_mode):
+                raise _PromotionFailure("owned Git metadata directory changed type", "worktree_occupied", git_dir)
+            child_flags = os.O_RDONLY
+            if hasattr(os, "O_DIRECTORY"):
+                child_flags |= os.O_DIRECTORY
+            if hasattr(os, "O_NOFOLLOW"):
+                child_flags |= os.O_NOFOLLOW
+            child_descriptor = os.open(directory, child_flags, dir_fd=directory_descriptor)
+            try:
+                children = set(os.listdir(child_descriptor))
+                if directory == "refs" and children:
+                    raise _PromotionFailure("unknown refs occupy owned Git metadata", "worktree_occupied", git_dir)
+                if directory == "logs" and children - {"HEAD"}:
+                    raise _PromotionFailure("unknown logs occupy owned Git metadata", "worktree_occupied", git_dir)
+                if directory == "logs" and "HEAD" in children:
+                    signature, _contents = _read_private_file(child_descriptor, "HEAD")
+                    file_records["logs/HEAD"] = signature
+            finally:
+                os.close(child_descriptor)
+        if "logs" in names:
+            child_descriptor = os.open("logs", directory_flags, dir_fd=directory_descriptor)
+            try:
+                if "HEAD" in os.listdir(child_descriptor):
+                    _unlink_private_file(child_descriptor, "HEAD", file_records["logs/HEAD"])
+            finally:
+                os.close(child_descriptor)
+            os.rmdir("logs", dir_fd=directory_descriptor)
+        if "refs" in names:
+            os.rmdir("refs", dir_fd=directory_descriptor)
+        for name, signature in file_records.items():
+            if "/" not in name:
+                _unlink_private_file(directory_descriptor, name, signature)
+        _unlink_private_file(directory_descriptor, "agent-learning-promotion-owner", marker_signature)
+    except OSError as exc:
+        os.close(managed_descriptor)
+        raise _PromotionFailure("owned Git metadata cleanup was blocked", "worktree_occupied", git_dir) from exc
+    except Exception:
+        os.close(managed_descriptor)
+        raise
+    finally:
+        os.close(directory_descriptor)
+    try:
+        os.rmdir(git_dir.name, dir_fd=managed_descriptor)
+    except OSError as exc:
+        try:
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            directory_descriptor = os.open(git_dir.name, directory_flags, dir_fd=managed_descriptor)
+            try:
+                descriptor = os.open(
+                    "agent-learning-promotion-owner",
+                    flags,
+                    0o600,
+                    dir_fd=directory_descriptor,
+                )
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(_worktree_owner_record(repository, owner_path, operation, identity))
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            finally:
+                os.close(directory_descriptor)
+        except OSError:
+            pass
+        raise _PromotionFailure("owned Git metadata directory is not empty", "worktree_occupied", git_dir) from exc
+    finally:
+        os.close(managed_descriptor)
+
+
 def _worktree_parent(worktree, expected_head):
     head = _head(worktree)
     if head == expected_head:
@@ -812,24 +1162,10 @@ def _remove_worktree(repository, path, operation, identity):
         raise _PromotionFailure("promotion cleanup path is occupied", "worktree_occupied", cleanup_path)
     worktree_root = path.parent
     parent_descriptor = _worktree_parent_descriptor(repository, worktree_root)
+    pruning_started = False
     try:
         try:
-            status = _git_bytes(
-                path,
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
-            )
-            ignored = _git_bytes(
-                path,
-                "ls-files",
-                "--others",
-                "--ignored",
-                "--exclude-standard",
-                "-z",
-                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
-            )
+            status, ignored = _worktree_changes(path)
         except _PromotionFailure as exc:
             raise _PromotionFailure(
                 "could not verify promotion worktree cleanup state",
@@ -851,29 +1187,10 @@ def _remove_worktree(repository, path, operation, identity):
         )
         cleanup_identity = _worktree_path_identity(repository, cleanup_path)
         if cleanup_identity != identity_before:
-            try:
-                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
-            except (OSError, _PromotionFailure):
-                pass
             raise _PromotionFailure(
                 "promotion worktree identity changed during cleanup",
                 "worktree_occupied",
                 cleanup_path,
-            )
-        if _path_entry_exists(path):
-            try:
-                _git(repository, "worktree", "repair", os.fspath(cleanup_path))
-                _git(repository, "worktree", "remove", "--", os.fspath(cleanup_path))
-            except _PromotionFailure as exc:
-                raise _PromotionFailure(
-                    "promotion worktree cleanup was blocked; concurrent path data was preserved",
-                    "worktree_occupied",
-                    path,
-                ) from exc
-            raise _PromotionFailure(
-                "a path was created during promotion worktree cleanup",
-                "worktree_occupied",
-                path,
             )
         try:
             _git(repository, "worktree", "repair", os.fspath(cleanup_path))
@@ -882,52 +1199,73 @@ def _remove_worktree(repository, path, operation, identity):
                 repaired_git_dir != git_dir
                 or not _owned_worktree(repository, path, operation, identity, repaired_git_dir)
             ):
-                raise _PromotionFailure("promotion worktree ownership changed during cleanup")
-            status = _git_bytes(
-                cleanup_path,
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
-            )
-            ignored = _git_bytes(
-                cleanup_path,
-                "ls-files",
-                "--others",
-                "--ignored",
-                "--exclude-standard",
-                "-z",
-                config=(("core.fsmonitor", "false"), ("core.untrackedCache", "false")),
-            )
+                raise _PromotionFailure("promotion worktree ownership changed during cleanup", "worktree_occupied", cleanup_path)
+            status, ignored = _worktree_changes(cleanup_path)
             if status or ignored:
-                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
                 reason = "promotion worktree contains ignored files" if ignored else "promotion worktree contains local or staged changes"
-                raise _PromotionFailure(reason, "worktree_occupied", path)
+                raise _PromotionFailure(reason, "worktree_occupied", cleanup_path)
             if _worktree_path_identity(repository, cleanup_path) != identity_before:
-                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
-                raise _PromotionFailure("promotion worktree changed during cleanup", "worktree_occupied", path)
-            _git(repository, "worktree", "remove", "--", os.fspath(cleanup_path))
+                raise _PromotionFailure("promotion worktree changed during cleanup", "worktree_occupied", cleanup_path)
         except _PromotionFailure as exc:
             if _path_entry_exists(cleanup_path):
                 try:
                     _restore_worktree(repository, path, cleanup_path, parent_descriptor)
                 except (OSError, _PromotionFailure):
                     pass
-            if _path_entry_exists(path):
+            raise _PromotionFailure(
+                "promotion worktree cleanup could not be verified",
+                "worktree_occupied",
+                cleanup_path,
+            ) from exc
+        worktree_head = _head(cleanup_path)
+        root_descriptor = _open_verified_directory(cleanup_path)
+        try:
+            root_metadata = os.fstat(root_descriptor)
+            if (root_metadata.st_dev, root_metadata.st_ino) != identity_before[-1]:
+                raise _PromotionFailure("promotion worktree changed during cleanup", "worktree_occupied", cleanup_path)
+            pruning_started = True
+            _prune_tracked_worktree(root_descriptor, cleanup_path, worktree_head)
+            _unlink_worktree_git_pointer(root_descriptor, git_dir)
+            try:
+                os.rmdir(cleanup_path.name, dir_fd=parent_descriptor)
+            except OSError as exc:
+                try:
+                    _restore_worktree_git_pointer(root_descriptor, git_dir)
+                except OSError:
+                    pass
                 raise _PromotionFailure(
-                    "promotion worktree changed during cleanup and was preserved",
-                    "worktree_occupied",
-                    path,
-                ) from exc
-            if _path_entry_exists(cleanup_path):
-                raise _PromotionFailure(
-                    "promotion worktree changed during cleanup and was preserved",
+                    "unknown data prevents promotion worktree cleanup",
                     "worktree_occupied",
                     cleanup_path,
                 ) from exc
-            raise
+        finally:
+            os.close(root_descriptor)
+        if _path_entry_exists(cleanup_path):
+            raise _PromotionFailure("a path was created during promotion worktree cleanup", "worktree_occupied", cleanup_path)
         if _path_entry_exists(path):
             raise _PromotionFailure("a path was created during promotion worktree cleanup", "worktree_occupied", path)
+        _remove_owned_worktree_metadata(
+            repository,
+            git_dir,
+            path,
+            cleanup_path,
+            operation,
+            identity,
+            worktree_head,
+        )
+    except _PromotionFailure:
+        if not pruning_started and _path_entry_exists(cleanup_path) and not _path_entry_exists(path):
+            try:
+                _restore_worktree(repository, path, cleanup_path, parent_descriptor)
+            except (OSError, _PromotionFailure):
+                pass
+        raise
+    except OSError as exc:
+        raise _PromotionFailure(
+            "promotion worktree cleanup was blocked",
+            "worktree_occupied",
+            cleanup_path if _path_entry_exists(cleanup_path) else git_dir,
+        ) from exc
     finally:
         os.close(parent_descriptor)
 
@@ -1479,7 +1817,12 @@ def promote(
                 if cleanup_failure is not None
                 else None
             )
-            return _result("promoted", integrated_commit, reason)
+            result = _result("promoted", integrated_commit, reason)
+            if cleanup_failure is not None:
+                result["reason_code"] = cleanup_failure.reason_code
+                if cleanup_failure.blocked_path is not None:
+                    result["blocked_path"] = os.fspath(cleanup_failure.blocked_path)
+            return result
     except _PromotionFailure as exc:
         return _blocked(str(exc), exc.reason_code, exc.blocked_path)
     except (OSError, ValueError, UnicodeError) as exc:
@@ -1634,7 +1977,12 @@ def rollback(repository: Path, commit: str, expected_head: str) -> dict:
                 if cleanup_failure is not None
                 else None
             )
-            return _result("reverted", integrated_commit, reason)
+            result = _result("reverted", integrated_commit, reason)
+            if cleanup_failure is not None:
+                result["reason_code"] = cleanup_failure.reason_code
+                if cleanup_failure.blocked_path is not None:
+                    result["blocked_path"] = os.fspath(cleanup_failure.blocked_path)
+            return result
     except _PromotionFailure as exc:
         return _blocked(str(exc), exc.reason_code, exc.blocked_path)
     except (OSError, ValueError, UnicodeError) as exc:

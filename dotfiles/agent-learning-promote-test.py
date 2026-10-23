@@ -576,27 +576,82 @@ class PromotionTest(unittest.TestCase):
         self.assertEqual(ignored.read_text(encoding="utf-8"), "keep concurrent ignored data")
         self.assertTrue(worktree.is_dir())
 
-    def test_untracked_file_added_at_remove_is_rejected_by_git(self):
+    def test_untracked_file_added_after_cleanup_preflight_survives(self):
         worktree_root = promotion._safe_worktree_root(self.repo)
         worktree = promotion._staging_worktree(
             self.repo, self.base_head, worktree_root, "promote", "remove-race"
         )
-        concurrent = worktree / "concurrent.txt"
-        original_git = promotion._git
+        cleanup_path = promotion._worktree_cleanup_path(worktree, "promote", "remove-race")
+        concurrent = cleanup_path / "concurrent.txt"
+        original_changes = promotion._worktree_changes
 
-        def add_untracked_before_remove(repository, *args, **kwargs):
-            if args[:2] == ("worktree", "remove"):
-                worktree.mkdir()
+        def add_untracked_after_preflight(path):
+            changes = original_changes(path)
+            if path == cleanup_path:
                 concurrent.write_text("keep concurrent data", encoding="utf-8")
-            return original_git(repository, *args, **kwargs)
+            return changes
 
-        with patch.object(promotion, "_git", side_effect=add_untracked_before_remove):
+        with patch.object(promotion, "_worktree_changes", side_effect=add_untracked_after_preflight):
             with self.assertRaises(promotion._PromotionFailure) as failure:
                 promotion._remove_worktree(self.repo, worktree, "promote", "remove-race")
 
         self.assertEqual(failure.exception.reason_code, "worktree_occupied")
+        self.assertEqual(failure.exception.blocked_path, cleanup_path)
         self.assertEqual(concurrent.read_text(encoding="utf-8"), "keep concurrent data")
-        self.assertTrue(worktree.is_dir())
+        self.assertTrue(cleanup_path.is_dir())
+
+    def test_ignored_file_added_after_cleanup_preflight_survives_without_git_remove(self):
+        worktree_root = promotion._safe_worktree_root(self.repo)
+        worktree = promotion._staging_worktree(
+            self.repo, self.base_head, worktree_root, "promote", "ignored-race"
+        )
+        cleanup_path = promotion._worktree_cleanup_path(worktree, "promote", "ignored-race")
+        ignored = cleanup_path / "ignored.txt"
+        (self.repo / ".git/info/exclude").write_text(".work/\nignored.txt\n", encoding="utf-8")
+        original_unlink = promotion._unlink_tracked_worktree_file
+        original_git = promotion._git
+
+        def add_ignored_before_pruning(root_descriptor, relative, mode, oid, signature):
+            if not ignored.exists():
+                ignored.write_text("keep concurrent ignored data", encoding="utf-8")
+            return original_unlink(root_descriptor, relative, mode, oid, signature)
+
+        def reject_recursive_remove(repository, *args, **kwargs):
+            if args[:2] == ("worktree", "remove"):
+                raise AssertionError("Git must not recursively remove worktree contents")
+            return original_git(repository, *args, **kwargs)
+
+        with patch.object(promotion, "_unlink_tracked_worktree_file", side_effect=add_ignored_before_pruning):
+            with patch.object(promotion, "_git", side_effect=reject_recursive_remove):
+                with self.assertRaises(promotion._PromotionFailure) as failure:
+                    promotion._remove_worktree(self.repo, worktree, "promote", "ignored-race")
+
+        self.assertEqual(failure.exception.reason_code, "worktree_occupied")
+        self.assertEqual(failure.exception.blocked_path, cleanup_path)
+        self.assertEqual(ignored.read_text(encoding="utf-8"), "keep concurrent ignored data")
+        self.assertTrue(cleanup_path.is_dir())
+
+    def test_promoted_result_reports_preserved_ignored_cleanup_race(self):
+        proposal, evidence = self.evidence()
+        worktree = self.repo / ".work/wt/agent-learning-promote-finding-0001"
+        cleanup_path = promotion._worktree_cleanup_path(worktree, "promote", "finding-0001")
+        ignored = cleanup_path / "ignored.txt"
+        original_changes = promotion._worktree_changes
+
+        def add_ignored_after_preflight(path):
+            changes = original_changes(path)
+            if path == cleanup_path:
+                ignored.write_text("keep concurrent ignored data", encoding="utf-8")
+            return changes
+
+        with patch.object(promotion, "_worktree_changes", side_effect=add_ignored_after_preflight):
+            result = self.promote(proposal, evidence)
+
+        self.assertEqual(result["status"], "promoted", result)
+        self.assertEqual(result["reason_code"], "worktree_occupied")
+        self.assertEqual(result["blocked_path"], str(cleanup_path))
+        self.assertEqual(ignored.read_text(encoding="utf-8"), "keep concurrent ignored data")
+        self.assertEqual(self.head(), result["commit"])
 
     def test_failed_validation_preserves_owned_candidate_diff_for_recovery(self):
         proposal, evidence = self.evidence()
