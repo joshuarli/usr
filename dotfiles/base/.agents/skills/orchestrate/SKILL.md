@@ -23,9 +23,9 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 ### Optional tier advice
 
-`USR_DECIDE_TIER=shadow|advisory` enables one sanitized consult per unchanged brief for bounded costly uncertainty. No god or mutating scout. Shadow never routes; advisory obeys rules. Advice errors return to normal routing.
+Explicitly set `USR_DECIDE_TIER=shadow|advisory` for one sanitized consult per unchanged brief on bounded, costly uncertainty. No god/mutating scout. Shadow never routes; advisory cannot override existing rules; justify any changed choice against policy. Failure: notify user; route normally.
 
-If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort rather than spawning above the parent, except for the Codex profile and the Grok pins below. If a selected model is unavailable, use a suitable allowed model at the same or lower tier or report the limitation. A failed command, missing dependency, or unavailable environment does not by itself justify model escalation.
+If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except for the Codex profile and Grok pins below. If a model is unavailable, use a suitable allowed model at the same or lower tier or report it. Failed commands, missing dependencies, or unavailable environments alone do not justify model escalation.
 
 ### Codex
 
