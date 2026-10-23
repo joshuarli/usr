@@ -1432,6 +1432,8 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_service(state, check)
 
         print_summary(state, "macos lean")
+        if state.verify_fail > 0:
+            result_code = 1
     except subprocess.CalledProcessError as exc:
         print(f"Error: {exc.cmd} exited with status {exc.returncode}", file=sys.stderr)
         if exc.stderr:

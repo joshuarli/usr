@@ -140,6 +140,30 @@ class CommandFailureTests(unittest.TestCase):
         self.assertIn("mdutil", errors.getvalue())
         self.assertIn("permission denied", errors.getvalue())
 
+    def test_failed_preserved_service_verification_returns_failure(self):
+        check = lean.PreserveCheck("com.apple.example", "Example", "user")
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(lean, "sw_vers", side_effect=["15.0", "build"]), \
+                patch.object(lean, "build_label_index", return_value={check.label}), \
+                patch.object(lean, "load_disabled_state"), \
+                patch.object(lean, "DISABLE_SECTIONS", []), \
+                patch.object(lean, "PRESERVE_SECTIONS", [("Preserved", [check])]), \
+                patch.object(lean, "run", return_value=subprocess.CompletedProcess(
+                    ["launchctl", "print"], 1, "", "")), \
+                patch.object(lean, "SudoWorker"), \
+                patch.object(lean, "apply_spotlight_tmutil"), \
+                patch.object(lean, "apply_user_defaults"), \
+                patch.object(lean, "apply_performance_defaults"), \
+                patch.object(lean, "apply_pmset"), \
+                patch.object(lean, "apply_ipv6"), \
+                patch.object(lean, "apply_mdns_captive"), \
+                patch.object(lean, "apply_logging"), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            self.assertEqual(lean.main([]), 1)
+        self.assertIn("FAIL Example", output.getvalue())
+        self.assertIn("WARNING: 1 preserved service(s) not loaded.", output.getvalue())
+        self.assertEqual(errors.getvalue(), "")
+
 
 if __name__ == "__main__":
     unittest.main()
