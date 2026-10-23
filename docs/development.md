@@ -10,6 +10,7 @@ Run the narrowest check that covers the change:
 | `dotfiles/base/.local/bin/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/decide-test.py` and `uvx ruff check dotfiles/base/.local/bin/decide dotfiles/base/.local/bin/decide-test.py` |
 | Session search and normalization | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-sessions-test.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |
 | Agent learning | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-review-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-promote-test.py`, and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-ops-test.py` |
+| Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-live-test.py` (no inference) |
 | `dotfiles/base/.local/bin/agent-vm` | `python3 -I dotfiles/agent-vm-test.py`; on macOS with smolvm, `python3 -I dotfiles/agent-vm-test.py --live` for mount/symlink integration |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |

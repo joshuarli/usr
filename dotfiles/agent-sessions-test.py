@@ -224,7 +224,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='append'").fetchone()[0], 3)
 
     def test_incomplete_index_progress_retries_with_matching_metadata(self):
-        path = self.transcript("interrupted", records=[message("recoverme")])
+        self.transcript("interrupted", records=[message("recoverme")])
         with Store(self.state) as store:
             store.refresh([self.transcripts], project=self.project_id)
             with store.db:

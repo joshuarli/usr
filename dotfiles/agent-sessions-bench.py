@@ -5,6 +5,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 import shutil
 import statistics
 import subprocess
@@ -435,7 +436,7 @@ def run(args):
                     }}) + _line({"type": "response_item", "timestamp": "2026-10-23T00:00:05Z", "payload": {
                         "type": "message", "role": "user", "content": [{"type": "input_text", "text": "synthetic missed hook"}],
                     }}))
-                    reconciled = _timed("missed_hook_reconciliation", lambda: timed_learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0), timings, deferred)
+                    reconciled = _timed("missed_hook_reconciliation", lambda timed_learner=timed_learner: timed_learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0), timings, deferred)
                     if reconciled is not None and reconciled["processed"] != 1:
                         raise RuntimeError("timed missed-hook reconciliation processed an unexpected count")
                 shutil.rmtree(build_state, ignore_errors=True)
