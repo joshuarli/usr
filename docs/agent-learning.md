@@ -1,6 +1,6 @@
 # Agent learning
 
-`agent-learn` records project-scoped review state and retained findings in `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/sessions.sqlite3`. Project review stays off until you enable that project.
+`agent-learn` stores review state and findings in `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/sessions.sqlite3`. Review stays off until you enable a project or the global wildcard.
 
 ## Project control
 
@@ -12,23 +12,35 @@ Enable one project and name the canonical `~/usr` checkout:
 agent-learn enable --project "$PWD" --usr-root "$HOME/usr"
 ```
 
-`enable` stores permission to send bounded, sanitized excerpts from that project's future stable sessions to Codex. It does not change Codex trust settings. Limits are defined in the tools, rather than stored as a second configuration.
+`enable` allows bounded, sanitized excerpts from that project's stable sessions to reach Codex. It does not change Codex trust settings. Limits are defined in the tools.
+
+Enable every Git project that appears in Codex session history:
+
+```sh
+agent-learn enable --all-projects --usr-root "$HOME/usr" --schedule
+```
+
+The global wildcard enrolls Git working trees with a readable `HEAD` when their session files update after you enable it. Scheduled scans add new projects. Non-Git sessions do not become learning projects. Each enabled project can contribute bounded, sanitized excerpts to Codex.
+
+Global scans read session headers across Codex session roots. For projects admitted by the wildcard, they index transcript bodies only when the session update time is at or after the grant time. They cache only headers for non-Git sessions and older sessions in global-only projects. Previously indexed transcripts remain in the local session database.
+
+Run `agent-learn disable --all-projects` to revoke the wildcard. Projects enabled with `--project` remain enabled. Projects disabled with `--project` stay excluded while the wildcard is active.
 
 Run `agent-learn status` to see enabled projects, usage counters, observational effectiveness measurements, and scheduler state. `agent-learn findings` lists retained findings. `agent-learn show ID` opens one finding and its evidence.
 
-Run `agent-learn disable --project "$PWD"` to stop future reviews for a project. It does not alter the Codex hook trust decision.
+Run `agent-learn disable --project "$PWD"` to stop reviews for one project. Under the wildcard, this also excludes that project. Run `agent-learn enable --project "$PWD" --usr-root "$HOME/usr"` to grant it explicitly again.
 
 ## Codex hook
 
-The user-level Codex `Stop` hook runs `agent-learn hook`. It reads only the event name and working directory from hook input. It does not read transcripts, inspect Git, run a model, or create a database for a disabled session.
+The user-level Codex `Stop` hook runs `agent-learn hook`. It reads only the event name and working directory from hook input. It does not read transcripts, inspect Git, or run a model.
 
-For an already enabled project, the hook updates one project-scoped SQLite hint. The scheduled runner checks hints later. `SubagentStop` events and sessions with `AGENT_LEARN_WORKER` set do not create hints.
+For an enrolled project, the hook updates one project-scoped SQLite hint. The scheduled runner checks hints later. It discovers wildcard projects during scheduled reconciliation. `SubagentStop` events and sessions with `AGENT_LEARN_WORKER` set do not create hints.
 
 The hook sits beside `codex-campaign-closeout.py` in `dotfiles/base/.codex/config.toml`. Codex may ask you to review and trust this unmanaged hook. Accept that prompt in Codex. The config does not add a trust record for it.
 
 ## Scheduler
 
-On macOS, pass `--schedule` to enable project review and install the per-user LaunchAgent:
+On macOS, pass `--schedule` to install the per-user LaunchAgent:
 
 ```sh
 agent-learn enable --project "$PWD" --usr-root "$HOME/usr" --schedule
@@ -36,7 +48,7 @@ agent-learn enable --project "$PWD" --usr-root "$HOME/usr" --schedule
 
 `com.josh.agent-learning` runs `agent-learn --state-dir PATH run --scheduled` every 15 minutes. It starts one process per run and does not keep a service running. `agent-learn status` reports whether the plist is configured and whether launchd has bootstrapped it.
 
-Pass `--schedule` to `agent-learn disable --project "$PWD" --schedule` to unload and remove the user LaunchAgent. This stops scheduled reviews for every project. Without that flag, the timer remains configured.
+Pass `--schedule` to either `agent-learn disable` command to unload and remove the user LaunchAgent. This stops scheduled reviews for every project. Without that flag, the timer remains configured.
 
 Linux does not install a systemd unit. Run `agent-learn run --scheduled` manually or use a scheduler you manage. The normal dotfiles sync does not install or start the LaunchAgent.
 
@@ -73,7 +85,7 @@ Codex search reads `$CODEX_HOME/sessions` and `$CODEX_HOME/archived_sessions`, w
 
 The Python applier accepts one contextual sentence appended to a paragraph in an existing allowlisted leaf skill. It also accepts a trigger insertion before an existing description's `Skip` clause, preserving the original description. Trigger insertions are limited to 120 characters. Model output cannot choose a shell command, arbitrary path, or new skill.
 
-Two independent originating sessions in two explicitly enabled repositories must support a global skill edit. Recurrence in one repository establishes local usefulness; commands and conventions belong in project memory. Global proposals must explain applicability beyond the observed projects, and the independent reviewer must support that judgment. Generic wording alone grants no authority. A deterministic defect seen once remains a candidate for the authorized repair workflow. Descendants of the same session count once; unresolved ancestry cannot authorize a promotion. The reviewer sees current owner guidance and related approved findings.
+Two independent originating sessions in two enabled repositories must support a global skill edit. Recurrence in one repository establishes local usefulness. Commands and conventions belong in project memory. Global proposals must explain their applicability beyond the observed repositories. The independent reviewer must support that judgment. Generic wording alone grants no authority. A deterministic defect seen once remains a candidate for the authorized repair workflow. Descendants of the same session count once. Unresolved ancestry cannot authorize a promotion. The reviewer sees current owner guidance and related approved findings.
 
 The applier stages the change in an ignored `.work/wt/` worktree, runs the existing skill checker, and makes a local Conventional Commit. It integrates only into the clean, unchanged destination branch. Conflicts and local modifications hold the finding until repository state changes. Prepared proposals persist before Git integration so an interrupted job can recover its own commit. No job pushes.
 
@@ -85,13 +97,13 @@ Invocation and recurring corrections are observational measurements. They do not
 
 ## Privacy and troubleshooting
 
-State directories use mode `0700`; database files use `0600`. Original transcripts remain authoritative and are never modified or copied into Git. Ordinary results use heuristic secret redaction. Heuristic redaction cannot identify every credential or confidential source fragment. Enabling a project explicitly allows the bounded Codex service interaction; local indexing alone makes no model request.
+State directories use mode `0700`; database files use `0600`. Original transcripts remain authoritative and are never modified or copied into Git. Ordinary results use heuristic secret redaction. Heuristic redaction cannot identify every credential or confidential source fragment. Enabling a project or the global wildcard allows bounded excerpts from eligible sessions to reach Codex. Local indexing alone makes no model request.
 
 Review workers use an empty scratch working directory, disabled tools and hooks, ignored user configuration, explicit read-only sandboxing, and ephemeral sessions. These settings reduce ambient access but do not establish VM isolation. Worker provenance also prevents recursive learning if a record survives unexpectedly. No transcript is sent to another decision provider.
 
-Use `agent-learn doctor` for index integrity, static CLI capability, scheduler state, and the hook-trust limitation. `agent-learn doctor --probe-cli` runs an unpaid loopback diagnostic with a dummy credential and synthetic input. It verifies actual invocation, model and effort, JSON Schema requests, ignored user configuration, and advertised tools. It never contacts a model provider. Empty advertised tools do not prove that every unadvertised dispatch is impossible; the diagnostic reports that boundary and authenticated inference as unverified. A read-only sandbox also does not prevent every host read.
+Use `agent-learn doctor` for index integrity, static CLI capability, scheduler state, and the hook-trust limitation. `agent-learn doctor --probe-cli` runs an unpaid loopback diagnostic with a dummy credential and synthetic input. It verifies actual invocation, model and effort, JSON Schema requests, ignored user configuration, and advertised tools. It never contacts a model provider. Empty advertised tools do not prove that every unadvertised dispatch is impossible. The diagnostic reports that boundary and authenticated inference as unverified. A read-only sandbox also does not prevent every host read.
 
-Check `/hooks` inside Codex for the actual trust decision. If model access fails, indexing and interactive coding continue. Errors and recovery conditions remain visible in findings. An ordinary no-op run makes no model call. Session roots are discovered once for all enabled projects, and unchanged file metadata avoids reopening transcript contents. Unindexed projects cache only header metadata; their transcript bodies stay outside model review.
+Check `/hooks` inside Codex for the actual trust decision. If model access fails, indexing and interactive coding continue. Errors and recovery conditions remain visible in findings. An ordinary no-op run makes no model call. Session roots are discovered once for all enabled projects. Unchanged file metadata avoids reopening transcript contents. Unindexed projects cache only header metadata. Their transcript bodies stay outside model review until an enabled project needs them.
 
 For an optional paid behavioral check, provide `OPENAI_API_KEY` through your normal environment and run `python3 -I dotfiles/agent-learning-live.py --live`. It uses scratch homes and a synthetic Git repository, changes an existing fixture skill, and records actual skill reads and preflight check results before and after. An unrelated status task checks for excessive invocation. It starts at most three Codex runs, each limited to 60 seconds; a run may make multiple model requests. Missing credentials make no request. A baseline that already behaves correctly produces an inconclusive improvement comparison. This single experiment does not establish a general causal effect. The deterministic evaluator tests run without inference.
 

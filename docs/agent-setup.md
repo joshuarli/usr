@@ -52,7 +52,7 @@ A session that needs you rings the terminal bell. `notify-sound` writes BEL to t
 
 Codex stores trusted projects in `dotfiles/base/.codex/config.toml` and the OpenRouter profile in `or.config.toml`. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. The OpenCode client owns `cli.json` and restores it when missing, so install its tracked symlink with the client stopped. Review their diffs before committing.
 
-`agent-learn` provides opt-in project-scoped review and retrieval. Its Codex `Stop` hook records a small hint only for enabled project paths. Codex may ask you to review and trust the unmanaged hook. See [agent learning](agent-learning.md) for its data limits, scheduler, and commands.
+`agent-learn` provides opt-in project review and retrieval. You can enable projects individually or use a global wildcard for Git projects in Codex session history. Its `Stop` hook records a small hint for enrolled project paths. Codex may ask you to review and trust the unmanaged hook. See [agent learning](agent-learning.md) for its data limits, scheduler, and commands.
 
 Claude retains its `agent-tier-gate` subagent hook and the official Slack plugin. The configured OpenCode `permissions` allow-all rule applies globally; there are no per-agent permission overrides in this tree.
 

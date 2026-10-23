@@ -1,7 +1,10 @@
+import contextlib
 import importlib
+import io
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -202,6 +205,79 @@ class LearningTest(unittest.TestCase):
         self.transcript("unknown-child", parent="missing-root")
         self.run_cycle()
         self.assertNotIn(self.new, self.skill.read_text())
+
+    def test_global_wildcard_enrolls_recent_git_projects_only(self):
+        self.store.db.execute("DELETE FROM learning_projects")
+        other = self.base / "other-project"
+        git(self.base, "clone", "--quiet", str(self.repo), str(other))
+        outside = Path.home()
+        enabled_at = time.time() - 10
+        self.learn.enable_all(self.repo, enabled_at)
+        self.transcript("global-root", messages=[("assistant", "Routine work completed.")])
+        self.transcript("global-other", cwd=other, messages=[("assistant", "Routine work completed.")])
+        old = self.transcript("global-old", cwd=other, messages=[("assistant", "Routine work completed.")])
+        old_timestamp = enabled_at - 1
+        os.utime(old, (old_timestamp, old_timestamp))
+        self.transcript("global-outside", cwd=outside, messages=[("assistant", "Routine work completed.")])
+
+        self.run_cycle()
+
+        enabled = {
+            row["project"]: row["grant_source"]
+            for row in self.store.db.execute("SELECT project,grant_source FROM learning_projects WHERE enabled=1")
+        }
+        self.assertEqual(enabled, {project_identity(self.repo): "global", project_identity(other): "global"})
+        processed = {row[0] for row in self.store.db.execute("SELECT session FROM learning_processed")}
+        self.assertEqual(processed, {"global-root", "global-other"})
+        indexed = {row[0] for row in self.store.db.execute("SELECT id FROM sessions")}
+        self.assertEqual(indexed, {"global-root", "global-other"})
+        headers = {row[0] for row in self.store.db.execute("SELECT id FROM unindexed_sources")}
+        self.assertEqual(headers, {"global-old", "global-outside"})
+        self.assertTrue(self.learn.status()["global_wildcard"])
+
+    def test_project_exception_survives_global_revocation(self):
+        self.store.db.execute("DELETE FROM learning_projects")
+        other = self.base / "other-project"
+        git(self.base, "clone", "--quiet", str(self.repo), str(other))
+        self.learn.enable_all(self.repo, time.time() - 10)
+        self.transcript("global-root", messages=[("assistant", "Routine work completed.")])
+        self.transcript("global-other", cwd=other, messages=[("assistant", "Routine work completed.")])
+        self.run_cycle()
+
+        self.learn.disable(other)
+        self.learn.enable(self.repo, self.repo, time.time())
+        self.learn.disable_all()
+
+        projects = {
+            row["project"]: (row["enabled"], row["grant_source"])
+            for row in self.store.db.execute("SELECT project,enabled,grant_source FROM learning_projects")
+        }
+        self.assertEqual(projects[project_identity(self.repo)], (1, "project"))
+        self.assertEqual(projects[project_identity(other)], (0, "project"))
+        self.assertFalse(self.learn.status()["global_wildcard"])
+
+    def test_schema_v2_migrates_to_global_grants(self):
+        db = sqlite3.connect(":memory:")
+        db.row_factory = sqlite3.Row
+        db.execute("CREATE TABLE learning_schema(version INTEGER NOT NULL)")
+        db.execute("INSERT INTO learning_schema VALUES(2)")
+        db.execute("CREATE TABLE learning_projects(project TEXT PRIMARY KEY,cwd TEXT NOT NULL,enabled INTEGER NOT NULL,enabled_at REAL NOT NULL,repository TEXT NOT NULL)")
+
+        learning.initialize(db)
+
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(learning_projects)")}
+        self.assertIn("grant_source", columns)
+        db.execute("INSERT INTO learning_projects(project,cwd,enabled,enabled_at,repository) VALUES('repo','/repo',0,1,'/usr')")
+        self.assertEqual(db.execute("SELECT grant_source FROM learning_projects").fetchone()[0], "project")
+        self.assertEqual(db.execute("SELECT version FROM learning_schema").fetchone()[0], learning.SCHEMA_VERSION)
+        self.assertIn("learning_global_grant", {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")})
+        db.close()
+
+    def test_scope_flags_reject_project_and_global_together(self):
+        parsed = learning.parser().parse_args(["enable", "--all-projects"])
+        self.assertTrue(parsed.all_projects)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            learning.parser().parse_args(["disable", "--project", str(self.repo), "--all-projects"])
 
     def test_memory_deterministically_rejects_weakening(self):
         self.model.target = "memory"

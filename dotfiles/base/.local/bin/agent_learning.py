@@ -2,6 +2,7 @@ import argparse
 import collections
 import contextlib
 import dataclasses
+import enum
 import fcntl
 import hashlib
 import json
@@ -17,7 +18,7 @@ from agent_learning_ops import SchedulerError
 from agent_session_store import Store, StoreError, default_state_dir, project_identity, redact
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_EVENTS = 2000
 MAX_REVIEWS = 2
 STABLE_SECONDS = 120
@@ -35,12 +36,24 @@ class RetryableLearningError(LearningError):
     category = "transient"
 
 
+class GrantSource(enum.Enum):
+    PROJECT = "project"
+    GLOBAL = "global"
+
+
 def initialize(db):
+    db.execute("CREATE TABLE IF NOT EXISTS learning_schema(version INTEGER NOT NULL)")
+    row = db.execute("SELECT version FROM learning_schema").fetchone()
+    if row is not None and row[0] not in (1, 2, SCHEMA_VERSION):
+        raise LearningError("incompatible learning schema; preserve database and upgrade the tool")
     db.executescript("""
-        CREATE TABLE IF NOT EXISTS learning_schema(version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS learning_projects(
             project TEXT PRIMARY KEY, cwd TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
-            enabled_at REAL NOT NULL, repository TEXT NOT NULL
+            enabled_at REAL NOT NULL, repository TEXT NOT NULL,
+            grant_source TEXT NOT NULL DEFAULT 'project' CHECK(grant_source IN ('project','global'))
+        );
+        CREATE TABLE IF NOT EXISTS learning_global_grant(
+            id INTEGER PRIMARY KEY CHECK(id = 1), enabled_at REAL NOT NULL, repository TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS learning_processed(
             session TEXT PRIMARY KEY, signature TEXT NOT NULL, processed_at REAL NOT NULL,
@@ -81,13 +94,11 @@ def initialize(db):
             started_at REAL NOT NULL, finished_at REAL, outcome TEXT, usage TEXT
         );
     """)
-    row = db.execute("SELECT version FROM learning_schema").fetchone()
     if row is None:
         db.execute("INSERT INTO learning_schema VALUES(?)", (SCHEMA_VERSION,))
-    elif row[0] not in (1, SCHEMA_VERSION):
-        raise LearningError("incompatible learning schema; preserve database and upgrade the tool")
     with db:
         additions = {
+            "learning_projects": {"grant_source": "TEXT NOT NULL DEFAULT 'project' CHECK(grant_source IN ('project','global'))"},
             "learning_findings": {"retry_kind": "TEXT NOT NULL DEFAULT 'evidence'", "failure_count": "INTEGER NOT NULL DEFAULT 0", "input_key": "TEXT", "checked_head": "TEXT"},
             "learning_memories": {"validity": "TEXT NOT NULL DEFAULT '[]'"},
             "learning_reviews": {"proposal": "TEXT"},
@@ -228,22 +239,102 @@ class Learner:
         self.store, self.db, self.reviewer = store, store.db, reviewer
         initialize(self.db)
 
-    def enable(self, cwd, repository, now):
-        cwd, repository = Path(cwd).resolve(strict=True), Path(repository).resolve(strict=True)
-        git_revision(cwd)
+    @staticmethod
+    def _learning_repository(repository):
+        repository = Path(repository).expanduser().resolve(strict=True)
         git_revision(repository)
         if not (repository / "dotfiles/base/.agents/skills/do/SKILL.md").is_file():
             raise LearningError("--usr-root must name the tracked usr source")
+        return repository
+
+    def enable(self, cwd, repository, now):
+        cwd = Path(cwd).expanduser().resolve(strict=True)
+        repository = self._learning_repository(repository)
+        git_revision(cwd)
         identity = project_identity(cwd)
         with self.db:
-            self.db.execute("""INSERT INTO learning_projects VALUES(?,?,1,?,?)
-                ON CONFLICT(project) DO UPDATE SET cwd=excluded.cwd,enabled=1,repository=excluded.repository""",
-                            (identity, str(cwd), now, str(repository)))
+            self.db.execute("""INSERT INTO learning_projects
+                (project,cwd,enabled,enabled_at,repository,grant_source) VALUES(?,?,1,?,?,?)
+                ON CONFLICT(project) DO UPDATE SET cwd=excluded.cwd,enabled=1,enabled_at=excluded.enabled_at,
+                repository=excluded.repository,grant_source=excluded.grant_source""",
+                (identity, str(cwd), now, str(repository), GrantSource.PROJECT.value))
         return identity
 
-    def disable(self, cwd):
+    def enable_all(self, repository, now):
+        repository = self._learning_repository(repository)
         with self.db:
-            self.db.execute("UPDATE learning_projects SET enabled=0 WHERE project=?", (project_identity(cwd),))
+            self.db.execute("""INSERT INTO learning_global_grant(id,enabled_at,repository) VALUES(1,?,?)
+                ON CONFLICT(id) DO UPDATE SET enabled_at=excluded.enabled_at,repository=excluded.repository""",
+                (now, str(repository)))
+            self.db.execute("""UPDATE learning_projects SET enabled_at=?,repository=?
+                WHERE grant_source=? AND enabled=1""",
+                (now, str(repository), GrantSource.GLOBAL.value))
+
+    def disable(self, cwd):
+        cwd = Path(cwd).expanduser().resolve()
+        identity = project_identity(cwd)
+        grant = self._global_grant()
+        if grant is not None:
+            git_revision(cwd)
+        with self.db:
+            if grant is not None:
+                self.db.execute("""INSERT INTO learning_projects
+                    (project,cwd,enabled,enabled_at,repository,grant_source) VALUES(?,?,0,?,?,?)
+                    ON CONFLICT(project) DO UPDATE SET enabled=0,grant_source=excluded.grant_source""",
+                    (identity, str(cwd), time.time(), grant["repository"], GrantSource.PROJECT.value))
+            else:
+                self.db.execute("""UPDATE learning_projects SET enabled=0,grant_source=? WHERE project=?""",
+                    (GrantSource.PROJECT.value, identity))
+
+    def disable_all(self):
+        with self.db:
+            self.db.execute("DELETE FROM learning_global_grant WHERE id=1")
+            self.db.execute("UPDATE learning_projects SET enabled=0 WHERE grant_source=?", (GrantSource.GLOBAL.value,))
+
+    def _global_grant(self):
+        return self.db.execute("SELECT enabled_at,repository FROM learning_global_grant WHERE id=1").fetchone()
+
+    def _enroll_global_projects(self, grant):
+        candidates = self.db.execute("""SELECT project,cwd FROM (
+            SELECT project,cwd,updated,id FROM unindexed_sources
+            UNION ALL
+            SELECT s.project,s.cwd,s.updated,s.id FROM sessions s
+            WHERE NOT EXISTS (SELECT 1 FROM unindexed_sources u WHERE u.id=s.id)
+        ) WHERE project LIKE 'git:%' AND updated>=? AND cwd!=''
+            GROUP BY project ORDER BY max(updated) DESC""", (grant["enabled_at"],)).fetchall()
+        eligible = []
+        for row in candidates:
+            cwd_value = row["cwd"]
+            if len(cwd_value) > 4096 or "\x00" in cwd_value:
+                continue
+            try:
+                cwd = Path(cwd_value).expanduser().resolve(strict=True)
+                if not cwd.is_dir():
+                    continue
+                git_revision(cwd)
+                if project_identity(cwd) != row["project"]:
+                    continue
+            except (LearningError, OSError, RuntimeError, ValueError):
+                continue
+            eligible.append((row["project"], str(cwd)))
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            current = self._global_grant()
+            if current is None or current["enabled_at"] != grant["enabled_at"] or current["repository"] != grant["repository"]:
+                self.db.rollback()
+                return
+            for project, cwd in eligible:
+                self.db.execute("""INSERT INTO learning_projects
+                    (project,cwd,enabled,enabled_at,repository,grant_source) VALUES(?,?,1,?,?,?)
+                    ON CONFLICT(project) DO UPDATE SET cwd=excluded.cwd,enabled=1,enabled_at=excluded.enabled_at,
+                    repository=excluded.repository
+                    WHERE learning_projects.grant_source=?""",
+                    (project, cwd, grant["enabled_at"], grant["repository"],
+                     GrantSource.GLOBAL.value, GrantSource.GLOBAL.value))
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            raise
 
     def _events(self, session):
         rows = list(self.db.execute("SELECT * FROM events WHERE session=? ORDER BY position DESC,id DESC LIMIT ?", (session, MAX_EVENTS + 1)))
@@ -736,11 +827,22 @@ class Learner:
 
     def reconcile(self, now, roots=None, stable_seconds=STABLE_SECONDS, max_reviews=MAX_REVIEWS):
         totals = {"processed": 0, "signals": 0, "reviews": 0}
-        projects = list(self.db.execute("""SELECT p.* FROM learning_projects p LEFT JOIN learning_hints h ON h.project=p.project
-            WHERE p.enabled=1 ORDER BY coalesce(h.observed_at,0) DESC,p.project"""))
+        grant = self._global_grant()
+        if grant is not None:
+            self.store.refresh_headers(roots=roots)
+            self._enroll_global_projects(grant)
+        projects = list(self.db.execute("SELECT * FROM learning_projects WHERE enabled=1"))
         if not projects:
             return totals
-        self.store.refresh(roots=roots, projects={project["project"] for project in projects})
+        project_ids = {project["project"] for project in projects}
+        updated_after = {
+            project["project"]: grant["enabled_at"]
+            for project in projects
+            if grant is not None and project["grant_source"] == GrantSource.GLOBAL.value
+        }
+        self.store.refresh(roots=roots, projects=project_ids, updated_after=updated_after or None)
+        projects = list(self.db.execute("""SELECT p.* FROM learning_projects p LEFT JOIN learning_hints h ON h.project=p.project
+            WHERE p.enabled=1 ORDER BY coalesce(h.observed_at,0) DESC,p.project"""))
         self.resume_promotions(now)
         self.recover_rollbacks()
         with self.db:
@@ -895,8 +997,11 @@ class Learner:
                 int(relevant and finding["signal"] in repeated), "observational; procedure adherence and causality unestablished"))
 
     def status(self):
+        grant = self._global_grant()
         return {
             "projects": [dict(row) for row in self.db.execute("SELECT * FROM learning_projects")],
+            "global_wildcard": grant is not None,
+            "global_enabled_at": grant["enabled_at"] if grant is not None else None,
             "eligible_sessions_processed": self.db.execute("SELECT count(*) FROM learning_processed").fetchone()[0],
             "candidate_signals": self.db.execute("SELECT count(*) FROM learning_incidents").fetchone()[0],
             "pending_hook_hints": self.db.execute("SELECT count(*) FROM learning_hints").fetchone()[0],
@@ -925,7 +1030,9 @@ def parser():
     commands.add_parser("show").add_argument("finding", type=int)
     for command in ("enable", "disable"):
         operation = commands.add_parser(command)
-        operation.add_argument("--project", type=Path, default=Path.cwd())
+        scope = operation.add_mutually_exclusive_group()
+        scope.add_argument("--project", type=Path)
+        scope.add_argument("--all-projects", action="store_true", help="enable or disable the global project wildcard")
         operation.add_argument("--schedule", action="store_true")
         if command == "enable":
             operation.add_argument("--usr-root", type=Path, default=Path(__file__).resolve().parents[4])
@@ -962,17 +1069,24 @@ def main(argv=None):
             if not args.scheduled:
                 print(json.dumps(result))
         elif args.command == "enable":
-            learner.enable(args.project, args.usr_root, time.time())
+            if args.all_projects:
+                learner.enable_all(args.usr_root, time.time())
+            else:
+                learner.enable(args.project or Path.cwd(), args.usr_root, time.time())
             if args.schedule:
                 from agent_learning_ops import install_scheduler
                 install_scheduler(args.usr_root, args.state_dir, Path.home())
-            print("Enabled model review for this project. Hooks require separate Codex trust; timer reconciliation recovers missed hooks.")
+            target = "all Git projects with agent sessions" if args.all_projects else "this project"
+            print("Enabled model review for " + target + ". Hooks require separate Codex trust; timer reconciliation recovers missed hooks.")
         elif args.command == "disable":
-            learner.disable(args.project)
+            if args.all_projects:
+                learner.disable_all()
+            else:
+                learner.disable(args.project or Path.cwd())
             if args.schedule:
                 from agent_learning_ops import remove_scheduler
                 remove_scheduler(Path.home())
-            print("Project model review disabled.")
+            print("Global model review disabled." if args.all_projects else "Project model review disabled.")
         elif args.command in ("status", "doctor"):
             from agent_learning_ops import scheduler_status
             result = learner.status()

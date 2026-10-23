@@ -526,7 +526,13 @@ class Store:
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
-    def refresh(self, roots=None, project=None, projects=None):
+    def refresh(self, roots=None, project=None, projects=None, *, updated_after=None):
+        return self._refresh(roots, project, projects, updated_after=updated_after)
+
+    def refresh_headers(self, roots=None):
+        return self._refresh(roots, None, set(), headers_only=True)
+
+    def _refresh(self, roots=None, project=None, projects=None, *, updated_after=None, headers_only=False):
         if project is not None and projects is not None:
             raise ValueError("choose either project or projects")
         if roots is None:
@@ -538,6 +544,12 @@ class Store:
             roots = [Path(root) for root in roots]
         project = str(project) if project is not None else None
         projects = frozenset(str(value) for value in projects) if projects is not None else None
+        if updated_after is not None:
+            updated_after = {str(project): float(timestamp) for project, timestamp in updated_after.items()}
+            if projects is None or not set(updated_after) <= projects:
+                raise ValueError("updated_after requires selected project identifiers")
+        else:
+            updated_after = {}
         cache = {}
         grouped = {}
         unreadable_paths = set()
@@ -592,9 +604,11 @@ class Store:
                     continue
                 present_paths.add(source_path)
                 existing = indexed_by_path.get(source_path)
-                cached = existing or unindexed_by_path.get(source_path)
-                if self._cached_metadata_matches(cached, source_stat):
-                    meta = cached
+                unindexed = unindexed_by_path.get(source_path)
+                if self._cached_metadata_matches(existing, source_stat):
+                    meta = existing
+                elif self._cached_metadata_matches(unindexed, source_stat):
+                    meta = unindexed
                 else:
                     meta, error = _metadata(path, "codex", cache, stats)
                     if error:
@@ -607,11 +621,21 @@ class Store:
                 selected = (project is None or meta["project"] == project) and (
                     projects is None or meta["project"] in projects
                 )
+                cutoff = updated_after.get(meta["project"])
+                if cutoff is not None and meta["updated"] < cutoff:
+                    selected = False
                 learning_worker = _is_learning_worker(meta)
                 if existing is None and (learning_worker or not selected):
                     self._cache_unindexed_metadata(meta, unindexed_by_path)
                 if learning_worker:
+                    if headers_only:
+                        with self.db:
+                            self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (source_path,))
                     stats["skipped_learning_workers"] += 1
+                    continue
+                if headers_only:
+                    if not self._cached_metadata_matches(existing, source_stat):
+                        self._cache_unindexed_metadata(meta, unindexed_by_path)
                     continue
                 grouped.setdefault(meta["id"], []).append((root_order, path, meta))
         candidates = {}
@@ -624,7 +648,14 @@ class Store:
             if project is not None and meta["project"] != project or projects is not None and meta["project"] not in projects:
                 stats["skipped_project"] += 1
                 continue
+            cutoff = updated_after.get(meta["project"])
+            if cutoff is not None and meta["updated"] < cutoff:
+                stats["skipped_project"] += 1
+                continue
             changed, added, malformed, partial = self._refresh_file(meta, stats)
+            if meta["source_path"] in unindexed_by_path:
+                with self.db:
+                    self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             stats["sessions_indexed"] += 1
             stats["events_added"] += added
             stats["malformed_lines"] += malformed

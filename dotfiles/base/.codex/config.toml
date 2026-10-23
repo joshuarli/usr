@@ -5,8 +5,8 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6.1-sol"
-model_reasoning_effort = "medium"
+model = "gpt-6-luna"
+model_reasoning_effort = "xhigh"
 
 notify = ["/Users/josh/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
 
@@ -250,6 +250,9 @@ trust_level = "trusted"
 [projects."/Users/josh/d/toolbox"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/niceforge"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
@@ -272,6 +275,9 @@ trusted_hash = "sha256:0d0564abe1b14925cf07bc041fb4dc0ebec5a0d659f1b51b3aa91523b
 
 [hooks.state."/home/josh/.codex/config.toml:stop:0:0"]
 trusted_hash = "sha256:0d0564abe1b14925cf07bc041fb4dc0ebec5a0d659f1b51b3aa91523be13e37e"
+
+[hooks.state."/Users/josh/.codex/config.toml:stop:1:0"]
+trusted_hash = "sha256:d1de976eb9b3cac8f60fbc5c515f16baa710fe23abb0d52b756a60ac24d6d5fe"
 
 [desktop]
 followUpQueueMode = "steer"
