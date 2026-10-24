@@ -15,6 +15,7 @@ goals = true
 apps = false
 plugins = false
 remote_plugin = false
+daemon_auto_start = false
 
 prevent_idle_sleep = true
 
