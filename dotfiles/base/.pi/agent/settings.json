@@ -30,5 +30,6 @@
         "google/gemini-3.8-flash"
       ]
     }
-  }
+  },
+  "lastChangelogVersion": "1.4.0"
 }
