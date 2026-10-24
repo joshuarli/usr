@@ -14,7 +14,8 @@ import sys
 import time
 from pathlib import Path
 
-from agent_experience import CORRECTION, ERROR, SCHEMA as EXPERIENCE_SCHEMA, observe_project, rebuild_recall_projection, recall_schema
+from agent_experience import CORRECTION, ERROR, RUNNER as RUNNER_PATTERN, SCHEMA as EXPERIENCE_SCHEMA, observe_project, pair_runs, rebuild_recall_projection, recall_schema, run_outcome
+from agent_recall import technical_tokens
 from agent_learning_ops import SchedulerError
 from agent_recall import DEFAULT_LIMIT, Retriever, SourceError, artifact_text as read_tracked_text
 from agent_session_store import Store, StoreError, default_state_dir, project_identity, redact
@@ -25,6 +26,8 @@ SCHEMA_VERSION = 4
 MAX_EVENTS = 2000
 MAX_REVIEWS = 2
 MAX_MODEL_CALLS_PER_DAY = 24
+RESERVED_CALLS_PER_REVIEW = 4
+RESERVED_CALLS_PER_MONITOR = 2
 STABLE_SECONDS = 120
 SAME_ADVICE_SIMILARITY = .9
 CONFLICT_SIMILARITY = .6
@@ -172,6 +175,16 @@ def initialize(db):
     db.commit()
 
 
+def _epoch(value):
+    import datetime
+    if not value:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 def words(text):
     return frozenset(w for w in re.findall(r"[a-z][a-z0-9_-]{2,}", text.lower()) if w not in STOP_WORDS)
 
@@ -299,17 +312,20 @@ class Learner:
             raise LearningError("--usr-root must name the tracked usr source")
         return repository
 
-    def enable(self, cwd, repository, now):
+    def enable(self, cwd, repository, now, harnesses=("codex",)):
         cwd = Path(cwd).expanduser().resolve(strict=True)
         repository = self._learning_repository(repository)
         git_revision(cwd)
         identity = project_identity(cwd)
+        granted = ",".join(sorted(set(harnesses) & set(HARNESSES)))
+        if not granted:
+            raise LearningError("choose at least one supported harness")
         with self.db:
             self.db.execute("""INSERT INTO learning_projects
-                (project,cwd,enabled,enabled_at,repository,grant_source) VALUES(?,?,1,?,?,?)
+                (project,cwd,enabled,enabled_at,repository,grant_source,review_harnesses) VALUES(?,?,1,?,?,?,?)
                 ON CONFLICT(project) DO UPDATE SET cwd=excluded.cwd,enabled=1,enabled_at=excluded.enabled_at,
-                repository=excluded.repository,grant_source=excluded.grant_source""",
-                (identity, str(cwd), now, str(repository), GrantSource.PROJECT.value))
+                repository=excluded.repository,grant_source=excluded.grant_source,review_harnesses=excluded.review_harnesses""",
+                (identity, str(cwd), now, str(repository), GrantSource.PROJECT.value, granted))
         return identity
 
     def enable_all(self, repository, now):
@@ -680,7 +696,7 @@ class Learner:
         with self.db:
             count = self._incident_count(finding)
             self.db.execute("UPDATE learning_findings SET state='reviewing',reviewed_incidents=? WHERE id=?", (count, finding["id"]))
-            review_id = self.db.execute("INSERT INTO learning_reviews(finding,started_at) VALUES(?,?)", (finding["id"], now)).lastrowid
+            review_id = self.db.execute("INSERT INTO learning_reviews(finding,started_at,usage) VALUES(?,?,?)", (finding["id"], now, json.dumps({"reserved": RESERVED_CALLS_PER_REVIEW, "calls": []}))).lastrowid
         reviewer = self.reviewer
         try:
             if reviewer is None:
@@ -883,7 +899,7 @@ class Learner:
         if reusable is not None and not self._verify(reusable["evidence_refs"], evidence[:2]):
             reusable = None
         with self.db:
-            review_id = self.db.execute("INSERT INTO learning_reviews(finding,started_at) VALUES(?,?)", (finding["id"], now)).lastrowid
+            review_id = self.db.execute("INSERT INTO learning_reviews(finding,started_at,usage) VALUES(?,?,?)", (finding["id"], now, json.dumps({"reserved": RESERVED_CALLS_PER_MONITOR, "calls": []}))).lastrowid
         concluded = False
         disposition, note = "none", None
         try:
@@ -971,28 +987,48 @@ class Learner:
 
     def _model_calls_since(self, since):
         total = 0
+        for row in self.db.execute("SELECT usage, finished_at, outcome FROM learning_reviews WHERE started_at>=? AND usage IS NOT NULL", (since,)):
+            usage = json.loads(row[0])
+            if not isinstance(usage, dict):
+                continue
+            calls = len(usage.get("calls", []))
+            reserved = usage.get("reserved", 0)
+            total += max(calls, reserved) if row[1] is None or row[2] == "interrupted" else calls
+        return total
+
+    def _usage_totals(self, since):
+        calls = tokens = 0
         for row in self.db.execute("SELECT usage FROM learning_reviews WHERE started_at>=? AND usage IS NOT NULL", (since,)):
             usage = json.loads(row[0])
             if isinstance(usage, dict):
-                total += len(usage.get("calls", []))
-        return total
+                for call in usage.get("calls", []):
+                    calls += 1
+                    if isinstance(call, dict):
+                        tokens += sum(value for key, value in call.items() if key.endswith("tokens") and isinstance(value, int))
+        return calls, tokens
 
-    def reconcile(self, now, roots=None, stable_seconds=STABLE_SECONDS, max_reviews=MAX_REVIEWS, max_model_calls=MAX_MODEL_CALLS_PER_DAY):
+    def reconcile(self, now, roots=None, stable_seconds=STABLE_SECONDS, max_reviews=MAX_REVIEWS, max_model_calls=MAX_MODEL_CALLS_PER_DAY, local_only=False):
         totals = {"processed": 0, "signals": 0, "reviews": 0}
         grant = self._global_grant()
-        if grant is not None:
+        if grant is not None and not local_only:
             self.store.refresh_headers(roots=roots)
             self._enroll_global_projects(grant)
-        projects = list(self.db.execute("SELECT * FROM learning_projects WHERE enabled=1"))
-        if not projects:
+        projects = list(self.db.execute("SELECT * FROM learning_projects WHERE enabled=1")) if not local_only else []
+        observed = self._observed_projects()
+        if not projects and not observed:
             return totals
-        project_ids = {project["project"] for project in projects}
+        project_ids = {project["project"] for project in projects} | set(observed)
         updated_after = {
             project["project"]: grant["enabled_at"]
             for project in projects
             if grant is not None and project["grant_source"] == GrantSource.GLOBAL.value
         }
         self.store.refresh(roots=roots, projects=project_ids, updated_after=updated_after or None)
+        if observed:
+            captured = self.observe(now, stable_seconds=stable_seconds)
+            totals["experiences"] = captured["created"] + captured["merged"]
+        if local_only:
+            return totals
         projects = list(self.db.execute("""SELECT p.* FROM learning_projects p LEFT JOIN learning_hints h ON h.project=p.project
             WHERE p.enabled=1 ORDER BY coalesce(h.observed_at,0) DESC,p.project"""))
         self.resume_promotions(now)
@@ -1345,8 +1381,10 @@ class Learner:
             row = self.db.execute("SELECT project FROM learning_memories WHERE finding=?", (int(ref.partition(":")[2]),)).fetchone()
         elif kind == "experience":
             row = self.db.execute("SELECT project FROM learning_experiences WHERE id=?", (int(ref.partition(":")[2]),)).fetchone()
+        elif kind == "event":
+            row = self.db.execute("SELECT project FROM sessions WHERE id=?", (ref.partition(":")[2].rpartition("@")[0],)).fetchone()
         else:
-            raise LearningError("feedback takes memory:N or experience:N")
+            raise LearningError("feedback takes memory:N, experience:N or event:SESSION@POSITION")
         if row is None:
             raise LearningError("no such record")
         with self.db:
@@ -1374,6 +1412,103 @@ class Learner:
                 finding["id"], session["id"], phase, int(relevant), int(proposal["owner"] in loaded),
                 int(repeated), "observational; procedure adherence and causality unestablished", int(finding["id"] in regressed)))
 
+    def quality(self):
+        receipts = {row[0]: row[1] for row in self.db.execute("SELECT event,count(*) FROM learning_receipts GROUP BY event")}
+        returned = self.db.execute("SELECT tier,status,count(*) FROM learning_receipts WHERE event='returned' GROUP BY tier,status").fetchall()
+        repeated_abstentions = [dict(row) for row in self.db.execute(
+            "SELECT query,count(*) AS times FROM learning_receipts WHERE event='abstained' AND query!='' GROUP BY lower(query) HAVING count(*)>=2 ORDER BY times DESC LIMIT 10")]
+        uninspected_leads = self.db.execute(
+            "SELECT count(DISTINCT record) FROM learning_receipts r WHERE event='returned' AND tier='lead' AND NOT EXISTS "
+            "(SELECT 1 FROM learning_receipts i WHERE i.record=r.record AND i.event='inspected')").fetchone()[0]
+        feedback = {"%s/%s" % (row[0], row[1]): row[2] for row in self.db.execute("SELECT reporter,verdict,count(*) FROM learning_feedback GROUP BY reporter,verdict")}
+        outcomes = {row[0]: row[1] for row in self.db.execute("SELECT verification,count(*) FROM learning_outcomes GROUP BY verification")}
+        consolidation = []
+        rows = self.db.execute("SELECT id,project,identifiers,claim FROM learning_experiences WHERE state='retained' ORDER BY id DESC LIMIT 200").fetchall()
+        for index, left in enumerate(rows):
+            for right in rows[index + 1:]:
+                if left["project"] != right["project"]:
+                    continue
+                shared = similarity(frozenset(left["identifiers"].lower().split()), frozenset(right["identifiers"].lower().split()))
+                if shared >= .6 and similarity(words(left["claim"]), words(right["claim"])) >= .4:
+                    consolidation.append({"experiences": [left["id"], right["id"]], "shared_identifiers": round(shared, 2)})
+        return {
+            "receipts": receipts,
+            "returned_by_tier_status": {"%s/%s" % (row[0], row[1]): row[2] for row in returned},
+            "stale_results_returned": sum(row[2] for row in returned if row[1] == "needs_revalidation"),
+            "leads_never_inspected": uninspected_leads,
+            "repeated_abstentions": repeated_abstentions,
+            "consolidation_candidates": consolidation[:10],
+            "feedback": feedback,
+            "feedback_note": "Feedback and receipts are observations; they never change instruction authority or ranking tier.",
+            "outcomes_by_verification": outcomes,
+            "not_observable": ["whether the agent obeyed a result", "whether a missed memory existed but was never captured", "causal improvement"],
+        }
+
+    def trace_outcomes(self, now):
+        written = 0
+        receipts = self.db.execute("SELECT * FROM learning_receipts WHERE event='returned' AND created_at<=? ORDER BY created_at", (now,)).fetchall()
+        for receipt in receipts:
+            located = self._receipt_session(receipt)
+            if located is None:
+                continue
+            session, events, index = located
+            outcome = self._follow_through(receipt, session, events, index)
+            with self.db:
+                self.db.execute("INSERT OR REPLACE INTO learning_outcomes(project,session,record,presented,acted,verification,repeated,computed_at) VALUES(?,?,?,?,?,?,?,?)",
+                                (receipt["project"], session, receipt["record"], outcome["presented"], outcome["acted"], outcome["verification"], outcome["repeated"], now))
+            written += 1
+        return written
+
+    def _receipt_session(self, receipt):
+        for row in self.db.execute("SELECT id FROM sessions WHERE project=? AND updated>=? ORDER BY updated LIMIT 40", (receipt["project"], receipt["created_at"] - 3600)):
+            events, _ = self._events(row["id"])
+            for index, event in enumerate(events):
+                if event["kind"] == "tool-call" and "agent-learn" in event["text"] and "recall" in event["text"]:
+                    stamp = _epoch(event["timestamp"])
+                    if stamp is not None and abs(stamp - receipt["created_at"]) <= 120:
+                        return row["id"], events, index
+        return None
+
+    def _follow_through(self, receipt, session, events, index):
+        ref = receipt["record"]
+        output = next((event for event in events[index + 1:index + 4] if event["kind"] == "tool-output"), None)
+        presented = int(output is not None and ref in output["text"])
+        if not presented:
+            return {"presented": 0, "acted": None, "verification": "unknown", "repeated": None}
+        record_tokens = self._record_tokens(ref)
+        query_tokens = {token.lower() for token in technical_tokens(events[index]["text"], 24)}
+        distinct = {token for token in record_tokens if token not in query_tokens}
+        later = events[index + 1:]
+        acted_events = [event for event in later if event["kind"] == "tool-call" and "agent-learn" not in event["text"] and any(token in event["text"].lower() for token in distinct)]
+        acted = int(bool(acted_events)) if distinct else None
+        runs = pair_runs(events)
+        verifying = [run for run in runs if run.call > index and run.out is not None and run.command and RUNNER_PATTERN.search(run.command)]
+        results = [run_outcome(events, run) for run in verifying]
+        if "ok" in results[-1:]:
+            verification = "passed"
+        elif "error" in results[-1:]:
+            verification = "failed"
+        else:
+            verification = "unknown"
+        repeated = None
+        if ref.startswith("experience:"):
+            row = self.db.execute("SELECT detector,claim FROM learning_experiences WHERE id=?", (int(ref.partition(":")[2]),)).fetchone()
+            if row is not None and row["detector"] == "resolved_failure":
+                signature = re.search(r"failed with `([^`]+)`", row["claim"])
+                if signature:
+                    repeated = int(any(signature.group(1)[:60] in events[run.out]["text"] for run in verifying if run_outcome(events, run) == "error"))
+        return {"presented": 1, "acted": acted, "verification": verification, "repeated": repeated}
+
+    def _record_tokens(self, ref):
+        kind, _, rest = ref.partition(":")
+        if kind == "experience":
+            row = self.db.execute("SELECT identifiers FROM learning_experiences WHERE id=?", (int(rest),)).fetchone()
+            return {token.lower() for token in row[0].split()} if row else set()
+        if kind == "memory":
+            row = self.db.execute("SELECT action,applicability FROM learning_memories WHERE finding=?", (int(rest),)).fetchone()
+            return {token.lower() for token in technical_tokens(row[0] + " " + row[1], 12)} if row else set()
+        return set()
+
     def status(self):
         grant = self._global_grant()
         return {
@@ -1389,6 +1524,18 @@ class Learner:
             "model_reviews": self.db.execute("SELECT count(*) FROM learning_reviews").fetchone()[0],
             "model_calls_24h": self._model_calls_since(time.time()-86400),
             "model_call_budget_24h": MAX_MODEL_CALLS_PER_DAY,
+            "model_tokens_24h": self._usage_totals(time.time()-86400)[1],
+            "deferred_reviews": self.db.execute("SELECT count(*) FROM learning_findings WHERE state IN ('pending','deferred')").fetchone()[0],
+            "rejected_candidates": self.db.execute("SELECT count(*) FROM learning_findings WHERE state='rejected'").fetchone()[0],
+            "observation": {
+                "projects": sorted(self._observed_projects()),
+                "experiences": {row[0]: row[1] for row in self.db.execute("SELECT state,count(*) FROM learning_experiences GROUP BY state")},
+                "sessions_observed": self.db.execute("SELECT count(*) FROM learning_observed").fetchone()[0],
+                "suppressed_as_documented": self.db.execute("SELECT coalesce(sum(suppressed),0) FROM learning_observed").fetchone()[0],
+            },
+            "retrieval": {row[0]: row[1] for row in self.db.execute("SELECT event,count(*) FROM learning_receipts GROUP BY event")},
+            "transcript_coverage": self.store.coverage(),
+            "unrecognized_transcript_events": self.store.unrecognized_kinds(5),
             "promotions_rejected_by_validation": self.db.execute("SELECT count(*) FROM learning_findings WHERE state='held'").fetchone()[0],
             "recurring_mistakes": self.db.execute("SELECT COALESCE(sum(repeated),0) FROM learning_evaluations WHERE phase='after'").fetchone()[0],
             "regressions_reported": self.db.execute("SELECT COALESCE(sum(regressed),0) FROM learning_evaluations WHERE phase='after'").fetchone()[0],
@@ -1406,6 +1553,7 @@ def parser():
     commands = cli.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run")
     run.add_argument("--scheduled", action="store_true")
+    run.add_argument("--local-only", action="store_true", help="index and capture experience; never start a model review")
     for command in ("status", "findings"):
         commands.add_parser(command)
     commands.add_parser("doctor").add_argument("--probe-cli", action="store_true", help="verify the actual CLI against an unpaid loopback endpoint")
@@ -1418,9 +1566,39 @@ def parser():
         operation.add_argument("--schedule", action="store_true")
         if command == "enable":
             operation.add_argument("--usr-root", type=Path, default=Path(__file__).resolve().parents[4])
-    recall = commands.add_parser("recall")
+            operation.add_argument("--harness", action="append", choices=HARNESSES, help="harness whose sessions may be reviewed by a model; default codex; repeatable")
+    recall = commands.add_parser("recall", help="retrieve relevant retained experience and session leads; makes no model request")
     recall.add_argument("query")
     recall.add_argument("--project", type=Path, default=Path.cwd())
+    recall.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    recall.add_argument("--explain", action="store_true", help="include candidate, ranking and exclusion detail")
+    recall.add_argument("--no-verify", action="store_true", help="skip source and worktree rechecks")
+    recall.add_argument("--no-refresh", action="store_true", help="search the existing local index without scanning transcripts")
+    recall.add_argument("--no-record", action="store_true", help="do not write a retrieval receipt")
+    inspect_command = commands.add_parser("inspect", help="show source-verified evidence behind a recall result")
+    inspect_command.add_argument("ref", help="memory:N, experience:N or event:SESSION@POSITION")
+    inspect_command.add_argument("--project", type=Path, default=Path.cwd())
+    observe = commands.add_parser("observe", help="capture experience locally without model review")
+    observe.add_argument("--project", type=Path, default=Path.cwd())
+    observe.add_argument("--off", action="store_true", help="stop local observation of the project; keeps captured experience")
+    observe.add_argument("--run", action="store_true", help="index and capture now")
+    experiences = commands.add_parser("experiences", help="list retained project experience")
+    experiences.add_argument("--project", type=Path)
+    experiences.add_argument("--state", choices=("retained", "retired", "superseded", "withdrawn"))
+    experiences.add_argument("--limit", type=int, default=50)
+    withdraw = commands.add_parser("withdraw", help="stop retrieving a memory or experience; keeps its evidence")
+    withdraw.add_argument("ref")
+    forget = commands.add_parser("forget", help="delete an experience record and withdraw what was derived from it")
+    forget.add_argument("ref")
+    forget_session = commands.add_parser("forget-session", help="delete one session's index and derived records; never touches the transcript file")
+    forget_session.add_argument("session")
+    feedback = commands.add_parser("feedback", help="record a verdict about a retrieved record; it never grants authority")
+    feedback.add_argument("ref")
+    feedback.add_argument("verdict", choices=("helped", "irrelevant", "stale", "misleading"))
+    feedback.add_argument("--note")
+    feedback.add_argument("--user", action="store_true", help="record as the user's verdict instead of the agent's")
+    commands.add_parser("quality", help="report retrieval quality observations from receipts, feedback and transcripts")
+    commands.add_parser("reindex", help="rebuild the recall projection from canonical records")
     commands.add_parser("undo", help="withdraw one promoted skill edit or approved project memory").add_argument("finding", type=int)
     commands.add_parser("hook", help=argparse.SUPPRESS)
     return cli
@@ -1448,14 +1626,14 @@ def main(argv=None):
             with run_lock(args.state_dir) as acquired:
                 if not acquired:
                     return 0
-                result = learner.reconcile(time.time())
+                result = learner.reconcile(time.time(), local_only=args.local_only)
             if not args.scheduled:
                 print(json.dumps(result))
         elif args.command == "enable":
             if args.all_projects:
                 learner.enable_all(args.usr_root, time.time())
             else:
-                learner.enable(args.project or Path.cwd(), args.usr_root, time.time())
+                learner.enable(args.project or Path.cwd(), args.usr_root, time.time(), args.harness or ("codex",))
             if args.schedule:
                 from agent_learning_ops import install_scheduler
                 install_scheduler(args.usr_root, args.state_dir, Path.home())
@@ -1492,7 +1670,52 @@ def main(argv=None):
                 result["hook_trust"] = "inspect /hooks in Codex; never inferred from configured commands"
             print(redact(json.dumps(result, indent=2)))
         elif args.command == "recall":
-            print(json.dumps(learner.recall(project_identity(args.project), args.query, cwd=args.project), indent=2))
+            identity = project_identity(args.project)
+            if not args.no_refresh:
+                store.refresh(project=identity)
+            response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record)
+            print(redact(json.dumps(response if args.explain else response["results"], indent=2)))
+        elif args.command == "inspect":
+            print(redact(json.dumps(learner.inspect(args.ref, cwd=args.project), indent=2)))
+        elif args.command == "observe":
+            if args.off:
+                learner.observe_disable(args.project)
+                print("Local observation stopped for this project. Captured experience is kept; use `agent-learn forget` to delete it.")
+            else:
+                identity = learner.observe_enable(args.project, time.time())
+                print("Local observation enabled. No model request is made; `agent-learn run --local-only` captures experience.")
+                if args.run:
+                    store.refresh(project=identity)
+                    print(json.dumps(learner.observe_project(identity, args.project, time.time())))
+        elif args.command == "experiences":
+            print(redact(json.dumps(learner.experiences(project_identity(args.project) if args.project else None, args.state, args.limit), indent=2)))
+        elif args.command == "withdraw":
+            with run_lock(args.state_dir) as acquired:
+                if not acquired:
+                    raise LearningError("a learning run is in progress; retry shortly")
+                print(learner.withdraw(args.ref, time.time()))
+        elif args.command == "forget":
+            with run_lock(args.state_dir) as acquired:
+                if not acquired:
+                    raise LearningError("a learning run is in progress; retry shortly")
+                result = learner.forget(args.ref, time.time())
+            print(json.dumps(result, indent=2))
+            exit_code = 1 if result["unresolved_derived_findings"] else 0
+        elif args.command == "forget-session":
+            with run_lock(args.state_dir) as acquired:
+                if not acquired:
+                    raise LearningError("a learning run is in progress; retry shortly")
+                result = learner.forget_session(args.session, time.time())
+            print(json.dumps(result, indent=2))
+            exit_code = 1 if result["unresolved_derived_findings"] else 0
+        elif args.command == "feedback":
+            learner.feedback(args.ref, args.verdict, "user" if args.user else "agent", time.time(), args.note)
+            print("Recorded. Feedback is advisory and never changes instruction authority.")
+        elif args.command == "quality":
+            print(redact(json.dumps(learner.quality(), indent=2)))
+        elif args.command == "reindex":
+            rebuild_recall_projection(learner.db)
+            print("Rebuilt the recall projection.")
         elif args.command == "findings":
             print(redact(json.dumps([dict(row) for row in learner.db.execute("SELECT id,signal,state,retry_kind,reason,commit_id FROM learning_findings ORDER BY id DESC LIMIT 50")], indent=2)))
         elif args.command == "show":

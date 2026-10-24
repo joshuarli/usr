@@ -344,7 +344,7 @@ def run(args):
             while first_reconcile["processed"]:
                 first_reconcile = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
             learning_noop = learner.reconcile(time.time()+1000, roots=[transcripts], stable_seconds=0)
-            if learning_noop != {"processed": 0, "signals": 0, "reviews": 0}:
+            if learning_noop != {"processed": 0, "signals": 0, "reviews": 0, "experiences": 0}:
                 raise RuntimeError("learning no-op repeated work")
             missed_hook = transcripts / "rollout-missed-hook.jsonl"
             missed_hook.write_bytes(_line({"type": "session_meta", "payload": {

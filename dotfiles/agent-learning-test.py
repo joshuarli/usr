@@ -147,7 +147,7 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(simulated_agent(), 0)
         head = git(self.repo, "rev-parse", "HEAD")
         calls = self.model.calls
-        self.assertEqual(self.run_cycle(), {"processed": 0, "signals": 0, "reviews": 0})
+        self.assertEqual(self.run_cycle(), {"processed": 0, "signals": 0, "reviews": 0, "experiences": 0})
         self.assertEqual(self.model.calls, calls)
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
 

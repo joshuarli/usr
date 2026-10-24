@@ -7,7 +7,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from agent_recall import doc_tokens, parse_query, stem, technical_tokens
+from agent_recall import doc_tokens, stem, technical_tokens
 from agent_session_store import redact
 
 MAX_EVENTS = 2000
@@ -309,16 +309,21 @@ def _resolved_failures(events, runs, outcomes):
         claimed.update(failures)
         success = runs[resolved]
         edits = edited_paths(events, run.out, success.call)
-        if not edits and success.command == run.command:
+        between = [item for item in runs[number + 1:resolved] if item.command and outcomes[id(item)] == "ok" and command_prefix(item.command) != prefix]
+        if not edits and not between and success.command == run.command:
             continue
-        change = ("fixed by changing " + ", ".join("`%s`" % path for path in edits)) if edits else "passed as `%s`" % clip(success.command, 120)
+        if edits:
+            change = "fixed by changing " + ", ".join("`%s`" % path for path in edits)
+        elif between:
+            change = "passed after running `%s`" % clip(between[-1].command, 120)
+        else:
+            change = "passed as `%s`" % clip(success.command, 120)
         claim = "`%s` failed with `%s`; %s." % (clip(run.command, 120), signature, change)
         applies = "Running `%s`%s." % (prefix, (" after editing " + ", ".join("`%s`" % path for path in edits)) if edits else "")
+        context_index = next((index for index in range(run.out, success.call) if events[index]["kind"] == "tool-call" and (edited_paths(events, index, index + 1) or (between and events[index]["text"] == events[between[-1].call]["text"]))), None)
         sources = [source(events, run.out, "trigger")] + [source(events, success.out, "outcome")]
-        for index in range(run.out, success.call):
-            if events[index]["kind"] == "tool-call" and edited_paths(events, index, index + 1):
-                sources.append(source(events, index, "context"))
-                break
+        if context_index is not None:
+            sources.append(source(events, context_index, "context"))
         drafts.append(Draft("failure", clip(claim, MAX_CLAIM), clip(applies, MAX_APPLIES), "resolved_failure", "%s|%s" % (prefix, signature_key(signature)),
                             _observed(events, success.out), sources, "recurring" if len(failures) > 1 else "", tuple(edits)))
     return drafts

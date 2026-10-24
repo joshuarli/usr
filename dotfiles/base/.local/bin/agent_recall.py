@@ -19,11 +19,16 @@ EVENT_POOL = 60
 RECORD_POOL = 30
 EVENTS_PER_SESSION = 2
 RRF_K = 20
-MIN_COVERAGE = 0.4
+MIN_COVERAGE = 0.3
 MIN_MASS = 0.8
-MIN_SCORE = 0.30
+MIN_SCORE = 0.3
+RELATIVE_CUT = 0.8
+PARTIAL_IDENT_CREDIT = 0.7
+MAX_CLAUSES = 3
 IDF_POWER = 1.0
 IDENT_BOOST = 1.5
+GENERIC_WEIGHT = 0.25
+GENERIC_WORDS = frozenset("fix fixed fixing fail fails failed failing failure test tests testing run runs running error errors bug bugs change changes update updates add adds build builds code function functions command commands output working".split())
 COVERAGE_TOP_K = 4
 NEAR_DUPLICATE = 0.6
 SUMMARY_CHARS = 280
@@ -132,6 +137,19 @@ def parse_query(text):
             seen_words.add(word)
             words.append(word)
     return Query(text, tuple(words[:24]), tuple(idents[:12]))
+
+
+def split_queries(text):
+    text = str(text)[:2000]
+    full = parse_query(text)
+    head, separator, tail = text.partition(":")
+    body = tail if separator and len(head.split()) <= 12 else text
+    prefix = head if body is tail else ""
+    parts = [part.strip() for part in re.split(r",|;|\band\b|\bplus\b|\bthen\b|\balso\b", body) if part.strip()]
+    clauses = [parse_query(prefix + " " + part) for part in parts]
+    if len(parts) < 2 or any(not clause.informative for clause in clauses):
+        return [full]
+    return [full] + clauses[:MAX_CLAUSES]
 
 
 def technical_tokens(text, limit=16):
@@ -279,21 +297,24 @@ class Retriever:
 
     def retrieve(self, text, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True):
         limit = max(1, min(int(limit), MAX_LIMIT))
-        query = parse_query(text)
-        self._query = query
-        trace = {"query": {"words": list(query.words), "identifiers": list(query.idents)}, "candidates": [], "excluded": []} if explain else None
-        if not query.informative:
+        queries = [query for query in split_queries(text) if query.informative]
+        self._query = queries[0] if queries else parse_query(text)
+        trace = {"query": {"words": list(self._query.words), "identifiers": list(self._query.idents), "clauses": len(queries) - 1}, "candidates": [], "excluded": []} if explain else None
+        if not queries:
             return self._response([], True, "query has no searchable terms", trace)
         pool = {}
-        for candidate in self._record_candidates(query):
-            pool[candidate.ref] = candidate
-        if include_events:
-            for candidate in self._event_candidates(query):
-                pool[candidate.ref] = candidate
+        for index, query in enumerate(queries):
+            found = self._record_candidates(query, index)
+            if include_events:
+                found += self._event_candidates(query, index)
+            for candidate in found:
+                known = pool.setdefault(candidate.ref, candidate)
+                if known is not candidate:
+                    known.ranks.update(candidate.ranks)
         self._merge_source_events(pool, trace)
         scored = []
         for candidate in pool.values():
-            self._score(candidate, query)
+            self._score_best(candidate, queries)
             scored.append(candidate)
         scored.sort(key=lambda item: (-item.score, item.ref))
         if trace is not None:
@@ -348,7 +369,7 @@ class Retriever:
             return 0.0
         return math.log(1 + total / (1 + frequency)) / math.log(1 + total)
 
-    def _record_candidates(self, query):
+    def _record_candidates(self, query, index):
         candidates = {}
         for label, expression in fts_expressions(query):
             try:
@@ -368,7 +389,7 @@ class Retriever:
         for (kind, ref), ranks in candidates.items():
             candidate = self._load_record(kind, ref)
             if candidate is not None:
-                candidate.ranks = ranks
+                candidate.ranks = {index: ranks}
                 loaded.append(candidate)
         return loaded
 
@@ -406,7 +427,7 @@ class Retriever:
             observed_at=row["observed_at"], supports=supports, validity=json.loads(row["validity"]), revision=row["revision"] or "",
             tags=row["tags"], evidence_roots=max(1, roots), conflicts=["experience:%d" % item for item in conflicts])
 
-    def _event_candidates(self, query):
+    def _event_candidates(self, query, index):
         quoted = ",".join("'%s'" % kind for kind in CONTENT_EVENT_KINDS)
         candidates = {}
         for label, expression in fts_expressions(query):
@@ -428,7 +449,7 @@ class Retriever:
                     entry = candidates[key] = {"row": row, "ranks": {}}
                 entry["ranks"][label] = position
         per_session = {}
-        for key, entry in sorted(candidates.items(), key=lambda item: min(item[1]["ranks"].values())):
+        for key, _ in sorted(candidates.items(), key=lambda item: min(item[1]["ranks"].values())):
             if len(per_session.setdefault(key[0], [])) < EVENTS_PER_SESSION:
                 per_session[key[0]].append(key)
         out = []
@@ -438,7 +459,7 @@ class Retriever:
                 out.append(Candidate(
                     kind="event", ref="event:%s@%d" % (row["session"], row["position"]), project=self.project, summary=row["text"],
                     applies_when="", action="", text=row["text"], experience_kind="", tier="lead", observed_at=row["updated"],
-                    ranks=ranks, supports=[{"session": row["session"], "position": row["position"], "digest": row["digest"], "role": "match"}],
+                    ranks={index: ranks}, supports=[{"session": row["session"], "position": row["position"], "digest": row["digest"], "role": "match"}],
                     event_kind=row["kind"], session_cwd=row["cwd"]))
         return out
 
@@ -452,8 +473,10 @@ class Retriever:
             event = pool.pop(ref)
             for owner in owners[(event.supports[0]["session"], event.supports[0]["position"])]:
                 owner.text += " " + event.text[:800]
-                for label, rank in event.ranks.items():
-                    owner.ranks[label] = min(rank, owner.ranks.get(label, rank))
+                for index, labels in event.ranks.items():
+                    merged = owner.ranks.setdefault(index, {})
+                    for label, rank in labels.items():
+                        merged[label] = min(rank, merged.get(label, rank))
             if trace is not None:
                 trace["excluded"].append({"ref": ref, "why": "merged into the record it supports"})
 
@@ -461,18 +484,36 @@ class Retriever:
         parts = subparts(ident)
         return IDENT_BOOST * max((self._idf(part) for part in parts), default=0.0) ** IDF_POWER
 
-    def _score(self, candidate, query):
+    def _score_best(self, candidate, queries):
+        best = None
+        for index, query in enumerate(queries):
+            features, score = self._score(candidate, query, candidate.ranks.get(index, {}))
+            if best is None or score > best[1]:
+                best = (features, score)
+        candidate.features, candidate.score = best
+
+    def _score(self, candidate, query, ranks):
         tokens = doc_tokens(candidate.text)
         flat = normalized(candidate.text)
-        terms = [(word, self._idf(word) ** IDF_POWER, word in tokens or stem(word) in tokens) for word in query.words]
-        terms += [(ident, self._ident_weight(ident), ident_in(ident, candidate.text, flat, tokens)) for ident in query.idents]
+        terms = []
+        for word in query.words:
+            weight = self._idf(word) ** IDF_POWER * (GENERIC_WEIGHT if word in GENERIC_WORDS or stem(word) in GENERIC_WORDS else 1.0)
+            terms.append((word, weight, 1.0 if word in tokens or stem(word) in tokens else 0.0))
+        for ident in query.idents:
+            if ident_in(ident, candidate.text, flat, tokens):
+                credit = 1.0
+            else:
+                parts = subparts(ident)
+                share = sum(1 for part in parts if part in tokens or stem(part) in tokens) / max(1, len(parts))
+                credit = PARTIAL_IDENT_CREDIT * share if share >= 0.5 and len(parts) > 1 else 0.0
+            terms.append((ident, self._ident_weight(ident), credit))
         top = sorted(terms, key=lambda term: -term[1])[:COVERAGE_TOP_K]
-        mass = sum(weight for _, weight, present in terms if present)
+        mass = sum(weight * credit for _, weight, credit in terms)
         total = sum(weight for _, weight, _ in top)
-        coverage = (sum(weight for _, weight, present in top if present) / total) if total > 0 else 0.0
+        coverage = (sum(weight * credit for _, weight, credit in top) / total) if total > 0 else 0.0
         hits = sum(1 for ident in query.idents if ident_in(ident, candidate.text, flat, tokens))
         lists = max(1, len(fts_expressions(query)))
-        lexical = min(1.0, sum(1.0 / (RRF_K + rank + 1) for rank in candidate.ranks.values()) * (RRF_K + 1) / lists)
+        lexical = min(1.0, sum(1.0 / (RRF_K + rank + 1) for rank in ranks.values()) * (RRF_K + 1) / lists)
         kind_weight = KIND_WEIGHT.get(candidate.event_kind, 1.0)
         worktree = 0.0
         if candidate.session_cwd and self.cwd is not None:
@@ -481,8 +522,7 @@ class Retriever:
         age_days = max(0.0, (self.now - candidate.observed_at) / 86400)
         recency = 0.03 * math.exp(-age_days / 180)
         score = (0.50 * coverage + 0.17 * lexical) * (0.6 + 0.4 * kind_weight) + TIER_PRIOR[candidate.tier] + evidence + recency + worktree
-        candidate.features = {"mass": mass, "coverage": coverage, "identifier_hits": float(hits), "lexical": lexical, "kind_weight": kind_weight}
-        candidate.score = score
+        return {"mass": mass, "coverage": coverage, "identifier_hits": float(hits), "lexical": lexical, "kind_weight": kind_weight}, score
 
     def _acceptable(self, candidate, trace):
         features = candidate.features
@@ -562,6 +602,10 @@ class Retriever:
     def _diversify(self, window, limit, trace):
         selected = []
         for candidate in window:
+            if selected and candidate.score < selected[0].score * RELATIVE_CUT:
+                if trace is not None:
+                    trace["excluded"].append({"ref": candidate.ref, "why": "far below the best result"})
+                continue
             tokens = doc_tokens(candidate.text)
             duplicate = None
             for chosen in selected:
