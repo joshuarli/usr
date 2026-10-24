@@ -58,14 +58,17 @@ alias tn tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" new -s
 alias ta tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" a -t
 alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 
-alias o    opencode2
+alias o opencode2
+
+set CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION 9001
+set USR_DECIDE_TIER advisory
+
+# it's better to be nicer to the disk than save a few ms
+set OPENCODE_DISABLE_FFF 1
 
 # work
 set PATH "$HOME/.local/share/sentry-devenv/bin:$PATH"
 set PATH "/opt/homebrew/share/google-cloud-sdk/bin:$PATH"
 alias codex-work vault OPENROUTER_API_KEY -- codex-or --no-daemon
 alias claude-work vault OPENROUTER_API_KEY -- claude-or
-
-set CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION 9001
-set USR_DECIDE_TIER advisory
 
