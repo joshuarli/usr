@@ -300,11 +300,11 @@ def _json_object(raw):
     return value if isinstance(value, dict) else None
 
 
-def _head_lines(path, open_source, stats):
+def _head_lines(path, open_source, stats, wanted):
     lines, used = [], 0
     with open_source(path, stats) as stream:
         info = os.fstat(stream.fileno())
-        while len(lines) < HEADER_SCAN_LINES and used < HEADER_SCAN_BYTES:
+        while len(lines) < wanted and used < HEADER_SCAN_BYTES:
             raw = stream.readline()
             if not raw:
                 break
@@ -351,7 +351,7 @@ def _json_text(value):
 
 
 def read_header(harness, path, open_source, stats=None):
-    lines, info = _head_lines(path, open_source, stats)
+    lines, info = _head_lines(path, open_source, stats, HEADER_SCAN_LINES if harness in ("claude", "muse") else 1)
     first = lines[0] if lines else b""
     header = {
         "native_id": path.stem, "cwd": "", "parent": None, "source": None, "thread_source": None,

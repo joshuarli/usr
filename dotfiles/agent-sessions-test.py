@@ -694,6 +694,37 @@ class HarnessIndexTests(unittest.TestCase):
             self.assertEqual(len(store.search("latecomer", self.project_id)), 1)
             self.assertEqual(store.db.execute("SELECT coverage FROM sessions").fetchone()[0], "complete")
 
+    def test_truncated_or_replaced_transcript_resets_instead_of_keeping_stale_events(self):
+        records = [{"type": "user", "message": {"role": "user", "content": "oldneedle%d" % index}} for index in range(5)]
+        path = self.claude("shrink", records)
+        with Store(self.state) as store:
+            self.refresh(store)
+            self.assertEqual(len(store.search("oldneedle4", self.project_id)), 1)
+            path.write_bytes(path.read_bytes()[: len(path.read_bytes()) // 3])
+            stats = self.refresh(store)
+            self.assertEqual(stats["resets"], 1)
+            self.assertEqual(store.search("oldneedle4", self.project_id), [])
+            replacement = self.root / "replacement.jsonl"
+            replacement.write_bytes(b"".join(line(dict(record, sessionId="shrink", cwd=str(self.project))) for record in [{"type": "user", "message": {"role": "user", "content": "newneedle"}}]))
+            os.replace(replacement, path)
+            stats = self.refresh(store)
+            self.assertEqual(stats["resets"], 1)
+            self.assertEqual(len(store.search("newneedle", self.project_id)), 1)
+            self.assertEqual(store.search("oldneedle0", self.project_id), [])
+
+    def test_archived_move_keeps_one_session_and_valid_evidence(self):
+        path = self.claude("moved", [{"type": "user", "message": {"role": "user", "content": "movedneedle"}}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            hit = store.search("movedneedle", self.project_id)[0]
+            archive = self.roots["claude"] / "-archive"
+            archive.mkdir()
+            os.replace(path, archive / path.name)
+            self.refresh(store)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
+            moved = store.search("movedneedle", self.project_id)[0]
+            self.assertEqual(store.resolve_evidence(moved["session"], moved["position"], moved["digest"])["session"], hit["session"])
+
     def test_two_files_with_one_session_identity_index_once(self):
         self.claude("twin", [{"type": "user", "message": {"role": "user", "content": "twinneedle"}}])
         copy = self.roots["claude"] / "-proj" / "copy" / "twin.jsonl"

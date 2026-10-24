@@ -1028,6 +1028,7 @@ class Learner:
         if observed:
             captured = self.observe(now, stable_seconds=stable_seconds)
             totals["experiences"] = captured["created"] + captured["merged"]
+            self.trace_outcomes(now)
         if local_only:
             return totals
         projects = list(self.db.execute("""SELECT p.* FROM learning_projects p LEFT JOIN learning_hints h ON h.project=p.project
@@ -1301,9 +1302,12 @@ class Learner:
                        and self.db.execute("SELECT harness FROM sessions WHERE id=?", (item["session"],)).fetchone()[0] in harnesses]
             if not allowed:
                 continue
+            by_session = {}
+            for item in sorted(allowed, key=lambda entry: entry["role"] != "trigger"):
+                by_session.setdefault(item["session"], item)
             with self.db:
                 finding = self._cluster(project, "experience", row["claim"], now)
-                for item in allowed:
+                for item in by_session.values():
                     self.db.execute("""INSERT OR IGNORE INTO learning_incidents(finding,session,root_session,position,digest,signal,observed_at)
                         VALUES(?,?,?,?,?,?,?)""", (finding, item["session"], self._root_session(item["session"]), item["position"], item["digest"], "experience", now))
                 self.db.execute("INSERT OR IGNORE INTO learning_experience_findings(experience,finding) VALUES(?,?)", (row["id"], finding))
@@ -1456,9 +1460,11 @@ class Learner:
             "not_observable": ["whether the agent obeyed a result", "whether a missed memory existed but was never captured", "causal improvement"],
         }
 
-    def trace_outcomes(self, now):
+    def trace_outcomes(self, now, limit=50):
         written = 0
-        receipts = self.db.execute("SELECT * FROM learning_receipts WHERE event='returned' AND created_at<=? ORDER BY created_at", (now,)).fetchall()
+        receipts = self.db.execute("""SELECT * FROM learning_receipts r WHERE event='returned' AND created_at<=? AND created_at>=?
+            AND NOT EXISTS (SELECT 1 FROM learning_outcomes o WHERE o.record=r.record AND o.project=r.project AND o.computed_at>=r.created_at)
+            ORDER BY created_at LIMIT ?""", (now, now - 14 * 86400, limit)).fetchall()
         for receipt in receipts:
             located = self._receipt_session(receipt)
             if located is None:
@@ -1508,7 +1514,7 @@ class Learner:
             if row is not None and row["detector"] == "resolved_failure":
                 signature = re.search(r"failed with `([^`]+)`", row["claim"])
                 if signature:
-                    repeated = int(any(signature.group(1)[:60] in events[run.out]["text"] for run in verifying if run_outcome(events, run) == "error"))
+                    repeated = int(any(signature.group(1)[:60] in " ".join(events[run.out]["text"].split()) for run in verifying if run_outcome(events, run) == "error"))
         return {"presented": 1, "acted": acted, "verification": verification, "repeated": repeated}
 
     def _record_tokens(self, ref):
@@ -1686,7 +1692,7 @@ def main(argv=None):
             if not args.no_refresh:
                 store.refresh(project=identity)
             response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record)
-            print(redact(json.dumps(response if args.explain else response["results"], indent=2)))
+            print(redact(json.dumps(response, indent=2) if args.explain else json.dumps(response["results"], separators=(",", ":"))))
             if response["abstained"]:
                 terms = ", ".join(response["vocabulary"])
                 print("agent-learn recall: " + response["hint"] + (" Terms seen in this project: " + terms + "." if terms else ""), file=sys.stderr)

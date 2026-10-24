@@ -19,10 +19,10 @@ EVENT_POOL = 60
 RECORD_POOL = 30
 EVENTS_PER_SESSION = 2
 RRF_K = 20
-MIN_COVERAGE = 0.3
-MIN_MASS = 0.8
+MIN_COVERAGE = 0.5
+SPECIFIC_IDF = 0.5
 MIN_SCORE = 0.3
-RELATIVE_CUT = 0.8
+RELATIVE_CUT = 0.7
 PARTIAL_IDENT_CREDIT = 0.7
 MAX_CLAUSES = 3
 IDF_POWER = 1.0
@@ -333,6 +333,7 @@ class Retriever:
         for item in window:
             self._finish(item)
         window.sort(key=lambda item: (-item.score, item.ref))
+        window = self._prefer_records(window, trace)
         selected = self._diversify(window, limit, trace)
         self._mark_conflicts(selected)
         selected = self._bound_context(selected, trace)
@@ -359,7 +360,12 @@ class Retriever:
             try:
                 self.db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp.events_vocab USING fts5vocab(main, events_fts, 'row')")
                 row = self.db.execute("SELECT doc FROM temp.events_vocab WHERE term = ?", (word,)).fetchone()
-                self._df_cache[word] = row[0] if row else 0
+                frequency = row[0] if row else 0
+                base = stem(word)
+                if len(base) >= 4:
+                    ranged = self.db.execute("SELECT coalesce(sum(doc), 0) FROM temp.events_vocab WHERE term >= ? AND term < ?", (base, base + "\uffff")).fetchone()[0]
+                    frequency = max(frequency, ranged)
+                self._df_cache[word] = frequency
             except sqlite3.DatabaseError:
                 self._df_cache[word] = 0
         return self._df_cache[word]
@@ -483,6 +489,16 @@ class Retriever:
             if trace is not None:
                 trace["excluded"].append({"ref": ref, "why": "merged into the record it supports"})
 
+    def _specific_word(self, word):
+        if word in GENERIC_WORDS or stem(word) in GENERIC_WORDS:
+            return False
+        return self._idf(word) >= SPECIFIC_IDF
+
+    @staticmethod
+    def _specific_ident(ident):
+        parts = subparts(ident)
+        return len(parts) > 1 or len(normalized(ident)) >= 5 or (ident.isupper() and len(ident) >= 2)
+
     def _ident_weight(self, ident):
         parts = subparts(ident)
         return IDENT_BOOST * max((self._idf(part) for part in parts), default=0.0) ** IDF_POWER
@@ -499,12 +515,16 @@ class Retriever:
         tokens = doc_tokens(candidate.text)
         flat = normalized(candidate.text)
         terms = []
+        specific = 0
         for word in query.words:
             weight = self._idf(word) ** IDF_POWER * (GENERIC_WEIGHT if word in GENERIC_WORDS or stem(word) in GENERIC_WORDS else 1.0)
-            terms.append((word, weight, 1.0 if word in tokens or stem(word) in tokens else 0.0))
+            present = word in tokens or stem(word) in tokens
+            specific += int(present and self._specific_word(word))
+            terms.append((word, weight, 1.0 if present else 0.0))
         for ident in query.idents:
             if ident_in(ident, candidate.text, flat, tokens):
                 credit = 1.0
+                specific += int(self._specific_ident(ident))
             else:
                 parts = subparts(ident)
                 share = sum(1 for part in parts if part in tokens or stem(part) in tokens) / max(1, len(parts))
@@ -525,11 +545,11 @@ class Retriever:
         age_days = max(0.0, (self.now - candidate.observed_at) / 86400)
         recency = 0.03 * math.exp(-age_days / 180)
         score = (0.50 * coverage + 0.17 * lexical) * (0.6 + 0.4 * kind_weight) + TIER_PRIOR[candidate.tier] + evidence + recency + worktree
-        return {"mass": mass, "coverage": coverage, "identifier_hits": float(hits), "lexical": lexical, "kind_weight": kind_weight}, score
+        return {"mass": mass, "specific": float(specific), "coverage": coverage, "identifier_hits": float(hits), "lexical": lexical, "kind_weight": kind_weight}, score
 
     def _acceptable(self, candidate, trace):
         features = candidate.features
-        ok = features["coverage"] >= MIN_COVERAGE and features["mass"] >= MIN_MASS and candidate.score >= MIN_SCORE
+        ok = features["coverage"] >= MIN_COVERAGE and features["specific"] >= 1 and candidate.score >= MIN_SCORE
         if not ok and trace is not None:
             trace["excluded"].append({"ref": candidate.ref, "why": "below relevance gate", "score": round(candidate.score, 4)})
         return ok
@@ -602,6 +622,21 @@ class Retriever:
         elif candidate.status == "verified":
             candidate.score *= 1.08
 
+    @staticmethod
+    def _prefer_records(window, trace):
+        record_sessions = {entry["session"] for item in window if item.kind != "event" for entry in item.supports}
+        kept = []
+        for item in window:
+            if item.kind == "event" and item.supports[0]["session"] in record_sessions and any(
+                other.kind != "event" and other.score >= 0.7 * item.score and item.supports[0]["session"] in {entry["session"] for entry in other.supports}
+                for other in window
+            ):
+                if trace is not None:
+                    trace["excluded"].append({"ref": item.ref, "why": "summarised by a retained record from the same session"})
+                continue
+            kept.append(item)
+        return kept
+
     def _diversify(self, window, limit, trace):
         selected = []
         for candidate in window:
@@ -654,14 +689,7 @@ class Retriever:
         else:
             summary = item.summary
         summary = redact(" ".join(summary.split()))[:SUMMARY_CHARS]
-        harness = split_id(item.supports[0]["session"])[0] if item.supports else ""
-        support = []
-        for entry in item.supports[:3]:
-            support.append({
-                "session": entry["session"], "position": entry["position"], "digest": entry["digest"],
-                "harness": split_id(entry["session"])[0],
-                "inspect": "agent-sessions show %s --position %d" % (entry["session"], entry["position"]),
-            })
+        support = [{"session": entry["session"], "position": entry["position"]} for entry in item.supports[:3]]
         authority = {
             "instruction": "Reviewed project advice; current source, tests, and instructions take precedence.",
             "experience": "Advisory historical experience; verify against the current worktree before relying on it.",
@@ -670,9 +698,8 @@ class Retriever:
         return {
             "ref": item.ref, "tier": item.tier, "kind": item.experience_kind or item.event_kind, "summary": summary,
             "applies_when": redact(" ".join(item.applies_when.split()))[:SUMMARY_CHARS], "action": redact(item.action)[:600] if item.action else None,
-            "status": item.status, "reasons": item.reasons, "support": support, "harness": harness,
-            "score": round(item.score, 3), "authority": authority,
-            "age_days": int(max(0, (self.now - item.observed_at) / 86400)),
+            "status": item.status, "reasons": item.reasons, "support": support, "inspect": "agent-learn inspect " + item.ref,
+            "authority": authority, "age_days": int(max(0, (self.now - item.observed_at) / 86400)),
         }
 
 

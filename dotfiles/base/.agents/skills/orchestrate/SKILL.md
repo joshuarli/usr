@@ -33,7 +33,7 @@ Use the model and effort in the Codex column for each Codex child. This profile 
 
 Assign a child only the model and effort in the Codex column. Never use any other model, including GPT-5.x, Terra, the `astra` tier, or `ultra`; this repository keeps delegation explicit through the orchestration instructions.
 
-Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief (include verified `agent-learn recall` results); otherwise use the smallest positive turn count needed.
+Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 
 ### Claude and Grok
 

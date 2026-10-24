@@ -23,6 +23,8 @@ The tracked skills live in `dotfiles/base/.agents/skills/`. Directory links and 
 
 [`SKILLS.md`](../SKILLS.md) explains skill selection and the `/do` and `/yea` workflows. To invoke `/do` directly, use `$do <task>` in Codex, `/do <task>` in Claude Code, Muse Code, Grok Code, or OpenCode. Codex also provides `/skills`. Antigravity uses `/<skill-name>`. DeepSeek Harness loads matching skills through its skill tool.
 
+The [`do`](../dotfiles/base/.agents/skills/do/SKILL.md) skill tells agents when to run one targeted `agent-learn recall` before expensive rediscovery. Retrieval is local, needs no model grant, and returns leads rather than instructions; see [agent learning](agent-learning.md). No harness hook injects memory into every turn.
+
 Harnesses use native skill metadata and discovery paths. The checker at [`skills-check.sh`](../dotfiles/skills-check.sh) validates tracked skill metadata. See [the skills guide](../SKILLS.md) for invocation rules.
 
 ## Harness configuration

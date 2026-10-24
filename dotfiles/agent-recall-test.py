@@ -169,7 +169,8 @@ class RetrievalTests(RecallCase):
         for item in response["results"]:
             self.assertIn(item["tier"], ("instruction", "experience", "lead"))
             self.assertTrue(item["authority"])
-            self.assertTrue(all(s["inspect"].startswith("agent-sessions show ") for s in item["support"]))
+            self.assertEqual(item["inspect"], "agent-learn inspect " + item["ref"])
+            self.assertTrue(all(set(s) == {"session", "position"} for s in item["support"]))
 
     def test_active_session_is_excluded(self):
         self.build(lesson_world())
@@ -389,11 +390,12 @@ class ReceiptTests(RecallCase):
         inspected = self.learner.inspect(ref, cwd=self.world.cwd("alpha"), now=self.world.now)
         self.assertTrue(all(item["verified"] for item in inspected["evidence"]))
         self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_receipts WHERE event = 'inspected'").fetchone()[0], 1)
-        before = response["results"][0]
+        before = self.ask("alpha", "ModuleNotFoundError orbit_core", explain=True)
         for _ in range(5):
             self.learner.feedback(ref, "helped", "agent", self.world.now)
-        after = self.ask("alpha", "ModuleNotFoundError orbit_core")["results"][0]
-        self.assertEqual((before["tier"], before["status"], before["score"]), (after["tier"], after["status"], after["score"]))
+        after = self.ask("alpha", "ModuleNotFoundError orbit_core", explain=True)
+        self.assertEqual(before["explain"]["candidates"], after["explain"]["candidates"])
+        self.assertEqual([(i["ref"], i["tier"], i["status"]) for i in before["results"]], [(i["ref"], i["tier"], i["status"]) for i in after["results"]])
         self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_feedback WHERE reporter = 'agent'").fetchone()[0], 5)
 
     def test_abstention_is_recorded_as_a_receipt(self):
@@ -406,6 +408,151 @@ class ReceiptTests(RecallCase):
         report = self.learner.quality()
         self.assertIn("causal improvement", report["not_observable"])
         self.assertIn("never change instruction authority", report["feedback_note"])
+
+
+class DetectorTests(RecallCase):
+    def kinds(self):
+        return {row["detector"]: dict(row) for row in self.store.db.execute("SELECT * FROM learning_experiences")}
+
+    def test_abandoned_approach_needs_a_real_failure_and_a_stated_reason(self):
+        spec = fixture({"alpha": BASE}, [
+            episode("ab", "alpha", [
+                {"user": "memory map the segment files to cut read cost"},
+                tool("go test ./internal/index -run TestCompactWhileServing", "fatal error: fault\n[signal SIGBUS: bus error code=0x2]\nFAIL quarry/internal/index", 2),
+                {"assistant": "Compaction truncates the segment file while a reader still maps it, so SIGBUS is unavoidable here; we are abandoning the mmap approach for os.ReadFile."},
+                tool("go test ./internal/index", "ok quarry/internal/index 0.3s", 0)], age=9),
+            episode("speculative", "alpha", [
+                {"user": "think about caching"},
+                {"assistant": "We could abandon the LRU and switch to a clock policy for the shard cache if it ever becomes slow."}], age=9),
+        ])
+        self.build(spec)
+        found = self.kinds()
+        self.assertIn("abandoned_approach", found)
+        self.assertIn("SIGBUS", found["abandoned_approach"]["claim"])
+        self.assertEqual(self.store.db.execute("SELECT count(DISTINCT session) FROM learning_experience_sources WHERE experience = ?", (found["abandoned_approach"]["id"],)).fetchone()[0], 1)
+        sources = {row[0] for row in self.store.db.execute("SELECT session FROM learning_experience_sources")}
+        self.assertNotIn("speculative", sources)
+
+    def test_investigated_fact_must_be_grounded_in_tool_output(self):
+        grounded = episode("g", "alpha", [
+            {"user": "why does the exporter drop rows"},
+            tool("grep -n batch_size src/export.py", "src/export.py:44: rows = rows[:batch_size]", 0),
+            {"assistant": "The root cause is that batch_size in src/export.py silently truncates rows beyond 500."},
+            tool("pytest -q tests/test_export.py", "1 passed in 0.2s", 0)], age=8)
+        ungrounded = episode("u", "alpha", [
+            {"user": "why is the build flaky"},
+            {"assistant": "The root cause is that zzqueue in lib/phantom.rs silently reorders jobs."},
+            tool("pytest -q", "3 passed in 0.2s", 0)], age=8)
+        self.build(fixture({"alpha": BASE}, [grounded, ungrounded]))
+        claims = " ".join(row["claim"] for row in self.store.db.execute("SELECT claim FROM learning_experiences"))
+        self.assertIn("batch_size", claims)
+        self.assertNotIn("zzqueue", claims)
+
+    def test_benchmark_result_keeps_numbers_from_the_output_and_ages_into_revalidation(self):
+        spec = fixture({"alpha": BASE}, [episode("bn", "alpha", [
+            {"user": "is hashing the bottleneck in dedupe"},
+            tool("cargo bench --bench dedupe", "hash_only        time: [41.2 ns 41.9 ns 42.8 ns]\nfull_dedupe      time: [598 ns 612 ns 631 ns]", 0),
+            {"assistant": "Hashing is not the bottleneck: it takes 41.9 ns of the 612 ns per call; allocation dominates."}], age=200)])
+        self.build(spec)
+        row = self.kinds()["benchmark_result"]
+        self.assertEqual((row["kind"], row["tags"]), ("failure", "performance"))
+        hit = next(item for item in self.ask("alpha", "dedupe hashing bottleneck allocation")["results"] if item["ref"].startswith("experience:"))
+        self.assertEqual(hit["status"], "needs_revalidation")
+        self.assertIn("aged_performance_result", hit["reasons"])
+
+    def test_technical_decision_requires_rationale_and_two_named_things(self):
+        spec = fixture({"alpha": BASE}, [
+            episode("d", "alpha", [{"user": "we will use sqlite_fts5 rather than lucene_core because the project must stay dependency free and run offline"}, {"assistant": "ok"}], age=5),
+            episode("vague", "alpha", [{"user": "I prefer tabs instead of spaces"}, {"assistant": "ok"}], age=5),
+        ])
+        self.build(spec)
+        claims = " ".join(row["claim"] for row in self.store.db.execute("SELECT claim FROM learning_experiences"))
+        self.assertIn("sqlite_fts5", claims)
+        self.assertNotIn("tabs", claims)
+
+    def test_failure_recurring_across_sessions_becomes_one_gotcha_even_without_a_fix(self):
+        episodes = [episode("r%d" % index, "alpha", [{"user": "run the integration suite"}, tool("make integration", "error: port 5432 already in use\nmake: *** [integration] Error 1", 2), {"assistant": "port busy"}], age=10 - index) for index in range(3)]
+        self.build(fixture({"alpha": BASE}, episodes))
+        gotcha = self.kinds()["recurring_failure"]
+        self.assertEqual(self.store.db.execute("SELECT count(DISTINCT session) FROM learning_experience_sources WHERE experience = ?", (gotcha["id"],)).fetchone()[0], 3)
+
+    def test_facts_already_documented_by_the_project_are_not_duplicated(self):
+        projects = {"alpha": {"files": {"AGENTS.md": "Run pytest -q tests/test_ingest.py after pip install -e . ; ModuleNotFoundError orbit_core means the package is not installed in the runner environment.\n"}}}
+        spec = lesson_world()
+        spec["projects"] = {"alpha": projects["alpha"], "beta": BASE}
+        self.build(spec)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_experiences WHERE project = ?", (self.ident["alpha"],)).fetchone()[0], 0)
+        self.assertGreaterEqual(self.store.db.execute("SELECT coalesce(sum(suppressed), 0) FROM learning_observed").fetchone()[0], 1)
+
+    def test_vague_or_code_heavy_corrections_are_not_kept(self):
+        dump = "\n".join("def f%d(x): return x" % index for index in range(30))
+        spec = fixture({"alpha": BASE}, [
+            episode("vague", "alpha", [{"user": "do it"}, {"assistant": "ok"}, {"user": "no, wrong, stop"}], age=5),
+            episode("dump", "alpha", [{"user": "go"}, {"assistant": "here"}, {"user": "wrong, use this instead:\n" + dump}], age=5),
+        ])
+        self.build(spec)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_experiences").fetchone()[0], 0)
+
+    def test_retirement_spares_conditioned_and_retrieved_records_and_never_touches_evidence(self):
+        self.build(lesson_world())
+        db = self.store.db
+        row = db.execute("SELECT id FROM learning_experiences WHERE project = ?", (self.ident["alpha"],)).fetchone()
+        later = self.world.now + 400 * 86400
+        self.assertGreaterEqual(agent_experience.retire_stale(db, later), 1)
+        self.assertEqual(db.execute("SELECT state FROM learning_experiences WHERE id = ?", (row[0],)).fetchone()[0], "retired")
+        self.assertGreater(db.execute("SELECT count(*) FROM learning_experience_sources WHERE experience = ?", (row[0],)).fetchone()[0], 0)
+        self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_docs WHERE kind = 'experience' AND ref = ?", (row[0],)).fetchone()[0], 0)
+
+    def test_receipt_protects_a_record_from_retirement(self):
+        self.build(lesson_world())
+        ref = self.ask("alpha", "ModuleNotFoundError orbit_core")["results"][0]["ref"]
+        self.learner.retrieve(self.ident["alpha"], "ModuleNotFoundError orbit_core", cwd=self.world.cwd("alpha"), now=self.world.now, record=True)
+        before = self.store.db.execute("SELECT count(*) FROM learning_experiences WHERE state = 'retained'").fetchone()[0]
+        retired = agent_experience.retire_stale(self.store.db, self.world.now + 400 * 86400)
+        returned = {row[0] for row in self.store.db.execute("SELECT record FROM learning_receipts")}
+        survivors = {"experience:%d" % row[0] for row in self.store.db.execute("SELECT id FROM learning_experiences WHERE state = 'retained'")}
+        self.assertTrue(returned & survivors or ref not in returned)
+        self.assertEqual(before - retired, self.store.db.execute("SELECT count(*) FROM learning_experiences WHERE state = 'retained'").fetchone()[0])
+
+
+class BudgetTests(RecallCase):
+    def test_review_that_crashes_before_recording_usage_still_consumes_its_reservation(self):
+        self.build(lesson_world(), observe=False)
+        db = self.store.db
+        now = self.world.now
+        with db:
+            db.execute("INSERT INTO learning_findings(project,signal,fingerprint,terms,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", ("p", "correction", "f", "t", "reviewing", now, now))
+            db.execute("INSERT INTO learning_reviews(finding,started_at,usage) VALUES(1,?,?)", (now, json.dumps({"reserved": agent_learning.RESERVED_CALLS_PER_REVIEW, "calls": []})))
+        self.assertEqual(self.learner._model_calls_since(now - 86400), agent_learning.RESERVED_CALLS_PER_REVIEW)
+        with db:
+            db.execute("UPDATE learning_reviews SET finished_at = ?, outcome = 'interrupted'", (now,))
+        self.assertEqual(self.learner._model_calls_since(now - 86400), agent_learning.RESERVED_CALLS_PER_REVIEW)
+        with db:
+            db.execute("UPDATE learning_reviews SET outcome = 'memory', usage = ?", (json.dumps({"calls": [{"mode": "proposal"}]}),))
+        self.assertEqual(self.learner._model_calls_since(now - 86400), 1)
+
+    def test_local_only_reconcile_never_reaches_a_reviewer(self):
+        class Exploding:
+            def review(self, context):
+                raise AssertionError("model requested")
+
+            adversarial = review
+            capabilities = review
+
+        self.build(lesson_world(), observe=False)
+        self.learner.reviewer = Exploding()
+        self.learner.enable(self.world.cwd("alpha"), ROOT, 0)
+        self.learner.observe_enable(self.world.cwd("beta"), 0)
+        totals = self.learner.reconcile(self.world.now, roots=self.world.root_args(), stable_seconds=0, local_only=True)
+        self.assertEqual(totals["reviews"], 0)
+        self.assertGreaterEqual(totals["experiences"], 1)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_reviews").fetchone()[0], 0)
+
+    def test_status_reports_spend_deferrals_and_rejections(self):
+        self.build(lesson_world(), observe=False)
+        status = self.learner.status()
+        for key in ("model_calls_24h", "model_tokens_24h", "deferred_reviews", "rejected_candidates", "transcript_coverage"):
+            self.assertIn(key, status)
 
 
 class HardeningTests(RecallCase):
@@ -586,6 +733,77 @@ class CommandTests(RecallCase):
         self.assertEqual(store.db.execute("SELECT review_harnesses FROM learning_projects").fetchone()[0], "codex")
         self.run_cli("enable", "--project", str(project), "--usr-root", str(ROOT), "--harness", "claude", "--harness", "codex")
         self.assertEqual(store.db.execute("SELECT review_harnesses FROM learning_projects").fetchone()[0], "claude,codex")
+
+
+class BridgeTests(RecallCase):
+    def two_session_spec(self, second_harness):
+        spec = lesson_world()
+        spec["episodes"].append(episode("a-3", "alpha", [
+            {"user": "tests fail on the runner again"}, tool("pytest -q tests/test_ingest.py", PYTEST_FAIL, 1),
+            tool("pip install -e .", "Successfully installed orbit-core", 0), tool("pytest -q tests/test_ingest.py", "1 passed in 0.4s", 0)],
+            harness=second_harness, age=3))
+        return spec
+
+    def test_corroborated_experience_enters_the_existing_review_gates_only_for_granted_harnesses(self):
+        self.build(self.two_session_spec("claude"), observe=False)
+        self.learner.enable(self.world.cwd("alpha"), ROOT, 0, ("codex",))
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        incidents = [row[0] for row in self.store.db.execute("SELECT session FROM learning_incidents WHERE signal = 'experience'")]
+        self.assertEqual(incidents, ["a-1"])
+        self.learner.enable(self.world.cwd("alpha"), ROOT, 0, ("codex", "claude"))
+        with self.store.db:
+            self.store.db.execute("DELETE FROM learning_experience_findings")
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        sessions = {row[0] for row in self.store.db.execute("SELECT session FROM learning_incidents WHERE signal = 'experience'")}
+        self.assertEqual(sessions, {"a-1", "claude:a-3"})
+
+    def test_observation_alone_never_creates_findings_or_model_work(self):
+        self.build(self.two_session_spec("codex"))
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings").fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_reviews").fetchone()[0], 0)
+
+
+class OutcomeTests(RecallCase):
+    def follow_up(self, later_turns, query="ModuleNotFoundError orbit_core"):
+        self.build(lesson_world())
+        ref = self.ask("alpha", query)["results"][0]["ref"]
+        start = self.world.now - 3 * 86400
+        recall = tool("agent-learn recall '%s' --project /repo" % query, '[{"ref": "%s"}]' % ref, 0)
+        episode_spec = episode("w-1", "alpha", [{"user": "tests fail on the runner again"}, recall, *later_turns], age=3)
+        BENCH.write_episode(self.world.roots, episode_spec, self.world.cwd("alpha"), start)
+        self.store.refresh(roots=self.world.root_args())
+        created = start + 60 + 1
+        with self.store.db:
+            self.store.db.execute("INSERT INTO learning_receipts(project,cwd,query,created_at,record,tier,status,rank,event) VALUES(?,?,?,?,?,?,?,0,'returned')",
+                                  (self.ident["alpha"], str(self.world.cwd("alpha")), query, created, ref, "experience", "unverified"))
+        self.learner.trace_outcomes(self.world.now)
+        row = self.store.db.execute("SELECT * FROM learning_outcomes").fetchone()
+        return dict(row) if row else None
+
+    def test_applied_and_verified_follow_through_is_recorded_without_claiming_cause(self):
+        outcome = self.follow_up([tool("pytest -q tests/test_ingest.py", "1 passed in 0.4s", 0)])
+        self.assertEqual((outcome["presented"], outcome["acted"], outcome["verification"]), (1, 1, "passed"))
+
+    def test_retrieved_but_ignored_advice_is_not_counted_as_followed(self):
+        outcome = self.follow_up([tool("git status", "clean", 0), {"assistant": "I followed the memory exactly."}])
+        self.assertEqual((outcome["presented"], outcome["acted"], outcome["verification"]), (1, 0, "unknown"))
+
+    def test_echoing_the_query_back_is_not_action(self):
+        outcome = self.follow_up([tool("rg ModuleNotFoundError orbit_core src/", "no matches", 0)])
+        self.assertEqual(outcome["acted"], 0)
+
+    def test_failed_verification_and_repeated_mistake_are_observed(self):
+        outcome = self.follow_up([tool("pytest -q tests/test_ingest.py", PYTEST_FAIL, 1)])
+        self.assertEqual((outcome["acted"], outcome["verification"], outcome["repeated"]), (1, "failed", 1))
+
+    def test_unlocatable_session_stays_unknown_rather_than_guessed(self):
+        self.build(lesson_world())
+        ref = self.ask("alpha", "ModuleNotFoundError orbit_core")["results"][0]["ref"]
+        with self.store.db:
+            self.store.db.execute("INSERT INTO learning_receipts(project,cwd,query,created_at,record,tier,status,rank,event) VALUES(?,?,?,?,?,?,?,0,'returned')",
+                                  (self.ident["alpha"], "x", "q", self.world.now - 86400, ref, "experience", "unverified"))
+        self.assertEqual(self.learner.trace_outcomes(self.world.now), 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_outcomes").fetchone()[0], 0)
 
 
 class MigrationTests(unittest.TestCase):

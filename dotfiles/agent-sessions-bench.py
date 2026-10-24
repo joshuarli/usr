@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
 BIN_DIR = ROOT / "dotfiles" / "base" / ".local" / "bin"
+sys.path.insert(0, str(BIN_DIR))
 STORE_SPEC = importlib.util.spec_from_file_location("agent_session_store", BIN_DIR / "agent_session_store.py")
 STORE_MODULE = importlib.util.module_from_spec(STORE_SPEC)
 sys.modules[STORE_SPEC.name] = STORE_MODULE
@@ -33,7 +34,6 @@ sys.modules[SPEC.name] = SKILL_USAGE
 SPEC.loader.exec_module(SKILL_USAGE)
 PERF_GATE = ROOT / "dotfiles" / "base" / ".local" / "bin" / "perf-gate-ready"
 QUERY = "retentionmarker"
-sys.path.insert(0, str(BIN_DIR))
 
 
 def _line(value):
@@ -122,7 +122,7 @@ def _learner(store, projects, project_ids):
     learner = importlib.import_module("agent_learning").Learner(store, NoModel())
     with store.db:
         store.db.executemany(
-            "INSERT OR REPLACE INTO learning_projects VALUES(?,?,1,0,?)",
+            "INSERT OR REPLACE INTO learning_projects(project,cwd,enabled,enabled_at,repository) VALUES(?,?,1,0,?)",
             ((project_id, str(project), str(ROOT)) for project, project_id in zip(projects, project_ids)),
         )
     return learner
@@ -187,7 +187,7 @@ def _legacy_refresh(module, store, roots, project_ids, transcripts):
         except (TypeError, ValueError, OSError):
             return False
 
-    def counted_open(path):
+    def counted_open(path, stats=None):
         stream = original_open(path)
         counters["content_opens"] += 1
         return CountedStream(stream)

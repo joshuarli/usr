@@ -430,7 +430,12 @@ class LegacySystem:
         project = importlib.import_module("agent_session_store").project_identity(self.world.cwd(case["project"], case.get("worktree")))
         terms, matches = self.words(case["query"]), []
         db = self.store.db
+        cwd = self.world.cwd(case["project"], case.get("worktree"))
         for memory in db.execute("SELECT * FROM learning_memories WHERE project=? AND state='approved'", (project,)):
+            try:
+                self.learner._memory_conditions(cwd, json.loads(memory["validity"]))
+            except (importlib.import_module("agent_learning").LearningError, OSError, UnicodeError, ValueError):
+                continue
             score = len(terms & self.words(memory["action"] + " " + memory["applicability"]))
             if score:
                 matches.append((score, memory))
@@ -484,7 +489,7 @@ class RecallSystem:
             out.append({
                 "sessions": [support["session"] for support in item["support"]], "tier": item["tier"], "status": item["status"],
                 "memories": [self.world.memory_ids.get(int(item["ref"].split(":")[1]))] if item["ref"].startswith("memory:") else [],
-                "score": item["score"], "dup_group": None, "chars": len(json.dumps(item)),
+                "score": None, "dup_group": None, "chars": len(json.dumps(item)),
             })
         return out
 
@@ -530,11 +535,13 @@ def locate_event(store, world):
     return locate
 
 
-def prepare(split, directory, system_names):
+def prepare(split, directory, system_names, haystack=0):
     fixture = load_fixture(split)
     problems = validate(fixture)
     if problems:
         raise SystemExit("invalid fixture %s:\n  " % split + "\n  ".join(problems))
+    if haystack:
+        fixture["episodes"].extend(haystack_episodes(list(fixture["projects"]), haystack, 12))
     world = World(fixture, directory)
     world.build()
     store_module = importlib.import_module("agent_session_store")
@@ -555,11 +562,36 @@ def prepare(split, directory, system_names):
     return world, store, learner
 
 
-def run_systems(split, names, limit=5, repeats=1):
+def retry_requests(split, haystack=0):
+    WORK_TMP.mkdir(parents=True, exist_ok=True)
+    requests = []
+    with tempfile.TemporaryDirectory(dir=str(WORK_TMP)) as directory:
+        world, store, learner = prepare(split, directory, ["new"], haystack)
+        system = RecallSystem(world, learner)
+        identity = importlib.import_module("agent_session_store").project_identity
+        for case in world.fixture["cases"]:
+            if system.run(case, 3, world.now):
+                continue
+            project = world.fixture["projects"][case["project"]]
+            files = sorted(set(project.get("files", {})) | set(project.get("worktrees", {}).get(case.get("worktree") or "", {}).get("files", {})))
+            requests.append({
+                "id": case["id"], "query": case["query"], "repository_files": files,
+                "hint": agent_learning_module().RETRY_HINT,
+                "vocabulary": learner.vocabulary(identity(world.cwd(case["project"], case.get("worktree")))),
+            })
+        store.close()
+    return requests
+
+
+def agent_learning_module():
+    return importlib.import_module("agent_learning")
+
+
+def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None):
     WORK_TMP.mkdir(parents=True, exist_ok=True)
     results = {}
     with tempfile.TemporaryDirectory(dir=str(WORK_TMP)) as directory:
-        world, store, learner = prepare(split, directory, names)
+        world, store, learner = prepare(split, directory, names, haystack)
         systems = []
         for name in names:
             if name == "legacy":
@@ -572,7 +604,7 @@ def run_systems(split, names, limit=5, repeats=1):
                 systems.append(RecallSystem(world, learner))
         cases = world.fixture["cases"]
         for system in systems:
-            per_case, timings, chars, details = [], [], [], {}
+            per_case, timings, chars, details, retried = [], [], [], {}, []
             for case in cases:
                 best = None
                 for _ in range(repeats):
@@ -581,6 +613,9 @@ def run_systems(split, names, limit=5, repeats=1):
                     elapsed = time.perf_counter() - started
                     best = elapsed if best is None else min(best, elapsed)
                 per_case.append((case, case_metrics(case, found, world.session_map, world.groups)))
+                if retries is not None and system.name == "new-recall":
+                    second = system.run(dict(case, query=retries[case["id"]]), limit, world.now) if not found and case["id"] in retries else found
+                    retried.append((case, case_metrics(case, second, world.session_map, world.groups)))
                 details[case["id"]] = [{"episodes": sorted(world.session_map.get(session, session) for session in item["sessions"]), "tier": item["tier"], "status": item.get("status"),
                                         "memories": item.get("memories"), "score": item.get("score")} for item in found[:5]]
                 timings.append(best)
@@ -593,6 +628,9 @@ def run_systems(split, names, limit=5, repeats=1):
             for case, metrics in per_case:
                 by_category.setdefault(case["category"], []).append((case, metrics))
             summary["by_category"] = {key: aggregate(value) for key, value in sorted(by_category.items())}
+            if retried:
+                summary["after_one_retry"] = aggregate(retried)
+                summary["retries_used"] = sum(1 for case, _ in per_case if case["id"] in retries and not details[case["id"]])
             summary["details"] = details
             summary["failures"] = [case["id"] for case, m in per_case if (case["expect"] == "match" and not m["recall5"]) or (case["expect"] == "abstain" and not m["abstain_correct"])]
             results[system.name] = summary
@@ -601,10 +639,48 @@ def run_systems(split, names, limit=5, repeats=1):
     return results
 
 
-def explain_cases(split, case_ids):
+HAY_WORDS = (
+    "update refactor module function class method variable string number list dict array loop branch merge commit rebase config setting option flag "
+    "build compile link package install dependency version upgrade release deploy server client request response handler route endpoint database query "
+    "schema migration table column index cache queue worker thread process memory cpu disk network socket timeout retry error warning exception stack trace "
+    "log debug info test fixture mock assert expect pass fail skip suite coverage lint format type check parse render template component view model "
+    "controller service repository interface implementation abstraction pattern design review document readme comment example tutorial script command shell "
+    "terminal editor plugin extension theme layout style color font image icon button form input output buffer stream reader writer encoder decoder token "
+    "session cookie header payload body json yaml toml csv xml html css markdown regex path directory file folder name value key item entry record field"
+).split()
+HAY_TEMPLATES = (
+    "please {a} the {b} {c} and then {d} the {e}", "why does the {a} {b} fail when the {c} is empty", "add a {a} {b} for the {c} {d}",
+    "{a} {b}: the {c} {d} returns {e} instead of {f}", "can you {a} this {b} and {c} the {d} output", "rename the {a} {b} to {c} everywhere",
+)
+
+
+def haystack_episodes(project_keys, per_project, turns, seed=7):
+    import random
+    rng = random.Random(seed)
+    episodes = []
+    for key in project_keys:
+        for number in range(per_project):
+            steps = []
+            for turn in range(turns):
+                words = {letter: rng.choice(HAY_WORDS) for letter in "abcdef"}
+                text = rng.choice(HAY_TEMPLATES).format(**words)
+                kind = rng.random()
+                if kind < 0.35:
+                    steps.append({"user": text})
+                elif kind < 0.6:
+                    steps.append({"assistant": text + " " + " ".join(rng.choice(HAY_WORDS) for _ in range(rng.randint(6, 30)))})
+                else:
+                    noise = "\n".join("%s %s 0x%06x %s" % (rng.choice(HAY_WORDS), rng.choice(HAY_WORDS), rng.randrange(1 << 24), rng.choice(HAY_WORDS)) for _ in range(rng.randint(3, 12)))
+                    steps.append({"tool": {"cmd": "%s %s" % (rng.choice(("pytest -q", "cargo test", "make", "npm test", "go test ./...", "git status")), rng.choice(HAY_WORDS)), "output": noise, "exit": 0}})
+            episodes.append({"id": "hay-%s-%d" % (key, number), "project": key, "harness": ("codex", "claude", "grok")[number % 3],
+                             "age_days": 1 + (number * 37) % 380, "turns": steps})
+    return episodes
+
+
+def explain_cases(split, case_ids, haystack=0):
     WORK_TMP.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=str(WORK_TMP)) as directory:
-        world, store, learner = prepare(split, directory, ["new"])
+        world, store, learner = prepare(split, directory, ["new"], haystack)
         identity = importlib.import_module("agent_session_store").project_identity
         for case in world.fixture["cases"]:
             if case["id"] not in case_ids:
@@ -628,12 +704,18 @@ def main(argv=None):
     why = commands.add_parser("explain")
     why.add_argument("--split", choices=SPLITS, default="dev")
     why.add_argument("case", nargs="+")
+    why.add_argument("--haystack", type=int, default=0)
     run = commands.add_parser("run")
     run.add_argument("--split", choices=SPLITS, default="dev")
     run.add_argument("--system", action="append", choices=("legacy", "fts-raw", "fts-or", "new"))
     run.add_argument("--repeats", type=int, default=1)
+    run.add_argument("--haystack", type=int, default=0, metavar="N", help="add N synthetic routine sessions per project to approximate a realistic corpus size")
     run.add_argument("--json", action="store_true")
     run.add_argument("--detail", action="store_true", help="print failing cases with returned results")
+    run.add_argument("--retries", metavar="FILE", help="JSON map of case id to the retry query an agent wrote after an abstention")
+    requests = commands.add_parser("retry-requests", help="print the abstained cases an agent would be asked to retry")
+    requests.add_argument("--split", choices=SPLITS, default="dev")
+    requests.add_argument("--haystack", type=int, default=0)
     args = cli.parse_args(argv)
     if args.command == "validate":
         bad = 0
@@ -646,11 +728,15 @@ def main(argv=None):
             for problem in problems:
                 print("  " + problem)
         return 1 if bad else 0
+    if args.command == "retry-requests":
+        print(json.dumps(retry_requests(args.split, args.haystack), indent=1))
+        return 0
     if args.command == "explain":
-        explain_cases(args.split, set(args.case))
+        explain_cases(args.split, set(args.case), args.haystack)
         return 0
     names = args.system or ["legacy", "fts-raw", "fts-or", "new"]
-    report = run_systems(args.split, names, repeats=args.repeats)
+    retries = json.loads(Path(args.retries).read_text()) if args.retries else None
+    report = run_systems(args.split, names, repeats=args.repeats, haystack=args.haystack, retries=retries)
     if args.json:
         print(json.dumps(report, indent=2, default=str))
     else:

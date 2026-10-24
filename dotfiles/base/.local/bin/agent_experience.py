@@ -660,7 +660,7 @@ def documented(draft, docs):
     identifiers = {token.lower() for token in technical_tokens(draft.claim, 12)}
     if not parts or len(identifiers) == 0:
         return False
-    return len(parts & docs) / len(parts) >= 0.85 and len(identifiers & docs) / len(identifiers) >= 0.9
+    return len(parts & docs) / len(parts) >= 0.6 and len(identifiers & docs) / len(identifiers) >= 0.9
 
 
 def observe_project(db, project, cwd, now, stable_seconds=120, limit=MAX_SESSIONS_PER_RUN):
