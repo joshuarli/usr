@@ -1,4 +1,4 @@
-decide itself works, and USR_DECIDE_TIER=advisory is set (2026-10-24) in dotfiles/base/.claude/settings.json env and ~/.local/bin/env, so orchestrate may now consult it. 40 sessions with 320 delegations before that never consulted it.
+decide itself works, and USR_DECIDE_TIER=advisory is set (2026-10-24) in dotfiles/base/.config/ish/config.ish and dotfiles/base/.claude/settings.json env, so orchestrate may now consult it. 40 sessions with 320 delegations before that never consulted it.
 
 Learning stays off for now.
 
