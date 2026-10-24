@@ -14,7 +14,7 @@ from pathlib import Path
 from agent_transcripts import HARNESSES, SUBSTANTIVE_KINDS, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _REDACTIONS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"),
@@ -271,7 +271,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -287,6 +287,11 @@ class Store:
                 if not self._schema_ready(3):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v3()
+                version = 4
+            if version == 4:
+                if not self._schema_ready(4):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v4()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -321,7 +326,8 @@ class Store:
             and {"id", "session", "position", "kind", "text", "timestamp", "call_id", "digest"} <= event_columns
             and (expected_version < 2 or "file_ctime_ns" in session_columns)
             and (expected_version < 3 or "unindexed_sources" in existing)
-            and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns and "forgotten_sessions" in existing))
+            and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns))
+            and (expected_version < 5 or "forgotten_sessions" in existing)
         )
 
     def _migrate_v1(self):
@@ -363,10 +369,20 @@ class Store:
                 "ALTER TABLE unindexed_sources ADD COLUMN ancestry TEXT NOT NULL DEFAULT 'known';"
                 "UPDATE sessions SET native_id = id WHERE native_id IS NULL;"
                 "UPDATE unindexed_sources SET native_id = id WHERE native_id IS NULL;"
-                "CREATE TABLE IF NOT EXISTS forgotten_sessions (id TEXT PRIMARY KEY, forgotten_at REAL NOT NULL);"
                 "UPDATE sessions SET recognized_events = (SELECT count(*) FROM events WHERE events.session = sessions.id AND events.kind IN (" + ",".join("'" + kind + "'" for kind in SUBSTANTIVE_KINDS) + ")),"
                 " unrecognized_events = (SELECT count(*) FROM events WHERE events.session = sessions.id AND events.kind LIKE 'unknown:%');"
                 "PRAGMA user_version = 4;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
+    def _migrate_v4(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "CREATE TABLE IF NOT EXISTS forgotten_sessions (id TEXT PRIMARY KEY, forgotten_at REAL NOT NULL);"
+                "PRAGMA user_version = 5;COMMIT;"
             )
         except sqlite3.DatabaseError:
             self.db.rollback()
@@ -657,13 +673,16 @@ class Store:
                 self.db.execute(
                     "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
                     "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?)",
+                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ? "
+                    "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
-                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"]),
+                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"], meta["id"]),
                 )
                 self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
+            if existing is None:
+                return False, 0, 0, 0
         offset = existing["indexed_bytes"]
         added = 0
         malformed = 0
@@ -781,7 +800,6 @@ class Store:
         record.update({"session": str(session), "position": int(position), "digest": str(digest)})
         return record
 
-    @_guarded
     @_guarded
     def forget_session(self, session, now):
         with self.db:

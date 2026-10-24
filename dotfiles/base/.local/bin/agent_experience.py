@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS learning_signatures(
 CREATE TABLE IF NOT EXISTS learning_observed(
     session TEXT PRIMARY KEY, signature TEXT NOT NULL, observed_at REAL NOT NULL, experiences INTEGER NOT NULL, suppressed INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS learning_forgotten_experiences(
+    project TEXT NOT NULL, fingerprint TEXT NOT NULL, forgotten_at REAL NOT NULL, PRIMARY KEY(project, fingerprint)
+);
 CREATE TABLE IF NOT EXISTS learning_observation(
     project TEXT PRIMARY KEY, cwd TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), enabled_at REAL NOT NULL
 );
@@ -477,18 +480,27 @@ POSITIVE = re.compile(r"\b(?:works?|fixed|passes?|passed|faster|use|succeeded|re
 NEGATIVE = re.compile(r"\b(?:fails?|failed|broken|slower|regress(?:ed|ion)?|never|avoid|don't|do not|abandoned|wrong|worse)\b", re.I)
 
 
-def file_conditions(cwd, paths, when):
+RECENT_SESSION_SECONDS = 3 * 86400
+MAX_CONDITION_BYTES = 262144
+
+
+def file_conditions(cwd, paths, when, now=0):
     conditions = []
+    recent = bool(now and when and now - when <= RECENT_SESSION_SECONDS)
     for path in paths[:3]:
         try:
-            tracked = subprocess.run(["git", "-C", str(cwd), "ls-files", "--error-unmatch", "--", path], capture_output=True, timeout=10)
-            if tracked.returncode:
+            tracked = subprocess.run(["git", "--literal-pathspecs", "-C", str(cwd), "ls-files", "--error-unmatch", "--", path], capture_output=True, timeout=10)
+            target = Path(cwd) / path
+            if tracked.returncode or target.is_symlink() or not target.is_file() or target.stat().st_size > MAX_CONDITION_BYTES:
                 continue
-            revision = subprocess.run(["git", "-C", str(cwd), "rev-list", "-1", "--before=@%d" % int(when), "HEAD"], capture_output=True, timeout=10).stdout.decode().strip() if when else ""
-            blob = subprocess.run(["git", "-C", str(cwd), "rev-parse", "%s:%s" % (revision or "HEAD", path)], capture_output=True, timeout=10)
+            if recent or not when:
+                blob = subprocess.run(["git", "-C", str(cwd), "hash-object", "--", path], capture_output=True, timeout=10)
+            else:
+                revision = subprocess.run(["git", "-C", str(cwd), "rev-list", "-1", "--before=@%d" % int(when), "HEAD"], capture_output=True, timeout=10).stdout.decode().strip()
+                blob = subprocess.run(["git", "-C", str(cwd), "rev-parse", "%s:%s" % (revision or "HEAD", path)], capture_output=True, timeout=10)
             if not blob.returncode:
                 conditions.append({"path": path, "blob": blob.stdout.decode().strip()})
-        except (subprocess.SubprocessError, OSError):
+        except (subprocess.SubprocessError, OSError, ValueError):
             continue
     return conditions
 
@@ -498,6 +510,8 @@ def add_experience(db, project, draft, session, now, worktree="", revision="", v
     fingerprint = _fingerprint(draft, identifiers)
     indexed = technical_tokens(draft.claim + " " + draft.applies_when + " " + draft.extra, 24)
     sources = [dict(item, session=session) for item in draft.sources]
+    if db.execute("SELECT 1 FROM learning_forgotten_experiences WHERE project = ? AND fingerprint = ?", (project, fingerprint)).fetchone():
+        return "forgotten", None
     existing = db.execute("SELECT id FROM learning_experiences WHERE project = ? AND fingerprint = ?", (project, fingerprint)).fetchone()
     if existing is None:
         existing = _near_duplicate(db, project, draft, identifiers)
@@ -612,7 +626,7 @@ def observe_session(db, project, cwd, session, now):
             suppressed += 1
             continue
         if draft.paths:
-            validity = file_conditions(cwd, draft.paths, draft.observed_at)
+            validity = file_conditions(cwd, draft.paths, draft.observed_at, now)
         else:
             validity = []
         status, _ = add_experience(db, project, draft, session, now, worktree=str(cwd), revision=revision, validity=validity)

@@ -22,16 +22,17 @@ PROVIDERS = (
     ("grok", "Grok Build", "grok"),
     ("dsh", "DeepSeek API", "dsh"),
     ("agy", "Antigravity", "agy"),
+    ("opencode", "OpenCode Go", "opencode2"),
 )
-HELP = """usage: usage [claude|codex|muse|grok|dsh|agy]
+HELP = """usage: usage [claude|codex|muse|grok|dsh|agy|opencode]
 
 Read subscription quota usage from Claude Code, Codex, Muse Code, Grok
-Build, and Antigravity, plus the DeepSeek API credit balance. Grok queries its
-CLI billing extension over ACP. The DeepSeek balance is not a subscription quota.
-With no provider, query every supported CLI installed here. These reads do not submit
-a model prompt. Claude Code uses its undocumented OAuth usage endpoint and
-does not refresh credentials. OpenCode's free-model quota is not available
-through a reader integrated here.
+Build, OpenCode Go, and Antigravity, plus the DeepSeek API credit balance.
+Grok queries its CLI billing extension over ACP. The DeepSeek balance is not
+a subscription quota. With no provider, query every supported CLI installed
+here. These reads do not submit a model prompt. Claude Code uses its
+undocumented OAuth usage endpoint and does not refresh credentials. OpenCode
+Go queries its hosted usage endpoint with the stored OAuth credential.
 """
 
 
@@ -451,6 +452,119 @@ def query_agy(binary):
     return report
 
 
+def read_opencode_account(binary):
+    try:
+        process = subprocess.run(
+            [binary, "auth", "export"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("OpenCode auth export timed out") from error
+    except OSError as error:
+        raise RuntimeError(f"cannot run OpenCode auth export: {error.strerror}") from error
+    if process.returncode:
+        detail = process.stderr.strip() or "auth export failed"
+        raise RuntimeError(detail)
+    try:
+        credentials = json.loads(process.stdout)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("OpenCode auth export returned invalid JSON") from error
+    if not isinstance(credentials, list):
+        raise RuntimeError("OpenCode auth export returned an invalid credential list")
+    fallback = None
+    for entry in credentials:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("integrationID") != "opencode":
+            continue
+        value = entry.get("value")
+        if not isinstance(value, dict) or not isinstance(value.get("access"), str):
+            continue
+        if entry.get("active"):
+            return entry
+        if fallback is None:
+            fallback = entry
+    if fallback is None:
+        raise RuntimeError("OpenCode Go login not found; run `opencode2 auth login`")
+    return fallback
+
+
+def query_opencode(binary):
+    account = read_opencode_account(binary)
+    token = account["value"]["access"]
+    metadata = account["value"].get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError("curl is required to verify OpenCode's HTTPS certificate")
+    if any(character in token for character in "\r\n\x00"):
+        raise RuntimeError("OpenCode OAuth token contains invalid header characters")
+    headers = (
+        "Accept: application/json",
+        f"Authorization: Bearer {token}",
+        "User-Agent: dotfiles-usage/1",
+    )
+    config = "".join(
+        f'header = "{curl_config_value(header)}"\n'
+        for header in headers
+    )
+    del token
+    process = subprocess.run(
+        [
+            curl,
+            "-q",
+            "--silent",
+            "--show-error",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "12",
+            "--config",
+            "-",
+            "--write-out",
+            "\\n%{http_code}",
+            "https://opencode.ai/zen/go/v1/usage",
+        ],
+        input=config,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or f"curl exited with status {process.returncode}"
+        raise RuntimeError(f"OpenCode usage request failed: {detail}")
+    body, separator, status = process.stdout.rpartition("\n")
+    if not separator or len(status) != 3 or not status.isdigit():
+        raise RuntimeError("curl returned an invalid HTTP response")
+    status_code = int(status)
+    if status_code in (401, 403):
+        raise RuntimeError("OpenCode rejected the stored credential; run `opencode2 auth login` to refresh the login")
+    if status_code == 429:
+        raise RuntimeError("OpenCode rate-limited the usage request; try again later")
+    if status_code < 200 or status_code >= 300:
+        raise RuntimeError(f"OpenCode usage endpoint returned HTTP {status_code}")
+    try:
+        result = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("OpenCode returned invalid usage JSON") from error
+    if not isinstance(result, dict):
+        raise RuntimeError("OpenCode returned an invalid usage response")
+    if not opencode_windows(result):
+        raise RuntimeError("OpenCode returned no recognized quota windows")
+    email = metadata.get("email")
+    org = metadata.get("orgName")
+    return {
+        "email": email if isinstance(email, str) else None,
+        "org": org if isinstance(org, str) else None,
+        "usage": result["usage"],
+    }
+
+
 def local_time(timestamp, scale=1):
     if not isinstance(timestamp, (int, float)):
         return "unknown"
@@ -671,6 +785,44 @@ def print_agy(report):
         print(f"  {line}")
 
 
+def opencode_windows(result):
+    usage = result.get("usage") if isinstance(result, dict) else None
+    if not isinstance(usage, dict):
+        return []
+    windows = []
+    for key, label in (("rolling", "5h"), ("weekly", "7d"), ("monthly", "30d")):
+        window = usage.get(key)
+        if not isinstance(window, dict):
+            continue
+        percent = window.get("percent")
+        if (
+            isinstance(percent, bool)
+            or not isinstance(percent, (int, float))
+            or not math.isfinite(percent)
+        ):
+            continue
+        status = window.get("status")
+        if not isinstance(status, str):
+            status = None
+        windows.append((label, percent, window.get("resetsAt"), status))
+    return windows
+
+
+def print_opencode(result):
+    print_heading("OpenCode Go")
+    email = result.get("email")
+    org = result.get("org")
+    if isinstance(email, str) and email:
+        detail = email
+        if isinstance(org, str) and org:
+            detail = f"{detail} ({org})"
+        print(f"  account: {detail}")
+    for label, percent, reset, status in opencode_windows(result):
+        if isinstance(status, str) and status and status != "ok":
+            label = f"{label} [{status}]"
+        print_window(label, percent, reset)
+
+
 def main(arguments):
     if arguments in (["-h"], ["--help"]):
         print(HELP, end="")
@@ -702,6 +854,7 @@ def main(arguments):
         "grok": query_grok,
         "dsh": query_dsh,
         "agy": query_agy,
+        "opencode": query_opencode,
     }
     render = {
         "claude": print_claude,
@@ -710,6 +863,7 @@ def main(arguments):
         "grok": print_grok,
         "dsh": print_dsh,
         "agy": print_agy,
+        "opencode": print_opencode,
     }
     results = {}
     failures = {}

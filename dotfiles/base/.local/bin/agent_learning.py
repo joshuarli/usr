@@ -748,7 +748,7 @@ class Learner:
                 if proposal["target"] == "memory":
                     if proposal["scope"] != "project" or referenced_projects != {finding["project"]}:
                         raise LearningError("project memory requires evidence and applicability from its own project")
-                    state, reason = self._approve_memory(finding, project, proposal, evidence, now)
+                    state, reason = self._approve_memory(finding, project, proposal, evidence, now, reviewer)
                     retry_kind = "none" if state == "memory" else "unsafe"
                 elif proposal["target"] == "skill":
                     if not self._global_evidence(proposal, evidence):
@@ -845,7 +845,7 @@ class Learner:
                 related.append({"id": previous["id"], "state": previous["state"], "action": prior["future_action"], "applicability": prior["applicability"]})
         return related
 
-    def _approve_memory(self, finding, project, proposal, evidence, now):
+    def _approve_memory(self, finding, project, proposal, evidence, now, reviewer):
         from agent_learning_promote import protected_text, safe_action
         from agent_learning_review import MEMORY_ACTION_LIMIT, MEMORY_APPLICABILITY_LIMIT
         if not safe_action(proposal["future_action"]) or protected_text(proposal["applicability"]):
@@ -858,10 +858,6 @@ class Learner:
         selected = [row for row in evidence if (row["session"], row["position"], row["digest"]) in refs]
         context = {"owning_guidance": "Project-specific memory. Never overrides repository rules.", "evidence": selected,
                    "tracked_project_files": self._project_sources(finding["project"], evidence)}
-        reviewer = self.reviewer
-        if reviewer is None:
-            from agent_learning_review import CodexReviewer
-            reviewer = CodexReviewer(Path(project["repository"]), self.store.state_dir)
         verdict = reviewer.adversarial(context, self._reviewable(finding, proposal))
         self._require_unobjected(verdict)
         if not verdict.get("approves") or verdict.get("risks") or not verdict.get("does_not_weaken"):
@@ -1006,7 +1002,7 @@ class Learner:
             usage = json.loads(row[0])
             if not isinstance(usage, dict):
                 continue
-            calls = len(usage.get("calls", []))
+            calls = len(usage.get("calls", [])) or (0 if row[1] is None or row[2] == "interrupted" else 1)
             reserved = usage.get("reserved", 0)
             total += max(calls, reserved) if row[1] is None or row[2] == "interrupted" else calls
         return total
@@ -1312,7 +1308,9 @@ class Learner:
         bridged = 0
         rows = self.db.execute("""SELECT e.* FROM learning_experiences e WHERE e.project=? AND e.state='retained' AND e.basis='deterministic'
             AND e.detector IN ({detectors}) AND NOT EXISTS (SELECT 1 FROM learning_experience_findings b WHERE b.experience=e.id)
-            ORDER BY e.id LIMIT 50""".format(detectors=",".join("'%s'" % name for name in self.BRIDGED_DETECTORS)), (project,)).fetchall()
+            AND EXISTS (SELECT 1 FROM learning_experience_sources s JOIN sessions x ON x.id=s.session
+                        WHERE s.experience=e.id AND x.updated>=? AND instr(','||?||',', ','||x.harness||',')>0)
+            ORDER BY e.id LIMIT 50""".format(detectors=",".join("'%s'" % name for name in self.BRIDGED_DETECTORS)), (project, granted_at, grant[0])).fetchall()
         for row in rows:
             sources = [dict(item) for item in self.db.execute("SELECT * FROM learning_experience_sources WHERE experience=?", (row["id"],))]
             allowed = []
@@ -1375,6 +1373,17 @@ class Learner:
                 self.db.execute("DELETE FROM %s WHERE %s=?" % (table, "finding"), (finding,))
             self.db.execute("DELETE FROM learning_findings WHERE id=?", (finding,))
 
+    def _scrub_withdrawn(self, findings, unresolved):
+        blocked = {item["finding"] for item in unresolved}
+        for finding in findings:
+            row = self.db.execute("SELECT state FROM learning_findings WHERE id=?", (finding,)).fetchone()
+            if row is None or finding in blocked or row["state"] not in ("superseded", "reversed"):
+                continue
+            self.db.execute("DELETE FROM learning_memories WHERE finding=?", (finding,))
+            self.db.execute("DELETE FROM learning_evaluations WHERE finding=?", (finding,))
+            self.db.execute("UPDATE learning_reviews SET proposal=NULL WHERE finding=?", (finding,))
+            self.db.execute("UPDATE learning_findings SET proposal=NULL,terms='',reason='evidence forgotten',updated_at=updated_at WHERE id=?", (finding,))
+
     def _purge_record_traces(self, ref):
         for table in ("learning_receipts", "learning_feedback", "learning_outcomes"):
             self.db.execute("DELETE FROM %s WHERE record=?" % table, (ref,))
@@ -1388,7 +1397,10 @@ class Learner:
             raise LearningError("experience does not exist")
         derived = [row[0] for row in self.db.execute("SELECT finding FROM learning_experience_findings WHERE experience=?", (experience,))]
         unresolved = self._withdraw_derived(derived, now)
+        identity = self.db.execute("SELECT project,fingerprint FROM learning_experiences WHERE id=?", (experience,)).fetchone()
         with self.db:
+            self.db.execute("INSERT OR REPLACE INTO learning_forgotten_experiences(project,fingerprint,forgotten_at) VALUES(?,?,?)", (identity["project"], identity["fingerprint"], now))
+            self._scrub_withdrawn(derived, unresolved)
             self._purge_findings(derived, experience)
             self._purge_record_traces(ref)
             self.db.execute("DELETE FROM learning_experiences WHERE id=?", (experience,))
@@ -1424,6 +1436,7 @@ class Learner:
                 sole.append(finding)
         unresolved = self._withdraw_derived(sole, now)
         with self.db:
+            self._scrub_withdrawn(sole, unresolved)
             for experience in experiences:
                 others = [row[0] for row in self.db.execute("SELECT DISTINCT session FROM learning_experience_sources WHERE experience=? AND session!=?", (experience, session))]
                 if others:
@@ -1431,8 +1444,11 @@ class Learner:
                 self._purge_findings([row[0] for row in self.db.execute("SELECT finding FROM learning_experience_findings WHERE experience=?", (experience,))], experience)
                 self._purge_record_traces("experience:%d" % experience)
                 self.db.execute("DELETE FROM learning_experiences WHERE id=?", (experience,))
-            for table in ("learning_signatures", "learning_observed", "learning_processed", "learning_evaluations", "learning_outcomes", "learning_receipts"):
+            for table in ("learning_signatures", "learning_observed", "learning_processed", "learning_evaluations", "learning_outcomes", "learning_receipts", "learning_feedback"):
                 self.db.execute("DELETE FROM %s WHERE session=?" % table, (session,))
+            prefix = "event:%s@" % session
+            for table in ("learning_receipts", "learning_feedback", "learning_outcomes"):
+                self.db.execute("DELETE FROM %s WHERE substr(record,1,?)=?" % table, (len(prefix), prefix))
             self.db.execute("DELETE FROM learning_incidents WHERE session=?", (session,))
             self._purge_findings(sorted(findings | bridged))
             self.store.forget_session(session, now)

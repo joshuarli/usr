@@ -232,11 +232,11 @@ def tracked_file(cwd, path):
             candidate = candidate / part
             if candidate.is_symlink():
                 raise SourceError("memory condition may not traverse symlinks")
-        tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative)], capture_output=True, timeout=10)
+        tracked = subprocess.run(["git", "--literal-pathspecs", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative)], capture_output=True, timeout=10)
         if tracked.returncode or not candidate.is_file() or candidate.stat().st_size > 262144:
             raise SourceError("memory condition source is unavailable or too large")
         return root, candidate
-    except (subprocess.SubprocessError, OSError) as error:
+    except (subprocess.SubprocessError, OSError, ValueError) as error:
         raise SourceError("memory condition source is unavailable: " + error.__class__.__name__) from error
 
 
@@ -724,7 +724,7 @@ class Retriever:
         }[item.tier]
         return {
             "ref": item.ref, "tier": item.tier, "kind": item.experience_kind or item.event_kind, "summary": summary,
-            "applies_when": redact(" ".join(item.applies_when.split()))[:SUMMARY_CHARS], "action": redact(item.action)[:600] if item.action else None,
+            "applies_when": redact(" ".join(item.applies_when.split()))[:SUMMARY_CHARS], "action": redact(item.action)[:600] if item.action and not self._weak else None,
             "status": item.status, "reasons": item.reasons, "support": support, "inspect": "agent-learn inspect " + item.ref,
             "authority": authority, "age_days": int(max(0, (self.now - item.observed_at) / 86400)),
         }
@@ -736,5 +736,8 @@ def _snippet(text, words):
     positions = [lowered.find(word) for word in words if lowered.find(word) >= 0]
     index = min(positions) if positions else 0
     wide = redact(flat[max(0, index - 2000):index + 2000 + SUMMARY_CHARS])
-    start = max(0, min(index, 2000) - 80)
-    return ("…" if index > 80 else "") + wide[start:start + SUMMARY_CHARS]
+    lowered = wide.lower()
+    positions = [lowered.find(word) for word in words if lowered.find(word) >= 0]
+    anchor = min(positions) if positions else 0
+    start = max(0, anchor - 80)
+    return ("…" if start else "") + wide[start:start + SUMMARY_CHARS]

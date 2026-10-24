@@ -7,13 +7,17 @@
     "title": false
   },
   "session": {
-    "sidebar": "auto",
+    "sidebar": "hide",
     "scrollbar": false,
-    "thinking": "hide"
+    "thinking": "hide",
+    "permissions": "autoaccept"
   },
-  "animations": true,
+  "animations": false,
   "keybinds": {
     "prompt.editor": "ctrl+g",
     "session.first": "home,alt+home"
+  },
+  "tabs": {
+    "mode": "auto"
   }
 }
