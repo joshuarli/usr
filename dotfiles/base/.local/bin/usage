@@ -122,7 +122,52 @@ def query_codex(binary):
 
 
 def query_muse(binary):
-    return query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
+    try:
+        process = subprocess.run(
+            [binary, "usage", "--json"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=20,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError("Muse usage request timed out after 20 seconds") from error
+    except OSError as error:
+        raise RuntimeError(f"cannot run Muse usage: {error.strerror}") from error
+    if process.returncode:
+        detail = (process.stderr or process.stdout).strip() or "command failed"
+        try:
+            fallback = query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
+        except Exception:
+            fallback = None
+        if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
+            return fallback
+        raise RuntimeError(detail)
+    try:
+        result = json.loads(process.stdout)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("Muse returned invalid usage JSON") from error
+    if not isinstance(result, dict):
+        raise RuntimeError("Muse returned an invalid usage response")
+    allowance = result.get("allowance")
+    if isinstance(allowance, dict) and any(
+        isinstance(allowance.get(slot), dict)
+        and isinstance(allowance[slot].get("usedPercent"), (int, float))
+        and not isinstance(allowance[slot].get("usedPercent"), bool)
+        for slot in ("window", "weekly")
+    ):
+        return result
+    try:
+        fallback = query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
+    except Exception:
+        fallback = None
+    if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
+        return fallback
+    reason = result.get("reason") or result.get("hint")
+    if isinstance(reason, str) and reason.strip():
+        raise RuntimeError(reason.strip())
+    raise RuntimeError("Muse returned no subscription quota")
 
 
 def grok_usage(result):
@@ -650,6 +695,23 @@ def print_window(label, used, reset, scale=1):
     print(f"  {label}: {percentage_text(used)}, {reset_text}")
 
 
+def normalize_window_label(raw, fallback=None):
+    if isinstance(raw, str) and raw.strip():
+        token = raw.strip().upper()
+        if "WEEK" in token:
+            return "7d"
+        if "MONTH" in token:
+            return "30d"
+        if any(key in token for key in ("SESSION", "ROLLING", "HOURLY", "5H", "FIVE")):
+            return "5h"
+        if "DAY" in token or "DAILY" in token:
+            return "24h"
+        cleaned = raw.strip().removeprefix("USAGE_PERIOD_TYPE_").replace("_", " ").strip()
+        if cleaned:
+            return cleaned
+    return fallback
+
+
 def print_codex(result):
     print_heading("Codex")
     buckets = result.get("rateLimitsByLimitId") or {}
@@ -670,7 +732,11 @@ def print_codex(result):
         print(f"  {color('no subscription quota returned', '33')}")
         return
     for slot, window in windows:
-        label = duration_name(window.get("windowDurationMins")) or slot
+        label = duration_name(window.get("windowDurationMins")) or normalize_window_label(
+            slot, slot
+        )
+        if label in ("primary", "secondary"):
+            label = {"primary": "5h", "secondary": "7d"}[label]
         used = window.get("usedPercent")
         print_window(label, used, window.get("resetsAt"))
 
@@ -739,13 +805,38 @@ def print_claude(result):
 
 def print_muse(result):
     print_heading("Muse Code")
+    allowance = result.get("allowance") if isinstance(result, dict) else None
+    if isinstance(allowance, dict):
+        if allowance.get("tier"):
+            print(f"  plan: {allowance['tier']}")
+        current = allowance.get("window")
+        weekly = allowance.get("weekly")
+        shown = False
+        if (
+            isinstance(current, dict)
+            and isinstance(current.get("usedPercent"), (int, float))
+            and not isinstance(current.get("usedPercent"), bool)
+        ):
+            print_window("5h", current.get("usedPercent"), current.get("resetsAtMs"), 1000)
+            shown = True
+        if (
+            isinstance(weekly, dict)
+            and isinstance(weekly.get("usedPercent"), (int, float))
+            and not isinstance(weekly.get("usedPercent"), bool)
+        ):
+            print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
+            shown = True
+        if shown:
+            return
+        print(f"  {color('no subscription quota returned', '33')}")
+        return
     usage = result.get("usage") if isinstance(result, dict) else None
     if not isinstance(usage, dict):
-        print(f"  {color('no subscription usage has been observed by Muse yet', '33')}")
+        print(f"  {color('no subscription quota returned', '33')}")
         return
     if usage.get("tier"):
         print(f"  plan: {usage['tier']}")
-    print(f"  {color('as of', '2')} {color(local_time(usage.get('observedAtMs'), 1000), '2')}")
+    print(f"  {color('(last observed)', '2')}")
     current = usage.get("window")
     weekly = usage.get("weekly")
     if isinstance(current, dict):
@@ -759,8 +850,7 @@ def print_grok(result):
     print_heading("Grok Build")
     if result.get("subscription_tier"):
         print(f"  plan: {result['subscription_tier']}")
-    period = result.get("period_type")
-    label = period.capitalize() if isinstance(period, str) else "subscription"
+    label = normalize_window_label(result.get("period_type"), "subscription")
     print_window(label, result.get("usage_percent"), result.get("reset_at"))
     prepaid = result.get("prepaid_balance_cents")
     if isinstance(prepaid, (int, float)) and not isinstance(prepaid, bool):
@@ -768,7 +858,7 @@ def print_grok(result):
 
 
 def print_dsh(result):
-    print_heading("DeepSeek API balance")
+    print_heading("DeepSeek API")
     available = result["is_available"]
     label = "available for API requests" if available else "insufficient for API requests"
     print(f"  {color(label, '32' if available else '31')}")
