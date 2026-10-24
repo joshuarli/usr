@@ -70,9 +70,9 @@ own_empty_dir() {
 own_missing_dirs() {
     [ ! -d "$1" ] || return 0
     own_empty_dir "$1"
-    own_parent=${1%/*}
-    [ -n "$own_parent" ] || own_parent=/
-    [ "$own_parent" = "$1" ] || own_missing_dirs "$own_parent"
+    missing_parent=${1%/*}
+    [ -n "$missing_parent" ] || missing_parent=/
+    [ "$missing_parent" = "$1" ] || own_missing_dirs "$missing_parent"
 }
 
 own_grok_target() {
@@ -294,13 +294,19 @@ install_binary() {
 
 install_release() {
     prog=$1
+    repo=$prog
     case "$prog" in
         e|fz|fdu|fastermod|tm|fs|srv|diff-pretty) owner="laputa-systems" ;;
         ish|mactop|gh) owner="joshuarli" ;;
+        srt) owner="joshuarli"; repo="sandbox-runtime" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
-    tag=$(curl -fsSL "https://github.com/${owner}/${prog}/releases.atom" \
-        | awk '
+    tag_prefix=
+    case "$prog" in
+        srt) tag_prefix=release- ;;
+    esac
+    tag=$(curl -fsSL "https://github.com/${owner}/${repo}/releases.atom" \
+        | awk -v prefix="$tag_prefix" '
             /<entry>/ { in_entry = 1; updated = ""; tag = "" }
             in_entry && /<updated>/ {
                 updated = $0
@@ -311,6 +317,7 @@ install_release() {
                 tag = $0
                 sub(/^.*releases\/tag\//, "", tag)
                 sub(/".*/, "", tag)
+                if (prefix != "" && index(tag, prefix) != 1) tag = ""
             }
             /<\/entry>/ {
                 if (updated > newest_updated && tag != "") {
@@ -326,12 +333,12 @@ install_release() {
         return
     fi
     case "${OS}:${prog}" in
-        Linux:e|Linux:ish|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:e|Linux:ish|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:srt) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
     asset="${prog}-${artifact_target}"
-    url="https://github.com/${owner}/${prog}/releases/download/${tag}/${asset}.zip"
+    url="https://github.com/${owner}/${repo}/releases/download/${tag}/${asset}.zip"
     id=$(asset_id "$url")
     if [ -z "$id" ]; then
         unchecked "$prog" "${asset}.zip is not available in ${tag}"
@@ -1381,7 +1388,7 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg pinact jactionlint jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold; do
+    for record_prog in fd rg pinact jactionlint jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold srt; do
         record_managed_binary "$record_prog"
     done
     if [ -s "${STATE}/mold" ] && [ "$(readlink "${DEST}/ld.mold" 2>/dev/null || :)" = mold ]; then
@@ -1461,7 +1468,7 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg pinact jactionlint jaq codex claude opencode2 fastermod tm ish e fz fdu fs srv
+    set -- fd rg pinact jactionlint jaq codex claude opencode2 fastermod tm ish e fz fdu fs srv srt
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
