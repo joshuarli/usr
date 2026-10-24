@@ -21,7 +21,7 @@ Ground the decision in current callers, existing contracts, tests, and constrain
 7. **Respect request mode.** A design-only or plan-only request ends with the requested analysis. Otherwise implement against the selected design. If the code needs a shape it did not foresee, decide whether the design, requirement, or implementation is wrong.
 8. **Redesign when evidence shows a pattern:** repeated workarounds across unrelated code, unrelated special-case branches, escape hatches in types, a lock where no sharing was expected, or callers that need internal abstraction rules. Reassess against the same criteria. Complexity in the data is not complexity in the design.
 
-Keep a useful sketch in the reply. Write no design file unless asked. Do not produce competing designs for routine changes or clear local repairs.
+Include the sketch when one was useful. Write no design file unless asked. Do not produce competing designs for routine changes or clear local repairs.
 
 **The test:** the selected design fits observed callers and invariants, and every compared design was judged against criteria set before the comparison.
 

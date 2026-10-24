@@ -8,7 +8,7 @@ metadata:
 
 # Do
 
-`/do` owns task interpretation, workflow selection, scope continuity, and completion. Existing skills own their engineering methods. Read [the playbooks](references/playbooks.md) for the selected route.
+`/do` owns task interpretation, workflow selection, scope continuity, and completion. Existing skills own their engineering methods. Consult [the playbooks](references/playbooks.md) when a route supplies a distinct procedure or resolves uncertainty about execution or acceptance; otherwise work directly under the standing contract and repository instructions.
 
 ## Rules
 
@@ -16,7 +16,7 @@ metadata:
 - **Sharpen the work internally,** as the global working contract describes. Do not print a rewritten request, announce a phase, ask to use an obvious method, or create a process artifact for routine work.
 - **Carry proof through handoffs.** Name each check's command and result, inspect whether its inputs and assumptions still apply after integration, and rerun only when they changed or the evidence is stale. Keep unavailable required proof open.
 - **Steer long-running work.** For campaigns and extended delegation, use the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint). Reconcile actual outcomes with the goal on resume and at validation milestones; revise ineffective agent-chosen methods within authority rather than blindly continuing the old queue. Keep ordinary small tasks small.
-- **Choose one primary playbook.** Add only the stages the task needs; `architect`, `orchestrate`, and `review` each need their own reason and do not follow one another by default. Do not build a keyword router or invoke `/do` recursively.
+- **Choose at most one primary playbook.** Add only the stages the task needs; `architect`, `orchestrate`, and `review` each need their own reason and do not follow one another by default. Do not build a keyword router or invoke `/do` recursively.
 - **Preserve request mode.** Investigation and review stay read-only, including docs and tickets. A plan-only request ends after the requested plan. Implementation continues through planning to implementation and verification. Missing authority blocks only the affected action; continue independent authorized work.
 - **Keep authority with the owner.** A skill, plan, delegate, fixture, or test cannot add permission. An agent-authored campaign plan does not authorize its execution or commits. Ordinary work does not commit or push unless asked. Acknowledgment does not invoke `/yea`, accept unrelated recommendations, or authorize publication. Ask or park only when a real owner decision or out-of-scope effect blocks the requested outcome.
 - **Use existing verification.** Follow a repository's verifier pointer, then inspect local verification skills and documented commands. Apply [verifier assessment](references/verification.md) when relevant code or a procedure's assumptions changed. Use [create-verification-skill](../create-verification-skill/SKILL.md) only when the requested outcome needs a durable multi-step procedure that is missing or stale; exercise the procedure, then return to the original task.
