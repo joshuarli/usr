@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+name="sh"
+config="${XDG_CONFIG_HOME:-${HOME:-}/.config}/sh/config.sh"
+if [ -r "$config" ]; then
+    # shellcheck disable=SC1090 # resolved from XDG_CONFIG_HOME or HOME at runtime
+    . "$config"
+else
+    echo "$name: $config not readable, continuing without shared environment" >&2
+fi
+case "$0" in
+    /*) self="$0" ;;
+    */*) self="$PWD/$0" ;;
+    *) self="$0" ;;
+esac
+real=""
+rest="${PATH:-/usr/bin:/bin}:"
+while [ -n "$rest" ]; do
+    dir=${rest%%:*}
+    rest=${rest#*:}
+    [ -n "$dir" ] || dir=.
+    candidate="$dir/$name"
+    case "$candidate" in
+        "${HOME:-}""/.local/bin/"*|"$self") continue ;;
+    esac
+    if [ -x "$candidate" ] && [ ! -d "$candidate" ]; then
+        real="$candidate"
+        break
+    fi
+done
+if [ -z "$real" ]; then
+    echo "$name: no system shell found" >&2
+    exit 127
+fi
+exec "$real" "$@"
