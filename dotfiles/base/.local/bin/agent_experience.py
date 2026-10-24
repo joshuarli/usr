@@ -18,7 +18,6 @@ NEAR_DUPLICATE_WORDS = 0.75
 NEAR_DUPLICATE_IDENTIFIERS = 0.5
 CONTRADICTION_IDENTIFIERS = 0.6
 RETIRE_AFTER_DAYS = 180
-KINDS = ("success", "failure", "decision", "gotcha", "method")
 CORRECTION = re.compile(r"\b(actually|i meant|you (?:should|must|already)|do not|don't|stop|wrong|instead|again|ignored|forgot|why did you)\b", re.I)
 ERROR = re.compile(r"(?:exit(?:ed)? (?:code|with code|status)[: ]+[1-9]|(?:command |test |build )?failed|permission denied|not found|no such file|error:)", re.I)
 FAILURE = re.compile(r"(?:\bFAILED\b|\bfailed\b|Traceback \(most recent|error(?:\[E\d+\])?:|\bpanic(?:ked)?\b|fatal:|undefined reference|cannot find|ModuleNotFoundError|ImportError|Segmentation fault|OOMKilled|\bKilled\b|exit(?:ed)? (?:code|status)[: ]+[1-9]|npm ERR!|\bE[A-Z]{3,}[A-Z]*\b:)")

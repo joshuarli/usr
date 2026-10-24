@@ -85,7 +85,7 @@ def render_codex(episode, cwd, start):
 
 
 def render_claude(episode, cwd, start):
-    session = native(episode)
+    session = episode.get("subagent_of") or native(episode)
     base = {"sessionId": session, "cwd": str(cwd), "isSidechain": bool(episode.get("subagent_of")), "version": "2.1.0"}
     lines = [{"type": "queue-operation", "operation": "enqueue", "sessionId": session, "timestamp": _iso(start)}]
     when = start
@@ -153,7 +153,7 @@ def write_episode(roots, episode, cwd, start):
         path = Path(roots["codex"]) / day.strftime("%Y/%m/%d") / ("rollout-%s-%s.jsonl" % (day.strftime("%Y-%m-%dT%H-%M-%S"), session))
     elif harness == "claude":
         directory = Path(roots["claude"]) / str(cwd).replace("/", "-")
-        path = directory / (session + ".jsonl")
+        path = directory / (episode["subagent_of"] if episode.get("subagent_of") else "") / ("subagents" if episode.get("subagent_of") else "") / (session + ".jsonl")
     elif harness == "grok":
         directory = Path(roots["grok"]) / quote(str(cwd), safe="") / session
         directory.mkdir(parents=True, exist_ok=True)
@@ -477,13 +477,15 @@ class RawFtsSystem:
 class RecallSystem:
     name = "new-recall"
 
-    def __init__(self, world, learner):
-        self.world, self.learner = world, learner
+    def __init__(self, world, learner, weak=False):
+        self.world, self.learner, self.weak = world, learner, weak
+        if weak:
+            self.name = "new-recall-weak"
 
     def run(self, case, limit, now):
         cwd = self.world.cwd(case["project"], case.get("worktree"))
         project = importlib.import_module("agent_session_store").project_identity(cwd)
-        response = self.learner.retrieve(project, case["query"], cwd=cwd, limit=limit, now=now)
+        response = self.learner.retrieve(project, case["query"], cwd=cwd, limit=limit, now=now, weak=self.weak)
         out = []
         for item in response["results"]:
             out.append({
@@ -549,10 +551,10 @@ def prepare(split, directory, system_names, haystack=0):
     store = store_module.Store(world.state_dir)
     learner = learning.Learner(store, None)
     started = time.perf_counter()
-    stats = store.refresh(roots=world.root_args() if "new" in system_names else [world.roots["codex"]])
+    stats = store.refresh(roots=world.root_args() if ("new" in system_names or "new-weak" in system_names) else [world.roots["codex"]])
     world.index_seconds = time.perf_counter() - started
     world.index_stats = stats
-    if hasattr(learner, "observe_project") and "new" in system_names:
+    if hasattr(learner, "observe_project") and ("new" in system_names or "new-weak" in system_names):
         identity = importlib.import_module("agent_session_store").project_identity
         world.capture = {}
         for key, entry in world.projects.items():
@@ -602,6 +604,8 @@ def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None):
                 systems.append(RawFtsSystem(world, store, "or"))
             elif name == "new":
                 systems.append(RecallSystem(world, learner))
+            elif name == "new-weak":
+                systems.append(RecallSystem(world, learner, weak=True))
         cases = world.fixture["cases"]
         for system in systems:
             per_case, timings, chars, details, retried = [], [], [], {}, []
@@ -614,7 +618,7 @@ def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None):
                     best = elapsed if best is None else min(best, elapsed)
                 per_case.append((case, case_metrics(case, found, world.session_map, world.groups)))
                 if retries is not None and system.name == "new-recall":
-                    second = system.run(dict(case, query=retries[case["id"]]), limit, world.now) if not found and case["id"] in retries else found
+                    second = system.run(dict(case, query=retries[case["id"]]), limit, world.now) if not found and retries.get(case["id"]) else found
                     retried.append((case, case_metrics(case, second, world.session_map, world.groups)))
                 details[case["id"]] = [{"episodes": sorted(world.session_map.get(session, session) for session in item["sessions"]), "tier": item["tier"], "status": item.get("status"),
                                         "memories": item.get("memories"), "score": item.get("score")} for item in found[:5]]
@@ -630,7 +634,7 @@ def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None):
             summary["by_category"] = {key: aggregate(value) for key, value in sorted(by_category.items())}
             if retried:
                 summary["after_one_retry"] = aggregate(retried)
-                summary["retries_used"] = sum(1 for case, _ in per_case if case["id"] in retries and not details[case["id"]])
+                summary["retries_used"] = sum(1 for case, _ in per_case if retries.get(case["id"]) and not details[case["id"]])
             summary["details"] = details
             summary["failures"] = [case["id"] for case, m in per_case if (case["expect"] == "match" and not m["recall5"]) or (case["expect"] == "abstain" and not m["abstain_correct"])]
             results[system.name] = summary
@@ -661,7 +665,7 @@ def haystack_episodes(project_keys, per_project, turns, seed=7):
     for key in project_keys:
         for number in range(per_project):
             steps = []
-            for turn in range(turns):
+            for _ in range(turns):
                 words = {letter: rng.choice(HAY_WORDS) for letter in "abcdef"}
                 text = rng.choice(HAY_TEMPLATES).format(**words)
                 kind = rng.random()
@@ -707,7 +711,7 @@ def main(argv=None):
     why.add_argument("--haystack", type=int, default=0)
     run = commands.add_parser("run")
     run.add_argument("--split", choices=SPLITS, default="dev")
-    run.add_argument("--system", action="append", choices=("legacy", "fts-raw", "fts-or", "new"))
+    run.add_argument("--system", action="append", choices=("legacy", "fts-raw", "fts-or", "new", "new-weak"))
     run.add_argument("--repeats", type=int, default=1)
     run.add_argument("--haystack", type=int, default=0, metavar="N", help="add N synthetic routine sessions per project to approximate a realistic corpus size")
     run.add_argument("--json", action="store_true")

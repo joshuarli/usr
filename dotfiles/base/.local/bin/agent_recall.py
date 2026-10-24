@@ -21,6 +21,7 @@ RRF_K = 20
 MIN_COVERAGE = 0.5
 SPECIFIC_IDF = 0.5
 MIN_SCORE = 0.3
+WEAK_MIN_SCORE = 0.1
 RELATIVE_CUT = 0.7
 PARTIAL_IDENT_CREDIT = 0.7
 MAX_CLAUSES = 3
@@ -314,9 +315,11 @@ class Retriever:
         self.now = time.time() if now is None else float(now)
         self._df_cache = {}
         self._events_total = None
+        self._weak = False
 
-    def retrieve(self, text, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True):
+    def retrieve(self, text, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True, weak=False):
         limit = max(1, min(int(limit), MAX_LIMIT))
+        self._weak = weak
         queries = [query for query in split_queries(text) if query.informative]
         self._query = queries[0] if queries else parse_query(text)
         trace = {"query": {"words": list(self._query.words), "identifiers": list(self._query.idents), "clauses": len(queries) - 1}, "candidates": [], "excluded": []} if explain else None
@@ -356,7 +359,7 @@ class Retriever:
         self._mark_conflicts(selected)
         selected = self._bound_context(selected, trace)
         if not selected:
-            return self._response([], True, "no candidate cleared the relevance gate", trace)
+            return self._response([], True, "no candidate matched" if self._weak else "no candidate cleared the relevance gate", trace)
         return self._response(selected, False, None, trace)
 
     def _response(self, selected, abstained, reason, trace):
@@ -567,7 +570,10 @@ class Retriever:
 
     def _acceptable(self, candidate, trace):
         features = candidate.features
-        ok = features["coverage"] >= MIN_COVERAGE and features["specific"] >= 1 and candidate.score >= MIN_SCORE
+        if self._weak:
+            ok = (features["coverage"] > 0 or features["identifier_hits"] >= 1) and candidate.score >= WEAK_MIN_SCORE
+        else:
+            ok = features["coverage"] >= MIN_COVERAGE and features["specific"] >= 1 and candidate.score >= MIN_SCORE
         if not ok and trace is not None:
             trace["excluded"].append({"ref": candidate.ref, "why": "below relevance gate", "score": round(candidate.score, 4)})
         return ok
@@ -626,6 +632,10 @@ class Retriever:
         return row is not None
 
     def _finish(self, candidate):
+        if self._weak:
+            candidate.tier = "lead"
+            candidate.reasons.append("low_confidence")
+            return
         if candidate.kind == "memory":
             if candidate.status == "verified":
                 candidate.tier = "instruction"

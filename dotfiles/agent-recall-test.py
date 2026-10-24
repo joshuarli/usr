@@ -131,6 +131,19 @@ class RetrievalTests(RecallCase):
             self.assertTrue(response["abstained"], query)
             self.assertEqual(response["results"], [])
 
+    def test_weak_mode_lists_low_confidence_leads_but_never_instructions(self):
+        spec = FreshnessTests.memory_spec(self, [{"path": "src/app.py", "contains": "return 1"}])
+        self.build(spec)
+        query = "pytest runner environment installs"
+        strict = self.ask("alpha", query)
+        weak = self.ask("alpha", query, weak=True)
+        self.assertGreaterEqual(len(weak["results"]), len(strict["results"]))
+        self.assertTrue(weak["results"])
+        for item in weak["results"]:
+            self.assertEqual(item["tier"], "lead")
+            self.assertIn("low_confidence", item["reasons"])
+        self.assertTrue(self.ask("alpha", "zzqqxx nothing", weak=True)["abstained"])
+
     def test_camel_snake_and_short_identifiers_match(self):
         spec = fixture({"alpha": BASE}, [
             episode("e-1", "alpha", [
@@ -891,6 +904,19 @@ class BridgeTests(RecallCase):
         self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
         sessions = {row[0] for row in self.store.db.execute("SELECT session FROM learning_incidents WHERE signal = 'experience'")}
         self.assertEqual(sessions, {"a-1", "claude:a-3"})
+
+    def test_unknown_ancestry_is_never_an_independent_root(self):
+        spec = fixture({"alpha": BASE}, [
+            episode("m-1", "alpha", [{"user": "muse prompt one"}], harness="muse"),
+            episode("g-1", "alpha", [{"user": "grok prompt one"}], harness="grok"),
+            episode("c-1", "alpha", [{"user": "claude root"}], harness="claude"),
+            episode("c-2", "alpha", [{"user": "claude child"}], harness="claude", subagent_of="c-1"),
+        ])
+        self.build(spec, observe=False)
+        self.assertEqual(self.learner._root_session("muse:m-1"), "unresolved-ancestry")
+        self.assertEqual(self.learner._root_session("grok:g-1"), "grok:g-1")
+        self.assertEqual(self.learner._root_session("claude:c-1"), "claude:c-1")
+        self.assertEqual(self.learner._root_session("claude:c-2"), "claude:c-1")
 
     def test_observation_alone_never_creates_findings_or_model_work(self):
         self.build(self.two_session_spec("codex"))

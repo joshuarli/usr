@@ -35,13 +35,6 @@ def qualified_id(harness, native_id):
     return harness + ":" + native_id
 
 
-def split_id(value):
-    prefix, separator, rest = str(value).partition(":")
-    if separator and prefix in HARNESSES:
-        return prefix, rest
-    return "codex", str(value)
-
-
 def _has_harness_prefix(value):
     prefix, separator, _ = str(value).partition(":")
     return bool(separator) and prefix in HARNESSES

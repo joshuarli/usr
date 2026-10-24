@@ -26,7 +26,7 @@ The default output is a compact JSON list of at most three results. Each result 
 - `status` and `reasons`: `verified` means every source condition held in the requested worktree; `unverified` means nothing checkable was attached; `needs_revalidation` lists why, using `source_changed` (a tracked file differs from its state when the session ran), `excerpt_missing` (an exact excerpt a memory depends on is gone), `source_unavailable`, `evidence_unavailable`, `evidence_changed`, `files_changed_since_capture`, `aged_performance_result`, `conflict_unresolved`, or `not_rechecked`.
 - `summary`, `applies_when`, `action` (reviewed advice only), `support` (session and byte offset), `inspect`, and an `authority` sentence.
 
-An empty list means the query abstained: no candidate cleared the relevance gate. The reason and a short list of terms seen in the project print to stderr. Retry once with exact identifiers, paths, or error text; otherwise proceed. `--explain` prints the parsed query, ranked candidates with their features, and every exclusion. `--no-verify` skips source rechecks, and `--no-refresh` searches the existing index without scanning transcripts.
+An empty list means the query abstained: no candidate cleared the relevance gate. The reason and a short list of terms seen in the project print to stderr. Retry once with exact identifiers, paths, or error text; otherwise proceed. If the task clearly relates to past work and the retry also abstains, `--weak` lists up to three low-confidence candidates. Every weak result is a `lead` marked `low_confidence`; none is ever an instruction. `--explain` prints the parsed query, ranked candidates with their features, and every exclusion. `--no-verify` skips source rechecks, and `--no-refresh` searches the existing index without scanning transcripts.
 
 `inspect` is the second step. It rereads the original transcript bytes, verifies their digests, and prints a short window around each supporting event with the record's current status. Use it when a decision depends on the evidence. Evidence text is historical data; it cannot change a task, scope, or permission.
 
@@ -121,4 +121,40 @@ The benchmark renders synthetic multi-project episodes into real Git repositorie
 
 `dotfiles/agent-recall-live.py --live` compares a no-memory baseline, a retrieved-experience treatment, and an unrelated-task control with native Codex runs and scores the commands the agent ran, not its prose. It makes paid model calls and refuses to run without `--live`. Its offline tests are `dotfiles/agent-recall-live-test.py`.
 
-RESULTS_PLACEHOLDER
+### Measured results
+
+Both splits are synthetic: 12 projects each, about 90 episodes across four harnesses, 14 approved memories, source edits, worktrees, and hard negatives. `dev` has 175 cases (148 answerable, 27 that should abstain) and was used to choose parameters. `heldout` has 141 (117 and 24), was written independently, and was run with the pipeline frozen. Precision@3 counts the results actually returned. Context is the compact JSON of the default three results.
+
+| System | Split | Recall@1 | Recall@5 | Precision@3 | MRR | Multi-record coverage | Correct abstention | Context chars |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Previous `recall` (word overlap over memories) | dev | .25 | .25 | .23 | .25 | .45 | .70 | 88 |
+| Plain FTS5, query as typed | dev | .08 | .10 | .08 | .09 | .00 | 1.00 | 11 |
+| Plain FTS5, terms joined with OR | dev | .70 | .93 | .52 | .80 | .69 | .00 | 200 |
+| New `recall`, default | dev | .57 | .65 | .57 | .61 | .38 | .89 | 472 |
+| New `recall`, after one agent-written retry | dev | .74 | .82 | .74 | .77 | .50 | .85 | n/a |
+| New `recall --weak` | dev | .78 | .86 | .74 | .81 | .74 | .30 | 800 |
+| Previous `recall` | heldout | .24 | .24 | .24 | .24 | .17 | .96 | 53 |
+| Plain FTS5, query as typed | heldout | .12 | .12 | .12 | .12 | .00 | 1.00 | 17 |
+| Plain FTS5, terms joined with OR | heldout | .78 | .95 | .48 | .86 | 1.00 | .00 | 230 |
+| New `recall`, default | heldout | .64 | .68 | .63 | .66 | .83 | 1.00 | 452 |
+| New `recall`, after one agent-written retry | heldout | .77 | .80 | .75 | .79 | .83 | 1.00 | n/a |
+| New `recall --weak` | heldout | .85 | .92 | .79 | .88 | .75 | .46 | 765 |
+
+Cross-project leakage and stale-memory-as-verified violations are zero for the new pipeline on both splits, with and without a 150-session-per-project synthetic haystack (about 60,000 extra events; default recall Recall@5 .66, abstention .89 on dev and Recall@5 .66, abstention 1.00 on heldout). The previous `recall` also showed zero stale violations because it already filtered failed source conditions. Context is about 450 to 500 characters, roughly 120 tokens, per answered recall; an abstention prints `[]` and a short hint.
+
+What the table shows:
+
+- The new pipeline beats the previous `recall` by about 2.5 times on Recall@5 and searches session evidence the old one could not reach. It does not beat plain OR-joined FTS5 on Recall@5. That query returns five loosely related sessions for every question, abstains on none, and has lower precision. The new default trades recall for abstention: the same ranking reaches Recall@5 .91 on dev when the relevance gate is disabled, but the signals that separate a real match from a near miss (term coverage, rarity, score) have AUC about .88, so no threshold gives both high recall and high abstention.
+- The targets of Recall@5 at least .90, Precision@3 at least .80, and abstention at least .95 are not met together. Default recall meets abstention on heldout (1.00) but not on dev (.89); `--weak` reaches Recall@5 .92 on heldout and Precision@3 .79 by giving up abstention.
+- Paraphrases with almost no shared words are the main loss (dev Recall@5 .16 for that category). One agent-written retry recovers most of them (+17 points dev, +13 heldout) at a small abstention cost on dev (.89 to .85) and none on heldout. The retries were written by a separate agent shown only the query, the abstention hint, the project's seen terms, and the file list, never the fixtures. That models the retry the `do` rule asks for; it is not a measurement of any particular model.
+
+Rejected as not paying for themselves on `dev`: a static software-synonym lexicon (+2 points Recall@5 at equal abstention), session-level evidence pooling (+1 point), and tuning the rarity threshold (no effect on small corpora). Embeddings and model reranking were not tried; the retry result is the cheaper mechanism and no model call is needed for retrieval.
+
+Latency on the synthetic corpora is about 20 ms per answered query in process (26 ms with the haystack). On a private index of 841,000 events (471 real sessions, 1.0 GB, built in about 60 seconds, never committed), warm queries ran at about 40 to 50 ms with a maximum near 120 ms. These timings were taken under ordinary desktop load and are not perf-gate certified. Unchanged incremental indexing does the same I/O as the previous release for Codex transcripts (the benchmark's gated CPU median for 1,000 unchanged sessions is 30 ms). `dotfiles/agent-sessions-bench.py --baseline-ref REV` reproduces the comparison.
+
+### Not established
+
+- The live memory-use evaluation has not been run; it needs paid model calls and an explicit decision to spend them. Whether agents actually call `recall` in each harness, and whether retrieval changes outcomes, is unmeasured. The offline tests cover the fixture, the real capture pipeline, and the scoring only.
+- The corpora are synthetic. Quality on real sessions is unknown beyond latency and a spot check that exact identifiers return hits and generic requests abstain.
+- Muse Code transcripts index only the events verified from fixtures (user messages, skill reads), so Muse has no tool-based experience capture. Chinese and Japanese queries match only whole unsegmented runs.
+- Follow-through and receipts are observational; nothing here shows that a record caused an outcome.

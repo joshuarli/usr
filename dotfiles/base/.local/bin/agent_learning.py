@@ -26,7 +26,7 @@ SCHEMA_VERSION = 4
 MAX_EVENTS = 2000
 MAX_REVIEWS = 2
 MAX_MODEL_CALLS_PER_DAY = 24
-RETRY_HINT = "No relevant prior experience. Proceed normally, or retry once with exact identifiers, file paths, error text, or the project's own terms."
+RETRY_HINT = "No relevant prior experience. Proceed normally, or retry once with exact identifiers, file paths, error text, or the project's own terms; --weak also lists low-confidence leads."
 RESERVED_CALLS_PER_REVIEW = 4
 RESERVED_CALLS_PER_MONITOR = 2
 STABLE_SECONDS = 120
@@ -1173,12 +1173,12 @@ class Learner:
                 return Path(row[0])
         return None
 
-    def retrieve(self, project, query, cwd=None, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True, now=None, record=False, session=None):
+    def retrieve(self, project, query, cwd=None, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True, now=None, record=False, session=None, weak=False):
         current = Path(cwd) if cwd is not None else self._project_cwd(project)
         if cwd is not None and project_identity(current) != project:
             raise LearningError("memory retrieval directory belongs to another project")
         moment = time.time() if now is None else now
-        response = Retriever(self.store, project, current, moment).retrieve(query, limit, explain, verify, include_events)
+        response = Retriever(self.store, project, current, moment).retrieve(query, limit, explain, verify, include_events, weak)
         if response["abstained"]:
             response["hint"] = RETRY_HINT
             response["vocabulary"] = self.vocabulary(project)
@@ -1640,6 +1640,7 @@ def parser():
     recall.add_argument("--no-verify", action="store_true", help="skip source and worktree rechecks")
     recall.add_argument("--no-refresh", action="store_true", help="search the existing local index without scanning transcripts")
     recall.add_argument("--no-record", action="store_true", help="do not write a retrieval receipt")
+    recall.add_argument("--weak", action="store_true", help="after an abstention, also list low-confidence leads; every result is a lead and none is an instruction")
     inspect_command = commands.add_parser("inspect", help="show source-verified evidence behind a recall result")
     inspect_command.add_argument("ref", help="memory:N, experience:N or event:SESSION@POSITION")
     inspect_command.add_argument("--project", type=Path, default=Path.cwd())
@@ -1737,7 +1738,7 @@ def main(argv=None):
             identity = project_identity(args.project)
             if not args.no_refresh:
                 store.refresh(project=identity)
-            response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record)
+            response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record, weak=args.weak)
             print(redacted_json(response, indent=2) if args.explain else redacted_json(response["results"], separators=(",", ":")))
             if response["abstained"]:
                 terms = ", ".join(response["vocabulary"])

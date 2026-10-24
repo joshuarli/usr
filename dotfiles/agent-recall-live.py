@@ -140,6 +140,10 @@ def run_metrics(arm, run):
     }
 
 
+def _rate(rows):
+    return lambda key: sum(1 for row in rows if row[key]) / len(rows)
+
+
 def summarize(per_run):
     summary = {}
     for arm in ARMS:
@@ -147,8 +151,7 @@ def summarize(per_run):
         if not rows:
             summary[arm] = {"complete_runs": 0}
             continue
-        def rate(key):
-            return sum(1 for row in rows if row[key]) / len(rows)
+        rate = _rate(rows)
         tokens = [sum(value for key, value in row["usage"].items() if key in ("input_tokens", "output_tokens")) for row in rows]
         summary[arm] = {
             "complete_runs": len(rows),
