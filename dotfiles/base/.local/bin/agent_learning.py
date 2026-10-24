@@ -153,6 +153,9 @@ def initialize(db):
                 "grant_source": "TEXT NOT NULL DEFAULT 'project' CHECK(grant_source IN ('project','global'))",
                 "review_harnesses": "TEXT NOT NULL DEFAULT 'codex'",
             },
+            "learning_global_grant": {
+                "review_harnesses": "TEXT NOT NULL DEFAULT 'codex'",
+            },
             "learning_findings": {"retry_kind": "TEXT NOT NULL DEFAULT 'evidence'", "failure_count": "INTEGER NOT NULL DEFAULT 0", "input_key": "TEXT", "checked_head": "TEXT"},
             "learning_memories": {"validity": "TEXT NOT NULL DEFAULT '[]'"},
             "learning_reviews": {"proposal": "TEXT"},
@@ -343,15 +346,18 @@ class Learner:
                 (identity, str(cwd), now, str(repository), GrantSource.PROJECT.value, granted))
         return identity
 
-    def enable_all(self, repository, now):
+    def enable_all(self, repository, now, harnesses=("codex",)):
         repository = self._learning_repository(repository)
+        granted = ",".join(sorted(set(harnesses) & set(HARNESSES)))
+        if not granted:
+            raise LearningError("choose at least one supported harness")
         with self.db:
-            self.db.execute("""INSERT INTO learning_global_grant(id,enabled_at,repository) VALUES(1,?,?)
-                ON CONFLICT(id) DO UPDATE SET enabled_at=excluded.enabled_at,repository=excluded.repository""",
-                (now, str(repository)))
-            self.db.execute("""UPDATE learning_projects SET enabled_at=?,repository=?
+            self.db.execute("""INSERT INTO learning_global_grant(id,enabled_at,repository,review_harnesses) VALUES(1,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET enabled_at=excluded.enabled_at,repository=excluded.repository,review_harnesses=excluded.review_harnesses""",
+                (now, str(repository), granted))
+            self.db.execute("""UPDATE learning_projects SET enabled_at=?,repository=?,review_harnesses=?
                 WHERE grant_source=? AND enabled=1""",
-                (now, str(repository), GrantSource.GLOBAL.value))
+                (now, str(repository), granted, GrantSource.GLOBAL.value))
 
     def disable(self, cwd):
         cwd = Path(cwd).expanduser().resolve()
@@ -375,7 +381,7 @@ class Learner:
             self.db.execute("UPDATE learning_projects SET enabled=0 WHERE grant_source=?", (GrantSource.GLOBAL.value,))
 
     def _global_grant(self):
-        return self.db.execute("SELECT enabled_at,repository FROM learning_global_grant WHERE id=1").fetchone()
+        return self.db.execute("SELECT enabled_at,repository,review_harnesses FROM learning_global_grant WHERE id=1").fetchone()
 
     def _enroll_global_projects(self, grant):
         candidates = self.db.execute("""SELECT project,cwd FROM (
@@ -408,12 +414,12 @@ class Learner:
                 return
             for project, cwd in eligible:
                 self.db.execute("""INSERT INTO learning_projects
-                    (project,cwd,enabled,enabled_at,repository,grant_source) VALUES(?,?,1,?,?,?)
+                    (project,cwd,enabled,enabled_at,repository,grant_source,review_harnesses) VALUES(?,?,1,?,?,?,?)
                     ON CONFLICT(project) DO UPDATE SET cwd=excluded.cwd,enabled=1,enabled_at=excluded.enabled_at,
-                    repository=excluded.repository
+                    repository=excluded.repository,review_harnesses=excluded.review_harnesses
                     WHERE learning_projects.grant_source=?""",
                     (project, cwd, grant["enabled_at"], grant["repository"],
-                     GrantSource.GLOBAL.value, GrantSource.GLOBAL.value))
+                     GrantSource.GLOBAL.value, grant["review_harnesses"] if "review_harnesses" in grant.keys() else "codex", GrantSource.GLOBAL.value))
             self.db.commit()
         except BaseException:
             self.db.rollback()
@@ -1596,6 +1602,7 @@ class Learner:
             "projects": [dict(row) for row in self.db.execute("SELECT * FROM learning_projects")],
             "global_wildcard": grant is not None,
             "global_enabled_at": grant["enabled_at"] if grant is not None else None,
+            "global_review_harnesses": grant["review_harnesses"] if grant is not None and "review_harnesses" in grant.keys() else None,
             "eligible_sessions_processed": self.db.execute("SELECT count(*) FROM learning_processed").fetchone()[0],
             "candidate_signals": self.db.execute("SELECT count(*) FROM learning_incidents").fetchone()[0],
             "pending_hook_hints": self.db.execute("SELECT count(*) FROM learning_hints").fetchone()[0],
@@ -1712,7 +1719,7 @@ def main(argv=None):
                 print(json.dumps(result))
         elif args.command == "enable":
             if args.all_projects:
-                learner.enable_all(args.usr_root, time.time())
+                learner.enable_all(args.usr_root, time.time(), args.harness or ("codex",))
             else:
                 learner.enable(args.project or Path.cwd(), args.usr_root, time.time(), args.harness or ("codex",))
             if args.schedule:

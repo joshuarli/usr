@@ -56,7 +56,7 @@ agent-learn enable --project "$PWD" --usr-root "$HOME/usr"
 agent-learn enable --all-projects --usr-root "$HOME/usr" --schedule
 ```
 
-`enable` allows bounded, sanitized excerpts from that project's eligible sessions to reach Codex for review. It does not change Codex trust settings. Review covers Codex sessions unless you name more with `--harness claude` (repeatable). Local indexing and observation never imply this grant. The wildcard enrolls Git projects found in Codex session history.
+`enable` allows bounded, sanitized excerpts from that project's eligible sessions to reach Codex for review. It does not change Codex trust settings. Review covers Codex sessions unless you name more with `--harness` (repeatable: `codex`, `claude`, `muse`, `grok`, `opencode`; applies to `--project` and `--all-projects`). Local indexing and observation never imply this grant. The wildcard enrolls Git projects found in session history.
 
 On macOS, `--schedule` installs a user LaunchAgent that runs `agent-learn run --scheduled` every 15 minutes. Without it, run reconciliation yourself; Linux has no bundled scheduler. The dotfiles sync does not install or start the LaunchAgent.
 
