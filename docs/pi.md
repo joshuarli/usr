@@ -4,7 +4,7 @@ Pi uses the Google Gemini API, not Gemini CLI OAuth or OpenRouter. The parent an
 
 ## Install and authenticate
 
-Install Node.js 22.19+ and npm first. `make` syncs the profile and includes Pi in the normal `dl` tools. `sh dl pi` installs or updates only Pi, resolving the latest `@earendil-works/pi-coding-agent` release (1.4.0 when this profile was restored on 2026-10-24). It installs with lifecycle scripts disabled under `${XDG_DATA_HOME:-~/.local/share}/pi` and links `~/.local/bin/pi`. Existing unmanaged launchers or install directories are not overwritten.
+Install Node.js 26.12.0+ and npm first. `make` syncs the profile and includes Pi in the normal `dl` tools. `sh dl pi` installs or updates only Pi, resolving the latest `@earendil-works/pi-coding-agent` release (1.4.0 when this profile was restored on 2026-10-24). It installs with lifecycle scripts disabled under `${XDG_DATA_HOME:-~/.local/share}/pi` and links `~/.local/bin/pi`. Existing unmanaged launchers or install directories are not overwritten.
 
 The settings declare Nico Bailon's `pi-subagents` 0.82.0, the latest release checked on 2026-10-24, as `npm:pi-subagents@0.82.0`. Pi manages that package and its dependencies separately from the CLI. After reviewing `make plan` and syncing with `make`, reconcile the declared package without trusting the current project's configuration:
 

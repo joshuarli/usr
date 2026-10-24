@@ -13,7 +13,6 @@ Run the narrowest check that covers the change:
 | Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-recall-test.py` |
 | Retrieval benchmark | `python3 -I dotfiles/agent-recall-bench.py validate`, then `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-recall-bench.py run --split dev` (offline; see [agent learning](agent-learning.md#evaluation)) |
 | Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-live-test.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-recall-live-test.py` (no inference) |
-| `dotfiles/base/.local/bin/agent-vm` | `python3 -I dotfiles/agent-vm-test.py`; on macOS with smolvm, `python3 -I dotfiles/agent-vm-test.py --live` for mount/symlink integration |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |

@@ -82,7 +82,6 @@ check:
 	cd dotfiles && sh worktree-remove-test.sh
 	sh dotfiles/mdtool-test.sh
 	python3 -I dotfiles/base/.local/bin/decide-test.py
-	python3 -I dotfiles/agent-vm-test.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
 	python3 -I dotfiles/agent-sessions-test.py
 	python3 -I dotfiles/agent-learning-test.py

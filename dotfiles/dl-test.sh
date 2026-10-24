@@ -326,11 +326,9 @@ chmod +x "$mock_bin/pnpm"
 cat > "$mock_bin/node" <<'EOF'
 #!/bin/sh
 [ "$1" = -p ] || exit 1
-printf '%s\n' "$CMD_TEST_NODE_MAJOR"
+printf '%s\n' "${CMD_TEST_NODE_VERSION:-26.12.0}"
 EOF
 chmod +x "$mock_bin/node"
-CMD_TEST_NODE_MAJOR=24
-export CMD_TEST_NODE_MAJOR
 
 cmd_home="$test_root/cmd-home"
 cmd_log="$test_root/cmd-npm.log"
@@ -402,7 +400,7 @@ fi
 
 cmd_old_node_home="$test_root/cmd-old-node-home"
 if HOME="$cmd_old_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    CMD_TEST_NODE_MAJOR=20 PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    CMD_TEST_NODE_VERSION=26.11.0 PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
     printf 'cmd accepted an unsupported Node.js version\n' >&2
     exit 1
 fi
@@ -484,6 +482,14 @@ case "$output" in
     *"Installed dsh and dsh-tui under $dsh_data/dsh"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+old_node_dsh_home="$test_root/old-node-dsh-home"
+if HOME="$old_node_dsh_home" XDG_DATA_HOME="$old_node_dsh_home/data" \
+    XDG_STATE_HOME="$old_node_dsh_home/state" TMPDIR="$test_root/tmp" \
+    CMD_TEST_NODE_VERSION=25.9.9 PATH="$mock_bin:$PATH" sh "$repo_root/dl" dsh >/dev/null 2>&1; then
+    printf '%s\n' 'dsh accepted an unsupported Node.js version' >&2
+    exit 1
+fi
+[ ! -e "$old_node_dsh_home/data/dsh" ]
 case "$(cat "$npm_log")" in
     *'@deepseek-ai/dsh@0.2.1-rc.2 @deepseek-harness-tui/dsh-tui@0.16.0'*) ;;
     *) cat "$npm_log" >&2; exit 1 ;;
@@ -742,21 +748,21 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 
-srt_home="$test_root/srt-home"
-mkdir -p "$srt_home/.local/bin" "$srt_home/.local/state/dl"
-printf '%s\n' 'srt test binary' > "$srt_home/.local/bin/srt"
-chmod +x "$srt_home/.local/bin/srt"
-printf '%s\n' 'srt-test-etag' > "$srt_home/.local/state/dl/srt"
-if output=$(HOME="$srt_home" XDG_STATE_HOME="$srt_home/.local/state" \
+sandbox_home="$test_root/sandbox-home"
+mkdir -p "$sandbox_home/.local/bin" "$sandbox_home/.local/state/dl"
+printf '%s\n' 'sandbox test binary' > "$sandbox_home/.local/bin/sandbox"
+chmod +x "$sandbox_home/.local/bin/sandbox"
+printf '%s\n' 'srt-test-etag' > "$sandbox_home/.local/state/dl/sandbox"
+if output=$(HOME="$sandbox_home" XDG_STATE_HOME="$sandbox_home/.local/state" \
     DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 TMPDIR="$test_root/tmp" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" srt 2>&1); then
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" sandbox 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
     exit 1
 fi
 case "$output" in
-    *'srt is current (release-0123456789abcdef0123456789abcdef01234567)'*) ;;
+    *'sandbox is current (release-0123456789abcdef0123456789abcdef01234567)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 

@@ -2,7 +2,7 @@
 
 This repository is the source of truth for my home configuration and machine setup. Edit this tree, never `~`.
 
-Use the [README](README.md) to install. See [sync](docs/sync.md), [development checks](docs/development.md), [agent learning](docs/agent-learning.md), [agent VM](docs/agent-vm.md), [macOS preferences](docs/macos-preferences.md), [agent setup](docs/agent-setup.md), the [skills guide](SKILLS.md), the [mdtool reference](docs/mdtool.md), [deferred work](TODO.md), and [RFCs](docs/rfc/).
+Use the [README](README.md) to install. See [sync](docs/sync.md), [development checks](docs/development.md), [agent learning](docs/agent-learning.md), [macOS preferences](docs/macos-preferences.md), [agent setup](docs/agent-setup.md), the [skills guide](SKILLS.md), the [mdtool reference](docs/mdtool.md), [deferred work](TODO.md), and [RFCs](docs/rfc/).
 
 `make plan` previews home sync. `make check` and `make lint` cover selected checks across several areas; see [development checks](docs/development.md) for narrow commands. Do not run `make`, `dl`, `macos/*`, `setup-*`, or reset scripts unless asked. They can alter the host or remove agent state.
 

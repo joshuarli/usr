@@ -2,8 +2,6 @@
 
 This repository installs my home configuration, personal commands, and machine setup. Clone it to `~/usr`.
 
-To run unfamiliar coding agents in a disposable Linux microVM with only explicit host directories exposed, use [`agent-vm`](docs/agent-vm.md). It mirrors the current project read/write, loads tracked global skills and instructions read-only, and does not mount your host home.
-
 ## Install
 
 On macOS, preview setup with `./macos/setup-macos -n`. Run `./macos/setup-macos` to install Homebrew and its packages, configure Touch ID for `sudo`, and start Unbound. The script changes system settings and uses `sudo`. Unbound listens on loopback and forwards to Cloudflare over authenticated DNS-over-TLS. Its DNS step assigns `127.0.0.1` to every enabled network service, including Tailscale. System DNS then depends on Unbound, with no public fallback if it stops.
