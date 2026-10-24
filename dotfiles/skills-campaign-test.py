@@ -345,6 +345,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             match = re.search(r"^evidence: (.+)$", result.stdout, re.MULTILINE)
             self.assertIsNotNone(match, result.stdout)
+            assert match is not None
             evidence = Path(match.group(1))
             self.assertTrue(evidence.is_file())
             content = evidence.read_text(encoding="utf-8")
@@ -363,6 +364,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual(1, failed.returncode, failed.stdout + failed.stderr)
             match = re.search(r"^evidence: (.+)$", failed.stdout, re.MULTILINE)
             self.assertIsNotNone(match, failed.stdout)
+            assert match is not None
             failure_evidence = Path(match.group(1))
             self.assertIn("FAIL: cannot initialize isolated fixture", failure_evidence.read_text(encoding="utf-8"))
         finally:
@@ -429,6 +431,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertEqual(130, interrupted.returncode, interrupted.stdout + interrupted.stderr)
             match = re.search(r"^evidence: (.+)$", interrupted.stdout, re.MULTILINE)
             self.assertIsNotNone(match, interrupted.stdout)
+            assert match is not None
             evidence = Path(match.group(1))
             self.assertEqual("journey exited before its first observation\n", evidence.read_text(encoding="utf-8"))
             self.assertEqual([], [path for path in (repo / ".work" / "tmp").glob("verify-usr.*") if path.is_dir()])
@@ -651,8 +654,8 @@ class SkillCampaignTests(unittest.TestCase):
                 self.fail(f"cannot load fixture tool from {FIXTURE_TOOL}")
             fixture_tool = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(fixture_tool)
-            fixture_tool.REPO = repo
-            fixture_tool.SKILL_TREE = skills
+            fixture_tool.REPO = repo  # ty: ignore[unresolved-attribute] # test injects fixture paths into the loaded helper module
+            fixture_tool.SKILL_TREE = skills  # ty: ignore[unresolved-attribute] # test injects fixture paths into the loaded helper module
 
             contract.write_text(candidate_contract, encoding="utf-8")
             skill.write_text(candidate_skill, encoding="utf-8")

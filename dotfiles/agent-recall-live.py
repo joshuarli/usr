@@ -16,10 +16,14 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 BIN = REPOSITORY / "dotfiles/base/.local/bin"
 sys.path.insert(0, str(BIN))
 SPEC = importlib.util.spec_from_file_location("agent_learning_live", REPOSITORY / "dotfiles/agent-learning-live.py")
+assert SPEC is not None
 LIVE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 SPEC.loader.exec_module(LIVE)
 BENCH_SPEC = importlib.util.spec_from_file_location("agent_recall_bench", REPOSITORY / "dotfiles/agent-recall-bench.py")
+assert BENCH_SPEC is not None
 BENCH = importlib.util.module_from_spec(BENCH_SPEC)
+assert BENCH_SPEC.loader is not None
 sys.modules[BENCH_SPEC.name] = BENCH
 BENCH_SPEC.loader.exec_module(BENCH)
 

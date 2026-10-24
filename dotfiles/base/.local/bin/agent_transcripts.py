@@ -6,6 +6,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any, Optional
 from urllib.parse import unquote
 
 HARNESSES = ("codex", "claude", "muse", "grok", "opencode")
@@ -72,7 +73,7 @@ def coerce_roots(roots):
     if isinstance(roots, dict):
         unknown = set(roots) - set(HARNESSES)
         if unknown:
-            raise ValueError("unsupported transcript harness: " + ", ".join(sorted(unknown)))
+            raise ValueError("unsupported transcript harness: " + ", ".join(sorted(str(name) for name in unknown)))
         return {name: [Path(root) for root in _listed(value)] for name, value in roots.items()}
     return {"codex": [Path(root) for root in _listed(roots)]}
 
@@ -140,7 +141,7 @@ def exit_outcome(text):
     return None
 
 
-def _record(kind, text="", timestamp=None, call_id=None, raw_type=None, outcome=None, **fields):
+def _record(kind, text="", timestamp=None, call_id=None, raw_type=None, outcome=None, **fields) -> dict[str, Any]:
     record = {
         "kind": str(kind),
         "text": text if isinstance(text, str) else _text_value(text),
@@ -290,9 +291,11 @@ def _millis(value):
 
 
 def _tool_outcome(block):
-    state = block.get("state") if isinstance(block.get("state"), dict) else {}
+    raw_state = block.get("state")
+    state = raw_state if isinstance(raw_state, dict) else {}
     status = state.get("status")
-    metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+    raw_metadata = state.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     exit_code = metadata.get("exit")
     if isinstance(exit_code, int) and not isinstance(exit_code, bool):
         return "ok" if exit_code == 0 else "error"
@@ -369,12 +372,14 @@ def normalize(obj, harness="codex"):
     raise ValueError("unsupported transcript harness: " + str(harness))
 
 
-def _json_object(raw):
+def _json_object(raw) -> Optional[dict[str, Any]]:
     try:
         value = json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, ValueError):
         return None
-    return value if isinstance(value, dict) else None
+    if not isinstance(value, dict):
+        return None
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _head_lines(path, open_source, stats, wanted):
@@ -437,7 +442,8 @@ def read_header(harness, path, open_source, stats=None):
     objects = [obj for obj in (_json_object(raw) for raw in lines) if obj is not None]
     if harness == "codex":
         obj = objects[0] if objects and _json_object(first) is not None else {}
-        payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+        raw_payload = obj.get("payload")
+        payload = raw_payload if isinstance(raw_payload, dict) else {}
         header["native_id"] = str(payload.get("id") or payload.get("session_id") or path.stem)
         header["cwd"] = payload.get("cwd") if isinstance(payload.get("cwd"), str) else ""
         source = payload.get("source")
@@ -448,9 +454,11 @@ def read_header(harness, path, open_source, stats=None):
         header["thread_source"] = str(thread_source) if thread_source is not None else None
         parent = payload.get("parent_thread_id")
         if parent is None and isinstance(source, dict):
-            spawned = source.get("subagent")
-            spawned = spawned.get("thread_spawn") if isinstance(spawned, dict) else None
-            parent = spawned.get("parent_thread_id") if isinstance(spawned, dict) else None
+            raw_spawned = source.get("subagent")
+            spawned = raw_spawned if isinstance(raw_spawned, dict) else None
+            raw_thread_spawn = spawned.get("thread_spawn") if isinstance(spawned, dict) else None
+            thread_spawn = raw_thread_spawn if isinstance(raw_thread_spawn, dict) else None
+            parent = thread_spawn.get("parent_thread_id") if isinstance(thread_spawn, dict) else None
         header["parent_native"] = str(parent) if parent is not None else None
         return header
     if harness == "claude":
@@ -477,17 +485,22 @@ def read_header(harness, path, open_source, stats=None):
         header["native_id"] = path.parent.name
         header["ancestry"] = "unknown"
         for obj in objects:
-            payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
-            record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-            if payload.get("kind") == "metadata" and isinstance(record.get("workspace_root"), str):
-                header["cwd"] = record["workspace_root"]
+            raw_payload = obj.get("payload")
+            payload = raw_payload if isinstance(raw_payload, dict) else {}
+            raw_record = payload.get("record")
+            record = raw_record if isinstance(raw_record, dict) else {}
+            workspace_root = record.get("workspace_root")
+            if payload.get("kind") == "metadata" and isinstance(workspace_root, str):
+                header["cwd"] = workspace_root
                 break
         return header
     header["native_id"] = path.parent.name
     summary = _sibling_json(path, "summary.json", open_source, stats)
-    info_block = summary.get("info") if isinstance(summary, dict) and isinstance(summary.get("info"), dict) else {}
-    if isinstance(info_block.get("cwd"), str):
-        header["cwd"] = info_block["cwd"]
+    raw_info = summary.get("info") if isinstance(summary, dict) else None
+    info_block = raw_info if isinstance(raw_info, dict) else {}
+    cwd = info_block.get("cwd")
+    if isinstance(cwd, str):
+        header["cwd"] = cwd
     else:
         header["cwd"] = unquote(path.parent.parent.name)
     if not header["cwd"].startswith("/"):

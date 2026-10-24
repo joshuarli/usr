@@ -21,6 +21,7 @@ from dataclasses import dataclass, replace
 from bisect import bisect_right
 from difflib import get_close_matches
 from pathlib import Path, PurePosixPath
+from typing import Any
 from urllib.parse import unquote
 
 COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
@@ -386,8 +387,8 @@ SITE_MARKERS = (
 class Site:
     kind: str
     root: str
-    bases: tuple
-    assets: tuple
+    bases: tuple[str, ...]
+    assets: tuple[str, ...]
 
 
 def find_sites(names):
@@ -706,7 +707,8 @@ def sphinx_projects(content):
         conf = sphinx_conf(text)
         srcdir = str(PurePosixPath(conf_path).parent)
         prefix = "" if srcdir == "." else srcdir + "/"
-        extensions = conf.get("extensions") if isinstance(conf.get("extensions"), list) else []
+        raw_extensions = conf.get("extensions")
+        extensions = raw_extensions if isinstance(raw_extensions, list) else []
         suffix = conf.get("source_suffix", [".rst"])
         if isinstance(suffix, str): suffix = [suffix]
         elif isinstance(suffix, dict): suffix = list(suffix)
@@ -1443,7 +1445,7 @@ def sentence_around(text, start, end, reach=400):
 
 def comment_blocks(file, text):
 
-    blocks = []
+    blocks: list[list[Any]] = []
     for n, comment in source_comments(file, text):
         if blocks and n == blocks[-1][1] and "\n" not in comment:
             blocks[-1][2].append(comment); blocks[-1][1] += 1

@@ -4,6 +4,7 @@ import argparse
 import re
 import subprocess
 import sys
+from typing import Any
 
 
 def diskutil_list():
@@ -60,7 +61,7 @@ def parse_disk0(output):
     return parts
 
 
-def derive_plan(parts):
+def derive_plan(parts) -> dict[str, Any]:
     # EFI - ASAHI is our anchor.
     efi_matches = [
         p for p in parts

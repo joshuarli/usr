@@ -1,0 +1,25 @@
+[environment]
+python-version = "3.15"
+extra-paths = ["dotfiles/base/.local/bin"]
+
+[analysis]
+return-type-inference = "always"
+strict-equality-semantics = true
+strict-generic-narrowing = true
+respect-type-ignore-comments = false
+
+[rules]
+blanket-ignore-comment = "error"
+disjoint-cast = "error"
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
+possibly-unresolved-reference = "error"
+unsound-assignment = "error"
+unsound-return-statement = "error"
+unsound-yield = "error"
+unsupported-dynamic-base = "error"
+unused-ignore-comment = "error"
+
+[terminal]
+error-on-warning = true
+output-format = "concise"

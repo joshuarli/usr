@@ -283,7 +283,7 @@ def _read_owned_plist(directory_fd: int) -> Optional[dict[str, object]]:
             os.close(file_fd)
     if not isinstance(plist, dict) or plist.get("Label") != LAUNCHD_LABEL:
         raise FileExistsError("LaunchAgent path belongs to another configuration")
-    return plist
+    return {key: item for key, item in plist.items() if isinstance(key, str)}
 
 
 def _replace_plist(directory_fd: int, contents: bytes) -> None:
@@ -333,7 +333,8 @@ def _launchd_target() -> str:
 
 def _launchd_loaded(runner: Optional[Callable[..., object]]) -> bool:
     result = _run_launchctl(["print", _launchd_target()], runner)
-    return getattr(result, "returncode", 1) == 0
+    returncode = getattr(result, "returncode", 1)
+    return isinstance(returncode, int) and returncode == 0
 
 
 def _run_launchctl(

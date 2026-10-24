@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
+from typing import Any, Optional
 
 from agent_recall import doc_tokens, stem, technical_tokens
 from agent_session_store import redact
@@ -128,9 +129,9 @@ class Draft:
     detector: str
     subject: str
     observed_at: float
-    sources: list
+    sources: list[dict[str, Any]]
     tags: str = ""
-    paths: tuple = ()
+    paths: tuple[str, ...] = ()
     extra: str = ""
 
 
@@ -139,7 +140,7 @@ class Run:
     call: int
     tool: str
     command: str
-    out: int = None
+    out: Optional[int] = None
 
 
 def tool_command(text):

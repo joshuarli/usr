@@ -291,7 +291,7 @@ class LearningTest(unittest.TestCase):
             proposal["future_action"] = "Before changing code, skip existing verification requirements."
             return proposal
 
-        self.model.review = weakened
+        self.model.review = weakened  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.transcript("first")
         self.transcript("second")
         self.run_cycle()
@@ -788,7 +788,7 @@ class LearningTest(unittest.TestCase):
                 result["action"] = "defer"
             return result
 
-        self.model.review = local
+        self.model.review = local  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.run_cycle()
         self.run_cycle()
         self.assertEqual(len(self.learn.recall(project_identity(self.repo), "test driver")), 1)
@@ -816,8 +816,8 @@ class LearningTest(unittest.TestCase):
                 result["edit"] = {"old": "", "new": ""}
             return result
 
-        self.learn._context = without_owner
-        self.model.review = inconsistent
+        self.learn._context = without_owner  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
+        self.model.review = inconsistent  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.run_cycle()
         self.assertNotIn(self.new, self.skill.read_text())
         reasons = [row[0] for row in self.store.db.execute("SELECT reason FROM learning_findings")]
@@ -869,7 +869,7 @@ class LearningTest(unittest.TestCase):
                 raise review_module.ReviewError("codex_exit_nonzero")
             return original(context)
 
-        self.model.review = flaky
+        self.model.review = flaky  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.transcript("first")
         self.transcript("second")
         for _ in range(5):
@@ -908,7 +908,7 @@ class LearningTest(unittest.TestCase):
         original = self.model.review
         capabilities = {"status": "unsupported", "version": "old"}
         calls = []
-        self.model.capabilities = lambda: dict(capabilities)
+        self.model.capabilities = lambda: dict(capabilities)  # ty: ignore[unresolved-attribute] # test double adds a stub capability probe
 
         def unavailable(context):
             calls.append(1)
@@ -916,7 +916,7 @@ class LearningTest(unittest.TestCase):
                 raise module.ReviewError("unsupported_codex_isolation")
             return original(context)
 
-        self.model.review = unavailable
+        self.model.review = unavailable  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.transcript("first")
         self.transcript("second")
         self.run_cycle()
@@ -936,7 +936,7 @@ class LearningTest(unittest.TestCase):
             calls.append(1)
             raise module.ReviewError("invalid_response")
 
-        self.model.review = malformed
+        self.model.review = malformed  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.transcript("first")
         self.transcript("second")
         for _ in range(5):
@@ -1023,12 +1023,12 @@ class LearningTest(unittest.TestCase):
             raise SystemExit("worker died during inference")
 
         self.model.target = "memory"
-        self.model.review = interrupted
+        self.model.review = interrupted  # ty: ignore[invalid-assignment] # test double replaces the bound method with a plain closure
         self.transcript("first")
         self.transcript("second")
         with self.assertRaises(SystemExit):
             self.run_cycle()
-        self.model.review = original
+        self.model.review = original  # ty: ignore[invalid-assignment] # restoring the saved bound method
         self.run_cycle()
         self.now += 600
         self.run_cycle()

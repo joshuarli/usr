@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -149,7 +150,7 @@ def _usage_totals(db):
     return {"model_calls": calls, **tokens}
 
 
-def _learn(scratch, reviewer=None):
+def _learn(scratch, reviewer=None) -> dict[str, Any]:
     usr = scratch / "usr"
     other = scratch / "other"
     history = scratch / "history"
@@ -242,7 +243,7 @@ def _command_records(events):
     return [records[key] for key in order]
 
 
-def _run_events(codex, repo, schema_path, env, prompt, model, effort, sandbox="read-only"):
+def _run_events(codex, repo, schema_path, env, prompt, model, effort, sandbox="read-only") -> dict[str, Any]:
     command = [
         codex, "exec", "--model", model, "--sandbox", sandbox, "--strict-config", "--ignore-user-config",
         "--ignore-rules", "--ephemeral", "--thread-source", "agent_learning_live_eval",
@@ -385,7 +386,7 @@ def _agent_repository(scratch, name, skill_text):
     return repo
 
 
-def _held_out(scratch, reviewer, treated_skill):
+def _held_out(scratch, reviewer, treated_skill) -> dict[str, Any]:
     codex = reviewer._codex_path
     model, effort = reviewer._tier("worker")
     env = reviewer._runtime_environment(scratch)

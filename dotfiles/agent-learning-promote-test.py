@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 
@@ -13,7 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 WORK_TMP = ROOT / ".work/tmp"
 MODULE_PATH = ROOT / "dotfiles/base/.local/bin/agent_learning_promote.py"
 SPEC = importlib.util.spec_from_file_location("agent_learning_promote", MODULE_PATH)
+assert SPEC is not None
 promotion = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 SPEC.loader.exec_module(promotion)
 
 
@@ -92,7 +95,7 @@ class PromotionTest(unittest.TestCase):
     def head(self):
         return run(["git", "-C", str(self.repo), "rev-parse", "HEAD"], self.repo).stdout.decode().strip()
 
-    def proposal(self, *, mode="paragraph", proposal_id="finding-0001", action="improve"):
+    def proposal(self, *, mode="paragraph", proposal_id="finding-0001", action="improve") -> dict[str, Any]:
         if mode == "paragraph":
             old = "Run the focused reproduction."
             future = "When reproducing a failure in a repository with a test driver, use that driver."
@@ -133,8 +136,8 @@ class PromotionTest(unittest.TestCase):
             },
         }
 
-    def evidence(self, *, same_root=False):
-        records = [
+    def evidence(self, *, same_root=False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        records: list[dict[str, Any]] = [
             {
                 "session": "session-a",
                 "position": 4,
@@ -638,12 +641,14 @@ class PromotionTest(unittest.TestCase):
                 target = worktree / "dotfiles/base/.agents/skills/root-cause/SKILL.md"
                 if change == "modified":
                     target.write_text(target.read_text(encoding="utf-8") + "local edit\n", encoding="utf-8")
+                    check_path, expected = target, "local edit\n"
                 else:
                     name = "ignored.txt" if change == "ignored" else "local.txt"
                     local = worktree / name
                     local.write_text("keep " + change, encoding="utf-8")
                     if change == "staged":
                         run(["git", "-C", str(worktree), "add", "--", name], self.repo)
+                    check_path, expected = local, "keep " + change
 
                 with self.assertRaises(promotion._PromotionFailure) as failure:
                     promotion._remove_worktree(self.repo, worktree, "promote", identity)
@@ -652,9 +657,9 @@ class PromotionTest(unittest.TestCase):
                 self.assertEqual(failure.exception.blocked_path, worktree)
                 self.assertTrue(worktree.is_dir())
                 if change == "modified":
-                    self.assertTrue(target.read_text(encoding="utf-8").endswith("local edit\n"))
+                    self.assertTrue(check_path.read_text(encoding="utf-8").endswith(expected))
                 else:
-                    self.assertEqual(local.read_text(encoding="utf-8"), "keep " + change)
+                    self.assertEqual(check_path.read_text(encoding="utf-8"), expected)
 
     def test_ignored_file_added_during_cleanup_preflight_is_preserved(self):
         worktree_root = promotion._safe_worktree_root(self.repo)

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, Optional
 
 
 STATE_NAME = "codex-campaign-closeout.json"
@@ -55,7 +56,7 @@ def filesystem_root(cwd):
 def listed_worktrees(root):
     output = git_output(root, "worktree", "list", "--porcelain", "-z")
     worktrees = []
-    current = None
+    current: Optional[dict[str, Any]] = None
     for field in output.split(b"\0"):
         if field.startswith(b"worktree "):
             if current is not None:

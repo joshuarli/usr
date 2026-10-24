@@ -16,7 +16,9 @@ OPS_PATH = REPOSITORY / "dotfiles/base/.local/bin/agent_learning_ops.py"
 SCRATCH_ROOT = REPOSITORY / ".work/tmp"
 SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
 SPEC = importlib.util.spec_from_file_location("agent_learning_ops", OPS_PATH)
+assert SPEC is not None
 OPS = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 sys.modules[SPEC.name] = OPS
 SPEC.loader.exec_module(OPS)
 
@@ -35,7 +37,7 @@ class AgentLearningOpsTests(unittest.TestCase):
             def database_path(state_dir):
                 return Path(state_dir) / "sessions.sqlite3"
 
-        store_module.Store = Store
+        store_module.Store = Store  # ty: ignore[unresolved-attribute] # test fabricates a stub module with no declared Store attribute
         return patch.dict(sys.modules, {"agent_session_store": store_module})
 
     def create_database(self, state_dir, projects):

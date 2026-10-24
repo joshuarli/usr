@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import unittest
+from typing import Any
 from unittest import mock
 import urllib.error
 from pathlib import Path
@@ -19,13 +20,15 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("decide")
 LOADER = importlib.machinery.SourceFileLoader("decide", str(SCRIPT))
-SPEC = importlib.util.spec_from_loader("decide", LOADER)
+SPEC = importlib.util.spec_from_loader("decide", LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+assert SPEC is not None
 DECIDE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 sys.modules[SPEC.name] = DECIDE
 SPEC.loader.exec_module(DECIDE)
 
 
-def sample_request():
+def sample_request() -> dict[str, Any]:
     return {
         "state": {"ticket": "checkout errors"},
         "questions": {
@@ -48,7 +51,7 @@ def sample_request():
     }
 
 
-def sample_result(request, model="clef-flash"):
+def sample_result(request, model="clef-flash") -> dict[str, Any]:
     answers = {}
     for question_id, question in request["questions"].items():
         if question["type"] == "noul":
@@ -96,7 +99,7 @@ def sample_eval_case(
     prediction=None,
     split="development",
     existing_choice="mechanic",
-):
+) -> dict[str, Any]:
     case = {
         "case_id": case_id,
         "source_group": source_group,
@@ -347,7 +350,8 @@ class DecideTests(unittest.TestCase):
     def test_http_redirect_does_not_read_response_body(self):
         body = mock.Mock()
         body.read.side_effect = AssertionError("redirect body must not be read")
-        error = urllib.error.HTTPError("https://example.invalid", 302, "Found", {}, body)
+        headers: Any = {}
+        error = urllib.error.HTTPError("https://example.invalid", 302, "Found", headers, body)
         opener = mock.Mock()
         opener.open.side_effect = error
         with mock.patch.object(DECIDE.urllib.request, "build_opener", return_value=opener):
@@ -374,7 +378,7 @@ class DecideTests(unittest.TestCase):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
-            def log_message(self, format_string, *args):
+            def log_message(self, format: str, *args: Any) -> None:
                 return
 
         destination = http.server.ThreadingHTTPServer(("127.0.0.1", 0), DestinationHandler)
@@ -388,7 +392,7 @@ class DecideTests(unittest.TestCase):
                 self.send_header("Location", destination_url)
                 self.end_headers()
 
-            def log_message(self, format_string, *args):
+            def log_message(self, format: str, *args: Any) -> None:
                 return
 
         origin = None

@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 
 spec = importlib.util.spec_from_file_location("macos_lean", Path(__file__).with_name("lean.py"))
+assert spec is not None
 lean = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
 sys.modules[spec.name] = lean
 spec.loader.exec_module(lean)
 

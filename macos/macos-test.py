@@ -11,8 +11,10 @@ from unittest.mock import patch
 
 
 loader = importlib.machinery.SourceFileLoader("macos_tool", str(Path(__file__).with_name("macos")))
-spec = importlib.util.spec_from_loader(loader.name, loader)
+spec = importlib.util.spec_from_loader(loader.name, loader)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+assert spec is not None
 macos = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
 spec.loader.exec_module(macos)
 
 
@@ -95,6 +97,7 @@ class PreferenceTests(unittest.TestCase):
             def run_defaults(scope, *arguments, input_data=None):
                 nonlocal actual
                 if arguments[:2] == ("import", "com.apple.dock"):
+                    assert input_data is not None
                     actual = plistlib.loads(input_data)
                 return b""
 
@@ -120,6 +123,7 @@ class PreferenceTests(unittest.TestCase):
             def run_defaults(scope, *arguments, input_data=None):
                 nonlocal actual
                 if arguments[:2] == ("import", "com.apple.dock"):
+                    assert input_data is not None
                     actual = plistlib.loads(input_data)
                 return b""
 
@@ -152,6 +156,7 @@ class PreferenceTests(unittest.TestCase):
                 nonlocal actual
                 if arguments[:2] == ("import", "com.apple.dock"):
                     events.append("apply")
+                    assert input_data is not None
                     actual = plistlib.loads(input_data)
                 return b""
 

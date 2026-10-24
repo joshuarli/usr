@@ -10,7 +10,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("agent_recall_live", ROOT / "dotfiles/agent-recall-live.py")
+assert SPEC is not None
 EVAL = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 SPEC.loader.exec_module(EVAL)
 
 

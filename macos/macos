@@ -24,8 +24,10 @@ SCOPES = ("user", "currentHost")
 lean_loader = importlib.machinery.SourceFileLoader(
     "macos_lean", str(Path(__file__).resolve().with_name("lean.py")),
 )
-lean_spec = importlib.util.spec_from_loader(lean_loader.name, lean_loader)
+lean_spec = importlib.util.spec_from_loader(lean_loader.name, lean_loader)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+assert lean_spec is not None
 lean_command = importlib.util.module_from_spec(lean_spec)
+assert lean_spec.loader is not None
 sys.modules[lean_spec.name] = lean_command
 lean_loader.exec_module(lean_command)
 
@@ -206,14 +208,15 @@ def values_equal(left: Any, right: Any) -> bool:
         return left.keys() == right.keys() and all(values_equal(left[key], right[key]) for key in left)
     if isinstance(left, list):
         return len(left) == len(right) and all(values_equal(a, b) for a, b in zip(left, right))
-    return left == right
+    return bool(left == right)
 
 
 def preference_differences(before: Any, after: Any,
                             prefix: tuple[str, ...] = ()) -> list[tuple[str, tuple[str, ...]]]:
     if isinstance(before, dict) and isinstance(after, dict):
         paths = []
-        for key in sorted(before.keys() | after.keys()):
+        names: set[Any] = set(before) | set(after)
+        for key in sorted(names):
             if key not in before:
                 paths.append(("+", prefix + (str(key),)))
             elif key not in after:
@@ -449,7 +452,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "lean":
-        return lean_command.main(arguments[1:])
+        return int(lean_command.main(arguments[1:]))
     args = parse_args(arguments)
     if sys.platform != "darwin":
         print("macos requires macOS", file=sys.stderr)

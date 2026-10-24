@@ -25,7 +25,7 @@ Run the narrowest check that covers the change:
 | `setup-linux` | `sh setup-linux-test.sh` and `shellcheck -s sh setup-linux setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I macos/make-sync-test.py` |
 | a shell script | `shellcheck -s sh FILE` |
-| a Python script | `uvx ruff check FILE`, which reads `ruff.toml` |
+| a Python script | `uvx ruff check FILE` and `uvx ty check FILE`, which read `ruff.toml` and `ty.toml` |
 | macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I macos/lean-test.py`, and `uvx ruff check macos/macos macos/macos-test.py macos/lean.py macos/lean-test.py` |
 
 `make check` and `make lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from the Makefile.

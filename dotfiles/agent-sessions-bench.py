@@ -20,7 +20,9 @@ WORK_TMP.mkdir(parents=True, exist_ok=True)
 BIN_DIR = ROOT / "dotfiles" / "base" / ".local" / "bin"
 sys.path.insert(0, str(BIN_DIR))
 STORE_SPEC = importlib.util.spec_from_file_location("agent_session_store", BIN_DIR / "agent_session_store.py")
+assert STORE_SPEC is not None
 STORE_MODULE = importlib.util.module_from_spec(STORE_SPEC)
+assert STORE_SPEC.loader is not None
 sys.modules[STORE_SPEC.name] = STORE_MODULE
 STORE_SPEC.loader.exec_module(STORE_MODULE)
 Store = STORE_MODULE.Store
@@ -28,8 +30,10 @@ normalize = STORE_MODULE.normalize
 project_identity = STORE_MODULE.project_identity
 SKILL_USAGE_PATH = BIN_DIR / "skill-usage"
 SKILL_USAGE_LOADER = importlib.machinery.SourceFileLoader("skill_usage_bench", str(SKILL_USAGE_PATH))
-SPEC = importlib.util.spec_from_loader("skill_usage_bench", SKILL_USAGE_LOADER)
+SPEC = importlib.util.spec_from_loader("skill_usage_bench", SKILL_USAGE_LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+assert SPEC is not None
 SKILL_USAGE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 sys.modules[SPEC.name] = SKILL_USAGE
 SPEC.loader.exec_module(SKILL_USAGE)
 PERF_GATE = ROOT / "dotfiles" / "base" / ".local" / "bin" / "perf-gate-ready"
@@ -141,7 +145,9 @@ def _load_baseline(ref, scratch_root):
     path = Path(scratch_root) / "agent_session_store_baseline.py"
     path.write_bytes(result.stdout)
     spec = importlib.util.spec_from_file_location("agent_session_store_baseline", path)
+    assert spec is not None
     module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module

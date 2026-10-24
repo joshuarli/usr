@@ -119,8 +119,17 @@ def query_rpc(binary, arguments, method, experimental=False):
         stop_process(process)
 
 
-def query_codex(binary):
-    return query_rpc(binary, ["app-server", "--stdio"], "account/rateLimits/read", True)
+def json_object(value: object, error: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise RuntimeError(error)
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
+def query_codex(binary: str) -> dict[str, object]:
+    return json_object(
+        query_rpc(binary, ["app-server", "--stdio"], "account/rateLimits/read", True),
+        "Codex returned an invalid usage response",
+    )
 
 
 def muse_last_observed(binary: str) -> object:
@@ -152,7 +161,7 @@ def query_muse(binary: str) -> dict[str, object]:
         detail = (process.stderr or process.stdout).strip() or "command failed"
         fallback = muse_last_observed(binary)
         if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
-            return fallback
+            return json_object(fallback, "Muse returned an invalid usage response")
         raise RuntimeError(detail)
     try:
         result = json.loads(process.stdout)
@@ -162,20 +171,20 @@ def query_muse(binary: str) -> dict[str, object]:
         raise RuntimeError("Muse returned an invalid usage response")
     allowance = result.get("allowance")
     if isinstance(allowance, dict) and any(
-        isinstance(allowance.get(slot), dict) and is_percent(allowance[slot].get("usedPercent"))
-        for slot in ("window", "weekly")
+        isinstance(section, dict) and is_percent(section.get("usedPercent"))
+        for section in (allowance.get("window"), allowance.get("weekly"))
     ):
-        return result
+        return json_object(result, "Muse returned an invalid usage response")
     fallback = muse_last_observed(binary)
     if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
-        return fallback
+        return json_object(fallback, "Muse returned an invalid usage response")
     reason = result.get("reason") or result.get("hint")
     if isinstance(reason, str) and reason.strip():
         raise RuntimeError(reason.strip())
     raise RuntimeError("Muse returned no subscription quota")
 
 
-def grok_usage(result):
+def grok_usage(result: object) -> dict[str, object]:
     config = result.get("config") if isinstance(result, dict) else None
     if not isinstance(config, dict):
         raise RuntimeError("Grok returned no subscription billing configuration")
@@ -196,11 +205,10 @@ def grok_usage(result):
         or not math.isfinite(prepaid_cents)
     ):
         prepaid_cents = None
+    subscription_tier = result.get("subscription_tier") if isinstance(result, dict) else None
     return {
         "subscription_tier": (
-            result.get("subscription_tier")
-            if isinstance(result.get("subscription_tier"), str)
-            else None
+            subscription_tier if isinstance(subscription_tier, str) else None
         ),
         "usage_percent": usage_percent,
         "period_type": (
@@ -211,7 +219,7 @@ def grok_usage(result):
     }
 
 
-def query_grok(binary):
+def query_grok(binary: str) -> dict[str, object]:
     process = subprocess.Popen(
         [binary, "--no-auto-update", "agent", "stdio"],
         stdin=subprocess.PIPE,
@@ -307,7 +315,7 @@ def read_claude_credentials():
     return oauth
 
 
-def query_claude(_binary):
+def query_claude(binary: str) -> dict[str, object]:
     oauth = read_claude_credentials()
     token = oauth["accessToken"]
     curl = shutil.which("curl")
@@ -369,7 +377,7 @@ def query_claude(_binary):
         raise RuntimeError("Anthropic returned an invalid usage response")
     if not claude_windows(usage):
         raise RuntimeError("Anthropic returned no recognized quota windows")
-    return {"plan": oauth.get("subscriptionType"), "usage": usage}
+    return {"plan": oauth.get("subscriptionType"), "usage": json_object(usage, "Anthropic returned an invalid usage response")}
 
 
 def curl_config_value(value):
@@ -407,7 +415,7 @@ def read_deepseek_api_key():
     return process.stdout
 
 
-def query_dsh(_binary):
+def query_dsh(binary: str) -> dict[str, object]:
     token = read_deepseek_api_key()
     curl = shutil.which("curl")
     if not curl:
@@ -476,10 +484,10 @@ def query_dsh(_binary):
             for field in ("currency", "total_balance", "granted_balance", "topped_up_balance")
         ):
             raise RuntimeError("DeepSeek returned an invalid balance entry")
-    return result
+    return json_object(result, "DeepSeek returned an invalid balance response")
 
 
-def query_agy(binary):
+def query_agy(binary: str) -> dict[str, object]:
     process = subprocess.run(
         [binary, "-p", "/usage", "--output-format", "json", "--print-timeout", "30s"],
         capture_output=True,
@@ -499,10 +507,10 @@ def query_agy(binary):
     report = result.get("response") or result.get("structured_output")
     if not report:
         raise RuntimeError("Antigravity returned no quota report")
-    return report
+    return {"report": report}
 
 
-def read_opencode_account(binary):
+def read_opencode_account(binary: str) -> dict[str, object]:
     try:
         process = subprocess.run(
             [binary, "auth", "export"],
@@ -532,21 +540,28 @@ def read_opencode_account(binary):
         if entry.get("integrationID") != "opencode":
             continue
         value = entry.get("value")
-        if not isinstance(value, dict) or not isinstance(value.get("access"), str):
+        if not isinstance(value, dict):
+            continue
+        if not isinstance(value.get("access"), str):
             continue
         if entry.get("active"):
-            return entry
+            return json_object(entry, "OpenCode auth export returned an invalid credential")
         if fallback is None:
             fallback = entry
     if fallback is None:
         raise RuntimeError("OpenCode Go login not found; run `opencode2 auth login`")
-    return fallback
+    return json_object(fallback, "OpenCode auth export returned an invalid credential")
 
 
-def query_opencode(binary):
+def query_opencode(binary: str) -> dict[str, object]:
     account = read_opencode_account(binary)
-    token = account["value"]["access"]
-    metadata = account["value"].get("metadata")
+    value = account.get("value")
+    if not isinstance(value, dict):
+        raise RuntimeError("OpenCode auth export returned an invalid credential")
+    token = value.get("access")
+    if not isinstance(token, str):
+        raise RuntimeError("OpenCode auth export returned an invalid credential")
+    metadata = value.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     curl = shutil.which("curl")
     if not curl:
@@ -606,12 +621,13 @@ def query_opencode(binary):
         raise RuntimeError("OpenCode returned an invalid usage response")
     if not opencode_windows(result):
         raise RuntimeError("OpenCode returned no recognized quota windows")
+    usage = result.get("usage")
     email = metadata.get("email")
     org = metadata.get("orgName")
     return {
         "email": email if isinstance(email, str) else None,
         "org": org if isinstance(org, str) else None,
-        "usage": result["usage"],
+        "usage": usage,
     }
 
 
@@ -815,7 +831,7 @@ def claude_windows(result):
     return windows
 
 
-def print_claude(result):
+def print_claude(result: dict[str, object]) -> None:
     print_heading("Claude Code")
     if result.get("plan"):
         print(f"  plan: {result['plan']}")
@@ -824,12 +840,13 @@ def print_claude(result):
         print_window(label, percent, reset)
 
 
-def print_muse(result: object) -> None:
+def print_muse(result: dict[str, object]) -> None:
     print_heading("Muse Code")
-    allowance = result.get("allowance") if isinstance(result, dict) else None
+    allowance = result.get("allowance")
     if isinstance(allowance, dict):
-        if allowance.get("tier"):
-            print(f"  plan: {allowance['tier']}")
+        tier = allowance.get("tier")
+        if tier:
+            print(f"  plan: {tier}")
         current = allowance.get("window")
         weekly = allowance.get("weekly")
         shown = False
@@ -843,12 +860,12 @@ def print_muse(result: object) -> None:
             return
         print(f"  {color('no subscription quota returned', '33')}")
         return
-    usage = result.get("usage") if isinstance(result, dict) else None
+    usage = result.get("usage")
     if not isinstance(usage, dict):
         print(f"  {color('no subscription quota returned', '33')}")
         return
     if usage.get("tier"):
-        print(f"  plan: {usage['tier']}")
+        print(f"  plan: {usage.get('tier')}")
     print(f"  {color('(last observed)', '2')}")
     current = usage.get("window")
     weekly = usage.get("weekly")
@@ -872,19 +889,28 @@ def print_grok(result: dict[str, object]) -> None:
 
 def print_dsh(result: dict[str, object]) -> None:
     print_heading("DeepSeek API")
-    available = result["is_available"]
+    available = result.get("is_available")
     label = "available for API requests" if available else "insufficient for API requests"
     print(f"  {color(label, '32' if available else '31')}")
-    for balance in result["balance_infos"]:
+    balances = result.get("balance_infos")
+    if not isinstance(balances, list):
+        raise RuntimeError("DeepSeek returned no balance information")
+    for balance in balances:
+        if not isinstance(balance, dict):
+            raise RuntimeError("DeepSeek returned an invalid balance entry")
+        currency = balance.get("currency")
+        total = balance.get("total_balance")
+        granted = balance.get("granted_balance")
+        topped_up = balance.get("topped_up_balance")
         print(
-            f"  {balance['currency']}: {balance['total_balance']} total "
-            f"({balance['granted_balance']} granted, {balance['topped_up_balance']} topped up)"
+            f"  {currency}: {total} total "
+            f"({granted} granted, {topped_up} topped up)"
         )
 
 
-def print_agy(report):
+def print_agy(result: dict[str, object]) -> None:
     print_heading("Antigravity")
-    for line in str(report).strip().splitlines():
+    for line in str(result.get("report")).strip().splitlines():
         print(f"  {line}")
 
 
@@ -911,7 +937,7 @@ def opencode_windows(result):
     return windows
 
 
-def print_opencode(result):
+def print_opencode(result: dict[str, object]) -> None:
     print_heading("OpenCode Go")
     email = result.get("email")
     org = result.get("org")

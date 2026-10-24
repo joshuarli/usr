@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 from agent_session_store import EvidenceChanged, EvidenceUnavailable, StoreError, redact
 
@@ -71,8 +72,8 @@ class SourceError(Exception):
 @dataclasses.dataclass(frozen=True)
 class Query:
     raw: str
-    words: tuple
-    idents: tuple
+    words: tuple[str, ...]
+    idents: tuple[str, ...]
 
     @property
     def informative(self):
@@ -293,18 +294,18 @@ class Candidate:
     experience_kind: str
     tier: str
     observed_at: float
-    ranks: dict = dataclasses.field(default_factory=dict)
-    supports: list = dataclasses.field(default_factory=list)
-    validity: list = dataclasses.field(default_factory=list)
+    ranks: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    supports: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    validity: list[Any] = dataclasses.field(default_factory=list)
     revision: str = ""
     tags: str = ""
     evidence_roots: int = 1
     event_kind: str = ""
     session_cwd: str = ""
-    features: dict = dataclasses.field(default_factory=dict)
+    features: dict[str, float] = dataclasses.field(default_factory=dict)
     status: str = "unverified"
-    reasons: list = dataclasses.field(default_factory=list)
-    conflicts: list = dataclasses.field(default_factory=list)
+    reasons: list[str] = dataclasses.field(default_factory=list)
+    conflicts: list[str] = dataclasses.field(default_factory=list)
     score: float = 0.0
 
 
@@ -530,6 +531,7 @@ class Retriever:
             features, score = self._score(candidate, query, candidate.ranks.get(index, {}))
             if best is None or score > best[1]:
                 best = (features, score)
+        assert best is not None
         candidate.features, candidate.score = best
 
     def _score(self, candidate, query, ranks):
@@ -711,7 +713,7 @@ class Retriever:
             used += size
         return kept
 
-    def _render(self, item):
+    def _render(self, item) -> dict[str, Any]:
         if item.kind == "event":
             summary = _snippet(item.summary, [word for word in (*self._query.words, *(ident.lower() for ident in self._query.idents))])
         else:

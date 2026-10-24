@@ -15,10 +15,12 @@ from pathlib import Path
 from unittest import mock
 
 
-SCRIPT = Path(__file__).with_name("agent-vm")
+SCRIPT = Path(__file__).resolve().parent / "base" / ".local" / "bin" / "agent-vm"
 LOADER = importlib.machinery.SourceFileLoader("agent_vm", str(SCRIPT))
-SPEC = importlib.util.spec_from_loader("agent_vm", LOADER)
+SPEC = importlib.util.spec_from_loader("agent_vm", LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+assert SPEC is not None
 AGENT_VM = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 sys.modules[SPEC.name] = AGENT_VM
 SPEC.loader.exec_module(AGENT_VM)
 

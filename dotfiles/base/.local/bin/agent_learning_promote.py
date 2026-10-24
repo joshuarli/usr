@@ -8,7 +8,7 @@ import tempfile
 import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 
 KNOWN_LEAF_SKILLS = frozenset(
@@ -287,7 +287,7 @@ def _promotion_lock(repository):
         os.close(descriptor)
 
 
-def _validate_proposal(proposal):
+def _validate_proposal(proposal) -> Any:
     if not isinstance(proposal, dict) or proposal.keys() - _PROPOSAL_FIELDS:
         raise _PromotionFailure("proposal has an unsupported shape")
     if proposal.get("action") != "improve":
@@ -1331,6 +1331,7 @@ def _staging_worktree(repository, expected_head, worktree_root, operation, ident
 def _skill_file(worktree, skill):
     relative = Path("dotfiles/base/.agents/skills") / skill / "SKILL.md"
     current = worktree
+    mode = 0
     for component in relative.parts:
         current = current / component
         try:
@@ -1704,7 +1705,7 @@ def _integrate(repository, candidate_commit, expected_head, branch):
         raise _PromotionFailure("fast-forward integration did not reach the candidate commit", "repository_changed")
 
 
-def recover_promotion(repository: Path, proposal: dict) -> dict:
+def recover_promotion(repository: Path, proposal: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(proposal, dict):
         return _blocked("proposal has an unsupported shape", "invalid_proposal")
     if proposal.get("action") != "improve":
@@ -1734,12 +1735,12 @@ def recover_promotion(repository: Path, proposal: dict) -> dict:
 
 def promote(
     repository: Path,
-    proposal: dict,
-    evidence: list,
+    proposal: dict[str, Any],
+    evidence: list[Any],
     expected_head: str,
     *,
-    verify_evidence: Callable[[list, list], bool],
-) -> dict:
+    verify_evidence: Callable[[list[dict[str, Any]], list[dict[str, Any]]], bool],
+) -> dict[str, Any]:
     if not isinstance(proposal, dict):
         return _blocked("proposal has an unsupported shape", "invalid_proposal")
     action = proposal.get("action")
@@ -1877,7 +1878,7 @@ def promote(
         return _blocked("promotion failed: {}".format(type(exc).__name__))
 
 
-def rollback(repository: Path, commit: str, expected_head: str) -> dict:
+def rollback(repository: Path, commit: str, expected_head: str) -> dict[str, Any]:
     try:
         if not isinstance(commit, str) or not _HEX.fullmatch(commit):
             raise _PromotionFailure("promotion commit is invalid", "invalid_proposal")

@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Any
 
 
 MAX_REQUEST_BYTES = 12_288
@@ -189,7 +190,7 @@ def endpoint(account_id, model):
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request, response, code, message, headers, new_url):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
@@ -236,8 +237,8 @@ def finite_number(value):
 def validate_probabilities(probabilities, expected_ids):
     if not isinstance(probabilities, dict) or set(probabilities) != set(expected_ids):
         raise InvalidProviderResponse()
-    values = list(probabilities.values())
-    if not all(numeric_probability(value) for value in values):
+    values = [float(value) for value in probabilities.values() if numeric_probability(value)]
+    if len(values) != len(probabilities):
         raise InvalidProviderResponse()
     if abs(sum(values) - 1.0) > 0.01:
         raise InvalidProviderResponse()
@@ -278,7 +279,7 @@ def validate_result(request, model, result):
             probabilities = validate_probabilities(answer["probabilities"], options)
             if not isinstance(answer["choice"], str) or answer["choice"] not in options:
                 raise InvalidProviderResponse()
-            if probabilities[answer["choice"]] != max(probabilities.values()):
+            if probabilities[answer["choice"]] != max(float(value) for value in probabilities.values()):
                 raise InvalidProviderResponse()
             validate_confidence(answer["confidence"])
         else:
@@ -366,7 +367,7 @@ def transport_error_reason(error):
     raise error
 
 
-def run_decision(request, model="clef-flash", env=None, transport=http_post, clock=time.monotonic):
+def run_decision(request, model="clef-flash", env=None, transport=http_post, clock=time.monotonic) -> dict[str, Any]:
     try:
         validate_request(request)
         model = parse_model(model)
@@ -602,7 +603,7 @@ def load_eval_cases(data, live=False, max_calls=None):
         case_ids.add(case["case_id"])
         source_splits[source_group] = split
         cases.append(case)
-        if live and len(cases) > max_calls:
+        if live and max_calls is not None and len(cases) > max_calls:
             raise InvalidInput("live_case_limit_exceeded")
     if not cases:
         raise InvalidInput("empty_evaluation_dataset")
@@ -760,7 +761,11 @@ def summarize_eval_cases(cases, request_count):
         else:
             models.add(prediction["model"])
         if case["expected_tier"] is None:
-            label_tiers = tuple(sorted(case["acceptable_tiers"], key=tier_ranks.get))
+            acceptable_tiers = case["acceptable_tiers"]
+            tiers = [tier for tier in acceptable_tiers if isinstance(tier, str)]
+            if len(tiers) != len(acceptable_tiers):
+                raise InvalidInput("invalid_evaluation_case")
+            label_tiers = tuple(sorted(tiers, key=tier_ranks.__getitem__))
         else:
             label_tiers = (case["expected_tier"],)
         row = confusion_rows.setdefault(

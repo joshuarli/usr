@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,7 +92,8 @@ def render_claude(episode, cwd, start):
     when = start
     for number, step in enumerate(episode["turns"]):
         when += 30
-        common = dict(base, timestamp=_iso(when), uuid="u-%s-%d" % (session, number))
+        uuid = "u-%s-%d" % (session, number)
+        common = dict(base, timestamp=_iso(when), uuid=uuid)
         if "user" in step:
             lines.append(dict(common, type="user", message={"role": "user", "content": step["user"]}))
         elif "assistant" in step:
@@ -106,7 +108,7 @@ def render_claude(episode, cwd, start):
             if exit_code:
                 block["is_error"] = True
                 block["content"] = "Exit code %d\n%s" % (exit_code, output)
-            lines.append(dict(common, type="user", uuid=common["uuid"] + "r", message={"role": "user", "content": [block]}))
+            lines.append(dict(common, type="user", uuid=uuid + "r", message={"role": "user", "content": [block]}))
     return [_line(obj) for obj in lines]
 
 
@@ -191,8 +193,8 @@ def _write_files(root, files):
         target.write_text(content)
 
 
-def load_fixture(split):
-    merged = {"projects": {}, "episodes": [], "memories": [], "mutations": [], "cases": []}
+def load_fixture(split) -> dict[str, Any]:
+    merged: dict[str, Any] = {"projects": {}, "episodes": [], "memories": [], "mutations": [], "cases": []}
     for path in sorted((FIXTURES / split).glob("*.json")):
         part = json.loads(path.read_text())
         merged.setdefault("now", part.get("now"))
@@ -286,6 +288,10 @@ def validate(fixture):
 
 
 class World:
+    index_seconds: float = 0.0
+    index_stats: Any = None
+    capture: dict[str, Any] = {}
+
     def __init__(self, fixture, directory):
         self.fixture = fixture
         self.directory = Path(directory)
@@ -349,7 +355,7 @@ def qualified(harness, native_id):
     return module.qualified_id(harness, native_id)
 
 
-def judge(case, results, session_map, groups):
+def judge(case, results, session_map, groups) -> list[dict[str, Any]]:
     def episode_of(session_id):
         return session_map.get(session_id, session_id)
 
@@ -426,7 +432,7 @@ class LegacySystem:
         self.words = importlib.import_module("agent_learning").words
         self.redact = importlib.import_module("agent_session_store").redact
 
-    def run(self, case, limit, now):
+    def run(self, case, limit, now) -> list[dict[str, Any]]:
         project = importlib.import_module("agent_session_store").project_identity(self.world.cwd(case["project"], case.get("worktree")))
         terms, matches = self.words(case["query"]), []
         db = self.store.db
@@ -454,7 +460,7 @@ class RawFtsSystem:
         self.world, self.store, self.mode = world, store, mode
         self.name = "fts5-" + mode
 
-    def run(self, case, limit, now):
+    def run(self, case, limit, now) -> list[dict[str, Any]]:
         project_identity = importlib.import_module("agent_session_store").project_identity
         project = project_identity(self.world.cwd(case["project"], case.get("worktree")))
         query = case["query"]
@@ -482,7 +488,7 @@ class RecallSystem:
         if weak:
             self.name = "new-recall-weak"
 
-    def run(self, case, limit, now):
+    def run(self, case, limit, now) -> list[dict[str, Any]]:
         cwd = self.world.cwd(case["project"], case.get("worktree"))
         project = importlib.import_module("agent_session_store").project_identity(cwd)
         response = self.learner.retrieve(project, case["query"], cwd=cwd, limit=limit, now=now, weak=self.weak)
@@ -589,7 +595,8 @@ def agent_learning_module():
     return importlib.import_module("agent_learning")
 
 
-def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None):
+def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None) -> dict[str, Any]:
+    retries = retries or {}
     WORK_TMP.mkdir(parents=True, exist_ok=True)
     results = {}
     with tempfile.TemporaryDirectory(dir=str(WORK_TMP)) as directory:
@@ -611,6 +618,7 @@ def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None):
             per_case, timings, chars, details, retried = [], [], [], {}, []
             for case in cases:
                 best = None
+                found: list[Any] = []
                 for _ in range(repeats):
                     started = time.perf_counter()
                     found = system.run(case, limit, world.now)

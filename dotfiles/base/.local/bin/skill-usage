@@ -12,6 +12,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -236,9 +237,9 @@ def kinds(skills):
 
 def report(use, skill_kinds, args):
     names = sorted(set(skill_kinds) | (set(use.listed) if args.all else set(use.listed) & set(use.loaded)))
-    rows = []
+    rows: list[dict[str, Any]] = []
     for name in names:
-        row = {"skill": name, "kind": skill_kinds.get(name, "other")}
+        row: dict[str, Any] = {"skill": name, "kind": skill_kinds.get(name, "other")}
         for harness in HARNESSES:
             row[f"listed_{harness}"] = None if harness == "grok" else sum(1 for h, _ in use.listed[name] if h == harness)
             row[f"loaded_{harness}"] = sum(1 for h, _ in use.loaded[name] if h == harness)

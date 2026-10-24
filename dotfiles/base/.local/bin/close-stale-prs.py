@@ -99,11 +99,10 @@ def one_year_ago(now: datetime) -> datetime:
 
 def repository_name() -> str:
     repository = run_gh_json(["repo", "view", "--json", "nameWithOwner"])
-    if not isinstance(repository, dict) or not isinstance(
-        repository.get("nameWithOwner"), str
-    ):
+    name = repository.get("nameWithOwner") if isinstance(repository, dict) else None
+    if not isinstance(name, str):
         raise RuntimeError("could not determine the current GitHub repository")
-    return repository["nameWithOwner"]
+    return name
 
 
 def default_branch_name() -> str:
@@ -111,11 +110,10 @@ def default_branch_name() -> str:
     default_branch = (
         repository.get("defaultBranchRef") if isinstance(repository, dict) else None
     )
-    if not isinstance(default_branch, dict) or not isinstance(
-        default_branch.get("name"), str
-    ):
+    branch_name = default_branch.get("name") if isinstance(default_branch, dict) else None
+    if not isinstance(branch_name, str):
         raise RuntimeError("could not determine the repository's default branch")
-    return default_branch["name"]
+    return branch_name
 
 
 def closed_pull_requests(

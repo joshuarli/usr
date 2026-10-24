@@ -17,6 +17,7 @@ import time
 import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 
 MAX_CONTEXT_CHARS = 30_000
@@ -239,11 +240,13 @@ class ReviewError(ValueError):
 
 class _ProbeHandler(BaseHTTPRequestHandler):
     def _respond(self):
+        server = self.server
+        assert isinstance(server, _ProbeServer)
         if self.path != "/v1/responses":
             self.send_error(404)
             return
         authorization = self.headers.get("Authorization", "")
-        if not hmac.compare_digest(authorization, "Bearer " + self.server.api_key):
+        if not hmac.compare_digest(authorization, "Bearer " + server.api_key):
             self.send_error(401)
             return
         try:
@@ -259,11 +262,11 @@ class _ProbeHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, json.JSONDecodeError, RecursionError):
             self.send_error(400)
             return
-        with self.server.requests_lock:
-            if len(self.server.requests) >= 2:
+        with server.requests_lock:
+            if len(server.requests) >= 2:
                 self.send_error(429)
                 return
-            self.server.requests.append({"method": self.command, "path": self.path, "body": request})
+            server.requests.append({"method": self.command, "path": self.path, "body": request})
         response = json.dumps(
             {"error": {"message": "Synthetic local request capture complete", "type": "invalid_request_error", "code": "probe_complete"}},
             separators=(",", ":"),
@@ -291,6 +294,11 @@ class _ProbeServer(ThreadingHTTPServer):
     allow_reuse_address = False
     request_queue_size = 4
     max_connections = 4
+    api_key: str
+    requests: list[dict[str, Any]]
+    requests_lock: threading.Lock
+    connection_count: int
+    connection_lock: threading.Lock
 
     def __init__(self, address, api_key):
         self.api_key = api_key
@@ -747,6 +755,15 @@ def _kill_process_group(process):
             raise ReviewError("process_cleanup_failed") from error
 
 
+def _selector_fileno(fileobj):
+    return fileobj if isinstance(fileobj, int) else fileobj.fileno()
+
+
+def _selector_close(selector, fileobj):
+    selector.unregister(fileobj)
+    fileobj.close()
+
+
 def _read_process(process, input_bytes, timeout):
     selector = selectors.DefaultSelector()
     stdout = bytearray()
@@ -768,20 +785,17 @@ def _read_process(process, input_bytes, timeout):
             for key, _ in selector.select(min(remaining, 0.5)):
                 if key.data == "stdin":
                     try:
-                        count = os.write(key.fileobj.fileno(), input_bytes[input_offset:input_offset + 8192])
+                        count = os.write(_selector_fileno(key.fileobj), input_bytes[input_offset:input_offset + 8192])
                     except BrokenPipeError:
-                        selector.unregister(key.fileobj)
-                        key.fileobj.close()
+                        _selector_close(selector, key.fileobj)
                         continue
                     input_offset += count
                     if input_offset >= len(input_bytes):
-                        selector.unregister(key.fileobj)
-                        key.fileobj.close()
+                        _selector_close(selector, key.fileobj)
                 else:
-                    chunk = os.read(key.fileobj.fileno(), 4096)
+                    chunk = os.read(_selector_fileno(key.fileobj), 4096)
                     if not chunk:
-                        selector.unregister(key.fileobj)
-                        key.fileobj.close()
+                        _selector_close(selector, key.fileobj)
                         continue
                     target = stdout if key.data == "stdout" else stderr
                     limit = MAX_RESPONSE_BYTES if key.data == "stdout" else MAX_STDERR_BYTES
@@ -1187,9 +1201,12 @@ class CodexReviewer:
                 for request in requests
                 for marker in ambient_markers
             )
+            independent_required = INDEPENDENT_REVIEW_SCHEMA.get("required")
             expected = (
                 ("scout", PROPOSAL_SCHEMA, PROPOSAL_FIELDS),
-                ("worker", INDEPENDENT_REVIEW_SCHEMA, frozenset(INDEPENDENT_REVIEW_SCHEMA["required"])),
+                ("worker", INDEPENDENT_REVIEW_SCHEMA, frozenset(
+                    field for field in independent_required if isinstance(field, str)
+                ) if isinstance(independent_required, list) else frozenset()),
             )
             summaries = []
             for index, request in enumerate(requests[:2]):
@@ -1204,6 +1221,8 @@ class CodexReviewer:
                 schema = response_format.get("schema") if isinstance(response_format, dict) else None
                 schema_required = schema.get("required", []) if isinstance(schema, dict) else []
                 schema_properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+                raw_expected_properties = expected_schema.get("properties") if isinstance(expected_schema, dict) else {}
+                expected_properties = raw_expected_properties if isinstance(raw_expected_properties, dict) else {}
                 tools = body.get("tools", [])
                 summary = {
                     "method": request.get("method"),
@@ -1217,8 +1236,10 @@ class CodexReviewer:
                     "structured_output": (
                         response_format.get("type") == "json_schema"
                         and isinstance(schema, dict)
-                        and set(schema_required) == set(expected_fields)
-                        and set(schema_properties) == set(expected_schema["properties"])
+                        and (set(
+                            field for field in schema_required if isinstance(field, str)
+                        ) if isinstance(schema_required, list) else set()) == set(expected_fields)
+                        and set(schema_properties) == set(expected_properties)
                     ),
                     "required_fields": sorted(schema_required) if isinstance(schema_required, list) else [],
                     "schema_fields": sorted(schema_properties) if isinstance(schema_properties, dict) else [],

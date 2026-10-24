@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "dotfiles" / "base" / ".local" / "bin"
@@ -15,7 +16,9 @@ WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(BIN))
 SPEC = importlib.util.spec_from_file_location("agent_recall_bench", ROOT / "dotfiles" / "agent-recall-bench.py")
+assert SPEC is not None
 BENCH = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 sys.modules[SPEC.name] = BENCH
 SPEC.loader.exec_module(BENCH)
 
@@ -35,7 +38,7 @@ def episode(key, project, turns, harness="codex", age=10, **extra):
     return dict({"id": key, "project": project, "harness": harness, "age_days": age, "turns": turns}, **extra)
 
 
-def fixture(projects, episodes, memories=(), mutations=(), cases=()):
+def fixture(projects, episodes, memories=(), mutations=(), cases=()) -> dict[str, Any]:
     return {"now": NOW, "projects": projects, "episodes": list(episodes), "memories": list(memories), "mutations": list(mutations), "cases": list(cases)}
 
 
@@ -72,7 +75,7 @@ PYTEST_FAIL = "E   ModuleNotFoundError: No module named 'orbit_core'\nFAILED tes
 BASE = {"files": {"src/app.py": "def main():\n    return 1\n", "Makefile": "test:\n\tpytest -q\n"}}
 
 
-def lesson_world():
+def lesson_world() -> dict[str, Any]:
     projects = {"alpha": BASE, "beta": BASE}
     episodes = [
         episode("a-1", "alpha", [
@@ -132,7 +135,7 @@ class RetrievalTests(RecallCase):
             self.assertEqual(response["results"], [])
 
     def test_weak_mode_lists_low_confidence_leads_but_never_instructions(self):
-        spec = FreshnessTests.memory_spec(self, [{"path": "src/app.py", "contains": "return 1"}])
+        spec = memory_spec([{"path": "src/app.py", "contains": "return 1"}])
         self.build(spec)
         query = "pytest runner environment installs"
         strict = self.ask("alpha", query)
@@ -197,26 +200,27 @@ class RetrievalTests(RecallCase):
         self.assertTrue(response["explain"]["candidates"][0]["features"])
 
 
-class FreshnessTests(RecallCase):
-    def memory_spec(self, validity, mutation=None, worktree=False):
-        projects = {"alpha": dict(BASE, worktrees={"wt": {"files": {"src/app.py": "def main():\n    return 2\n"}}} if worktree else {})}
-        episodes = lesson_world()["episodes"][:2]
-        memories = [{"id": "m1", "project": "alpha", "age_days": 5, "action": "Install the package in editable mode before running tests on a clean checkout of orbit_core.",
-                     "applicability": "Running pytest on a clean runner for orbit_core ingest tests.", "sources": [{"episode": "a-1", "contains": "ModuleNotFoundError"}], "validity": validity}]
-        return fixture(projects, episodes, memories, [mutation] if mutation else [])
+def memory_spec(validity, mutation=None, worktree=False):
+    projects = {"alpha": dict(BASE, worktrees={"wt": {"files": {"src/app.py": "def main():\n    return 2\n"}}} if worktree else {})}
+    episodes = lesson_world()["episodes"][:2]
+    memories = [{"id": "m1", "project": "alpha", "age_days": 5, "action": "Install the package in editable mode before running tests on a clean checkout of orbit_core.",
+                 "applicability": "Running pytest on a clean runner for orbit_core ingest tests.", "sources": [{"episode": "a-1", "contains": "ModuleNotFoundError"}], "validity": validity}]
+    return fixture(projects, episodes, memories, [mutation] if mutation else [])
 
+
+class FreshnessTests(RecallCase):
     def instruction(self, response):
         return [item for item in response["results"] if item["ref"].startswith("memory:")]
 
     def test_memory_is_instruction_only_while_its_source_condition_holds(self):
         validity = [{"path": "src/app.py", "contains": "def main():"}]
-        self.build(self.memory_spec(validity))
+        self.build(memory_spec(validity))
         hit = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         self.assertEqual((hit["tier"], hit["status"]), ("instruction", "verified"))
 
     def test_changed_source_demotes_to_lead_with_reason(self):
         validity = [{"path": "src/app.py", "contains": "return 1"}]
-        spec = self.memory_spec(validity, {"project": "alpha", "path": "src/app.py", "content": "def main():\n    return 9\n", "commit": False})
+        spec = memory_spec(validity, {"project": "alpha", "path": "src/app.py", "content": "def main():\n    return 9\n", "commit": False})
         self.build(spec)
         hit = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         self.assertEqual((hit["tier"], hit["status"]), ("lead", "needs_revalidation"))
@@ -224,14 +228,14 @@ class FreshnessTests(RecallCase):
 
     def test_unrelated_commit_does_not_invalidate(self):
         validity = [{"path": "src/app.py", "contains": "return 1"}]
-        spec = self.memory_spec(validity, {"project": "alpha", "path": "docs/notes.md", "content": "unrelated\n", "commit": True})
+        spec = memory_spec(validity, {"project": "alpha", "path": "docs/notes.md", "content": "unrelated\n", "commit": True})
         self.build(spec)
         hit = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         self.assertEqual(hit["status"], "verified")
 
     def test_validity_is_evaluated_in_the_requested_worktree(self):
         validity = [{"path": "src/app.py", "contains": "return 1"}]
-        self.build(self.memory_spec(validity, worktree=True))
+        self.build(memory_spec(validity, worktree=True))
         main = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         branch = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner", worktree="wt"))[0]
         self.assertEqual(main["status"], "verified")
@@ -239,19 +243,19 @@ class FreshnessTests(RecallCase):
 
     def test_missing_source_file_is_unavailable_not_wrong(self):
         validity = [{"path": "src/gone.py", "contains": "x"}]
-        self.build(self.memory_spec(validity))
+        self.build(memory_spec(validity))
         hit = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         self.assertTrue(any(reason.startswith("source_unavailable:") for reason in hit["reasons"]))
         self.assertNotEqual(hit["status"], "verified")
 
     def test_memory_without_checkable_conditions_is_advisory_not_current_instruction(self):
-        self.build(self.memory_spec([]))
+        self.build(memory_spec([]))
         hit = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         self.assertEqual((hit["tier"], hit["status"]), ("experience", "unverified"))
 
     def test_transcript_changed_after_indexing_is_flagged(self):
         validity = [{"path": "src/app.py", "contains": "return 1"}]
-        self.build(self.memory_spec(validity))
+        self.build(memory_spec(validity))
         path = self.world.episode_paths["a-1"]
         data = path.read_bytes()
         path.write_bytes(data.replace(b"ModuleNotFoundError", b"ModuleNotFoundErrXr", 1))
@@ -263,7 +267,7 @@ class FreshnessTests(RecallCase):
 
     def test_deleted_transcript_marks_evidence_unavailable_and_keeps_record(self):
         validity = [{"path": "src/app.py", "contains": "return 1"}]
-        self.build(self.memory_spec(validity))
+        self.build(memory_spec(validity))
         self.world.episode_paths["a-1"].unlink()
         response = self.ask("alpha", "editable install orbit_core pytest clean runner")
         memory = next(item for item in response["results"] if item["ref"].startswith("memory:"))
@@ -769,8 +773,6 @@ class SecondReviewRegressionTests(RecallCase):
         self.assertEqual(self.learner.bridge_experiences(self.ident["alpha"], self.world.now), 1)
 
     def test_a_fix_committed_after_the_session_does_not_start_out_as_changed(self):
-        spec = FreshnessTests.memory_spec  # keep the helper import local to this module
-        del spec
         projects = {"alpha": BASE}
         patch = "apply_patch '*** Begin Patch\n*** Update File: src/app.py\n@@\n-return 1\n+return 2\n*** End Patch'"
         turns = [{"user": "fix"}, tool("pytest -q tests/test_app.py", "E   AssertionError: main returned 1\nFAILED tests/test_app.py::test_main", 1),
@@ -809,7 +811,7 @@ class SecondReviewRegressionTests(RecallCase):
         self.assertNotIn(secret[-20:], json.dumps(results))
 
     def test_weak_results_never_carry_reviewed_action_text(self):
-        spec = FreshnessTests.memory_spec(self, [{"path": "src/app.py", "contains": "return 1"}])
+        spec = memory_spec([{"path": "src/app.py", "contains": "return 1"}])
         self.build(spec)
         weak = self.ask("alpha", "pytest runner environment installs", weak=True)
         self.assertTrue(weak["results"])
@@ -859,7 +861,7 @@ class HardeningTests(RecallCase):
         self.assertIn("evidence_changed", inspected["reasons"])
 
     def test_symlinked_validity_path_is_never_followed(self):
-        spec = FreshnessTests.memory_spec(self, [{"path": "src/app.py", "contains": "return 1"}])
+        spec = memory_spec([{"path": "src/app.py", "contains": "return 1"}])
         self.build(spec)
         target = self.world.projects["alpha"]["path"] / "src" / "app.py"
         outside = Path(self.world.directory) / "outside.py"
@@ -978,7 +980,7 @@ class OpenCodeTests(unittest.TestCase):
 
 class CommandTests(RecallCase):
     def setUp(self):
-        self.env = None
+        self.env: dict[str, str] = {}
 
     def prepare_cli(self, spec):
         temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
@@ -1109,7 +1111,9 @@ class OutcomeTests(RecallCase):
                                   (self.ident["alpha"], str(self.world.cwd("alpha")), query, created, ref, "experience", "unverified"))
         self.learner.trace_outcomes(self.world.now)
         row = self.store.db.execute("SELECT * FROM learning_outcomes").fetchone()
-        return dict(row) if row else None
+        if row is None:
+            self.fail("follow-up produced no outcome row")
+        return dict(row)
 
     def test_applied_and_verified_follow_through_is_recorded_without_claiming_cause(self):
         outcome = self.follow_up([tool("pytest -q tests/test_ingest.py", "1 passed in 0.4s", 0)])

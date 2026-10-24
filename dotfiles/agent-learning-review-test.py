@@ -10,19 +10,22 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "dotfiles/base/.local/bin/agent_learning_review.py"
 LOADER = importlib.machinery.SourceFileLoader("agent_learning_review", str(SCRIPT))
-SPEC = importlib.util.spec_from_loader("agent_learning_review", LOADER)
+SPEC = importlib.util.spec_from_loader("agent_learning_review", LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+assert SPEC is not None
 REVIEW = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 SPEC.loader.exec_module(REVIEW)
 REPOSITORY = SCRIPT.parents[4]
 TMP_ROOT = REPOSITORY / ".work" / "tmp"
 
 
-def sample_context(**extra):
+def sample_context(**extra) -> dict[str, Any]:
     context = {
         "signal": "repeated-command",
         "evidence": [
@@ -40,7 +43,7 @@ def sample_context(**extra):
     return context
 
 
-def sample_proposal(context, with_edit=True):
+def sample_proposal(context, with_edit=True) -> dict[str, Any]:
     ref = context["evidence"][0]
     old = "Use direct verbs in docs."
     future = "When a documented command fails twice, verify its prerequisites before changing the procedure."
@@ -370,7 +373,7 @@ else:
 
     def test_disabled_code_mode_notice_is_not_tool_activity_but_other_errors_are(self):
         def stream(*items):
-            events = [{"type": "thread.started"}]
+            events: list[dict[str, Any]] = [{"type": "thread.started"}]
             events += [{"type": "item.completed", "item": item} for item in items]
             events += [{"type": "turn.started"}, {"type": "item.completed", "item": {"type": "agent_message", "text": "{}"}}, {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}}]
             return "\n".join(json.dumps(event) for event in events).encode()

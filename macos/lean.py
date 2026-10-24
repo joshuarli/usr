@@ -753,7 +753,7 @@ class SudoWorker:
                     raise FileNotFoundError(message)
                 return subprocess.CompletedProcess(argv, 127, "", message)
             raise OSError(message)
-        completed = subprocess.CompletedProcess(
+        completed: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(
             argv, result["returncode"], result["stdout"], result["stderr"]
         )
         if check:

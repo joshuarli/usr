@@ -12,6 +12,7 @@ import stat
 import subprocess
 import urllib.parse
 from pathlib import Path
+from typing import Any, Callable
 
 from agent_transcripts import OPENCODE_SUBPOSITIONS, DATABASE_HARNESSES, HARNESSES, SUBSTANTIVE_KINDS, opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
 
@@ -166,6 +167,7 @@ def _metadata(path, harness, project_cache, stats=None):
             project_cache[cwd] = project_identity(cwd, stats=stats)
         project = project_cache[cwd]
     file_stat = header["file_stat"]
+    assert isinstance(file_stat, os.stat_result)
     first = header["first"]
     parent = header["parent_native"]
     return {
@@ -229,11 +231,11 @@ def _under(path, root):
         return False
 
 
-def _guarded(method):
+def _guarded(method: Callable[..., Any]) -> Callable[..., Any]:
     @functools.wraps(method)
-    def guarded(self, *args, **kwargs):
+    def guarded(*args: Any, **kwargs: Any) -> Any:
         try:
-            return method(self, *args, **kwargs)
+            return method(*args, **kwargs)
         except sqlite3.DatabaseError as exc:
             if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower():
                 raise

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,9 @@ WORK_TMP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / "dotfiles" / "base" / ".local" / "bin"))
 MODULE_PATH = ROOT / "dotfiles" / "base" / ".local" / "bin" / "agent_session_store.py"
 SPEC = importlib.util.spec_from_file_location("agent_session_store", MODULE_PATH)
+assert SPEC is not None
 STORE_MODULE = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 sys.modules[SPEC.name] = STORE_MODULE
 SPEC.loader.exec_module(STORE_MODULE)
 Store = STORE_MODULE.Store
@@ -256,11 +259,11 @@ class SessionStoreTests(unittest.TestCase):
             return original_fstat(stream, stats)
 
         with Store(self.state) as store:
-            STORE_MODULE._fstat_source = append_before_final_stat
+            STORE_MODULE._fstat_source = append_before_final_stat  # ty: ignore[unresolved-attribute] # test monkey-patches the module to observe file reads
             try:
                 first = store.refresh([self.transcripts], project=self.project_id)
             finally:
-                STORE_MODULE._fstat_source = original_fstat
+                STORE_MODULE._fstat_source = original_fstat  # ty: ignore[unresolved-attribute] # test restores the monkey-patched module function
             self.assertTrue(did_append[0])
             self.assertEqual(first["events_added"], 2)
             progress = store.db.execute(
@@ -430,7 +433,9 @@ class SessionStoreTests(unittest.TestCase):
         old_path = self.root / "agent_session_store_v3.py"
         old_path.write_bytes(shown.stdout)
         spec = importlib.util.spec_from_file_location("agent_session_store_v3", old_path)
+        assert spec is not None
         old = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
         sys.modules[spec.name] = old
         spec.loader.exec_module(old)
         self.transcript("legacy-a", records=[message("legacyneedle one"), message("legacyneedle two", "assistant")])
@@ -595,7 +600,7 @@ class OpenCodeIndexTests(unittest.TestCase):
     def refresh(self, store):
         return store.refresh({"opencode": [self.data]}, project=self.project_id)
 
-    def sessions(self):
+    def sessions(self) -> list[dict[str, Any]]:
         return [{"id": "ses_alpha", "messages": [
             oc_user("run the focused tests for the cache"),
             oc_assistant(

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from agent_experience import CORRECTION, ERROR, RUNNER as RUNNER_PATTERN, SCHEMA as EXPERIENCE_SCHEMA, observe_project, pair_runs, rebuild_recall_projection, recall_schema, run_outcome
 from agent_recall import technical_tokens
@@ -1175,7 +1176,7 @@ class Learner:
                 return Path(row[0])
         return None
 
-    def retrieve(self, project, query, cwd=None, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True, now=None, record=False, session=None, weak=False):
+    def retrieve(self, project, query, cwd=None, limit=DEFAULT_LIMIT, explain=False, verify=True, include_events=True, now=None, record=False, session=None, weak=False) -> dict[str, Any]:
         current = Path(cwd) if cwd is not None else self._project_cwd(project)
         if cwd is not None and project_identity(current) != project:
             raise LearningError("memory retrieval directory belongs to another project")
@@ -1206,14 +1207,18 @@ class Learner:
                 self.db.execute("INSERT INTO learning_receipts(project,cwd,query,created_at,record,tier,status,rank,event,session) VALUES(?,?,?,?,?,?,?,?,'returned',?)",
                                 (project, str(cwd) if cwd else None, text, now, item["ref"], item["tier"], item["status"], rank, session))
 
-    def recall(self, project, query, cwd=None):
+    def recall(self, project, query, cwd=None) -> list[dict[str, Any]]:
         response = self.retrieve(project, query, cwd=cwd, include_events=False)
         return [{"id": int(item["ref"].split(":")[1]), "action": item["action"], "when": item["applies_when"], "authority": item["authority"]}
                 for item in response["results"] if item["ref"].startswith("memory:") and item["status"] in ("verified", "unverified")]
 
-    def inspect(self, ref, cwd=None, now=None, record=True, session=None):
+    def inspect(self, ref, cwd=None, now=None, record=True, session=None) -> dict[str, Any]:
         kind, _, rest = ref.partition(":")
         moment = time.time() if now is None else now
+        supports: list[dict[str, Any]] = []
+        summary = ""
+        tier = ""
+        assessment: dict[str, Any] = {}
         if kind == "event":
             session_id, _, position = rest.rpartition("@")
             row = self.db.execute("SELECT project, cwd FROM sessions WHERE id=?", (session_id,)).fetchone()
@@ -1752,7 +1757,8 @@ def main(argv=None):
                 result["reviewer"] = CodexReviewer(repository, args.state_dir).capabilities()
                 if args.probe_cli:
                     result["reviewer_probe"] = CodexReviewer(repository, args.state_dir).probe_cli()
-                    if result["reviewer_probe"].get("status") != "ok":
+                    probe = result.get("reviewer_probe")
+                    if isinstance(probe, dict) and probe.get("status") != "ok":
                         exit_code = 1
                 result["redaction"] = "heuristic, cannot guarantee removal of all secrets"
                 result["hook_trust"] = "inspect /hooks in Codex; never inferred from configured commands"
@@ -1764,8 +1770,10 @@ def main(argv=None):
             response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record, weak=args.weak)
             print(redacted_json(response, indent=2) if args.explain else redacted_json(response["results"], separators=(",", ":")))
             if response["abstained"]:
-                terms = ", ".join(response["vocabulary"])
-                print("agent-learn recall: " + response["hint"] + (" Terms seen in this project: " + terms + "." if terms else ""), file=sys.stderr)
+                vocabulary = response.get("vocabulary")
+                terms = ", ".join(vocabulary) if isinstance(vocabulary, list) else ""
+                hint = response.get("hint")
+                print("agent-learn recall: " + (hint if isinstance(hint, str) else "") + (" Terms seen in this project: " + terms + "." if terms else ""), file=sys.stderr)
         elif args.command == "inspect":
             print(redacted_json(learner.inspect(args.ref, cwd=args.project), indent=2))
         elif args.command == "observe":

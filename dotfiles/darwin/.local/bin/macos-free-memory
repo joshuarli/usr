@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import time
+from typing import Any
 
 PAGE = 16384
 PROTECTED_HINTS = ("python-build", "perf.py", "bench.py", "stage-perf")
@@ -78,7 +79,7 @@ def vm_summary() -> dict[str, float]:
     }
 
 
-def top_table(sort_key: str, count: int) -> list[dict]:
+def top_table(sort_key: str, count: int) -> list[dict[str, Any]]:
     out = run(["top", "-l", "1", "-s", "0", "-o", sort_key, "-n", str(count)])
     rows = []
     for line in out.splitlines():
@@ -106,7 +107,7 @@ def top_table(sort_key: str, count: int) -> list[dict]:
     return rows
 
 
-def ps_table() -> list[dict]:
+def ps_table() -> list[dict[str, Any]]:
     out = run(["ps", "ax", "-o", "pid=,rss=,etime=,args="])
     rows = []
     for line in out.splitlines():
@@ -132,7 +133,7 @@ def ps_table() -> list[dict]:
     return rows
 
 
-def find_procs(rows: list[dict], *needles: str) -> list[dict]:
+def find_procs(rows: list[dict[str, Any]], *needles: str) -> list[dict[str, Any]]:
     out = []
     for r in rows:
         lowered = r["args"].lower()
@@ -178,10 +179,10 @@ def sigint_one(pid: int, expect: str) -> str:
     return f"PID {pid}: SIGINT sent, exited"
 
 
-def apply_targets(procs: list[dict]) -> tuple[list[dict], list[dict]]:
+def apply_targets(procs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     own = own_chain()
-    late: list[dict] = []
-    first: list[dict] = []
+    late: list[dict[str, Any]] = []
+    first: list[dict[str, Any]] = []
     for p in find_procs(procs, "opencode", "serve"):
         (late if p["pid"] in own else first).append(
             {**p, "expect": "opencode", "label": "opencode serve"}
@@ -197,20 +198,22 @@ def apply_targets(procs: list[dict]) -> tuple[list[dict], list[dict]]:
     return first, late
 
 
-def orbstack_status(procs: list[dict], total_mb: float) -> str:
+def orbstack_status(procs: list[dict[str, Any]], total_mb: float) -> str:
     lines = []
     cfg = os.path.expanduser("~/.orbstack/vmconfig.json")
     mib: float | None = None
     if os.path.exists(cfg):
         try:
             with open(cfg) as f:
-                mib = json.load(f).get("memory_mib")
-            lines.append(f"vmconfig memory_mib={mib} (~{mib / 1024:.0f} GB)")
-            if mib and total_mb and mib / total_mb > 0.5:
-                lines.append(
-                    f"WARN: allocation is >50% of {total_mb / 1024:.0f}G phys; "
-                    "lower in OrbStack Settings > Resources"
-                )
+                mib_raw = json.load(f).get("memory_mib")
+                mib = mib_raw if isinstance(mib_raw, (int, float)) else None
+            if mib is not None:
+                lines.append(f"vmconfig memory_mib={mib} (~{mib / 1024:.0f} GB)")
+                if total_mb and mib / total_mb > 0.5:
+                    lines.append(
+                        f"WARN: allocation is >50% of {total_mb / 1024:.0f}G phys; "
+                        "lower in OrbStack Settings > Resources"
+                    )
         except (OSError, ValueError):
             lines.append("vmconfig unreadable")
     else:
@@ -241,7 +244,7 @@ def orbstack_status(procs: list[dict], total_mb: float) -> str:
     return "\n".join("  " + ln for ln in lines)
 
 
-def brew_services_status(procs: list[dict]) -> str:
+def brew_services_status(procs: list[dict[str, Any]]) -> str:
     if not shutil.which("brew"):
         return "  brew not found"
     raw = run(["brew", "services", "list"]).strip()
@@ -266,7 +269,7 @@ def brew_services_status(procs: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def watchman_status(procs: list[dict]) -> str:
+def watchman_status(procs: list[dict[str, Any]]) -> str:
     daemons = [p for p in procs if p["args"].endswith("/watchman")
                or "watchman --foreground" in p["args"]]
     if not daemons and not run(["pgrep", "-x", "watchman"]).strip():

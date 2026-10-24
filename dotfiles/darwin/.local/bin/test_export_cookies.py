@@ -13,7 +13,9 @@ from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("export-cookies.py")
 SPEC = importlib.util.spec_from_file_location("export_cookies", SCRIPT)
+assert SPEC is not None
 export_cookies = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
 SPEC.loader.exec_module(export_cookies)
 
 
