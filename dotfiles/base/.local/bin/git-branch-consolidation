@@ -2,8 +2,26 @@
 set -eu
 
 usage() {
-  echo "usage: git-branch-consolidation [REMOTE] [MAIN]" >&2
+  cat >&2 <<'USAGE'
+usage: git-branch-consolidation [--delete] [REMOTE [MAIN]]
+
+Fetch REMOTE, then list local branches merged into REMOTE/MAIN without deleting them.
+REMOTE defaults to origin. MAIN defaults to REMOTE/HEAD.
+Pass --delete to remove only eligible local branches; remote branches are never deleted.
+USAGE
 }
+
+delete=false
+case "${1:-}" in
+  --delete)
+    delete=true
+    shift
+    ;;
+  --help|-h)
+    usage
+    exit 0
+    ;;
+esac
 
 if [ "$#" -gt 2 ]; then
   usage
@@ -11,14 +29,9 @@ if [ "$#" -gt 2 ]; then
 fi
 
 remote=${1:-origin}
-main=${2:-main}
+main=${2:-}
 root=$(git rev-parse --show-toplevel) || exit 1
 cd "$root"
-
-git show-ref --verify --quiet "refs/heads/$main" || {
-  echo "git-branch-consolidation: local branch '$main' does not exist" >&2
-  exit 1
-}
 
 git remote get-url "$remote" >/dev/null 2>&1 || {
   echo "git-branch-consolidation: remote '$remote' does not exist" >&2
@@ -26,14 +39,35 @@ git remote get-url "$remote" >/dev/null 2>&1 || {
 }
 
 git fetch "$remote"
+
+if [ -z "$main" ]; then
+  remote_head=$(git symbolic-ref --quiet --short "refs/remotes/$remote/HEAD") || {
+    echo "git-branch-consolidation: remote '$remote' has no default-branch reference; pass MAIN explicitly" >&2
+    exit 1
+  }
+  case "$remote_head" in
+    "$remote"/*) main=${remote_head#"$remote"/} ;;
+    *)
+      echo "git-branch-consolidation: invalid remote default-branch reference '$remote_head'" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+git check-ref-format --branch "$main" >/dev/null || {
+  echo "git-branch-consolidation: invalid branch name '$main'" >&2
+  exit 2
+}
+
 git show-ref --verify --quiet "refs/remotes/$remote/$main" || {
   echo "git-branch-consolidation: remote branch '$remote/$main' does not exist" >&2
   exit 1
 }
 
+target="$remote/$main"
 current=$(git branch --show-current)
 local_candidates=
-for branch in $(git for-each-ref --format='%(refname:short)' --merged="$main" refs/heads); do
+for branch in $(git for-each-ref --format='%(refname:short)' --merged="$target" refs/heads); do
   [ "$branch" = "$main" ] && continue
   [ "$branch" = "$current" ] && continue
   if git worktree list --porcelain | grep -Fqx "branch refs/heads/$branch"; then
@@ -43,33 +77,21 @@ for branch in $(git for-each-ref --format='%(refname:short)' --merged="$main" re
 done
 
 if [ -z "$local_candidates" ]; then
-  echo "No local branches merged into '$main' to delete."
+  echo "No local branches merged into '$target' to remove."
   exit 0
 fi
 
-remote_candidates=
-for branch in $local_candidates; do
-  if git show-ref --verify --quiet "refs/remotes/$remote/$branch" &&
-    git merge-base --is-ancestor "$remote/$branch" "$remote/$main"; then
-    remote_candidates="$remote_candidates $branch"
-  fi
-done
-
-printf 'Deleting local branches merged into %s:\n' "$main"
-for branch in $local_candidates; do
-  printf '  %s\n' "$branch"
-done
-
-if [ -n "$remote_candidates" ]; then
-  printf 'Deleting matching remote branches merged into %s/%s:\n' "$remote" "$main"
-  for branch in $remote_candidates; do
+if [ "$delete" != true ]; then
+  printf 'Dry run: local branches merged into %s that can be removed:\n' "$target"
+  for branch in $local_candidates; do
     printf '  %s\n' "$branch"
-    git push "$remote" --delete "$branch"
   done
-else
-  echo "No matching remote branches are merged into '$remote/$main'; remote branches were kept."
+  echo "No branches were deleted. Rerun with --delete to remove these local branches."
+  exit 0
 fi
 
+printf 'Deleting local branches merged into %s:\n' "$target"
 for branch in $local_candidates; do
+  printf '  %s\n' "$branch"
   git branch -d "$branch"
 done
