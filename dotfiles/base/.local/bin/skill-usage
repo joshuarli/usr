@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_session_store import normalize
+from agent_transcripts import default_roots, normalize
 
 HARNESSES = ("claude", "codex", "muse", "grok")
 LISTING = re.compile(r"^- ([a-z0-9][a-z0-9-]*):", re.M)
@@ -403,10 +403,11 @@ def main(argv=None):
     parser.add_argument("command", nargs="?", choices=("report", "selftest"), default="report")
     parser.add_argument("--days", type=int, default=60, help="only sessions touched in the last N days")
     parser.add_argument("--skills", default=os.path.expanduser("~/.agents/skills"))
-    parser.add_argument("--claude", default=os.path.expanduser("~/.claude/projects"))
-    parser.add_argument("--codex", default=os.path.expanduser("~/.codex/sessions"))
-    parser.add_argument("--muse", default=os.path.expanduser("~/.local/share/muse/sessions"))
-    parser.add_argument("--grok", default=os.path.expanduser("~/.grok/sessions"))
+    roots = default_roots()
+    parser.add_argument("--claude", default=str(roots["claude"][0]))
+    parser.add_argument("--codex", default=str(roots["codex"][0]))
+    parser.add_argument("--muse", default=str(roots["muse"][0]))
+    parser.add_argument("--grok", default=str(roots["grok"][0]))
     parser.add_argument("--show", metavar="SKILL", help="list each load of SKILL with the prompt before it")
     parser.add_argument("--all", action="store_true", help="also list skills that are not in --skills and never loaded")
     parser.add_argument("--json", action="store_true")

@@ -8,15 +8,12 @@ import re
 import sqlite3
 import stat
 import subprocess
-import time
 from pathlib import Path
 
+from agent_transcripts import HARNESSES, SUBSTANTIVE_KINDS, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
+
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 3
-_SKIP_TEXT_KEYS = frozenset((
-    "encrypted_content", "internal_chat_message_metadata_passthrough", "id", "call_id",
-    "type", "status", "role", "timestamp", "ordinal",
-))
+SCHEMA_VERSION = 4
 _REDACTIONS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"),
@@ -39,154 +36,6 @@ def redact(text):
     value = _REDACTIONS[0].sub("Bearer [REDACTED]", value)
     value = _REDACTIONS[1].sub("[REDACTED]", value)
     return value
-
-
-def _text_value(value):
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "\n".join(part for part in (_text_value(item) for item in value) if part)
-    if isinstance(value, dict):
-        parts = []
-        for key, item in value.items():
-            if key in _SKIP_TEXT_KEYS:
-                continue
-            text = _text_value(item)
-            if text:
-                parts.append((str(key) + ": " if len(value) > 1 else "") + text)
-        return "\n".join(parts)
-    return ""
-
-
-def _content_text(value):
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "\n".join(part for part in (_content_text(item) for item in value) if part)
-    if isinstance(value, dict):
-        block_type = value.get("type")
-        if block_type in ("image", "input_image", "audio", "input_audio", "encrypted_content"):
-            return ""
-        if "text" in value:
-            return _text_value(value.get("text"))
-        if "content" in value:
-            return _content_text(value.get("content"))
-    return ""
-
-
-def _record(kind, text="", timestamp=None, call_id=None, raw_type=None, **fields):
-    record = {
-        "kind": str(kind),
-        "text": text if isinstance(text, str) else _text_value(text),
-        "timestamp": str(timestamp) if timestamp is not None else None,
-        "call_id": str(call_id) if call_id is not None else None,
-        "raw_type": str(raw_type) if raw_type is not None else None,
-    }
-    record.update(fields)
-    return record
-
-
-def _codex_record(obj):
-    top_type = obj.get("type", "unknown")
-    payload = obj.get("payload")
-    payload = payload if isinstance(payload, dict) else {}
-    item_type = payload.get("type")
-    timestamp = obj.get("timestamp") or payload.get("timestamp")
-    if top_type == "response_item":
-        if item_type == "message":
-            role = payload.get("role") or "unknown"
-            return _record(str(role), _content_text(payload.get("content", "")), timestamp, raw_type=top_type, role=role)
-        if item_type == "agent_message":
-            return _record("assistant", _content_text(payload.get("content", "")), timestamp, raw_type=top_type, role="assistant")
-        if item_type in ("function_call", "custom_tool_call"):
-            name = payload.get("name") or "tool"
-            args = payload.get("arguments", payload.get("input", ""))
-            return _record("tool-call", str(name) + ("\n" + _text_value(args) if args else ""), timestamp, payload.get("call_id"), top_type, tool_name=name)
-        if item_type in ("function_call_output", "custom_tool_call_output"):
-            output = payload.get("output", "")
-            return _record("tool-output", output, timestamp, payload.get("call_id"), top_type)
-        if item_type == "reasoning":
-            return _record("reasoning", "", timestamp, raw_type=top_type)
-        return _record("response_item:" + str(item_type or "unknown"), _text_value(payload), timestamp, payload.get("call_id"), top_type)
-    if top_type == "event_msg":
-        if item_type == "task_complete":
-            return _record("task_complete", payload.get("last_agent_message", ""), timestamp, raw_type=top_type)
-        if item_type == "turn_aborted":
-            return _record("turn_aborted", payload.get("reason", ""), timestamp, raw_type=top_type)
-        return _record("event_msg:" + str(item_type or "unknown"), "", timestamp, raw_type=top_type)
-    if top_type == "session_meta":
-        return _record("session_meta", "", timestamp, raw_type=top_type)
-    if top_type in ("world_state", "turn_context", "token_usage_record", "inter_agent_communication_metadata"):
-        return _record(str(top_type), "", timestamp, raw_type=top_type)
-    if top_type == "compacted":
-        return _record("compacted", _text_value(payload), timestamp, raw_type=top_type)
-    return _record("unknown:" + str(top_type), _text_value(payload), timestamp, raw_type=top_type)
-
-
-def _claude_record(obj):
-    message = obj.get("message")
-    message = message if isinstance(message, dict) else {}
-    content = message.get("content", obj.get("content", ""))
-    texts = [_content_text(content)]
-    if isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                name = block.get("name") or "tool"
-                texts.append(str(name) + "\n" + _text_value(block.get("input", {})))
-    kind = obj.get("type") or "unknown"
-    role = message.get("role") or kind
-    return _record(str(kind), "\n".join(text for text in texts if text), obj.get("timestamp"), raw_type=kind, role=role)
-
-
-def _muse_record(obj):
-    payload = obj.get("payload")
-    payload = payload if isinstance(payload, dict) else {}
-    event = payload.get("event")
-    event = event if isinstance(event, dict) else {}
-    event_type = event.get("kind") or payload.get("kind") or "unknown"
-    text = ""
-    if event_type == "model_user_messages":
-        text = _content_text(event.get("messages", []))
-    elif event_type == "model_request_configured":
-        text = _content_text(event.get("run_context_messages", []))
-    elif event_type == "skill_read_observed":
-        text = _text_value(event)
-    timestamp = obj.get("recorded_at")
-    if isinstance(timestamp, (int, float)):
-        timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(timestamp / 1_000_000))
-    return _record(str(event_type), text, timestamp, raw_type=payload.get("kind", "event"))
-
-
-def _grok_record(obj):
-    kind = obj.get("type") or "unknown"
-    content = _content_text(obj.get("content", ""))
-    calls = []
-    for call in obj.get("tool_calls", []) or []:
-        if not isinstance(call, dict):
-            continue
-        args = call.get("arguments", "")
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except ValueError:
-                pass
-        calls.append(str(call.get("name") or "tool") + "\n" + _text_value(args))
-    text = "\n".join(part for part in (content, *calls) if part)
-    return _record(str(kind), text, obj.get("timestamp"), raw_type=kind)
-
-
-def normalize(obj, harness="codex"):
-    if not isinstance(obj, dict):
-        return [_record("unknown:non_object", "", raw_type=type(obj).__name__)]
-    if harness == "codex":
-        return [_codex_record(obj)]
-    if harness == "claude":
-        return [_claude_record(obj)]
-    if harness == "muse":
-        return [_muse_record(obj)]
-    if harness == "grok":
-        return [_grok_record(obj)]
-    raise ValueError("unsupported transcript harness: " + str(harness))
 
 
 def _run_git(path, *args, stats=None):
@@ -281,48 +130,27 @@ def _prepare_database(path):
 
 def _metadata(path, harness, project_cache, stats=None):
     try:
-        with _open_source(path, stats) as stream:
-            file_stat = _fstat_source(stream, stats)
-            first = _readline(stream, stats)
+        header = read_header(harness, path, _open_source, stats)
     except OSError as exc:
         return None, "source_unreadable:" + exc.__class__.__name__
-    obj = {}
-    if first:
-        try:
-            obj = _json_line(first)
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-            obj = {}
-    if not isinstance(obj, dict):
-        obj = {}
-    payload = obj.get("payload")
-    payload = payload if isinstance(payload, dict) else {}
-    session_id = str(payload.get("id") or payload.get("session_id") or path.stem)
-    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else ""
+    cwd = header["cwd"]
     project = None
     if cwd:
         if cwd not in project_cache:
             project_cache[cwd] = project_identity(cwd, stats=stats)
         project = project_cache[cwd]
-    source = payload.get("source")
-    thread_source = payload.get("thread_source")
-    if source is None:
-        source = thread_source
-    try:
-        source_json = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":")) if source is not None else None
-    except (TypeError, ValueError):
-        source_json = None
-    parent = payload.get("parent_thread_id")
-    if parent is None and isinstance(source, dict):
-        spawned = source.get("subagent")
-        spawned = spawned.get("thread_spawn") if isinstance(spawned, dict) else None
-        parent = spawned.get("parent_thread_id") if isinstance(spawned, dict) else None
+    file_stat = header["file_stat"]
+    first = header["first"]
+    parent = header["parent_native"]
     return {
-        "id": session_id,
+        "id": qualified_id(harness, clean_native_id(header["native_id"], path)),
+        "native_id": clean_native_id(header["native_id"], path),
         "cwd": cwd,
         "project": project,
-        "parent": str(parent) if parent is not None else None,
-        "source": source_json,
-        "thread_source": str(thread_source) if thread_source is not None else None,
+        "parent": qualified_id(harness, clean_native_id(parent, path)) if parent is not None else None,
+        "source": header["source"],
+        "thread_source": header["thread_source"],
+        "ancestry": header["ancestry"],
         "harness": harness,
         "source_path": str(path.absolute()),
         "file_size": file_stat.st_size,
@@ -417,7 +245,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -428,6 +256,11 @@ class Store:
                 if not self._schema_ready(2):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v2()
+                version = 3
+            if version == 3:
+                if not self._schema_ready(3):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v3()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -462,6 +295,7 @@ class Store:
             and {"id", "session", "position", "kind", "text", "timestamp", "call_id", "digest"} <= event_columns
             and (expected_version < 2 or "file_ctime_ns" in session_columns)
             and (expected_version < 3 or "unindexed_sources" in existing)
+            and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns))
         )
 
     def _migrate_v1(self):
@@ -490,6 +324,27 @@ class Store:
             self.db.rollback()
             raise
 
+    def _migrate_v3(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "ALTER TABLE sessions ADD COLUMN native_id TEXT;"
+                "ALTER TABLE sessions ADD COLUMN ancestry TEXT NOT NULL DEFAULT 'known' CHECK(ancestry IN ('known','unknown'));"
+                "ALTER TABLE sessions ADD COLUMN recognized_events INTEGER NOT NULL DEFAULT 0;"
+                "ALTER TABLE sessions ADD COLUMN unrecognized_events INTEGER NOT NULL DEFAULT 0;"
+                "ALTER TABLE events ADD COLUMN outcome TEXT CHECK(outcome IN ('ok','error'));"
+                "ALTER TABLE unindexed_sources ADD COLUMN native_id TEXT;"
+                "ALTER TABLE unindexed_sources ADD COLUMN ancestry TEXT NOT NULL DEFAULT 'known';"
+                "UPDATE sessions SET native_id = id WHERE native_id IS NULL;"
+                "UPDATE unindexed_sources SET native_id = id WHERE native_id IS NULL;"
+                "UPDATE sessions SET recognized_events = (SELECT count(*) FROM events WHERE events.session = sessions.id AND events.kind IN (" + ",".join("'" + kind + "'" for kind in SUBSTANTIVE_KINDS) + ")),"
+                " unrecognized_events = (SELECT count(*) FROM events WHERE events.session = sessions.id AND events.kind LIKE 'unknown:%');"
+                "PRAGMA user_version = 4;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
     def _create_schema(self):
         self.db.executescript(
             "BEGIN IMMEDIATE;"
@@ -499,18 +354,20 @@ class Store:
             "file_size INTEGER NOT NULL, file_mtime_ns INTEGER NOT NULL, file_ctime_ns INTEGER, file_dev INTEGER NOT NULL, "
             "file_ino INTEGER NOT NULL, indexed_bytes INTEGER NOT NULL DEFAULT 0, header_digest TEXT NOT NULL, "
             "checkpoint_position INTEGER, checkpoint_digest TEXT, malformed_lines INTEGER NOT NULL DEFAULT 0, "
-            "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete');"
+            "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete', native_id TEXT, "
+            "ancestry TEXT NOT NULL DEFAULT 'known' CHECK(ancestry IN ('known','unknown')), "
+            "recognized_events INTEGER NOT NULL DEFAULT 0, unrecognized_events INTEGER NOT NULL DEFAULT 0);"
             "CREATE TABLE unindexed_sources ("
             "id TEXT NOT NULL, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, thread_source TEXT, "
             "harness TEXT NOT NULL, source_path TEXT PRIMARY KEY, updated REAL NOT NULL, file_size INTEGER NOT NULL, "
             "file_mtime_ns INTEGER NOT NULL, file_ctime_ns INTEGER NOT NULL, file_dev INTEGER NOT NULL, "
-            "file_ino INTEGER NOT NULL, header_digest TEXT NOT NULL);"
+            "file_ino INTEGER NOT NULL, header_digest TEXT NOT NULL, native_id TEXT, ancestry TEXT NOT NULL DEFAULT 'known');"
             "CREATE INDEX sessions_project_updated ON sessions(project, updated DESC);"
             "CREATE INDEX sessions_parent ON sessions(parent);"
             "CREATE TABLE events ("
             "id INTEGER PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, "
             "position INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT, call_id TEXT, "
-            "raw_type TEXT, digest TEXT NOT NULL, UNIQUE(session, position));"
+            "raw_type TEXT, digest TEXT NOT NULL, outcome TEXT CHECK(outcome IN ('ok','error')), UNIQUE(session, position));"
             "CREATE INDEX events_session_position ON events(session, position);"
             "CREATE VIRTUAL TABLE events_fts USING fts5(text, content='events', content_rowid='id');"
             "CREATE TRIGGER events_ai AFTER INSERT ON events BEGIN "
@@ -526,22 +383,17 @@ class Store:
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
-    def refresh(self, roots=None, project=None, projects=None, *, updated_after=None):
-        return self._refresh(roots, project, projects, updated_after=updated_after)
+    def refresh(self, roots=None, project=None, projects=None, *, updated_after=None, harnesses=HARNESSES):
+        return self._refresh(roots, project, projects, updated_after=updated_after, harnesses=tuple(harnesses))
 
     def refresh_headers(self, roots=None):
-        return self._refresh(roots, None, set(), headers_only=True)
+        return self._refresh(roots, None, set(), headers_only=True, harnesses=("codex",))
 
-    def _refresh(self, roots=None, project=None, projects=None, *, updated_after=None, headers_only=False):
+    def _refresh(self, roots=None, project=None, projects=None, *, updated_after=None, headers_only=False, harnesses=HARNESSES):
         if project is not None and projects is not None:
             raise ValueError("choose either project or projects")
-        if roots is None:
-            codex_home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).expanduser()
-            roots = [codex_home / "sessions", codex_home / "archived_sessions"]
-        elif isinstance(roots, (str, os.PathLike)):
-            roots = [Path(roots)]
-        else:
-            roots = [Path(root) for root in roots]
+        root_map = coerce_roots(roots)
+        roots = [(harness, root) for harness in HARNESSES if harness in harnesses for root in root_map.get(harness, [])]
         project = str(project) if project is not None else None
         projects = frozenset(str(value) for value in projects) if projects is not None else None
         if updated_after is not None:
@@ -571,7 +423,7 @@ class Store:
             for row in self.db.execute("SELECT * FROM unindexed_sources")
         }
         present_paths = set()
-        for root_order, root in enumerate(roots):
+        for root_order, (harness, root) in enumerate(roots):
             if not root.is_dir():
                 continue
             walk_errors = []
@@ -582,7 +434,7 @@ class Store:
                     stats["skipped_ephemeral"] += 1
                     continue
                 for filename in filenames:
-                    if filename.startswith("rollout-") and filename.endswith(".jsonl"):
+                    if is_source_name(harness, filename):
                         paths.append(Path(directory) / filename)
             for error_path in walk_errors:
                 stats["unreadable"] += 1
@@ -610,7 +462,7 @@ class Store:
                 elif self._cached_metadata_matches(unindexed, source_stat):
                     meta = unindexed
                 else:
-                    meta, error = _metadata(path, "codex", cache, stats)
+                    meta, error = _metadata(path, harness, cache, stats)
                     if error:
                         stats["unreadable"] += 1
                         unreadable_paths.add(source_path)
@@ -662,7 +514,7 @@ class Store:
             stats["partial_files"] += int(partial > 0)
             stats["resets"] += int(changed)
         target_project = project
-        scanned_roots = [root.resolve() for root in roots if root.is_dir()]
+        scanned_roots = [root.resolve() for _, root in roots if root.is_dir()]
         rows = self.db.execute("SELECT id, project, source_path FROM sessions").fetchall()
         remove = []
         degraded = []
@@ -708,11 +560,11 @@ class Store:
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO unindexed_sources (id, project, cwd, parent, source, thread_source, harness, "
-                "source_path, updated, file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, header_digest) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "source_path, updated, file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, header_digest, native_id, ancestry) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                  meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
-                 meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"]),
+                 meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"]),
             )
         cached[meta["source_path"]] = meta
 
@@ -770,17 +622,18 @@ class Store:
             with self.db:
                 self.db.execute(
                     "INSERT INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
-                    "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded')",
+                    "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?)",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
-                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"]),
+                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"]),
                 )
                 self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
         offset = existing["indexed_bytes"]
         added = 0
         malformed = 0
+        recognized = unrecognized = 0
         checkpoint_position = existing["checkpoint_position"]
         checkpoint_digest = existing["checkpoint_digest"]
         partial = 0
@@ -814,12 +667,16 @@ class Store:
                         else:
                             for record in records:
                                 self.db.execute(
-                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                     (meta["id"], position, record["kind"], record["text"], record["timestamp"],
-                                     record["call_id"], record["raw_type"], digest),
+                                     record["call_id"], record["raw_type"], digest, record["outcome"]),
                                 )
                                 added += 1
+                                if record["kind"].startswith("unknown:"):
+                                    unrecognized += 1
+                                elif record["kind"] in SUBSTANTIVE_KINDS:
+                                    recognized += 1
                         offset = stream.tell()
                         checkpoint_position = position
                         checkpoint_digest = digest
@@ -831,12 +688,22 @@ class Store:
                     mtime_ns = final_stat.st_mtime_ns
                     ctime_ns = final_stat.st_ctime_ns
                     updated = final_stat.st_mtime
-                    coverage = "degraded" if malformed_total or partial else "complete"
+                    totals = self.db.execute(
+                        "SELECT recognized_events + ?, unrecognized_events + ? FROM sessions WHERE id = ?",
+                        (recognized, unrecognized, meta["id"]),
+                    ).fetchone()
+                    if totals[0] == 0 and (totals[1] or malformed_total):
+                        coverage = "unsupported"
+                    elif malformed_total or partial or totals[1]:
+                        coverage = "degraded"
+                    else:
+                        coverage = "complete"
                     self.db.execute(
                         "UPDATE sessions SET updated = ?, file_size = ?, file_mtime_ns = ?, file_ctime_ns = ?, indexed_bytes = ?, "
-                        "checkpoint_position = ?, checkpoint_digest = ?, malformed_lines = ?, partial_bytes = ?, coverage = ? "
-                        "WHERE id = ?",
-                        (updated, size, mtime_ns, ctime_ns, offset, checkpoint_position, checkpoint_digest, malformed_total, partial, coverage, meta["id"]),
+                        "checkpoint_position = ?, checkpoint_digest = ?, malformed_lines = ?, partial_bytes = ?, coverage = ?, "
+                        "recognized_events = ?, unrecognized_events = ? WHERE id = ?",
+                        (updated, size, mtime_ns, ctime_ns, offset, checkpoint_position, checkpoint_digest, malformed_total, partial, coverage,
+                         totals[0], totals[1], meta["id"]),
                     )
         except OSError as exc:
             raise StoreError("cannot read transcript " + meta["source_path"] + ": " + str(exc)) from exc
@@ -883,6 +750,23 @@ class Store:
         record.update({"session": str(session), "position": int(position), "digest": str(digest)})
         return record
 
+    def coverage(self):
+        rows = self.db.execute(
+            "SELECT harness, count(*) AS sessions, coalesce(sum(recognized_events + unrecognized_events), 0) AS events, "
+            "coalesce(sum(coverage = 'complete'), 0) AS complete, coalesce(sum(coverage = 'degraded'), 0) AS degraded, "
+            "coalesce(sum(coverage = 'unsupported'), 0) AS unsupported, coalesce(sum(unrecognized_events), 0) AS unrecognized, "
+            "coalesce(sum(ancestry = 'unknown'), 0) AS unknown_ancestry FROM sessions GROUP BY harness ORDER BY harness"
+        )
+        return [dict(row) for row in rows]
+
+    def unrecognized_kinds(self, limit=20):
+        rows = self.db.execute(
+            "SELECT s.harness AS harness, e.kind AS kind, count(*) AS events FROM events e JOIN sessions s ON s.id = e.session "
+            "WHERE e.kind LIKE 'unknown:%' GROUP BY s.harness, e.kind ORDER BY events DESC LIMIT ?",
+            (int(limit),),
+        )
+        return [dict(row) for row in rows]
+
     def _filters(self, kinds, since):
         clauses = []
         params = []
@@ -904,7 +788,7 @@ class Store:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
                 raise StoreError("invalid regular expression: " + str(exc)) from exc
-            sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated "
+            sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness "
             sql += "FROM events e JOIN sessions s ON s.id=e.session WHERE e.text != ''"
             params = []
             if project is not None:
@@ -921,7 +805,7 @@ class Store:
                     if len(matches) >= limit:
                         break
             return matches
-        sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated "
+        sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness "
         sql += "FROM events_fts JOIN events e ON e.id=events_fts.rowid JOIN sessions s ON s.id=e.session "
         sql += "WHERE events_fts MATCH ?"
         params = [query]
@@ -948,10 +832,10 @@ class Store:
             params.insert(0, project)
         sql = (
             "WITH ranked AS (SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, "
-            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, "
+            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, "
             "row_number() OVER (PARTITION BY e.session ORDER BY e.position DESC) AS rank "
             "FROM events e JOIN sessions s ON s.id=e.session WHERE 1=1" + project_sql + filter_sql + ") "
-            "SELECT session, position, digest, kind, text, timestamp, call_id, project, cwd, parent, source, thread_source, source_path, updated "
+            "SELECT session, position, digest, kind, text, timestamp, call_id, project, cwd, parent, source, thread_source, source_path, updated, harness "
             "FROM ranked WHERE rank=1 ORDER BY updated DESC, position DESC LIMIT ?"
         )
         params.append(max(1, int(limit)))
@@ -975,7 +859,7 @@ class Store:
                 raise StoreError("event byte offset is not indexed for this session")
         columns = (
             "e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, "
-            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated"
+            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness"
         )
         before_rows = self.db.execute(
             "SELECT " + columns + " FROM events e JOIN sessions s ON s.id=e.session "

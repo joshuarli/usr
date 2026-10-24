@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
+sys.path.insert(0, str(ROOT / "dotfiles" / "base" / ".local" / "bin"))
 MODULE_PATH = ROOT / "dotfiles" / "base" / ".local" / "bin" / "agent_session_store.py"
 SPEC = importlib.util.spec_from_file_location("agent_session_store", MODULE_PATH)
 STORE_MODULE = importlib.util.module_from_spec(SPEC)
@@ -348,6 +349,13 @@ class SessionStoreTests(unittest.TestCase):
         with sqlite3.connect(path) as db:
             self.assertEqual(db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
 
+    @staticmethod
+    def downgrade_v4_columns(db, sessions=True):
+        db.execute("ALTER TABLE events DROP COLUMN outcome")
+        if sessions:
+            for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events"):
+                db.execute("ALTER TABLE sessions DROP COLUMN " + column)
+
     def test_schema_v1_migrates_metadata_without_rebuilding_index(self):
         self.transcript("legacy", records=[message("legacyevidence")])
         with Store(self.state) as store:
@@ -358,6 +366,7 @@ class SessionStoreTests(unittest.TestCase):
         with sqlite3.connect(path) as db:
             db.execute("PRAGMA foreign_keys = OFF")
             db.execute("PRAGMA legacy_alter_table = ON")
+            self.downgrade_v4_columns(db, sessions=False)
             db.execute("DROP INDEX sessions_project_updated")
             db.execute("DROP INDEX sessions_parent")
             db.execute("DROP TABLE unindexed_sources")
@@ -381,7 +390,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("CREATE INDEX sessions_parent ON sessions(parent)")
             db.execute("PRAGMA user_version = 1")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 4)
             self.assertIsNone(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0])
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy'").fetchone()[0], 2)
@@ -398,9 +407,10 @@ class SessionStoreTests(unittest.TestCase):
         path = Store.database_path(self.state)
         with sqlite3.connect(path) as db:
             db.execute("DROP TABLE unindexed_sources")
+            self.downgrade_v4_columns(db)
             db.execute("PRAGMA user_version = 2")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 4)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy-v2'").fetchone()[0], 2)
             self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 0)
             stats = store.refresh([self.transcripts], project=self.project_id)
@@ -500,6 +510,159 @@ class SessionStoreTests(unittest.TestCase):
             hit = store.search("leakmarker", self.project_id)[0]
             with self.assertRaises(StoreError):
                 store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+
+
+class HarnessIndexTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temp.name)
+        self.state = self.root / "state"
+        self.project = self.root / "project"
+        self.project.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        self.project_id = project_identity(self.project)
+        self.roots = {name: self.root / "roots" / name for name in ("codex", "claude", "muse", "grok")}
+        for path in self.roots.values():
+            path.mkdir(parents=True)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def write(self, path, records):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"".join(line(record) for record in records))
+        return path
+
+    def codex(self, session, text, cwd=None):
+        return self.write(self.roots["codex"] / ("rollout-" + session + ".jsonl"), [metadata(session, cwd or self.project), message(text)])
+
+    def claude(self, session, records, directory=None, sidechain=False):
+        base = {"sessionId": session, "cwd": str(self.project), "isSidechain": sidechain}
+        path = (self.roots["claude"] / "-proj" / (directory or "") / (session + ".jsonl"))
+        return self.write(path, [dict(base, **record) for record in records])
+
+    def grok(self, session, records, primary=True):
+        directory = self.roots["grok"] / "%2Fproj" / session
+        self.write(directory / "chat_history.jsonl", records)
+        self.write(directory / "summary.json", [{"info": {"id": session, "cwd": str(self.project)}}])
+        if primary:
+            self.write(directory / "events.jsonl", [{"type": "turn_started", "session_relationship": "primary"}])
+        return directory / "chat_history.jsonl"
+
+    def muse(self, session, records):
+        meta = {"payload": {"kind": "metadata", "record": {"workspace_root": str(self.project)}}}
+        return self.write(self.roots["muse"] / "2026" / "10" / "20" / session / "session.jsonl", [meta, *records])
+
+    def refresh(self, store, **kwargs):
+        return store.refresh({name: [path] for name, path in self.roots.items()}, project=self.project_id, **kwargs)
+
+    def test_identical_native_ids_stay_distinct_per_harness(self):
+        self.codex("shared", "codexneedle")
+        self.claude("shared", [{"type": "user", "message": {"role": "user", "content": "claudeneedle"}}])
+        self.grok("shared", [{"type": "user", "content": [{"type": "text", "text": "grokneedle"}]}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            ids = {row["id"]: row["harness"] for row in store.db.execute("SELECT id, harness FROM sessions")}
+            self.assertEqual(ids, {"shared": "codex", "claude:shared": "claude", "grok:shared": "grok"})
+            for needle, expected in (("codexneedle", "shared"), ("claudeneedle", "claude:shared"), ("grokneedle", "grok:shared")):
+                hits = store.search(needle, self.project_id)
+                self.assertEqual([hit["session"] for hit in hits], [expected])
+                evidence = store.resolve_evidence(hits[0]["session"], hits[0]["position"], hits[0]["digest"])
+                self.assertEqual(evidence["session"], expected)
+
+    def test_codex_id_that_looks_qualified_cannot_collide(self):
+        self.codex("claude:abc", "codexprefixneedle")
+        self.claude("abc", [{"type": "user", "message": {"role": "user", "content": "claudeabcneedle"}}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            ids = sorted(row[0] for row in store.db.execute("SELECT id FROM sessions"))
+            self.assertEqual(ids, ["claude:abc", "codex:claude:abc"])
+            self.assertEqual(store.search("codexprefixneedle", self.project_id)[0]["session"], "codex:claude:abc")
+
+    def test_claude_tool_events_keep_call_ids_and_explicit_outcomes(self):
+        self.claude("tools", [
+            {"type": "user", "message": {"role": "user", "content": "run the focused test"}},
+            {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": "pytest -q tests/test_x.py"}}]}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "1 failed", "is_error": True}]}},
+            {"type": "user", "isMeta": True, "message": {"role": "user", "content": [{"type": "text", "text": "skill body injected by harness"}]}},
+        ])
+        with Store(self.state) as store:
+            self.refresh(store)
+            rows = store.db.execute("SELECT kind, call_id, outcome FROM events WHERE session = 'claude:tools' ORDER BY position").fetchall()
+            self.assertEqual([tuple(row) for row in rows], [("user", None, None), ("tool-call", "toolu_1", None), ("tool-output", "toolu_1", "error"), ("context", None, None)])
+
+    def test_sidechain_parent_is_known_and_muse_ancestry_is_not_invented(self):
+        self.claude("main", [{"type": "user", "message": {"role": "user", "content": "root work"}}])
+        self.claude("agent-a1", [{"type": "user", "message": {"role": "user", "content": "child work"}}], directory="main/subagents", sidechain=True)
+        self.muse("m1", [{"recorded_at": 1792018406398112, "payload": {"event": {"kind": "model_user_messages", "messages": ["muse prompt"]}}}])
+        self.grok("g-primary", [{"type": "user", "content": "grok prompt"}])
+        self.grok("g-unknown", [{"type": "user", "content": "grok other"}], primary=False)
+        with Store(self.state) as store:
+            self.refresh(store)
+            rows = {row["id"]: row for row in store.db.execute("SELECT id, parent, ancestry, thread_source FROM sessions")}
+            self.assertEqual((rows["claude:main"]["ancestry"], rows["claude:main"]["parent"]), ("known", None))
+            self.assertEqual((rows["claude:agent-a1"]["parent"], rows["claude:agent-a1"]["thread_source"]), (None, "subagent"))
+            self.assertEqual(rows["muse:m1"]["ancestry"], "unknown")
+            self.assertEqual(rows["grok:g-primary"]["ancestry"], "known")
+            self.assertEqual(rows["grok:g-unknown"]["ancestry"], "unknown")
+
+    def test_unrecognized_format_is_reported_instead_of_an_empty_success(self):
+        self.muse("future", [{"recorded_at": 1, "payload": {"event": {"kind": "model_v9_turn", "data": "x"}}}])
+        self.claude("newer", [{"type": "turn_v7", "message": {"role": "user", "content": "new shape"}}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            coverage = {row["id"]: row["coverage"] for row in store.db.execute("SELECT id, coverage FROM sessions")}
+            self.assertEqual(coverage, {"muse:future": "unsupported", "claude:newer": "unsupported"})
+            kinds = {(row["harness"], row["kind"]) for row in store.unrecognized_kinds()}
+            self.assertEqual(kinds, {("muse", "unknown:model_v9_turn"), ("claude", "unknown:turn_v7")})
+            summary = {row["harness"]: row for row in store.coverage()}
+            self.assertEqual(summary["muse"]["unsupported"], 1)
+
+    def test_unchanged_refresh_reads_no_bodies_for_any_harness(self):
+        self.codex("c1", "alpha")
+        self.claude("cl1", [{"type": "user", "message": {"role": "user", "content": "beta"}}])
+        self.grok("g1", [{"type": "user", "content": "gamma"}])
+        self.muse("m1", [{"recorded_at": 1792018406398112, "payload": {"event": {"kind": "model_user_messages", "messages": ["delta"]}}}])
+        with Store(self.state) as store:
+            first = self.refresh(store)
+            self.assertEqual(first["sessions_indexed"], 4)
+            again = self.refresh(store)
+            self.assertEqual((again["content_opens"], again["bytes_read"], again["git_processes"], again["sqlite_changes"]), (0, 0, 0, 0))
+
+    def test_symlinked_transcripts_and_directories_are_not_followed(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        self.write(outside / "leak.jsonl", [{"type": "user", "sessionId": "leak", "cwd": str(self.project), "message": {"role": "user", "content": "leakneedle"}}])
+        (self.roots["claude"] / "-proj").mkdir()
+        os.symlink(outside / "leak.jsonl", self.roots["claude"] / "-proj" / "linked.jsonl")
+        os.symlink(outside, self.roots["claude"] / "linked-dir")
+        with Store(self.state) as store:
+            stats = self.refresh(store)
+            self.assertEqual(store.search("leakneedle", self.project_id), [])
+            self.assertEqual(stats["sessions_indexed"], 0)
+
+    def test_deleted_harness_source_is_removed_from_the_index(self):
+        path = self.claude("gone", [{"type": "user", "message": {"role": "user", "content": "goneneedle"}}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            self.assertEqual(len(store.search("goneneedle", self.project_id)), 1)
+            path.unlink()
+            stats = self.refresh(store)
+            self.assertEqual(stats["deleted"], 1)
+            self.assertEqual(store.search("goneneedle", self.project_id), [])
+
+    def test_cli_indexes_selected_harness_with_named_root(self):
+        self.claude("cli1", [{"type": "user", "message": {"role": "user", "content": "clineedle"}}])
+        self.codex("cx", "clineedle")
+        result = subprocess.run(
+            [sys.executable, str(CLI_PATH), "search", "clineedle", "--state-dir", str(self.state), "--project", str(self.project),
+             "--root", "claude=" + str(self.roots["claude"]), "--root", str(self.roots["codex"]), "--harness", "claude"],
+            check=True, capture_output=True, text=True)
+        self.assertIn("session=claude:cli1", result.stdout)
+        self.assertIn("harness=claude", result.stdout)
+        self.assertNotIn("session=cx", result.stdout)
 
 
 if __name__ == "__main__":
