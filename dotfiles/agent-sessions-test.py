@@ -546,6 +546,177 @@ class SessionStoreTests(unittest.TestCase):
                 store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
 
 
+def opencode_database(root, project, sessions):
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "opencode.db"
+    db = sqlite3.connect(path)
+    db.executescript(
+        "CREATE TABLE IF NOT EXISTS session_v2 (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, fork_session_id TEXT, "
+        "directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, "
+        "time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS credential (id TEXT PRIMARY KEY, label TEXT, value TEXT);"
+    )
+    for session in sessions:
+        db.execute("INSERT OR REPLACE INTO session_v2 VALUES (?, 'p1', ?, ?, ?, 't', 1000, ?)", (session["id"], session.get("parent"), session.get("fork"), str(project), session.get("updated", 2000)))
+        for seq, (kind, data) in enumerate(session["messages"], start=1):
+            db.execute("INSERT OR REPLACE INTO session_message VALUES (?, ?, ?, ?, 1000, ?, ?)", ("%s-%d" % (session["id"], seq), session["id"], kind, seq, session.get("updated", 2000), json.dumps(data)))
+    db.commit()
+    db.close()
+    return path
+
+
+def oc_user(text):
+    return ("user", {"time": {"created": 1792000000000}, "text": text, "files": [], "agents": []})
+
+
+def oc_assistant(*blocks):
+    return ("assistant", {"time": {"created": 1792000001000}, "agent": "build", "content": list(blocks)})
+
+
+def oc_tool(call, name, tool_input, output, status="completed", **metadata):
+    return {"type": "tool", "id": call, "name": name, "executed": True, "state": {"status": status, "input": tool_input, "content": [{"type": "text", "text": output}], "metadata": metadata}}
+
+
+class OpenCodeIndexTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temp.name)
+        self.state = self.root / "state"
+        self.data = self.root / "data" / "opencode"
+        self.project = self.root / "project"
+        self.project.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        self.project_id = project_identity(self.project)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def refresh(self, store):
+        return store.refresh({"opencode": [self.data]}, project=self.project_id)
+
+    def sessions(self):
+        return [{"id": "ses_alpha", "messages": [
+            oc_user("run the focused tests for the cache"),
+            oc_assistant(
+                {"type": "reasoning", "text": "private thinking"},
+                oc_tool("call_1", "shell", {"command": "pytest -q tests/test_cache.py"}, "FAILED tests/test_cache.py::test_evict\nE  KeyError: 'shard'", exit=1, status="completed"),
+                {"type": "text", "text": "The shard map is missing a key; patching src/cache.py."},
+                oc_tool("call_2", "edit", {"path": "src/cache.py", "oldString": "a", "newString": "b"}, "edited", files=["src/cache.py"]),
+                oc_tool("call_3", "shell", {"command": "pytest -q tests/test_cache.py"}, "1 passed in 0.2s", exit=0, status="completed")),
+        ]}]
+
+    def test_sessions_messages_and_explicit_exit_codes_are_indexed(self):
+        opencode_database(self.data, self.project, self.sessions())
+        with Store(self.state) as store:
+            stats = self.refresh(store)
+            self.assertEqual(stats["sessions_indexed"], 1)
+            row = store.db.execute("SELECT id, harness, ancestry, thread_source, coverage, native_id FROM sessions").fetchone()
+            self.assertEqual(tuple(row), ("opencode:ses_alpha", "opencode", "known", "user", "complete", "ses_alpha"))
+            kinds = [tuple(r) for r in store.db.execute("SELECT kind, call_id, outcome FROM events ORDER BY position")]
+            self.assertEqual(kinds, [("user", None, None), ("tool-call", "call_1", None), ("tool-output", "call_1", "error"), ("assistant", None, None),
+                                     ("tool-call", "call_2", None), ("tool-output", "call_2", "ok"), ("tool-call", "call_3", None), ("tool-output", "call_3", "ok")])
+            hits = store.search("KeyError", self.project_id)
+            self.assertEqual(hits[0]["session"], "opencode:ses_alpha")
+            self.assertEqual(hits[0]["harness"], "opencode")
+            self.assertEqual(store.search("private thinking", self.project_id), [])
+
+    def test_evidence_is_verified_against_the_database_row(self):
+        path = opencode_database(self.data, self.project, self.sessions())
+        with Store(self.state) as store:
+            self.refresh(store)
+            hit = store.search("KeyError", self.project_id)[0]
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
+            db = sqlite3.connect(path)
+            db.execute("UPDATE session_message SET data = replace(data, 'KeyError', 'ValueError') WHERE seq = 2")
+            db.commit()
+            db.close()
+            with self.assertRaises(STORE_MODULE.EvidenceChanged):
+                store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+            path.unlink()
+            with self.assertRaises(STORE_MODULE.EvidenceUnavailable):
+                store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+
+    def test_unchanged_refresh_reads_no_messages_and_a_new_message_reindexes_that_session(self):
+        path = opencode_database(self.data, self.project, self.sessions())
+        with Store(self.state) as store:
+            self.refresh(store)
+            noop = self.refresh(store)
+            self.assertEqual((noop["content_opens"], noop["bytes_read"], noop["git_processes"], noop["sqlite_changes"]), (0, 0, 0, 0))
+            sessions = self.sessions()
+            sessions[0]["messages"].append(oc_user("now rerun everything with the race detector"))
+            sessions[0]["updated"] = 3000
+            opencode_database(self.data, self.project, sessions)
+            changed = self.refresh(store)
+            self.assertEqual(changed["resets"], 1)
+            self.assertEqual(len(store.search("race detector", self.project_id)), 1)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
+            self.assertTrue(path.exists())
+
+    def test_parent_and_fork_lineage_is_recorded_and_never_invented(self):
+        sessions = self.sessions() + [
+            {"id": "ses_child", "parent": "ses_alpha", "messages": [oc_user("child work")]},
+            {"id": "ses_fork", "fork": "ses_alpha", "messages": [oc_user("forked work")]},
+            {"id": "ses_other", "messages": [oc_user("independent work")]},
+        ]
+        opencode_database(self.data, self.project, sessions)
+        with Store(self.state) as store:
+            self.refresh(store)
+            rows = {r["id"]: r for r in store.db.execute("SELECT id, parent, thread_source FROM sessions")}
+            self.assertEqual((rows["opencode:ses_child"]["parent"], rows["opencode:ses_child"]["thread_source"]), ("opencode:ses_alpha", "subagent"))
+            self.assertEqual(rows["opencode:ses_fork"]["parent"], "opencode:ses_alpha")
+            self.assertIsNone(rows["opencode:ses_other"]["parent"])
+
+    def test_credential_tables_are_never_read_and_the_database_is_not_modified(self):
+        path = opencode_database(self.data, self.project, self.sessions())
+        db = sqlite3.connect(path)
+        db.execute("INSERT INTO credential VALUES ('c1', 'token', 'CREDENTIAL-MARKER-9f3a')")
+        db.commit()
+        db.close()
+        before = path.read_bytes()
+        with Store(self.state) as store:
+            self.refresh(store)
+            dump = json.dumps([list(r) for r in store.db.execute("SELECT text FROM events")]) + json.dumps([list(r) for r in store.db.execute("SELECT * FROM sessions")])
+            self.assertNotIn("CREDENTIAL-MARKER", dump)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_symlinked_database_is_not_followed(self):
+        real = self.root / "elsewhere"
+        opencode_database(real, self.project, self.sessions())
+        self.data.mkdir(parents=True)
+        os.symlink(real / "opencode.db", self.data / "opencode.db")
+        with Store(self.state) as store:
+            stats = self.refresh(store)
+            self.assertEqual(stats["sessions_indexed"], 0)
+            self.assertEqual(store.search("KeyError", self.project_id), [])
+
+    def test_deleted_session_and_unknown_message_types_are_reported(self):
+        sessions = self.sessions() + [{"id": "ses_new", "messages": [("hologram", {"time": {"created": 1}, "x": 1})]}]
+        path = opencode_database(self.data, self.project, sessions)
+        with Store(self.state) as store:
+            self.refresh(store)
+            coverage = {r["id"]: r["coverage"] for r in store.db.execute("SELECT id, coverage FROM sessions")}
+            self.assertEqual(coverage, {"opencode:ses_alpha": "complete", "opencode:ses_new": "unsupported"})
+            db = sqlite3.connect(path)
+            db.execute("DELETE FROM session_message WHERE session_id = 'ses_alpha'")
+            db.execute("DELETE FROM session_v2 WHERE id = 'ses_alpha'")
+            db.commit()
+            db.close()
+            stats = self.refresh(store)
+            self.assertEqual(stats["deleted"], 1)
+            self.assertEqual(store.search("KeyError", self.project_id), [])
+
+    def test_same_native_id_in_another_harness_does_not_collide(self):
+        opencode_database(self.data, self.project, self.sessions())
+        codex = self.root / "codex"
+        codex.mkdir()
+        (codex / "rollout-ses_alpha.jsonl").write_bytes(line(metadata("ses_alpha", self.project)) + line(message("codexonly")))
+        with Store(self.state) as store:
+            store.refresh({"opencode": [self.data], "codex": [codex]}, project=self.project_id)
+            ids = sorted(r[0] for r in store.db.execute("SELECT id FROM sessions"))
+            self.assertEqual(ids, ["opencode:ses_alpha", "ses_alpha"])
+
+
 class HarnessIndexTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))

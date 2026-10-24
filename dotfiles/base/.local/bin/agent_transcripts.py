@@ -8,7 +8,10 @@ import time
 from pathlib import Path
 from urllib.parse import unquote
 
-HARNESSES = ("codex", "claude", "muse", "grok")
+HARNESSES = ("codex", "claude", "muse", "grok", "opencode")
+DATABASE_HARNESSES = ("opencode",)
+OPENCODE_DB = "opencode.db"
+OPENCODE_SUBPOSITIONS = 1000
 SUBSTANTIVE_KINDS = ("user", "assistant", "developer", "tool-call", "tool-output", "task_complete", "compacted", "context", "skill_read_observed")
 HEADER_SCAN_LINES = 200
 HEADER_SCAN_BYTES = 524288
@@ -59,6 +62,7 @@ def default_roots(environ=None):
         "claude": [claude_home / "projects"],
         "muse": [data_home / "muse" / "sessions"],
         "grok": [grok_home / "sessions"],
+        "opencode": [data_home / "opencode"],
     }
 
 
@@ -77,7 +81,15 @@ def _listed(value):
     return [value] if isinstance(value, (str, os.PathLike)) else list(value)
 
 
+def opencode_database(root):
+    root = Path(root)
+    candidate = root if root.name.endswith(".db") else root / OPENCODE_DB
+    return candidate if candidate.is_file() and not candidate.is_symlink() else None
+
+
 def is_source_name(harness, name):
+    if harness in DATABASE_HARNESSES:
+        return False
     if harness == "codex":
         return name.startswith("rollout-") and name.endswith(".jsonl")
     if harness == "claude":
@@ -271,6 +283,76 @@ def _grok_record(obj):
     return _record("unknown:" + str(kind), "", timestamp, raw_type=kind)
 
 
+def _millis(value):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(value / 1000))
+    return None
+
+
+def _tool_outcome(block):
+    state = block.get("state") if isinstance(block.get("state"), dict) else {}
+    status = state.get("status")
+    metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+    exit_code = metadata.get("exit")
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        return "ok" if exit_code == 0 else "error"
+    if status == "error":
+        return "error"
+    return "ok" if status == "completed" else None
+
+
+def opencode_events(message_type, data):
+    if not isinstance(data, dict):
+        return [(0, _record("unknown:non_object", "", raw_type=message_type))]
+    created = (data.get("time") or {}).get("created") if isinstance(data.get("time"), dict) else None
+    stamp = _millis(created)
+    if message_type == "user":
+        return [(0, _record("user", _text_value(data.get("text", "")), stamp, raw_type="user", role="user"))]
+    if message_type in ("system", "synthetic"):
+        return [(0, _record("context", _text_value(data.get("text", "")), stamp, raw_type=message_type))]
+    if message_type == "compaction":
+        return [(0, _record("compacted", _text_value(data.get("summary", "")), stamp, raw_type=message_type))]
+    if message_type == "idle":
+        return [(0, _record("idle", "", stamp, raw_type=message_type))]
+    if message_type != "assistant":
+        return [(0, _record("unknown:" + str(message_type), "", stamp, raw_type=message_type))]
+    events = []
+    blocks = data.get("content") if isinstance(data.get("content"), list) else []
+    for index, block in enumerate(blocks[: OPENCODE_SUBPOSITIONS // 2]):
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        if kind == "text":
+            events.append((index * 2, _record("assistant", _text_value(block.get("text", "")), stamp, raw_type="assistant", role="assistant")))
+        elif kind == "tool":
+            state = block.get("state") if isinstance(block.get("state"), dict) else {}
+            name = str(block.get("name") or "tool")
+            arguments = _text_value(state.get("input", {}))
+            call_id = block.get("id")
+            events.append((index * 2, _record("tool-call", name + ("\n" + arguments if arguments else ""), stamp, call_id, "assistant", tool_name=name)))
+            if state.get("status") in ("completed", "error"):
+                output = _content_text(state.get("content", []))
+                if not output and state.get("error"):
+                    output = _text_value(state.get("error"))
+                events.append((index * 2 + 1, _record("tool-output", output, stamp, call_id, "assistant", outcome=_tool_outcome(block))))
+        elif kind == "reasoning":
+            continue
+        else:
+            events.append((index * 2, _record("unknown:" + str(kind), "", stamp, raw_type="assistant")))
+    return events or [(0, _record("assistant", "", stamp, raw_type="assistant"))]
+
+
+def opencode_record(message_type, data_text, subposition):
+    try:
+        data = json.loads(data_text)
+    except ValueError:
+        return None
+    for index, record in opencode_events(message_type, data):
+        if index == subposition:
+            return record
+    return None
+
+
 def normalize(obj, harness="codex"):
     if not isinstance(obj, dict):
         return [_record("unknown:non_object", "", raw_type=type(obj).__name__)]
@@ -282,6 +364,8 @@ def normalize(obj, harness="codex"):
         return [_muse_record(obj)]
     if harness == "grok":
         return [_grok_record(obj)]
+    if harness in DATABASE_HARNESSES:
+        raise ValueError("database transcripts are read with opencode_events, not normalize")
     raise ValueError("unsupported transcript harness: " + str(harness))
 
 

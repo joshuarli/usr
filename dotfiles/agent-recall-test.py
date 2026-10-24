@@ -927,6 +927,55 @@ class HardeningTests(RecallCase):
         self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_docs").fetchone()[0], count)
 
 
+class OpenCodeTests(unittest.TestCase):
+    def test_opencode_session_yields_retrievable_inspectable_experience(self):
+        import sqlite3 as sql
+        temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.addCleanup(temp.cleanup)
+        base = Path(temp.name)
+        repo = base / "repo"
+        (repo / "src").mkdir(parents=True)
+        (repo / "src" / "app.py").write_text("def main():\n    return 1\n")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init"], check=True)
+        data = base / "data" / "opencode"
+        data.mkdir(parents=True)
+        db = sql.connect(data / "opencode.db")
+        db.executescript(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, fork_session_id TEXT, directory TEXT, title TEXT, time_created INTEGER, time_updated INTEGER);"
+            "CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT);")
+
+        def tool_block(call, name, tool_input, output, **metadata):
+            return {"type": "tool", "id": call, "name": name, "state": {"status": "completed", "input": tool_input, "content": [{"type": "text", "text": output}], "metadata": metadata}}
+
+        messages = [
+            ("user", {"time": {"created": 1790000000000}, "text": "fix the failing app test"}),
+            ("assistant", {"time": {"created": 1790000001000}, "content": [
+                tool_block("c1", "shell", {"command": "pytest -q tests/test_app.py"}, "E   AssertionError: main returned 1\nFAILED tests/test_app.py::test_main", exit=1),
+                tool_block("c2", "edit", {"path": "src/app.py", "oldString": "return 1", "newString": "return 2"}, "edited", files=["src/app.py"]),
+                tool_block("c3", "shell", {"command": "pytest -q tests/test_app.py"}, "1 passed in 0.1s", exit=0)]}),
+        ]
+        db.execute("INSERT INTO session_v2 VALUES ('ses_oc1', 'p', NULL, NULL, ?, 't', 1790000000000, 1790000002000)", (str(repo),))
+        for seq, (kind, payload) in enumerate(messages, start=1):
+            db.execute("INSERT INTO session_message VALUES (?, 'ses_oc1', ?, ?, 1, 1790000002000, ?)", ("m%d" % seq, kind, seq, json.dumps(payload)))
+        db.commit()
+        db.close()
+        store = agent_session_store.Store(base / "state")
+        self.addCleanup(store.close)
+        identity = agent_session_store.project_identity(repo)
+        store.refresh({"opencode": [data]}, project=identity)
+        learner = agent_learning.Learner(store, None)
+        totals = learner.observe_project(identity, repo, 1790100000, 0)
+        self.assertEqual(totals["created"], 1)
+        response = learner.retrieve(identity, "tests/test_app.py AssertionError main returned", cwd=repo, now=1790100000)
+        hit = response["results"][0]
+        self.assertEqual((hit["ref"].split(":")[0], hit["status"]), ("experience", "verified"))
+        self.assertEqual(hit["support"][0]["session"], "opencode:ses_oc1")
+        inspected = learner.inspect(hit["ref"], cwd=repo, now=1790100000, record=False)
+        self.assertTrue(all(item["verified"] for item in inspected["evidence"]))
+
+
 class CommandTests(RecallCase):
     def setUp(self):
         self.env = None
