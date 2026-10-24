@@ -1,5 +1,7 @@
 #!/bin/sh
 exec python3 -I - "$@" <<'PY'
+from __future__ import annotations
+
 import concurrent.futures
 import datetime
 import hashlib
@@ -121,7 +123,18 @@ def query_codex(binary):
     return query_rpc(binary, ["app-server", "--stdio"], "account/rateLimits/read", True)
 
 
-def query_muse(binary):
+def muse_last_observed(binary: str) -> object:
+    try:
+        return query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
+    except Exception:
+        return None
+
+
+def is_percent(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def query_muse(binary: str) -> dict[str, object]:
     try:
         process = subprocess.run(
             [binary, "usage", "--json"],
@@ -137,10 +150,7 @@ def query_muse(binary):
         raise RuntimeError(f"cannot run Muse usage: {error.strerror}") from error
     if process.returncode:
         detail = (process.stderr or process.stdout).strip() or "command failed"
-        try:
-            fallback = query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
-        except Exception:
-            fallback = None
+        fallback = muse_last_observed(binary)
         if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
             return fallback
         raise RuntimeError(detail)
@@ -152,16 +162,11 @@ def query_muse(binary):
         raise RuntimeError("Muse returned an invalid usage response")
     allowance = result.get("allowance")
     if isinstance(allowance, dict) and any(
-        isinstance(allowance.get(slot), dict)
-        and isinstance(allowance[slot].get("usedPercent"), (int, float))
-        and not isinstance(allowance[slot].get("usedPercent"), bool)
+        isinstance(allowance.get(slot), dict) and is_percent(allowance[slot].get("usedPercent"))
         for slot in ("window", "weekly")
     ):
         return result
-    try:
-        fallback = query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
-    except Exception:
-        fallback = None
+    fallback = muse_last_observed(binary)
     if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
         return fallback
     reason = result.get("reason") or result.get("hint")
@@ -621,7 +626,7 @@ def local_time(timestamp, scale=1):
         return "unknown"
 
 
-def reset_delay(timestamp, scale=1):
+def reset_seconds(timestamp: object, scale: float = 1) -> float | None:
     try:
         if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool):
             target = timestamp / scale
@@ -629,9 +634,15 @@ def reset_delay(timestamp, scale=1):
             parsed = datetime.datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             target = parsed.timestamp()
         else:
-            return "unknown"
-        remaining = target - time.time()
+            return None
+        return target - time.time()
     except (OverflowError, OSError, ValueError):
+        return None
+
+
+def reset_delay(timestamp: object, scale: float = 1) -> str:
+    remaining = reset_seconds(timestamp, scale)
+    if remaining is None:
         return "unknown"
     if remaining <= 0:
         return "now"
@@ -689,13 +700,24 @@ def print_heading(title):
     print(color(title, "1;36"))
 
 
-def print_window(label, used, reset, scale=1):
+def reset_urgency_color(timestamp: object, scale: float = 1) -> str:
+    remaining = reset_seconds(timestamp, scale)
+    if remaining is None:
+        return "2"
+    if remaining < 86400:
+        return "38;5;208"
+    if remaining > 259200:
+        return "32"
+    return "33"
+
+
+def print_window(label: str, used: object, reset: object, scale: float = 1) -> None:
     delay = reset_delay(reset, scale)
-    reset_text = color("resets in " + delay, "2")
+    reset_text = color("resets in " + delay, reset_urgency_color(reset, scale))
     print(f"  {label}: {percentage_text(used)}, {reset_text}")
 
 
-def normalize_window_label(raw, fallback=None):
+def normalize_window_label(raw: object, fallback: str) -> str:
     if isinstance(raw, str) and raw.strip():
         token = raw.strip().upper()
         if "WEEK" in token:
@@ -712,7 +734,7 @@ def normalize_window_label(raw, fallback=None):
     return fallback
 
 
-def print_codex(result):
+def print_codex(result: dict[str, object]) -> None:
     print_heading("Codex")
     buckets = result.get("rateLimitsByLimitId") or {}
     bucket = buckets.get("codex") if isinstance(buckets, dict) else None
@@ -735,8 +757,7 @@ def print_codex(result):
         label = duration_name(window.get("windowDurationMins")) or normalize_window_label(
             slot, slot
         )
-        if label in ("primary", "secondary"):
-            label = {"primary": "5h", "secondary": "7d"}[label]
+        label = {"primary": "5h", "secondary": "7d"}.get(label, label)
         used = window.get("usedPercent")
         print_window(label, used, window.get("resetsAt"))
 
@@ -803,7 +824,7 @@ def print_claude(result):
         print_window(label, percent, reset)
 
 
-def print_muse(result):
+def print_muse(result: object) -> None:
     print_heading("Muse Code")
     allowance = result.get("allowance") if isinstance(result, dict) else None
     if isinstance(allowance, dict):
@@ -812,18 +833,10 @@ def print_muse(result):
         current = allowance.get("window")
         weekly = allowance.get("weekly")
         shown = False
-        if (
-            isinstance(current, dict)
-            and isinstance(current.get("usedPercent"), (int, float))
-            and not isinstance(current.get("usedPercent"), bool)
-        ):
+        if isinstance(current, dict) and is_percent(current.get("usedPercent")):
             print_window("5h", current.get("usedPercent"), current.get("resetsAtMs"), 1000)
             shown = True
-        if (
-            isinstance(weekly, dict)
-            and isinstance(weekly.get("usedPercent"), (int, float))
-            and not isinstance(weekly.get("usedPercent"), bool)
-        ):
+        if isinstance(weekly, dict) and is_percent(weekly.get("usedPercent")):
             print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
             shown = True
         if shown:
@@ -846,7 +859,7 @@ def print_muse(result):
         print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
 
 
-def print_grok(result):
+def print_grok(result: dict[str, object]) -> None:
     print_heading("Grok Build")
     if result.get("subscription_tier"):
         print(f"  plan: {result['subscription_tier']}")
@@ -857,7 +870,7 @@ def print_grok(result):
         print(f"  prepaid credits: ${prepaid / 100:.2f}")
 
 
-def print_dsh(result):
+def print_dsh(result: dict[str, object]) -> None:
     print_heading("DeepSeek API")
     available = result["is_available"]
     label = "available for API requests" if available else "insufficient for API requests"
