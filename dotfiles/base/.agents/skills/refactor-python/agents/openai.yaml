@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refactor Python"
+  short_description: "Modern Python with strict, practical ty and Ruff checks"
+  default_prompt: "Use $refactor-python to refactor the selected Python code for Python 3.13+ with ty and Ruff, preserving its contracts and using no formatters."
+policy:
+  allow_implicit_invocation: false

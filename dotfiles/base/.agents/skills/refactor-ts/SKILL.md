@@ -45,7 +45,7 @@ Keep a lightweight assessment of concrete changes, justified exceptions, and con
 5. When in scope, migrate packages and commands using the stack reference. Replace each old responsibility with its new owner before deleting the old implementation. Do not retain duplicate frameworks, validators, or orchestration without an actual compatibility need.
 6. Update affected callers, public documentation, and existing tests together. Complete the requested scope, not only the first easy file.
 
-Do not add frameworks, design-pattern layers, configuration knobs, branded types, services, or clever type machinery without a concrete responsibility. Do not mechanically rewrite every interface to a type alias, every class to functions, or every enum to strings. Do not introduce or run formatters, including check-only runs. Preserve local layout and avoid cosmetic churn.
+Do not add abstractions or clever type machinery without a concrete responsibility, or mechanically rewrite interfaces, classes, or enums. Do not install, configure, or run formatters, including check-only runs, editor actions, hooks, and aggregate commands that invoke them. Inspect task definitions and run permitted constituent checks instead. Do not substitute formatting/import-sorting lints or manual reflow. Preserve local layout. Favor correctness lints; avoid blanket pedantic/style groups and rules that force verbosity or redundant annotations.
 
 Keep publication, major contract decisions, and CI edits within existing authorization. Do not edit CI unless asked. An instruction to refactor does not itself authorize committing, pushing, or deploying.
 

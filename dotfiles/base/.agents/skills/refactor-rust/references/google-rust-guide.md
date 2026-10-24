@@ -37,8 +37,8 @@ Keep platform rules scoped:
 
 ## Formatting
 
-- Use the codebase's [formatting tool](https://google.github.io/styleguide/rustguide.html#formatting-other) when active instructions permit it. The guide favors 100-column lines, lowercase hexadecimal digits, macro matcher formatting, and escaped invisible characters. Respect stable-toolchain limitations; do not require unsupported settings or a toolchain change.
-- Reserve [`rustfmt::skip`](https://google.github.io/styleguide/rustguide.html#formatting-optout) for meaningful manual alignment or generated code, not personal formatting preferences.
+- This workflow overrides Google's [formatting-tool recommendation](https://google.github.io/styleguide/rustguide.html#formatting-other): do not install, configure, or run formatters, including `rustfmt`/`cargo fmt`, check-only runs, or indirect invocation through another command. Do not enable formatting lints as a substitute.
+- Keep readable local layout while making substantive changes. Do not reflow untouched code, enforce column/hexadecimal preferences mechanically, or add/remove [`rustfmt::skip`](https://google.github.io/styleguide/rustguide.html#formatting-optout) merely for this pass. Preserve meaningful manual alignment and generated code.
 
 ## Ownership and function boundaries
 
