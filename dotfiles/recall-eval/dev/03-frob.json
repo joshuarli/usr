@@ -356,7 +356,7 @@
   {
    "id": "lf-c3",
    "split": "dev",
-   "category": "short_identifier",
+   "category": "paraphrase",
    "project": "libfrob",
    "query": "ABI",
    "expect": "match",

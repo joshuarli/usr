@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
   "provider": "meta",
-  "model": "muse-wonder-1.0",
+  "model": "muse-spark-1.3",
   "reasoning_effort": "high",
   "model_reasoning_efforts": {
+    "muse-spark-1.3": "high",
     "muse-wonder-1.0": "high"
   },
   "tui": {
@@ -19,13 +20,6 @@
   },
   "contributor_mode_enabled": true,
   "contributor_mode_disclosure_acknowledged": true,
-  "permissions": {
-    "schema_version": 1,
-    "default_profile": ":unrestricted"
-  },
-  "telemetry": {
-    "enabled": false
-  },
   "hooks": {
     "Stop": [
       {
@@ -49,5 +43,12 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "schema_version": 1,
+    "default_profile": ":unrestricted"
+  },
+  "telemetry": {
+    "enabled": false
   }
 }

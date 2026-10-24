@@ -19,8 +19,12 @@ EVENT_POOL = 60
 RECORD_POOL = 30
 EVENTS_PER_SESSION = 2
 RRF_K = 20
-MIN_COVERAGE = 0.5
+MIN_COVERAGE = 0.4
+MIN_MASS = 0.8
 MIN_SCORE = 0.30
+IDF_POWER = 1.0
+IDENT_BOOST = 1.5
+COVERAGE_TOP_K = 4
 NEAR_DUPLICATE = 0.6
 SUMMARY_CHARS = 280
 CONTEXT_CHARS = 2400
@@ -48,6 +52,7 @@ _TECH_SHAPES = (
     re.compile(r"[a-z][A-Z]"),
     re.compile(r"[A-Za-z][0-9]|[0-9][A-Za-z]"),
     re.compile(r"[A-Za-z0-9]\(\)$"),
+    re.compile(r"[A-Za-z0-9]-[A-Za-z0-9]"),
     re.compile(r"^[A-Z][A-Z0-9]{1,}$"),
 )
 
@@ -93,24 +98,35 @@ def parse_query(text):
     text = str(text)[:2000]
     idents, words = [], []
     seen_idents, seen_words = set(), set()
+
+    def add_ident(token):
+        key = token.lower()
+        if key not in seen_idents:
+            seen_idents.add(key)
+            idents.append(token)
+
     for match in _RAW.finditer(text):
-        token = match.group(0).strip(_TRIM)
-        if not token or not re.search(r"[A-Za-z0-9]", token):
+        raw = match.group(0)
+        if "=" in raw:
+            key = raw.split("=", 1)[0].strip(_TRIM)
+            if key and re.search(r"[A-Za-z]{2}", key):
+                add_ident(key)
             continue
-        parts = subparts(token)
-        if not parts:
+        flag = re.match(r"^--?([A-Za-z][A-Za-z0-9-]{2,})$", raw)
+        if flag:
+            add_ident(raw)
             continue
-        short_ok = token.isupper() or token.lower() in SHORT_TECHNICAL
-        if is_technical(token) or (short_ok and len(token) <= 4 and len(token) >= 2 and token.isalpha()):
-            key = token.lower()
-            if key not in seen_idents:
-                seen_idents.add(key)
-                idents.append(token)
+        token = raw.strip(_TRIM)
+        if not token or not re.search(r"[A-Za-z0-9]", token) or not subparts(token):
+            continue
+        short_ok = token.lower() in SHORT_TECHNICAL or (token.isupper() and 2 <= len(token) <= 5 and token.isalpha())
+        if is_technical(token) or short_ok:
+            add_ident(token)
             continue
         word = token.lower()
         if word in STOP_WORDS or not word.isalnum():
             continue
-        if len(word) < 3 and word not in SHORT_TECHNICAL:
+        if len(word) < 3:
             continue
         if word not in seen_words:
             seen_words.add(word)
@@ -274,7 +290,7 @@ class Retriever:
         if include_events:
             for candidate in self._event_candidates(query):
                 pool[candidate.ref] = candidate
-        self._suppress_covered_events(pool, trace)
+        self._merge_source_events(pool, trace)
         scored = []
         for candidate in pool.values():
             self._score(candidate, query)
@@ -426,22 +442,35 @@ class Retriever:
                     event_kind=row["kind"], session_cwd=row["cwd"]))
         return out
 
-    def _suppress_covered_events(self, pool, trace):
-        covered = {(support["session"], support["position"]) for item in pool.values() if item.kind != "event" for support in item.supports}
-        for ref in [ref for ref, item in pool.items() if item.kind == "event" and (item.supports[0]["session"], item.supports[0]["position"]) in covered]:
+    def _merge_source_events(self, pool, trace):
+        owners = {}
+        for item in pool.values():
+            if item.kind != "event":
+                for support in item.supports:
+                    owners.setdefault((support["session"], support["position"]), []).append(item)
+        for ref in [ref for ref, item in pool.items() if item.kind == "event" and (item.supports[0]["session"], item.supports[0]["position"]) in owners]:
+            event = pool.pop(ref)
+            for owner in owners[(event.supports[0]["session"], event.supports[0]["position"])]:
+                owner.text += " " + event.text[:800]
+                for label, rank in event.ranks.items():
+                    owner.ranks[label] = min(rank, owner.ranks.get(label, rank))
             if trace is not None:
-                trace["excluded"].append({"ref": ref, "why": "source of a retained record"})
-            del pool[ref]
+                trace["excluded"].append({"ref": ref, "why": "merged into the record it supports"})
+
+    def _ident_weight(self, ident):
+        parts = subparts(ident)
+        return IDENT_BOOST * max((self._idf(part) for part in parts), default=0.0) ** IDF_POWER
 
     def _score(self, candidate, query):
         tokens = doc_tokens(candidate.text)
         flat = normalized(candidate.text)
-        weights = {word: self._idf(word) for word in query.words}
-        total = sum(weights.values())
-        matched = sum(weight for word, weight in weights.items() if word in tokens or stem(word) in tokens)
-        coverage = (matched / total) if total > 0 else 0.0
+        terms = [(word, self._idf(word) ** IDF_POWER, word in tokens or stem(word) in tokens) for word in query.words]
+        terms += [(ident, self._ident_weight(ident), ident_in(ident, candidate.text, flat, tokens)) for ident in query.idents]
+        top = sorted(terms, key=lambda term: -term[1])[:COVERAGE_TOP_K]
+        mass = sum(weight for _, weight, present in terms if present)
+        total = sum(weight for _, weight, _ in top)
+        coverage = (sum(weight for _, weight, present in top if present) / total) if total > 0 else 0.0
         hits = sum(1 for ident in query.idents if ident_in(ident, candidate.text, flat, tokens))
-        ident_ratio = hits / len(query.idents) if query.idents else 0.0
         lists = max(1, len(fts_expressions(query)))
         lexical = min(1.0, sum(1.0 / (RRF_K + rank + 1) for rank in candidate.ranks.values()) * (RRF_K + 1) / lists)
         kind_weight = KIND_WEIGHT.get(candidate.event_kind, 1.0)
@@ -451,15 +480,13 @@ class Retriever:
         evidence = min(0.06, 0.02 * (candidate.evidence_roots - 1))
         age_days = max(0.0, (self.now - candidate.observed_at) / 86400)
         recency = 0.03 * math.exp(-age_days / 180)
-        score = (0.38 * coverage + 0.30 * ident_ratio + 0.17 * lexical) * (0.6 + 0.4 * kind_weight) + TIER_PRIOR[candidate.tier] + evidence + recency + worktree
-        candidate.features = {"coverage": coverage, "identifier_hits": float(hits), "identifier_ratio": ident_ratio, "lexical": lexical, "kind_weight": kind_weight}
+        score = (0.50 * coverage + 0.17 * lexical) * (0.6 + 0.4 * kind_weight) + TIER_PRIOR[candidate.tier] + evidence + recency + worktree
+        candidate.features = {"mass": mass, "coverage": coverage, "identifier_hits": float(hits), "lexical": lexical, "kind_weight": kind_weight}
         candidate.score = score
 
     def _acceptable(self, candidate, trace):
         features = candidate.features
-        has_words = features["coverage"] >= MIN_COVERAGE
-        has_ident = features["identifier_hits"] >= 1
-        ok = (has_words or has_ident) and candidate.score >= MIN_SCORE
+        ok = features["coverage"] >= MIN_COVERAGE and features["mass"] >= MIN_MASS and candidate.score >= MIN_SCORE
         if not ok and trace is not None:
             trace["excluded"].append({"ref": candidate.ref, "why": "below relevance gate", "score": round(candidate.score, 4)})
         return ok
@@ -542,7 +569,7 @@ class Retriever:
                 if len(tokens & other) / max(1, len(tokens | other)) >= NEAR_DUPLICATE:
                     duplicate = chosen
                     break
-                if candidate.supports and chosen.supports and candidate.supports[0]["session"] == chosen.supports[0]["session"] and candidate.kind == chosen.kind == "event":
+                if {item["session"] for item in candidate.supports[:3]} & {item["session"] for item in chosen.supports[:3]}:
                     duplicate = chosen
                     break
             if duplicate is not None:

@@ -129,6 +129,7 @@ class Draft:
     sources: list
     tags: str = ""
     paths: tuple = ()
+    extra: str = ""
 
 
 @dataclasses.dataclass
@@ -484,6 +485,7 @@ def file_conditions(cwd, paths, when):
 def add_experience(db, project, draft, session, now, worktree="", revision="", validity=()):
     identifiers = technical_tokens(draft.claim + " " + draft.applies_when, 12)
     fingerprint = _fingerprint(draft, identifiers)
+    indexed = technical_tokens(draft.claim + " " + draft.applies_when + " " + draft.extra, 24)
     sources = [dict(item, session=session) for item in draft.sources]
     existing = db.execute("SELECT id FROM learning_experiences WHERE project = ? AND fingerprint = ?", (project, fingerprint)).fetchone()
     if existing is None:
@@ -498,13 +500,13 @@ def add_experience(db, project, draft, session, now, worktree="", revision="", v
     cursor = db.execute(
         "INSERT INTO learning_experiences(project, kind, claim, applies_when, identifiers, fingerprint, basis, detector, revision, worktree, "
         "observed_at, captured_at, validity, tags) VALUES(?,?,?,?,?,?, 'deterministic', ?,?,?,?,?,?,?)",
-        (project, draft.kind, draft.claim, draft.applies_when, " ".join(identifiers), fingerprint, draft.detector, revision, worktree,
+        (project, draft.kind, draft.claim, draft.applies_when, " ".join(indexed), fingerprint, draft.detector, revision, worktree,
          draft.observed_at or now, now, json.dumps(list(validity)), draft.tags))
     experience = cursor.lastrowid
     for item in sources:
         db.execute("INSERT OR IGNORE INTO learning_experience_sources(experience, session, position, digest, role) VALUES(?,?,?,?,?)",
                    (experience, item["session"], item["position"], item["digest"], item["role"]))
-    _relate(db, experience, project, draft, identifiers, now)
+    _relate(db, experience, project, draft, indexed, now)
     return "created", experience
 
 
@@ -594,6 +596,7 @@ def observe_session(db, project, cwd, session, now):
     docs = documented_text(cwd)
     revision = _head(cwd)
     for draft in drafts:
+        draft.extra = redact(evidence_text(events, draft))
         if documented(draft, docs):
             suppressed += 1
             continue
@@ -606,6 +609,16 @@ def observe_session(db, project, cwd, session, now):
         merged += status == "merged"
     record_signatures(db, project, session, events, runs, outcomes, now)
     return created, merged, suppressed, truncated
+
+
+def evidence_text(events, draft):
+    positions = {item["position"] for item in draft.sources}
+    texts = [event["text"][:700] for event in events if event["position"] in positions]
+    last = max((index for index, event in enumerate(events) if event["position"] in positions), default=None)
+    if last is not None:
+        following = [event["text"][:500] for event in events[last + 1:last + 4] if event["kind"] == "assistant"]
+        texts.extend(following[:1])
+    return " ".join(texts)
 
 
 def _head(cwd):

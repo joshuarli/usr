@@ -278,7 +278,7 @@
   {
    "id": "ap-short-oom",
    "split": "heldout",
-   "category": "short_identifier",
+   "category": "paraphrase",
    "project": "assetpipe",
    "query": "OOM",
    "expect": "match",
