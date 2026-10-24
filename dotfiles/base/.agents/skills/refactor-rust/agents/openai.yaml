@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refactor Rust"
+  short_description: "Refactor Rust using the Google style guide"
+  default_prompt: "Use $refactor-rust to refactor this Rust codebase according to the Google Rust Style Guide while preserving behavior."
+policy:
+  allow_implicit_invocation: false
