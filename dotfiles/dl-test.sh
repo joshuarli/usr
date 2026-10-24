@@ -50,11 +50,19 @@ INSTALLER
         [ -n "$output" ] || exit 1
         cat > "$output" <<'INSTALLER'
 #!/bin/sh
-[ "$#" -eq 4 ] && [ "$1" = --dir ] && [ "$2" = "$HOME/.local/bin" ] \
-    && [ "$3" = --skip-aliases ] && [ "$4" = --skip-path ] || exit 1
-mkdir -p "$HOME/.local/bin"
-printf '%s\n' '#!/bin/sh' 'exit 0' > "$HOME/.local/bin/agy"
-chmod +x "$HOME/.local/bin/agy"
+[ "$#" -eq 2 ] && [ "$1" = --dir ] && [ -n "${2:-}" ] || exit 1
+mkdir -p "$2"
+cat > "$2/agy" <<'AGY'
+#!/bin/sh
+if [ "${1:-}" = install ]; then
+    [ "$2" = --dir ] && [ -n "${3:-}" ] \
+        && [ "$4" = --skip-aliases ] && [ "$5" = --skip-path ] || exit 1
+    exit 0
+fi
+exit 0
+AGY
+chmod +x "$2/agy"
+printf '%s\n' '# Added by Antigravity CLI installer' >> "$HOME/.bashrc"
 INSTALLER
         ;;
     https://dev.meta.ai/install.sh)
@@ -583,6 +591,7 @@ else
     exit 1
 fi
 [ -x "$antigravity_home/.local/bin/agy" ]
+[ ! -e "$antigravity_home/.bashrc" ]
 case "$output" in
     *"Installed Antigravity CLI ($antigravity_home/.local/bin/agy)"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;

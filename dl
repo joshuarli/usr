@@ -1190,16 +1190,23 @@ install_antigravity() {
         return
     fi
     own_file "${DEST}/agy"
-    if ! bash "$tmpbin" --dir "$DEST" --skip-aliases --skip-path; then
+    agy_home=$(mktemp -d)
+    if ! HOME="$agy_home" bash "$tmpbin" --dir "$DEST"; then
+        rm -rf "$agy_home"
         rm -f "$tmpbin"
         tmpbin=
         skip antigravity "official installer failed"
         return
     fi
+    rm -rf "$agy_home"
     rm -f "$tmpbin"
     tmpbin=
     if ! installed agy; then
         skip antigravity "official installer did not install ${DEST}/agy"
+        return
+    fi
+    if ! "${DEST}/agy" install --dir "$DEST" --skip-aliases --skip-path; then
+        skip antigravity "official setup failed"
         return
     fi
     changed=true
