@@ -1316,11 +1316,25 @@ EOF
 wait_for_workers() {
     group_failed=false
     for worker_pid in $worker_pids; do
-        if wait "$worker_pid"; then :; else group_failed=true; fi
+        case "$worker_progs" in
+            *' '*)
+                worker_prog=${worker_progs%% *}
+                worker_progs=${worker_progs#* }
+                ;;
+            *)
+                worker_prog=$worker_progs
+                worker_progs=
+                ;;
+        esac
+        if wait "$worker_pid"; then :; else
+            group_failed=true
+            worker_failed_progs="${worker_failed_progs}${worker_failed_progs:+ }$worker_prog"
+        fi
         worker_pids=${worker_pids#"$worker_pid"}
         worker_pids=${worker_pids# }
     done
     worker_count=0
+    worker_progs=
     if $group_failed; then return 1; fi
     return 0
 }
@@ -1329,7 +1343,14 @@ run_parallel_wave() {
     max_workers=$#
     parallel_failed=false
     worker_pids=
+    worker_progs=
+    worker_failed_progs=
     worker_count=0
+    if [ ! -r "$script_path" ]; then
+        printf '%s\n' "dl: cannot start parallel workers: cannot read '$script_path' (invoked as '$0')" >&2
+        printf '%s\n' "dl: check the invocation path and retry" >&2
+        return 1
+    fi
     if ! log_dir=$(mktemp -d); then
         printf '%s\n' "Could not create a directory for worker output" >&2
         return 1
@@ -1337,11 +1358,12 @@ run_parallel_wave() {
     log_count=0
     for prog in "$@"; do
         log_count=$((log_count + 1))
-        DL_INTERNAL_WORKER=true "$script_path" "$prog" \
+        DL_INTERNAL_WORKER=true sh "$script_path" "$prog" \
             > "${log_dir}/${log_count}.stdout" \
             2> "${log_dir}/${log_count}.stderr" &
         worker_pid=$!
         worker_pids="${worker_pids}${worker_pids:+ }${worker_pid}"
+        worker_progs="${worker_progs}${worker_progs:+ }${prog}"
         worker_count=$((worker_count + 1))
         if [ "$worker_count" -ge "$max_workers" ]; then
             if ! wait_for_workers; then parallel_failed=true; fi
@@ -1355,7 +1377,12 @@ run_parallel_wave() {
         rm -rf "$log_dir" || parallel_failed=true
         log_dir=
     fi
-    if $parallel_failed; then return 1; fi
+    if $parallel_failed; then
+        if [ -n "$worker_failed_progs" ]; then
+            printf '%s\n' "dl: parallel install failed for: $worker_failed_progs" >&2
+        fi
+        return 1
+    fi
     return 0
 }
 

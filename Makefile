@@ -13,7 +13,7 @@ sync: layers
 	mkdir -p "$(dir $(DL_OWNED_FILE))" || exit 1; \
 	status=0; \
 	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
-	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || status=$$?; \
+	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || { status=$$?; printf 'sync: dl step failed\n' >&2; }; \
 	brew_status=0; \
 	if [ "$(OS)" = darwin ]; then TMPDIR="$(DL_TMPDIR)" sh macos/setup-macos brew packages || { brew_status=$$?; [ $$status -ne 0 ] || status=$$brew_status; }; fi; \
 	if [ "$(OS)" = linux ] && [ -r /etc/os-release ]; then \
