@@ -6,8 +6,10 @@ Use the installed package's declarations and bundled agent/API documentation, th
 
 - Keep pure functions outside Effect. Use `Effect.gen` for inline effectful sequencing. For reusable effectful functions, prefer `Effect.fn("name")` when a tracing boundary helps and `Effect.fnUntraced` when it does not; avoid wrappers whose sole purpose is returning an `Effect.gen`.
 - Keep requirements and expected failures visible in the program's type. Do not return a Promise from deep domain helpers just to run an Effect early. Interpret programs at process, request, UI, or other actual application boundaries.
+- Keep work inside the effect's deferred operation. Lifting an already evaluated value or already started Promise cannot restore laziness, replayability, or cancellation. Do not move I/O out of its owner while simplifying a generator or adapter.
 - Use `Context.Service` for a meaningful dependency with behavior and Layers for implementations/composition. Do not create a service for every pure helper. Keep identifiers unambiguous and dependent layers explicit.
 - Compose shared services once per appropriate application lifetime. A shared runtime can own pools and infrastructure while request identity, tenant data, transactions, and cancellation remain request-scoped. Do not put request state in a process-global singleton.
+- Check [Layer memoization](https://effect.website/docs/v4/requirements-management/layer-memoization) when changing composition. Reuse the same Layer instance in the intended graph/runtime for shared resources; repeated factory calls or separate provisioning boundaries can acquire separate pools/listeners. Compose the graph deliberately rather than assuming equal service types imply one acquisition.
 - Use `NodeRuntime.runMain` for a suitable CLI/process entrypoint and [`ManagedRuntime`](https://github.com/Effect-TS/effect/blob/main/ai-docs/src/04_integration/10_managed-runtime.ts) for integration with a non-Effect host. Dispose owned runtimes during shutdown/unmount according to their actual owner; a child must not dispose a runtime shared by the application.
 
 ## Failures and boundaries
@@ -18,7 +20,9 @@ Represent anticipated failure with the typed error channel and discriminated err
 
 Use [Schema](https://github.com/Effect-TS/effect/blob/main/packages/effect/SCHEMA.md) as the canonical definition at untrusted/serialized boundaries. Decode incoming values and encode outbound values; wire and domain representations may differ. Do not hand-maintain parallel interfaces, validators, and DTO conversions for one contract. Avoid repeatedly decoding trusted values within one domain.
 
-Use `Effect.tryPromise` or the matching adapter for a genuinely fallible Promise API, mapping rejection into the intended error type. Pass the adapter's AbortSignal to operations that support cancellation. Do not pretend a Promise-returning library has no failure path because its TS signature omits errors.
+Use [`Effect.try`/`Effect.tryPromise`](https://effect.website/docs/v4/getting-started/creating-effects) for expected synchronous throws or Promise rejections, mapping them to the intended error type. Reserve `sync`/`promise` for operations whose unexpected failures should be defects. Put the operation itself inside the thunk; wrapping a previously started Promise does not make it cold or safely retryable. Forward the adapter's AbortSignal to cancellable operations, preserving the installed callback signature.
+
+A [`ManagedRuntime` Promise bridge](https://effect.website/docs/v4/api/effect/ManagedRuntime) does not preserve a typed rejection channel. Handle expected failures within Effect, or use `runPromiseExit` and inspect its `Exit`/`Cause`, including layer-build failures, defects, and interruption. Treat raw Promise rejection as unknown; never cast it to `E` or assume every rejection has the domain error's tag.
 
 ## Resources and concurrency
 

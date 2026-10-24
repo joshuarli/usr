@@ -34,6 +34,7 @@ respect-type-ignore-comments = false
 
 [tool.ty.rules]
 blanket-ignore-comment = "error"
+disjoint-cast = "error"
 dynamic-function-decorator-return = "error"
 missing-type-argument = "error"
 possibly-unresolved-reference = "error"
@@ -48,9 +49,9 @@ error-on-warning = true
 output-format = "concise"
 ```
 
-The unsound-flow rules constrain dynamic values crossing declared assignments, returns, and yields. Decorator/base-class checks protect signatures and inheritance from becoming dynamic unnoticed. Require real type arguments rather than filling generics with `Any` merely to silence a diagnostic.
+The unsound-flow rules constrain dynamic values crossing declared assignments, returns, and yields. `disjoint-cast` rejects impossible conversions such as `cast(str, an_int)`; overlapping casts still require evidence and never validate data. Decorator/base-class checks protect signatures and inheritance from becoming dynamic unnoticed. Require real type arguments rather than filling generics with `Any` merely to silence a diagnostic.
 
-Strict equality/generic analysis avoids permissive narrowing assumptions about subclass equality and generic runtime checks. Keep these settings unless a demonstrated limitation needs a narrow override; do not make public classes `final`, change equality, or insert unchecked casts to appease the checker. Return inference reduces needless private synchronous return annotations; the checked version does not infer asynchronous/generator returns through this option, so annotate those contracts explicitly.
+Strict equality/generic analysis avoids permissive narrowing assumptions about subclass equality and generic runtime checks. Keep these settings unless a demonstrated limitation needs a narrow override; do not make public classes `final`, change equality, or insert unchecked casts to appease the checker. Return inference reduces needless private synchronous return annotations. The checked version does not infer async/generator returns through this option: manually check those annotations, including private functions. Also review public static/class/property return surfaces that the selected `ANN201` rule does not fully cover. Do not enable blanket private-return annotation rules to approximate this targeted review.
 
 ## ty limits and exceptions
 
@@ -127,7 +128,7 @@ Add narrowly selected domain-specific checks only when they catch a concrete mis
 ## Run and migrate
 
 1. Inspect actual commands, environment, pins, configs, and existing diagnostics. Resolve/pin the latest tools when migration is in scope. Do not run any formatter, format check, import sorter, editor formatting action, or aggregate task that invokes one. Use permitted constituent commands.
-2. Merge the profiles and run the pinned `ty check` and `ruff check` for the relevant first-party paths through the established runner. For an existing uv project, `uv run ty check` and `uv run ruff check` are appropriate; other runners remain valid. Inspect scripts for hidden formatting or automatic fixes first.
+2. Merge profiles only when tooling migration is in scope. Run pinned `ty check` and `ruff check` for the relevant first-party paths through the established runner. For an existing uv project, `uv run ty check` and `uv run ruff check` are appropriate; other runners remain valid. For a narrow task lacking the tools or compatible floor, use applicable existing checks and report the blocked gate; do not add pins or raise the runtime floor. Inspect scripts for hidden formatting or automatic fixes first.
 3. Treat diagnostics as code/design work. Check public re-exports before removing imports; preserve runtime annotation imports, timezone/wire contracts, and resource/cancellation behavior. [Fix safety](https://docs.astral.sh/ruff/linter/#fix-safety) is a tool classification, not proof that a change is compatible. Apply only selected, understood lint fixes; no blanket unsafe fixes or `--add-noqa`.
 4. Retire replaced mypy/Pyright/Flake8/plugin plumbing only after required coverage is established. Remove obsolete formatter dependencies/configuration when tooling cleanup is in scope, without running them. Do not replace configuration by excluding the code that fails. Keep CI edits within an explicit CI request.
 5. Verify the changed contracts with narrow existing tests and minimum-version execution where needed. Reuse results while their inputs remain valid. Report actual versions, checks, justified exceptions, missing coverage, and unavailable checks; a static check is not a runtime test.

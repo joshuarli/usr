@@ -39,7 +39,7 @@ Use [Vitest 5](https://vitest.dev/guide/migration/) for existing pure logic, Nod
 
 Use [Vitest Browser Mode](https://vitest.dev/guide/browser/) with `@vitest/browser-playwright`, its `playwright()` provider, and configured browser instances for DOM, layout, focus, forms, and navigation. Current browser APIs come from `vitest/browser`; await interactions and retrying element assertions. Keep the Solid 2 plugin even when a testing example still shows `vite-plugin-solid`.
 
-Keep Playwright directly for existing full journeys. Use Effect test Layers and compatible `@effect/vitest` for Effect behavior. Avoid global patching, duplicated test layers, or replacing real-browser coverage with a DOM emulator. Prefer deterministic, isolated behavior checks, following the project's test policy. Add tests only when the user asks to verify behavior; do not create tests solely because code moved.
+Keep Playwright directly for existing full journeys. Use Effect test Layers and compatible `@effect/vitest` for Effect behavior. Avoid global patching, duplicated test layers, or replacing real-browser coverage with a DOM emulator. Run focused existing checks by default unless explicitly opted out; follow the project's test policy. Add tests only for uncovered observable contracts or invariants, not merely because code moved. An authorized bug fix needs a failing reproducer followed by a passing result.
 
 ## Migration sequence and retirement
 
@@ -53,7 +53,7 @@ Inspect entrypoints, packages, routes, network/persistence, existing tests, depl
 6. Replace redundant utility layers and migrate existing tests.
 7. Remove dead code, packages, configs, imports, commands, and extra lockfiles; verify the real changed paths.
 
-Remove obsolete React/Next and their state/router/data layers unless a published integration requires them; remove duplicated Axios/Express/validation machinery after its responsibilities are covered. Retire Webpack, hand-kept Rollup/esbuild/Babel configuration, Jest, ESLint, and formatter remnants once their replacements are proven. A transitive implementation dependency is not an obsolete user-owned tool: do not try to purge every lockfile occurrence.
+Remove obsolete React/Next and their state/router/data layers unless a supported integration requires them; remove duplicated Axios/Express/validation machinery after its responsibilities are covered. Trace routes, cookies/auth, middleware, caching, streaming, build/deployment adapters, and public consumers before retiring a framework: matching rendered output alone does not establish parity. Retire obsolete build/test/lint plumbing once replacements are proven; remove formatter remnants without running them. A transitive implementation dependency is not an obsolete user-owned tool: do not purge every lockfile occurrence.
 
 Remove old Deno configs, lockfiles, tasks, imports, and `Deno.*` calls in a runtime migration, along with obsolete CommonJS glue, Node bootstraps, and tsconfig workarounds. Do not leave two frameworks or runtimes configured just as an escape hatch. Keep genuine consumer compatibility explicit.
 

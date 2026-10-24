@@ -15,6 +15,8 @@ Use [Solid 2 documentation](https://v2.solidjs.com/), the installed package decl
 
 Use [async memos/derived stores and boundaries](https://v2.solidjs.com/concepts/async-reactivity) instead of recreating resource, transition, loading, error, and result state. Read reactive inputs synchronously before awaiting or constructing lazily executed work.
 
+Use async derivations for reads; put mutations behind explicit event/server commands with an owner and failure policy. Reactive recomputation can replay work. Abort/supersession does not prove a remote write was rolled back or never accepted; preserve the operation's authorization, idempotency, and revalidation contract.
+
 Distinguish initial loading from a pending update to already displayed data. Use `Loading`, `Errored`, and `isPending` where appropriate. Choose whether old data should remain visible when a subject changes; preserve intended UX rather than accepting an accidental new loading policy.
 
 Superseded results being ignored does not cancel the underlying operation. Register run cleanup and an AbortController before the first await where cancellation is needed. Do not mechanically delete `onCleanup`: async memos still use it. A displayed run can remain live until its replacement commits; do not await that old run's cleanup from inside the replacement.

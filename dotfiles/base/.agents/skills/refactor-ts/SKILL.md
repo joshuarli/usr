@@ -9,7 +9,7 @@ metadata:
 
 # Refactor TypeScript
 
-Refactor the code and its applicable tooling into a coherent implementation of the chosen stack. Improve domain modeling, boundaries, reactivity, error handling, and resource ownership; a dependency bump or lint-only pass does not finish actionable work. Preserve behavior and public contracts unless their change is already authorized. If the scope already meets the goal, report the evidence without manufacturing edits.
+Refactor code and applicable tooling for the chosen stack. Improve domain modeling, boundaries, reactivity, failures, and resource ownership; upgrades or lint alone do not finish actionable work. Preserve behavior and public contracts unless their change is authorized. A justified no-op is valid; do not manufacture edits.
 
 Use the requested paths/packages; an unqualified invocation covers the current repository's first-party TypeScript. A whole-codebase invocation includes migration of applicable stack layers. A narrow code refactor does not authorize an unrelated framework or runtime migration. Exclude vendored code and generated outputs; change their source only if in scope.
 
@@ -26,7 +26,7 @@ Read the relevant references before editing:
 - [Effect](references/effect.md): effectful code, services, failures, resources, and runtime integration.
 - [Solid](references/solid.md): components, reactive state, async UI, SSR, and the Solid/Effect boundary.
 
-These are this stack's prescriptions, synthesized from primary sources, not one vendor's universal style guide. For version-sensitive work, read the installed package's declarations, exports, bundled guidance, and official versioned docs/migration notes. Check current releases before changing pins. Current unversioned examples can still target the wrong major. If upstream access fails, use installed evidence, identify uncertainty, and avoid inventing APIs or upgrading blindly.
+For version-sensitive work, use installed declarations/exports and official versioned guidance. Check releases before changing pins; unversioned examples may target another major. If upstream is unavailable, use installed evidence and identify uncertainty. Do not invent APIs or upgrade blindly.
 
 ## Inspect and decide
 
@@ -34,7 +34,7 @@ Read active instructions, working changes, package manifests/lockfile, runtime t
 
 Identify application versus published-library boundaries and browser, server, worker, and test environments. Trace actual data and resource flows: unknown input to decoded value, service to runner, reactive source to UI, acquisition to release. Establish focused baseline results or record unavailable checks.
 
-Keep a lightweight assessment of concrete changes, justified exceptions, and contract conflicts. Preserve wire formats, optional-property presence, public imports/types, error/status behavior, initialization order, route/SSR behavior, cancellation and disposal, and performance constraints. Do not make a published type harder to use merely to satisfy a preference. Honor local policies before generic advice.
+For each batch, identify its concrete benefit, preserved invariant, and smallest regression check. Preserve wire formats, property presence, public imports/types, failures/status, initialization, SSR, cancellation, and performance. Stronger validation, changed defaults, and new failure cases are contract changes. Fix incidental bugs only within authorized behavior; otherwise report them and continue independent work. Honor local policy.
 
 ## Refactor in coherent passes
 
@@ -45,18 +45,18 @@ Keep a lightweight assessment of concrete changes, justified exceptions, and con
 5. When in scope, migrate packages and commands using the stack reference. Replace each old responsibility with its new owner before deleting the old implementation. Do not retain duplicate frameworks, validators, or orchestration without an actual compatibility need.
 6. Update affected callers, public documentation, and existing tests together. Complete the requested scope, not only the first easy file.
 
-Do not add abstractions or clever type machinery without a concrete responsibility, or mechanically rewrite interfaces, classes, or enums. Do not install, configure, or run formatters, including check-only runs, editor actions, hooks, and aggregate commands that invoke them. Inspect task definitions and run permitted constituent checks instead. Do not substitute formatting/import-sorting lints or manual reflow. Preserve local layout. Favor correctness lints; avoid blanket pedantic/style groups and rules that force verbosity or redundant annotations.
+Do not add abstractions without a responsibility or mechanically rewrite interfaces, classes, or enums. Do not install, configure, or run formatters, including check-only, editor, hook, or aggregate runs. Inspect task definitions and run permitted constituent checks. Do not substitute formatting/import-sorting lints or manual reflow. Keep local layout and correctness lints; avoid blanket pedantic/style groups or forced verbosity.
 
 Keep publication, major contract decisions, and CI edits within existing authorization. Do not edit CI unless asked. An instruction to refactor does not itself authorize committing, pushing, or deploying.
 
 ## Verify and finish
 
-Follow active repository verification instructions and reuse existing results. When verification is requested or required by those instructions, use the narrowest existing commands that establish the changed contracts. Run scripts through `pnpm run` and binaries through `pnpm exec`. Keep an independent compiler check for the intended configs, plus applicable Oxlint checks and tests. Node type stripping and Vite compilation do not prove type safety. Separate preexisting failures from regressions.
+Run focused verification by default, honoring explicit opt-outs and active instructions. Use `pnpm run` for scripts and `pnpm exec` for binaries. Keep an independent compiler check for the intended configs, plus applicable Oxlint checks and tests; Node stripping and Vite compilation do not prove type safety. Verify actual file/config discovery. Reuse results only while relevant code, dependencies, configuration, and environment remain unchanged; separate baseline failures from regressions.
 
-Check the risks actually touched: boundary/omission semantics, exhaustive states, failures/defects, cancellation/finalizers, reactive updates, SSR/request isolation, and package exports/declarations. Add tests only when the user asks to verify behavior and an observable contract or invariant lacks coverage, never to assert code shape. Respect a verification opt-out and report what it leaves unproven.
+Check the risks touched: boundary/omission semantics, exhaustive states, failures, cancellation/finalizers, reactivity, request isolation, and exports/declarations. Add tests only for an uncovered observable contract or invariant, never code shape. An authorized bug fix needs a failing reproducer followed by a passing result. Do not make checks green with weaker types/schemas/tests, fabricated guards, broad suppressions, or excluded code; a specific false positive may justify a narrow exception.
 
-For UI changes, exercise affected behavior in a real browser. For SSR, cover production serving and nested navigation. For package/lockfile changes, verify a frozen-lockfile install. For build changes, inspect output for obsolete frameworks, server-only imports, and secrets. Use existing performance/size gates only where the change can affect them.
+For UI changes, exercise affected behavior in a real browser. For changed SSR/routes, cover production serving and nested navigation. For dependency changes, verify a frozen install; for build changes, inspect output for obsolete frameworks and server-only imports/secrets. Use relevant existing performance/size gates; measure performance claims.
 
-Review the final diff and rescan for obsolete imports, duplicated ownership, new suppressions, accidental API changes, or unrelated churn. Report a blocked migration precisely; do not hide it behind weakened types, silently lost lint coverage, or compatibility shims.
+Review the final diff and rescan for obsolete code, duplicated ownership, accidental contracts, and churn. Bind evidence to final changes: stale checks, empty test selections, or excluded code are not passes. Missing required proof means unverified/partial, not complete. Report the precise gap without compatibility shims or silently lost coverage.
 
 **Report:** code and stack changes with representative symbols; removed dependencies/layers; contracts preserved or intentionally changed; justified exceptions and remaining blockers; source/version uncertainty; checks run, results, preexisting failures, and checks not run.
