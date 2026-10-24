@@ -176,6 +176,20 @@ def initialize(db):
     db.commit()
 
 
+def redact_tree(value):
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {key: redact_tree(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact_tree(item) for item in value]
+    return value
+
+
+def redacted_json(value, **options):
+    return json.dumps(redact_tree(value), **options)
+
+
 def _epoch(value):
     import datetime
     if not value:
@@ -1014,7 +1028,7 @@ class Learner:
         if grant is not None and not local_only:
             self.store.refresh_headers(roots=roots)
             self._enroll_global_projects(grant)
-        projects = list(self.db.execute("SELECT * FROM learning_projects WHERE enabled=1")) if not local_only else []
+        projects = list(self.db.execute("SELECT * FROM learning_projects WHERE enabled=1"))
         observed = self._observed_projects()
         if not projects and not observed:
             return totals
@@ -1046,7 +1060,7 @@ class Learner:
                 totals[key] += stats[key]
         for project in projects:
             for row in self.db.execute("SELECT * FROM learning_findings WHERE project=? AND state IN ('promoted','memory')", (project["project"],)).fetchall():
-                if totals["reviews"] < max_reviews and self._model_calls_since(now-86400) < max_model_calls and self.monitor(row, project, now):
+                if totals["reviews"] < max_reviews and self._model_calls_since(now-86400) + RESERVED_CALLS_PER_MONITOR <= max_model_calls and self.monitor(row, project, now):
                     totals["reviews"] += 1
             pending = list(self.db.execute("""SELECT f.* FROM learning_findings f WHERE project=?
                 AND (state IN ('pending','deferred') OR (state='held' AND retry_kind='capability')) AND retry_at<=?
@@ -1054,7 +1068,7 @@ class Learner:
                 ORDER BY (SELECT count(DISTINCT root_session) FROM learning_incidents WHERE finding=f.id) DESC,created_at
                 """, (project["project"], now)))
             for finding in pending:
-                if totals["reviews"] >= max_reviews or self._model_calls_since(now-86400) >= max_model_calls:
+                if totals["reviews"] >= max_reviews or self._model_calls_since(now-86400) + RESERVED_CALLS_PER_REVIEW > max_model_calls:
                     break
                 related = self._related_ids(finding["id"])
                 represented = self.db.execute("SELECT id FROM learning_findings WHERE id!=? AND id IN ({ids}) AND state='promoted' LIMIT 1".format(ids=",".join("?" * len(related))), (finding["id"], *related)).fetchone()
@@ -1178,7 +1192,7 @@ class Learner:
             counts.update(token for token in row[0].split() if len(token) >= 4)
         for row in self.db.execute("SELECT action,applicability FROM learning_memories WHERE project=? AND state='approved' LIMIT 40", (project,)):
             counts.update(technical_tokens(row[0] + " " + row[1], 8))
-        return [token for token, _ in counts.most_common(limit)]
+        return [redact(token) for token, _ in counts.most_common(limit) if redact(token) == token]
 
     def _record_receipts(self, project, cwd, query, response, now, session):
         text = redact(" ".join(str(query).split()))[:300]
@@ -1221,6 +1235,8 @@ class Learner:
                 raise LearningError("no such retained record")
             project = row["project"]
         current = Path(cwd) if cwd is not None else self._project_cwd(project)
+        if cwd is not None and project_identity(current) != project:
+            raise LearningError("record belongs to another project; run inspect from that project")
         retriever = Retriever(self.store, project, current, moment)
         if kind != "event":
             candidate = retriever._load_record(kind, int(rest))
@@ -1288,18 +1304,22 @@ class Learner:
     BRIDGED_DETECTORS = ("resolved_failure", "user_correction", "recurring_failure", "investigated_fact", "technical_decision")
 
     def bridge_experiences(self, project, now):
-        grant = self.db.execute("SELECT review_harnesses FROM learning_projects WHERE project=? AND enabled=1", (project,)).fetchone()
+        grant = self.db.execute("SELECT review_harnesses,enabled_at FROM learning_projects WHERE project=? AND enabled=1", (project,)).fetchone()
         if grant is None:
             return 0
         harnesses = set(grant[0].split(","))
+        granted_at = grant[1]
         bridged = 0
         rows = self.db.execute("""SELECT e.* FROM learning_experiences e WHERE e.project=? AND e.state='retained' AND e.basis='deterministic'
             AND e.detector IN ({detectors}) AND NOT EXISTS (SELECT 1 FROM learning_experience_findings b WHERE b.experience=e.id)
             ORDER BY e.id LIMIT 50""".format(detectors=",".join("'%s'" % name for name in self.BRIDGED_DETECTORS)), (project,)).fetchall()
         for row in rows:
             sources = [dict(item) for item in self.db.execute("SELECT * FROM learning_experience_sources WHERE experience=?", (row["id"],))]
-            allowed = [item for item in sources if self.db.execute("SELECT harness FROM sessions WHERE id=?", (item["session"],)).fetchone() is not None
-                       and self.db.execute("SELECT harness FROM sessions WHERE id=?", (item["session"],)).fetchone()[0] in harnesses]
+            allowed = []
+            for item in sources:
+                owner = self.db.execute("SELECT harness,updated FROM sessions WHERE id=?", (item["session"],)).fetchone()
+                if owner is not None and owner["harness"] in harnesses and owner["updated"] >= granted_at:
+                    allowed.append(item)
             if not allowed:
                 continue
             by_session = {}
@@ -1340,6 +1360,25 @@ class Learner:
             raise LearningError("experience does not exist or is already withdrawn")
         return "withdrew experience %s from retrieval; evidence remains until forgotten" % rest
 
+    PURGEABLE_STATES = ("pending", "deferred", "held", "rejected", "reviewing")
+
+    def _purge_findings(self, findings, forgotten_experience=None):
+        for finding in findings:
+            row = self.db.execute("SELECT state,signal FROM learning_findings WHERE id=?", (finding,)).fetchone()
+            if row is None or row["state"] not in self.PURGEABLE_STATES:
+                continue
+            others = self.db.execute("SELECT count(*) FROM learning_experience_findings WHERE finding=? AND experience!=?", (finding, forgotten_experience or 0)).fetchone()[0]
+            remaining = self.db.execute("SELECT count(*) FROM learning_incidents WHERE finding=?", (finding,)).fetchone()[0]
+            if others or not (remaining == 0 or (row["signal"] == "experience" and forgotten_experience is not None)):
+                continue
+            for table in ("learning_reviews", "learning_evaluations", "learning_incidents", "learning_experience_findings"):
+                self.db.execute("DELETE FROM %s WHERE %s=?" % (table, "finding"), (finding,))
+            self.db.execute("DELETE FROM learning_findings WHERE id=?", (finding,))
+
+    def _purge_record_traces(self, ref):
+        for table in ("learning_receipts", "learning_feedback", "learning_outcomes"):
+            self.db.execute("DELETE FROM %s WHERE record=?" % table, (ref,))
+
     def forget(self, ref, now):
         kind, _, rest = ref.partition(":")
         if kind != "experience":
@@ -1350,6 +1389,8 @@ class Learner:
         derived = [row[0] for row in self.db.execute("SELECT finding FROM learning_experience_findings WHERE experience=?", (experience,))]
         unresolved = self._withdraw_derived(derived, now)
         with self.db:
+            self._purge_findings(derived, experience)
+            self._purge_record_traces(ref)
             self.db.execute("DELETE FROM learning_experiences WHERE id=?", (experience,))
         return {"forgot": ref, "unresolved_derived_findings": unresolved}
 
@@ -1369,26 +1410,32 @@ class Learner:
         return unresolved
 
     def forget_session(self, session, now):
-        if self.db.execute("SELECT 1 FROM sessions WHERE id=?", (session,)).fetchone() is None and \
-                self.db.execute("SELECT 1 FROM learning_incidents WHERE session=? UNION SELECT 1 FROM learning_experience_sources WHERE session=?", (session, session)).fetchone() is None:
+        known = self.db.execute("SELECT 1 FROM sessions WHERE id=?", (session,)).fetchone() or \
+            self.db.execute("SELECT 1 FROM learning_incidents WHERE session=? UNION SELECT 1 FROM learning_experience_sources WHERE session=?", (session, session)).fetchone()
+        if known is None:
             raise LearningError("no indexed or derived record references that session")
         findings = {row[0] for row in self.db.execute("SELECT DISTINCT finding FROM learning_incidents WHERE session=?", (session,))}
+        experiences = [row[0] for row in self.db.execute("SELECT DISTINCT experience FROM learning_experience_sources WHERE session=?", (session,))]
+        bridged = {row[0] for exp in experiences for row in self.db.execute("SELECT finding FROM learning_experience_findings WHERE experience=?", (exp,))}
         sole = []
-        for finding in findings:
+        for finding in findings | bridged:
             remaining = self.db.execute("SELECT count(DISTINCT root_session) FROM learning_incidents WHERE finding=? AND session!=?", (finding, session)).fetchone()[0]
             if remaining < 2:
                 sole.append(finding)
         unresolved = self._withdraw_derived(sole, now)
         with self.db:
-            self.db.execute("DELETE FROM learning_experiences WHERE id IN (SELECT experience FROM learning_experience_sources WHERE session=? "
-                            "AND experience NOT IN (SELECT experience FROM learning_experience_sources WHERE session!=?))", (session, session))
-            self.db.execute("DELETE FROM learning_experience_sources WHERE session=?", (session,))
-            self.db.execute("DELETE FROM learning_signatures WHERE session=?", (session,))
-            self.db.execute("DELETE FROM learning_observed WHERE session=?", (session,))
-            self.db.execute("DELETE FROM learning_processed WHERE session=?", (session,))
-            self.db.execute("DELETE FROM learning_evaluations WHERE session=?", (session,))
+            for experience in experiences:
+                others = [row[0] for row in self.db.execute("SELECT DISTINCT session FROM learning_experience_sources WHERE experience=? AND session!=?", (experience, session))]
+                if others:
+                    self.db.execute("DELETE FROM learning_observed WHERE session IN (%s)" % ",".join("?" * len(others)), others)
+                self._purge_findings([row[0] for row in self.db.execute("SELECT finding FROM learning_experience_findings WHERE experience=?", (experience,))], experience)
+                self._purge_record_traces("experience:%d" % experience)
+                self.db.execute("DELETE FROM learning_experiences WHERE id=?", (experience,))
+            for table in ("learning_signatures", "learning_observed", "learning_processed", "learning_evaluations", "learning_outcomes", "learning_receipts"):
+                self.db.execute("DELETE FROM %s WHERE session=?" % table, (session,))
             self.db.execute("DELETE FROM learning_incidents WHERE session=?", (session,))
-            self.db.execute("DELETE FROM sessions WHERE id=?", (session,))
+            self._purge_findings(sorted(findings | bridged))
+            self.store.forget_session(session, now)
         return {"forgot_session": session, "unresolved_derived_findings": unresolved}
 
     def feedback(self, ref, verdict, reporter, now, note=None, session=None):
@@ -1610,11 +1657,10 @@ def parser():
     forget.add_argument("ref")
     forget_session = commands.add_parser("forget-session", help="delete one session's index and derived records; never touches the transcript file")
     forget_session.add_argument("session")
-    feedback = commands.add_parser("feedback", help="record a verdict about a retrieved record; it never grants authority")
+    feedback = commands.add_parser("feedback", help="record the agent's verdict about a retrieved record; it never grants authority")
     feedback.add_argument("ref")
     feedback.add_argument("verdict", choices=("helped", "irrelevant", "stale", "misleading"))
     feedback.add_argument("--note")
-    feedback.add_argument("--user", action="store_true", help="record as the user's verdict instead of the agent's")
     commands.add_parser("quality", help="report retrieval quality observations from receipts, feedback and transcripts")
     commands.add_parser("reindex", help="rebuild the recall projection from canonical records")
     commands.add_parser("undo", help="withdraw one promoted skill edit or approved project memory").add_argument("finding", type=int)
@@ -1686,18 +1732,18 @@ def main(argv=None):
                         exit_code = 1
                 result["redaction"] = "heuristic, cannot guarantee removal of all secrets"
                 result["hook_trust"] = "inspect /hooks in Codex; never inferred from configured commands"
-            print(redact(json.dumps(result, indent=2)))
+            print(redacted_json(result, indent=2))
         elif args.command == "recall":
             identity = project_identity(args.project)
             if not args.no_refresh:
                 store.refresh(project=identity)
             response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record)
-            print(redact(json.dumps(response, indent=2) if args.explain else json.dumps(response["results"], separators=(",", ":"))))
+            print(redacted_json(response, indent=2) if args.explain else redacted_json(response["results"], separators=(",", ":")))
             if response["abstained"]:
                 terms = ", ".join(response["vocabulary"])
                 print("agent-learn recall: " + response["hint"] + (" Terms seen in this project: " + terms + "." if terms else ""), file=sys.stderr)
         elif args.command == "inspect":
-            print(redact(json.dumps(learner.inspect(args.ref, cwd=args.project), indent=2)))
+            print(redacted_json(learner.inspect(args.ref, cwd=args.project), indent=2))
         elif args.command == "observe":
             if args.off:
                 learner.observe_disable(args.project)
@@ -1709,7 +1755,7 @@ def main(argv=None):
                     store.refresh(project=identity)
                     print(json.dumps(learner.observe_project(identity, args.project, time.time())))
         elif args.command == "experiences":
-            print(redact(json.dumps(learner.experiences(project_identity(args.project) if args.project else None, args.state, args.limit), indent=2)))
+            print(redacted_json(learner.experiences(project_identity(args.project) if args.project else None, args.state, args.limit), indent=2))
         elif args.command == "withdraw":
             with run_lock(args.state_dir) as acquired:
                 if not acquired:
@@ -1730,21 +1776,21 @@ def main(argv=None):
             print(json.dumps(result, indent=2))
             exit_code = 1 if result["unresolved_derived_findings"] else 0
         elif args.command == "feedback":
-            learner.feedback(args.ref, args.verdict, "user" if args.user else "agent", time.time(), args.note)
+            learner.feedback(args.ref, args.verdict, "agent", time.time(), args.note)
             print("Recorded. Feedback is advisory and never changes instruction authority.")
         elif args.command == "quality":
-            print(redact(json.dumps(learner.quality(), indent=2)))
+            print(redacted_json(learner.quality(), indent=2))
         elif args.command == "reindex":
             rebuild_recall_projection(learner.db)
             print("Rebuilt the recall projection.")
         elif args.command == "findings":
-            print(redact(json.dumps([dict(row) for row in learner.db.execute("SELECT id,signal,state,retry_kind,reason,commit_id FROM learning_findings ORDER BY id DESC LIMIT 50")], indent=2)))
+            print(redacted_json([dict(row) for row in learner.db.execute("SELECT id,signal,state,retry_kind,reason,commit_id FROM learning_findings ORDER BY id DESC LIMIT 50")], indent=2))
         elif args.command == "show":
             row = learner.db.execute("SELECT * FROM learning_findings WHERE id=?", (args.finding,)).fetchone()
             if row is None:
                 raise LearningError("finding does not exist")
             evaluations = [dict(item) for item in learner.db.execute("SELECT * FROM learning_evaluations WHERE finding=? ORDER BY session LIMIT 20", (args.finding,))]
-            print(redact(json.dumps({"finding": dict(row), "evidence": learner._evidence(args.finding), "evaluations": evaluations}, indent=2)))
+            print(redacted_json({"finding": dict(row), "evidence": learner._evidence(args.finding), "evaluations": evaluations}, indent=2))
         store.db.close()
         return exit_code
     except (LearningError, StoreError, SchedulerError, OSError, ValueError, sqlite3.Error, subprocess.SubprocessError) as error:

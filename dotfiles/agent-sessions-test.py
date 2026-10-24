@@ -353,6 +353,7 @@ class SessionStoreTests(unittest.TestCase):
     @staticmethod
     def downgrade_v4_columns(db, sessions=True):
         db.execute("ALTER TABLE events DROP COLUMN outcome")
+        db.execute("DROP TABLE forgotten_sessions")
         if sessions:
             for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events"):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
@@ -420,6 +421,38 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(stats["content_opens"], 0)
             self.assertEqual(stats["bytes_read"], 0)
             self.assertEqual(stats["git_processes"], 0)
+
+    def test_populated_v3_database_from_the_previous_release_migrates_in_place(self):
+        ref = "6e301c4"
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", ref + ":dotfiles/base/.local/bin/agent_session_store.py"], capture_output=True)
+        if shown.returncode:
+            self.skipTest("previous release revision is not available in this checkout")
+        old_path = self.root / "agent_session_store_v3.py"
+        old_path.write_bytes(shown.stdout)
+        spec = importlib.util.spec_from_file_location("agent_session_store_v3", old_path)
+        old = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = old
+        spec.loader.exec_module(old)
+        self.transcript("legacy-a", records=[message("legacyneedle one"), message("legacyneedle two", "assistant")])
+        self.transcript("legacy-b", records=[message("another legacyneedle")])
+        with old.Store(self.state) as store:
+            store.db.execute("CREATE TABLE learning_hints (id TEXT PRIMARY KEY, text TEXT)")
+            store.db.execute("INSERT INTO learning_hints VALUES ('h1', 'keep')")
+            store.db.commit()
+            store.refresh([self.transcripts], project=self.project_id)
+            before = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
+        with Store(self.state) as store:
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+            after = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
+            self.assertEqual(before, after)
+            self.assertEqual(store.db.execute("SELECT text FROM learning_hints").fetchone()[0], "keep")
+            rows = store.db.execute("SELECT id, native_id, ancestry, coverage, recognized_events FROM sessions ORDER BY id").fetchall()
+            self.assertEqual([(row["id"], row["native_id"], row["ancestry"], row["coverage"]) for row in rows], [("legacy-a", "legacy-a", "known", "complete"), ("legacy-b", "legacy-b", "known", "complete")])
+            self.assertTrue(all(row["recognized_events"] > 0 for row in rows))
+            hit = store.search("legacyneedle", self.project_id)[0]
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["session"], hit["session"])
+            stats = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual((stats["resets"], stats["events_added"], stats["bytes_read"]), (0, 0, 0))
 
     def test_git_worktrees_share_project_identity(self):
         repo = self.root / "git-repo"

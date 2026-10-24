@@ -625,10 +625,10 @@ def observe_session(db, project, cwd, session, now):
 
 def evidence_text(events, draft):
     positions = {item["position"] for item in draft.sources}
-    texts = [event["text"][:700] for event in events if event["position"] in positions]
+    texts = [redact(event["text"][:6000])[:700] for event in events if event["position"] in positions]
     last = max((index for index, event in enumerate(events) if event["position"] in positions), default=None)
     if last is not None:
-        following = [event["text"][:500] for event in events[last + 1:last + 4] if event["kind"] == "assistant"]
+        following = [redact(event["text"][:4000])[:500] for event in events[last + 1:last + 4] if event["kind"] == "assistant"]
         texts.extend(following[:1])
     return " ".join(texts)
 

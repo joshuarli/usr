@@ -23,7 +23,7 @@ agent-learn inspect experience:12 --project "$PWD"
 The default output is a compact JSON list of at most three results. Each result has:
 
 - `tier`: `instruction` (reviewed project advice, source conditions hold), `experience` (advisory), or `lead` (an unverified search lead from a session, or a record that needs revalidation).
-- `status` and `reasons`: `verified` means every source condition held in the requested worktree; `unverified` means nothing checkable was attached; `needs_revalidation` lists why, using `source_changed`, `excerpt_missing`, `source_unavailable`, `evidence_unavailable`, `evidence_changed`, `files_changed_since_capture`, `aged_performance_result`, `conflict_unresolved`, or `not_rechecked`.
+- `status` and `reasons`: `verified` means every source condition held in the requested worktree; `unverified` means nothing checkable was attached; `needs_revalidation` lists why, using `source_changed` (a tracked file differs from its state when the session ran), `excerpt_missing` (an exact excerpt a memory depends on is gone), `source_unavailable`, `evidence_unavailable`, `evidence_changed`, `files_changed_since_capture`, `aged_performance_result`, `conflict_unresolved`, or `not_rechecked`.
 - `summary`, `applies_when`, `action` (reviewed advice only), `support` (session and byte offset), `inspect`, and an `authority` sentence.
 
 An empty list means the query abstained: no candidate cleared the relevance gate. The reason and a short list of terms seen in the project print to stderr. Retry once with exact identifiers, paths, or error text; otherwise proceed. `--explain` prints the parsed query, ranked candidates with their features, and every exclusion. `--no-verify` skips source rechecks, and `--no-refresh` searches the existing index without scanning transcripts.
@@ -60,22 +60,22 @@ agent-learn enable --all-projects --usr-root "$HOME/usr" --schedule
 
 On macOS, `--schedule` installs a user LaunchAgent that runs `agent-learn run --scheduled` every 15 minutes. Without it, run reconciliation yourself; Linux has no bundled scheduler. The dotfiles sync does not install or start the LaunchAgent.
 
-Each run starts at most two finding reviews and stops starting reviews once the previous 24 hours hold 24 model calls. A review reserves four calls when it starts and replaces the reservation with recorded usage when it finishes, so a crash cannot hide spend. `agent-learn status` reports `model_calls_24h`, `model_tokens_24h`, deferred reviews, and rejected candidates.
+Each run starts at most two finding reviews. A review starts only when the previous 24 hours leave room for its full reservation: four model calls within a 24-call budget, two for a regression monitor. The reservation is written before the first call and replaced by recorded usage when the review finishes, so a crash cannot hide spend and the budget is a hard cap. `agent-learn status` reports `model_calls_24h`, `model_tokens_24h`, deferred reviews, and rejected candidates.
 
 Run `agent-learn status` for grants, findings, observation, retrieval counts, transcript coverage, and scheduler state. `agent-learn findings` lists findings and `agent-learn show ID` inspects one.
 
 ## Withdraw, delete, and disable
 
 - `agent-learn withdraw experience:N` stops retrieval and keeps the evidence. `withdraw memory:N` withdraws an approved project memory.
-- `agent-learn forget experience:N` deletes the record, its sources, and its links, withdraws memories derived from it, and reports any promoted skill edit it cannot safely reverse as `unresolved_derived_findings` with a non-zero exit. It never forces a revert.
-- `agent-learn forget-session SESSION` deletes one session's index rows and everything derived only from it. It never touches the transcript file.
+- `agent-learn forget experience:N` deletes the record, its sources, links, receipts, feedback, and any still-pending review candidate built from it. It withdraws memories derived from it and reports a promoted skill edit it cannot safely reverse as `unresolved_derived_findings` with a non-zero exit. It never forces a revert.
+- `agent-learn forget-session SESSION` deletes one session's index rows, every experience that cites it, and everything derived only from it, and records a tombstone so a later refresh does not index the same transcript again. Experiences supported by other sessions are rebuilt from those sessions on the next run. It never touches the transcript file.
 - `agent-learn undo ID` withdraws a promoted skill edit or approved memory. A promotion can be reversed after later commits when its paragraph is unchanged; otherwise the reversal is refused and `status` lists the finding under `unresolved_regressions`.
 - `agent-learn disable --project "$PWD"` stops review for one project; `--all-projects` revokes the wildcard; `--schedule` removes the LaunchAgent for every project. Disabling stops future work and deletes nothing.
 - `agent-learn reindex` rebuilds the search projection from the canonical records.
 
 ## Feedback and measurement
 
-Every recall writes a receipt of what was returned, and `inspect` writes one for what was inspected. `agent-learn feedback REF helped|irrelevant|stale|misleading` records the agent's own verdict; `--user` records yours. Feedback and frequency never raise a record's tier or ranking. `agent-learn quality` reports abstentions, stale results returned, leads never inspected, queries that repeatedly abstained, consolidation candidates, feedback counts, and follow-through. Follow-through is derived from transcripts: a result was presented when its reference appears in the recall output, acted on when a later tool call used an identifier the query did not already contain, and verified when a later test or build run passed or failed. It is observational. It cannot show that a record caused an outcome, that an agent obeyed it, or that a missing memory existed.
+Every recall writes a receipt of what was returned, and `inspect` writes one for what was inspected. `agent-learn feedback REF helped|irrelevant|stale|misleading` records a verdict; it is self-declared and nothing reads it for ranking, tier, or authority. Feedback and frequency never raise a record's tier or ranking. `agent-learn quality` reports abstentions, stale results returned, leads never inspected, queries that repeatedly abstained, consolidation candidates, feedback counts, and follow-through. Follow-through is derived from transcripts: a result was presented when its reference appears in the recall output, acted on when a later tool call used an identifier the query did not already contain, and verified when a later test or build run passed or failed. It is observational. It cannot show that a record caused an outcome, that an agent obeyed it, or that a missing memory existed.
 
 ## Hook and data boundaries
 

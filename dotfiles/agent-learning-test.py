@@ -489,6 +489,21 @@ class LearningTest(unittest.TestCase):
         self.learn.reconcile(self.now + 1, roots=[self.history], stable_seconds=0, max_model_calls=2)
         self.assertEqual(self.model.calls, calls)
 
+    def test_admission_needs_room_for_the_whole_reservation(self):
+        self.global_pattern()
+        self.learn.reconcile(self.now, roots=[self.history], stable_seconds=0, max_model_calls=0)
+        finding = self.store.db.execute("SELECT id FROM learning_findings ORDER BY id LIMIT 1").fetchone()[0]
+        spent = learning.MAX_MODEL_CALLS_PER_DAY - learning.RESERVED_CALLS_PER_REVIEW + 1
+        with self.store.db:
+            self.store.db.execute("INSERT INTO learning_reviews(finding,started_at,finished_at,outcome,usage) VALUES(?,?,?,?,?)",
+                                  (finding, self.now, self.now, "deferred", json.dumps({"calls": [{"mode": "proposal"}] * spent})))
+        self.learn.reconcile(self.now + 1, roots=[self.history], stable_seconds=0)
+        self.assertEqual(self.model.calls, 0)
+        with self.store.db:
+            self.store.db.execute("UPDATE learning_reviews SET usage = ?", (json.dumps({"calls": [{"mode": "proposal"}] * (spent - 1)}),))
+        self.learn.reconcile(self.now + 2, roots=[self.history], stable_seconds=0)
+        self.assertGreater(self.model.calls, 0)
+
     def test_one_lesson_is_learned_used_and_withdrawn_when_proven_wrong(self):
         def agent():
             runner = "test-driver.py" if "repository with a test driver" in self.skill.read_text() else "focused-test.py"

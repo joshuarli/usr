@@ -555,6 +555,141 @@ class BudgetTests(RecallCase):
             self.assertIn(key, status)
 
 
+class ReviewRegressionTests(RecallCase):
+    def edit_world(self, mutation=None, worktree=False):
+        projects = {"alpha": dict(BASE, worktrees={"wt": {"files": {"src/app.py": "def main():\n    return 3\n"}}} if worktree else {})}
+        patch = "apply_patch '*** Begin Patch\n*** Update File: src/app.py\n@@\n-return 1\n+return 2\n*** End Patch'"
+        turns = [{"user": "tests fail on the runner"}, tool("pytest -q tests/test_app.py", "E   AssertionError: main returned 1\nFAILED tests/test_app.py::test_main", 1),
+                 tool(patch, "Success. Updated src/app.py", 0), tool("pytest -q tests/test_app.py", "1 passed in 0.2s", 0)]
+        return fixture(projects, [episode("e-1", "alpha", turns, age=6)], mutations=[mutation] if mutation else [])
+
+    def test_experience_with_a_file_condition_is_retrievable_and_tracks_the_file(self):
+        self.build(self.edit_world())
+        row = self.store.db.execute("SELECT validity FROM learning_experiences").fetchone()
+        self.assertEqual([item["path"] for item in json.loads(row[0])], ["src/app.py"])
+        hit = self.ask("alpha", "tests/test_app.py AssertionError main returned")["results"][0]
+        self.assertEqual((hit["tier"], hit["status"]), ("experience", "verified"))
+        self.assertEqual(self.learner.inspect(hit["ref"], cwd=self.world.cwd("alpha"), record=False)["status"], "verified")
+
+    def test_changed_deleted_or_branch_specific_file_moves_the_experience_to_revalidation(self):
+        self.build(self.edit_world({"project": "alpha", "path": "src/app.py", "content": "def main():\n    return 9\n", "commit": False}))
+        hit = self.ask("alpha", "tests/test_app.py AssertionError main returned")["results"][0]
+        self.assertEqual((hit["tier"], hit["status"]), ("lead", "needs_revalidation"))
+        self.assertIn("source_changed:src/app.py", hit["reasons"])
+        (self.world.projects["alpha"]["path"] / "src" / "app.py").unlink()
+        hit = self.ask("alpha", "tests/test_app.py AssertionError main returned")["results"][0]
+        self.assertIn("source_unavailable:src/app.py", hit["reasons"])
+
+    def test_branch_with_a_different_file_does_not_inherit_main_checkout_verification(self):
+        self.build(self.edit_world(worktree=True))
+        main = self.ask("alpha", "tests/test_app.py AssertionError main returned")["results"][0]
+        branch = self.ask("alpha", "tests/test_app.py AssertionError main returned", worktree="wt")["results"][0]
+        self.assertEqual((main["status"], branch["status"]), ("verified", "needs_revalidation"))
+
+    def test_bridging_respects_the_review_grant_time(self):
+        spec = lesson_world()
+        spec["episodes"].append(episode("a-3", "alpha", [
+            {"user": "tests fail again"}, tool("pytest -q tests/test_ingest.py", PYTEST_FAIL, 1),
+            tool("pip install -e .", "Successfully installed orbit-core", 0), tool("pytest -q tests/test_ingest.py", "1 passed in 0.4s", 0)], age=3))
+        self.build(spec, observe=False)
+        self.learner.enable(self.world.cwd("alpha"), ROOT, self.world.now - 10 * 86400)
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        sessions = {row[0] for row in self.store.db.execute("SELECT session FROM learning_incidents WHERE signal = 'experience'")}
+        self.assertEqual(sessions, {"a-3"})
+
+    def test_local_only_run_keeps_the_global_grant_cutoff(self):
+        spec = lesson_world()
+        self.build(spec, observe=False)
+        grant = self.world.now - 5 * 86400
+        self.learner.enable_all(ROOT, grant)
+        with self.store.db:
+            self.store.db.execute("INSERT OR REPLACE INTO learning_projects(project,cwd,enabled,enabled_at,repository,grant_source) VALUES(?,?,1,?,?,'global')",
+                                  (self.ident["alpha"], str(self.world.cwd("alpha")), grant, str(ROOT)))
+            self.store.db.execute("DELETE FROM sessions")
+        self.learner.reconcile(self.world.now, roots=self.world.root_args(), stable_seconds=0, local_only=True)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM sessions WHERE id IN ('a-1')").fetchone()[0], 0)
+
+    def test_forgetting_a_session_survives_the_next_refresh_and_regenerates_without_it(self):
+        spec = lesson_world()
+        spec["episodes"].append(episode("a-3", "alpha", [
+            {"user": "tests fail again"}, tool("pytest -q tests/test_ingest.py", PYTEST_FAIL, 1),
+            tool("pip install -e .", "Successfully installed orbit-core", 0), tool("pytest -q tests/test_ingest.py", "1 passed in 0.4s", 0)], age=3))
+        self.build(spec)
+        self.learner.enable(self.world.cwd("alpha"), ROOT, 0)
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        self.learner.retrieve(self.ident["alpha"], "ModuleNotFoundError orbit_core", cwd=self.world.cwd("alpha"), now=self.world.now, record=True, session="a-1")
+        result = self.learner.forget_session("a-1", 5)
+        self.assertEqual(result["unresolved_derived_findings"], [])
+        stats = self.store.refresh(roots=self.world.root_args(), project=self.ident["alpha"])
+        self.assertEqual(stats["skipped_forgotten"], 1)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM sessions WHERE id = 'a-1'").fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_receipts WHERE session = 'a-1'").fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_incidents WHERE session = 'a-1'").fetchone()[0], 0)
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        alpha = self.store.db.execute("SELECT id FROM learning_experiences WHERE project = ?", (self.ident["alpha"],)).fetchall()
+        sessions = {row[0] for row in self.store.db.execute("SELECT session FROM learning_experience_sources WHERE experience = ?", (alpha[0][0],))}
+        self.assertEqual((len(alpha), sessions), (1, {"a-3"}))
+
+    def test_forgetting_an_experience_removes_its_pending_review_candidate(self):
+        self.build(lesson_world(), observe=False)
+        self.learner.enable(self.world.cwd("alpha"), ROOT, 0)
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        experience = self.store.db.execute("SELECT id FROM learning_experiences WHERE project = ?", (self.ident["alpha"],)).fetchone()[0]
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_findings WHERE signal = 'experience'").fetchone()[0], 1)
+        self.learner.forget("experience:%d" % experience, 5)
+        for table in ("learning_findings", "learning_incidents", "learning_experience_findings"):
+            self.assertEqual(self.store.db.execute("SELECT count(*) FROM " + table).fetchone()[0], 0, table)
+
+    def test_secret_straddling_the_snippet_window_is_not_leaked(self):
+        secret = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
+        text = "prefix " + secret + " " + "filler " * 12 + "orbit_core marker"
+        spec = fixture({"alpha": BASE}, [episode("s", "alpha", [{"user": "see logs"}, {"assistant": text}, {"user": "thanks"}], age=5)])
+        self.build(spec, observe=False)
+        dump = json.dumps(self.ask("alpha", "orbit_core marker")["results"])
+        self.assertNotIn(secret[-14:], dump)
+        self.assertNotIn(secret, dump)
+
+    def test_structured_redaction_covers_quoted_values(self):
+        dumped = agent_learning.redacted_json({"proposal": 'password: "hunter2" and api_key=abcdefabcdef1234', "list": ["token: sk-" + "x" * 30]})
+        self.assertNotIn("hunter2", dumped)
+        self.assertNotIn("abcdefabcdef1234", dumped)
+        self.assertNotIn("x" * 30, dumped)
+
+    def test_inspect_refuses_a_record_from_another_project(self):
+        self.build(lesson_world())
+        ref = next(item["ref"] for item in self.ask("beta", "gcc unrecognized option fzorp")["results"])
+        with self.assertRaises(agent_learning.LearningError):
+            self.learner.inspect(ref, cwd=self.world.cwd("alpha"), record=False)
+        self.assertTrue(self.learner.inspect(ref, cwd=self.world.cwd("beta"), record=False)["evidence"])
+
+    def test_concurrent_first_indexing_of_one_session_does_not_fail(self):
+        import threading
+        errors = []
+        spec = lesson_world()
+        temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.addCleanup(temp.cleanup)
+        world = BENCH.World(spec, temp.name)
+        world.build()
+
+        def indexer():
+            try:
+                store = agent_session_store.Store(world.state_dir)
+                store.refresh(roots=world.root_args())
+                store.close()
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=indexer) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        store = agent_session_store.Store(world.state_dir)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 3)
+
+
 class HardeningTests(RecallCase):
     def test_non_ascii_text_paths_and_identifiers_are_searchable(self):
         spec = fixture({"alpha": BASE}, [

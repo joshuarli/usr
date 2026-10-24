@@ -132,8 +132,13 @@ def _prepare_database(path):
         if not stat.S_ISREG(mode.st_mode) or mode.st_nlink != 1:
             raise StoreError("session database must be a regular, unlinked file: " + str(path))
     else:
-        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
-        os.close(fd)
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            os.close(fd)
+        except FileExistsError:
+            mode = path.lstat()
+            if path.is_symlink() or not stat.S_ISREG(mode.st_mode) or mode.st_nlink != 1:
+                raise StoreError("session database must be a regular, unlinked file: " + str(path)) from None
     os.chmod(path, 0o600)
 
 
@@ -316,7 +321,7 @@ class Store:
             and {"id", "session", "position", "kind", "text", "timestamp", "call_id", "digest"} <= event_columns
             and (expected_version < 2 or "file_ctime_ns" in session_columns)
             and (expected_version < 3 or "unindexed_sources" in existing)
-            and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns))
+            and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns and "forgotten_sessions" in existing))
         )
 
     def _migrate_v1(self):
@@ -358,6 +363,7 @@ class Store:
                 "ALTER TABLE unindexed_sources ADD COLUMN ancestry TEXT NOT NULL DEFAULT 'known';"
                 "UPDATE sessions SET native_id = id WHERE native_id IS NULL;"
                 "UPDATE unindexed_sources SET native_id = id WHERE native_id IS NULL;"
+                "CREATE TABLE IF NOT EXISTS forgotten_sessions (id TEXT PRIMARY KEY, forgotten_at REAL NOT NULL);"
                 "UPDATE sessions SET recognized_events = (SELECT count(*) FROM events WHERE events.session = sessions.id AND events.kind IN (" + ",".join("'" + kind + "'" for kind in SUBSTANTIVE_KINDS) + ")),"
                 " unrecognized_events = (SELECT count(*) FROM events WHERE events.session = sessions.id AND events.kind LIKE 'unknown:%');"
                 "PRAGMA user_version = 4;COMMIT;"
@@ -398,6 +404,7 @@ class Store:
             "CREATE TRIGGER events_au AFTER UPDATE ON events BEGIN "
             "INSERT INTO events_fts(events_fts, rowid, text) VALUES ('delete', old.id, old.text); "
             "INSERT INTO events_fts(rowid, text) VALUES (new.id, new.text); END;"
+            "CREATE TABLE IF NOT EXISTS forgotten_sessions (id TEXT PRIMARY KEY, forgotten_at REAL NOT NULL);"
             "CREATE TABLE index_issues ("
             "session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, position INTEGER NOT NULL, "
             "kind TEXT NOT NULL, PRIMARY KEY(session, position));"
@@ -435,8 +442,9 @@ class Store:
             "deleted": 0, "skipped_project": 0, "skipped_ephemeral": 0,
             "skipped_learning_workers": 0, "unreadable": 0,
             "stat_operations": 0, "content_opens": 0, "bytes_read": 0,
-            "git_processes": 0, "sqlite_changes": 0,
+            "git_processes": 0, "sqlite_changes": 0, "skipped_forgotten": 0,
         }
+        forgotten = {row[0] for row in self.db.execute("SELECT id FROM forgotten_sessions")}
         indexed_by_path = {
             row["source_path"]: dict(row)
             for row in self.db.execute("SELECT * FROM sessions")
@@ -492,6 +500,9 @@ class Store:
                         continue
                 if _ephemeral(meta):
                     stats["skipped_ephemeral"] += 1
+                    continue
+                if meta["id"] in forgotten:
+                    stats["skipped_forgotten"] += 1
                     continue
                 selected = (project is None or meta["project"] == project) and (
                     projects is None or meta["project"] in projects
@@ -644,7 +655,7 @@ class Store:
         if existing is None:
             with self.db:
                 self.db.execute(
-                    "INSERT INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
+                    "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
                     "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?)",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
@@ -769,6 +780,13 @@ class Store:
         record = dict(records[0])
         record.update({"session": str(session), "position": int(position), "digest": str(digest)})
         return record
+
+    @_guarded
+    @_guarded
+    def forget_session(self, session, now):
+        with self.db:
+            self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
+            self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)", (str(session), float(now)))
 
     @_guarded
     def coverage(self):

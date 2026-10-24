@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 
 from agent_session_store import EvidenceChanged, EvidenceUnavailable, StoreError, redact
-from agent_transcripts import split_id
 
 DEFAULT_LIMIT = 3
 MAX_LIMIT = 8
@@ -220,7 +219,7 @@ def ident_in(ident, doc_text, doc_norm, tokens):
     return ident.lower() in tokens or flat in tokens
 
 
-def artifact_text(cwd, path):
+def tracked_file(cwd, path):
     relative = Path(path)
     if relative.is_absolute() or not relative.parts or any(part in ("..", ".git", ".work") for part in relative.parts):
         raise SourceError("memory condition must name a tracked project file")
@@ -235,20 +234,39 @@ def artifact_text(cwd, path):
         tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", "--", str(relative)], capture_output=True, timeout=10)
         if tracked.returncode or not candidate.is_file() or candidate.stat().st_size > 262144:
             raise SourceError("memory condition source is unavailable or too large")
-        return candidate.read_text()
-    except (subprocess.SubprocessError, OSError, UnicodeError) as error:
+        return root, candidate
+    except (subprocess.SubprocessError, OSError) as error:
         raise SourceError("memory condition source is unavailable: " + error.__class__.__name__) from error
+
+
+def artifact_text(cwd, path):
+    _, candidate = tracked_file(cwd, path)
+    try:
+        return candidate.read_text()
+    except (OSError, UnicodeError) as error:
+        raise SourceError("memory condition source is unavailable: " + error.__class__.__name__) from error
+
+
+def current_blob(cwd, path):
+    root, candidate = tracked_file(cwd, path)
+    try:
+        result = subprocess.run(["git", "-C", str(root), "hash-object", "--", str(candidate.relative_to(root))], capture_output=True, timeout=10, check=True)
+    except (subprocess.SubprocessError, OSError) as error:
+        raise SourceError("source cannot be hashed") from error
+    return result.stdout.decode().strip()
 
 
 def condition_states(conditions, cwd):
     states = []
     for condition in conditions:
+        path = condition["path"]
         try:
-            text = artifact_text(cwd, condition["path"])
+            if "blob" in condition:
+                states.append((path, "holds" if current_blob(cwd, path) == condition["blob"] else "source_changed"))
+            else:
+                states.append((path, "holds" if condition["contains"] in artifact_text(cwd, path) else "excerpt_missing"))
         except SourceError:
-            states.append((condition["path"], "source_unavailable"))
-            continue
-        states.append((condition["path"], "holds" if condition["contains"] in text else "excerpt_missing"))
+            states.append((path, "source_unavailable"))
     return states
 
 
@@ -687,8 +705,7 @@ class Retriever:
         if item.kind == "event":
             summary = _snippet(item.summary, [word for word in (*self._query.words, *(ident.lower() for ident in self._query.idents))])
         else:
-            summary = item.summary
-        summary = redact(" ".join(summary.split()))[:SUMMARY_CHARS]
+            summary = redact(" ".join(item.summary.split()))[:SUMMARY_CHARS]
         support = [{"session": entry["session"], "position": entry["position"]} for entry in item.supports[:3]]
         authority = {
             "instruction": "Reviewed project advice; current source, tests, and instructions take precedence.",
@@ -708,5 +725,6 @@ def _snippet(text, words):
     lowered = flat.lower()
     positions = [lowered.find(word) for word in words if lowered.find(word) >= 0]
     index = min(positions) if positions else 0
-    start = max(0, index - 80)
-    return ("…" if start else "") + flat[start:start + SUMMARY_CHARS]
+    wide = redact(flat[max(0, index - 2000):index + 2000 + SUMMARY_CHARS])
+    start = max(0, min(index, 2000) - 80)
+    return ("…" if index > 80 else "") + wide[start:start + SUMMARY_CHARS]
