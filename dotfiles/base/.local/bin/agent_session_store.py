@@ -25,6 +25,14 @@ class StoreError(RuntimeError):
     pass
 
 
+class EvidenceUnavailable(StoreError):
+    pass
+
+
+class EvidenceChanged(StoreError):
+    pass
+
+
 def default_state_dir():
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base).expanduser() / "agent-sessions"
@@ -730,15 +738,15 @@ class Store:
     def resolve_evidence(self, session, position, digest):
         row = self.db.execute("SELECT source_path, harness FROM sessions WHERE id = ?", (str(session),)).fetchone()
         if row is None:
-            raise StoreError("session is no longer indexed")
+            raise EvidenceUnavailable("session is no longer indexed")
         try:
             with _open_source(row["source_path"]) as stream:
                 stream.seek(int(position))
                 raw = stream.readline()
         except OSError as exc:
-            raise StoreError("indexed transcript source is unavailable: " + str(exc)) from exc
+            raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
         if not raw or not hmac.compare_digest(_sha256(raw), str(digest)):
-            raise StoreError("transcript evidence changed since indexing; refresh the session index")
+            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         try:
             obj = _json_line(raw)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
