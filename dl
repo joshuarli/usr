@@ -26,6 +26,7 @@ GROK_HOME="${HOME}/.grok"
 MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
 OPENCODE2_HOME="${HOME}/.opencode"
 CMD_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/command-code"
+PI_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pi"
 PYTHON_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/python-build"
 
 STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
@@ -1059,6 +1060,76 @@ install_cmd() {
     printf '%s\n' "Installed ${DEST}/cmd"
 }
 
+install_pi() {
+    command -v npm >/dev/null 2>&1 || { unchecked pi "npm is required"; return; }
+    if ! node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 22 || (major === 22 && minor >= 19) ? 0 : 1)' 2>/dev/null; then
+        unchecked pi "Node.js 22.19 or newer is required"
+        return
+    fi
+    version=$(npm view @earendil-works/pi-coding-agent@latest version 2>/dev/null) || version=
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked pi "no npm release found"; return; }
+    if [ -e "${DEST}/pi" ] || [ -L "${DEST}/pi" ]; then
+        if [ "$(readlink "${DEST}/pi" 2>/dev/null || :)" != "${PI_INSTALL_ROOT}/bin/pi" ] \
+            || [ ! -s "${STATE}/pi" ]; then
+            skip pi "${DEST}/pi already exists outside dl management"
+            return
+        fi
+    fi
+    if [ -e "$PI_INSTALL_ROOT" ] || [ -L "$PI_INSTALL_ROOT" ]; then
+        if [ ! -d "$PI_INSTALL_ROOT" ] || [ -L "$PI_INSTALL_ROOT" ] \
+            || [ ! -s "${STATE}/pi" ]; then
+            skip pi "$PI_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    fi
+    if [ "$(cat "${STATE}/pi" 2>/dev/null)" = "$version" ] \
+        && [ -x "${PI_INSTALL_ROOT}/bin/pi" ] \
+        && [ "$(readlink "${DEST}/pi" 2>/dev/null || :)" = "${PI_INSTALL_ROOT}/bin/pi" ]; then
+        own_dir "$PI_INSTALL_ROOT"
+        own_file "${DEST}/pi"
+        own_file "${STATE}/pi"
+        printf '%s\n' "pi is current (${version})"
+        return
+    fi
+    own_parent=${PI_INSTALL_ROOT%/*}
+    own_missing_dirs "$own_parent"
+    mkdir -p "$own_parent"
+    install_prefix=$PI_INSTALL_ROOT
+    if [ ! -d "$PI_INSTALL_ROOT" ]; then
+        tmpbundle=$(mktemp -d "${PI_INSTALL_ROOT}.XXXXXX")
+        install_prefix=$tmpbundle
+    fi
+    printf '%s\n' "Installing Pi (${version}) ..."
+    if ! npm install --global --ignore-scripts --prefix "$install_prefix" "@earendil-works/pi-coding-agent@${version}"; then
+        skip pi "npm install failed"
+        return
+    fi
+    if [ ! -x "${install_prefix}/bin/pi" ]; then
+        skip pi "npm did not install ${install_prefix}/bin/pi"
+        return
+    fi
+    if [ "$install_prefix" != "$PI_INSTALL_ROOT" ]; then
+        if [ -e "$PI_INSTALL_ROOT" ] || [ -L "$PI_INSTALL_ROOT" ]; then
+            skip pi "$PI_INSTALL_ROOT appeared during install"
+            return
+        fi
+        mv "$install_prefix" "$PI_INSTALL_ROOT"
+        tmpbundle=
+    fi
+    own_dir "$PI_INSTALL_ROOT"
+    tmpbinlink=$(mktemp "${DEST}/.pi.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${PI_INSTALL_ROOT}/bin/pi" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/pi"
+    tmpbinlink=
+    printf '%s\n' "$version" > "${STATE}/pi"
+    own_file "${DEST}/pi"
+    own_file "${STATE}/pi"
+    changed=true
+    printf '%s\n' "Installed ${DEST}/pi"
+}
+
 install_dsh() {
     command -v npm >/dev/null 2>&1 || { unchecked dsh "npm is required"; return; }
     version=$(npm view @deepseek-ai/dsh@next version 2>/dev/null) || version=
@@ -1612,6 +1683,15 @@ record_managed_installs() {
             own_file "${DEST}/cmd"
         fi
     fi
+    if [ -s "${STATE}/pi" ]; then
+        own_file "${STATE}/pi"
+        if [ -d "$PI_INSTALL_ROOT" ] && [ ! -L "$PI_INSTALL_ROOT" ] \
+            && [ -x "${PI_INSTALL_ROOT}/bin/pi" ] \
+            && [ "$(readlink "${DEST}/pi" 2>/dev/null || :)" = "${PI_INSTALL_ROOT}/bin/pi" ]; then
+            own_dir "$PI_INSTALL_ROOT"
+            own_file "${DEST}/pi"
+        fi
+    fi
     record_managed_binary opencode2
     if [ -s "${STATE}/opencode2" ] \
         && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
@@ -1653,7 +1733,7 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg pinact jactionlint jaq codex claude opencode2 fastermod tm ish e fz fdu fs srv srt python3
+    set -- fd rg pinact jactionlint jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv srt python3
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
@@ -1693,6 +1773,7 @@ for prog in "$@"; do
         grok) install_grok ;;
         dsh) install_dsh ;;
         cmd) install_cmd ;;
+        pi) install_pi ;;
         antigravity|agy) install_antigravity ;;
         muse) install_muse ;;
         claude) install_claude ;;

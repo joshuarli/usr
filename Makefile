@@ -74,6 +74,7 @@ layers:
 
 check:
 	python3 -I macos/make-sync-test.py
+	python3 -I dotfiles/pi-test.py
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
 	cd dotfiles && sh agent-tier-gate-test.sh
 	sh dotfiles/reset-agents-test.sh
