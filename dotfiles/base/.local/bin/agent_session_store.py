@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Normalize and index local agent transcripts."""
+import functools
 import hashlib
 import hmac
 import json
@@ -211,6 +212,18 @@ def _under(path, root):
         return False
 
 
+def _guarded(method):
+    @functools.wraps(method)
+    def guarded(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except sqlite3.DatabaseError as exc:
+            if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower():
+                raise
+            raise StoreError("session index database is unreadable; preserve learning data and run `agent-sessions doctor`: " + str(exc)) from exc
+    return guarded
+
+
 class Store:
     def __init__(self, state_dir):
         self.state_dir = _prepare_state_dir(state_dir)
@@ -391,9 +404,11 @@ class Store:
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
+    @_guarded
     def refresh(self, roots=None, project=None, projects=None, *, updated_after=None, harnesses=HARNESSES):
         return self._refresh(roots, project, projects, updated_after=updated_after, harnesses=tuple(harnesses))
 
+    @_guarded
     def refresh_headers(self, roots=None):
         return self._refresh(roots, None, set(), headers_only=True, harnesses=("codex",))
 
@@ -648,10 +663,8 @@ class Store:
         try:
             with _open_source(meta["source_path"], stats) as stream:
                 opened = _fstat_source(stream, stats)
-                if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
-                    meta["file_dev"], meta["file_ino"], meta["file_size"], meta["file_mtime_ns"], meta["file_ctime_ns"]
-                ):
-                    raise StoreError("transcript changed while refresh was starting; retry refresh")
+                if (opened.st_dev, opened.st_ino) != (meta["file_dev"], meta["file_ino"]) or opened.st_size < meta["file_size"]:
+                    raise StoreError("transcript was replaced while refresh was starting; retry refresh")
                 stream.seek(offset)
                 with self.db:
                     while True:
@@ -725,9 +738,7 @@ class Store:
         try:
             with _open_source(meta["source_path"], stats) as stream:
                 opened = _fstat_source(stream, stats)
-                if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
-                    meta["file_dev"], meta["file_ino"], meta["file_size"], meta["file_mtime_ns"], meta["file_ctime_ns"]
-                ):
+                if (opened.st_dev, opened.st_ino) != (meta["file_dev"], meta["file_ino"]) or opened.st_size < meta["file_size"]:
                     return False
                 stream.seek(position)
                 raw = _readline(stream, stats)
@@ -735,6 +746,7 @@ class Store:
             return False
         return bool(raw and hmac.compare_digest(_sha256(raw), digest))
 
+    @_guarded
     def resolve_evidence(self, session, position, digest):
         row = self.db.execute("SELECT source_path, harness FROM sessions WHERE id = ?", (str(session),)).fetchone()
         if row is None:
@@ -758,6 +770,7 @@ class Store:
         record.update({"session": str(session), "position": int(position), "digest": str(digest)})
         return record
 
+    @_guarded
     def coverage(self):
         rows = self.db.execute(
             "SELECT harness, count(*) AS sessions, coalesce(sum(recognized_events + unrecognized_events), 0) AS events, "
@@ -767,6 +780,7 @@ class Store:
         )
         return [dict(row) for row in rows]
 
+    @_guarded
     def unrecognized_kinds(self, limit=20):
         rows = self.db.execute(
             "SELECT s.harness AS harness, e.kind AS kind, count(*) AS events FROM events e JOIN sessions s ON s.id = e.session "
@@ -787,6 +801,7 @@ class Store:
             params.append(float(since))
         return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
+    @_guarded
     def search(self, query, project=None, *, limit=20, regex=False, kinds=None, since=None):
         if int(limit) < 1:
             raise ValueError("limit must be positive")
@@ -830,6 +845,7 @@ class Store:
         except sqlite3.OperationalError as exc:
             raise StoreError("FTS5 search failed; quote phrases and use AND/OR between terms: " + str(exc)) from exc
 
+    @_guarded
     def recent(self, project=None, *, limit=20, kinds=None, since=None):
         if int(limit) < 1:
             raise ValueError("limit must be positive")
@@ -849,6 +865,7 @@ class Store:
         params.append(max(1, int(limit)))
         return [dict(row) for row in self.db.execute(sql, params)]
 
+    @_guarded
     def session_events(self, session, project=None, *, position=None, before=3, after=3):
         if before < 0 or after < 0:
             raise ValueError("event window sizes cannot be negative")

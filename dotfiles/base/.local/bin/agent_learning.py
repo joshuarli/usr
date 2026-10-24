@@ -26,6 +26,7 @@ SCHEMA_VERSION = 4
 MAX_EVENTS = 2000
 MAX_REVIEWS = 2
 MAX_MODEL_CALLS_PER_DAY = 24
+RETRY_HINT = "No relevant prior experience. Proceed normally, or retry once with exact identifiers, file paths, error text, or the project's own terms."
 RESERVED_CALLS_PER_REVIEW = 4
 RESERVED_CALLS_PER_MONITOR = 2
 STABLE_SECONDS = 120
@@ -1163,9 +1164,20 @@ class Learner:
             raise LearningError("memory retrieval directory belongs to another project")
         moment = time.time() if now is None else now
         response = Retriever(self.store, project, current, moment).retrieve(query, limit, explain, verify, include_events)
+        if response["abstained"]:
+            response["hint"] = RETRY_HINT
+            response["vocabulary"] = self.vocabulary(project)
         if record:
             self._record_receipts(project, current, query, response, moment, session)
         return response
+
+    def vocabulary(self, project, limit=15):
+        counts = collections.Counter()
+        for row in self.db.execute("SELECT identifiers FROM learning_experiences WHERE project=? AND state='retained' ORDER BY id DESC LIMIT 80", (project,)):
+            counts.update(token for token in row[0].split() if len(token) >= 4)
+        for row in self.db.execute("SELECT action,applicability FROM learning_memories WHERE project=? AND state='approved' LIMIT 40", (project,)):
+            counts.update(technical_tokens(row[0] + " " + row[1], 8))
+        return [token for token, _ in counts.most_common(limit)]
 
     def _record_receipts(self, project, cwd, query, response, now, session):
         text = redact(" ".join(str(query).split()))[:300]
@@ -1675,6 +1687,9 @@ def main(argv=None):
                 store.refresh(project=identity)
             response = learner.retrieve(identity, args.query, cwd=args.project, limit=args.limit, explain=args.explain, verify=not args.no_verify, record=not args.no_record)
             print(redact(json.dumps(response if args.explain else response["results"], indent=2)))
+            if response["abstained"]:
+                terms = ", ".join(response["vocabulary"])
+                print("agent-learn recall: " + response["hint"] + (" Terms seen in this project: " + terms + "." if terms else ""), file=sys.stderr)
         elif args.command == "inspect":
             print(redact(json.dumps(learner.inspect(args.ref, cwd=args.project), indent=2)))
         elif args.command == "observe":

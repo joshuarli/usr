@@ -202,8 +202,11 @@ def run_outcome(events, run):
     return None
 
 
-def error_signature(text):
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+WRAPPER_LINE = re.compile(r"^(?:exit(?:ed)? (?:code|status)\b.*|exit: -?\d+|output:|---|script completed|wall time.*)$", re.I)
+
+
+def error_signature(text, explicit=False):
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not WRAPPER_LINE.match(line.strip())]
     priorities = (
         re.compile(r"^(?:E\s+)?[\w.]*(?:Error|Exception)\b.*"),
         re.compile(r"error(?:\[E\d+\])?:.*", re.I),
@@ -221,6 +224,10 @@ def error_signature(text):
                 signature = re.sub(r"\s+", " ", signature)[:160]
                 if len(re.findall(r"[A-Za-z]{4,}", signature)) >= 1 and signature.lower() not in ("error", "failed", "error:"):
                     return signature
+    if explicit and lines:
+        signature = re.sub(r"0x[0-9a-fA-F]+|\b\d{4,}\b|/(?:tmp|var/folders)/\S+", "N", re.sub(r"\s+", " ", lines[0]))[:160]
+        if len(re.findall(r"[A-Za-z]{4,}", signature)) >= 1:
+            return signature
     return ""
 
 
@@ -288,7 +295,7 @@ def _resolved_failures(events, runs, outcomes):
         if outcomes[id(run)] != "error" or number in claimed or not (run.command and RUNNER.search(run.command)):
             continue
         text = events[run.out]["text"]
-        signature = error_signature(text)
+        signature = error_signature(text, explicit=events[run.out].get("outcome") == "error")
         if not signature or (TRANSIENT.search(text[:3000]) and not re.search(r"Traceback|error\[|assert", text)):
             continue
         prefix = command_prefix(run.command)
@@ -569,7 +576,7 @@ def record_signatures(db, project, session, events, runs, outcomes, now):
         if run.out is None or outcomes[id(run)] != "error" or not (run.command and RUNNER.search(run.command)):
             continue
         text = events[run.out]["text"]
-        signature = error_signature(text)
+        signature = error_signature(text, explicit=events[run.out].get("outcome") == "error")
         if not signature or TRANSIENT.search(text[:3000]):
             continue
         key = command_prefix(run.command) + "|" + signature_key(signature)

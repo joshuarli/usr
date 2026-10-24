@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import importlib.util
 import json
+import os
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -404,6 +406,186 @@ class ReceiptTests(RecallCase):
         report = self.learner.quality()
         self.assertIn("causal improvement", report["not_observable"])
         self.assertIn("never change instruction authority", report["feedback_note"])
+
+
+class HardeningTests(RecallCase):
+    def test_non_ascii_text_paths_and_identifiers_are_searchable(self):
+        spec = fixture({"alpha": BASE}, [
+            episode("u-1", "alpha", [
+                {"user": "сборка падает: ошибка линковки в src/дом.py"},
+                tool("make все", "ошибка: не найден символ дом_инициализация\nmake: *** [all] Error 2", 2),
+                {"assistant": "Порядок библиотек в линковке неверный: сначала объектные файлы, затем -lm. 日本語のエラーメッセージも確認した。"},
+                tool("make все LDLIBS=-lm", "сборка завершена 1 passed", 0)], age=7),
+            episode("u-2", "alpha", [{"user": "update the café menu copy"}, {"assistant": "done"}], age=7),
+        ])
+        self.build(spec)
+        for query in ("ошибка линковки", "src/дом.py", "дом_инициализация"):
+            self.assertIn("u-1", self.episodes(self.ask("alpha", query)), query)
+        self.assertIn("u-2", self.episodes(self.ask("alpha", "cafe menu copy")))
+
+    def test_huge_event_is_indexed_but_results_stay_small(self):
+        blob = "hugemarker " + "x" * 3_000_000
+        spec = fixture({"alpha": BASE}, [episode("h", "alpha", [
+            {"user": "dump the logs"}, tool("cat build.log", blob, 1), {"assistant": "The log shows hugemarker at the start of a very long line."}, tool("cat build.log", "ok 1 passed", 0)], age=5)])
+        self.build(spec, observe=False)
+        response = self.ask("alpha", "hugemarker")
+        self.assertTrue(response["results"])
+        self.assertLess(len(json.dumps(response)), 6000)
+
+    def test_evidence_changing_after_retrieval_is_caught_at_inspection(self):
+        self.build(lesson_world())
+        response = self.ask("alpha", "ModuleNotFoundError orbit_core")
+        ref = response["results"][0]["ref"]
+        path = self.world.episode_paths["a-1"]
+        path.write_bytes(path.read_bytes().replace(b"orbit_core", b"orbit_c0re"))
+        inspected = self.learner.inspect(ref, cwd=self.world.cwd("alpha"), now=self.world.now, record=False)
+        self.assertTrue(any(not item["verified"] for item in inspected["evidence"]))
+        self.assertIn("evidence_changed", inspected["reasons"])
+
+    def test_symlinked_validity_path_is_never_followed(self):
+        spec = FreshnessTests.memory_spec(self, [{"path": "src/app.py", "contains": "return 1"}])
+        self.build(spec)
+        target = self.world.projects["alpha"]["path"] / "src" / "app.py"
+        outside = Path(self.world.directory) / "outside.py"
+        outside.write_text("def main():\n    return 1\n")
+        target.unlink()
+        target.symlink_to(outside)
+        hit = next(item for item in self.ask("alpha", "editable install orbit_core pytest clean runner")["results"] if item["ref"].startswith("memory:"))
+        self.assertTrue(any(reason.startswith("source_unavailable:") for reason in hit["reasons"]))
+
+    def test_concurrent_readers_and_a_writer_do_not_fail(self):
+        import threading
+        self.build(lesson_world())
+        errors = []
+
+        def reader():
+            try:
+                store = agent_session_store.Store(self.world.state_dir)
+                learner = agent_learning.Learner(store, None)
+                for _ in range(15):
+                    learner.retrieve(self.ident["alpha"], "ModuleNotFoundError orbit_core", cwd=self.world.cwd("alpha"), now=self.world.now)
+                store.close()
+            except Exception as error:
+                errors.append(error)
+
+        def writer():
+            try:
+                store = agent_session_store.Store(self.world.state_dir)
+                learner = agent_learning.Learner(store, None)
+                for _ in range(6):
+                    store.refresh(roots=self.world.root_args())
+                    learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+                store.close()
+            except Exception as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=reader) for _ in range(3)] + [threading.Thread(target=writer)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+
+    def test_crash_while_recording_a_memory_leaves_no_orphan_projection(self):
+        self.build(lesson_world(), observe=False)
+        db = self.store.db
+        before = db.execute("SELECT count(*) FROM learning_recall_docs").fetchone()[0]
+        with self.assertRaises(RuntimeError):
+            with db:
+                db.execute("INSERT INTO learning_findings(project,signal,fingerprint,terms,state,created_at,updated_at,proposal) VALUES('p','correction','f','t','memory',1,1,'{}')")
+                db.execute("INSERT INTO learning_memories(finding,project,action,applicability,revision,state,created_at,validity) VALUES(1,'p','act','when','r','approved',1,'[]')")
+                self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_docs").fetchone()[0], before + 1)
+                raise RuntimeError("crash")
+        self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_docs").fetchone()[0], before)
+        self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_fts").fetchone()[0], before)
+
+    def test_projection_can_be_rebuilt_from_canonical_records_after_loss(self):
+        self.build(lesson_world())
+        db = self.store.db
+        count = db.execute("SELECT count(*) FROM learning_recall_docs").fetchone()[0]
+        with db:
+            db.execute("DELETE FROM learning_recall_fts")
+            db.execute("DELETE FROM learning_recall_docs")
+        self.assertTrue(self.ask("alpha", "ModuleNotFoundError orbit_core")["results"])
+        agent_experience.rebuild_recall_projection(db)
+        self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_docs").fetchone()[0], count)
+
+
+class CommandTests(RecallCase):
+    def setUp(self):
+        self.env = None
+
+    def prepare_cli(self, spec):
+        temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.addCleanup(temp.cleanup)
+        base = Path(temp.name)
+        world = BENCH.World(spec, base / "world")
+        world.build()
+        homes = {"codex": base / "codex", "claude": base / "claude", "grok": base / "grok", "muse": base / "data" / "muse"}
+        for name, target in (("codex", homes["codex"] / "sessions"), ("claude", homes["claude"] / "projects"), ("grok", homes["grok"] / "sessions"), ("muse", homes["muse"] / "sessions")):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(world.roots[name], target)
+        self.world = world
+        self.state = base / "state"
+        self.env = dict(os.environ, CODEX_HOME=str(homes["codex"]), CLAUDE_CONFIG_DIR=str(homes["claude"]), GROK_HOME=str(homes["grok"]),
+                        XDG_DATA_HOME=str(base / "data"), HOME=str(base), PATH=os.environ["PATH"] + ":/nonexistent")
+        self.env.pop("AGENT_LEARN_WORKER", None)
+
+    def run_cli(self, *args, check=True):
+        result = subprocess.run([sys.executable, str(BIN / "agent-learn"), "--state-dir", str(self.state), *args], capture_output=True, text=True, env=self.env)
+        if check:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def test_local_only_flow_needs_no_enrollment_and_makes_no_model_request(self):
+        self.prepare_cli(lesson_world())
+        project = str(self.world.projects["alpha"]["path"])
+        cold = self.run_cli("recall", "ModuleNotFoundError orbit_core", "--project", project)
+        self.assertIn("a-1", json.dumps(json.loads(cold.stdout)))
+        self.assertEqual(self.run_cli("experiences", "--project", project).stdout.strip(), "[]")
+        self.run_cli("observe", "--project", project)
+        self.run_cli("run", "--local-only")
+        listed = json.loads(self.run_cli("experiences", "--project", project).stdout)
+        self.assertEqual([item["detector"] for item in listed], ["resolved_failure"])
+        hits = json.loads(self.run_cli("recall", "ModuleNotFoundError orbit_core", "--project", project, "--limit", "2").stdout)
+        self.assertEqual(hits[0]["ref"], "experience:%d" % listed[0]["id"])
+        inspected = json.loads(self.run_cli("inspect", hits[0]["ref"], "--project", project).stdout)
+        self.assertTrue(all(item["verified"] for item in inspected["evidence"]))
+        status = json.loads(self.run_cli("status").stdout)
+        self.assertEqual(status["model_reviews"], 0)
+        self.assertEqual(status["findings"], {})
+        self.assertEqual(status["retrieval"]["returned"], 2 if len(hits) == 2 else status["retrieval"]["returned"])
+
+    def test_abstention_prints_guidance_on_stderr_and_an_empty_list(self):
+        self.prepare_cli(lesson_world())
+        project = str(self.world.projects["alpha"]["path"])
+        self.run_cli("observe", "--project", project, "--run")
+        result = self.run_cli("recall", "websocket reconnect backoff", "--project", project)
+        self.assertEqual(json.loads(result.stdout), [])
+        self.assertIn("retry once", result.stderr)
+
+    def test_forget_and_forget_session_delete_derived_records_not_transcripts(self):
+        self.prepare_cli(lesson_world())
+        project = str(self.world.projects["alpha"]["path"])
+        self.run_cli("observe", "--project", project, "--run")
+        listed = json.loads(self.run_cli("experiences", "--project", project).stdout)
+        transcript = next(Path(self.env["CODEX_HOME"]).rglob("rollout-*a-1.jsonl"))
+        self.run_cli("forget", "experience:%d" % listed[0]["id"])
+        self.assertEqual(json.loads(self.run_cli("experiences", "--project", project).stdout), [])
+        self.run_cli("forget-session", "a-1")
+        self.assertTrue(transcript.exists())
+        status = json.loads(self.run_cli("status").stdout)
+        self.assertEqual(status["observation"]["sessions_observed"], 1)
+
+    def test_enabling_review_defaults_to_codex_sessions_only(self):
+        self.prepare_cli(lesson_world())
+        project = self.world.projects["alpha"]["path"]
+        self.run_cli("enable", "--project", str(project), "--usr-root", str(ROOT))
+        store = agent_session_store.Store(self.state)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("SELECT review_harnesses FROM learning_projects").fetchone()[0], "codex")
+        self.run_cli("enable", "--project", str(project), "--usr-root", str(ROOT), "--harness", "claude", "--harness", "codex")
+        self.assertEqual(store.db.execute("SELECT review_harnesses FROM learning_projects").fetchone()[0], "claude,codex")
 
 
 class MigrationTests(unittest.TestCase):

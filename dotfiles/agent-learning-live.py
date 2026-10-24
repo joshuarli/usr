@@ -242,9 +242,9 @@ def _command_records(events):
     return [records[key] for key in order]
 
 
-def _run_events(codex, repo, schema_path, env, prompt, model, effort):
+def _run_events(codex, repo, schema_path, env, prompt, model, effort, sandbox="read-only"):
     command = [
-        codex, "exec", "--model", model, "--sandbox", "read-only", "--strict-config", "--ignore-user-config",
+        codex, "exec", "--model", model, "--sandbox", sandbox, "--strict-config", "--ignore-user-config",
         "--ignore-rules", "--ephemeral", "--thread-source", "agent_learning_live_eval",
         "--output-schema", str(schema_path), "--cd", str(repo), "--skip-git-repo-check",
     ]
@@ -293,7 +293,18 @@ def _run_events(codex, repo, schema_path, env, prompt, model, effort):
         return {"status": "unverified", "reason": REVIEW._codex_exit_reason(stderr), "commands": _command_records(events)}
     if not any(event.get("type") == "turn.completed" for event in events):
         return {"status": "unverified", "reason": "missing_turn_completion", "commands": _command_records(events)}
-    return {"status": "complete", "reason": None, "commands": _command_records(events)}
+    return {"status": "complete", "reason": None, "commands": _command_records(events), "usage": _turn_usage(events)}
+
+
+def _turn_usage(events):
+    totals = {}
+    for event in events:
+        usage = event.get("usage") if event.get("type") == "turn.completed" else None
+        if isinstance(usage, dict):
+            for key, value in usage.items():
+                if isinstance(value, int) and not isinstance(value, bool):
+                    totals[key] = totals.get(key, 0) + value
+    return totals
 
 
 def _executes(command, script):

@@ -28,7 +28,8 @@ MAX_CLAUSES = 3
 IDF_POWER = 1.0
 IDENT_BOOST = 1.5
 GENERIC_WEIGHT = 0.25
-GENERIC_WORDS = frozenset("fix fixed fixing fail fails failed failing failure test tests testing run runs running error errors bug bugs change changes update updates add adds build builds code function functions command commands output working".split())
+MIN_EFFECTIVE_EVENTS = 500
+GENERIC_WORDS = frozenset("fix fixed fixing fail fails failed failing failure test tests testing run runs running error errors bug bugs change changes update updates add adds build builds code function functions command commands output working rename remove delete create edit move open read write check show print list return handle variable value name string number".split())
 COVERAGE_TOP_K = 4
 NEAR_DUPLICATE = 0.6
 SUMMARY_CHARS = 280
@@ -46,18 +47,19 @@ how what why when where which who whom whose there here again once ever never if
 make makes made use used using uses new old try trying tried let lets see look looks find found check checks thing things way ways work works
 working issue issues problem problems task tasks code project repo repository file files""".split())
 _RAW = re.compile(r"[^\s\"'`()\[\]{},;?!<>|]+")
-_CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
+_CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+|[^\W\d_A-Za-z]+")
+_CHUNK = re.compile(r"[^\W_]+")
 _TRIM = " .:/\\-_=+*#@"
 _TECH_SHAPES = (
-    re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]"),
-    re.compile(r"[A-Za-z0-9][/\\][A-Za-z0-9]"),
-    re.compile(r"[A-Za-z0-9]\.[A-Za-z0-9]"),
-    re.compile(r"[A-Za-z0-9]::[A-Za-z0-9]"),
-    re.compile(r"^--?[A-Za-z][A-Za-z0-9-]*"),
+    re.compile(r"[^\W_]_[^\W_]"),
+    re.compile(r"[^\W_][/\\][^\W_]"),
+    re.compile(r"[^\W_]\.[^\W_]"),
+    re.compile(r"[^\W_]::[^\W_]"),
+    re.compile(r"^--?[^\W\d_][A-Za-z0-9-]*"),
     re.compile(r"[a-z][A-Z]"),
-    re.compile(r"[A-Za-z][0-9]|[0-9][A-Za-z]"),
-    re.compile(r"[A-Za-z0-9]\(\)$"),
-    re.compile(r"[A-Za-z0-9]-[A-Za-z0-9]"),
+    re.compile(r"[^\W\d_][0-9]|[0-9][^\W\d_]"),
+    re.compile(r"[^\W_]\(\)$"),
+    re.compile(r"[^\W_]-[^\W_]"),
     re.compile(r"^[A-Z][A-Z0-9]{1,}$"),
 )
 
@@ -88,7 +90,7 @@ def stem(word):
 
 def subparts(token):
     parts = []
-    for chunk in re.findall(r"[A-Za-z0-9]+", token):
+    for chunk in _CHUNK.findall(token):
         parts.extend(match.lower() for match in _CAMEL.findall(chunk))
     return parts
 
@@ -114,15 +116,15 @@ def parse_query(text):
         raw = match.group(0)
         if "=" in raw:
             key = raw.split("=", 1)[0].strip(_TRIM)
-            if key and re.search(r"[A-Za-z]{2}", key):
+            if key and re.search(r"[^\W\d_]{2}", key):
                 add_ident(key)
             continue
-        flag = re.match(r"^--?([A-Za-z][A-Za-z0-9-]{2,})$", raw)
+        flag = re.match(r"^--?([^\W\d_][\w-]{2,})$", raw)
         if flag:
             add_ident(raw)
             continue
         token = raw.strip(_TRIM)
-        if not token or not re.search(r"[A-Za-z0-9]", token) or not subparts(token):
+        if not token or not re.search(r"[^\W_]", token) or not subparts(token):
             continue
         short_ok = token.lower() in SHORT_TECHNICAL or (token.isupper() and 2 <= len(token) <= 5 and token.isalpha())
         if is_technical(token) or short_ok:
@@ -199,7 +201,7 @@ def doc_tokens(text):
         if token:
             tokens.add(token)
             tokens.add(stem(token))
-    for chunk in re.findall(r"[A-Za-z0-9]+", text):
+    for chunk in _CHUNK.findall(text):
         for part in _CAMEL.findall(chunk):
             tokens.add(part.lower())
             tokens.add(stem(part.lower()))
@@ -208,7 +210,7 @@ def doc_tokens(text):
 
 
 def normalized(text):
-    return re.sub(r"[^a-z0-9]", "", text.lower())
+    return re.sub(r"[\W_]+", "", text.lower())
 
 
 def ident_in(ident, doc_text, doc_norm, tokens):
@@ -367,7 +369,8 @@ class Retriever:
         frequency = self._df(word)
         if total >= 200 and frequency / total > 0.2:
             return 0.0
-        return math.log(1 + total / (1 + frequency)) / math.log(1 + total)
+        effective = max(total, MIN_EFFECTIVE_EVENTS)
+        return math.log(1 + effective / (1 + frequency)) / math.log(1 + effective)
 
     def _record_candidates(self, query, index):
         candidates = {}

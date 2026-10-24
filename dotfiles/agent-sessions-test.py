@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK_TMP = ROOT / ".work" / "tmp"
@@ -642,6 +643,84 @@ class HarnessIndexTests(unittest.TestCase):
             stats = self.refresh(store)
             self.assertEqual(store.search("leakneedle", self.project_id), [])
             self.assertEqual(stats["sessions_indexed"], 0)
+
+    def test_transcript_growing_between_discovery_and_indexing_is_indexed_not_fatal(self):
+        path = self.claude("live", [{"type": "user", "message": {"role": "user", "content": "firstneedle"}}])
+        original = STORE_MODULE._metadata
+
+        def grow_after_header(*args, **kwargs):
+            result = original(*args, **kwargs)
+            with open(path, "ab") as stream:
+                stream.write(line({"type": "user", "sessionId": "live", "cwd": str(self.project), "message": {"role": "user", "content": "secondneedle"}}))
+            return result
+
+        with Store(self.state) as store, mock.patch.object(STORE_MODULE, "_metadata", grow_after_header):
+            self.refresh(store)
+            self.assertEqual(len(store.search("firstneedle", self.project_id)), 1)
+            self.assertEqual(len(store.search("secondneedle", self.project_id)), 1)
+
+    def test_crash_while_indexing_rolls_back_and_the_next_refresh_completes(self):
+        records = [{"type": "user", "message": {"role": "user", "content": "needle%d" % index}} for index in range(6)]
+        self.claude("crashy", records)
+        calls = {"count": 0}
+        original = STORE_MODULE.normalize
+
+        def explode(obj, harness="codex"):
+            calls["count"] += 1
+            if calls["count"] == 4:
+                raise KeyboardInterrupt("simulated crash")
+            return original(obj, harness)
+
+        with Store(self.state) as store:
+            with mock.patch.object(STORE_MODULE, "normalize", explode), self.assertRaises(KeyboardInterrupt):
+                self.refresh(store)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM events").fetchone()[0], 0)
+            stats = self.refresh(store)
+            self.assertEqual(stats["events_added"], 6)
+            self.assertEqual(store.db.execute("SELECT coverage FROM sessions").fetchone()[0], "complete")
+
+    def test_partial_tail_is_flagged_then_indexed_once_the_line_completes(self):
+        path = self.claude("tail", [{"type": "user", "message": {"role": "user", "content": "whole"}}])
+        full = line({"type": "user", "sessionId": "tail", "cwd": str(self.project), "message": {"role": "user", "content": "latecomer"}})
+        with open(path, "ab") as stream:
+            stream.write(full[:25])
+        with Store(self.state) as store:
+            self.refresh(store)
+            self.assertEqual(store.db.execute("SELECT coverage, partial_bytes > 0 FROM sessions").fetchone()[:], ("degraded", 1))
+            self.assertEqual(store.search("latecomer", self.project_id), [])
+            with open(path, "ab") as stream:
+                stream.write(full[25:])
+            self.refresh(store)
+            self.assertEqual(len(store.search("latecomer", self.project_id)), 1)
+            self.assertEqual(store.db.execute("SELECT coverage FROM sessions").fetchone()[0], "complete")
+
+    def test_two_files_with_one_session_identity_index_once(self):
+        self.claude("twin", [{"type": "user", "message": {"role": "user", "content": "twinneedle"}}])
+        copy = self.roots["claude"] / "-proj" / "copy" / "twin.jsonl"
+        copy.parent.mkdir(parents=True)
+        copy.write_bytes((self.roots["claude"] / "-proj" / "twin.jsonl").read_bytes())
+        with Store(self.state) as store:
+            self.refresh(store)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
+            self.assertEqual(len(store.search("twinneedle", self.project_id)), 1)
+
+    def test_corrupt_database_is_refused_and_left_untouched(self):
+        with Store(self.state) as store:
+            self.claude("c", [{"type": "user", "message": {"role": "user", "content": "x " * 5000}}])
+            self.refresh(store)
+        path = Store.database_path(self.state)
+        data = bytearray(path.read_bytes())
+        for offset in range(4096, len(data) - 4096, 4096):
+            data[offset:offset + 64] = b"\xff" * 64
+        path.write_bytes(bytes(data))
+        before = path.read_bytes()
+        with self.assertRaises(StoreError):
+            with Store(self.state) as store:
+                store.refresh({name: [root] for name, root in self.roots.items()})
+                store.search("x", None)
+                store.db.execute("PRAGMA integrity_check").fetchall()
+                raise StoreError("integrity")
+        self.assertEqual(path.read_bytes()[:16], before[:16])
 
     def test_deleted_harness_source_is_removed_from_the_index(self):
         path = self.claude("gone", [{"type": "user", "message": {"role": "user", "content": "goneneedle"}}])
