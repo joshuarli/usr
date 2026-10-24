@@ -1,11 +1,11 @@
 ---
 name: orchestrate
-description: "Route substantial, routine, mechanical, exploratory, or context-heavy work across subagents to control cost, isolate context, and parallelize independent work, and run a multi-lane campaign over a backlog. Delegate whenever the work is economical to specify and verify. Skip a task cheaper to do directly."
+description: "Delegate to subagents when parallel independent work, disposable context, independent scrutiny, or lower cost clearly beats the main loop, and run a multi-lane campaign over a backlog. Skip tightly coupled work and any task cheaper to do directly."
 ---
 
 # Orchestrate
 
-Delegate only when specification and verification cost less than local work. The parent owns direction, integration, and final verification.
+The parent keeps tightly coupled investigation, design, and integration, and owns direction and final verification. Delegate only for a concrete advantage: parallel independent work, disposable context, independent scrutiny, a harness-enforced permission boundary, or execution cheaper after counting briefing, waiting, review, and integration. A cheaper child model alone is not enough.
 
 ## Routing
 
@@ -25,7 +25,7 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 Consult once per unchanged decision only when `USR_DECIDE_TIER` is already `shadow` or `advisory`; never set it. For bounded, consequential uncertainty, use `decide` only when your harness has a meaningful cheaper-tier choice; skip OpenCode's and Command Code's pinned-model children. Run `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide` with sanitized JSON on stdin; read its structured result. Shadow never routes. Advisory is parent-assessed within existing tier/model/permission/authorization rules and cannot override user-selected models or mandatory escalation. Exclude `god` and mutating `scout`. Unavailable or invalid advice leaves routing unchanged; notify the user. Details: `~/usr/docs/agent-setup.md`.
 
-If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except for the Codex profile and Grok pins below. If a model is unavailable, use a suitable allowed model at the same or lower tier or report it. Failed commands, missing dependencies, or unavailable environments alone do not justify model escalation.
+If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except for the Codex profile and Grok pins below. If a model is unavailable, use a suitable allowed model at the same or lower tier or report it.
 
 ### Codex
 
@@ -63,7 +63,7 @@ Use only the DeepSeek TUI table route for DSH work. DSH has `off`, `low`, `high`
 
 ## Delegation
 
-Delegate coherent component-sized work; do not delegate a one-command or one-edit task when the handoff costs more than doing it locally. Batch related trivial work into one assignment. When one script or codemod can apply the change to every unit in a single pass, write and run it yourself instead of fanning out children to hand-apply it, and prove it by rerunning it on the unit you did by hand.
+Delegate coherent component-sized work. Do not spawn an agent for one command or edit, to restate a plan, or to summarize code the parent must understand anyway. Batch related trivial work into one assignment. When one script or codemod can apply the change to every unit in a single pass, write and run it yourself instead of fanning out children to hand-apply it, and prove it by rerunning it on the unit you did by hand.
 
 Size concurrency for accepted progress. Give parallel writers disjoint ownership, but also bound shared-service contention, review work, and the verification queue. Resource headroom is a ceiling, not a target. Stagger independent preparation when it helps; reduce or pause writers when acceptance is saturated. Give each child a coherent end-to-end slice, not a fragment requiring another handoff.
 
@@ -81,7 +81,7 @@ Carry forward findings and failed approaches. Every child gets:
 
 The parent owns each child worktree from creation through removal. Record its exact path, its branch when it has one, and the integration worktree when you create it or the harness creates it. A child finishing does not remove its worktree. Remove only the recorded path, never every entry under `.work/wt/`.
 
-After a child finishes, review its changes and decide whether to integrate or park them. For accepted changes, inspect the integrated diff and bind evidence to it. Reuse worker evidence when the relevant inputs and assumptions are unchanged; rerun checks only when integration or changed inputs could invalidate them. Remove the child worktree only after applicable proof is complete, the child has stopped, and all work worth keeping is in the integration branch or a preserved branch.
+After a child finishes, review its changes and decide whether to integrate or park them. For accepted changes, inspect the integrated diff and reuse worker evidence unless integration or changed inputs could invalidate it. Remove the child worktree only after applicable proof is complete, the child has stopped, and all work worth keeping is in the integration branch or a preserved branch.
 
 Before removal, run `git -C <child-worktree> status --porcelain --ignored=matching --untracked-files=all`. Keep the worktree if it has modified or untracked files. Review ignored files and preserve any local data worth keeping. Remove the worktree with `git -C <integration-worktree> worktree remove <child-worktree>`. Delete its branch only when `git -C <integration-worktree> merge-base --is-ancestor <branch> HEAD` succeeds, then run `git -C <integration-worktree> branch -d <branch>`. Keep the branch when that check fails, including after squash integration. Never force-delete a branch or worktree.
 
