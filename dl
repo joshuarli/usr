@@ -633,6 +633,7 @@ install_python3() {
         return
     fi
     asset_name=${asset_url##*/}
+    asset_name=$(printf '%s\n' "$asset_name" | sed 's/%2B/+/g; s/%2b/+/g')
     expected_sha256=$(grep -F "  ${asset_name}" "$tmpoutput" | awk '{print $1}')
     rm -f "$tmpoutput"
     tmpoutput=
