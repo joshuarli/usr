@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "defaultMode": "yolo"
+  },
+  "tasteLearning": false,
+  "attribution": {
+    "commit": ""
+  }
+}

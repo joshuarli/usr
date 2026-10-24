@@ -15,7 +15,7 @@ GUEST_RESOURCES = "/opt/agent-vm"
 GUEST_BOOTSTRAP = r"""
 set -eu
 mkdir -p \
-  "$HOME/.agents" "$HOME/.codex" "$HOME/.claude" "$HOME/.grok" \
+  "$HOME/.agents" "$HOME/.codex" "$HOME/.claude" "$HOME/.grok" "$HOME/.commandcode" \
   "$HOME/.config/opencode" "$HOME/.config/muse" \
   "$HOME/.gemini/config" "$HOME/.gemini/antigravity-cli" "$HOME/.dsh"
 ln -s /opt/agent-vm/skills "$HOME/.agents/skills"
@@ -29,6 +29,7 @@ ln -s "$HOME/.codex/AGENTS.md" "$HOME/.config/opencode/AGENTS.md"
 ln -s "$HOME/.codex/AGENTS.md" "$HOME/.config/muse/AGENTS.md"
 ln -s "$HOME/.codex/AGENTS.md" "$HOME/.gemini/config/AGENTS.md"
 ln -s "$HOME/.codex/AGENTS.md" "$HOME/.dsh/AGENTS.md"
+ln -s "$HOME/.codex/AGENTS.md" "$HOME/.commandcode/AGENTS.md"
 ln -s /opt/agent-vm/claude-agents "$HOME/.claude/agents"
 ln -s /opt/agent-vm/grok-agents "$HOME/.grok/agents"
 if command -v git >/dev/null 2>&1; then

@@ -11,19 +11,19 @@ Delegate only when specification and verification cost less than local work. The
 
 Route by difficulty, uncertainty, and risk. Use the column for the harness you are running in.
 
-| Work | Codex | Claude and Grok | OpenCode | Muse Code | Antigravity CLI | DeepSeek TUI |
+| Work | Codex | Claude and Grok | OpenCode / Command Code | Muse Code | Antigravity CLI | DeepSeek TUI |
 | --- | --- | --- | --- | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | same model, `explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | same model, `general` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6-luna`, `xhigh` | `worker` | same model, `general` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` | same model, `general` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-medium` | `deepseek-flash`, `max` |
-| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | same model, `general` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` |
+| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | same model, `explore` / `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` |
+| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | same model, `general` / `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` |
+| Normal implementation, debugging, tests, ordinary review | `gpt-6-luna`, `xhigh` | `worker` | same model, `general` / `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` | same model, `general` / `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-medium` | `deepseek-flash`, `max` |
+| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | same model, `general` / `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` |
 
-**Default to `worker`.** Size is not difficulty. A big lane with a clear method and acceptance (a profiled optimization, a port with a reference, a mock built from a design doc, an investigation with a known procedure, a bug fix with a reproduction) is a `worker` task, and so is most campaign lane work. Use `expert` only when the path is unknown and a wrong turn is costly: a cross-cutting design, a failure with no hypothesis, an integration that spans owners. If the brief can name the steps and the acceptance check, it is not an `expert` brief. Start with `worker` and escalate on evidence that the work was harder than briefed.
+**Default to `worker`.** Size is not difficulty: a large lane with a known method and acceptance is still worker work. Use `expert` only for unknown paths with costly wrong turns (cross-cutting designs, unexplained failures, multi-owner integration). If the brief specifies steps and acceptance, start with `worker`; escalate only when evidence warrants it.
 
 ### Optional tier advice
 
-Consult once per unchanged decision only when `USR_DECIDE_TIER` is already `shadow` or `advisory`; never set it. For bounded, consequential uncertainty, use `decide` only when your harness has a meaningful cheaper-tier choice; skip OpenCode's same-model children. Run `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide` with sanitized JSON on stdin; read its structured result. Shadow never routes. Advisory is parent-assessed within existing tier/model/permission/authorization rules and cannot override user-selected models or mandatory escalation. Exclude `god` and mutating `scout`. Unavailable or invalid advice leaves routing unchanged; notify the user. Details: `~/usr/docs/agent-setup.md`.
+Consult once per unchanged decision only when `USR_DECIDE_TIER` is already `shadow` or `advisory`; never set it. For bounded, consequential uncertainty, use `decide` only when your harness has a meaningful cheaper-tier choice; skip OpenCode and Command Code's same-model children. Run `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide` with sanitized JSON on stdin; read its structured result. Shadow never routes. Advisory is parent-assessed within existing tier/model/permission/authorization rules and cannot override user-selected models or mandatory escalation. Exclude `god` and mutating `scout`. Unavailable or invalid advice leaves routing unchanged; notify the user. Details: `~/usr/docs/agent-setup.md`.
 
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except for the Codex profile and Grok pins below. If a model is unavailable, use a suitable allowed model at the same or lower tier or report it. Failed commands, missing dependencies, or unavailable environments alone do not justify model escalation.
 
@@ -39,9 +39,11 @@ Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns
 
 Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that order. A caller spawns only a lower tier, and `scout` spawns nothing. `agent-tier-gate` enforces that: Claude matches `Agent`, Grok matches `spawn_subagent`. `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps Claude nesting at 3. Model and effort come from `~/.claude/agents` or `~/.grok/agents`, not from the call. Every Grok definition pins `grok-4.7`. Do not use another model or `xhigh`. If `grok-4.7` is unavailable, report it. Change a type's model or effort in its file. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed, or a decision others build on. Add a definition when none of the five fit. Prefer a fresh agent; fork only when the child needs the conversation.
 
-### OpenCode
+### OpenCode and Command Code
 
 OpenCode has no tiering: children run the same model. `explore` is read-only; use `general` otherwise. Pass no model override; default to `general`. Report unavailable models and keep briefs self-contained.
+
+Command Code uses built-in `Explore` (read-only) and `General` (other work), inheriting the session model until model tiers are verified. Children may run in parallel or background but cannot nest; give parallel writers separate worktrees.
 
 Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
 

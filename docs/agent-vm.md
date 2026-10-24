@@ -28,7 +28,7 @@ The current directory is always read/write. Repeat `--rw DIR` or `--ro DIR` for 
 Without mounting your host home, `agent-vm` additionally grants **read-only** access to these *tracked* resources from `~/usr/dotfiles/base`:
 
 - `.agents/skills`: provided in the guest's `~/.agents/skills`, `~/.claude/skills` and `~/.gemini/antigravity-cli/skills` discovery paths.
-- `.codex/AGENTS.md`: copied as the canonical `~/.codex/AGENTS.md` and exposed through the Claude, Grok, Muse, OpenCode, Antigravity and DeepSeek global-instruction adapters.
+- `.codex/AGENTS.md`: copied as the canonical `~/.codex/AGENTS.md` and exposed through the Claude, Grok, Muse, OpenCode, Antigravity, DeepSeek and Command Code global-instruction adapters.
 - `.claude/agents` and `.grok/agents`: exposed in the corresponding guest home directories.
 
 Pass `--usr DIR` if the repository is not at `~/usr`, or `--no-config` to skip loading these resources. Project-local instructions and skills remain visible in the writable project mount. This does **not** mount host agent caches, saved logins, API keys, SSH sockets, `.gitconfig` or your other dotfiles. It also does not copy harness preferences such as `settings.json` / `config.toml`: those may contain machine-dependent hooks and host paths.

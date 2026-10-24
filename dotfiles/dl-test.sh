@@ -242,6 +242,7 @@ case "$1" in
         case "$2" in
             @deepseek-ai/dsh@next) printf '%s\n' '0.2.1-rc.2' ;;
             @deepseek-harness-tui/dsh-tui) printf '%s\n' '0.16.0' ;;
+            command-code@latest) printf '%s\n' "${CMD_TEST_VERSION:-1.87.3}" ;;
             *) exit 1 ;;
         esac
         ;;
@@ -259,6 +260,17 @@ case "$1" in
             esac
         done
         [ -n "$prefix" ] || exit 1
+        if [ "${5:-}" = "command-code@${CMD_TEST_VERSION:-1.87.3}" ]; then
+            if [ "${CMD_INSTALL_FAIL:-false}" = true ]; then
+                mkdir -p "$prefix/lib/node_modules/command-code"
+                exit 17
+            fi
+            mkdir -p "$prefix/bin" "$prefix/lib/node_modules/command-code"
+            printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/cmd"
+            chmod +x "$prefix/bin/cmd"
+            printf '%s\n' "install $*" >> "$NPM_LOG"
+            exit 0
+        fi
         mkdir -p "$prefix/bin"
         mkdir -p "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui"
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh"
@@ -284,6 +296,120 @@ cat > "$mock_bin/pnpm" <<'EOF'
 exit 0
 EOF
 chmod +x "$mock_bin/pnpm"
+
+cat > "$mock_bin/node" <<'EOF'
+#!/bin/sh
+[ "$1" = -p ] || exit 1
+printf '%s\n' "$CMD_TEST_NODE_MAJOR"
+EOF
+chmod +x "$mock_bin/node"
+CMD_TEST_NODE_MAJOR=24
+export CMD_TEST_NODE_MAJOR
+
+cmd_home="$test_root/cmd-home"
+cmd_log="$test_root/cmd-npm.log"
+if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$cmd_home/.local/bin/cmd")" = "$cmd_home/.local/share/command-code/bin/cmd" ]
+[ -x "$cmd_home/.local/share/command-code/bin/cmd" ]
+[ "$(cat "$cmd_home/.local/state/dl/cmd")" = 1.87.3 ]
+case "$output" in
+    *"Installed $cmd_home/.local/bin/cmd"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'cmd is current (1.87.3)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(wc -l < "$cmd_log")" -eq 1 ]
+if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    CMD_TEST_VERSION=1.87.4 PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(cat "$cmd_home/.local/state/dl/cmd")" = 1.87.4 ]
+[ "$(wc -l < "$cmd_log")" -eq 2 ]
+
+cmd_owned_file="$cmd_home/.local/state/make/dl-owned"
+mkdir -p "$(dirname "$cmd_owned_file")"
+HOME="$cmd_home" DL_RECORD_OWNED=true DL_OWNED_FILE="$cmd_owned_file" \
+    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+for owned_path in "$cmd_home/.local/bin/cmd" "$cmd_home/.local/state/dl/cmd"; do
+    awk -F '\t' -v path="$owned_path" \
+        '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$cmd_owned_file"
+done
+awk -F '\t' -v path="$cmd_home/.local/share/command-code" \
+    '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$cmd_owned_file"
+
+cmd_collision_home="$test_root/cmd-collision-home"
+mkdir -p "$cmd_collision_home/.local/bin"
+printf '%s\n' sentinel > "$cmd_collision_home/.local/bin/cmd"
+if HOME="$cmd_collision_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    printf 'cmd overwrote an unmanaged launcher\n' >&2
+    exit 1
+fi
+[ "$(cat "$cmd_collision_home/.local/bin/cmd")" = sentinel ]
+
+cmd_prefix_home="$test_root/cmd-prefix-home"
+mkdir -p "$cmd_prefix_home/.local/share/command-code"
+if HOME="$cmd_prefix_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    printf 'cmd overwrote an unmanaged npm prefix\n' >&2
+    exit 1
+fi
+[ ! -e "$cmd_prefix_home/.local/bin/cmd" ]
+
+cmd_old_node_home="$test_root/cmd-old-node-home"
+if HOME="$cmd_old_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    CMD_TEST_NODE_MAJOR=20 PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    printf 'cmd accepted an unsupported Node.js version\n' >&2
+    exit 1
+fi
+[ ! -e "$cmd_old_node_home/.local/bin/cmd" ]
+
+cmd_failure_home="$test_root/cmd-failure-home"
+if HOME="$cmd_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    CMD_INSTALL_FAIL=true PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    printf 'cmd ignored a failed npm install\n' >&2
+    exit 1
+fi
+[ ! -e "$cmd_failure_home/.local/bin/cmd" ]
+[ ! -e "$cmd_failure_home/.local/state/dl/cmd" ]
+[ ! -e "$cmd_failure_home/.local/share/command-code" ]
+if find "$cmd_failure_home/.local/share" -name 'command-code.*' | grep -q .; then
+    printf 'cmd kept an incomplete npm installation\n' >&2
+    exit 1
+fi
+if output=$(HOME="$cmd_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
+    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$cmd_failure_home/.local/share/command-code/bin/cmd" ]
+
+default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
+case "$default_targets" in
+    *'set -- '*grok*|*'set -- '*cmd*)
+        printf 'optional coding agents appeared in the default dl targets\n' >&2
+        exit 1 ;;
+esac
 
 unowned_dsh_home="$test_root/unowned-dsh-home"
 unowned_dsh_root="$unowned_dsh_home/data/dsh"

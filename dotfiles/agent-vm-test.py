@@ -86,6 +86,7 @@ class AgentVmTests(unittest.TestCase):
             "$HOME/.config/muse/AGENTS.md",
             "$HOME/.gemini/config/AGENTS.md",
             "$HOME/.dsh/AGENTS.md",
+            "$HOME/.commandcode/AGENTS.md",
             "$HOME/.claude/agents",
             "$HOME/.grok/agents",
         ):
@@ -132,6 +133,7 @@ class AgentVmTests(unittest.TestCase):
             ".config/muse/AGENTS.md",
             ".gemini/config/AGENTS.md",
             ".dsh/AGENTS.md",
+            ".commandcode/AGENTS.md",
         ):
             self.assertEqual((guest_home / path).read_text(), "global instructions")
         self.assertTrue((guest_home / ".claude/agents").is_dir())

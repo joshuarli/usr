@@ -25,6 +25,7 @@ CODEX_LEGACY_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
 GROK_HOME="${HOME}/.grok"
 MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
 OPENCODE2_HOME="${HOME}/.opencode"
+CMD_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/command-code"
 
 STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
 DL_OWNED_FILE=${DL_OWNED_FILE:-}
@@ -832,6 +833,80 @@ remove_legacy_dsh() {
     fi
 }
 
+install_cmd() {
+    command -v npm >/dev/null 2>&1 || { unchecked cmd "npm is required"; return; }
+    node_major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null) || node_major=
+    case "$node_major" in
+        ''|*[!0-9]*) unchecked cmd "Node.js 22 or newer is required"; return ;;
+    esac
+    if [ "$node_major" -lt 22 ]; then
+        unchecked cmd "Node.js 22 or newer is required"
+        return
+    fi
+    version=$(npm view command-code@latest version 2>/dev/null) || version=
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked cmd "no npm release found"; return; }
+    if [ -e "${DEST}/cmd" ] || [ -L "${DEST}/cmd" ]; then
+        if [ "$(readlink "${DEST}/cmd" 2>/dev/null || :)" != "${CMD_INSTALL_ROOT}/bin/cmd" ] \
+            || [ ! -s "${STATE}/cmd" ]; then
+            skip cmd "${DEST}/cmd already exists outside dl management"
+            return
+        fi
+    fi
+    if [ -e "$CMD_INSTALL_ROOT" ] || [ -L "$CMD_INSTALL_ROOT" ]; then
+        if [ ! -d "$CMD_INSTALL_ROOT" ] || [ -L "$CMD_INSTALL_ROOT" ] \
+            || [ ! -s "${STATE}/cmd" ]; then
+            skip cmd "$CMD_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    fi
+    if [ "$(cat "${STATE}/cmd" 2>/dev/null)" = "$version" ] \
+        && [ -x "${CMD_INSTALL_ROOT}/bin/cmd" ] \
+        && [ "$(readlink "${DEST}/cmd" 2>/dev/null || :)" = "${CMD_INSTALL_ROOT}/bin/cmd" ]; then
+        own_dir "$CMD_INSTALL_ROOT"
+        own_file "${DEST}/cmd"
+        own_file "${STATE}/cmd"
+        printf '%s\n' "cmd is current (${version})"
+        return
+    fi
+    own_parent=${CMD_INSTALL_ROOT%/*}
+    own_missing_dirs "$own_parent"
+    mkdir -p "$own_parent"
+    install_prefix=$CMD_INSTALL_ROOT
+    if [ ! -d "$CMD_INSTALL_ROOT" ]; then
+        tmpbundle=$(mktemp -d "${CMD_INSTALL_ROOT}.XXXXXX")
+        install_prefix=$tmpbundle
+    fi
+    printf '%s\n' "Installing Command Code (${version}) ..."
+    if ! npm install --global --prefix "$install_prefix" "command-code@${version}"; then
+        skip cmd "npm install failed"
+        return
+    fi
+    if [ ! -x "${install_prefix}/bin/cmd" ]; then
+        skip cmd "npm did not install ${install_prefix}/bin/cmd"
+        return
+    fi
+    if [ "$install_prefix" != "$CMD_INSTALL_ROOT" ]; then
+        if [ -e "$CMD_INSTALL_ROOT" ] || [ -L "$CMD_INSTALL_ROOT" ]; then
+            skip cmd "$CMD_INSTALL_ROOT appeared during install"
+            return
+        fi
+        mv "$install_prefix" "$CMD_INSTALL_ROOT"
+        tmpbundle=
+    fi
+    own_dir "$CMD_INSTALL_ROOT"
+    tmpbinlink=$(mktemp "${DEST}/.cmd.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${CMD_INSTALL_ROOT}/bin/cmd" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/cmd"
+    tmpbinlink=
+    printf '%s\n' "$version" > "${STATE}/cmd"
+    own_file "${DEST}/cmd"
+    own_file "${STATE}/cmd"
+    changed=true
+    printf '%s\n' "Installed ${DEST}/cmd"
+}
+
 install_dsh() {
     command -v npm >/dev/null 2>&1 || { unchecked dsh "npm is required"; return; }
     version=$(npm view @deepseek-ai/dsh@next version 2>/dev/null) || version=
@@ -1336,6 +1411,15 @@ record_managed_installs() {
             fi
         fi
     fi
+    if [ -s "${STATE}/cmd" ]; then
+        own_file "${STATE}/cmd"
+        if [ -d "$CMD_INSTALL_ROOT" ] && [ ! -L "$CMD_INSTALL_ROOT" ] \
+            && [ -x "${CMD_INSTALL_ROOT}/bin/cmd" ] \
+            && [ "$(readlink "${DEST}/cmd" 2>/dev/null || :)" = "${CMD_INSTALL_ROOT}/bin/cmd" ]; then
+            own_dir "$CMD_INSTALL_ROOT"
+            own_file "${DEST}/cmd"
+        fi
+    fi
     record_managed_binary opencode2
     if [ -s "${STATE}/opencode2" ] \
         && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
@@ -1377,7 +1461,7 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg pinact jactionlint jaq grok codex claude opencode2 fastermod tm ish e fz fdu fs srv
+    set -- fd rg pinact jactionlint jaq codex claude opencode2 fastermod tm ish e fz fdu fs srv
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
@@ -1416,6 +1500,7 @@ for prog in "$@"; do
         jactionlint) install_jactionlint ;;
         grok) install_grok ;;
         dsh) install_dsh ;;
+        cmd) install_cmd ;;
         antigravity|agy) install_antigravity ;;
         muse) install_muse ;;
         claude) install_claude ;;

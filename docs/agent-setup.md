@@ -13,6 +13,11 @@
 | OpenCode | `~/.config/opencode/AGENTS.md` | `~/.agents/skills/` |
 | Antigravity CLI | `~/.gemini/config/AGENTS.md` | `~/.gemini/antigravity-cli/skills/` |
 | DeepSeek Harness | `${DSH_HOME:-~/.dsh}/AGENTS.md` | `${DSH_AGENTS_HOME:-~/.agents}/skills/` |
+| Command Code (`cmd`, opt-in) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
+
+Command Code requires Node.js 22+ and is installed on demand with `sh dl cmd`, into `~/.local/share/command-code` (or `$XDG_DATA_HOME/command-code`). Grok is likewise opt-in (`sh dl grok`); neither is downloaded by no-argument `dl` or `make`. Sync the tracked configuration with `make` as usual, then run `cmd login` yourself. The installer never touches Command's `~/.commandcode` credentials or sessions.
+
+Command shares the canonical global instructions and discovers `~/.agents/skills/` without duplication. Its settings start in unrestricted `yolo` mode, disable Taste learning to avoid overlapping `agent-learn`, and omit the default commit co-author trailer. Edit the tracked `tasteLearning` setting to try Taste. Use `/skill:<name>` if a built-in command shadows a skill. Command's `Explore` and `General` subagents inherit the session model until their model tiers are calibrated; its transcripts are not yet indexed by `agent-sessions` or `agent-learn`.
 
 The tracked skills live in `dotfiles/base/.agents/skills/`. Directory links and allowlists keep harness state outside the repository. Claude subagents live in `dotfiles/base/.claude/agents/`; Grok has matching definitions in `dotfiles/base/.grok/agents/`. For a custom `DSH_HOME`, install the DeepSeek adapter at `${DSH_HOME}/AGENTS.md`; `DSH_AGENTS_HOME` controls shared skill discovery.
 
@@ -24,7 +29,7 @@ Harnesses use native skill metadata and discovery paths. The checker at [`skills
 
 The tracked configs are under [`dotfiles/base`](../dotfiles/base/). Review changes after a harness writes its own config. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. OpenCode restores its `cli.json` when missing, so install its tracked symlink while the client is stopped.
 
-The configured harnesses allow unrestricted actions. Claude disables sandboxing and uses `bypassPermissions`; Codex sets `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`; Muse uses `:unrestricted`; Grok sets `yolo = true` and sandbox profile `off`; OpenCode has an allow-all permissions rule. Grok imports Claude hooks but not Claude's `env` settings. See the tracked configs for hook and notification details.
+The configured harnesses allow unrestricted actions. Claude disables sandboxing and uses `bypassPermissions`; Codex sets `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`; Muse uses `:unrestricted`; Grok sets `yolo = true` and sandbox profile `off`; OpenCode has an allow-all permissions rule; Command Code defaults to `yolo`. Grok imports Claude hooks but not Claude's `env` settings. See the tracked configs for hook and notification details.
 
 `reset-agents` clears Claude, Codex, Grok, Muse, and OpenCode state under `$HOME`; pass one harness name to reset only that harness. It keeps dotfiles-managed files and `.credentials.json`, `auth.json`, and `mcp_credentials.json`. It rejects paths outside the resolved home and paths with symlinked components. Run it only when you intend to reset state. See its [implementation](../dotfiles/base/.local/bin/reset-agents) for supported paths.
 
