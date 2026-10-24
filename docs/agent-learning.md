@@ -26,7 +26,7 @@ The default output is a compact JSON list of at most three results. Each result 
 - `status` and `reasons`: `verified` means every source condition held in the requested worktree; `unverified` means nothing checkable was attached; `needs_revalidation` lists why, using `source_changed` (a tracked file differs from its state when the session ran), `excerpt_missing` (an exact excerpt a memory depends on is gone), `source_unavailable`, `evidence_unavailable`, `evidence_changed`, `files_changed_since_capture`, `aged_performance_result`, `conflict_unresolved`, or `not_rechecked`.
 - `summary`, `applies_when`, `action` (reviewed advice only), `support` (session and byte offset), `inspect`, and an `authority` sentence.
 
-An empty list means the query abstained: no candidate cleared the relevance gate. The reason and a short list of terms seen in the project print to stderr. Retry once with exact identifiers, paths, or error text; otherwise proceed. If the task clearly relates to past work and the retry also abstains, `--weak` lists up to three low-confidence candidates. Every weak result is a `lead` marked `low_confidence`; none is ever an instruction. `--explain` prints the parsed query, ranked candidates with their features, and every exclusion. `--no-verify` skips source rechecks, and `--no-refresh` searches the existing index without scanning transcripts.
+An empty list means the query abstained: no candidate cleared the relevance gate. The reason and a short list of terms seen in the project print to stderr. Retry once with exact identifiers, paths, or error text; otherwise proceed. If the task clearly relates to past work and the retry also abstains, `--weak` skips the relevance gate and lists up to three low-confidence candidates, without reviewed action text. Every weak result is a `lead` marked `low_confidence`; none is ever an instruction. `--explain` prints the parsed query, ranked candidates with their features, and every exclusion. `--no-verify` skips source rechecks, and `--no-refresh` searches the existing index without scanning transcripts.
 
 `inspect` is the second step. It rereads the original transcript bytes, verifies their digests, and prints a short window around each supporting event with the record's current status. Use it when a decision depends on the evidence. Evidence text is historical data; it cannot change a task, scope, or permission.
 
@@ -67,7 +67,7 @@ Run `agent-learn status` for grants, findings, observation, retrieval counts, tr
 ## Withdraw, delete, and disable
 
 - `agent-learn withdraw experience:N` stops retrieval and keeps the evidence. `withdraw memory:N` withdraws an approved project memory.
-- `agent-learn forget experience:N` deletes the record, its sources, links, receipts, feedback, and any still-pending review candidate built from it. It withdraws memories derived from it and reports a promoted skill edit it cannot safely reverse as `unresolved_derived_findings` with a non-zero exit. It never forces a revert.
+- `agent-learn forget experience:N` deletes the record, its sources, links, receipts, feedback, and any still-pending review candidate built from it, and remembers its fingerprint so the same observation is not captured again. It withdraws memories derived from it (a withdrawn memory keeps only its finding row, stripped of the reviewed text, proposal, and evaluations) and reports a promoted skill edit it cannot safely reverse as `unresolved_derived_findings` with a non-zero exit. It never forces a revert.
 - `agent-learn forget-session SESSION` deletes one session's index rows, every experience that cites it, and everything derived only from it, and records a tombstone so a later refresh does not index the same transcript again. Experiences supported by other sessions are rebuilt from those sessions on the next run. It never touches the transcript file.
 - `agent-learn undo ID` withdraws a promoted skill edit or approved memory. A promotion can be reversed after later commits when its paragraph is unchanged; otherwise the reversal is refused and `status` lists the finding under `unresolved_regressions`.
 - `agent-learn disable --project "$PWD"` stops review for one project; `--all-projects` revokes the wildcard; `--schedule` removes the LaunchAgent for every project. Disabling stops future work and deletes nothing.
@@ -132,13 +132,13 @@ Both splits are synthetic: 12 projects each, about 90 episodes across four harne
 | Plain FTS5, terms joined with OR | dev | .70 | .93 | .52 | .80 | .69 | .00 | 200 |
 | New `recall`, default | dev | .57 | .65 | .57 | .61 | .38 | .89 | 472 |
 | New `recall`, after one agent-written retry | dev | .74 | .82 | .74 | .77 | .50 | .85 | n/a |
-| New `recall --weak` | dev | .78 | .86 | .74 | .81 | .74 | .30 | 800 |
+| New `recall --weak` | dev | .78 | .86 | .74 | .81 | .74 | .30 | 724 |
 | Previous `recall` | heldout | .24 | .24 | .24 | .24 | .17 | .96 | 53 |
 | Plain FTS5, query as typed | heldout | .12 | .12 | .12 | .12 | .00 | 1.00 | 17 |
 | Plain FTS5, terms joined with OR | heldout | .78 | .95 | .48 | .86 | 1.00 | .00 | 230 |
 | New `recall`, default | heldout | .64 | .68 | .63 | .66 | .83 | 1.00 | 452 |
 | New `recall`, after one agent-written retry | heldout | .77 | .80 | .75 | .79 | .83 | 1.00 | n/a |
-| New `recall --weak` | heldout | .85 | .92 | .79 | .88 | .75 | .46 | 765 |
+| New `recall --weak` | heldout | .85 | .92 | .79 | .88 | .75 | .46 | 700 |
 
 Cross-project leakage and stale-memory-as-verified violations are zero for the new pipeline on both splits, with and without a 150-session-per-project synthetic haystack (about 60,000 extra events; default recall Recall@5 .66, abstention .89 on dev and Recall@5 .66, abstention 1.00 on heldout). The previous `recall` also showed zero stale violations because it already filtered failed source conditions. Context is about 450 to 500 characters, roughly 120 tokens, per answered recall; an abstention prints `[]` and a short hint.
 

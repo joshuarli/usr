@@ -703,6 +703,127 @@ class ReviewRegressionTests(RecallCase):
         self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 3)
 
 
+class SecondReviewRegressionTests(RecallCase):
+    def two_session_world(self):
+        spec = lesson_world()
+        spec["episodes"].append(episode("a-3", "alpha", [
+            {"user": "tests fail again"}, tool("pytest -q tests/test_ingest.py", PYTEST_FAIL, 1),
+            tool("pip install -e .", "Successfully installed orbit-core", 0), tool("pytest -q tests/test_ingest.py", "1 passed in 0.4s", 0)], age=3))
+        return spec
+
+    def test_deployed_v4_database_without_the_tombstone_table_migrates_in_place(self):
+        temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.addCleanup(temp.cleanup)
+        state = Path(temp.name) / "state"
+        store = agent_session_store.Store(state)
+        with store.db:
+            store.db.execute("DROP TABLE forgotten_sessions")
+            store.db.execute("PRAGMA user_version = 4")
+        store.close()
+        store = agent_session_store.Store(state)
+        self.addCleanup(store.close)
+        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 5)
+        self.assertEqual(store.db.execute("SELECT count(*) FROM forgotten_sessions").fetchone()[0], 0)
+
+    def test_forgetting_scrubs_withdrawn_memories_feedback_and_reviewer_context(self):
+        self.build(self.two_session_world(), observe=False)
+        db = self.store.db
+        action = "SECRETACTION run the private deploy script"
+        with db:
+            db.execute("INSERT INTO learning_findings(project,signal,fingerprint,terms,state,created_at,updated_at,proposal) VALUES(?,?,?,?,?,?,?,?)",
+                       (self.ident["alpha"], "correction", "fp", "secretterm", "memory", 1, 1, json.dumps({"future_action": action, "owner": "memory", "target": "memory", "applicability": "x"})))
+            db.execute("INSERT INTO learning_memories(finding,project,action,applicability,revision,state,created_at,validity) VALUES(1,?,?,?,?,'approved',1,'[]')",
+                       (self.ident["alpha"], action, "when", "r"))
+            db.execute("INSERT INTO learning_incidents(finding,session,root_session,position,digest,signal,observed_at) VALUES(1,'a-1','a-1',0,'d','correction',1)")
+            db.execute("INSERT INTO learning_feedback(record,project,reporter,verdict,note,created_at,session) VALUES('event:a-1@566',?,'agent','helped','SECRETNOTE',1,NULL)", (self.ident["alpha"],))
+        self.learner.forget_session("a-1", 5)
+        dump = json.dumps([list(row) for table in ("learning_findings", "learning_memories", "learning_feedback", "learning_reviews") for row in db.execute("SELECT * FROM " + table)])
+        self.assertNotIn("SECRETACTION", dump)
+        self.assertNotIn("SECRETNOTE", dump)
+        self.assertEqual(db.execute("SELECT state FROM learning_findings WHERE id = 1").fetchone()[0], "superseded")
+        self.assertEqual(db.execute("SELECT count(*) FROM learning_recall_docs WHERE kind = 'memory'").fetchone()[0], 0)
+
+    def test_forget_racing_a_refresh_cannot_reinsert_the_session(self):
+        self.build(lesson_world(), observe=False)
+        path = self.world.episode_paths["a-1"]
+        meta, error = agent_session_store._metadata(path, "codex", {}, None)
+        self.assertIsNone(error)
+        self.learner.forget_session("a-1", 5)
+        stats = {key: 0 for key in ("git_processes", "stat_operations", "content_opens", "bytes_read")}
+        self.store._refresh_file(meta, stats)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM sessions WHERE id = 'a-1'").fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM events WHERE session = 'a-1'").fetchone()[0], 0)
+
+    def test_bridging_is_not_starved_by_ineligible_older_experiences(self):
+        self.build(self.two_session_world(), observe=False)
+        db = self.store.db
+        self.learner.enable(self.world.cwd("alpha"), ROOT, self.world.now - 10 * 86400)
+        with db:
+            for index in range(60):
+                cursor = db.execute("INSERT INTO learning_experiences(project,kind,claim,applies_when,identifiers,fingerprint,basis,detector,observed_at,captured_at) "
+                                    "VALUES(?,?,?,?,?,?,?,?,?,?)", (self.ident["alpha"], "failure", "old claim %d" % index, "when", "x", "old%d" % index, "deterministic", "resolved_failure", 1, 1))
+                db.execute("INSERT INTO learning_experience_sources(experience,session,position,digest,role) VALUES(?,?,?,?,?)", (cursor.lastrowid, "a-1", 0, "d", "trigger"))
+            cursor = db.execute("INSERT INTO learning_experiences(project,kind,claim,applies_when,identifiers,fingerprint,basis,detector,observed_at,captured_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                                (self.ident["alpha"], "failure", "new claim", "when", "x", "new", "deterministic", "resolved_failure", 2, 2))
+            db.execute("INSERT INTO learning_experience_sources(experience,session,position,digest,role) VALUES(?,?,?,?,?)", (cursor.lastrowid, "a-3", 0, "d", "trigger"))
+        self.assertEqual(self.learner.bridge_experiences(self.ident["alpha"], self.world.now), 1)
+
+    def test_a_fix_committed_after_the_session_does_not_start_out_as_changed(self):
+        spec = FreshnessTests.memory_spec  # keep the helper import local to this module
+        del spec
+        projects = {"alpha": BASE}
+        patch = "apply_patch '*** Begin Patch\n*** Update File: src/app.py\n@@\n-return 1\n+return 2\n*** End Patch'"
+        turns = [{"user": "fix"}, tool("pytest -q tests/test_app.py", "E   AssertionError: main returned 1\nFAILED tests/test_app.py::test_main", 1),
+                 tool(patch, "ok", 0), tool("pytest -q tests/test_app.py", "1 passed", 0)]
+        spec = fixture(projects, [episode("fx", "alpha", turns, age=1)], mutations=[{"project": "alpha", "path": "src/app.py", "content": "def main():\n    return 2\n", "commit": True}])
+        self.build(spec, observe=False)
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        hit = self.ask("alpha", "tests/test_app.py AssertionError main returned")["results"][0]
+        self.assertEqual(hit["status"], "verified")
+
+    def test_finished_review_with_no_recorded_call_still_costs_one_call(self):
+        self.build(lesson_world(), observe=False)
+        db = self.store.db
+        with db:
+            db.execute("INSERT INTO learning_findings(project,signal,fingerprint,terms,state,created_at,updated_at) VALUES('p','correction','f','t','held',1,1)")
+            db.execute("INSERT INTO learning_reviews(finding,started_at,finished_at,outcome,usage) VALUES(1,?,?,'transient',?)", (self.world.now, self.world.now, json.dumps({"calls": []})))
+        self.assertEqual(self.learner._model_calls_since(0), 1)
+
+    def test_forgotten_experience_is_not_recreated_when_its_session_changes(self):
+        self.build(lesson_world())
+        db = self.store.db
+        experience = db.execute("SELECT id FROM learning_experiences WHERE project = ?", (self.ident["alpha"],)).fetchone()[0]
+        self.learner.forget("experience:%d" % experience, 5)
+        with db:
+            db.execute("DELETE FROM learning_observed")
+        self.learner.observe_project(self.ident["alpha"], self.world.cwd("alpha"), self.world.now, 0)
+        self.assertEqual(db.execute("SELECT count(*) FROM learning_experiences WHERE project = ?", (self.ident["alpha"],)).fetchone()[0], 0)
+
+    def test_long_secret_before_the_match_does_not_blank_the_snippet(self):
+        secret = "sk-" + "A1b2C3d4" * 70
+        text = "prefix " + secret + " " + "filler " * 30 + "orbit_core marker tail"
+        spec = fixture({"alpha": BASE}, [episode("s", "alpha", [{"user": "see logs"}, {"assistant": text}, {"user": "thanks"}], age=5)])
+        self.build(spec, observe=False)
+        results = self.ask("alpha", "orbit_core marker")["results"]
+        self.assertTrue(any("orbit_core" in item["summary"] for item in results))
+        self.assertNotIn(secret[-20:], json.dumps(results))
+
+    def test_weak_results_never_carry_reviewed_action_text(self):
+        spec = FreshnessTests.memory_spec(self, [{"path": "src/app.py", "contains": "return 1"}])
+        self.build(spec)
+        weak = self.ask("alpha", "pytest runner environment installs", weak=True)
+        self.assertTrue(weak["results"])
+        self.assertTrue(all(item["action"] is None for item in weak["results"]))
+
+    def test_glob_characters_and_nul_in_condition_paths_are_not_special(self):
+        self.build(lesson_world(), observe=False)
+        cwd = self.world.cwd("alpha")
+        (cwd / "a*").write_text("untracked")
+        (cwd / "ab").write_text("untracked")
+        self.assertEqual(agent_recall.condition_states([{"path": "a*", "contains": "x"}, {"path": "src/\x00.py", "contains": "x"}], cwd),
+                         [("a*", "source_unavailable"), ("src/\x00.py", "source_unavailable")])
+
+
 class HardeningTests(RecallCase):
     def test_non_ascii_text_paths_and_identifiers_are_searchable(self):
         spec = fixture({"alpha": BASE}, [
