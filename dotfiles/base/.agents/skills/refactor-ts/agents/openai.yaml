@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refactor TypeScript"
+  short_description: "Refactor TypeScript for Solid and Effect"
+  default_prompt: "Use $refactor-ts to refactor this TypeScript codebase for my chosen Node, pnpm, Solid, and Effect stack."
+policy:
+  allow_implicit_invocation: false

@@ -92,4 +92,4 @@ Choose between the PR skills by size: `pr-ready` for one PR, `pr-stack` for a st
 
 ## Not listed
 
-Skills for a language, stack, or engineering method are not in this index. Examples are `ts-tools`, `rust-hash`, `rust-cli-lexopt`, `durable-state`, `error-model`, `root-cause`, and `make-it-fast`. Add a skill here only if it changes how the agent works rather than what it works on.
+Skills for a language, stack, or engineering method are not in this index. Examples are `refactor-ts`, `rust-hash`, `rust-cli-lexopt`, `durable-state`, `error-model`, `root-cause`, and `make-it-fast`. Add a skill here only if it changes how the agent works rather than what it works on.

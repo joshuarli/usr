@@ -30,7 +30,7 @@ KNOWN_LEAF_SKILLS = frozenset(
         "test-audit",
         "rust-cli-lexopt",
         "rust-hash",
-        "ts-tools",
+        "refactor-ts",
     }
 )
 
