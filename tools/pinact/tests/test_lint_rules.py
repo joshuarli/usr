@@ -19,7 +19,6 @@ SRC = HERE.parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 from pinact import lint as L  # noqa: E402
-from pinact import pinning  # noqa: E402
 
 
 def lint_text(content: str, profile: str = "default", filename: str = "w.yml",
@@ -76,8 +75,7 @@ class SyntaxTests(unittest.TestCase):
         self.assertIn("duplicate-key", by_id)
 
     def test_duplicate_job_ids_reported(self) -> None:
-        node_src = "a: 1\na: 2\n"
-        _, _, by_id = lint_text(f"on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n", profile="correctness")
+        _, _, by_id = lint_text("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n", profile="correctness")
         self.assertNotIn("duplicate-key", by_id)
         dup = "on: push\njobs:\n  a: 1\n  a: 2\n"
         _, _, by_id = lint_text(dup, profile="correctness")
@@ -183,9 +181,24 @@ class NeedsTests(unittest.TestCase):
                    "  b:\n    needs: a\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n")
         _, _, by_id = lint_text(content, profile="correctness")
         self.assertIn("needs-cycle", by_id)
+        self.assertEqual(by_id["needs-cycle"][0].line, 3)
 
 
 class MatrixCronTests(unittest.TestCase):
+    def test_matrix_include_keys_are_known(self) -> None:
+        content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                   "    strategy:\n      matrix:\n        include:\n          - custom: value\n"
+                   "    steps:\n      - run: echo ${{ matrix.other }}\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertIn("undefined-property", by_id)
+
+    def test_dynamic_matrix_property_stays_unknown(self) -> None:
+        content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                   "    strategy:\n      matrix: ${{ fromJSON('{\"os\":[\"ubuntu-latest\"]}') }}\n"
+                   "    steps:\n      - run: echo ${{ matrix.os }}\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertNotIn("undefined-property", by_id)
+
     def test_invalid_matrix_shape(self) -> None:
         content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
                    "    strategy:\n      matrix: [1, 2]\n"
@@ -227,6 +240,24 @@ class EventPermissionTests(unittest.TestCase):
                    "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n")
         _, _, by_id = lint_text(content, profile="correctness")
         self.assertIn("invalid-type", by_id)
+
+    def test_unknown_event_filter(self) -> None:
+        content = ("on:\n  push:\n    branch: main\n"
+                   "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertIn("invalid-event-filter", by_id)
+
+    def test_template_injection_is_in_correctness_profile(self) -> None:
+        content = ("on: pull_request\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                   "    steps:\n      - run: echo ${{ github.event.pull_request.title }}\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertIn("template-injection", by_id)
+
+    def test_unknown_matrix_property_is_in_correctness_profile(self) -> None:
+        content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                   "    steps:\n      - run: echo ${{ matrix.os }}\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertIn("undefined-property", by_id)
 
     def test_invalid_permissions(self) -> None:
         content = ("on: push\npermissions:\n  bogus: read\n"
@@ -316,6 +347,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             code, out, _ = lint_cli(["--format=json", "--select=unknown-key", str(dirty)])
             self.assertEqual(code, 0)
+            code, _, err = lint_cli(["--format=json", "--select=not-a-rule", str(dirty)])
+            self.assertEqual(code, 2)
+            self.assertIn("unknown rule", err)
             code, _, err = lint_cli(["--format=json", "--catalog", str(Path(temp) / "nope.toml"), str(dirty)])
             self.assertEqual(code, 2)
             self.assertIn("catalog", err)

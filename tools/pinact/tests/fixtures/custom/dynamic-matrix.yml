@@ -1,0 +1,9 @@
+on: push
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON('{"os":["ubuntu-latest"]}') }}
+    steps:
+      - run: echo ${{ matrix.os }}

@@ -107,11 +107,12 @@ def check_events(doc: SourceDocument, root: MappingNode) -> list[tuple]:
                 out.append((line, col, "invalid-event", "error",
                             f"unknown trigger event '{key.value}'", False))
                 continue
-            out.extend(check_event_filters(key, value))
             if key.value == "schedule":
                 out.extend(check_schedule(key, value))
-            if key.value == "workflow_call":
+            elif key.value == "workflow_call":
                 out.extend(check_workflow_call(key, value))
+            elif key.value != "workflow_dispatch":
+                out.extend(check_event_filters(key, value))
     else:
         line, col = _value_line_col(on)
         out.append((line, col, "invalid-type", "error",
@@ -123,8 +124,14 @@ def check_event_filters(key_node, value) -> list[tuple]:
     out = []
     if not isinstance(value, MappingNode):
         return out
+    allowed = tables.EVENT_FILTERS.get(key_node.value, frozenset())
     for fkey, fval in mapping_pairs(value):
         if not isinstance(fkey, ScalarNode):
+            continue
+        if fkey.value not in allowed:
+            line, col = _line_col(fkey)
+            out.append((line, col, "invalid-event-filter", "error",
+                        f"unknown filter '{fkey.value}' for event '{key_node.value}'", False))
             continue
         if fkey.value in ("branches", "branches-ignore", "tags", "tags-ignore", "paths", "paths-ignore"):
             if not isinstance(fval, SequenceNode):
@@ -310,7 +317,6 @@ def check_needs_edges(seen: dict, needs_map: dict[str, list[str]], jobs_node) ->
                 line, col = _line_col(key) if key is not None else (1, 1)
                 out.append((line, col, "invalid-needs", "error",
                             f"job '{jid}' needs unknown job '{need}'", False))
-    order: dict[str, int] = {}
     WHITE, GRAY, BLACK = 0, 1, 2
     color = {jid: WHITE for jid in seen}
     stack: list[str] = []
@@ -322,7 +328,7 @@ def check_needs_edges(seen: dict, needs_map: dict[str, list[str]], jobs_node) ->
             if dep not in color:
                 continue
             if color[dep] == GRAY:
-                key = _find_job_key(jobs_node, node_id)
+                key = _find_job_key(jobs_node, stack[stack.index(dep)])
                 line, col = _line_col(key) if key is not None else (1, 1)
                 cycle = " -> ".join([*stack, dep])
                 out.append((line, col, "needs-cycle", "error",

@@ -125,6 +125,7 @@ class ContextTests(unittest.TestCase):
             step_ids_by_job={"build": {"one"}},
             needs_by_job={"test": {"build"}},
             matrix_keys={"build": {"os"}},
+            matrix_jobs={"build"},
             inputs={"name"},
             location="test",
         )
@@ -133,6 +134,7 @@ class ContextTests(unittest.TestCase):
             step_ids_by_job={"build": {"one"}},
             needs_by_job={"test": {"build"}},
             matrix_keys={"build": {"os"}},
+            matrix_jobs={"build"},
             inputs={"name"},
             location="build",
         )
@@ -150,6 +152,17 @@ class ContextTests(unittest.TestCase):
         status, _ = E.analyze_expression("matrix.os", self.build_ctx)
         self.assertIn(status, ("valid", "valid-unknown"))
         status, _ = E.analyze_expression("fromJSON(inputs.name).os", self.ctx)
+        self.assertEqual(status, "valid-unknown")
+
+    def test_matrix_unavailable_without_strategy(self) -> None:
+        ctx = E.Context(job_ids={"build"}, location="build")
+        status, message = E.analyze_expression("matrix.os", ctx)
+        self.assertEqual(status, "semantic-error")
+        self.assertIn("matrix", message)
+
+    def test_dynamic_matrix_keeps_keys_unknown(self) -> None:
+        ctx = E.Context(job_ids={"build"}, matrix_jobs={"build"}, location="build")
+        status, _ = E.analyze_expression("matrix.os", ctx)
         self.assertEqual(status, "valid-unknown")
 
     def test_steps_inputs(self) -> None:

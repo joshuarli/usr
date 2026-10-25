@@ -62,10 +62,10 @@ class CheckoutCredentialsTests(unittest.TestCase):
         _, _, by_id = lint_text(self.VULN)
         self.assertIn("checkout-credentials", by_id)
 
-    def test_missing_key_is_safe(self) -> None:
+    def test_missing_key_reports_upstream_default(self) -> None:
         content = jobbody("{}", "      - uses: actions/checkout@v4\n")
         _, _, by_id = lint_text(content)
-        self.assertNotIn("checkout-credentials", by_id)
+        self.assertIn("checkout-credentials", by_id)
 
     def test_explicit_false_is_safe(self) -> None:
         content = jobbody("{}", "      - uses: actions/checkout@v4\n"
@@ -210,6 +210,13 @@ class DangerousTriggerTests(unittest.TestCase):
         content = ("on:\n  workflow_dispatch:\npermissions:\n  contents: read\n"
                    "jobs:\n  build:\n    runs-on: ubuntu-latest\n"
                    "    steps:\n      - run: echo hi\n")
+        _, _, by_id = lint_text(content)
+        self.assertNotIn("dangerous-trigger", by_id)
+
+    def test_workflow_dispatch_with_write_checkout_is_trusted(self) -> None:
+        content = ("on: workflow_dispatch\npermissions: write-all\njobs:\n"
+                   "  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+                   "      - uses: actions/checkout@v4\n      - run: make release\n")
         _, _, by_id = lint_text(content)
         self.assertNotIn("dangerous-trigger", by_id)
 

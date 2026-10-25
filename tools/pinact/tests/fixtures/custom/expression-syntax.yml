@@ -1,0 +1,7 @@
+on: push
+jobs:
+  build:
+    if: ${{ github.ref == }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build
