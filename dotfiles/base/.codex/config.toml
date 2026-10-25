@@ -263,6 +263,9 @@ trust_level = "trusted"
 [projects."/home/josh/d/crabc"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/ntpd-rs"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
