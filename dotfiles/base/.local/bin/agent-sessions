@@ -45,7 +45,8 @@ def _stats(stats):
     print(
         "sessions={sessions_indexed} events={events_added} malformed={malformed_lines} "
         "partial={partial_files} resets={resets} deleted={deleted} skipped_project={skipped_project} "
-        "skipped_ephemeral={skipped_ephemeral} skipped_learning_workers={skipped_learning_workers}".format(**stats)
+        "skipped_ephemeral={skipped_ephemeral} skipped_learning_workers={skipped_learning_workers} "
+        "archived={archived} archive_errors={archive_errors}".format(**stats)
     )
 
 

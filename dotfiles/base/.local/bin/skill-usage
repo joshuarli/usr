@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Count how each skill is listed and loaded across real Claude, Codex, Muse, and Grok sessions (read-only)."""
+"""Count how each skill is listed and loaded across real Claude, Codex, Muse, Grok, and Pi sessions (read-only)."""
 import argparse
 import collections
 import contextlib
@@ -16,13 +16,14 @@ from typing import Any
 from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_transcripts import default_roots, normalize
+from agent_transcripts import default_roots, is_source_name, normalize
 
-HARNESSES = ("claude", "codex", "muse", "grok")
+HARNESSES = ("claude", "codex", "muse", "grok", "pi")
 LISTING = re.compile(r"^- ([a-z0-9][a-z0-9-]*):", re.M)
 SKILL_PATH = re.compile(r"/skills/([a-z0-9][a-z0-9-]*)/SKILL\.md")
 READ = SKILL_PATH
 SLASH = re.compile(r"<command-name>/([^<]+)</command-name>")
+PI_SKILL_BLOCK = re.compile(r"\A<skill name=\"([^\"]+)\" location=\"[^\"]+\">\n.*?\n</skill>(?:\n\n(.+))?\Z", re.S)
 GROK_SLASH = re.compile(r"^\s*/([a-z0-9][a-z0-9:_-]*)(?:\s|$)")
 
 
@@ -227,6 +228,51 @@ def scan_grok(root, since, use, known_skills):
                             use.load(skill, "grok", session, when, project, "read", prompt)
 
 
+def scan_pi(root, since, use):
+    for path in sorted(Path(root).rglob("*.jsonl")):
+        if not is_source_name("pi", path.name) or path.stat().st_mtime < since:
+            continue
+        session, project, prompt = path.stem, "", ""
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                header = line.startswith('{"type":"session"')
+                listing = '"role":"system"' in line and "SKILL.md" in line
+                slash = '"role":"user"' in line and "<skill name=" in line
+                read = '"toolCall"' in line and "SKILL.md" in line
+                user = use.want_show and '"role":"user"' in line
+                if not (header or listing or slash or read or user):
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if obj.get("type") == "session":
+                    session = obj.get("id") or session
+                    project = os.path.basename(str(obj.get("cwd") or "").rstrip("/"))
+                    use.sessions["pi"].add(session)
+                    continue
+                message = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+                when = str(obj.get("timestamp", ""))[:10]
+                role = message.get("role")
+                if role == "system":
+                    sections = message.get("sections")
+                    listing_text = str(sections.get("skills", "")) if isinstance(sections, dict) else ""
+                    for name in SKILL_PATH.findall(listing_text):
+                        use.listed[bare(name)].add(("pi", session))
+                elif role == "user":
+                    text = normalized_text(obj, "pi")
+                    block = PI_SKILL_BLOCK.match(text)
+                    if block:
+                        use.load(block.group(1), "pi", session, when, project, "slash", block.group(2) or prompt)
+                    elif text:
+                        prompt = text
+                elif role == "assistant" and read:
+                    for part in message.get("content") or []:
+                        if isinstance(part, dict) and part.get("type") == "toolCall" and part.get("name") == "read":
+                            for name in set(SKILL_PATH.findall(json.dumps(part.get("arguments", {})))):
+                                use.load(name, "pi", session, when, project, "read", prompt)
+
+
 def kinds(skills):
     out = {}
     for skill in sorted(Path(skills).glob("*/SKILL.md")):
@@ -251,11 +297,11 @@ def report(use, skill_kinds, args):
         print(json.dumps({"days": args.days, "sessions": totals, "skills": rows}))
         return
     print("window %s days; sessions: %s" % (args.days, ", ".join(f"{harness} {totals[harness]}" for harness in HARNESSES)))
-    print(f"{'skill':46} {'kind':8} {'listed c/x/m/g':>15} {'loaded c/x/m/g':>15}")
+    print(f"{'skill':46} {'kind':8} {'listed c/x/m/g/p':>17} {'loaded c/x/m/g/p':>17}")
     for r in rows:
         listed = ["—" if r[f"listed_{harness}"] is None else str(r[f"listed_{harness}"]) for harness in HARNESSES]
         loaded = [str(r[f"loaded_{harness}"]) for harness in HARNESSES]
-        print(f"{r['skill']:46} {r['kind']:8} {'/'.join(listed):>15} {'/'.join(loaded):>15}")
+        print(f"{r['skill']:46} {r['kind']:8} {'/'.join(listed):>17} {'/'.join(loaded):>17}")
     never = [r["skill"] for r in rows if r["kind"] == "auto" and sum(r[f"loaded_{harness}"] for harness in HARNESSES) == 0]
     print("auto-triggered and never loaded: " + (", ".join(never) or "none"))
 
@@ -271,6 +317,8 @@ def run(args):
         scan_muse(args.muse, since, use)
     if os.path.isdir(args.grok):
         scan_grok(args.grok, since, use, set(kinds(args.skills)))
+    if os.path.isdir(args.pi):
+        scan_pi(args.pi, since, use)
     if args.show:
         for when, harness, project, how, prompt in sorted(use.loads.get(args.show, [])):
             print(f"{when}\t{harness}\t{project}\t{how}\t{prompt}")
@@ -386,6 +434,32 @@ class SelfTest(unittest.TestCase):
             self.assertEqual(use.loads["a"], [("2026-10-13", "grok", "project", "read", "check this code")])
             self.assertEqual(use.loads["b"], [("2026-10-13", "grok", "project", "slash", "check this code")])
 
+    def test_pi_counts_listings_slash_blocks_and_skill_file_reads(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, "--x-project--", "2026-10-14T00-00-00-000Z_p1.jsonl")
+            path.parent.mkdir(parents=True)
+            skills = "<available_skills>\n<skill>\n<location>/h/.agents/skills/a/SKILL.md</location>\n</skill>\n<skill>\n<location>/h/.agents/skills/c/SKILL.md</location>\n</skill>\n</available_skills>"
+            block = '<skill name="b" location="/h/.agents/skills/b/SKILL.md">\nReferences are relative to /h.\n\nbody\n</skill>\n\nexplain the rule'
+            records = [
+                {"type": "session", "version": 3, "id": "p1", "timestamp": "2026-10-14T00:00:00.000Z", "cwd": "/x/project"},
+                {"type": "message", "id": "s", "parentId": None, "timestamp": "2026-10-14T00:00:01.000Z", "message": {"role": "system", "content": "", "sections": {"skills": skills}}},
+                {"type": "message", "id": "u", "parentId": "s", "timestamp": "2026-10-14T00:00:02.000Z", "message": {"role": "user", "content": "fix the parser"}},
+                {"type": "message", "id": "a", "parentId": "u", "timestamp": "2026-10-14T00:00:03.000Z", "message": {"role": "assistant", "content": [
+                    {"type": "toolCall", "id": "t1", "name": "read", "arguments": {"path": "/h/.agents/skills/a/SKILL.md"}}]}},
+                {"type": "message", "id": "u2", "parentId": "a", "timestamp": "2026-10-14T00:00:04.000Z", "message": {"role": "user", "content": block}},
+            ]
+            path.write_text("\n".join(json.dumps(record, separators=(",", ":")) for record in records) + "\n")
+            Path(root, "--x-project--", "events.jsonl").write_text('{"type":"session","id":"not-a-session"}\n')
+            use = Usage(True)
+            scan_pi(root, 0, use)
+            self.assertEqual(use.sessions["pi"], {"p1"})
+            self.assertEqual(use.listed["a"], {("pi", "p1")})
+            self.assertEqual(use.listed["c"], {("pi", "p1")})
+            self.assertEqual(use.loaded["a"], {("pi", "p1")})
+            self.assertEqual(use.loaded["b"], {("pi", "p1")})
+            self.assertEqual(use.loads["a"], [("2026-10-14", "pi", "project", "read", "fix the parser")])
+            self.assertEqual(use.loads["b"], [("2026-10-14", "pi", "project", "slash", "explain the rule")])
+
     def test_grok_listing_count_is_unknown_without_saved_catalog(self):
         with tempfile.TemporaryDirectory() as root:
             _, _, skills = self.fixture(root)
@@ -396,7 +470,7 @@ class SelfTest(unittest.TestCase):
                 report(use, kinds(skills), args)
             result = json.loads(output.getvalue())
             self.assertIsNone(result["skills"][0]["listed_grok"])
-            self.assertEqual(result["sessions"], {"claude": 0, "codex": 0, "muse": 0, "grok": 0})
+            self.assertEqual(result["sessions"], {"claude": 0, "codex": 0, "muse": 0, "grok": 0, "pi": 0})
 
 
 def main(argv=None):
@@ -409,6 +483,7 @@ def main(argv=None):
     parser.add_argument("--codex", default=str(roots["codex"][0]))
     parser.add_argument("--muse", default=str(roots["muse"][0]))
     parser.add_argument("--grok", default=str(roots["grok"][0]))
+    parser.add_argument("--pi", default=str(roots["pi"][0]))
     parser.add_argument("--show", metavar="SKILL", help="list each load of SKILL with the prompt before it")
     parser.add_argument("--all", action="store_true", help="also list skills that are not in --skills and never loaded")
     parser.add_argument("--json", action="store_true")

@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -124,7 +125,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 3)
             before = store.db.total_changes
             noop = store.refresh([self.transcripts], projects=iter(project_ids))
-            self.assertEqual(noop["stat_operations"], 3)
+            self.assertEqual(noop["stat_operations"], 6)
             self.assertEqual(noop["content_opens"], 0)
             self.assertEqual(noop["bytes_read"], 0)
             self.assertEqual(noop["git_processes"], 0)
@@ -183,7 +184,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(noop["bytes_read"], 0)
             self.assertEqual(noop["git_processes"], 0)
             self.assertEqual(noop["sqlite_changes"], 0)
-            self.assertEqual(noop["stat_operations"], 7)
+            self.assertEqual(noop["stat_operations"], 13)
             enabled = store.refresh([self.transcripts], projects={project_ids[1]})
             self.assertEqual(enabled["sessions_indexed"], 2)
             self.assertEqual(enabled["content_opens"], 2)
@@ -309,7 +310,9 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.db.execute("SELECT source_path FROM sessions WHERE id='move'").fetchone()[0], str(archived_path.resolve()))
             archived_path.unlink()
             stats = store.refresh([self.transcripts, archived], project=self.project_id)
-            self.assertEqual(stats["deleted"], 1)
+            self.assertEqual(stats["deleted"], 0)
+            self.assertEqual(len(store.search("newneedle", self.project_id)), 1)
+            store.forget_session("move", 0)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events").fetchone()[0], 0)
 
     def test_parent_source_and_learning_worker_filter(self):
@@ -356,6 +359,8 @@ class SessionStoreTests(unittest.TestCase):
     @staticmethod
     def downgrade_v4_columns(db, sessions=True):
         db.execute("ALTER TABLE events DROP COLUMN outcome")
+        db.execute("ALTER TABLE events DROP COLUMN entry")
+        db.execute("ALTER TABLE events DROP COLUMN parent_entry")
         db.execute("DROP TABLE forgotten_sessions")
         if sessions:
             for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events"):
@@ -395,7 +400,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("CREATE INDEX sessions_parent ON sessions(parent)")
             db.execute("PRAGMA user_version = 1")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
             self.assertIsNone(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0])
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy'").fetchone()[0], 2)
@@ -415,7 +420,7 @@ class SessionStoreTests(unittest.TestCase):
             self.downgrade_v4_columns(db)
             db.execute("PRAGMA user_version = 2")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy-v2'").fetchone()[0], 2)
             self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 0)
             stats = store.refresh([self.transcripts], project=self.project_id)
@@ -447,7 +452,7 @@ class SessionStoreTests(unittest.TestCase):
             store.refresh([self.transcripts], project=self.project_id)
             before = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 5)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
             after = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
             self.assertEqual(before, after)
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints").fetchone()[0], "keep")
@@ -458,6 +463,50 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["session"], hit["session"])
             stats = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual((stats["resets"], stats["events_added"], stats["bytes_read"]), (0, 0, 0))
+
+    def test_schema_v5_migration_reindexes_pi_sessions_to_record_their_branches(self):
+        pi_dir = self.root / "pi"
+        pi_dir.mkdir()
+        header = {"type": "session", "version": 3, "id": "p1", "timestamp": "2026-10-24T23:28:22.773Z", "cwd": str(self.project)}
+        entry = {"type": "message", "id": "u1", "parentId": None, "timestamp": "2026-10-24T23:30:00.000Z", "message": {"role": "user", "content": "pimigrate"}}
+        (pi_dir / "2026-10-24T23-28-22-773Z_p1.jsonl").write_bytes(line(header) + line(entry))
+        self.transcript("keep", records=[message("keepmigrate")])
+        roots = {"pi": [pi_dir], "codex": [self.transcripts]}
+        with Store(self.state) as store:
+            store.refresh(roots, project=self.project_id)
+        with sqlite3.connect(Store.database_path(self.state)) as db:
+            db.execute("ALTER TABLE events DROP COLUMN entry")
+            db.execute("ALTER TABLE events DROP COLUMN parent_entry")
+            db.execute("PRAGMA user_version = 5")
+        with Store(self.state) as store:
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual([row[0] for row in store.db.execute("SELECT id FROM sessions")], ["keep"])
+            store.refresh(roots, project=self.project_id)
+            self.assertEqual(store.db.execute("SELECT entry, parent_entry FROM events WHERE session = 'pi:p1' AND kind = 'user'").fetchone()[:], ("u1", None))
+
+    def test_active_branch_drops_abandoned_pi_branches_only(self):
+        header = {"type": "session", "version": 3, "id": "branchy", "timestamp": "2026-10-24T23:28:22.773Z", "cwd": str(self.project)}
+
+        def user(entry_id, parent, text):
+            return {"type": "message", "id": entry_id, "parentId": parent, "timestamp": "2026-10-24T23:30:00.000Z", "message": {"role": "user", "content": text}}
+
+        pi_dir = self.root / "pi"
+        pi_dir.mkdir()
+        (pi_dir / "2026-10-24T23-28-22-773Z_branchy.jsonl").write_bytes(b"".join(line(item) for item in (
+            header, user("a", None, "root"), user("b", "a", "abandoned"), user("c", "b", "abandoned too"), user("d", "a", "kept"), user("e", "d", "newest"))))
+        with Store(self.state) as store:
+            store.refresh({"pi": [pi_dir]}, project=self.project_id)
+
+            def texts(rows):
+                return [row["text"] for row in rows if row["kind"] == "user"]
+
+            rows = [dict(row) for row in store.db.execute("SELECT * FROM events WHERE session = 'pi:branchy' ORDER BY position")]
+            self.assertEqual(texts(rows), ["root", "abandoned", "abandoned too", "kept", "newest"])
+            self.assertEqual(texts(STORE_MODULE.active_branch(rows)), ["root", "kept", "newest"])
+            self.assertEqual(STORE_MODULE.active_branch(rows)[0]["kind"], "session_meta")
+            experience = importlib.import_module("agent_experience")
+            events, truncated = experience.session_events(store.db, "pi:branchy")
+            self.assertEqual((texts(events), truncated), (["root", "kept", "newest"], False))
 
     def test_git_worktrees_share_project_identity(self):
         repo = self.root / "git-repo"
@@ -539,16 +588,15 @@ class SessionStoreTests(unittest.TestCase):
             stats = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions WHERE id='outside'").fetchone()[0], 1)
         external = self.root / "outside.jsonl"
-        external.write_bytes(line(metadata("outside", self.project)) + line(message("leakmarker")))
+        external.write_bytes(line(metadata("outside", self.project)) + line(message("externalmarker")))
         known.unlink()
         known.symlink_to(external)
         with Store(self.state) as store:
             stats = store.refresh([self.transcripts], project=self.project_id)
             self.assertGreater(stats["unreadable"], 0)
-            self.assertEqual(store.db.execute("SELECT coverage FROM sessions WHERE id='outside'").fetchone()[0], "degraded")
+            self.assertEqual(store.search("externalmarker", self.project_id), [])
             hit = store.search("leakmarker", self.project_id)[0]
-            with self.assertRaises(StoreError):
-                store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["text"], "leakmarker")
 
 
 def opencode_database(root, project, sessions):
@@ -569,6 +617,10 @@ def opencode_database(root, project, sessions):
     db.commit()
     db.close()
     return path
+
+
+def archived_bytes(store):
+    return b"".join(path.read_bytes() for path in sorted(store.archive_dir.rglob("*")) if path.is_file())
 
 
 def oc_user(text):
@@ -636,9 +688,10 @@ class OpenCodeIndexTests(unittest.TestCase):
             db.execute("UPDATE session_message SET data = replace(data, 'KeyError', 'ValueError') WHERE seq = 2")
             db.commit()
             db.close()
-            with self.assertRaises(STORE_MODULE.EvidenceChanged):
-                store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
             path.unlink()
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
+            store.forget_session(hit["session"], 0)
             with self.assertRaises(STORE_MODULE.EvidenceUnavailable):
                 store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
 
@@ -708,8 +761,31 @@ class OpenCodeIndexTests(unittest.TestCase):
             db.commit()
             db.close()
             stats = self.refresh(store)
-            self.assertEqual(stats["deleted"], 1)
+            self.assertEqual(stats["deleted"], 0)
+            hit = store.search("KeyError", self.project_id)[0]
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
+            store.forget_session("opencode:ses_alpha", 0)
+            self.refresh(store)
             self.assertEqual(store.search("KeyError", self.project_id), [])
+            self.assertNotIn(b"KeyError", archived_bytes(store))
+
+    def test_database_sessions_survive_removal_of_the_database_and_never_archive_credentials(self):
+        path = opencode_database(self.data, self.project, self.sessions())
+        db = sqlite3.connect(path)
+        db.execute("INSERT INTO credential VALUES ('c1', 'label', 'hunter2-secret')")
+        db.commit()
+        db.close()
+        with Store(self.state) as store:
+            self.refresh(store)
+            hit = store.search("KeyError", self.project_id)[0]
+            self.assertNotIn(b"hunter2-secret", archived_bytes(store))
+            path.unlink()
+            stats = self.refresh(store)
+            self.assertEqual(stats["deleted"], 0)
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
+            self.assertEqual(len(store.search("KeyError", self.project_id)), 1)
+            steady = self.refresh(store)
+            self.assertEqual((steady["content_opens"], steady["git_processes"], steady["sqlite_changes"]), (0, 0, 0))
 
     def test_same_native_id_in_another_harness_does_not_collide(self):
         opencode_database(self.data, self.project, self.sessions())
@@ -1025,15 +1101,92 @@ class HarnessIndexTests(unittest.TestCase):
                 raise StoreError("integrity")
         self.assertEqual(path.read_bytes()[:16], before[:16])
 
-    def test_deleted_harness_source_is_removed_from_the_index(self):
-        path = self.claude("gone", [{"type": "user", "message": {"role": "user", "content": "goneneedle"}}])
+    def test_sessions_outlive_the_harness_files_they_came_from(self):
+        self.codex("c1", "codexkeep")
+        self.claude("cl1", [{"type": "user", "message": {"role": "user", "content": "claudekeep"}}])
+        self.grok("g1", [{"type": "user", "content": "grokkeep"}])
+        self.muse("m1", [{"recorded_at": 1792018406398112, "payload": {"event": {"kind": "model_user_messages", "messages": ["musekeep"]}}}])
+        self.pi("p1", [{"type": "message", "id": "u1", "parentId": None, "timestamp": "2026-10-24T23:30:00.000Z", "message": {"role": "user", "content": "pikeep"}}])
+        needles = {"codexkeep": "c1", "claudekeep": "claude:cl1", "grokkeep": "grok:g1", "musekeep": "muse:m1", "pikeep": "pi:p1"}
         with Store(self.state) as store:
             self.refresh(store)
-            self.assertEqual(len(store.search("goneneedle", self.project_id)), 1)
-            path.unlink()
+            hits = {needle: store.search(needle, self.project_id)[0] for needle in needles}
+            for path in self.roots.values():
+                shutil.rmtree(path)
+                path.mkdir()
             stats = self.refresh(store)
-            self.assertEqual(stats["deleted"], 1)
-            self.assertEqual(store.search("goneneedle", self.project_id), [])
+            self.assertEqual(stats["deleted"], 0)
+            for needle, session in needles.items():
+                found = store.search(needle, self.project_id)
+                self.assertEqual([hit["session"] for hit in found], [session])
+                evidence = store.resolve_evidence(session, hits[needle]["position"], hits[needle]["digest"])
+                self.assertEqual(evidence["text"], needle)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions WHERE ancestry = 'known'").fetchone()[0], 4)
+            steady = self.refresh(store)
+            self.assertEqual((steady["content_opens"], steady["bytes_read"], steady["git_processes"], steady["sqlite_changes"]), (0, 0, 0, 0))
+
+    def test_evidence_resolves_from_the_archive_before_the_next_refresh(self):
+        path = self.claude("early", [{"type": "user", "message": {"role": "user", "content": "earlyneedle"}}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            hit = store.search("earlyneedle", self.project_id)[0]
+            path.unlink()
+            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["text"], "earlyneedle")
+
+    def test_session_growing_after_archiving_stays_archived(self):
+        path = self.claude("grow", [{"type": "user", "message": {"role": "user", "content": "firstgrow"}}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            with open(path, "ab") as stream:
+                stream.write(line({"type": "user", "sessionId": "grow", "cwd": str(self.project), "message": {"role": "user", "content": "secondgrow"}}))
+            self.refresh(store)
+            path.unlink()
+            self.refresh(store)
+            self.assertEqual(len(store.search("secondgrow", self.project_id)), 1)
+            self.assertEqual(len(store.search("firstgrow", self.project_id)), 1)
+
+    def test_forget_session_purges_the_archived_copy_and_blocks_a_new_one(self):
+        live = self.claude("forgotten", [{"type": "user", "message": {"role": "user", "content": "purgeneedle"}}])
+        gone = self.claude("vanished", [{"type": "user", "message": {"role": "user", "content": "vanishneedle"}}])
+        self.grok("g-forget", [{"type": "user", "content": "grokpurge"}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            self.assertIn(b"purgeneedle", archived_bytes(store))
+            gone.unlink()
+            self.refresh(store)
+            for session in ("claude:forgotten", "claude:vanished", "grok:g-forget"):
+                store.forget_session(session, 0)
+            for needle in (b"purgeneedle", b"vanishneedle", b"grokpurge"):
+                self.assertNotIn(needle, archived_bytes(store))
+            self.refresh(store)
+            self.assertTrue(live.exists())
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+            self.assertNotIn(b"purgeneedle", archived_bytes(store))
+
+    def test_symlinked_companions_and_archive_directory_are_refused(self):
+        secret = self.root / "secret.json"
+        secret.write_text("outsidesecret")
+        path = self.grok("g-link", [{"type": "user", "content": "grokentry"}])
+        (path.parent / "summary.json").unlink()
+        (path.parent / "summary.json").symlink_to(secret)
+        with Store(self.state) as store:
+            stats = self.refresh(store)
+            self.assertEqual(stats["archive_errors"], 1)
+            self.assertNotIn(b"outsidesecret", archived_bytes(store))
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        shutil.rmtree(self.state / "archive")
+        (self.state / "archive").symlink_to(elsewhere)
+        with self.assertRaisesRegex(StoreError, "symlink"):
+            Store(self.state)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_learning_workers_and_unindexable_files_are_not_archived(self):
+        worker = self.roots["codex"] / "rollout-worker.jsonl"
+        self.write(worker, [metadata("worker", self.project, source={"learning_worker": True}), message("workersecret")])
+        with Store(self.state) as store:
+            self.refresh(store)
+            self.assertNotIn(b"workersecret", archived_bytes(store))
 
     def test_cli_indexes_selected_harness_with_named_root(self):
         self.claude("cli1", [{"type": "user", "message": {"role": "user", "content": "clineedle"}}])

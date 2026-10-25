@@ -255,11 +255,11 @@ class FreshnessTests(RecallCase):
         memory = next(item for ref, item in statuses.items() if ref.startswith("memory:"))
         self.assertIn("evidence_changed", memory["reasons"], "edited transcript flags evidence_changed")
         self.assertNotEqual(memory["status"], "verified", "edited transcript is not verified")
+        path.write_bytes(data)
         self.world.episode_paths["a-1"].unlink()
         response = self.ask("alpha", "editable install orbit_core pytest clean runner")
         memory = next(item for item in response["results"] if item["ref"].startswith("memory:"))
-        self.assertIn("evidence_unavailable", memory["reasons"], "deleted transcript flags evidence_unavailable")
-        self.assertNotEqual(memory["tier"], "instruction", "deleted transcript is not an instruction")
+        self.assertFalse({"evidence_changed", "evidence_unavailable"} & set(memory["reasons"]), "deleted transcript still verifies from the archive")
 
 
 class CaptureTests(RecallCase):
@@ -709,11 +709,13 @@ class SecondReviewRegressionTests(RecallCase):
         store = agent_session_store.Store(state)
         with store.db:
             store.db.execute("DROP TABLE forgotten_sessions")
+            store.db.execute("ALTER TABLE events DROP COLUMN entry")
+            store.db.execute("ALTER TABLE events DROP COLUMN parent_entry")
             store.db.execute("PRAGMA user_version = 4")
         store.close()
         store = agent_session_store.Store(state)
         self.addCleanup(store.close)
-        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 5)
+        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
         self.assertEqual(store.db.execute("SELECT count(*) FROM forgotten_sessions").fetchone()[0], 0)
 
     def test_forgetting_scrubs_withdrawn_memories_feedback_and_reviewer_context(self):

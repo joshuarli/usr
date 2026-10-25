@@ -19,7 +19,7 @@ from agent_experience import CORRECTION, ERROR, RUNNER as RUNNER_PATTERN, SCHEMA
 from agent_recall import technical_tokens
 from agent_learning_ops import SchedulerError
 from agent_recall import DEFAULT_LIMIT, Retriever, SourceError, artifact_text as read_tracked_text
-from agent_session_store import Store, StoreError, default_state_dir, project_identity, redact
+from agent_session_store import Store, StoreError, active_branch, default_state_dir, project_identity, redact
 from agent_transcripts import HARNESSES
 
 
@@ -429,7 +429,7 @@ class Learner:
     def _events(self, session):
         rows = list(self.db.execute("SELECT * FROM events WHERE session=? ORDER BY position DESC,id DESC LIMIT ?", (session, MAX_EVENTS + 1)))
         truncated = len(rows) > MAX_EVENTS
-        return [dict(row) for row in reversed(rows[:MAX_EVENTS])], truncated
+        return active_branch([dict(row) for row in reversed(rows[:MAX_EVENTS])]), truncated
 
     def _attributed_finding(self, signal, text):
         if signal == "correction" and re.search(r"\b(caused|regression|contradicts)\b", text, re.I):
@@ -1684,7 +1684,7 @@ def parser():
     withdraw.add_argument("ref")
     forget = commands.add_parser("forget", help="delete an experience record and withdraw what was derived from it")
     forget.add_argument("ref")
-    forget_session = commands.add_parser("forget-session", help="delete one session's index and derived records; never touches the transcript file")
+    forget_session = commands.add_parser("forget-session", help="delete one session's index, archived copy, and derived records; never touches the harness's own transcript file")
     forget_session.add_argument("session")
     feedback = commands.add_parser("feedback", help="record the agent's verdict about a retrieved record; it never grants authority")
     feedback.add_argument("ref")

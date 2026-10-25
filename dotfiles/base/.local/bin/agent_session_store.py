@@ -14,10 +14,12 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
-from agent_transcripts import OPENCODE_SUBPOSITIONS, DATABASE_HARNESSES, HARNESSES, SUBSTANTIVE_KINDS, opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
+from agent_transcripts import OPENCODE_DB, OPENCODE_SUBPOSITIONS, DATABASE_HARNESSES, HARNESSES, SUBSTANTIVE_KINDS, opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+ARCHIVE_DIRNAME = "archive"
+ARCHIVE_COMPANIONS = {"grok": ("summary.json", "events.jsonl")}
 _REDACTIONS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"),
@@ -223,6 +225,39 @@ def _ephemeral(meta):
     return any(".ephemeral" in Path(value).parts for value in paths if value)
 
 
+def _archive_path(archive_dir, harness, source):
+    return Path(archive_dir) / harness / os.path.abspath(source).lstrip(os.sep)
+
+
+def _archive_link(source, destination):
+    source_stat = os.lstat(source)
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise OSError("refusing to archive a non-regular file: " + str(source))
+    try:
+        if os.path.samestat(source_stat, os.lstat(destination)):
+            return False
+    except FileNotFoundError:
+        pass
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    staging = destination.with_name(destination.name + ".linking")
+    staging.unlink(missing_ok=True)
+    os.link(source, staging)
+    os.replace(staging, destination)
+    return True
+
+
+def active_branch(events):
+    parents = {event["entry"]: event["parent_entry"] for event in events if event["entry"] is not None}
+    if not parents:
+        return list(events)
+    path = set()
+    current = max((event for event in events if event["entry"] is not None), key=lambda event: event["position"])["entry"]
+    while current in parents and current not in path:
+        path.add(current)
+        current = parents[current]
+    return [event for event in events if event["entry"] is None or event["entry"] in path]
+
+
 def _under(path, root):
     try:
         Path(os.path.abspath(path)).relative_to(Path(os.path.abspath(root)))
@@ -246,6 +281,11 @@ def _guarded(method: Callable[..., Any]) -> Callable[..., Any]:
 class Store:
     def __init__(self, state_dir):
         self.state_dir = _prepare_state_dir(state_dir)
+        self.archive_dir = self.state_dir / ARCHIVE_DIRNAME
+        if self.archive_dir.is_symlink():
+            raise StoreError("session archive may not be a symlink: " + str(self.archive_dir))
+        self.archive_dir.mkdir(mode=0o700, exist_ok=True)
+        os.chmod(self.archive_dir, 0o700)
         self.path = self.database_path(self.state_dir)
         try:
             _prepare_database(self.path)
@@ -285,7 +325,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, 4, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -306,6 +346,11 @@ class Store:
                 if not self._schema_ready(4):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v4()
+                version = 5
+            if version == 5:
+                if not self._schema_ready(5):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v5()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -342,6 +387,7 @@ class Store:
             and (expected_version < 3 or "unindexed_sources" in existing)
             and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns))
             and (expected_version < 5 or "forgotten_sessions" in existing)
+            and (expected_version < 6 or {"entry", "parent_entry"} <= event_columns)
         )
 
     def _migrate_v1(self):
@@ -402,6 +448,19 @@ class Store:
             self.db.rollback()
             raise
 
+    def _migrate_v5(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "ALTER TABLE events ADD COLUMN entry TEXT;"
+                "ALTER TABLE events ADD COLUMN parent_entry TEXT;"
+                "DELETE FROM sessions WHERE harness = 'pi';"
+                "PRAGMA user_version = 6;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
     def _create_schema(self):
         self.db.executescript(
             "BEGIN IMMEDIATE;"
@@ -424,7 +483,7 @@ class Store:
             "CREATE TABLE events ("
             "id INTEGER PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, "
             "position INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT, call_id TEXT, "
-            "raw_type TEXT, digest TEXT NOT NULL, outcome TEXT CHECK(outcome IN ('ok','error')), UNIQUE(session, position));"
+            "raw_type TEXT, digest TEXT NOT NULL, outcome TEXT CHECK(outcome IN ('ok','error')), entry TEXT, parent_entry TEXT, UNIQUE(session, position));"
             "CREATE INDEX events_session_position ON events(session, position);"
             "CREATE VIRTUAL TABLE events_fts USING fts5(text, content='events', content_rowid='id');"
             "CREATE TRIGGER events_ai AFTER INSERT ON events BEGIN "
@@ -453,7 +512,11 @@ class Store:
         if project is not None and projects is not None:
             raise ValueError("choose either project or projects")
         root_map = coerce_roots(roots)
-        roots = [(harness, root) for harness in HARNESSES if harness in harnesses for root in root_map.get(harness, [])]
+        live_roots = [(harness, root) for harness in HARNESSES if harness in harnesses for root in root_map.get(harness, [])]
+        roots = live_roots + [(harness, self._archive_root(harness, root)) for harness, root in live_roots]
+        live_count = len(live_roots)
+        live_identities = set()
+        live_database_sessions = set()
         project = str(project) if project is not None else None
         projects = frozenset(str(value) for value in projects) if projects is not None else None
         if updated_after is not None:
@@ -473,6 +536,7 @@ class Store:
             "skipped_learning_workers": 0, "unreadable": 0,
             "stat_operations": 0, "content_opens": 0, "bytes_read": 0,
             "git_processes": 0, "sqlite_changes": 0, "skipped_forgotten": 0,
+            "archived": 0, "archive_errors": 0,
         }
         forgotten = {row[0] for row in self.db.execute("SELECT id FROM forgotten_sessions")}
         indexed_by_path = {
@@ -507,6 +571,7 @@ class Store:
                         self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (source_path,))
                 stats["skipped_learning_workers"] += 1
                 return
+            self._archive_source(meta, path, stats)
             if headers_only:
                 if not unchanged:
                     self._cache_unindexed_metadata(meta, unindexed_by_path)
@@ -515,7 +580,8 @@ class Store:
 
         for root_order, (harness, root) in enumerate(roots):
             if harness in DATABASE_HARNESSES:
-                self._discover_database(root_order, harness, root, admit, indexed_by_path, unindexed_by_path, cache, present_paths, unreadable_paths, stats)
+                archive = self._archive_root(harness, root) if root_order < live_count else None
+                self._discover_database(root_order, harness, root, admit, indexed_by_path, unindexed_by_path, cache, present_paths, unreadable_paths, stats, archive, live_database_sessions, forgotten)
                 continue
             if not root.is_dir():
                 continue
@@ -548,6 +614,11 @@ class Store:
                     unreadable_paths.add(source_path)
                     continue
                 present_paths.add(source_path)
+                identity = (source_stat.st_dev, source_stat.st_ino)
+                if root_order >= live_count and identity in live_identities:
+                    continue
+                if root_order < live_count:
+                    live_identities.add(identity)
                 existing = indexed_by_path.get(source_path)
                 unindexed = unindexed_by_path.get(source_path)
                 if self._cached_metadata_matches(existing, source_stat):
@@ -656,7 +727,7 @@ class Store:
             for key in ("file_size", "file_mtime_ns", "file_ctime_ns", "file_dev", "file_ino")
         )
 
-    def _discover_database(self, root_order, harness, root, admit, indexed_by_path, unindexed_by_path, cache, present_paths, unreadable_paths, stats):
+    def _discover_database(self, root_order, harness, root, admit, indexed_by_path, unindexed_by_path, cache, present_paths, unreadable_paths, stats, archive, known_sessions, forgotten):
         database = opencode_database(root)
         if database is None:
             return
@@ -666,6 +737,11 @@ class Store:
                     "SELECT id, parent_id, fork_session_id, directory, time_created, time_updated FROM session_v2").fetchall()
                 counts = {row[0]: (row[1], row[2]) for row in connection.execute(
                     "SELECT session_id, count(*), max(time_updated) FROM session_message GROUP BY session_id")}
+                if archive is not None:
+                    try:
+                        self._archive_database(connection, sessions, counts, archive, forgotten)
+                    except (OSError, sqlite3.DatabaseError):
+                        stats["archive_errors"] += 1
         except (OSError, sqlite3.DatabaseError):
             stats["unreadable"] += 1
             unreadable_paths.add(str(Path(root).absolute()))
@@ -673,6 +749,11 @@ class Store:
         stats["stat_operations"] += 1
         for row in sessions:
             native = clean_native_id(row["id"], database)
+            if archive is not None:
+                known_sessions.add(native)
+            elif native in known_sessions:
+                present_paths.add("%s#%s" % (database.absolute(), native))
+                continue
             source_path = "%s#%s" % (database.absolute(), native)
             present_paths.add(source_path)
             count, latest = counts.get(row["id"], (0, 0))
@@ -698,6 +779,79 @@ class Store:
                 })
                 unchanged = False
             admit(meta, existing, unchanged, source_path, root_order, database)
+
+    def _archive_root(self, harness, root):
+        root = Path(root)
+        if harness in DATABASE_HARNESSES:
+            return _archive_path(self.archive_dir, harness, root if root.name.endswith(".db") else root / OPENCODE_DB)
+        return _archive_path(self.archive_dir, harness, root.resolve())
+
+    def _archive_source(self, meta, path, stats):
+        if meta["harness"] in DATABASE_HARNESSES or _under(path, self.archive_dir):
+            return
+        linked = False
+        for name in (path.name, *ARCHIVE_COMPANIONS.get(meta["harness"], ())):
+            source = path.parent / name
+            try:
+                if _archive_link(source, _archive_path(self.archive_dir, meta["harness"], source)):
+                    stats["archived"] += 1
+                    linked = linked or source == path
+            except FileNotFoundError:
+                continue
+            except OSError:
+                stats["archive_errors"] += 1
+        if linked:
+            after = os.lstat(path)
+            if (after.st_size, after.st_mtime_ns) == (meta["file_size"], meta["file_mtime_ns"]):
+                meta["file_ctime_ns"] = after.st_ctime_ns
+                with self.db:
+                    for table in ("sessions", "unindexed_sources"):
+                        self.db.execute("UPDATE " + table + " SET file_ctime_ns = ? WHERE source_path = ?", (after.st_ctime_ns, meta["source_path"]))
+
+    def _archive_database(self, source, sessions, counts, destination, forgotten):
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with contextlib.closing(sqlite3.connect(str(destination), timeout=10)) as target:
+            target.executescript(
+                "CREATE TABLE IF NOT EXISTS session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, fork_session_id TEXT, directory TEXT NOT NULL, "
+                "time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS session_message (session_id TEXT NOT NULL, seq INTEGER NOT NULL, type TEXT NOT NULL, "
+                "time_updated INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (session_id, seq));"
+            )
+            os.chmod(destination, 0o600)
+            archived = {row[0]: row[1:] for row in target.execute(
+                "SELECT s.id, s.time_updated, count(m.seq), coalesce(max(m.time_updated), 0) FROM session_v2 s "
+                "LEFT JOIN session_message m ON m.session_id = s.id GROUP BY s.id")}
+            changed = []
+            for row in sessions:
+                if qualified_id("opencode", clean_native_id(row["id"], destination)) in forgotten:
+                    continue
+                count, latest = counts.get(row["id"], (0, 0))
+                have = archived.get(row["id"])
+                if have is None or have[0] != row["time_updated"] or have[1] < count or have[2] < (latest or 0):
+                    changed.append(row)
+            with target:
+                for row in changed:
+                    target.execute("INSERT OR REPLACE INTO session_v2 VALUES (?, ?, ?, ?, ?, ?)", tuple(row))
+                    for message in source.execute("SELECT type, seq, time_updated, data FROM session_message WHERE session_id = ? ORDER BY seq", (row["id"],)):
+                        target.execute("INSERT OR REPLACE INTO session_message VALUES (?, ?, ?, ?, ?)", (row["id"], message["seq"], message["type"], message["time_updated"], message["data"]))
+
+    def _archived_copy(self, harness, path):
+        path = Path(path)
+        return path if _under(path, self.archive_dir) else _archive_path(self.archive_dir, harness, path)
+
+    def _purge_archive(self, harness, source_path):
+        if harness in DATABASE_HARNESSES:
+            database, _, native = source_path.rpartition("#")
+            archive = self._archived_copy(harness, database)
+            if archive.is_file():
+                with contextlib.closing(sqlite3.connect(str(archive), timeout=10)) as target, target:
+                    target.execute("PRAGMA secure_delete = ON")
+                    target.execute("DELETE FROM session_message WHERE session_id = ?", (native,))
+                    target.execute("DELETE FROM session_v2 WHERE id = ?", (native,))
+            return
+        archive = self._archived_copy(harness, source_path)
+        for name in (archive.name, *ARCHIVE_COMPANIONS.get(harness, ())):
+            (archive.parent / name).unlink(missing_ok=True)
 
     def _refresh_database_session(self, meta, stats):
         existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
@@ -833,10 +987,10 @@ class Store:
                         else:
                             for record in records:
                                 self.db.execute(
-                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome, entry, parent_entry) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                     (meta["id"], position, record["kind"], record["text"], record["timestamp"],
-                                     record["call_id"], record["raw_type"], digest, record["outcome"]),
+                                     record["call_id"], record["raw_type"], digest, record["outcome"], record.get("entry"), record.get("parent_entry")),
                                 )
                                 added += 1
                                 if record["kind"].startswith("unknown:"):
@@ -898,12 +1052,24 @@ class Store:
             raise EvidenceUnavailable("session is no longer indexed")
         if row["harness"] in DATABASE_HARNESSES:
             return self._resolve_database_evidence(row, session, position, digest)
-        try:
-            with _open_source(row["source_path"]) as stream:
-                stream.seek(int(position))
-                raw = stream.readline()
-        except OSError as exc:
-            raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
+        raw = b""
+        failure = None
+        for candidate in (Path(row["source_path"]), self._archived_copy(row["harness"], row["source_path"])):
+            try:
+                with _open_source(candidate) as stream:
+                    stream.seek(int(position))
+                    raw = stream.readline()
+            except FileNotFoundError as exc:
+                failure = failure or exc
+                continue
+            except OSError as exc:
+                raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
+            if raw and hmac.compare_digest(_sha256(raw), str(digest)):
+                break
+        else:
+            if failure is not None and not raw:
+                raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(failure)) from failure
+            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         if not raw or not hmac.compare_digest(_sha256(raw), str(digest)):
             raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         try:
@@ -919,6 +1085,9 @@ class Store:
 
     @_guarded
     def forget_session(self, session, now):
+        row = self.db.execute("SELECT harness, source_path FROM sessions WHERE id = ?", (str(session),)).fetchone()
+        if row is not None:
+            self._purge_archive(row["harness"], row["source_path"])
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)", (str(session), float(now)))
@@ -945,12 +1114,23 @@ class Store:
     def _resolve_database_evidence(self, row, session, position, digest):
         database = row["source_path"].rpartition("#")[0]
         seq, sub = divmod(int(position), OPENCODE_SUBPOSITIONS)
-        try:
-            with contextlib.closing(_open_database(database)) as connection:
-                message = connection.execute("SELECT type, data FROM session_message WHERE session_id = ? AND seq = ?", (row["native_id"], seq)).fetchone()
-        except (OSError, sqlite3.DatabaseError) as exc:
-            raise EvidenceUnavailable("indexed OpenCode database is unavailable: " + str(exc)) from exc
-        if message is None or not hmac.compare_digest(_sha256(message["data"].encode("utf-8")), str(digest)):
+        message = None
+        failure = None
+        for candidate in (database, str(self._archived_copy(row["harness"], database))):
+            try:
+                with contextlib.closing(_open_database(candidate)) as connection:
+                    found = connection.execute("SELECT type, data FROM session_message WHERE session_id = ? AND seq = ?", (row["native_id"], seq)).fetchone()
+            except (OSError, sqlite3.DatabaseError) as exc:
+                failure = failure or exc
+                continue
+            message = found or message
+            if found is not None and hmac.compare_digest(_sha256(found["data"].encode("utf-8")), str(digest)):
+                break
+        else:
+            if message is None and failure is not None:
+                raise EvidenceUnavailable("indexed OpenCode database is unavailable: " + str(failure)) from failure
+            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+        if message is None:
             raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         record = opencode_record(message["type"], message["data"], sub)
         if record is None:

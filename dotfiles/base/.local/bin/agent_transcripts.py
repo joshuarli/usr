@@ -270,6 +270,17 @@ def _pi_message_record(message, timestamp):
 
 
 def _pi_record(obj):
+    record = _pi_entry_record(obj)
+    if obj.get("type") != "session":
+        record.update(entry=_pi_entry_id(obj.get("id")), parent_entry=_pi_entry_id(obj.get("parentId")))
+    return record
+
+
+def _pi_entry_id(value):
+    return value if isinstance(value, str) else None
+
+
+def _pi_entry_record(obj):
     kind = obj.get("type") or "unknown"
     timestamp = obj.get("timestamp")
     if kind == "session":

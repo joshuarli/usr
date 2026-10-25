@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from agent_recall import doc_tokens, stem, technical_tokens
-from agent_session_store import redact
+from agent_session_store import active_branch, redact
 
 MAX_EVENTS = 2000
 MAX_CLAIM = 500
@@ -581,8 +581,8 @@ def retire_stale(db, now, days=RETIRE_AFTER_DAYS):
 
 
 def session_events(db, session):
-    rows = list(db.execute("SELECT position, digest, kind, text, timestamp, call_id, outcome FROM events WHERE session = ? ORDER BY position DESC LIMIT ?", (session, MAX_EVENTS + 1)))
-    return [dict(row) for row in reversed(rows[:MAX_EVENTS])], len(rows) > MAX_EVENTS
+    rows = list(db.execute("SELECT position, digest, kind, text, timestamp, call_id, outcome, entry, parent_entry FROM events WHERE session = ? ORDER BY position DESC LIMIT ?", (session, MAX_EVENTS + 1)))
+    return active_branch([dict(row) for row in reversed(rows[:MAX_EVENTS])]), len(rows) > MAX_EVENTS
 
 
 def record_signatures(db, project, session, events, runs, outcomes, now):
