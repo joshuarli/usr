@@ -15,7 +15,7 @@ ARCH=$(uname -m | sed 's/arm64/aarch64/')
 OS=$(uname -s)
 case "$OS" in
     Darwin|Linux) ;;
-    *) printf '%s\n' "Unsupported OS: ${OS}" >&2; exit 1 ;;
+    *) _dl_fail "Unsupported OS: ${OS}"; exit 1 ;;
 esac
 DEST="${HOME}/.local/bin"
 CLAUDE_VERSIONS="${XDG_DATA_HOME:-${HOME}/.local/share}/claude/versions"
@@ -53,7 +53,36 @@ if [ "$_dl_worker_mode" = true ]; then
     log_dir=
     log_count=0
 fi
-skip() { printf '%s\n' "Skipping $1: $2" >&2; failed=true; }
+DL_COLOR=${DL_COLOR:-auto}
+if [ "$DL_COLOR" = auto ]; then
+    if [ -n "${NO_COLOR:-}" ]; then DL_COLOR=0
+    elif [ -t 1 ]; then DL_COLOR=1
+    else DL_COLOR=0
+    fi
+fi
+case "$DL_COLOR" in 1|true|yes|always) DL_COLOR=1 ;; *) DL_COLOR=0 ;; esac
+export DL_COLOR
+if [ "$DL_COLOR" = 1 ]; then
+    _dl_reset=$(printf '\033[0m')
+    _dl_dim=$(printf '\033[2m')
+    _dl_red=$(printf '\033[31m')
+    _dl_green=$(printf '\033[32m')
+    _dl_yellow=$(printf '\033[33m')
+    _dl_blue=$(printf '\033[34m')
+else
+    _dl_reset=
+    _dl_dim=
+    _dl_red=
+    _dl_green=
+    _dl_yellow=
+    _dl_blue=
+fi
+_dl_ok() { printf '%s✓ %s%s\n' "$_dl_green" "$1" "$_dl_reset"; }
+_dl_current() { printf '%s· %s%s\n' "$_dl_dim" "$1" "$_dl_reset"; }
+_dl_fetch() { printf '%s↓ %s%s\n' "$_dl_blue" "$1" "$_dl_reset"; }
+_dl_warn() { printf '%s! %s%s\n' "$_dl_yellow" "$1" "$_dl_reset" >&2; }
+_dl_fail() { printf '%s✗ %s%s\n' "$_dl_red" "$1" "$_dl_reset" >&2; }
+skip() { _dl_fail "Skipping $1: $2"; failed=true; }
 own_file() {
     if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
         || ! awk -F '\t' -v path="$1" '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
@@ -109,27 +138,27 @@ mkdir -p "$STATE"
 
 cleanup_temporary_files() {
     if [ -n "$tmpzip" ]; then
-        rm -f "$tmpzip" || printf '%s\n' "Warning: could not remove $tmpzip" >&2
+        rm -f "$tmpzip" || _dl_warn "Warning: could not remove $tmpzip"
         tmpzip=
     fi
     if [ -n "$tmpbin" ]; then
-        rm -f "$tmpbin" || printf '%s\n' "Warning: could not remove $tmpbin" >&2
+        rm -f "$tmpbin" || _dl_warn "Warning: could not remove $tmpbin"
         tmpbin=
     fi
     if [ -n "$tmpoutput" ]; then
-        rm -f "$tmpoutput" || printf '%s\n' "Warning: could not remove $tmpoutput" >&2
+        rm -f "$tmpoutput" || _dl_warn "Warning: could not remove $tmpoutput"
         tmpoutput=
     fi
     if [ -n "$tmpbundle" ]; then
-        rm -rf "$tmpbundle" || printf '%s\n' "Warning: could not remove $tmpbundle" >&2
+        rm -rf "$tmpbundle" || _dl_warn "Warning: could not remove $tmpbundle"
         tmpbundle=
     fi
     if [ -n "$tmpbinlink" ]; then
-        rm -f "$tmpbinlink" || printf '%s\n' "Warning: could not remove $tmpbinlink" >&2
+        rm -f "$tmpbinlink" || _dl_warn "Warning: could not remove $tmpbinlink"
         tmpbinlink=
     fi
     if [ -n "$log_dir" ]; then
-        rm -rf "$log_dir" || printf '%s\n' "Warning: could not remove $log_dir" >&2
+        rm -rf "$log_dir" || _dl_warn "Warning: could not remove $log_dir"
         log_dir=
     fi
     return 0
@@ -171,7 +200,7 @@ trap 'on_signal 143' TERM
 
 unchecked() {
     if [ -x "${DEST}/$1" ]; then
-        printf '%s\n' "Warning: could not check $1 ($2); keeping the installed one" >&2
+        _dl_warn "Warning: could not check $1 ($2); keeping the installed one"
     else
         skip "$1" "$2"
     fi
@@ -219,7 +248,7 @@ installed() {
 
 keep_installed() {
     if installed "$1"; then
-        printf '%s\n' "$1 is installed"
+        _dl_current "$1 is installed"
         return 0
     fi
     return 1
@@ -298,7 +327,7 @@ claude_launcher_is_dl_binary() {
 claude_keep_installed() {
     if claude_launcher_is_legacy_dl; then return 1; fi
     if installed claude; then
-        printf '%s\n' 'claude is installed'
+        _dl_current 'claude is installed'
         return 0
     fi
     return 1
@@ -315,7 +344,7 @@ install_binary() {
     printf '%s\n' "$3" > "${STATE}/$1"
     own_file "${STATE}/$1"
     changed=true
-    printf '%s\n' "Installed ${DEST}/$1"
+    _dl_ok "Installed ${DEST}/$1"
 }
 
 install_release() {
@@ -375,10 +404,10 @@ install_release() {
         return
     fi
     if is_current "$prog" "$id"; then
-        printf '%s\n' "${prog} is current (${tag})"
+        _dl_current "${prog} is current (${tag})"
         return
     fi
-    printf '%s\n' "Downloading ${asset}.zip ..."
+    _dl_fetch "Downloading ${asset}.zip ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
@@ -430,10 +459,10 @@ install_fd_or_rg() {
         return
     fi
     if is_current "$prog" "$id"; then
-        printf '%s\n' "${prog} is current (${tag})"
+        _dl_current "${prog} is current (${tag})"
         return
     fi
-    printf '%s\n' "Downloading ${asset}.tar.gz ..."
+    _dl_fetch "Downloading ${asset}.tar.gz ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
@@ -477,10 +506,10 @@ install_mold() {
     fi
     if is_current mold "$id" && [ "$(readlink "${DEST}/ld.mold" 2>/dev/null || :)" = mold ]; then
         own_file "${DEST}/ld.mold"
-        printf '%s\n' "mold is current (${tag})"
+        _dl_current "mold is current (${tag})"
         return
     fi
-    printf '%s\n' "Downloading ${asset}.tar.gz ..."
+    _dl_fetch "Downloading ${asset}.tar.gz ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
@@ -561,7 +590,7 @@ install_python3() {
         return
     fi
     if is_current python3 "$id"; then
-        printf '%s\n' "python3 is current (${tag})"
+        _dl_current "python3 is current (${tag})"
         return
     fi
     release_dir="${PYTHON_BUILD_ROOT}/${tag}"
@@ -569,7 +598,7 @@ install_python3() {
         skip python3 "$release_dir already exists"
         return
     fi
-    printf '%s\n' "Downloading python-build ${tag} (${triple}) ..."
+    _dl_fetch "Downloading python-build ${tag} (${triple}) ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$asset_url"; then
         rm -f "$tmpzip"
@@ -645,7 +674,7 @@ install_python3() {
     printf '%s\n' "$id" > "${STATE}/python3"
     own_file "${STATE}/python3"
     changed=true
-    printf '%s\n' "Installed ${DEST}/python3"
+    _dl_ok "Installed ${DEST}/python3"
 }
 
 install_nodejs() {
@@ -749,7 +778,7 @@ install_nodejs() {
                 fi
                 own_file "${DEST}/${nodejs_command}"
             done
-            printf '%s\n' "nodejs is current (${NODEJS_VERSION}, npm ${npm_latest})"
+            _dl_current "nodejs is current (${NODEJS_VERSION}, npm ${npm_latest})"
             return
         fi
     else
@@ -770,7 +799,7 @@ install_nodejs() {
             return
         fi
     else
-        printf '%s\n' "Downloading Node.js ${NODEJS_VERSION} (${nodejs_target}) ..."
+        _dl_fetch "Downloading Node.js ${NODEJS_VERSION} (${nodejs_target}) ..."
         tmpzip=$(mktemp)
         if ! curl -fsSL -o "$tmpzip" "$nodejs_url"; then
             skip nodejs "${nodejs_asset} download failed"
@@ -812,7 +841,7 @@ install_nodejs() {
     printf '%s\n' "$npm_latest" \
         | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
         || { skip nodejs "could not resolve the latest npm version"; return; }
-    printf '%s\n' "Installing npm ${npm_latest} ..."
+    _dl_fetch "Installing npm ${npm_latest} ..."
     if ! PATH="${tmpbundle}/bin:${PATH}" "${tmpbundle}/bin/npm" install \
         --global --prefix "$tmpbundle" "npm@${npm_latest}"; then
         skip nodejs "npm ${npm_latest} install failed"
@@ -861,12 +890,12 @@ install_nodejs() {
         rm -rf "${NODEJS_INSTALL_ROOT:?}/${previous_release:?}"
     fi
     changed=true
-    printf '%s\n' "Installed ${DEST}/node (${NODEJS_VERSION}, npm ${npm_latest})"
+    _dl_ok "Installed ${DEST}/node (${NODEJS_VERSION}, npm ${npm_latest})"
 }
 
 install_mactop_app() {
     app="/Applications/mactop.app"
-    printf '%s\n' "Installing ${app} ..."
+    _dl_fetch "Installing ${app} ..."
     tmpbundle=$(mktemp -d "/Applications/.mactop.XXXXXX")
     bundle=$tmpbundle
     mkdir -p "$bundle/Contents/MacOS"
@@ -904,7 +933,7 @@ EOF
     rm -rf "$app"
     mv "$bundle" "$app"
     tmpbundle=
-    printf '%s\n' "Installed ${app}"
+    _dl_ok "Installed ${app}"
     own_dir "$app"
     agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
     own_missing_dirs "${HOME}/Library/LaunchAgents"
@@ -929,7 +958,7 @@ EOF
     launchctl bootout "gui/$(id -u)" "$agent" 2>/dev/null || true
     launchctl bootstrap "gui/$(id -u)" "$agent"
     launchctl kickstart -k "gui/$(id -u)/com.mactop"
-    printf '%s\n' "Loaded ${agent}"
+    _dl_ok "Loaded ${agent}"
 }
 
 install_direct() {
@@ -939,10 +968,10 @@ install_direct() {
         return
     fi
     if is_current "$1" "$id"; then
-        printf '%s\n' "$1 is current"
+        _dl_current "$1 is current"
         return
     fi
-    printf '%s\n' "Downloading $1 ..."
+    _dl_fetch "Downloading $1 ..."
     tmpbin=$(mktemp "${DEST}/.$1.XXXXXX")
     if ! curl -fsSL -o "$tmpbin" "$2"; then
         rm -f "$tmpbin"
@@ -988,9 +1017,9 @@ install_grok() {
     if installed grok && ! grok_launcher_is_legacy_dl; then
         if [ -f "${DEST}/grok" ] && [ ! -L "${DEST}/grok" ] \
             && [ -s "${STATE}/grok" ] && ! command -v file >/dev/null 2>&1; then
-            printf '%s\n' 'Warning: file is required to identify the existing Grok launcher; keeping it' >&2
+            _dl_warn 'Warning: file is required to identify the existing Grok launcher; keeping it'
         fi
-        printf '%s\n' 'grok is installed'
+        _dl_current 'grok is installed'
         return
     fi
     case "$OS:$ARCH" in
@@ -1013,7 +1042,7 @@ install_grok() {
         own_file "${GROK_HOME}/bin/grok"
         grok_target=$(readlink "${GROK_HOME}/bin/grok") || grok_target=
         own_grok_target "$grok_target"
-        printf '%s\n' "grok is current (${version})"
+        _dl_current "grok is current (${version})"
         return
     fi
     grok_bin_dir="${GROK_HOME}/bin"
@@ -1060,7 +1089,7 @@ install_grok() {
     printf '%s\n' "$id" > "${STATE}/grok"
     own_file "${STATE}/grok"
     changed=true
-    printf '%s\n' "Installed ${DEST}/grok"
+    _dl_ok "Installed ${DEST}/grok"
 }
 
 repair_dsh_tui_patch() {
@@ -1123,7 +1152,7 @@ PY
     }
     if [ "$patch_result" = updated ]; then
         changed=true
-        printf '%s\n' "Removed dsh-tui's stale tool-ralph patch row"
+        _dl_ok "Removed dsh-tui's stale tool-ralph patch row"
     fi
 }
 
@@ -1140,12 +1169,12 @@ remove_legacy_dsh() {
         case "$legacy_bin_target" in
             ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js|"$legacy_package/lib/bin.js") ;;
             *)
-                printf '%s\n' "Keeping existing dsh launcher at $legacy_bin; leaving the previous npm package installed"
+                _dl_current "Keeping existing dsh launcher at $legacy_bin; leaving the previous npm package installed"
                 return 0
                 ;;
         esac
     elif [ -e "$legacy_bin" ]; then
-        printf '%s\n' "Keeping existing dsh launcher at $legacy_bin; leaving the previous npm package installed"
+        _dl_current "Keeping existing dsh launcher at $legacy_bin; leaving the previous npm package installed"
         return 0
     fi
     if ! npm uninstall --global --prefix "$legacy_root" @deepseek-ai/dsh; then
@@ -1183,7 +1212,7 @@ install_cmd() {
         own_dir "$CMD_INSTALL_ROOT"
         own_file "${DEST}/cmd"
         own_file "${STATE}/cmd"
-        printf '%s\n' "cmd is current (${version})"
+        _dl_current "cmd is current (${version})"
         return
     fi
     own_parent=${CMD_INSTALL_ROOT%/*}
@@ -1194,7 +1223,7 @@ install_cmd() {
         tmpbundle=$(mktemp -d "${CMD_INSTALL_ROOT}.XXXXXX")
         install_prefix=$tmpbundle
     fi
-    printf '%s\n' "Installing Command Code (${version}) ..."
+    _dl_fetch "Installing Command Code (${version}) ..."
     if ! npm install --global --prefix "$install_prefix" "command-code@${version}"; then
         skip cmd "npm install failed"
         return
@@ -1221,7 +1250,7 @@ install_cmd() {
     own_file "${DEST}/cmd"
     own_file "${STATE}/cmd"
     changed=true
-    printf '%s\n' "Installed ${DEST}/cmd"
+    _dl_ok "Installed ${DEST}/cmd"
 }
 
 install_pi() {
@@ -1253,7 +1282,7 @@ install_pi() {
         own_dir "$PI_INSTALL_ROOT"
         own_file "${DEST}/pi"
         own_file "${STATE}/pi"
-        printf '%s\n' "pi is current (${version})"
+        _dl_current "pi is current (${version})"
         return
     fi
     own_parent=${PI_INSTALL_ROOT%/*}
@@ -1264,7 +1293,7 @@ install_pi() {
         tmpbundle=$(mktemp -d "${PI_INSTALL_ROOT}.XXXXXX")
         install_prefix=$tmpbundle
     fi
-    printf '%s\n' "Installing Pi (${version}) ..."
+    _dl_fetch "Installing Pi (${version}) ..."
     if ! npm install --global --ignore-scripts --prefix "$install_prefix" "@earendil-works/pi-coding-agent@${version}"; then
         skip pi "npm install failed"
         return
@@ -1291,7 +1320,7 @@ install_pi() {
     own_file "${DEST}/pi"
     own_file "${STATE}/pi"
     changed=true
-    printf '%s\n' "Installed ${DEST}/pi"
+    _dl_ok "Installed ${DEST}/pi"
 }
 
 install_dsh() {
@@ -1315,7 +1344,7 @@ install_dsh() {
         own_dir "$DSH_INSTALL_ROOT"
         own_file "${STATE}/dsh"
         own_file "${STATE}/dsh-tui"
-        printf '%s\n' "dsh and dsh-tui are current (${version}, ${tui_version})"
+        _dl_current "dsh and dsh-tui are current (${version}, ${tui_version})"
         return
     fi
     if [ -e "$DSH_INSTALL_ROOT" ] || [ -L "$DSH_INSTALL_ROOT" ]; then
@@ -1328,7 +1357,7 @@ install_dsh() {
         own_missing_dirs "$own_parent"
         own_dir "$DSH_INSTALL_ROOT"
     fi
-    printf '%s\n' "Installing dsh (${version}) and dsh-tui (${tui_version}) ..."
+    _dl_fetch "Installing dsh (${version}) and dsh-tui (${tui_version}) ..."
     if ! npm install --global --prefix "$DSH_INSTALL_ROOT" \
         "@deepseek-ai/dsh@${version}" "@deepseek-harness-tui/dsh-tui@${tui_version}"; then
         skip dsh "npm install failed"
@@ -1344,12 +1373,12 @@ install_dsh() {
     own_file "${STATE}/dsh"
     own_file "${STATE}/dsh-tui"
     changed=true
-    printf '%s\n' "Installed dsh and dsh-tui under ${DSH_INSTALL_ROOT}"
+    _dl_ok "Installed dsh and dsh-tui under ${DSH_INSTALL_ROOT}"
 }
 
 install_antigravity() {
     if keep_installed agy; then return; fi
-    printf '%s\n' 'Installing Antigravity CLI ...'
+    _dl_fetch 'Installing Antigravity CLI ...'
     tmpbin=$(mktemp)
     if ! curl -fsSL -o "$tmpbin" https://antigravity.google/cli/install.sh; then
         rm -f "$tmpbin"
@@ -1378,7 +1407,7 @@ install_antigravity() {
         return
     fi
     changed=true
-    printf '%s\n' "Installed Antigravity CLI (${DEST}/agy)"
+    _dl_ok "Installed Antigravity CLI (${DEST}/agy)"
     own_file "${DEST}/agy"
 }
 
@@ -1386,12 +1415,12 @@ install_muse() {
     if installed muse && ! muse_launcher_is_legacy_dl; then
         if [ -f "${DEST}/muse" ] && [ ! -L "${DEST}/muse" ] \
             && [ -s "${STATE}/muse" ] && ! command -v file >/dev/null 2>&1; then
-            printf '%s\n' 'Warning: file is required to identify the existing Muse launcher; keeping it' >&2
+            _dl_warn 'Warning: file is required to identify the existing Muse launcher; keeping it'
         fi
-        printf '%s\n' 'muse is installed'
+        _dl_current 'muse is installed'
         return
     fi
-    printf '%s\n' 'Installing Muse Code launcher ...'
+    _dl_fetch 'Installing Muse Code launcher ...'
     tmpbin=$(mktemp)
     if ! curl -fsSL -o "$tmpbin" "$MUSE_LAUNCHER_URL"; then
         rm -f "$tmpbin"
@@ -1414,7 +1443,7 @@ install_muse() {
     fi
     rm -f "${STATE}/muse"
     changed=true
-    printf '%s\n' "Installed Muse Code launcher (${DEST}/muse)"
+    _dl_ok "Installed Muse Code launcher (${DEST}/muse)"
     own_file "${DEST}/muse"
 }
 
@@ -1422,11 +1451,11 @@ install_claude() {
     if claude_keep_installed; then
         if [ -f "${DEST}/claude" ] && [ ! -L "${DEST}/claude" ] \
             && [ -s "${STATE}/claude" ] && ! command -v file >/dev/null 2>&1; then
-            printf '%s\n' 'Warning: file is required to identify the existing Claude launcher; keeping it' >&2
+            _dl_warn 'Warning: file is required to identify the existing Claude launcher; keeping it'
         fi
         return
     fi
-    printf '%s\n' 'Installing Claude Code with the native installer ...'
+    _dl_fetch 'Installing Claude Code with the native installer ...'
     tmpbin=$(mktemp)
     if ! curl -fsSL -o "$tmpbin" https://claude.ai/install.sh; then
         rm -f "$tmpbin"
@@ -1456,7 +1485,7 @@ install_claude() {
     fi
     rm -f "${STATE}/claude"
     changed=true
-    printf '%s\n' "Installed Claude Code (${DEST}/claude)"
+    _dl_ok "Installed Claude Code (${DEST}/claude)"
     own_file "${DEST}/claude"
     claude_target=$(readlink "${DEST}/claude" 2>/dev/null || :)
     case "$claude_target" in /*) ;; *) claude_target="${DEST}/${claude_target}" ;; esac
@@ -1470,7 +1499,7 @@ install_claude() {
 
 install_codex() {
     if installed codex && ! codex_launcher_is_legacy_dl; then
-        printf '%s\n' 'codex is installed'
+        _dl_current 'codex is installed'
         return
     fi
     if ! jaq_available; then
@@ -1533,7 +1562,7 @@ install_codex() {
                 own_file "${DEST}/codex-code-mode-host"
             fi
         fi
-        printf '%s\n' "codex is current (${version})"
+        _dl_current "codex is current (${version})"
         return
     fi
     release_dir="${releases}/${version}-${target}"
@@ -1609,7 +1638,7 @@ install_codex() {
     printf '%s\n' "$id" > "${STATE}/codex"
     own_file "${STATE}/codex"
     changed=true
-    printf '%s\n' "Installed ${DEST}/codex"
+    _dl_ok "Installed ${DEST}/codex"
 }
 
 install_opencode2() {
@@ -1618,9 +1647,9 @@ install_opencode2() {
             != "${OPENCODE2_HOME}/bin/opencode2" ]; then
         if [ -f "${DEST}/opencode2" ] && [ ! -L "${DEST}/opencode2" ] \
             && [ -s "${STATE}/opencode2" ] && ! command -v file >/dev/null 2>&1; then
-            printf '%s\n' 'Warning: file is required to identify the existing OpenCode 2 launcher; keeping it' >&2
+            _dl_warn 'Warning: file is required to identify the existing OpenCode 2 launcher; keeping it'
         fi
-        printf '%s\n' 'opencode2 is installed'
+        _dl_current 'opencode2 is installed'
         return
     fi
     case "$OS:$ARCH" in
@@ -1656,18 +1685,24 @@ EOF
             own_file "${OPENCODE2_HOME}/bin/opencode2"
             own_file "${OPENCODE2_HOME}/bin/opencode"
         fi
-        printf '%s\n' "opencode2 is current"
+        _dl_current "opencode2 is current"
         return
     fi
     opencode2_bin_dir="${OPENCODE2_HOME}/bin"
     opencode2_binary="${opencode2_bin_dir}/opencode"
     if [ -e "$opencode2_binary" ] || [ -L "$opencode2_binary" ]; then
-        skip opencode2 "$opencode2_binary already exists"
-        return
+        if [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" != "${opencode2_bin_dir}/opencode2" ]; then
+            skip opencode2 "$opencode2_binary already exists"
+            return
+        fi
+        if [ ! -s "${STATE}/opencode2" ]; then
+            skip opencode2 "$opencode2_binary already exists"
+            return
+        fi
     fi
     own_missing_dirs "$opencode2_bin_dir"
     mkdir -p "$opencode2_bin_dir"
-    printf '%s\n' "Downloading opencode2 ..."
+    _dl_fetch "Downloading opencode2 ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
@@ -1712,7 +1747,7 @@ EOF
     printf '%s\n' "$id" > "${STATE}/opencode2"
     own_file "${STATE}/opencode2"
     changed=true
-    printf '%s\n' "Installed ${DEST}/opencode2"
+    _dl_ok "Installed ${DEST}/opencode2"
 }
 
 wait_for_workers() {
@@ -1749,12 +1784,12 @@ run_parallel_wave() {
     worker_failed_progs=
     worker_count=0
     if [ ! -r "$script_path" ]; then
-        printf '%s\n' "dl: cannot start parallel workers: cannot read '$script_path' (invoked as '$0')" >&2
-        printf '%s\n' "dl: check the invocation path and retry" >&2
+        _dl_fail "dl: cannot start parallel workers: cannot read '$script_path' (invoked as '$0')"
+        _dl_fail "dl: check the invocation path and retry"
         return 1
     fi
     if ! log_dir=$(mktemp -d); then
-        printf '%s\n' "Could not create a directory for worker output" >&2
+        _dl_fail "Could not create a directory for worker output"
         return 1
     fi
     log_count=0
@@ -1781,7 +1816,7 @@ run_parallel_wave() {
     fi
     if $parallel_failed; then
         if [ -n "$worker_failed_progs" ]; then
-            printf '%s\n' "dl: parallel install failed for: $worker_failed_progs" >&2
+            _dl_fail "dl: parallel install failed for: $worker_failed_progs"
         fi
         return 1
     fi
@@ -1934,16 +1969,16 @@ report_unowned_launcher() {
     if installed "$report_prog" && { [ ! -f "$DL_OWNED_FILE" ] \
         || ! awk -F '\t' -v path="$report_path" \
             '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
-        printf '%s\n' "Leaving untracked launcher: $report_path" >&2
+        _dl_warn "Leaving untracked launcher: $report_path"
         if [ -L "$report_path" ]; then
             report_target=$(readlink "$report_path" 2>/dev/null || :)
-            if [ -n "$report_target" ]; then printf '%s\n' "Its target is also untracked: $report_target" >&2; fi
+            if [ -n "$report_target" ]; then _dl_warn "Its target is also untracked: $report_target"; fi
         fi
     fi
 }
 
 if [ "$DL_RECORD_OWNED" = true ]; then
-    [ -n "$DL_OWNED_FILE" ] || { printf '%s\n' 'DL_OWNED_FILE is required to record installed paths' >&2; exit 1; }
+    [ -n "$DL_OWNED_FILE" ] || { _dl_fail 'DL_OWNED_FILE is required to record installed paths'; exit 1; }
     record_managed_installs
     for report_prog in agy muse claude; do report_unowned_launcher "$report_prog"; done
     exit 0
@@ -1980,7 +2015,7 @@ fi
 if [ "$#" -gt 1 ] && [ "$_dl_worker_mode" != true ]; then
     if ! run_parallel "$@"; then failed=true; fi
     if $failed; then exit 1; fi
-    printf '%s\n' "Done."
+    _dl_ok "Done."
     exit 0
 fi
 
@@ -2013,4 +2048,4 @@ for prog in "$@"; do
 done
 
 if $failed; then exit 1; fi
-if [ "$_dl_worker_mode" != true ]; then printf '%s\n' "Done."; fi
+if [ "$_dl_worker_mode" != true ]; then _dl_ok "Done."; fi
