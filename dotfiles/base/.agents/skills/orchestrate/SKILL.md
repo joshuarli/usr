@@ -16,8 +16,8 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 | Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/muse-spark-1.3-contributor#low`, `explore` | `meta/muse-spark-1.3-contributor`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `google/gemini-3.8-flash`, `scout`, `low` |
 | Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/muse-spark-1.3-contributor#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `google/gemini-3.8-flash`, `mechanic`, `medium` |
 | Normal implementation, debugging, tests, ordinary review | `gpt-6-luna`, `xhigh` | `worker` | `opencode-go/muse-spark-1.3-contributor#xhigh`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` | `google/gemini-3.8-flash`, `worker`, `high` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` | `opencode-go/kimi-k3.1-pro#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-medium` | `deepseek-flash`, `max` | `google/gemini-3.8-flash`, `expert`, `high` |
-| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | `opencode-go/kimi-k3.1-pro#max`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `google/gemini-3.8-flash`, `god`, `high` |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-sol`, `medium` | `expert` | `opencode-go/muse-spark-1.3-contributor#xhigh`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-medium` | `deepseek-flash`, `max` | `google/gemini-3.8-flash`, `expert`, `high` |
+| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | `opencode-go/muse-spark-1.3-contributor#xhigh`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `google/gemini-3.8-flash`, `god`, `high` |
 
 **Default to `worker`.** Size is not difficulty: a large lane with a known method and acceptance is still worker work. Use `expert` only for unknown paths with costly wrong turns (cross-cutting designs, unexplained failures, multi-owner integration). If the brief specifies steps and acceptance, start with `worker`; escalate only when evidence warrants it.
 
@@ -41,7 +41,7 @@ Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that ord
 
 ### OpenCode
 
-Run OpenCode sessions with `opencode-go/muse-spark-1.3-contributor`. Pass the row's model on every child: `opencode-go/muse-spark-1.3-contributor#low` for scouting, `#high` for mechanical edits, `#xhigh` for `worker`, `opencode-go/kimi-k3.1-pro#high` for `expert`, `opencode-go/kimi-k3.1-pro#max` for `god`. Use `explore` read-only for scouting, `general` otherwise. Never use another model; if a pinned model is unavailable, report it. Keep briefs self-contained.
+Keep every OpenCode lane on `opencode-go/muse-spark-1.3-contributor`; Kimi is too expensive for these lanes. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. If the model is unavailable, report it. Keep briefs self-contained.
 
 ### Command Code
 
