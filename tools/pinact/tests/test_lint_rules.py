@@ -183,6 +183,20 @@ class NeedsTests(unittest.TestCase):
         self.assertIn("needs-cycle", by_id)
         self.assertEqual(by_id["needs-cycle"][0].line, 3)
 
+    def test_needs_result_requires_declared_dependency(self) -> None:
+        content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                   "    steps:\n      - run: echo build\n"
+                   "  deploy:\n    runs-on: ubuntu-latest\n    steps:\n"
+                   "      - run: echo ${{ needs.build.result }}\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertIn("undefined-property", by_id)
+
+    def test_missing_step_id_is_reported_when_job_has_no_step_ids(self) -> None:
+        content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
+                   "    steps:\n      - run: echo ${{ steps.missing.outputs.value }}\n")
+        _, _, by_id = lint_text(content, profile="correctness")
+        self.assertIn("undefined-property", by_id)
+
 
 class MatrixCronTests(unittest.TestCase):
     def test_matrix_include_keys_are_known(self) -> None:
@@ -198,6 +212,15 @@ class MatrixCronTests(unittest.TestCase):
                    "    steps:\n      - run: echo ${{ matrix.os }}\n")
         _, _, by_id = lint_text(content, profile="correctness")
         self.assertNotIn("undefined-property", by_id)
+
+    def test_dynamic_matrix_is_valid_under_default_profile(self) -> None:
+        content = ("on: push\njobs:\n  prepare:\n    runs-on: ubuntu-latest\n"
+                   "    steps:\n      - run: echo matrix\n"
+                   "  build:\n    needs: prepare\n    runs-on: ubuntu-latest\n"
+                   "    strategy:\n      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}\n"
+                   "    steps:\n      - run: echo ${{ matrix.os }}\n")
+        _, _, by_id = lint_text(content, profile="default")
+        self.assertNotIn("invalid-matrix", by_id)
 
     def test_invalid_matrix_shape(self) -> None:
         content = ("on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n"
@@ -222,6 +245,20 @@ class MatrixCronTests(unittest.TestCase):
         content = "on:\n  schedule:\n    - cron: '0 0 * * *'\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n"
         _, _, by_id = lint_text(content, profile="default")
         self.assertNotIn("invalid-cron", by_id)
+
+    def test_cron_steps_and_names(self) -> None:
+        for cron in ("1-5/2 * * * *", "0 0 * JAN-MAR MON-FRI", "20/15 * * * *"):
+            with self.subTest(cron=cron):
+                content = f"on:\n  schedule:\n    - cron: '{cron}'\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n"
+                _, _, by_id = lint_text(content, profile="default")
+                self.assertNotIn("invalid-cron", by_id)
+
+    def test_cron_rejects_out_of_range_and_zero_steps(self) -> None:
+        for cron in ("99 99 99 99 99", "*/0 * * * *", "0 0 * 13 *", "0 0 * * 7"):
+            with self.subTest(cron=cron):
+                content = f"on:\n  schedule:\n    - cron: '{cron}'\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n"
+                _, _, by_id = lint_text(content, profile="default")
+                self.assertIn("invalid-cron", by_id)
 
     def test_schedule_missing_cron(self) -> None:
         content = "on:\n  schedule:\n    - {}\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n"

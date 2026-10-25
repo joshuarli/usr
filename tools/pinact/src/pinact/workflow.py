@@ -5,13 +5,21 @@ from __future__ import annotations
 import re
 
 from pinact._vendor.yaml.nodes import MappingNode, ScalarNode, SequenceNode
+from pinact import expressions as expr
 from pinact.model import SourceDocument, mapping_get, mapping_pairs, scalar_text
 from pinact import tables
 
 JOB_ID = re.compile(r"[a-zA-Z_][a-zA-Z0-9_-]*\Z")
 STEP_ID = re.compile(r"[a-zA-Z_][a-zA-Z0-9_-]*\Z")
-CRON_FIELD = re.compile(
-    r"^(\*|(\*|\d+)([-/]\d+)?(,(\*|\d+)([-/]\d+)?)*)$"
+CRON_FIELDS = (
+    (0, 59, {}),
+    (0, 23, {}),
+    (1, 31, {}),
+    (1, 12, dict(zip(
+        ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"),
+        range(1, 13),
+    ))),
+    (0, 6, dict(zip(("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"), range(7)))),
 )
 
 
@@ -185,9 +193,47 @@ def check_schedule(key_node, value) -> list[tuple]:
 
 def valid_cron(expr: str) -> bool:
     parts = expr.strip().split()
-    if len(parts) != 5:
+    if len(parts) != len(CRON_FIELDS):
         return False
-    return all(bool(CRON_FIELD.fullmatch(p)) for p in parts)
+    return all(
+        _valid_cron_field(part, minimum, maximum, names)
+        for part, (minimum, maximum, names) in zip(parts, CRON_FIELDS)
+    )
+
+
+def _cron_value(text: str, names: dict[str, int]) -> int | None:
+    if text.isdecimal():
+        return int(text)
+    return names.get(text.upper())
+
+
+def _valid_cron_field(
+    field: str, minimum: int, maximum: int, names: dict[str, int]
+) -> bool:
+    for item in field.split(","):
+        if not item:
+            return False
+        base, separator, step_text = item.partition("/")
+        if separator and (not step_text.isdecimal() or int(step_text) == 0):
+            return False
+        if "/" in step_text:
+            return False
+        if base == "*":
+            continue
+        if base.count("-") == 1:
+            start_text, end_text = base.split("-")
+            start = _cron_value(start_text, names)
+            end = _cron_value(end_text, names)
+            if start is None or end is None or start > end:
+                return False
+        else:
+            start = _cron_value(base, names)
+            end = maximum if separator else start
+            if start is None:
+                return False
+        if start < minimum or end is None or end > maximum:
+            return False
+    return True
 
 
 def check_workflow_call(key_node, value) -> list[tuple]:
@@ -449,6 +495,15 @@ def check_strategy(strategy, jid: str) -> list[tuple]:
     if matrix is None:
         return out
     if not isinstance(matrix, MappingNode):
+        if isinstance(matrix, ScalarNode):
+            interpolations, errors = expr.scan_interpolations(matrix.value)
+            if (
+                not errors
+                and len(interpolations) == 1
+                and not matrix.value[:interpolations[0].start].strip()
+                and not matrix.value[interpolations[0].end:].strip()
+            ):
+                return out
         line, col = _value_line_col(matrix)
         out.append((line, col, "invalid-matrix", "error",
                     f"job '{jid}' 'strategy.matrix' must be a mapping", False))

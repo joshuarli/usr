@@ -168,10 +168,10 @@ class DocumentShapeTests(unittest.TestCase):
         self.assertEqual([(use.index, use.repo, use.ref) for use in uses],
                          [(3, "actions/checkout", "v1")])
 
-    def test_tab_indentation_falls_back_to_line_scan(self) -> None:
-        _, uses = scan_text("steps:\n\t- uses: actions/checkout@v1\n")
-        self.assertEqual([(use.index, use.repo, use.ref) for use in uses],
-                         [(1, "actions/checkout", "v1")])
+    def test_tab_indentation_fails_closed(self) -> None:
+        with self.assertRaises(pinning.PinError) as ctx:
+            scan_text("steps:\n\t- uses: actions/checkout@v1\n")
+        self.assertIn("invalid YAML", str(ctx.exception))
 
 
 class DiscoveryErrorTests(unittest.TestCase):

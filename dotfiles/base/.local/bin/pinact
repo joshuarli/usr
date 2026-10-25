@@ -12,6 +12,9 @@ def _source_root() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if sys.version_info < (3, 11):
+        print("pinact requires Python 3.11 or newer", file=sys.stderr)
+        return 2
     root = _source_root()
     if root not in sys.path:
         sys.path.insert(0, root)

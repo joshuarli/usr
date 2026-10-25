@@ -31,6 +31,14 @@ def git(*args: str, cwd: Path, env: dict[str, str] | None = None) -> str:
 
 
 class PinactTests(unittest.TestCase):
+    def test_requires_python_311(self) -> None:
+        stderr = io.StringIO()
+        with patch.object(sys, "version_info", (3, 10)):
+            with contextlib.redirect_stderr(stderr):
+                result = PINACT_MODULE.main(["--help"])
+        self.assertEqual(result, 2)
+        self.assertIn("Python 3.11 or newer", stderr.getvalue())
+
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -171,6 +179,15 @@ class PinactTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(first.read_text(), 'uses: actions/checkout@v1\n')
         self.assertEqual(second.read_text(), 'uses: actions/checkout@does-not-exist\n')
+
+    def test_pin_refuses_to_modify_invalid_yaml(self) -> None:
+        source = "steps:\n  - uses: actions/checkout@v2\n  - {broken:\n"
+        path = self.workflow(source)
+
+        result = self.run_pinact()
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(path.read_text(), source)
 
     def test_scan_rejects_unsupported_flow_and_invalid_refs(self) -> None:
         for value in (

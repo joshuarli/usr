@@ -473,11 +473,11 @@ def check_semantics(node: Node, ctx: Context) -> tuple[str, str | None]:
             parts = _prop_chain(node)
             if len(parts) >= 2:
                 job = parts[1]
-                if job not in ctx.needs_by_job.get(ctx.location, set()) and job not in ctx.job_ids:
-                    if ctx.job_ids:
+                if ctx.job_ids:
+                    if job not in ctx.job_ids:
                         return ("semantic-error", f"unknown job '{job}' in 'needs' context")
-                    _bump_unsupported()
-                    return ("valid-unknown", None)
+                    if job not in ctx.needs_by_job.get(ctx.location, set()):
+                        return ("semantic-error", f"job '{job}' is not a dependency in 'needs' context")
             _bump_unsupported()
             return ("valid-unknown", None)
         if low_root == "matrix":
@@ -496,7 +496,7 @@ def check_semantics(node: Node, ctx: Context) -> tuple[str, str | None]:
             if len(parts) >= 2:
                 sid = parts[1]
                 known = ctx.step_ids_by_job.get(ctx.location, set())
-                if known and sid not in known:
+                if ctx.location in ctx.step_ids_by_job and sid not in known:
                     return ("semantic-error", f"unknown step '{sid}'")
             _bump_unsupported()
             return ("valid-unknown", None)

@@ -146,6 +146,16 @@ class ContextTests(unittest.TestCase):
         self.assertEqual(status, "semantic-error")
         self.assertIn("nope", msg)
 
+    def test_needs_job_must_be_declared_as_dependency(self) -> None:
+        ctx = E.Context(
+            job_ids={"build", "deploy"},
+            needs_by_job={"deploy": set()},
+            location="deploy",
+        )
+        status, message = E.analyze_expression("needs.build.result", ctx)
+        self.assertEqual(status, "semantic-error")
+        self.assertIn("needs", message)
+
     def test_static_vs_dynamic_matrix(self) -> None:
         status, msg = E.analyze_expression("matrix.bogus", self.build_ctx)
         self.assertEqual(status, "semantic-error")
@@ -172,6 +182,15 @@ class ContextTests(unittest.TestCase):
         self.assertIn(status, ("valid", "valid-unknown"))
         status, msg = E.analyze_expression("inputs.bogus", self.ctx)
         self.assertEqual(status, "semantic-error")
+
+    def test_step_ids_are_checked_when_a_job_has_no_ids(self) -> None:
+        ctx = E.Context(
+            step_ids_by_job={"build": set()},
+            location="build",
+        )
+        status, message = E.analyze_expression("steps.missing.outputs.value", ctx)
+        self.assertEqual(status, "semantic-error")
+        self.assertIn("missing", message)
 
 
 class BuiltinTests(unittest.TestCase):

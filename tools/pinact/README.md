@@ -1,7 +1,7 @@
 # pinact
 
 `pinact` pins GitHub Actions references, checks workflows, and applies a limited set of safe fixes.
-`make sync` installs its launcher at `~/.local/bin/pinact`. It needs Python 3.10+ and Git. The
+`make sync` installs its launcher at `~/.local/bin/pinact`. It needs Python 3.11+ and Git. The
 runtime is self-contained: it has no required config file, package installation, site-packages
 import, compiled extension, GitHub API, or token.
 
@@ -98,6 +98,6 @@ PYTHONDONTWRITEBYTECODE=1 TMPDIR="$PWD/.work/tmp" python3.13 -I tools/pinact/tes
 PYTHONDONTWRITEBYTECODE=1 TMPDIR="$PWD/.work/tmp" python3.13 -I tools/pinact/tests/test_fix.py
 ```
 
-The seven-family differential corpus and its limits are described in the [coverage report](tests/fixtures/coverage.md).
+The differential corpus and its limits are described in the [coverage report](tests/fixtures/coverage.md).
 See the [compatibility report](docs/compatibility.md) for the supported workflow surface and
 known gaps.

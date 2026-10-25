@@ -7,9 +7,7 @@ bodies, comments, flow-style text inside plain scalars, and merge-key targets
 are never separate nodes, so they are never treated as invocations. The
 composer shares anchored nodes across aliases, so the walk visits each
 composite node once: recursion stays bounded and merge constructs are
-preserved rather than expanded. Files the composer cannot parse fall back to
-the original line scan, except undefined aliases, which fail closed because
-the document structure is unknowable.
+preserved rather than expanded. Files the composer cannot parse are rejected.
 """
 
 from __future__ import annotations
@@ -154,52 +152,6 @@ def _collect(node: object, scoped: bool, flowing: bool,
             _collect(item, scoped, nested, found, seen)
 
 
-def _legacy_uses(path: Path, source: str, refresh: bool) -> list[Use]:
-    uses = []
-    block_indent = -1
-    scopes: list[tuple[int, str]] = []
-    for index, line in enumerate(source.splitlines(keepends=True)):
-        body, _ = split_line(line)
-        body = body.removeprefix("\ufeff") if index == 0 else body
-        indent = len(body) - len(body.lstrip(" \t"))
-        if block_indent >= 0:
-            if not body.strip() or indent > block_indent:
-                continue
-            block_indent = -1
-        if body.lstrip().startswith("#"):
-            continue
-        while scopes and indent <= scopes[-1][0]:
-            scopes.pop()
-        match = USES.fullmatch(body)
-        if not match:
-            if SCALAR.fullmatch(body):
-                block_indent = indent
-            elif INLINE.search(body):
-                raise PinError(f"{path}:{index + 1}: unsupported inline uses syntax")
-            elif scope := SCOPE.fullmatch(body):
-                scopes.append((indent, scope["name"]))
-            continue
-        if any(name in NON_ACTION for _, name in scopes):
-            continue
-        value = VALUE.fullmatch(match["value"])
-        if not value:
-            raise PinError(f"{path}:{index + 1}: unsupported uses value")
-        spec = value["action"]
-        parsed = parse_action(spec)
-        if parsed is None:
-            continue
-        repo, ref = parsed
-        if SHA.fullmatch(ref) and not (refresh and (tag := version_comment(value["comment"] or ""))):
-            continue
-        if SHA.fullmatch(ref):
-            ref = tag
-            if not valid_ref(ref):
-                raise PinError(f"{path}:{index + 1}: invalid version annotation")
-        uses.append(Use(index, repo, ref, spec, match["indent"] + match["key"],
-                         value["quote"], value["gap"], value["comment"] or ""))
-    return uses
-
-
 def scan(path: Path, refresh: bool, include_pinned: bool = False) -> tuple[str, list[Use]]:
     if path.is_symlink():
         raise PinError(f"{path}: refusing to modify a symlink")
@@ -212,8 +164,8 @@ def scan(path: Path, refresh: bool, include_pinned: bool = False) -> tuple[str, 
         documents = list(yaml.compose_all(source, Loader=yaml.BaseLoader))
     except ComposerError as exc:
         raise PinError(f"{path}: unresolvable anchor: {exc}") from exc
-    except yaml.YAMLError:
-        return source, _legacy_uses(path, source, refresh)
+    except yaml.YAMLError as exc:
+        raise PinError(f"{path}: invalid YAML: {exc}") from exc
     found: list[tuple[int, bool, bool]] = []
     for document in documents:
         if document is not None:

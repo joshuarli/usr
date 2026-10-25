@@ -27,15 +27,15 @@ Deliverables:
   report, repomod integration notes, vendored-provenance file. `make check` / `make lint` (usr) and
   `make test` / `ruff` / `ty` (repomod) green.
 
-Last accepted checkpoint: U8 docs and C1 retirement code are pushed: usr `7053e07` on
-`campaign-pinact-u1`; repomod `efcfe5b` on `campaign-pinact-r1`. U6 meets O4 on its 31-defect
-weighted corpus: 63/63 weighted recall, 0/3 correctness errors on valid fixtures, and no writes
-across 18 `fix --diff` inputs.
-Provisional work: none.
-Current steering decision: U7 was waived by the owner; accept U8 and C1 code. The required broad
-`make check`, `make lint`, and repomod `make test` gates are parked under the root `AGENTS.md`
-restriction on running `make` without an explicit request.
-Next milestone: owner decision on the broad final gates.
+Last previously accepted checkpoint: U8 docs and C1 retirement code are pushed: usr `7053e07` on
+`campaign-pinact-u1`; repomod `efcfe5b` on `campaign-pinact-r1`.
+Follow-up: review repairs are on usr and repomod `campaign-pinact-followup`; they are locally
+committed and merged into each repository's default branch, and remain unpushed.
+Current steering decision: the consumer profile, reported correctness defects, and duplicate
+repomod implementation have been repaired on local branches. The selected corpus uses the
+consumer's `default` profile and includes nine valid workflows, but its 31 labelled defects do not
+establish fleet-wide parity. Broad local gates pass; the CI workflow itself has not run.
+Next milestone: publish usr before repomod so repomod CI checks out the matching Pinact launcher.
 
 ## 1. Charter
 
@@ -562,5 +562,29 @@ request. The campaign is parked at those final broad gates.
 ## 10. For the owner afterwards
 
 Read the compatibility/coverage report and skim the rule reference for IDs your fleet configs
-mention. Branch work stays unmerged until you land it. The remaining closeout gates need an explicit
-request to run the `make` targets restricted by the root instructions.
+mention. The follow-up commits are merged into the local default branches and remain unpushed; the
+updated repomod CI workflow needs a run after publishing usr first.
+
+## Review follow-up
+
+The owner reopened the campaign after review of the latest `usr` and `repomod` heads. Pinact now
+accepts expression-valued matrices as dynamic, rejects malformed YAML before pinning, validates
+declared `needs` and step IDs, checks cron field ranges and steps, and requires Python 3.11 for
+`tomllib`. Its corpus score now uses the `default` profile consumed by repomod; five real repomod
+release workflows were added to the valid set. The latest local run covers 23 files, 31 labelled
+defects, and nine valid workflows. Pinact has 63/63 weighted recall on those labels and zero errors
+on the valid set; the report explicitly limits that claim to the selected corpus and records
+jactionlint's dynamic-matrix false positives.
+
+Repomod now routes action lint and fixing through one `gha-syntax` rule with Pinact's default
+profile. Its duplicate action scanner, cross-major rewriting path, and second Pinact check adapter
+were removed; `actions.toml` refresh remains. This removes the `gha-pin` and `gha-version` rule IDs.
+The repomod test workflow checks out `usr` and runs an isolated real-launcher integration that
+asserts security findings and catalog-backed same-major fixing.
+
+Follow-up verification: usr `make check` and `make lint` passed; repomod `make test` passed all 313
+tests with the isolated real-launcher CLI integration enabled, and repomod `make lint` passed. The
+205 Pinact tests across its documented suites and catalog regression, corpus runner, Pinact launcher
+check, and `mdtool` with zero errors also passed. Ruff now excludes the vendored PyYAML tree that
+caused the broad lint target to fail. The CI workflow itself was not run. Follow-up commits are
+merged into the local default branches and remain unpushed.

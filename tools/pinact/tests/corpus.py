@@ -64,7 +64,13 @@ DEFECTS = (
 VALID = (
     "custom/safe-checkout.yml",
     "custom/safe-dynamic-input.yml",
+    "custom/dynamic-matrix.yml",
     "repomod/test.yml",
+    "repomod-real/joshuarli-gh-prerelease.yml",
+    "repomod-real/joshuarli-ish-release.yml",
+    "repomod-real/diff-pretty-release.yml",
+    "repomod-real/srv-release.yml",
+    "repomod-real/xsh-release.yml",
 )
 
 
@@ -100,68 +106,81 @@ def observations(records: list[dict[str, object]]) -> set[tuple[str, int, str]]:
 
 def main() -> int:
     jactionlint = shutil.which("jactionlint")
-    if jactionlint is None:
-        raise RuntimeError("jactionlint is required for the local differential corpus")
-    version = run([jactionlint, "--version"], FIXTURES, dict(os.environ))
-    if version.returncode != 0:
-        raise RuntimeError(version.stderr.strip() or "cannot read jactionlint version")
+    version_text = None
+    if jactionlint is not None:
+        version = run([jactionlint, "--version"], FIXTURES, dict(os.environ))
+        if version.returncode != 0:
+            raise RuntimeError(version.stderr.strip() or "cannot read jactionlint version")
+        version_text = version.stdout.splitlines()[0]
     scratch = ROOT / ".work" / "tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     environment = dict(os.environ)
     environment["TMPDIR"] = str(scratch)
     files = sorted(path.relative_to(FIXTURES).as_posix() for path in FIXTURES.rglob("*.yml"))
+    families = {Path(path).parts[0] for path in files}
     inputs = ["--", *files]
+    profiles = ("correctness", "default")
     commands = {
-        "jactionlint": {
-            profile: [jactionlint, f"--profile={profile}", "--no-online", "--format=json", *inputs]
-            for profile in ("correctness", "default")
-        },
         "pinact": {
             profile: [sys.executable, "-I", str(LAUNCHER), "lint", f"--profile={profile}", "--format=json", *inputs]
-            for profile in ("correctness", "default")
+            for profile in profiles
         },
     }
-    results: dict[str, set[tuple[str, int, str]]] = {}
+    if jactionlint is not None:
+        commands["jactionlint"] = {
+            profile: [jactionlint, f"--profile={profile}", "--no-online", "--format=json", *inputs]
+            for profile in profiles
+        }
+    results: dict[str, dict[str, set[tuple[str, int, str]]]] = {}
     raw: dict[str, dict[str, list[dict[str, object]]]] = defaultdict(dict)
     for tool, profiles in commands.items():
-        combined: set[tuple[str, int, str]] = set()
+        results[tool] = {}
         for profile, command in profiles.items():
             records = lint_records(command, FIXTURES, environment)
             raw[tool][profile] = records
-            combined.update(observations(records))
-        results[tool] = combined
+            results[tool][profile] = observations(records)
 
-    print(f"jactionlint: {version.stdout.splitlines()[0]}")
-    print(f"fixtures: {len(files)} files across 7 source families")
+    print(f"jactionlint: {version_text or 'not installed; optional comparison skipped'}")
+    print(f"fixtures: {len(files)} files across {len(families)} source families")
     print(f"expected defects: {len(DEFECTS)}; weight denominator: {sum(item[3] for item in DEFECTS)}")
-    print("family\tdefects\tweight\tjactionlint\tpinact\tjactionlint exact\tpinact exact")
+    print(
+        "family\tdefects\tweight\t"
+        + "\t".join(f"{tool} default" for tool in results)
+        + "\t"
+        + "\t".join(f"{tool} exact" for tool in results)
+    )
     family_counts: dict[str, Counter[str]] = defaultdict(Counter)
     for path, line, family, weight in DEFECTS:
         family_counts[family]["defects"] += 1
         family_counts[family]["weight"] += weight
         for tool in results:
-            if any(found_path == path and found_family == family for found_path, _, found_family in results[tool]):
+            default = results[tool]["default"]
+            if any(found_path == path and found_family == family for found_path, _, found_family in default):
                 family_counts[family][tool] += 1
-            if (path, line, family) in results[tool]:
+            if (path, line, family) in default:
                 family_counts[family][f"{tool}-exact"] += 1
     for family in sorted(family_counts):
         counts = family_counts[family]
         print(
             f"{family}\t{counts['defects']}\t{counts['weight']}\t"
-            f"{counts['jactionlint']}\t{counts['pinact']}\t"
-            f"{counts['jactionlint-exact']}\t{counts['pinact-exact']}"
+            + "\t".join(str(counts[tool]) for tool in results)
+            + "\t"
+            + "\t".join(str(counts[f"{tool}-exact"]) for tool in results)
         )
     total_weight = sum(item[3] for item in DEFECTS)
     for tool in results:
         found_weight = sum(
             weight
             for path, line, family, weight in DEFECTS
-            if (path, line, family) in results[tool]
+            if (path, line, family) in results[tool]["default"]
         )
         category_weight = sum(
             weight
             for path, _, family, weight in DEFECTS
-            if any(found_path == path and found_family == family for found_path, _, found_family in results[tool])
+            if any(
+                found_path == path and found_family == family
+                for found_path, _, found_family in results[tool]["default"]
+            )
         )
         print(
             f"{tool} weighted recall: {found_weight}/{total_weight} exact; "
@@ -170,34 +189,50 @@ def main() -> int:
         missed = [
             f"{path}:{line}:{family}"
             for path, line, family, _ in DEFECTS
-            if not any(found_path == path and found_family == family for found_path, _, found_family in results[tool])
+            if not any(
+                found_path == path and found_family == family
+                for found_path, _, found_family in results[tool]["default"]
+            )
         ]
         print(f"{tool} missed: {', '.join(missed) if missed else 'none'}")
         expected_families = {(path, family) for path, _, family, _ in DEFECTS}
         other_rules: Counter[str] = Counter()
-        for records in raw[tool].values():
-            for record in records:
-                path = record.get("filepath")
-                rule = record.get("id")
-                family = RULE_FAMILIES.get(rule) if isinstance(rule, str) else None
-                if isinstance(path, str) and isinstance(rule, str) and (
-                    family is None or (Path(path).as_posix(), family) not in expected_families
-                ):
-                    other_rules[rule] += 1
+        for record in raw[tool]["default"]:
+            path = record.get("filepath")
+            rule = record.get("id")
+            family = RULE_FAMILIES.get(rule) if isinstance(rule, str) else None
+            if isinstance(path, str) and isinstance(rule, str) and (
+                family is None or (Path(path).as_posix(), family) not in expected_families
+            ):
+                other_rules[rule] += 1
         rendered = ", ".join(f"{rule}×{count}" for rule, count in sorted(other_rules.items()))
         print(f"{tool} other rule findings (unscored): {rendered or 'none'}")
 
-    print("valid files\tjactionlint correctness errors\tpinact correctness errors")
+    valid_columns = ["valid file"]
+    if "jactionlint" in raw:
+        valid_columns.extend(("jactionlint correctness errors", "jactionlint default errors"))
+    valid_columns.extend(("pinact correctness errors", "pinact default errors"))
+    print("\t".join(valid_columns))
     for path in VALID:
-        counts = []
-        for tool in raw:
+        counts = [path]
+        if "jactionlint" in raw:
+            for profile in profiles:
+                errors = [
+                    record
+                    for record in raw["jactionlint"][profile]
+                    if record.get("filepath") == path and record.get("severity") == "error"
+                ]
+                counts.append(str(len(errors)))
+        for profile in profiles:
             errors = [
                 record
-                for record in raw[tool]["correctness"]
+                for record in raw["pinact"][profile]
                 if record.get("filepath") == path and record.get("severity") == "error"
             ]
+            if profile == "default" and errors:
+                raise RuntimeError(f"pinact default reported errors for valid workflow {path}")
             counts.append(str(len(errors)))
-        print(f"{path}\t{counts[0]}\t{counts[1]}")
+        print("\t".join(counts))
 
     snapshots = {path: (FIXTURES / path).read_bytes() for path in files}
     fix = run(

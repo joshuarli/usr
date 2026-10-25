@@ -1,11 +1,11 @@
 # U6 coverage results
 
-The checked-in corpus has 18 files from seven source families and 31 labelled defects. High-risk
+The checked-in corpus has 23 files from eight source families and 31 labelled defects. High-risk
 security findings weigh 3, workflow-breaking errors weigh 2, and mutable action references weigh 1.
-The raw denominator is 31 defects and the weighted denominator is 63. The runner merges correctness
-and default profile results by semantic family and source location.
+The raw denominator is 31 defects and the weighted denominator is 63. The score uses Pinact's
+`default` profile, which is also the profile repomod consumes.
 
-| Defect family | Defects | Weight | jactionlint exact | pinact exact |
+| Defect family | Defects | Weight | jactionlint default | pinact default |
 | --- | ---: | ---: | ---: | ---: |
 | Checkout credentials | 7 | 21 | 7/7 | 7/7 |
 | Credential exposure | 1 | 3 | 0/1 | 1/1 |
@@ -20,21 +20,26 @@ and default profile results by semantic family and source location.
 | YAML syntax | 1 | 2 | 1/1 | 1/1 |
 | **Total** | **31** | **63** | **57/63 weighted** | **63/63 weighted** |
 
-Pinact detected all 31 expected defects at the labelled source line: 63/63 weighted recall. The
-jactionlint comparison missed the checked-in dangerous-trigger and credential-exposure cases; these
-are findings outside its current result set for this corpus. It reported the other 29 defects at
-the labelled location. Pinact produced 0 correctness errors across the three reviewed valid files;
-the jactionlint correctness profile also produced 0/3. The dynamic matrix case is kept separately
-because jactionlint reports its `matrix.os` value as an array in an inline expression; Pinact
-accepts the dynamic matrix property as unknown at analysis time.
+Pinact detected all 31 expected defects at the labelled source line: 63/63 weighted recall in this
+selected corpus. jactionlint missed the checked-in dangerous-trigger and credential-exposure cases;
+it reported the other 29 defects at the labelled location. This result is not evidence of
+fleet-wide parity: the corpus contains 31 selected defects, with 19 in unpinned-action and
+checkout-credential cases. Its valid side has nine workflows, five copied from repomod's checked-in
+release fixtures, but that remains a small sample.
 
-The runner also reports unscored default-profile findings so policy and shell-analysis gaps stay
-visible without treating every upstream rule as a Pinact requirement. In this run, jactionlint
-reported 13 concurrency, 2 expression-type, 9 missing-permissions, 19 missing-timeout, and 1
-pipeline-without-pipefail finding outside the weighted set. Pinact reported one `invalid-matrix`
-finding outside the weighted set. These families remain outside this corpus's common-defect gate.
+Pinact reported zero errors under both `correctness` and `default` across all nine valid workflows,
+including `custom/dynamic-matrix.yml`. jactionlint reported one correctness error and three default
+errors for that valid dynamic matrix, which uses `matrix: ${{ fromJSON(...) }}`. Its other valid
+workflows had zero correctness errors. Their default findings ranged from one to six.
 
-`pinact fix --diff` returned its expected edit status and left all 18 fixtures byte-identical. The
+The runner reports unscored default-profile findings so policy and shell-analysis gaps stay visible
+without treating every upstream rule as a Pinact requirement. In this run, jactionlint reported 13
+concurrency, 1 expression-type, 9 missing-permissions, 21 missing-timeout, 2
+pipeline-without-pipefail, 1 excessive-permissions, and 6 artipacked findings outside the weighted
+set. Pinact reported six unscored checkout-credentials findings on the real release workflows.
+These families remain outside this corpus's weighted defect gate.
+
+`pinact fix --diff` returned its expected edit status and left all 23 fixtures byte-identical. The
 autofix engine's per-edit safety proof remains covered by `tests/test_fix.py`.
 
 Only `jactionlint 2.3.0` was available as an external executable. The actionlint and zizmor source

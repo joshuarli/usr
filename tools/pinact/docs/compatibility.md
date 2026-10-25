@@ -6,7 +6,7 @@ semantics and leaves dynamic or unfamiliar values unknown.
 
 ## Supported interface
 
-- Python 3.10+ and Git, with the launcher usable under `python3 -I`.
+- Python 3.11+ and Git, with the launcher usable under `python3 -I`.
 - Legacy pin commands, `pinact run`, `--check`, `--refresh`, and `--allow-branches`.
 - `lint` text/JSON output with `correctness`, `default`, and `strict` profiles.
 - Explicit TOML catalogs for approval checks and offline fixes.
@@ -20,10 +20,11 @@ workflow by serializing a YAML tree.
 ## Differential evidence
 
 The [coverage report](../tests/fixtures/coverage.md) records the exact labelled corpus, commands,
-denominators, and findings. On 31 predefined defects weighted to 63, Pinact detected 63/63 at the
-labelled locations. jactionlint 2.3.0 detected 57/63. Both correctness profiles reported zero
-errors on the three reviewed valid workflows. The corpus also confirms `fix --diff` leaves all 18
-inputs byte-identical.
+denominators, and findings. On 31 selected defects weighted to 63, Pinact detected 63/63 at the
+labelled locations under `default`; jactionlint 2.3.0 detected 57/63. Pinact reported zero errors
+under both profiles across nine valid workflows, including five copied from repomod's release
+fixtures. jactionlint reported errors for the valid dynamic-matrix workflow. The corpus confirms
+`fix --diff` leaves all 23 inputs byte-identical.
 
 This result applies only to the checked-in labels and valid fixtures. It does not establish complete
 GitHub Actions syntax or security parity. The actionlint and zizmor examples are documentation-based

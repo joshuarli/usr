@@ -243,7 +243,17 @@ def _expression_findings(doc: SourceDocument, ctx: expr.Context, profile: str) -
                 rule = (
                     "undefined-property"
                     if msg is not None
-                    and msg.startswith(("unknown matrix key", "matrix context is unavailable"))
+                    and (
+                        msg.startswith(
+                            (
+                                "unknown matrix key",
+                                "matrix context is unavailable",
+                                "unknown job",
+                                "unknown step",
+                            )
+                        )
+                        or "is not a dependency in 'needs' context" in msg
+                    )
                     else "invalid-expression"
                 )
                 if rule not in _profile_ids(profile):

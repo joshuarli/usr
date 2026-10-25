@@ -1,7 +1,6 @@
 """Approved-pin catalogs: offline resolution with strong safety invariants.
 
-Accepted file: TOML (``tomllib`` when available, else a minimal subset
-parser for ``[table]`` + ``key = "value"``) with one table per action:
+Accepted file: TOML with one table per action:
 
 .. code-block:: toml
 
@@ -32,6 +31,7 @@ Safety invariants (offline-first, never network):
 from __future__ import annotations
 
 import re
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,55 +65,27 @@ def _version_order(text: str) -> tuple[int, int, int] | None:
     return tuple(int(part or 0) for part in match.groups())
 
 
-def _parse_toml_subset(text: str) -> dict[str, dict[str, str]]:
-    tables: dict[str, dict[str, str]] = {}
-    current: str | None = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current = line[1:-1].strip().strip('"').strip("'")
-            tables.setdefault(current, {})
-            continue
-        if "=" not in line or current is None:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().split("#", 1)[0].strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-            value = value[1:-1]
-        tables[current][key.strip()] = value
-    return tables
-
-
 def load_catalog(path: Path) -> dict[str, CatalogEntry]:
     try:
-        text = path.read_text(encoding="utf-8")
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
     except OSError as exc:
         raise CatalogError(f"catalog not found: {path}") from exc
-    try:
-        import tomllib as _tomllib  # type: ignore[import]
-        with path.open("rb") as handle:
-            try:
-                data = _tomllib.load(handle)
-            except Exception as exc:
-                raise CatalogError(f"invalid catalog {path}: {exc}") from exc
-        flat: dict[str, dict[str, str]] = {}
+    except tomllib.TOMLDecodeError as exc:
+        raise CatalogError(f"invalid catalog {path}: {exc}") from exc
+    flat: dict[str, dict[str, str]] = {}
 
-        def walk(prefix: str, node: object) -> None:
-            if isinstance(node, dict) and {"channel", "version", "sha"} <= set(node):
-                flat[prefix] = {k: str(v) for k, v in node.items()
-                                if k in ("channel", "version", "sha")}
-                return
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    name = f"{prefix}.{key}" if prefix else str(key)
-                    walk(name, value)
+    def walk(prefix: str, node: object) -> None:
+        if isinstance(node, dict) and {"channel", "version", "sha"} <= set(node):
+            flat[prefix] = {k: str(v) for k, v in node.items()
+                            if k in ("channel", "version", "sha")}
+            return
+        if isinstance(node, dict):
+            for key, value in node.items():
+                name = f"{prefix}.{key}" if prefix else str(key)
+                walk(name, value)
 
-        walk("", data)
-    except ImportError:
-        flat = _parse_toml_subset(text)
+    walk("", data)
     entries: dict[str, CatalogEntry] = {}
     for table, fields in flat.items():
         repo = table.strip().strip('"').strip("'")
