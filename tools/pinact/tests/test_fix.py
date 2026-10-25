@@ -332,6 +332,34 @@ class CatalogPinFixTests(unittest.TestCase):
 
 
 class CatalogValidationTests(unittest.TestCase):
+    def test_repomod_catalog_table_shape(self) -> None:
+        catalog = (
+            '[actions."actions/checkout"]\n'
+            'channel = "v4"\n'
+            'version = "v4.2.2"\n'
+            f'sha = "{PIN_SHA}"\n\n'
+            '[actions."owner/repo"]\n'
+            'channel = "v2"\n'
+            'version = "v2.3.0"\n'
+            'sha = "' + "a" * 40 + '"\n'
+        )
+        temp = write_tree({
+            "w.yml": BASE.format(
+                steps="      - uses: actions/checkout@v4\n"
+                "      - uses: owner/repo/sub/path@v2\n"
+            ),
+            "cat.toml": catalog,
+        })
+        try:
+            root = Path(temp.name)
+            code, _, err = run_fix(["--catalog", str(root / "cat.toml"), str(root / "w.yml")])
+            self.assertEqual(code, 0, err)
+            result = (root / "w.yml").read_text(encoding="utf-8")
+            self.assertIn(f"actions/checkout@{PIN_SHA} # v4.2.2", result)
+            self.assertIn(f"owner/repo/sub/path@{'a' * 40} # v2.3.0", result)
+        finally:
+            temp.cleanup()
+
     def test_bad_records_rejected(self) -> None:
         cases = [
             ("empty", ""),
