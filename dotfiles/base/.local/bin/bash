@@ -13,21 +13,55 @@ case "$0" in
     */*) self="$PWD/$0" ;;
     *) self="$0" ;;
 esac
-real=""
-rest="${PATH:-/usr/bin:/bin}:"
-while [ -n "$rest" ]; do
-    dir=${rest%%:*}
-    rest=${rest#*:}
-    [ -n "$dir" ] || dir=.
-    candidate="$dir/$name"
-    case "$candidate" in
-        "${HOME:-}""/.local/bin/"*|"$self") continue ;;
-    esac
-    if [ -x "$candidate" ] && [ ! -d "$candidate" ]; then
-        real="$candidate"
-        break
+find_real() {
+    rest="${PATH:-/usr/bin:/bin}:"
+    while [ -n "$rest" ]; do
+        dir=${rest%%:*}
+        rest=${rest#*:}
+        [ -n "$dir" ] || dir=.
+        candidate="$dir/$1"
+        case "$candidate" in
+            "${HOME:-}""/.local/bin/"*|"${self%/*}/"*) continue ;;
+        esac
+        if [ -x "$candidate" ] && [ ! -d "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+real=$(find_real "$name") || real=""
+if [ -z "$real" ]; then
+    command_mode=false
+    for arg in "$@"; do
+        case "$arg" in
+            --*) ;;
+            -*c*) command_mode=true; break ;;
+            -*) ;;
+            *) break ;;
+        esac
+    done
+    if [ "$command_mode" = true ]; then
+        real=/bin/sh
+        pending=$#
+        rewriting=true
+        while [ "$pending" -gt 0 ]; do
+            arg=$1
+            shift
+            pending=$((pending - 1))
+            if [ "$rewriting" = true ]; then
+                case "$arg" in
+                    -l|--login) continue ;;
+                    -lc|-cl) arg=-c; rewriting=false ;;
+                    -c) rewriting=false ;;
+                    -*) ;;
+                    *) rewriting=false ;;
+                esac
+            fi
+            set -- "$@" "$arg"
+        done
     fi
-done
+fi
 if [ -z "$real" ]; then
     echo "$name: no system shell found" >&2
     exit 127
