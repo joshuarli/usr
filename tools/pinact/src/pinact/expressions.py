@@ -407,6 +407,7 @@ class Context:
     step_ids_by_job: dict[str, set[str]] = field(default_factory=dict)
     needs_by_job: dict[str, set[str]] = field(default_factory=dict)
     matrix_keys: dict[str, set[str]] = field(default_factory=dict)
+    matrix_jobs: set[str] = field(default_factory=set)
     inputs: set[str] = field(default_factory=set)
     outputs: set[str] = field(default_factory=set)
     location: str = ""
@@ -484,8 +485,10 @@ def check_semantics(node: Node, ctx: Context) -> tuple[str, str | None]:
             if len(parts) >= 2:
                 key = parts[1]
                 known = ctx.matrix_keys.get(ctx.location, set())
-                if known and key not in known:
+                if ctx.location in ctx.matrix_keys and key not in known:
                     return ("semantic-error", f"unknown matrix key '{key}'")
+                if ctx.job_ids and ctx.location not in ctx.matrix_jobs:
+                    return ("semantic-error", f"matrix context is unavailable in job '{ctx.location}'")
             _bump_unsupported()
             return ("valid-unknown", None)
         if low_root == "steps":

@@ -1,0 +1,8 @@
+on: pull_request_target
+permissions:
+  contents: read
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - run: printf '%s\n' "${{ github.event.comment.body }}"

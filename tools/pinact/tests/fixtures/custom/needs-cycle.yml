@@ -1,0 +1,12 @@
+on: push
+jobs:
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo test

@@ -8,9 +8,8 @@ Rules (all default-profile except missing-permissions which is strict-only
 to preserve the R0 13/13 correctness probe):
 
 - ``checkout-credentials`` (warning, default): explicit
-  ``with: persist-credentials: true`` on ``actions/checkout``. Missing keys
-  are NOT flagged: the upstream default is true, and flagging every
-  checkout without the key would punish valid repos. Autofix only under
+  ``with: persist-credentials: true`` or a missing key on
+  ``actions/checkout``. The upstream default is true. Autofix only under
   explicit policy (see fixes).
 - ``excessive-permissions`` (error, default): provably broad
   ``permissions: write-all`` at workflow or job level. Per-scope ``write``
@@ -21,8 +20,8 @@ to preserve the R0 13/13 correctness probe):
   sets ``permissions``. Strict-only so default stays near-zero-FP on repos
   that rely on org defaults. ``permissions: {}`` counts as set.
 - ``dangerous-trigger`` (error, default): high-risk trigger
-  (``pull_request_target``, ``workflow_run``, ``issue_comment``,
-  ``workflow_dispatch``) PLUS untrusted-execution context: a checkout step
+  (``pull_request_target``, ``workflow_run``, ``issue_comment``)
+  PLUS untrusted-execution context: a checkout step
   AND (write-ish permissions OR a ``run:`` interpolation). A bare trigger
   with read-only permissions and no checkout/interpolation is safe and
   never flagged.
@@ -68,7 +67,7 @@ CREDENTIAL_EXPOSURE = "credential-exposure"
 DEPRECATED_COMMAND = "deprecated-command"
 
 HIGH_RISK_TRIGGERS = frozenset({
-    "pull_request_target", "workflow_run", "issue_comment", "workflow_dispatch",
+    "pull_request_target", "workflow_run", "issue_comment",
 })
 
 UNTRUSTED_PREFIXES = (
@@ -250,21 +249,20 @@ def check_checkout_credentials(doc: SourceDocument, root: MappingNode) -> list[t
     for step in all_steps(doc, root):
         if step_uses_repo(step) != "actions/checkout":
             continue
+        uses = mapping_get(step, "uses")
         with_node = mapping_get(step, "with")
-        if not isinstance(with_node, MappingNode):
-            continue
-        persist = mapping_get(with_node, "persist-credentials")
-        if persist is None:
-            continue
-        text = _scalar_str(persist)
-        if text is None:
-            continue
-        if _is_truthy_str(text):
-            line, col = _line_col(persist)
-            out.append((line, col, CHECKOUT_CREDENTIALS, "warning",
-                        "actions/checkout keeps GITHUB_TOKEN available to later job commands; "
-                        "set 'persist-credentials: false' unless later steps need git access "
-                        "(fix only under explicit policy)", False))
+        persist = mapping_get(with_node, "persist-credentials") if isinstance(with_node, MappingNode) else None
+        location = uses
+        if persist is not None:
+            text = _scalar_str(persist)
+            if text is None or not _is_truthy_str(text):
+                continue
+            location = persist
+        line, col = _line_col(location) if isinstance(location, ScalarNode) else _line_col(step)
+        out.append((line, col, CHECKOUT_CREDENTIALS, "warning",
+                    "actions/checkout keeps GITHUB_TOKEN available to later job commands by default; "
+                    "set 'persist-credentials: false' unless later steps need git access "
+                    "(fix only under explicit policy)", False))
     return out
 
 

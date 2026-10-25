@@ -1,0 +1,61 @@
+name: test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run make with a fresh home
+        shell: bash
+        run: |
+          printf '/.work/\n' >> .git/info/exclude
+          mkdir -p .work/tmp .work/ci-home
+          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884
+        with:
+          enable-cache: false
+
+      - name: Run repository checks
+        shell: bash
+        run: |
+          GIT_AUTHOR_NAME=CI \
+          GIT_AUTHOR_EMAIL=ci@example.invalid \
+          GIT_COMMITTER_NAME=CI \
+          GIT_COMMITTER_EMAIL=ci@example.invalid \
+          PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make check
+          PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make lint
+
+  macos:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Remove preinstalled Brewfile packages
+        shell: bash
+        run: |
+          brew=/opt/homebrew/bin/brew
+          [[ -x "$brew" ]] || brew=/usr/local/bin/brew
+          [[ -x "$brew" ]]
+          while IFS= read -r package; do
+            if "$brew" list --formula --versions "$package" >/dev/null 2>&1; then
+              "$brew" uninstall --force --ignore-dependencies --formula "$package"
+            fi
+          done < <("$brew" bundle list --file=macos/Brewfile --formula)
+          while IFS= read -r package; do
+            if "$brew" list --cask --versions "$package" >/dev/null 2>&1; then
+              "$brew" uninstall --force --cask "$package"
+            fi
+          done < <("$brew" bundle list --file=macos/Brewfile --cask)
+
+      - name: Run make with a fresh home
+        shell: bash
+        run: |
+          printf '/.work/\n' >> .git/info/exclude
+          mkdir -p .work/tmp .work/ci-home
+          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" make

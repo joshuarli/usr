@@ -31,8 +31,9 @@ FINDING_LINE = re.compile(r":(\d+):")
 
 CORRECTNESS_IDS = frozenset({
     "yaml-syntax", "duplicate-key", "invalid-type", "missing-key",
-    "invalid-job-id", "invalid-needs", "needs-cycle",
-    "invalid-uses", "unpinned-uses", "expression-syntax",
+    "invalid-job-id", "invalid-needs", "needs-cycle", "invalid-event-filter",
+    "invalid-uses", "unpinned-uses", "expression-syntax", "undefined-property",
+    "template-injection",
 })
 
 DEFAULT_IDS = CORRECTNESS_IDS | frozenset({
@@ -122,10 +123,22 @@ def _build_context(doc: SourceDocument) -> expr.Context:
                 strategy = mapping_get(val, "strategy")
                 if isinstance(strategy, MappingNode):
                     matrix = mapping_get(strategy, "matrix")
+                    if matrix is not None:
+                        ctx.matrix_jobs.add(jid)
                     if isinstance(matrix, MappingNode):
                         keys = set()
-                        for mkey, _ in matrix.value:
-                            if isinstance(mkey, ScalarNode) and mkey.value not in ("include", "exclude"):
+                        for mkey, mvalue in matrix.value:
+                            if not isinstance(mkey, ScalarNode):
+                                continue
+                            if mkey.value == "include" and isinstance(mvalue, SequenceNode):
+                                for item in mvalue.value:
+                                    if isinstance(item, MappingNode):
+                                        keys.update(
+                                            key.value
+                                            for key, _ in item.value
+                                            if isinstance(key, ScalarNode)
+                                        )
+                            elif mkey.value != "exclude":
                                 keys.add(mkey.value)
                         ctx.matrix_keys[jid] = keys
                 steps = mapping_get(val, "steps")
@@ -227,9 +240,15 @@ def _expression_findings(doc: SourceDocument, ctx: expr.Context, profile: str) -
                 out.append(Finding(doc.display, line, col, "expression-syntax", "error",
                                    f"invalid expression ${{{{ {interp.inner.strip()} }}}}: {msg}", False))
             elif status == "semantic-error":
-                if "invalid-expression" not in _profile_ids(profile):
+                rule = (
+                    "undefined-property"
+                    if msg is not None
+                    and msg.startswith(("unknown matrix key", "matrix context is unavailable"))
+                    else "invalid-expression"
+                )
+                if rule not in _profile_ids(profile):
                     continue
-                out.append(Finding(doc.display, line, col, "invalid-expression", "error",
+                out.append(Finding(doc.display, line, col, rule, "error",
                                    f"invalid expression ${{{{ {interp.inner.strip()} }}}}: {msg}", False))
     return out
 
@@ -416,6 +435,10 @@ def lint_one_file(path: Path, profile: str, catalog: str | None = None) -> tuple
 def lint_files(files: list[Path], profile: str = "default",
                select: list[str] | None = None,
                catalog: str | None = None) -> tuple[list[Finding], str | None]:
+    if select:
+        unknown = sorted(set(select) - STRICT_IDS)
+        if unknown:
+            return [], f"pinact: unknown rule ID(s): {', '.join(unknown)}"
     try:
         targets = files or pinning.discover()
     except pinning.PinError as exc:
