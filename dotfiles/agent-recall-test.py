@@ -97,23 +97,24 @@ def lesson_world() -> dict[str, Any]:
 
 
 class RetrievalTests(RecallCase):
-    def test_hostile_query_syntax_never_raises_or_executes(self):
+    def test_query_robustness_matches_lessons_rejects_hostile_and_abstains_on_generic(self):
         self.build(lesson_world())
+        for query in ("ModuleNotFoundError orbit_core", "tests/test_ingest.py fails", "No module named 'orbit_core'"):
+            response = self.ask("alpha", query)
+            self.assertIn("a-1", self.episodes(response), "exact query finds the lesson: %r" % (query,))
+            self.assertEqual(response["results"][0]["support"][0]["session"], "a-1", "exact query ranks the lesson first: %r" % (query,))
         hostile = [
             '"unterminated', "foo AND OR NOT NEAR(", "claim:orbit_core*", "') OR 1=1 --", "a" * 3000, "(((", "\\x00 null \x00", "NEAR(a b, 2)",
             "-", "*", "orbit_core\"; DROP TABLE events; --", "{evil}", "col1:col2:col3 ^start",
         ]
         for query in hostile:
             response = self.ask("alpha", query)
-            self.assertIn("results", response)
-        self.assertEqual(self.store.db.execute("SELECT count(*) FROM sessions").fetchone()[0] > 0, True)
-
-    def test_exact_identifier_and_error_phrase_find_the_lesson(self):
-        self.build(lesson_world())
-        for query in ("ModuleNotFoundError orbit_core", "tests/test_ingest.py fails", "No module named 'orbit_core'"):
+            self.assertIn("results", response, "hostile query never raises: %r" % (query,))
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM sessions").fetchone()[0] > 0, True, "hostile queries leave the index intact")
+        for query in ("fix the failing test", "websocket reconnect backoff for the mobile client", "how do I rename a file"):
             response = self.ask("alpha", query)
-            self.assertIn("a-1", self.episodes(response), query)
-            self.assertEqual(response["results"][0]["support"][0]["session"], "a-1")
+            self.assertTrue(response["abstained"], "generic query abstains: %r" % (query,))
+            self.assertEqual(response["results"], [], "generic query returns nothing: %r" % (query,))
 
     def test_cross_project_evidence_is_never_returned(self):
         spec = lesson_world()
@@ -127,12 +128,13 @@ class RetrievalTests(RecallCase):
         for item in self.ask("beta", "ModuleNotFoundError orbit_core")["results"]:
             self.assertNotIn("a-1", [self.world.session_map.get(s["session"]) for s in item["support"]])
 
-    def test_abstains_when_only_generic_words_overlap(self):
+    def test_retrieval_mechanics_exclude_the_active_session_and_explain_candidates(self):
         self.build(lesson_world())
-        for query in ("fix the failing test", "websocket reconnect backoff for the mobile client", "how do I rename a file"):
-            response = self.ask("alpha", query)
-            self.assertTrue(response["abstained"], query)
-            self.assertEqual(response["results"], [])
+        response = self.learner.retrieve(self.ident["alpha"], "ModuleNotFoundError orbit_core", cwd=self.world.cwd("alpha"), now=self.world.now - 86400 * 21)
+        self.assertEqual([item for item in response["results"] if item["ref"].startswith("event:")], [], "active session events are excluded")
+        explained = self.ask("alpha", "ModuleNotFoundError orbit_core", explain=True)
+        self.assertIn("candidates", explained["explain"], "explain reports candidates")
+        self.assertTrue(explained["explain"]["candidates"][0]["features"], "explain reports candidate features")
 
     def test_weak_mode_lists_low_confidence_leads_but_never_instructions(self):
         spec = memory_spec([{"path": "src/app.py", "contains": "return 1"}])
@@ -188,17 +190,6 @@ class RetrievalTests(RecallCase):
             self.assertEqual(item["inspect"], "agent-learn inspect " + item["ref"])
             self.assertTrue(all(set(s) == {"session", "position"} for s in item["support"]))
 
-    def test_active_session_is_excluded(self):
-        self.build(lesson_world())
-        response = self.learner.retrieve(self.ident["alpha"], "ModuleNotFoundError orbit_core", cwd=self.world.cwd("alpha"), now=self.world.now - 86400 * 21)
-        self.assertEqual([item for item in response["results"] if item["ref"].startswith("event:")], [])
-
-    def test_explain_reports_candidates_and_exclusions(self):
-        self.build(lesson_world())
-        response = self.ask("alpha", "ModuleNotFoundError orbit_core", explain=True)
-        self.assertIn("candidates", response["explain"])
-        self.assertTrue(response["explain"]["candidates"][0]["features"])
-
 
 def memory_spec(validity, mutation=None, worktree=False):
     projects = {"alpha": dict(BASE, worktrees={"wt": {"files": {"src/app.py": "def main():\n    return 2\n"}}} if worktree else {})}
@@ -253,7 +244,7 @@ class FreshnessTests(RecallCase):
         hit = self.instruction(self.ask("alpha", "editable install orbit_core pytest clean runner"))[0]
         self.assertEqual((hit["tier"], hit["status"]), ("experience", "unverified"))
 
-    def test_transcript_changed_after_indexing_is_flagged(self):
+    def test_changed_or_deleted_transcript_marks_evidence_and_keeps_the_record(self):
         validity = [{"path": "src/app.py", "contains": "return 1"}]
         self.build(memory_spec(validity))
         path = self.world.episode_paths["a-1"]
@@ -262,17 +253,13 @@ class FreshnessTests(RecallCase):
         response = self.ask("alpha", "editable install orbit_core pytest clean runner")
         statuses = {item["ref"]: item for item in response["results"]}
         memory = next(item for ref, item in statuses.items() if ref.startswith("memory:"))
-        self.assertIn("evidence_changed", memory["reasons"])
-        self.assertNotEqual(memory["status"], "verified")
-
-    def test_deleted_transcript_marks_evidence_unavailable_and_keeps_record(self):
-        validity = [{"path": "src/app.py", "contains": "return 1"}]
-        self.build(memory_spec(validity))
+        self.assertIn("evidence_changed", memory["reasons"], "edited transcript flags evidence_changed")
+        self.assertNotEqual(memory["status"], "verified", "edited transcript is not verified")
         self.world.episode_paths["a-1"].unlink()
         response = self.ask("alpha", "editable install orbit_core pytest clean runner")
         memory = next(item for item in response["results"] if item["ref"].startswith("memory:"))
-        self.assertIn("evidence_unavailable", memory["reasons"])
-        self.assertNotEqual(memory["tier"], "instruction")
+        self.assertIn("evidence_unavailable", memory["reasons"], "deleted transcript flags evidence_unavailable")
+        self.assertNotEqual(memory["tier"], "instruction", "deleted transcript is not an instruction")
 
 
 class CaptureTests(RecallCase):

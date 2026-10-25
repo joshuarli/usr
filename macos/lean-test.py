@@ -41,18 +41,18 @@ class CommandFailureTests(unittest.TestCase):
         )
         for operation, apply_success, revert_success in operations:
             for mode, success in (("apply", apply_success), ("revert", revert_success)):
-                with self.subTest(operation=operation.__name__, mode=mode):
-                    state = lean.State(mode, 501, "27.0", "Golden Gate", "27")
-                    output = io.StringIO()
-                    with patch.object(lean, "sudo_worker", self.sudo_worker()), \
-                            patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
-                            patch.object(lean, "list_network_services", return_value=["Wi-Fi"]), \
-                            contextlib.redirect_stdout(output):
-                        with self.assertRaises(subprocess.CalledProcessError) as caught:
-                            operation(state)
-                    self.assertEqual(caught.exception.returncode, 7)
-                    self.assertEqual(caught.exception.stderr, "permission denied")
-                    self.assertNotIn(success, output.getvalue())
+                step = "mutation %s %s aborts before success" % (operation.__name__, mode)
+                state = lean.State(mode, 501, "27.0", "Golden Gate", "27")
+                output = io.StringIO()
+                with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                        patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
+                        patch.object(lean, "list_network_services", return_value=["Wi-Fi"]), \
+                        contextlib.redirect_stdout(output):
+                    with self.assertRaises(subprocess.CalledProcessError, msg=step) as caught:
+                        operation(state)
+                self.assertEqual(caught.exception.returncode, 7, step)
+                self.assertEqual(caught.exception.stderr, "permission denied", step)
+                self.assertNotIn(success, output.getvalue(), step)
 
     def test_missing_mutation_executable_raises(self):
         with patch.object(lean, "sudo_worker", self.sudo_worker()), \
@@ -63,21 +63,21 @@ class CommandFailureTests(unittest.TestCase):
     def test_failed_preferences_and_service_mutations_do_not_count_as_applied(self):
         for mode in ("apply", "revert"):
             for domain in ("user", "system"):
-                with self.subTest(mode=mode, domain=domain):
-                    state = lean.State(mode, 501, "27.0", "Golden Gate", "27")
-                    state.real_labels.add("com.apple.example")
-                    with patch.object(lean, "sudo_worker", self.sudo_worker()), \
-                            patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
-                            contextlib.redirect_stdout(io.StringIO()):
-                        with self.assertRaises(subprocess.CalledProcessError):
-                            if domain == "user":
-                                lean.disable_user(state, "com.apple.example")
-                            else:
-                                lean.disable_system(state, "com.apple.example")
-                                lean.flush_system(state)
-                    self.assertEqual(state.n_applied, 0)
-                    self.assertEqual(state.disabled_user, set())
-                    self.assertEqual(state.disabled_system, set())
+                step = "failed %s %s mutation counts nothing as applied" % (mode, domain)
+                state = lean.State(mode, 501, "27.0", "Golden Gate", "27")
+                state.real_labels.add("com.apple.example")
+                with patch.object(lean, "sudo_worker", self.sudo_worker()), \
+                        patch.object(lean.subprocess, "run", side_effect=self.failed_command), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(subprocess.CalledProcessError, msg=step):
+                        if domain == "user":
+                            lean.disable_user(state, "com.apple.example")
+                        else:
+                            lean.disable_system(state, "com.apple.example")
+                            lean.flush_system(state)
+                self.assertEqual(state.n_applied, 0, step)
+                self.assertEqual(state.disabled_user, set(), step)
+                self.assertEqual(state.disabled_system, set(), step)
         with patch.object(lean, "sudo_worker", self.sudo_worker()), \
                 patch.object(lean.subprocess, "run", side_effect=self.failed_command):
             with self.assertRaises(subprocess.CalledProcessError):

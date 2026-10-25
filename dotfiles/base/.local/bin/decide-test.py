@@ -172,10 +172,9 @@ class DecideTests(unittest.TestCase):
         bad_score = sample_request()
         bad_score["questions"]["severity"]["criteria"] = ["Only one"]
         cases.append(bad_score)
-        for value in cases:
-            with self.subTest(value=value):
-                with self.assertRaises(DECIDE.InvalidInput):
-                    DECIDE.validate_request(value)
+        for index, value in enumerate(cases):
+            with self.assertRaises(DECIDE.InvalidInput, msg="invalid request case %d" % (index,)):
+                DECIDE.validate_request(value)
         with self.assertRaises(DECIDE.InvalidInput):
             DECIDE.parse_model("@cf/cloudflare/clef-flash")
 
@@ -215,9 +214,8 @@ class DecideTests(unittest.TestCase):
             data = b'{"state":"' + escaped + b'","questions":{"q":' + (
                 b'{"type":"noul","instructions":"Is this true?"}}}'
             )
-            with self.subTest(escaped=escaped):
-                with self.assertRaises(DECIDE.InvalidInput):
-                    DECIDE.parse_request_bytes(data)
+            with self.assertRaises(DECIDE.InvalidInput, msg="escaped surrogate %r is rejected" % (escaped,)):
+                DECIDE.parse_request_bytes(data)
 
         with self.assertRaises(DECIDE.InvalidInput):
             DECIDE.parse_request_bytes(
@@ -251,19 +249,19 @@ class DecideTests(unittest.TestCase):
             b'{"type":"noul","instructions":"Is this true?"}}}',
         )
         for data in inputs:
-            with self.subTest(data=data):
-                process = subprocess.run(
-                    [sys.executable, "-I", str(SCRIPT)],
-                    env=env,
-                    input=data,
-                    capture_output=True,
-                    check=False,
-                )
-                self.assertEqual(process.returncode, 2)
-                self.assertEqual(len(process.stdout.splitlines()), 1)
-                self.assertEqual(json.loads(process.stdout)["status"], "invalid")
-                self.assertNotIn(b"private", process.stdout + process.stderr)
-                self.assertEqual(process.stderr, b"")
+            step = "surrogate input of %d bytes is rejected without leaking" % (len(data),)
+            process = subprocess.run(
+                [sys.executable, "-I", str(SCRIPT)],
+                env=env,
+                input=data,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(process.returncode, 2, step)
+            self.assertEqual(len(process.stdout.splitlines()), 1, step)
+            self.assertEqual(json.loads(process.stdout)["status"], "invalid", step)
+            self.assertNotIn(b"private", process.stdout + process.stderr, step)
+            self.assertEqual(process.stderr, b"", step)
 
     def test_input_rejects_unhashable_question_types_and_null_criteria(self):
         with self.assertRaises(DECIDE.InvalidInput):
@@ -316,10 +314,9 @@ class DecideTests(unittest.TestCase):
         nonfinite = sample_result(self.request)
         nonfinite["answers"]["urgent"]["noul"] = float("nan")
         invalid_results.append(nonfinite)
-        for candidate in invalid_results:
-            with self.subTest(candidate=candidate):
-                with self.assertRaises(DECIDE.InvalidProviderResponse):
-                    DECIDE.validate_result(self.request, "clef-flash", candidate)
+        for index, candidate in enumerate(invalid_results):
+            with self.assertRaises(DECIDE.InvalidProviderResponse, msg="invalid result case %d" % (index,)):
+                DECIDE.validate_result(self.request, "clef-flash", candidate)
         self.assertIsNotNone(result)
 
     def test_provider_result_rejects_wrong_choice_type_and_unbounded_numbers(self):
@@ -484,16 +481,16 @@ class DecideTests(unittest.TestCase):
             (urllib.error.URLError(ssl.SSLError("private TLS detail")), "tls_error"),
         ]
         for failure, reason in failures:
-            with self.subTest(reason=reason):
-                outcome = DECIDE.run_decision(
-                    self.request,
-                    "clef-flash",
-                    self.env,
-                    transport=lambda *args, failure=failure: (_ for _ in ()).throw(failure),
-                )
-                self.assertEqual(outcome["status"], "unavailable")
-                self.assertEqual(outcome["reason"], reason)
-                self.assertNotIn(str(failure), json.dumps(outcome))
+            step = "transport failure maps to %s" % (reason,)
+            outcome = DECIDE.run_decision(
+                self.request,
+                "clef-flash",
+                self.env,
+                transport=lambda *args, failure=failure: (_ for _ in ()).throw(failure),
+            )
+            self.assertEqual(outcome["status"], "unavailable", step)
+            self.assertEqual(outcome["reason"], reason, step)
+            self.assertNotIn(str(failure), json.dumps(outcome), step)
 
     def test_http_and_cloudflare_errors_map_auth_quota_capacity_and_provider_failure(self):
         cases = [
@@ -506,17 +503,17 @@ class DecideTests(unittest.TestCase):
             (200, envelope({}, success=False, errors=[{"code": 9999, "message": "private"}]), "provider_failure"),
         ]
         for status, body, reason in cases:
-            with self.subTest(status=status, reason=reason):
-                outcome = DECIDE.run_decision(
-                    self.request,
-                    "clef-flash",
-                    self.env,
-                    transport=lambda *args, status=status, body=body: DECIDE.HttpResponse(status, body),
-                )
-                self.assertEqual(outcome["status"], "unavailable")
-                self.assertEqual(outcome["reason"], reason)
-                self.assertNotIn("private", json.dumps(outcome))
-                self.assertNotIn("secret", json.dumps(outcome))
+            step = "HTTP %r maps to %s" % (status, reason)
+            outcome = DECIDE.run_decision(
+                self.request,
+                "clef-flash",
+                self.env,
+                transport=lambda *args, status=status, body=body: DECIDE.HttpResponse(status, body),
+            )
+            self.assertEqual(outcome["status"], "unavailable", step)
+            self.assertEqual(outcome["reason"], reason, step)
+            self.assertNotIn("private", json.dumps(outcome), step)
+            self.assertNotIn("secret", json.dumps(outcome), step)
 
     def test_malformed_or_truncated_provider_response_is_unavailable(self):
         cases = [
@@ -525,15 +522,15 @@ class DecideTests(unittest.TestCase):
             b" " * (DECIDE.MAX_RESPONSE_BYTES + 1),
         ]
         for body in cases:
-            with self.subTest(length=len(body)):
-                outcome = DECIDE.run_decision(
-                    self.request,
-                    "clef-flash",
-                    self.env,
-                    transport=lambda *args, body=body: DECIDE.HttpResponse(200, body),
-                )
-                self.assertEqual(outcome["status"], "unavailable")
-                self.assertEqual(outcome["reason"], "invalid_provider_response")
+            step = "malformed body of %d bytes is unavailable" % (len(body),)
+            outcome = DECIDE.run_decision(
+                self.request,
+                "clef-flash",
+                self.env,
+                transport=lambda *args, body=body: DECIDE.HttpResponse(200, body),
+            )
+            self.assertEqual(outcome["status"], "unavailable", step)
+            self.assertEqual(outcome["reason"], "invalid_provider_response", step)
 
     def test_context_limit_makes_advice_unavailable(self):
         result = sample_result(self.request)
@@ -836,22 +833,22 @@ class DecideTests(unittest.TestCase):
 
     def test_live_evaluation_rejects_ineligible_tier_options(self):
         for forbidden_tier in ("scout", "god"):
-            with self.subTest(forbidden_tier=forbidden_tier):
-                case = sample_eval_case(
-                    f"live-{forbidden_tier}",
-                    f"synthetic-live-{forbidden_tier}",
-                    prediction=None,
-                    existing_choice="worker",
+            step = "ineligible tier %s is rejected from live routing" % (forbidden_tier,)
+            case = sample_eval_case(
+                f"live-{forbidden_tier}",
+                f"synthetic-live-{forbidden_tier}",
+                prediction=None,
+                existing_choice="worker",
+            )
+            case["question"]["criteria"] = {
+                "worker": "Known method",
+                "expert": "Uncertain path",
+                forbidden_tier: "Not eligible for live routing",
+            }
+            with self.assertRaises(DECIDE.InvalidInput, msg=step):
+                DECIDE.load_eval_cases(
+                    eval_jsonl(case), live=True, max_calls=1
                 )
-                case["question"]["criteria"] = {
-                    "worker": "Known method",
-                    "expert": "Uncertain path",
-                    forbidden_tier: "Not eligible for live routing",
-                }
-                with self.assertRaises(DECIDE.InvalidInput):
-                    DECIDE.load_eval_cases(
-                        eval_jsonl(case), live=True, max_calls=1
-                    )
 
         case = sample_eval_case(
             "live-eligible",

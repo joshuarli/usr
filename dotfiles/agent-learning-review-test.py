@@ -252,102 +252,104 @@ else:
             REVIEW._jsonl_response(b'{"type":"mcp_tool_call"}\n')
         self.assertEqual(caught.exception.category, "capability")
 
-    def test_owner_catalog_can_route_to_a_second_review_without_an_edit(self):
-        context = sample_context(owning_guidance={"other-owner": "Unrelated guide."})
-        proposal = sample_proposal(context, with_edit=False)
-        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
-
-    def test_description_edit_preserves_wording_and_inserts_before_skip(self):
-        old = 'description: "Write direct docs. Skip broad style feedback."'
-        future = "When a command fails twice, verify prerequisites."
-        new = 'description: "Write direct docs. ' + future + ' Skip broad style feedback."'
-        context = sample_context(owning_guidance={"technical-writing": old})
-        proposal = sample_proposal(context)
-        proposal["future_action"] = future
-        proposal["edit"] = {"old": old, "new": new}
-        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
-        proposal["edit"]["new"] = new.replace("Write direct docs.", "Write clearer docs.")
-        with self.assertRaisesRegex(REVIEW.ReviewError, "edit_not_grounded_in_guidance"):
-            REVIEW._validate_proposal(proposal, context)
-
-    def test_skill_supersede_requires_exact_inverse_and_finding_id(self):
-        context = sample_context(
-            prior_promotion={
-                "owner": "technical-writing",
-                "target_skill": "technical-writing",
-                "edit": {"old": "Existing instruction.", "new": "Existing instruction. When a failure repeats, inspect the prerequisite."},
-            },
-            finding_id=44,
-        )
-        proposal = sample_proposal(context)
-        proposal.update(
-            {
-                "action": "supersede",
-                "edit": {
-                    "old": context["prior_promotion"]["edit"]["new"],
-                    "new": context["prior_promotion"]["edit"]["old"],
-                },
-                "supersedes": 44,
-            }
-        )
-        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
-        proposal["edit"]["new"] = "A different instruction."
-        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_inverse_edit"):
-            REVIEW._validate_proposal(proposal, context)
-
-    def test_memory_proposal_has_no_skill_owner(self):
+    def test_valid_proposals_pass_shape_owner_and_scope_checks(self):
+        description_old = 'description: "Write direct docs. Skip broad style feedback."'
+        description_future = "When a command fails twice, verify prerequisites."
+        description_new = 'description: "Write direct docs. ' + description_future + ' Skip broad style feedback."'
+        inverse = {"old": "Existing instruction.", "new": "Existing instruction. When a failure repeats, inspect the prerequisite."}
+        cases = [
+            ("owner catalog routes to a second review without an edit",
+             {"owning_guidance": {"other-owner": "Unrelated guide."}}, False, None),
+            ("memory proposal has no skill owner",
+             {}, False, lambda context, proposal: proposal.update({"target": "memory", "scope": "project", "owner": ""})),
+            ("memory at the stored-form limit is accepted",
+             {}, False, lambda context, proposal: proposal.update(
+                 {"target": "memory", "scope": "project", "owner": "",
+                  "future_action": "When " + "x" * (REVIEW.MEMORY_ACTION_LIMIT - len("When "))})),
+            ("description edit preserves wording and inserts before skip",
+             {"owning_guidance": {"technical-writing": description_old}}, True,
+             lambda context, proposal: (proposal.__setitem__("future_action", description_future),
+                proposal.__setitem__("edit", {"old": description_old, "new": description_new}))),
+            ("skill supersede requires the exact inverse and finding id",
+             {"prior_promotion": {"owner": "technical-writing", "target_skill": "technical-writing", "edit": inverse},
+               "finding_id": 44}, True,
+             lambda context, proposal: proposal.update(
+                 {"action": "supersede",
+                  "edit": {"old": context["prior_promotion"]["edit"]["new"], "new": context["prior_promotion"]["edit"]["old"]},
+                  "supersedes": 44})),
+            ("project memory validity requires exact tracked evidence",
+             {"tracked_project_files": [{"path": "docs/runbook.md", "evidence": "Restart the worker after each migration."}]}, False,
+             lambda context, proposal: proposal.update(
+                 {"target": "memory", "scope": "project", "owner": "",
+                  "validity": [{"path": "docs/runbook.md", "contains": "after each migration"}]})),
+        ]
+        for step, extra, with_edit, mutate in cases:
+            context = sample_context(**extra)
+            proposal = sample_proposal(context, with_edit=with_edit)
+            if mutate is not None:
+                mutate(context, proposal)
+            self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal, step)
         context = sample_context()
-        proposal = sample_proposal(context, with_edit=False)
-        proposal.update({"target": "memory", "scope": "project", "owner": ""})
-        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
-
-    def test_project_memory_validity_requires_exact_tracked_evidence(self):
-        context = sample_context(
-            tracked_project_files=[{"path": "docs/runbook.md", "evidence": "Restart the worker after each migration."}]
-        )
-        proposal = sample_proposal(context, with_edit=False)
-        proposal.update(
-            {
-                "target": "memory",
-                "scope": "project",
-                "owner": "",
-                "validity": [{"path": "docs/runbook.md", "contains": "after each migration"}],
-            }
-        )
-        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
-        proposal["validity"][0]["contains"] = "after each deployment"
-        with self.assertRaisesRegex(REVIEW.ReviewError, "validity_not_in_context") as caught:
-            REVIEW._validate_proposal(proposal, context)
-        self.assertEqual(caught.exception.category, "unsafe")
-
-    def test_scope_must_match_an_improvement_target(self):
-        proposal = sample_proposal(sample_context())
-        proposal["scope"] = "project"
-        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_scope") as caught:
-            REVIEW._validate_proposal(proposal, sample_context())
-        self.assertEqual(caught.exception.category, "unsafe")
-
-    def test_memory_longer_than_its_stored_form_is_rejected_before_review(self):
-        context = sample_context()
-        proposal = sample_proposal(context, with_edit=False)
-        proposal.update({"target": "memory", "scope": "project", "owner": ""})
-        proposal["future_action"] = "When " + "x" * (REVIEW.MEMORY_ACTION_LIMIT - len("When "))
-        self.assertEqual(REVIEW._validate_proposal(proposal, context), proposal)
-        proposal["future_action"] += "x"
-        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_proposal"):
-            REVIEW._validate_proposal(proposal, context)
-        proposal["future_action"] = "When a documented command fails twice, verify its prerequisites."
-        proposal["applicability"] = "x" * (REVIEW.MEMORY_APPLICABILITY_LIMIT + 1)
-        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_proposal"):
-            REVIEW._validate_proposal(proposal, context)
-
-    def test_independent_rejection_may_disagree_about_scope(self):
-        proposal = dict(sample_proposal(sample_context()), proposal_id="synthetic-id", target_skill="technical-writing")
+        proposal = dict(sample_proposal(context, with_edit=False), proposal_id="synthetic-id", target_skill="technical-writing")
         verdict = {"approves": False, "risks": ["Applies only to this project."], "owner": "technical-writing",
                    "does_not_weaken": True, "globally_applicable": False, "scope_reason": "Project-specific convention."}
-        self.assertEqual(REVIEW._validate_independent_review(verdict, proposal), verdict)
-        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_independent_review"):
-            REVIEW._validate_independent_review(dict(verdict, approves=True), proposal)
+        self.assertEqual(REVIEW._validate_independent_review(verdict, proposal), verdict, "independent rejection may disagree about scope")
+
+    def test_invalid_proposals_fail_with_their_reason(self):
+        description_old = 'description: "Write direct docs. Skip broad style feedback."'
+        description_future = "When a command fails twice, verify prerequisites."
+        inverse = {"old": "Existing instruction.", "new": "Existing instruction. When a failure repeats, inspect the prerequisite."}
+        cases = [
+            ("scope must match an improvement target",
+             {}, True, lambda context, proposal: proposal.__setitem__("scope", "project"),
+             "invalid_scope", "unsafe"),
+            ("description rewording is not grounded",
+             {"owning_guidance": {"technical-writing": description_old}}, True,
+             lambda context, proposal: (proposal.__setitem__("future_action", description_future),
+                proposal.__setitem__("edit", {"old": description_old,
+                    "new": description_old.replace("Write direct docs.", "Write clearer docs.")})),
+             "edit_not_grounded_in_guidance", None),
+            ("supersede with a different edit is not the inverse",
+             {"prior_promotion": {"owner": "technical-writing", "target_skill": "technical-writing", "edit": inverse},
+               "finding_id": 44}, True,
+             lambda context, proposal: proposal.update(
+                 {"action": "supersede",
+                  "edit": {"old": context["prior_promotion"]["edit"]["new"], "new": "A different instruction."},
+                  "supersedes": 44}),
+             "invalid_inverse_edit", None),
+            ("project memory validity must match tracked evidence",
+             {"tracked_project_files": [{"path": "docs/runbook.md", "evidence": "Restart the worker after each migration."}]}, False,
+             lambda context, proposal: proposal.update(
+                 {"target": "memory", "scope": "project", "owner": "",
+                  "validity": [{"path": "docs/runbook.md", "contains": "after each deployment"}]}),
+             "validity_not_in_context", "unsafe"),
+            ("memory longer than its stored form is rejected",
+             {}, False, lambda context, proposal: proposal.update(
+                 {"target": "memory", "scope": "project", "owner": "",
+                  "future_action": "When " + "x" * (REVIEW.MEMORY_ACTION_LIMIT - len("When ")) + "x"}),
+             "invalid_proposal", None),
+            ("memory with a long applicability is rejected",
+             {}, False, lambda context, proposal: proposal.update(
+                 {"target": "memory", "scope": "project", "owner": "",
+                  "future_action": "When a documented command fails twice, verify its prerequisites.",
+                  "applicability": "x" * (REVIEW.MEMORY_APPLICABILITY_LIMIT + 1)}),
+             "invalid_proposal", None),
+        ]
+        for step, extra, with_edit, mutate, code, category in cases:
+            context = sample_context(**extra)
+            proposal = sample_proposal(context, with_edit=with_edit)
+            mutate(context, proposal)
+            with self.assertRaisesRegex(REVIEW.ReviewError, code, msg=step) as caught:
+                REVIEW._validate_proposal(proposal, context)
+            if category is not None:
+                self.assertEqual(caught.exception.category, category, step)
+        context = sample_context()
+        proposal = dict(sample_proposal(context), proposal_id="synthetic-id", target_skill="technical-writing")
+        with self.assertRaisesRegex(REVIEW.ReviewError, "invalid_independent_review", msg="independent approval cannot agree about scope"):
+            REVIEW._validate_independent_review(dict(
+                {"approves": False, "risks": [], "owner": "technical-writing", "does_not_weaken": True,
+                 "globally_applicable": False, "scope_reason": "Project-specific convention."},
+                approves=True), proposal)
 
     def test_closed_pipes_do_not_outlive_the_deadline(self):
         process = subprocess.Popen(

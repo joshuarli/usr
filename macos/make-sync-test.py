@@ -13,6 +13,10 @@ class MakeSyncTests(unittest.TestCase):
         self.assertIn("sh macos/setup-macos brew packages", makefile)
         self.assertNotIn("sh macos/setup-macos brew packages dns", makefile)
 
+    def test_dns_remains_an_explicit_setup_step(self):
+        setup = (ROOT / "macos/setup-macos").read_text(encoding="utf-8")
+        self.assertIn("dns)        step_dns ;;", setup)
+
 
 if __name__ == "__main__":
     unittest.main()

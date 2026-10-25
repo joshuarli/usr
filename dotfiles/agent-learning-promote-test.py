@@ -634,32 +634,32 @@ class PromotionTest(unittest.TestCase):
             ("untracked", "untracked"),
             ("ignored", "ignored"),
         ):
-            with self.subTest(change=change):
-                worktree = promotion._staging_worktree(
-                    self.repo, self.base_head, worktree_root, "promote", identity
-                )
-                target = worktree / "dotfiles/base/.agents/skills/root-cause/SKILL.md"
-                if change == "modified":
-                    target.write_text(target.read_text(encoding="utf-8") + "local edit\n", encoding="utf-8")
-                    check_path, expected = target, "local edit\n"
-                else:
-                    name = "ignored.txt" if change == "ignored" else "local.txt"
-                    local = worktree / name
-                    local.write_text("keep " + change, encoding="utf-8")
-                    if change == "staged":
-                        run(["git", "-C", str(worktree), "add", "--", name], self.repo)
-                    check_path, expected = local, "keep " + change
+            step = "worktree change %r is preserved" % (change,)
+            worktree = promotion._staging_worktree(
+                self.repo, self.base_head, worktree_root, "promote", identity
+            )
+            target = worktree / "dotfiles/base/.agents/skills/root-cause/SKILL.md"
+            if change == "modified":
+                target.write_text(target.read_text(encoding="utf-8") + "local edit\n", encoding="utf-8")
+                check_path, expected = target, "local edit\n"
+            else:
+                name = "ignored.txt" if change == "ignored" else "local.txt"
+                local = worktree / name
+                local.write_text("keep " + change, encoding="utf-8")
+                if change == "staged":
+                    run(["git", "-C", str(worktree), "add", "--", name], self.repo)
+                check_path, expected = local, "keep " + change
 
-                with self.assertRaises(promotion._PromotionFailure) as failure:
-                    promotion._remove_worktree(self.repo, worktree, "promote", identity)
+            with self.assertRaises(promotion._PromotionFailure, msg=step) as failure:
+                promotion._remove_worktree(self.repo, worktree, "promote", identity)
 
-                self.assertEqual(failure.exception.reason_code, "worktree_occupied")
-                self.assertEqual(failure.exception.blocked_path, worktree)
-                self.assertTrue(worktree.is_dir())
-                if change == "modified":
-                    self.assertTrue(check_path.read_text(encoding="utf-8").endswith(expected))
-                else:
-                    self.assertEqual(check_path.read_text(encoding="utf-8"), expected)
+            self.assertEqual(failure.exception.reason_code, "worktree_occupied", step)
+            self.assertEqual(failure.exception.blocked_path, worktree, step)
+            self.assertTrue(worktree.is_dir(), step)
+            if change == "modified":
+                self.assertTrue(check_path.read_text(encoding="utf-8").endswith(expected), step)
+            else:
+                self.assertEqual(check_path.read_text(encoding="utf-8"), expected, step)
 
     def test_ignored_file_added_during_cleanup_preflight_is_preserved(self):
         worktree_root = promotion._safe_worktree_root(self.repo)

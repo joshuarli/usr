@@ -2,7 +2,7 @@
 
 ## Run checks
 
-Run the narrowest check that covers the change:
+Run the narrowest check that covers the change. `make check-parallel` runs the Python files in parallel across `dotfiles` and `macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`); `python3 -I` stays the canonical per-file runner.
 
 | Changed | Run |
 | --- | --- |

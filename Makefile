@@ -93,6 +93,10 @@ check:
 	sh dotfiles/skills-check.sh .agents/skills
 	python3 -I dotfiles/skills-campaign-test.py
 
+check-parallel:
+	mkdir -p "$(DL_TMPDIR)"
+	TMPDIR="$(DL_TMPDIR)" uvx --python 3.15 --with 'joshuarli-pytest-parallel==0.4.0' pytest dotfiles macos
+
 lint:
 	@files=$$(git ls-files -co --exclude-standard | while read -r f; do \
 		[ -f "$$f" ] && [ ! -L "$$f" ] || continue; \

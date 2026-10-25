@@ -150,10 +150,10 @@ class SkillCampaignTests(unittest.TestCase):
             base / ".gemini" / "config" / "AGENTS.md",
         )
         for adapter in adapters:
-            with self.subTest(adapter=adapter):
-                self.assertTrue(adapter.is_symlink())
-                self.assertFalse(adapter.readlink().is_absolute())
-                self.assertEqual(canonical.resolve(), adapter.resolve())
+            step = "adapter %s resolves to the canonical contract" % (adapter,)
+            self.assertTrue(adapter.is_symlink(), step)
+            self.assertFalse(adapter.readlink().is_absolute(), step)
+            self.assertEqual(canonical.resolve(), adapter.resolve(), step)
 
     def test_known_global_and_local_skill_trees_pass(self):
         for skills in (
@@ -193,13 +193,13 @@ class SkillCampaignTests(unittest.TestCase):
                 (skill / "agents" / "openai.yaml", "allow_implicit_invocation: false", "allow_implicit_invocation: true"),
             )
             for path, original, replacement in mutations:
-                with self.subTest(path=path.relative_to(skills), original=original):
-                    current = path.read_text(encoding="utf-8")
-                    self.assertIn(original, current)
-                    path.write_text(current.replace(original, replacement), encoding="utf-8")
-                    result = run("sh", str(CHECKER), str(skills))
-                    self.assertNotEqual(0, result.returncode)
-                    path.write_text(current, encoding="utf-8")
+                step = "checker rejects drift in %s (%r)" % (path.relative_to(skills), original)
+                current = path.read_text(encoding="utf-8")
+                self.assertIn(original, current, step)
+                path.write_text(current.replace(original, replacement), encoding="utf-8")
+                result = run("sh", str(CHECKER), str(skills))
+                self.assertNotEqual(0, result.returncode, step)
+                path.write_text(current, encoding="utf-8")
         finally:
             shutil.rmtree(work)
 
@@ -304,26 +304,26 @@ class SkillCampaignTests(unittest.TestCase):
 
     def test_scratch_check_rejects_both_symlinked_scratch_paths(self):
         for scratch_path in (".work", ".work/tmp"):
-            with self.subTest(scratch_path=scratch_path):
-                work = Path(tempfile.mkdtemp(prefix="scratch-check-symlink-", dir=WORK_TMP))
-                try:
-                    repo = work / "repo"
-                    git_init(repo)
-                    (repo / ".git" / "info" / "exclude").write_text(".work/\n", encoding="utf-8")
-                    outside = work / "outside"
-                    outside.mkdir()
-                    scratch = repo / ".work"
-                    if scratch_path == ".work":
-                        scratch.symlink_to(outside, target_is_directory=True)
-                    else:
-                        scratch.mkdir()
-                        (scratch / "tmp").symlink_to(outside, target_is_directory=True)
-                    result = run("sh", str(SCRATCH_CHECK), str(repo))
-                    self.assertNotEqual(0, result.returncode)
-                    self.assertIn("must not be symlinks", result.stderr)
-                    self.assertEqual([], list(outside.iterdir()))
-                finally:
-                    shutil.rmtree(work)
+            step = "scratch symlink at %s is rejected" % (scratch_path,)
+            work = Path(tempfile.mkdtemp(prefix="scratch-check-symlink-", dir=WORK_TMP))
+            try:
+                repo = work / "repo"
+                git_init(repo)
+                (repo / ".git" / "info" / "exclude").write_text(".work/\n", encoding="utf-8")
+                outside = work / "outside"
+                outside.mkdir()
+                scratch = repo / ".work"
+                if scratch_path == ".work":
+                    scratch.symlink_to(outside, target_is_directory=True)
+                else:
+                    scratch.mkdir()
+                    (scratch / "tmp").symlink_to(outside, target_is_directory=True)
+                result = run("sh", str(SCRATCH_CHECK), str(repo))
+                self.assertNotEqual(0, result.returncode, step)
+                self.assertIn("must not be symlinks", result.stderr, step)
+                self.assertEqual([], list(outside.iterdir()), step)
+            finally:
+                shutil.rmtree(work)
 
     def test_verification_skill_names_an_existing_executable_helper(self):
         self.assertEqual([], skill_errors(VERIFY_SKILL))
@@ -377,28 +377,28 @@ class SkillCampaignTests(unittest.TestCase):
 
     def test_usr_journey_rejects_symlinked_scratch_directories(self):
         for scratch_path in (".work", ".work/tmp"):
-            with self.subTest(scratch_path=scratch_path):
-                work = Path(tempfile.mkdtemp(prefix="verify-usr-symlink-", dir=WORK_TMP))
-                try:
-                    repo = work / "repo"
-                    helper = install_journey(repo)
-                    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-                    exclude = repo / ".git" / "info" / "exclude"
-                    exclude.write_text(".work/\n", encoding="utf-8")
-                    outside = work / "outside"
-                    outside.mkdir()
-                    scratch = repo / ".work"
-                    if scratch_path == ".work":
-                        scratch.symlink_to(outside, target_is_directory=True)
-                    else:
-                        scratch.mkdir()
-                        (scratch / "tmp").symlink_to(outside, target_is_directory=True)
-                    result = run(str(helper))
-                    self.assertNotEqual(0, result.returncode)
-                    self.assertIn("must not be symlinks", result.stderr)
-                    self.assertEqual([], list(outside.iterdir()))
-                finally:
-                    shutil.rmtree(work)
+            step = "journey symlink at %s is rejected" % (scratch_path,)
+            work = Path(tempfile.mkdtemp(prefix="verify-usr-symlink-", dir=WORK_TMP))
+            try:
+                repo = work / "repo"
+                helper = install_journey(repo)
+                subprocess.run(["git", "init", "-q", str(repo)], check=True)
+                exclude = repo / ".git" / "info" / "exclude"
+                exclude.write_text(".work/\n", encoding="utf-8")
+                outside = work / "outside"
+                outside.mkdir()
+                scratch = repo / ".work"
+                if scratch_path == ".work":
+                    scratch.symlink_to(outside, target_is_directory=True)
+                else:
+                    scratch.mkdir()
+                    (scratch / "tmp").symlink_to(outside, target_is_directory=True)
+                result = run(str(helper))
+                self.assertNotEqual(0, result.returncode, step)
+                self.assertIn("must not be symlinks", result.stderr, step)
+                self.assertEqual([], list(outside.iterdir()), step)
+            finally:
+                shutil.rmtree(work)
 
     def test_usr_journey_requires_the_git_info_exclude_rule(self):
         work = Path(tempfile.mkdtemp(prefix="verify-usr-ignore-source-", dir=WORK_TMP))
@@ -510,15 +510,15 @@ class SkillCampaignTests(unittest.TestCase):
 
         mutations = (overwrite, delete, add, change_mode, change_symlink, add_ignored_file, change_git_config, worker_commit, add_remote)
         for mutation in mutations:
-            with self.subTest(mutation=mutation.__name__):
-                work = Path(tempfile.mkdtemp(prefix="fixture-score-mutation-", dir=WORK_TMP))
-                try:
-                    repo, baseline = scoring_repo(work)
-                    mutation(repo)
-                    scored = score_fixture(repo, baseline)
-                    self.assertNotEqual(0, scored.returncode, scored.stdout + scored.stderr)
-                finally:
-                    shutil.rmtree(work)
+            step = "mutation %s keeps the failure detectable" % (mutation.__name__,)
+            work = Path(tempfile.mkdtemp(prefix="fixture-score-mutation-", dir=WORK_TMP))
+            try:
+                repo, baseline = scoring_repo(work)
+                mutation(repo)
+                scored = score_fixture(repo, baseline)
+                self.assertNotEqual(0, scored.returncode, step + "\n" + scored.stdout + scored.stderr)
+            finally:
+                shutil.rmtree(work)
 
     def test_unchanged_score_fails_when_git_command_fails(self):
         work = Path(tempfile.mkdtemp(prefix="fixture-score-command-failure-", dir=WORK_TMP))
@@ -549,20 +549,20 @@ class SkillCampaignTests(unittest.TestCase):
             shutil.rmtree(unreproduced_repo)
 
         for case, allowed in (("campaign-authorized", True), ("campaign-no-commit", False)):
-            with self.subTest(case=case):
-                prepared = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", case)
-                self.assertEqual(0, prepared.returncode, prepared.stdout + prepared.stderr)
-                repo = Path(prepared.stdout.strip())
-                try:
-                    authority = (repo / "AGENTS.md").read_text(encoding="utf-8") + (repo / "docs" / "CAMPAIGN-SAMPLE.md").read_text(encoding="utf-8")
-                    self.assertEqual(allowed, "One local commit is authorized" in authority)
-                    tests = (repo / "tests" / "test_value.py").read_text(encoding="utf-8")
-                    for value in ("is_positive(1)", "is_positive(0)", "is_positive(-1)"):
-                        self.assertIn(value, tests)
-                    baseline = run("git", "rev-parse", "--verify", "HEAD", cwd=repo).stdout.strip()
-                    self.assertEqual(0, score_fixture(repo, baseline).returncode)
-                finally:
-                    shutil.rmtree(repo)
+            step = "scenario fixture %s advertises its facts" % (case,)
+            prepared = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", case)
+            self.assertEqual(0, prepared.returncode, step + "\n" + prepared.stdout + prepared.stderr)
+            repo = Path(prepared.stdout.strip())
+            try:
+                authority = (repo / "AGENTS.md").read_text(encoding="utf-8") + (repo / "docs" / "CAMPAIGN-SAMPLE.md").read_text(encoding="utf-8")
+                self.assertEqual(allowed, "One local commit is authorized" in authority, step)
+                tests = (repo / "tests" / "test_value.py").read_text(encoding="utf-8")
+                for value in ("is_positive(1)", "is_positive(0)", "is_positive(-1)"):
+                    self.assertIn(value, tests, step)
+                baseline = run("git", "rev-parse", "--verify", "HEAD", cwd=repo).stdout.strip()
+                self.assertEqual(0, score_fixture(repo, baseline).returncode, step)
+            finally:
+                shutil.rmtree(repo)
 
         campaign_new = run(sys.executable, "-I", str(FIXTURE_TOOL), "prepare", "campaign-new")
         self.assertEqual(0, campaign_new.returncode, campaign_new.stdout + campaign_new.stderr)
