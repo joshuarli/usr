@@ -95,6 +95,16 @@ agent-sessions show claude:SESSION --position BYTE_OFFSET
 agent-sessions doctor
 ```
 
+To find your own prompts, filter to `--kind user` and widen the scope with `--all-projects`. Hyphenated identifiers and slashes are autoquoted, so `codegen-units` and `thin lto / codegen-units` work unquoted; quoting still forces an exact phrase and `AND`/`OR` still combine terms. Limit to today with `--since 1d` (or an ISO date), and use `--regex` only for pattern matching.
+
+```sh
+agent-sessions search 'codegen-units' --all-projects --kind user
+agent-sessions search 'thin lto / codegen-units' --all-projects --kind user --since 1d
+agent-sessions search '"codegen-units"' --all-projects --kind user --limit 5
+```
+
+`agent-learn recall` is for reviewed memories and fuzzy session leads (technical tokens handled, ranked, gated); `agent-sessions search` is the direct full-text index for exact message lookup.
+
 A Codex session keeps its bare ID. Other harnesses use `harness:ID`, so identical IDs from different tools never collide. Use the full session ID and byte offset printed with a hit. `show` verifies source bytes before displaying context. `doctor` prints per-harness coverage: complete, degraded, and unsupported sessions, unrecognized event kinds, and sessions whose ancestry is unknown. A session whose lines parse but contain no understood content is `unsupported`, not an empty success. Muse and Grok do not always state their ancestry; unknown ancestry is never counted as an independent root. `doctor --rebuild-index` rebuilds transcript tables while preserving learning records.
 
 Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFIG_DIR/projects`, `$XDG_DATA_HOME/muse/sessions`, `$GROK_HOME/sessions`, `$XDG_DATA_HOME/opencode`, and Pi's session directory (`$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`), each falling back to its usual home directory. Pass `--root [HARNESS=]PATH` to override. Indexing never follows symlinks. Pi sessions are the `<timestamp>_<id>.jsonl` files, so pi-subagents artifacts such as `events.jsonl` are not mistaken for sessions. Pi stores one tool call or result per entry; several calls from one assistant entry become one event whose call ID lists them all. A session whose header names a `parentSession` links to that session and is labeled `child`: Pi writes the same field for a user fork and for a delegated subagent. Every entry of a branched session is indexed and searchable, but experience detectors and review read only the active branch: the chain from the newest entry back through `parentId`, so a failure on an abandoned branch is never paired with a success on another. OpenCode 2 keeps sessions in a SQLite database (`opencode.db`), not transcript files: the indexer opens it read-only, reads only the `session_v2` and `session_message` tables (never the account or credential tables), reindexes a session whenever its message count or update time changes, and takes shell exit codes from the recorded tool metadata. A hit's byte offset is `message sequence × 1000 + block`, and `show` verifies the row's digest. Search matches whole tokens, so a Chinese or Japanese query matches only a whole unsegmented run.

@@ -573,6 +573,14 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(redact("api_key=sk-this-is-a-long-secret-value"), "api_key=[REDACTED]")
         self.assertEqual(redact("Authorization: Bearer abc123"), "Authorization=[REDACTED]")
 
+    def test_search_autoquotes_hyphens_and_slashes(self):
+        self.transcript("hyphen", records=[message("release build must have thin lto, codegen-units must not be 1")])
+        with Store(self.state) as store:
+            store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(len(store.search("codegen-units", self.project_id)), 1)
+            self.assertEqual(len(store.search("thin lto / codegen-units", self.project_id)), 1)
+            self.assertEqual(len(store.search('"codegen-units"', self.project_id)), 1)
+
     def test_state_permissions_and_symlinks_are_rejected(self):
         with Store(self.state) as store:
             self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o700)

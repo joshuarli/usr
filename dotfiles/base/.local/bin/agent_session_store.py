@@ -52,6 +52,22 @@ def redact(text):
     return value
 
 
+_FTS_TERM = re.compile(r"[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+|[A-Za-z0-9]{2,}")
+
+
+def fts_fallback(query):
+    seen = set()
+    terms = []
+    for match in _FTS_TERM.findall(str(query)):
+        key = match.lower()
+        if key not in seen:
+            seen.add(key)
+            terms.append(match)
+    if not terms:
+        return None
+    return " OR ".join('"' + term.replace('"', "") + '"' for term in terms)
+
+
 def _run_git(path, *args, stats=None):
     if stats is not None:
         stats["git_processes"] += 1
@@ -1193,6 +1209,13 @@ class Store:
         try:
             return [dict(row) for row in self.db.execute(sql, params)]
         except sqlite3.OperationalError as exc:
+            fallback = fts_fallback(query)
+            if fallback is not None and fallback != query:
+                retry_params = [fallback, *params[1:]]
+                try:
+                    return [dict(row) for row in self.db.execute(sql, retry_params)]
+                except sqlite3.OperationalError:
+                    pass
             raise StoreError("FTS5 search failed; quote phrases and use AND/OR between terms: " + str(exc)) from exc
 
     @_guarded
