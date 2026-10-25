@@ -200,7 +200,7 @@ def _legacy_uses(path: Path, source: str, refresh: bool) -> list[Use]:
     return uses
 
 
-def scan(path: Path, refresh: bool) -> tuple[str, list[Use]]:
+def scan(path: Path, refresh: bool, include_pinned: bool = False) -> tuple[str, list[Use]]:
     if path.is_symlink():
         raise PinError(f"{path}: refusing to modify a symlink")
     try:
@@ -238,9 +238,11 @@ def scan(path: Path, refresh: bool) -> tuple[str, list[Use]]:
         if parsed is None:
             continue
         repo, ref = parsed
-        if SHA.fullmatch(ref) and not (refresh and (tag := version_comment(value["comment"] or ""))):
-            continue
         if SHA.fullmatch(ref):
+            tag = version_comment(value["comment"] or "")
+            if not include_pinned and not (refresh and tag):
+                continue
+        if SHA.fullmatch(ref) and refresh and tag:
             ref = tag
             if not valid_ref(ref):
                 raise PinError(f"{path}:{index + 1}: invalid version annotation")
