@@ -1,8 +1,7 @@
 # Campaign: pinact as self-contained GitHub Actions linter/autofixer, integrated into repomod
 
-Status: ready. Goal: `usr` ships a self-contained GitHub Actions pinning, linting, and autofixing
-`pinact`; `repomod` consumes it for all GitHub Actions checks and fixes; `jactionlint` is retired.
-Executor runs unattended to done or parked-behind-a-hard-stop.
+Status: parked at the final verification boundary. The authorized code and docs are pushed; the
+full `make` gates remain unrun under the repository's explicit restriction.
 
 Deliverables:
 
@@ -28,12 +27,15 @@ Deliverables:
   report, repomod integration notes, vendored-provenance file. `make check` / `make lint` (usr) and
   `make test` / `ruff` / `ty` (repomod) green.
 
-Last accepted checkpoint: none. Provisional work: none.
-Current steering decision: initial. Start width 2 (one lane per repo), provisional cap 2 items per
-lane, validation waves as named below.
-Next substantive milestone: pilot — U1 accepted (vendored YAML + AST-backed `pin --check` passes
-the existing 11 pinact tests unchanged in behavior, plus a `pinact lint` JSON probe consumed by a
-repomod scratch test, not yet wired in).
+Last accepted checkpoint: U8 docs and C1 retirement code are pushed: usr `7053e07` on
+`campaign-pinact-u1`; repomod `efcfe5b` on `campaign-pinact-r1`. U6 meets O4 on its 31-defect
+weighted corpus: 63/63 weighted recall, 0/3 correctness errors on valid fixtures, and no writes
+across 18 `fix --diff` inputs.
+Provisional work: none.
+Current steering decision: U7 was waived by the owner; accept U8 and C1 code. The required broad
+`make check`, `make lint`, and repomod `make test` gates are parked under the root `AGENTS.md`
+restriction on running `make` without an explicit request.
+Next milestone: owner decision on the broad final gates.
 
 ## 1. Charter
 
@@ -309,11 +311,8 @@ Phase 2 — hardening (runs with Phase 1 findings, not after everything):
 Phase 3 — optimization and polish (only after D1-D6 work end to end; move any earlier optimization
 here unless it unblocks a feature):
 
-- U7. Performance + size pass. Prereq: U6 numbers. Owns: same package (no new deps). Work: remove
-  measured waste only (shared facts, single parse, batched lookups); record wall/memory/size vs
-  `jactionlint` with the benchmark-checklist method (interleaved runs, production flags, error counts,
-  representative corpus share); keep the few-thousand-line soft target subordinate to correctness.
-  Proof: before/after table; egregious limits in section 2 hold; no behavior change (U1-U5 suites green).
+- U7. Waived by the owner on 2026-10-25: performance is not an issue for this campaign. No U7
+  optimization was retained and no speedup is claimed.
 - U8. Docs + installation. Prereq: U5-U6, R1-R3 behavior frozen. Owns: `usr/tools/pinact/README.md`,
   architecture note, rule reference (ID/description/severity/profile/fix/limits), compatibility report,
   repomod integration notes (replaces the old migration guide: how repomod calls `lint --format=json`
@@ -361,7 +360,8 @@ unsound approximation; never weaken or delete a test to pass, and never fabricat
   green; `mdtool check` on touched docs clean; final report lists: (1) commit SHAs in both repos,
   (2) architecture + module sizes, (3) vendored size + provenance, (4) CLI commands, (5) rules by
   correctness/security/policy, (6) safe autofixes, (7) differential results, (8) unsupported
-  behavior, (9) false positives/regressions found and fixed, (10) runtime + test performance,
+  behavior, (9) false positives/regressions found and fixed, (10) runtime + test performance
+  (waived with U7),
   (11) exact outstanding work for the fleet to rely on `pinact` (should be none, or named parks).
 - Offline proof: `lint` and default `fix` suites pass with all network helpers stubbed to fail.
 - Idempotence proof: every fix test asserts second-run no-change plus diff-mode writes nothing.
@@ -492,12 +492,75 @@ Campaign log: no waves run. R0 probe accepted 2026-10-25 (scratch only, lane wor
 38 jactionlint-default findings vs 13 pinact unpinned lines on the 9-file scratch set, 13 true
 agreements at file+line, 23 jactionlint-only across 6 classes R1 must cover. Retry when lane-usr
 publishes `lint --format=json`: re-run `.work/tmp/r0-probe/run_probe.sh` plus the new subcommand.
-Next: launch lane-usr on U1 and lane-repomod on R0 probe within the
-section-4 capacities, then steer.
+Wave 1 (pilot) accepted 2026-10-26: U1 verified in-worktree (11 pinact + 26 YAML suites green,
+`--check` clean, `-S` clean); lint-column retry run by parent — new `lint --format=json` yields the
+same 13 file+line defects with P6 keys/columns; lane-usr deliberate
+divergences (quoted flow strings/comments no longer fail; forward aliases fail closed) accepted as
+fewer-false-positive corrections with tests.
+Wave 2 (U2+U3) accepted 2026-10-26: 11+26+40+24 suites green under `-I` and `-S`; probe still
+13/13 unpinned-uses at correctness profile; structured `yaml-syntax`/`missing-key` verified by
+parent sampling. Notes for U6: model+scan double-parse deferred to U7 perf pass; unknown
+`--select` IDs currently match nothing (rc 0) — confirm or reject as invalid usage in U6.
+Steering: keep lane-usr worktree/branch for U4+U5; repomod lane unparked for R1 (U2 JSON stable).
+Wave 3 partial (R1) accepted 2026-10-26: `_validate_workflows` + new `_pinact_lint_findings` shell
+`pinact lint --profile=correctness --format=json`; 106 tests + ruff + ty rerun green by parent;
+severity remap kept (proven unexercised by pinact output); dependabot/lock files scoped out of the
+new path (old jactionlint rules had no pinact equivalent yet); `_validate_workflows` still passes
+`changed` unfiltered — R2 must scope fixer outputs. Known gap carried: gha-syntax reports strictly
+less than the old path until U4/U6 fill it; O4 gates the close.
+Wave 3 complete (U4+U5) accepted 2026-10-26 at `b97e849`, pushed to `campaign-pinact-u1`:
+security, catalog, and fix commands; 11 pinning + 26 YAML + 40 lint + 24 expression + 46 security +
+39 fix tests passed on Python 3.13 with `-I`; launcher `--check` and Ruff passed. Independent review
+found and the lane fixed pinned-SHA approval bypass, same-major catalog downgrades, shell-agnostic
+fixes, job permission inheritance, and boolean-expression taint false positives. U5 also refuses
+shell expansion rewrites and policy YAML injection, preserves CRLF and file modes, and reports
+unapproved pinned SHAs. Steering: accept U4+U5; R2 is unblocked on the existing repomod lane.
+Wave 3 R2 accepted 2026-10-26 at `f568a44`, pushed to `campaign-pinact-r1`: Pinact is the sole
+GitHub Actions fixer in the disposable `.work/tmp` worktree; changed-file validation and fixer
+arguments now include only workflows and `action.yml`/`action.yaml`. The scratch test verifies the
+plan and cleanup. `pytest tests/test_actions_release.py tests/test_github_policy.py tests/test_fix.py`
+passed (128); Ruff and `ty` passed project-wide. A disposable repository run with the actual Pinact
+launcher rewrote the deprecated output command and returned a plan; scratch cleanup was verified.
+Steering: accept R2; R3 catalog/policy wiring is unblocked.
+Wave 3 R3 accepted 2026-10-26 at `63d71a3`, pushed to `campaign-pinact-r1`: Pinact lint and fix
+receive the repomod actions catalog explicitly; fixes use catalog-only resolution and do not
+request network resolution. Catalog-backed checks keep repomod's own major/version/SHA checks.
+The real Pinact run against a copied catalog verified approved v7 pinning, the version comment,
+major-bump refusal, and scratch cleanup. One integration defect surfaced and was corrected on the
+Pinact lane at `ddb7886`: nested `[actions."owner/repo"]` tables now normalize into action records.
+Pinact suites passed (187 total across six suites) and Ruff passed; repomod's 128 scoped tests,
+Ruff, and `ty` passed, with a real Pinact catalog-lint run against the disposable repository.
+Docs and `actions.toml` were unchanged because no pin policy or catalog values needed editing.
+Steering: accept R3; U6 differential corpus/remediation is next.
+Wave 4 U6 accepted 2026-10-26 at `2aecbff`, pushed to `campaign-pinact-u1`: the checked-in corpus
+has 18 fixtures across seven source families and 31 labelled defects (weight denominator 63).
+Pinact detected all 31 at the labelled locations (63/63 weighted); jactionlint 2.3.0 detected
+57/63 weighted. The three valid fixtures had zero correctness errors in both tools. `fix --diff`
+left all 18 inputs byte-identical. Actionlint and zizmor-derived cases are documented examples;
+those executables were unavailable and were not independently run. The reviewer found a dynamic
+matrix context bug, fixed with regression coverage. U6 also rejects unknown `--select` rule IDs
+with invalid-use status 2. Focused suites passed: 26 YAML, 45 lint, 26 expression, 47 security,
+40 fix, and 11 integration tests; launcher `--check`, Ruff, and `mdtool` passed.
+R4 O4 gate accepted before optimization: weighted recall exceeds 90%, valid corpus has zero
+correctness false positives, no destructive `fix --diff` result, and no high-severity misses inside
+the labelled coverage.
+Wave 5 U8 docs accepted at usr `67c8b25` and repomod `b37f1ad`; Pinact now documents command
+contracts, rule profiles, architecture, compatibility limits, and corpus coverage. repomod describes
+the explicit catalog, validation, and detached-worktree fix plan. `make check` now includes the five
+Pinact unit suites and keeps their scratch under `.work/tmp`; touched documentation passed `mdtool`.
+Owner waived U7 on 2026-10-25: performance is not an issue, and the unmeasured parse-reuse candidate
+was discarded.
+Wave 6 C1 retirement code accepted at usr `7053e07` and repomod `efcfe5b`: the downloader no longer
+offers or records jactionlint; repomod's dead checker/fixer adapters, mocks, and old differential
+probe were removed. Its remaining tree has no jactionlint reference; usr retains only its
+development-time parity corpus. `dotfiles/dl-test.sh` passed with scratch HOME/TMPDIR. Repomod's 126
+focused tests passed with jactionlint absent from `PATH`; Ruff and ty passed; the completion review
+found and removed the now-orphaned `install_github_archive` helper. Full `make check`, `make lint`,
+and repomod `make test` were not run because the root instructions prohibit `make` without an explicit
+request. The campaign is parked at those final broad gates.
 
 ## 10. For the owner afterwards
 
-Read the final report (section 5, item 11 deliverable) and the compatibility/coverage report; skim
-the rule reference for IDs your fleet configs mention; cherry-pick nothing until C1 lands — branch
-work stays unmerged until you land it. If the parity gate fails, read the parked items and their
-retry conditions first.
+Read the compatibility/coverage report and skim the rule reference for IDs your fleet configs
+mention. Branch work stays unmerged until you land it. The remaining closeout gates need an explicit
+request to run the `make` targets restricted by the root instructions.
