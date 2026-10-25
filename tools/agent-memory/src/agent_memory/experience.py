@@ -8,8 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-from agent_recall import doc_tokens, stem, technical_tokens
-from agent_session_store import active_branch, redact
+from agent_memory.recall import doc_tokens, stem, technical_tokens
+from agent_memory.store import active_branch, redact
 
 MAX_EVENTS = 2000
 MAX_CLAIM = 500

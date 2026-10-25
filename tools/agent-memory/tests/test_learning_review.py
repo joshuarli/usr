@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -14,12 +15,12 @@ from typing import Any
 from unittest import mock
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "dotfiles/base/.local/bin/agent_learning_review.py"
-LOADER = importlib.machinery.SourceFileLoader("agent_learning_review", str(SCRIPT))
-SPEC = importlib.util.spec_from_loader("agent_learning_review", LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+SCRIPT = Path(__file__).resolve().parents[3] / "tools/agent-memory/src/agent_memory/learning_review.py"
+SPEC = importlib.util.spec_from_file_location("agent_memory.learning_review", SCRIPT)
 assert SPEC is not None
 REVIEW = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
+sys.modules[SPEC.name] = REVIEW
 SPEC.loader.exec_module(REVIEW)
 REPOSITORY = SCRIPT.parents[4]
 TMP_ROOT = REPOSITORY / ".work" / "tmp"

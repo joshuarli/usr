@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("agent_recall_live", ROOT / "dotfiles/agent-recall-live.py")
+ROOT = Path(__file__).resolve().parents[3]
+SPEC = importlib.util.spec_from_file_location("live_recall", ROOT / "tools/agent-memory/eval/live_recall.py")
 assert SPEC is not None
 EVAL = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

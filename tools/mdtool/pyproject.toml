@@ -1,0 +1,11 @@
+[project]
+name = "mdtool"
+version = "0.1.0"
+description = "Read-only audit of a repository's Markdown, MDX, reStructuredText, and the code that depends on those docs"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = "-p no:cacheprovider"

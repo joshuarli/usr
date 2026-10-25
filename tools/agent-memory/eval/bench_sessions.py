@@ -14,12 +14,12 @@ import tempfile
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
-BIN_DIR = ROOT / "dotfiles" / "base" / ".local" / "bin"
-sys.path.insert(0, str(BIN_DIR))
-STORE_SPEC = importlib.util.spec_from_file_location("agent_session_store", BIN_DIR / "agent_session_store.py")
+SRC_DIR = ROOT / "tools" / "agent-memory" / "src"
+sys.path.insert(0, str(SRC_DIR))
+STORE_SPEC = importlib.util.spec_from_file_location("agent_memory.store", SRC_DIR / "agent_memory" / "store.py")
 assert STORE_SPEC is not None
 STORE_MODULE = importlib.util.module_from_spec(STORE_SPEC)
 assert STORE_SPEC.loader is not None
@@ -28,7 +28,7 @@ STORE_SPEC.loader.exec_module(STORE_MODULE)
 Store = STORE_MODULE.Store
 normalize = STORE_MODULE.normalize
 project_identity = STORE_MODULE.project_identity
-SKILL_USAGE_PATH = BIN_DIR / "skill-usage"
+SKILL_USAGE_PATH = ROOT / "dotfiles/base/.local/bin/skill-usage"
 SKILL_USAGE_LOADER = importlib.machinery.SourceFileLoader("skill_usage_bench", str(SKILL_USAGE_PATH))
 SPEC = importlib.util.spec_from_loader("skill_usage_bench", SKILL_USAGE_LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
 assert SPEC is not None
@@ -123,7 +123,7 @@ class NoModel:
 
 
 def _learner(store, projects, project_ids):
-    learner = importlib.import_module("agent_learning").Learner(store, NoModel())
+    learner = importlib.import_module("agent_memory.learning").Learner(store, NoModel())
     with store.db:
         store.db.executemany(
             "INSERT OR REPLACE INTO learning_projects(project,cwd,enabled,enabled_at,repository) VALUES(?,?,1,0,?)",

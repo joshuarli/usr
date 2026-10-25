@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_learning import main
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools" / "agent-memory" / "src"))
+from agent_memory.learning import main
 
 sys.exit(main())

@@ -12,12 +12,12 @@ import time
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "dotfiles/base/.local/bin"
-sys.path.insert(0, str(BIN))
-learning = importlib.import_module("agent_learning")
-review_module = importlib.import_module("agent_learning_review")
-store_module = importlib.import_module("agent_session_store")
+ROOT = Path(__file__).resolve().parents[3]
+SRC = ROOT / "tools" / "agent-memory" / "src"
+sys.path.insert(0, str(SRC))
+from agent_memory import learning  # noqa: E402
+from agent_memory import learning_review as review_module  # noqa: E402
+from agent_memory import store as store_module  # noqa: E402
 Store, project_identity = store_module.Store, store_module.project_identity
 
 
@@ -87,7 +87,7 @@ class LearningTest(unittest.TestCase):
         shutil.copyfile(ROOT / "dotfiles/skills-check.sh", checker)
         mdtool = self.repo / "dotfiles/base/.local/bin/mdtool"
         mdtool.parent.mkdir(parents=True)
-        shutil.copyfile(BIN / "mdtool", mdtool)
+        shutil.copyfile(ROOT / "tools/mdtool/src/mdtool.py", mdtool)
         (self.repo / "focused-test.py").write_text("import os, sys\nsys.exit(0 if os.environ.get('TEST_DRIVER') == '1' else 2)\n")
         (self.repo / "test-driver.py").write_text("import os, subprocess, sys\nenv = dict(os.environ, TEST_DRIVER='1')\nsys.exit(subprocess.call([sys.executable, 'focused-test.py'], env=env))\n")
         git(self.repo, "add", ".")
@@ -162,7 +162,7 @@ class LearningTest(unittest.TestCase):
         self.assertIn(self.old, self.skill.read_text())
 
     def test_actual_structured_contract_accepts_the_full_pipeline(self):
-        adapter = importlib.import_module("agent_learning_review")
+        adapter = importlib.import_module("agent_memory.learning_review")
         fake = self.model
 
         class ValidatedReviewer:
@@ -181,7 +181,7 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(row["state"], "promoted", dict(row))
 
     def test_promotion_recovers_a_crash_after_git_integration(self):
-        promote = importlib.import_module("agent_learning_promote")
+        promote = importlib.import_module("agent_memory.learning_promote")
         real = promote.promote
 
         def crash_after_git(*args, **kwargs):
@@ -313,7 +313,7 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(self.model.calls, calls)
 
     def test_attributed_regression_reverts_once_with_original_provenance(self):
-        adapter = importlib.import_module("agent_learning_review")
+        adapter = importlib.import_module("agent_memory.learning_review")
         self.global_pattern()
         self.run_cycle()
         finding = self.store.db.execute("SELECT * FROM learning_findings").fetchone()
@@ -858,7 +858,7 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(self.store.db.execute("SELECT state FROM learning_findings WHERE id=?", (finding["id"],)).fetchone()[0], "reversed")
 
     def test_temporary_model_outages_do_not_exhaust_lifetime_eligibility(self):
-        review_module = importlib.import_module("agent_learning_review")
+        review_module = importlib.import_module("agent_memory.learning_review")
         self.model.target = "memory"
         original = self.model.review
         attempts = []
@@ -903,7 +903,7 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(len(self.learn.recall(project_identity(self.repo), "test driver")), 1)
 
     def test_capability_change_reopens_the_blocked_review(self):
-        module = importlib.import_module("agent_learning_review")
+        module = importlib.import_module("agent_memory.learning_review")
         self.model.target = "memory"
         original = self.model.review
         capabilities = {"status": "unsupported", "version": "old"}
@@ -929,7 +929,7 @@ class LearningTest(unittest.TestCase):
         self.assertEqual(len(self.learn.recall(project_identity(self.repo), "test driver")), 1)
 
     def test_invalid_responses_have_a_bounded_budget_for_unchanged_evidence(self):
-        module = importlib.import_module("agent_learning_review")
+        module = importlib.import_module("agent_memory.learning_review")
         calls = []
 
         def malformed(context):

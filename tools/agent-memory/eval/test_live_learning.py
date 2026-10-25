@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest import mock
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("learning_live", ROOT / "dotfiles/agent-learning-live.py")
+ROOT = Path(__file__).resolve().parents[3]
+SPEC = importlib.util.spec_from_file_location("live_learning", ROOT / "tools/agent-memory/eval/live_learning.py")
 assert SPEC is not None
 EVAL = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

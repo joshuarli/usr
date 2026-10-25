@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(ROOT / "dotfiles" / "base" / ".local" / "bin"))
-MODULE_PATH = ROOT / "dotfiles" / "base" / ".local" / "bin" / "agent_session_store.py"
+sys.path.insert(0, str(ROOT / "tools" / "agent-memory" / "src"))
+MODULE_PATH = ROOT / "tools" / "agent-memory" / "src" / "agent_memory" / "store.py"
 SPEC = importlib.util.spec_from_file_location("agent_session_store", MODULE_PATH)
 assert SPEC is not None
 STORE_MODULE = importlib.util.module_from_spec(SPEC)
@@ -504,7 +504,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(texts(rows), ["root", "abandoned", "abandoned too", "kept", "newest"])
             self.assertEqual(texts(STORE_MODULE.active_branch(rows)), ["root", "kept", "newest"])
             self.assertEqual(STORE_MODULE.active_branch(rows)[0]["kind"], "session_meta")
-            experience = importlib.import_module("agent_experience")
+            experience = importlib.import_module("agent_memory.experience")
             events, truncated = experience.session_events(store.db, "pi:branchy")
             self.assertEqual((texts(events), truncated), (["root", "kept", "newest"], False))
 

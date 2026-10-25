@@ -1,0 +1,2682 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import ast
+import contextlib
+import errno
+import io
+import json
+import os
+import re
+import subprocess
+import stat
+import sys
+import tempfile
+import unicodedata
+import unittest
+from collections import Counter
+from dataclasses import dataclass, replace
+from bisect import bisect_right
+from difflib import get_close_matches
+from pathlib import Path, PurePosixPath
+from typing import Any
+from urllib.parse import unquote
+
+COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
+CHECKS = ("links", "refs", "consumers", "pointers", "dups", "router")
+README_NAMES = {"readme.md", "readme.mdx", "readme.markdown", "readme.rst"}
+MD_EXTS = {".md", ".markdown", ".mdx"}
+RST_EXTS = {".rst"}
+EXTS = MD_EXTS | RST_EXTS
+MAX_BYTES = 2 * 1024 * 1024
+SKIP_DIRS = {".git", ".work", "target", "node_modules"}
+URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+@dataclass(frozen=True)
+class Finding:
+    code: str
+    severity: str
+    file: str
+    line: int
+    col: int
+    message: str
+    target: str
+
+    def identity(self):
+
+        target = re.sub(r":\d+-\d+", "", self.target) if self.code == "D001" else self.target
+        return self.code, self.file, target
+
+
+def run_git(root, args, data=None):
+    try:
+        p = subprocess.run(["git", "-C", str(root), *args], input=data,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except OSError as e:
+        raise RuntimeError(f"cannot run git: {e}") from e
+    if p.returncode:
+        raise RuntimeError(p.stderr.decode("utf-8", "replace").strip() or "git failed")
+    return p.stdout
+
+
+def in_git(root):
+    try:
+        run_git(root, ["rev-parse", "--show-toplevel"])
+        return True
+    except RuntimeError:
+        return False
+
+
+def tracked_files(root, untracked=False):
+    paths = set()
+    git = in_git(root)
+    if git:
+        paths.update(x.decode("utf-8", "surrogateescape") for x in
+                     run_git(root, ["ls-files", "-z"]).split(b"\0") if x)
+        if untracked:
+            paths.update(x.decode("utf-8", "surrogateescape") for x in
+                         run_git(root, ["ls-files", "--others", "--exclude-standard", "-z"]).split(b"\0") if x)
+    else:
+        for base, dirs, names in os.walk(root, followlinks=False):
+            dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+            for name in names:
+                path = Path(base, name)
+                paths.add(path.relative_to(root).as_posix())
+    return git, sorted(paths)
+
+
+def sparse_skipped(root):
+
+    try:
+        listing = run_git(root, ["ls-files", "-t", "-z"])
+    except RuntimeError:
+        return set()
+    return {x[2:].decode("utf-8", "surrogateescape") for x in listing.split(b"\0") if x.startswith(b"S ")}
+
+
+def safe_read(root, rel):
+
+    raw = root / Path(rel)
+    try:
+        resolved = raw.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+        parts = resolved.relative_to(root.resolve()).parts
+        if not parts:
+            raise OSError("not a file")
+        flags_dir = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags_file = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(root, flags_dir)
+        try:
+            for part in parts[:-1]:
+                nxt = os.open(part, flags_dir, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+            final = os.open(parts[-1], flags_file, dir_fd=fd)
+            try:
+                st = os.fstat(final)
+                if not stat.S_ISREG(st.st_mode):
+                    raise OSError("not a regular file")
+                if st.st_size > MAX_BYTES:
+                    return None
+                chunks = []
+                total = 0
+                while total <= MAX_BYTES:
+                    block = os.read(final, min(65536, MAX_BYTES + 1 - total))
+                    if not block:
+                        break
+                    chunks.append(block)
+                    total += len(block)
+                data = b"".join(chunks)
+                if len(data) > MAX_BYTES or b"\0" in data[:8192]:
+                    return None
+                return data.decode("utf-8", "replace")
+            finally:
+                os.close(final)
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, RuntimeError):
+        raise
+
+
+def markdown(path):
+
+    return Path(path).suffix.lower() in EXTS
+
+
+def rst(path):
+    return Path(path).suffix.lower() in RST_EXTS
+
+
+def selected(paths, args, *, require_matches=True):
+    if not args.paths:
+        return [p for p in paths if markdown(p)]
+    wanted = [os.path.normpath(p).replace(os.sep, "/") for p in args.paths]
+    for path in wanted:
+        if path == ".." or path.startswith(("../", "/")):
+            raise RuntimeError(f"scope must be repo-relative and stay inside the root: {path}")
+        if not any(path == "." or p == path or p.startswith(path + "/") for p in paths):
+            if require_matches and args.command != "anchors":
+                raise RuntimeError(f"scope matches no files: {path}; use --untracked for new files")
+    return [p for p in paths if any(w == "." or p == w or p.startswith(w + "/") for w in wanted)]
+
+
+def vitepress_slug(title):
+
+    s = re.sub(r"[\u0300-\u036f]", "", unicodedata.normalize("NFKD", title))
+    s = re.sub(r"[\x00-\x1f]", "", s)
+    s = re.sub(r"[\s~`!@#$%^&*()\-_+=\[\]{}|\\;:\"'\u201c\u201d\u2018\u2019<>,.?/]+", "-", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return re.sub(r"^(\d)", r"_\1", s).lower()
+
+
+def slug_headings(text, path="", style=None):
+
+    if rst(path):
+        return rst_headings(text)
+    mdx = Path(path).suffix.lower() == ".mdx"
+    vitepress = style in {"vitepress", "vuepress"}
+
+    custom_ids = mdx or style is not None
+    result, used = [], Counter()
+    alternates = set()
+    fenced = False
+    fence_char, fence_len = "", 0
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if m:
+            tok = m.group(1)
+            if not fenced:
+                fenced, fence_char, fence_len = True, tok[0], len(tok)
+            elif tok[0] == fence_char and len(tok) >= fence_len:
+                fenced = False
+            continue
+        if fenced:
+            continue
+        m = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$", line)
+        level, title = (len(m.group(1)), m.group(2)) if m else (0, "")
+        if not m and i + 1 < len(lines) and re.match(r"^\s{0,3}(=+|-+)\s*$", lines[i + 1]):
+            level, title = (1 if "=" in lines[i + 1] else 2), line.strip()
+        if not level or not title:
+            continue
+        custom = re.search(r"\s*\{#([\w-]+)\}$", title) if custom_ids else None
+        if custom:
+            title = title[:custom.start()]
+        if mdx and re.search(r"<[A-Z][\w.]*\s[^>]*\bname=", title):
+
+            named = re.sub(r"<[A-Z][\w.]*\s[^>]*?\bname=[\"']([^\"']+)[\"'][^>]*>", r"\1", title)
+            named = re.sub(r"<[^>]*>|[`*~]", "", named)
+            alternates.add(re.sub(r"\s+", "-", "".join(c.lower() if c.isalnum() or c in " -_" else "" for c in named).strip()))
+        visible = re.sub(r"<[^>]*>", "", title)
+        visible = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", visible)
+        visible = re.sub(r"!?\[([^\]]*)\](?:\[[^]]*\])?", r"\1", visible)
+        if vitepress:
+            visible = re.sub(r"[`*~]", "", visible)
+            base = vitepress_slug(visible)
+        elif style == "mkdocs":
+
+            visible = re.sub(r"[`*~]", "", visible)
+            ascii_title = unicodedata.normalize("NFKD", visible).encode("ascii", "ignore").decode()
+            base = re.sub(r"[-\s]+", "-", re.sub(r"[^\w\s-]", "", ascii_title).strip().lower())
+        else:
+
+            visible = re.sub(r"[`*~]" if mdx else r"[`*_~]", "", visible)
+            base = "".join(c.lower() if c.isalnum() or c in " -_" else "" for c in visible.strip())
+            base = base.replace(" ", "-")
+        if custom:
+            result.append((i + 1, level, custom.group(1), visible.strip()))
+            continue
+        n = used[base]
+        used[base] += 1
+        result.append((i + 1, level, base if n == 0 else f"{base}-{n}", visible.strip()))
+    anchors = set(alternates)
+
+    element = r"<(?:[A-Za-z][\w.]*\s[^>]*?\bid|a\s[^>]*?\bname|[A-Z][\w.]*\s[^>]*?\bname)=" if mdx else r"<a\s+(?:id|name)="
+    for match in re.finditer(element + r"[\"']([^\"']+)[\"']", text, re.I if not mdx else 0):
+        anchors.add(match.group(1))
+    return result, anchors
+
+
+RST_ADORN = re.compile(r"^([!-/:-@\[-`{-~])\1+\s*$")
+RST_LITERAL_DIRECTIVES = {"code", "code-block", "sourcecode", "parsed-literal", "doctest", "highlight", "math", "raw", "csv-table", "graphviz", "mermaid"}
+RST_SHELLS = {"sh", "bash", "shell", "console", "shell-session"}
+RST_DIRECTIVE = re.compile(r"^(\s*)\.\.\s+([\w:.+-]+)::(.*)$")
+RST_TARGET = re.compile(r"^\s*\.\.\s+_(`[^`]+`|[^:`][^:]*):(?:\s+(.*))?$")
+RST_INLINE_LITERAL = re.compile(r"``(?=\S)(.+?)(?<=\S)``")
+
+
+def rst_scan(text):
+
+    lines = text.splitlines()
+    clean, shell = [], set()
+    base, is_shell, active, doctest = 0, False, False, False
+    for n, line in enumerate(lines, 1):
+        indent = len(line) - len(line.lstrip())
+        if doctest or (not active and line.lstrip().startswith(">>>")):
+            doctest = bool(line.strip())
+            if doctest:
+                clean.append(""); continue
+        if active:
+            if not line.strip():
+                clean.append(""); continue
+            if indent > base:
+                clean.append("")
+                if is_shell and not re.match(r"^\s*:[\w-]+:", line): shell.add(n)
+                continue
+            active = False
+        d = RST_DIRECTIVE.match(line)
+        stripped = line.strip()
+        if d and d.group(2).lower() in RST_LITERAL_DIRECTIVES:
+            base, active = indent, True
+            is_shell = d.group(3).strip().lower() in RST_SHELLS
+        elif not d and stripped.endswith("::") and not stripped.startswith(".."):
+            base, active, is_shell = indent, True, False
+        clean.append(RST_INLINE_LITERAL.sub(lambda m: "\0" * len(m.group()), line))
+    return lines, clean, shell
+
+
+def rst_id(name):
+
+    value = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    return re.sub(r"^[^a-z]+", "", value).rstrip("-")
+
+
+def rst_name(name):
+    return " ".join(name.strip().strip("`").split()).lower()
+
+
+def rst_visible(title):
+    return re.sub(r"[`*|]|_+$|(?<=\w)__?(?=\s|$)", "", title).strip()
+
+
+def rst_headings(text):
+
+    raw, clean, _shell = rst_scan(text)
+    lines = ["" if r.strip() and not c else r for r, c in zip(raw, clean)]
+    result, styles, anchors = [], [], set()
+    for i, line in enumerate(lines):
+        if i + 1 >= len(lines) or not line.strip() or RST_ADORN.match(line):
+            continue
+        under = RST_ADORN.match(lines[i + 1])
+        if not under or len(lines[i + 1].rstrip()) < len(line.rstrip()):
+            continue
+        over = i > 0 and lines[i - 1].rstrip() == lines[i + 1].rstrip()
+        if not over and (line[0].isspace() or (i > 0 and lines[i - 1].strip())):
+            continue
+        style = ("over" if over else "under", under.group(1))
+        if style not in styles: styles.append(style)
+        title = rst_visible(line)
+        result.append((i + 1, styles.index(style) + 1, rst_id(title), title))
+    for line in clean:
+        m = RST_TARGET.match(line)
+        if m and not m.group(2):
+            anchors.add(rst_id(rst_name(m.group(1))))
+        for inline in re.finditer(r"(?<![\w`])_`([^`]+)`", line):
+            anchors.add(rst_id(rst_name(inline.group(1))))
+    return result, anchors
+
+
+def rst_toctree(text):
+
+
+    _raw, lines, _shell = rst_scan(text)
+    i = 0
+    while i < len(lines):
+        d = RST_DIRECTIVE.match(lines[i])
+        i += 1
+        if not d or d.group(2).lower() != "toctree": continue
+        base = len(d.group(1))
+        while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > base):
+            entry = lines[i].strip()
+            if entry and not entry.startswith(":"):
+                m = re.match(r"^.*<([^<>]+)>$", entry)
+                value = (m.group(1) if m else entry).strip()
+                yield i + 1, lines[i].index(entry) + 1, value
+            i += 1
+
+
+def resolve_doc(file, path, exists):
+
+    base = os.path.normpath((PurePosixPath(file).parent / path).as_posix()).replace("\\", "/")
+    for candidate in (base, *(base + ext for ext in (".rst", ".md", ".mdx", ".txt", ".ipynb"))):
+        if exists(candidate): return True
+    return False
+
+
+def visible_lines(text):
+    lines = text.splitlines()
+    out, fence = [], None
+    for line in lines:
+        m = re.match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if m:
+            token = m.group(1)
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+            out.append("")
+        elif fence:
+            out.append("")
+        elif line.startswith(("    ","\t")):
+            out.append("")
+        else:
+            out.append(re.sub(r"(`+).*?\1", lambda x: "\0" * len(x.group()), line))
+    return lines, out
+
+
+def add(findings, code, severity, file, line, col, message, target):
+    findings.append(Finding(code, severity, file, line, col, message, target))
+
+
+SITE_MARKERS = (
+
+    ("vitepress", re.compile(r"(?:^|/)\.vitepress/config\.[cm]?[jt]s$"), ("",), ("public",)),
+    ("vuepress", re.compile(r"(?:^|/)\.vuepress/config\.[cm]?[jt]s$"), ("",), (".vuepress/public",)),
+    ("docusaurus", re.compile(r"(?:^|/)docusaurus\.config\.[cm]?[jt]s$"), ("docs", "blog", "src/pages", ""), ("static",)),
+    ("astro", re.compile(r"(?:^|/)astro\.config\.[cm]?[jt]s$"), ("src/content/docs", "src/pages", "src/content"), ("public",)),
+    ("mkdocs", re.compile(r"(?:^|/)mkdocs\.ya?ml$"), ("docs",), ("docs",)),
+    ("mdbook", re.compile(r"(?:^|/)book\.toml$"), ("src",), ("src",)),
+)
+
+
+@dataclass(frozen=True)
+class Site:
+    kind: str
+    root: str
+    bases: tuple[str, ...]
+    assets: tuple[str, ...]
+
+
+def find_sites(names):
+
+    sites = {}
+    for name in names:
+        for kind, marker, bases, assets in SITE_MARKERS:
+            m = marker.search(name)
+            if not m: continue
+            root = name[:m.start()].rstrip("/")
+            if "node_modules" in root.split("/"): continue
+            def join(base, root=root):
+                return "/".join(x for x in (root, base) if x)
+            sites[root] = Site(kind, root, tuple(join(b) for b in bases), tuple(join(b) for b in assets))
+    return sites
+
+
+def site_of(file, sites):
+    if not sites: return None
+    for base in (*PurePosixPath(file).parents,):
+        key = "" if str(base) == "." else str(base)
+        if key in sites: return sites[key]
+    return None
+
+
+def site_page(stem, known):
+
+    stem = stem.rstrip("/")
+    if stem.endswith((".html", ".htm")): stem = stem.rsplit(".", 1)[0]
+    for candidate in (stem, stem + ".md", stem + ".mdx", f"{stem}/index.md", f"{stem}/index.mdx", f"{stem}/README.md"):
+        c = candidate.strip("/")
+        if c and c in known: return c
+    return None
+
+
+def mdx_route(file, path, content, known=()):
+
+    page = PurePosixPath(file)
+    bases = [page.parent] if page.stem == "index" else [page.parent, page.parent / page.stem]
+    for base in bases:
+        route = os.path.normpath((base / path).as_posix()).replace("\\", "/")
+        for candidate in (route + ".mdx", route + ".md", route + "/index.mdx", route + "/index.md"):
+            if candidate in content or candidate in known: return candidate
+    return None
+
+
+def site_route(file, path, known):
+
+    route = path.strip("/")
+    for base in PurePosixPath(file).parents:
+        prefix = "" if str(base) == "." else f"{base}/"
+        stem = prefix + route
+        for candidate in (stem, stem + ".md", stem + ".mdx", f"{stem}/index.md", f"{stem}/index.mdx", f"{stem}/README.md"):
+            if candidate.strip("/") and candidate.strip("/") in known: return candidate.strip("/")
+    return None
+
+
+def check_destinations(out, root, file, spans, all_files, file_case, content, sites=None):
+    mdx = Path(file).suffix.lower() == ".mdx"
+    site = site_of(file, sites)
+    for n, col, dest in spans:
+
+        if re.fullmatch(r"(?i)url|link|path|href|target|\.\.\.|<[^>]*>|\{[^}]*\}", dest): continue
+        if URL_SCHEME.match(dest) or dest.startswith("//") or (mdx and dest.startswith("/")):
+
+            continue
+        path, _, frag = dest.partition("#"); path, frag = unquote(path), unquote(frag)
+        if not path:
+            target_file = file
+        else:
+
+            candidate = path.lstrip("/") if path.startswith("/") else (PurePosixPath(file).parent / path).as_posix()
+            norm = os.path.normpath(candidate).replace("\\", "/")
+            if norm == ".." or norm.startswith("../") or norm.startswith("/"):
+                add(out, "L001", "error", file, n, col, "destination escapes root", dest)
+                continue
+            if norm not in all_files and norm.casefold() in file_case:
+                add(out, "L003", "error", file, n, col, "path differs only by letter case", dest)
+                continue
+            if mdx and norm not in content:
+                norm = mdx_route(file, path, content, all_files) or norm
+            known = None
+            if site and norm not in all_files and norm not in content and not (root / norm).exists():
+
+                known = all_files | set(content)
+                if path.startswith("/"):
+                    bases = site.bases + site.assets
+                    norm = next((hit for b in bases for hit in [site_page(f"{b}/{path.strip('/')}" if b else path.strip("/"), known)] if hit), None) or norm
+                elif site.kind != "mkdocs":
+                    norm = site_page(norm, known) or norm
+            if path.startswith("/") and norm not in all_files and norm not in content and not (root / norm).exists():
+
+                norm = site_route(file, path, known or (all_files | set(content))) or norm
+
+            sparse = norm in all_files and not os.path.lexists(root / norm)
+            if norm not in content and not sparse:
+                try:
+                    resolved = (root / norm).resolve(strict=True)
+                    resolved.relative_to(root.resolve())
+                except (OSError, ValueError):
+                    hint = ("; looks like a URL without its scheme" if HOSTNAME.match(path) or path.startswith("www.")
+                            else "; remove the extra parentheses" if path.startswith("(") and URL_SCHEME.match(path[1:]) else "")
+                    add(out, "L001", "error", file, n, col, "destination does not exist or escapes root" + hint, dest)
+                    continue
+
+            target_file = norm
+        if frag:
+            if (root / target_file).is_dir():
+                add(out, "L002", "error", file, n, col, "directory has no fragment", dest)
+                continue
+            target_text = content.get(target_file)
+            if target_text is None:
+                try:
+                    target_text = safe_read(root, target_file)
+                except (OSError, ValueError):
+                    target_text = None
+            if target_text is not None:
+                target_site = site_of(target_file, sites)
+                hs, ex = slug_headings(target_text, target_file, target_site.kind if target_site else None)
+                known_anchors = {h[2] for h in hs} | ex
+                github = not target_site and not mdx and not rst(target_file)
+
+                if github and (frag == "top" or re.fullmatch(r"L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?", frag)): continue
+                if frag not in known_anchors and frag.lower() in {a.lower() for a in known_anchors}:
+
+                    add(out, "L009", "warn", file, n, col, "fragment matches a heading only when case is ignored", dest)
+                    continue
+                if frag not in known_anchors:
+                    anchors = sorted({h[2] for h in hs} | ex)
+                    suggestions = get_close_matches(frag, anchors, n=3) or anchors[:3]
+                    hint = "; available: " + ", ".join("#" + a for a in suggestions) if suggestions else "; target has no anchors"
+                    add(out, "L002", "error", file, n, col, "fragment does not exist" + hint, dest)
+
+
+def rst_link_findings(root, file, text, all_files, file_case, content):
+    out = []
+    lines, clean, _shell = rst_scan(text)
+    headings, _anchors = rst_headings(text)
+    names = {rst_name(h[3]) for h in headings}
+    uri_targets = {}
+    spans = []
+    used = Counter()
+
+    def exists(path):
+        if path == ".." or path.startswith(("../", "/")): return False
+        if path in all_files or path in content: return True
+        try:
+            (root / path).resolve(strict=True).relative_to(root.resolve())
+            return (root / path).is_file()
+        except (OSError, ValueError):
+            return False
+
+    def local(dest):
+
+        path = dest.split("#", 1)[0]
+        return not (URL_SCHEME.match(dest) or dest.startswith(("//", "/", "#")) or dest.endswith("_") or path.endswith((".html", ".htm")))
+
+    for n, line in enumerate(clean, 1):
+        t = RST_TARGET.match(line)
+        if t:
+            name = rst_name(t.group(1)); names.add(name)
+            dest = (t.group(2) or "").strip()
+            if dest and not dest.endswith("_"):
+                uri_targets.setdefault(name, n)
+                if local(dest): spans.append((n, 1, dest))
+            elif dest:
+                used[rst_name(dest[:-1])] += 1
+            continue
+        d = RST_DIRECTIVE.match(line)
+        if d and d.group(2).lower() in {"include", "literalinclude", "image", "figure"}:
+            dest = d.group(3).strip()
+            if dest and not dest.startswith("<") and local(dest):
+                spans.append((n, d.start(3) + 1 + len(d.group(3)) - len(d.group(3).lstrip()), dest))
+        for m in re.finditer(r"(?<![\w`]):(doc|download):`(?:[^`<]*<([^`>]+)>|([^`<]+))`", line):
+            dest = (m.group(2) or m.group(3)).strip().lstrip("~!")
+            if not local(dest): continue
+            found = resolve_doc(file, dest, exists) if m.group(1) == "doc" else exists(os.path.normpath((PurePosixPath(file).parent / dest).as_posix()))
+            if not found:
+                add(out, "L001", "error", file, n, m.start() + 1, "destination does not exist or escapes root", dest)
+        for m in re.finditer(r"(?<![\w`])_`([^`]+)`", line):
+            names.add(rst_name(m.group(1)))
+        for m in RST_INLINE_LITERAL.finditer(lines[n - 1]):
+            for ref in re.finditer(r"([^\s:]+):(\d+)(?:-(\d+))?", m.group(1)):
+                target, start, end = ref.group(1), int(ref.group(2)), int(ref.group(3) or ref.group(2))
+                if target in content and end > len(content[target].splitlines()):
+                    add(out, "L004", "error", file, n, m.start() + 1 + ref.start(), "line reference exceeds target", f"{target}:{start}-{end}")
+    for n, col, entry in rst_toctree(text):
+        if entry == "self" or "*" in entry or not local(entry): continue
+        if not resolve_doc(file, entry, exists):
+            add(out, "L001", "error", file, n, col, "toctree entry does not exist", entry)
+    body = "\n".join("" if RST_TARGET.match(line) or re.match(r"^\s*\.\.\s+\|", line) else line for line in clean)
+    starts = [0] + [i + 1 for i, c in enumerate(body) if c == "\n"]
+
+    def where(offset):
+        n = bisect_right(starts, offset)
+        return n, offset - starts[n - 1] + 1
+
+    masked, refs = list(body), []
+    for m in re.finditer(r"(:[\w:.+-]+:)?`((?:[^`\n]|\n(?![ \t]*\n))+)`(:[\w:.+-]+:)?(__?)?", body):
+        masked[m.start():m.end()] = [c if c == "\n" else " " for c in m.group()]
+        if m.group(1) or m.group(3) or not m.group(4): continue
+        embedded = re.match(r"(?s)^(.*?)\s*<([^<>]+)>$", m.group(2))
+        if embedded:
+            dest = " ".join(embedded.group(2).split())
+            if dest.endswith("_"):
+                refs.append((m.start(), rst_name(dest[:-1])))
+            else:
+                if m.group(4) == "_" and embedded.group(1).strip(): names.add(rst_name(embedded.group(1)))
+                if local(dest): spans.append((*where(m.start()), dest))
+        elif m.group(4) == "_":
+            refs.append((m.start(), rst_name(m.group(2))))
+    for m in re.finditer(r"\|([^|\n]+)\|(__?)", body):
+        masked[m.start():m.end()] = [" "] * (m.end() - m.start())
+        if m.group(2) == "_": refs.append((m.start(), rst_name(m.group(1))))
+    for m in re.finditer(r"(?<![\w`|\]\\])([A-Za-z0-9](?:[\w.+-]*[A-Za-z0-9])?)_(?![\w`])", "".join(masked)):
+        refs.append((m.start(), rst_name(m.group(1))))
+    for offset, name in refs:
+        used[name] += 1
+        if name not in names:
+            add(out, "L005", "error", file, *where(offset), "missing reference target", name)
+    for name, n in uri_targets.items():
+        if not used[name]:
+            add(out, "L006", "warn", file, n, 1, "unused reference definition", name)
+    check_destinations(out, root, file, spans, all_files, file_case, content)
+    return out
+
+
+SPHINX_BUILTIN_LABELS = {"genindex", "modindex", "py-modindex", "search"}
+
+SPHINX_OPAQUE = {"sphinx_external_toc", "ablog", "sphinx_gallery.gen_gallery", "jupyter_book", "sphinx_click", "sphinx_click.ext", "autoapi.extension"}
+MYST_LABEL = re.compile(r"^\s{0,3}\(([^()\s][^()]*)\)=\s*$")
+
+
+def sphinx_conf(text):
+
+    conf = {}
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return conf
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError, TypeError):
+                value = None
+            for t in targets:
+                if isinstance(t, ast.Name): conf[t.id] = value
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError, TypeError):
+                conf[node.target.id] = None; continue
+            if isinstance(conf.get(node.target.id), list) and isinstance(value, (list, tuple)):
+                conf[node.target.id] = conf[node.target.id] + list(value)
+        elif (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+              and isinstance(node.value.func.value, ast.Name) and node.value.func.attr in {"append", "extend"}):
+            name = node.value.func.value.id
+            try:
+                args = [ast.literal_eval(a) for a in node.value.args]
+            except (ValueError, SyntaxError, TypeError):
+                conf[name] = None; continue
+            if isinstance(conf.get(name), list):
+                conf[name] = conf[name] + (args if node.value.func.attr == "append" else [x for a in args for x in a])
+    return conf
+
+
+def sphinx_glob(pattern):
+
+    out = ""
+    for part in re.split(r"(\*\*|\*|\?)", pattern):
+        out += {"**": ".*", "*": "[^/]*", "?": "[^/]"}.get(part, re.escape(part))
+    return re.compile(out + r"\Z")
+
+
+def sphinx_toctrees(text, myst):
+
+    lines = text.splitlines() if myst else rst_scan(text)[1]
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if myst:
+            m = re.match(r"^\s{0,3}(`{3,}|:{3,})\{toctree\}", line)
+            if not m: i += 1; continue
+            fence, start, entries, glob = m.group(1), i + 1, [], False
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith(fence):
+                s = lines[i].strip()
+                if s.startswith(":") or s == "---" or re.match(r"^[\w-]+:\s", s) and not entries:
+                    glob = glob or s.startswith((":glob:", "glob:"))
+                elif s:
+                    entries.append((i + 1, lines[i].index(s) + 1, s))
+                i += 1
+            yield start, entries, glob
+            continue
+        d = RST_DIRECTIVE.match(line)
+        i += 1
+        if not d or d.group(2).lower() != "toctree": continue
+        base, start, entries, glob = len(d.group(1)), i, [], False
+        while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) > base):
+            s = lines[i].strip()
+            if s.startswith(":"):
+                glob = glob or s.startswith(":glob:")
+            elif s:
+                entries.append((i + 1, lines[i].index(s) + 1, s))
+            i += 1
+        yield start, entries, glob
+
+
+def sphinx_projects(content):
+
+    for conf_path, text in sorted(content.items()):
+        if Path(conf_path).name != "conf.py" or not re.search(r"(?m)^(?:extensions|project|html_theme|master_doc|root_doc)\s*[:=+]", text):
+            continue
+        conf = sphinx_conf(text)
+        srcdir = str(PurePosixPath(conf_path).parent)
+        prefix = "" if srcdir == "." else srcdir + "/"
+        raw_extensions = conf.get("extensions")
+        extensions = raw_extensions if isinstance(raw_extensions, list) else []
+        suffix = conf.get("source_suffix", [".rst"])
+        if isinstance(suffix, str): suffix = [suffix]
+        elif isinstance(suffix, dict): suffix = list(suffix)
+        elif not isinstance(suffix, (list, tuple)): suffix = [".rst", ".md"]
+        suffixes = {s for s in suffix if isinstance(s, str)}
+        if "source_suffix" not in conf and any(str(e).startswith(("myst_parser", "myst_nb")) for e in extensions):
+            suffixes.add(".md")
+        patterns = []
+        for key in ("exclude_patterns", "templates_path", "html_static_path", "html_extra_path"):
+            value = conf.get(key)
+            if isinstance(value, (list, tuple)): patterns.extend(v for v in value if isinstance(v, str))
+        patterns.append("_build")
+        matchers = [sphinx_glob(p.rstrip("/")) for p in patterns]
+        docs = {}
+        for path in content:
+            if not path.startswith(prefix): continue
+            rel = path[len(prefix):]
+            ext = next((s for s in sorted(suffixes, key=len, reverse=True) if rel.endswith(s)), None)
+            if not ext: continue
+            parts = rel.split("/")
+            if any(m.match("/".join(parts[:k])) for m in matchers for k in range(1, len(parts) + 1)): continue
+            docs[rel[: -len(ext)]] = path
+        root_doc = conf.get("root_doc") or conf.get("master_doc") or "index"
+        if isinstance(root_doc, str) and root_doc in docs:
+            yield srcdir, conf, extensions, docs, root_doc
+
+
+def sphinx_findings(files, content):
+
+    out = []
+    scope = set(files)
+    for srcdir, conf, extensions, docs, root_doc in sphinx_projects(content):
+        if not scope & set(docs.values()): continue
+        ext_names = {str(e) for e in extensions}
+        intersphinx = "sphinx.ext.intersphinx" in ext_names
+        labels, auto = set(SPHINX_BUILTIN_LABELS), "sphinx.ext.autosectionlabel" in ext_names
+        prefix_doc = bool(conf.get("autosectionlabel_prefix_document"))
+        reached, included = {root_doc}, set()
+        children = {}
+        for doc, path in docs.items():
+            text, myst = content[path], not rst(path)
+            if rst(path):
+                _lines, clean, _shell = rst_scan(text)
+                for line in clean:
+                    t = RST_TARGET.match(line)
+                    if t and not (t.group(2) or "").strip(): labels.add(rst_name(t.group(1)))
+                for m in re.finditer(r"(?m)^\s+:name:\s+(.+?)\s*$", text): labels.add(rst_name(m.group(1)))
+                for line in clean:
+                    d = RST_DIRECTIVE.match(line)
+                    if d and d.group(2).lower() in {"include", "literalinclude"}: included.add((doc, d.group(3).strip()))
+                if auto:
+                    for _n, _level, _id, title in rst_headings(text)[0]:
+                        labels.add(rst_name(f"{doc}:{title}" if prefix_doc else title))
+            else:
+                for line in text.splitlines():
+                    m = MYST_LABEL.match(line)
+                    if m: labels.add(rst_name(m.group(1)))
+                    inc = re.match(r"^\s{0,3}(?:`{3,}|:{3,})\{include\}\s+(\S+)", line)
+                    if inc: included.add((doc, inc.group(1)))
+                for m in re.finditer(r"(?m)^:name:\s+(.+?)\s*$", text): labels.add(rst_name(m.group(1)))
+                if auto:
+                    for _n, _level, _id, title in slug_headings(text, path)[0]:
+                        labels.add(rst_name(f"{doc}:{title}" if prefix_doc else title))
+            kids = []
+            for _start, entries, glob in sphinx_toctrees(text, myst):
+                for _n, _c, entry in entries:
+                    m = re.match(r"^.*<([^<>]+)>$", entry)
+                    name = (m.group(1) if m else entry).strip()
+                    if name == "self" or URL_SCHEME.match(name): continue
+                    base = name.lstrip("/") if name.startswith("/") else os.path.normpath(str(PurePosixPath(doc).parent / name)).replace("\\", "/")
+
+                    for ext in (".rst", ".md", ".txt"):
+                        if base.endswith(ext) and base[: -len(ext)] in docs: base = base[: -len(ext)]; break
+                    if glob and re.search(r"[*?\[]", name):
+                        matcher = sphinx_glob(base)
+                        kids.extend(d for d in docs if matcher.match(d))
+                    else:
+                        kids.append(base)
+            children[doc] = kids
+        todo = [root_doc]
+        while todo:
+            for kid in children.get(todo.pop(), ()):
+                if kid in docs and kid not in reached:
+                    reached.add(kid); todo.append(kid)
+        included_files = set()
+        for doc, target in included:
+            p = target.lstrip("/") if target.startswith("/") else os.path.normpath(str(PurePosixPath(doc).parent / target)).replace("\\", "/")
+            included_files.add(p if srcdir == "." else f"{srcdir}/{p}")
+        opaque = bool(ext_names & SPHINX_OPAQUE) or any(f"{'' if srcdir == '.' else srcdir + '/'}_toc.yml" == p for p in content)
+        for doc, path in sorted(docs.items()):
+            if path not in scope: continue
+            text = content[path]
+            head = "\n".join(text.splitlines()[:30])
+            orphan = re.search(r"(?m)^:orphan:\s*$", head) or re.search(r"(?m)\A---\s*\n(?:.*\n)*?orphan:\s*true\s*\n", text)
+            if not opaque and doc not in reached and path not in included_files and not orphan:
+                add(out, "L008", "warn", path, 1, 1, "document is not in any toctree; add it to one or mark it :orphan:", doc)
+            for n, col, label in sphinx_refs(path, text):
+                name = rst_name(label)
+                if name in labels: continue
+                if ":" in name and intersphinx: continue
+                hint = get_close_matches(name, sorted(labels - SPHINX_BUILTIN_LABELS), n=1)
+
+                add(out, "L007", "note" if intersphinx else "error", path, n, col,
+                    "Sphinx label is not defined" + ("; intersphinx may resolve it" if intersphinx else "")
+                    + (f"; did you mean {hint[0]}?" if hint else ""), label)
+    return out
+
+
+def sphinx_refs(path, text):
+
+    if rst(path):
+        _lines, clean, _shell = rst_scan(text)
+        body = "\n".join(clean)
+        role = re.compile(r"(?<![\w`]):(?:std:)?ref:`((?:[^`\n]|\n(?![ \t]*\n))+)`")
+    else:
+        raw, clean = visible_lines(text)
+
+        body = "\n".join(r if "{ref}" in c or "{std:ref}" in c else c for r, c in zip(raw, clean))
+        role = re.compile(r"\{(?:std:)?ref\}`([^`\n]+)`")
+    starts = [0] + [i + 1 for i, c in enumerate(body) if c == "\n"]
+    for m in role.finditer(body):
+        value = " ".join(m.group(1).split())
+        e = re.match(r"^(.*?)\s*<([^<>]+)>$", value)
+        label = (e.group(2) if e else value).strip()
+        if not label: continue
+        n = bisect_right(starts, m.start())
+        yield n, m.start() - starts[n - 1] + 1, label
+
+
+def link_findings(root, files, content, tracked=None):
+    out = []
+    all_files = set(files) | set(tracked or ())
+    file_case = {p.casefold() for p in files}
+    sites = find_sites(all_files)
+    for file in files:
+        text = content.get(file)
+        if text is None:
+            continue
+        if rst(file):
+            out.extend(rst_link_findings(root, file, text, all_files, file_case, content))
+            continue
+        lines, clean = visible_lines(text)
+        defs = {}
+        refs_used = Counter()
+        def label_key(value):
+            return " ".join(value.split()).casefold()
+        definitions = {}
+        for n, line in enumerate(clean, 1):
+            d = re.match(r"^\s{0,3}\[([^]]+)\]:(?:\s*(?:<([^>]+)>|(\S+)))?", line)
+            if not d: continue
+            dest = d.group(2) or d.group(3)
+            if not dest and n < len(lines) and lines[n].strip():
+
+                dest = lines[n].split()[0].strip("<>")
+            if dest:
+                defs[label_key(d.group(1))] = (dest, n)
+                definitions[n] = dest
+        joined = "\n".join(clean)
+        for m in re.finditer(r"\[([^]\n]*\n[^]]*)\](?:\[([^]]*)\])?", joined):
+            label = label_key(m.group(2) or m.group(1))
+            if label in defs: refs_used[label] += 1
+        spans = []
+        for n, line in enumerate(clean, 1):
+            if n in definitions:
+                spans.append((n, 1, definitions[n]))
+                continue
+            for m in re.finditer(r"!?\[[^]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+['\"][^'\"]*['\"])?\)", line):
+                spans.append((n, m.start() + 1, m.group(1) or m.group(2)))
+            for m in re.finditer(r"<((?:https?://|mailto:)[^>]+)>|<a\s+href=['\"]([^'\"]+)['\"]", line, re.I):
+                spans.append((n, m.start() + 1, m.group(1) or m.group(2)))
+            for m in re.finditer(r"\[([^]]+)\](?:\[([^]]*)\])?", line):
+                label = label_key(m.group(2) if m.group(2) else m.group(1))
+                if label in defs:
+                    refs_used[label] += 1
+                    if "(" not in line[m.end():m.end()+1]:
+                        spans.append((n, m.start() + 1, defs[label][0]))
+                elif m.group(2) is not None:
+                    add(out, "L005", "error", file, n, m.start()+1, "missing reference definition", label)
+            for m in re.finditer(r"(?<!`)`([^`]+)`(?!`)", lines[n-1]):
+                for ref in re.finditer(r"([^\s:]+):(\d+)(?:-(\d+))?", m.group(1)):
+                    target, start, end = ref.group(1), int(ref.group(2)), int(ref.group(3) or ref.group(2))
+                    if target in content and end > len(content[target].splitlines()):
+                        add(out, "L004", "error", file, n, m.start()+1+ref.start(), "line reference exceeds target", f"{target}:{start}-{end}")
+        check_destinations(out, root, file, spans, all_files, file_case, content, sites)
+        for label, (_dest, n) in defs.items():
+            if not refs_used[label]:
+                add(out, "L006", "warn", file, n, 1, "unused reference definition", label)
+    out.extend(sphinx_findings(files, content))
+    return out
+
+
+FILE_EXT = re.compile(r"\.(?:mdx?|markdown|rst|txt|rs|toml|ya?ml|json|py|pyi|sh|bash|c|h|cc|cpp|hpp|go|ts|tsx|js|jsx|mjs|cjs|rb|java|kt|swift|sql|cfg|ini|proto|tf|lua)$", re.I)
+PLACEHOLDER = re.compile(r"<[^>]+>|\bNN\b|\{[^}]*\}|\*|\$[A-Za-z_]|\.\.\.|\bpath/to\b|\b(?:owner|org|user)/repo\b|(?:^|[/\s])(?:foo|bar|baz|qux|foobar|xxx|example|your[-_][\w-]*|my[-_][\w-]*|some[-_][\w-]*|[\w-]+-name)(?=[./\s]|$)")
+
+NOT_PATH = re.compile(r"[\s:@?#\\|<>()\[\]{}=,;'\"`!%^&+]")
+HOSTNAME = re.compile(r"^(?:[a-z0-9-]+\.)+(?:com|org|net|io|dev|sh|app|ai|co|so|cloud|run|page|site|xyz)/", re.I)
+
+
+CHANGELOG = re.compile(r"(?:^|/)(?:CHANGELOG|CHANGES|HISTORY|NEWS|RELEASES?|RELEASE[-_]NOTES)(?:[-_.][^/]*)?\.(?:mdx?|rst|txt)$|(?:^|/)(?:changelogs?|release[-_]notes)/", re.I)
+
+LEGAL = re.compile(r"(?:^|/)(?:LICEN[CS]E|COPYING|NOTICE|THIRD[-_]PARTY[-_\w]*|AUTHORS|CONTRIBUTORS|CODE[-_]OF[-_]CONDUCT)(?:[-_.][^/]*)?$", re.I)
+GENERATED_MARK = re.compile(r"(?i)\b(?:this file is (?:auto-?)?generated|auto-?generated (?:file|by)|generated by .{0,60}do not edit|do not edit\b.{0,40}generated|DO NOT EDIT)\b")
+
+
+
+OTHER_REPO = re.compile(r"(?i)\b(?:that|another|other|upstream|separate|target|consumer|downstream|host)\s+(?:[\w-]+\s+)?(?:repo|repository|checkout)\b")
+GITHUB_REPO = re.compile(r"(?i)github\.com[/:]([\w.-]+/[\w.-]+?)(?:\.git)?(?=[/#)\s`'\"]|$)")
+
+CREATES = re.compile(r"(?i)(?:\b(?:create[sd]?|creating|generate[sd]?|generating|scaffold(?:s|ed)?)\s+(?:(?:a|an|the|new|empty|file|directory|folder|named|called|at|in)\s+){0,3}"
+                     r"|\b(?:copy|copies|move|moves|rename|renames)\b[^`]*`[^`]+`\s+(?:to|as)\s+)$")
+
+
+def origin_repo(root):
+
+    if root is None: return None
+    try:
+        url = run_git(root, ["config", "--get", "remote.origin.url"]).decode().strip()
+    except Exception:
+        return None
+    m = GITHUB_REPO.search(url)
+    return m.group(1).lower() if m else None
+
+
+def demoted(f, reason):
+
+    if f.severity == "note": return f
+    return replace(f, severity="note", message=f"{f.message}; {reason}")
+
+
+def generated(text):
+
+    return bool(GENERATED_MARK.search("\n".join(text.splitlines()[:5])))
+
+
+GENERATED_DIRS = {"runs", "target", ".venv", "venv", "node_modules", ".tox", "dist", "build", "_build", ".next", ".output", "out", "output",
+                  "htmlcov", "coverage", "__pycache__", ".nuxt", ".svelte-kit", ".astro", ".docusaurus", ".turbo", ".cache", ".parcel-cache", ".vercel"}
+RUNNERS = {"sh", "bash", "zsh", "source", "."}
+
+
+def invoked_scripts(words):
+
+    found = []
+    for cmd in commands_in(words):
+        cmd = command_head(cmd)
+        if not cmd: continue
+        if cmd[0].startswith(("./", "scripts/")):
+            found.append(cmd[0])
+        elif cmd[0] in RUNNERS and len(cmd) > 1 and not cmd[1].startswith("-"):
+            found.append(cmd[1])
+    return found
+
+
+def path_index(names):
+
+    dirs, suffixes = {"."}, set()
+    for p in names:
+        parent = PurePosixPath(p).parent
+        while str(parent) != ".":
+            dirs.add(str(parent)); parent = parent.parent
+    for p in set(names) | dirs:
+        parts = p.split("/")
+        suffixes.update("/".join(parts[i:]) for i in range(1, len(parts)))
+
+    for p in names:
+        stem = re.sub(r"\.[A-Za-z0-9]+$", "", p)
+        if stem != p:
+            parts = stem.split("/")
+            suffixes.update("/".join(parts[i:]) for i in range(len(parts)))
+    return dirs, suffixes
+
+
+def path_exists(path, file, names, dirs, suffixes):
+
+    beside = os.path.normpath(str(PurePosixPath(file).parent / path)).replace("\\", "/")
+    if (path in names or path in dirs or path in suffixes
+            or (not beside.startswith("../") and (beside in names or beside in dirs))):
+        return True
+
+    parts = PurePosixPath(path).parts
+    for ancestor in PurePosixPath(file).parents:
+        if not ancestor.name or ancestor.name not in parts[1:3]: continue
+        tail = parts[parts.index(ancestor.name) + 1:]
+        if not tail: continue
+        candidate = str(ancestor.joinpath(*tail))
+        if candidate in names or candidate in dirs: return True
+    return False
+
+
+SHELL_LANGS = {"sh", "bash", "shell", "zsh", "console", "shell-session", "sh-session", "shellsession", "terminal"}
+PROMPT_LANGS = {"console", "shell-session", "sh-session", "shellsession", "terminal"}
+SHELL_SEP = {"&&", "||", ";", "|", "&", "(", ")", "then", "do"}
+PNPM_BUILTINS = set("""add install i update up upgrade remove rm uninstall un link ln unlink import rebuild rb prune
+fetch install-test it patch patch-commit patch-remove audit list ls ll la outdated why licenses exec dlx create
+publish pack recursive server store root bin setup init deploy doctor config c get set env help self-update
+dedupe cache approve-builds ignored-builds sbom login logout whoami version view info owner dist-tag docs home
+repo search unpublish deprecate completion x catalog node""".split())
+YARN_BUILTINS = set("""add audit autoclean bin cache check config constraints create dedupe dlx exec explain
+generate-lock-entry global help import info init install licenses link list login logout node npm outdated owner
+pack patch patch-commit plugin policies publish rebuild remove search sdks set stage tag team unlink unplug up
+upgrade upgrade-interactive version versions why workspace workspaces""".split())
+
+KNOWN_BINS = set("""tsc tsserver tsx ts-node vitest jest eslint prettier biome oxlint oxfmt playwright changeset
+next vite turbo nx lerna nitro nuxt wrangler vercel esbuild rollup webpack tailwindcss postcss knip astro svelte-kit
+drizzle-kit prisma husky lint-staged concurrently rimraf cross-env tsup storybook cypress mocha ava c8 nyc""".split())
+
+
+def make_targets_of(text):
+
+    targets = set()
+    for line in text.splitlines():
+        phony = re.match(r"^\s*\.PHONY\s*:\s*(.*)", line)
+        if phony:
+            targets.update(phony.group(1).split()); continue
+        rule = re.match(r"^([^\s:=#$][^:=#]*?)\s*::?(?![=])", line)
+        if rule and not line.startswith("\t"):
+            targets.update(t for t in rule.group(1).split() if "%" not in t)
+    return targets
+
+
+def package_names(content):
+
+    scripts, runnable, found = set(), set(KNOWN_BINS), False
+    for p, text in content.items():
+        if Path(p).name != "package.json": continue
+        try:
+            data = json.loads(text)
+        except ValueError:
+            continue
+        if not isinstance(data, dict): continue
+        found = True
+        scripts.update(k for k in (data.get("scripts") or {}) if isinstance(k, str))
+        for field in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+            for name in data.get(field) or {}:
+                runnable.update({name, name.rsplit("/", 1)[-1]})
+        bins = data.get("bin")
+        if isinstance(bins, dict): runnable.update(bins)
+        elif isinstance(bins, str) and isinstance(data.get("name"), str): runnable.add(data["name"].rsplit("/", 1)[-1])
+    return found, scripts, runnable
+
+
+def commands_in(words):
+
+    cmd = []
+    for w in words:
+        if w in SHELL_SEP:
+            if cmd: yield cmd
+            cmd = []
+        else:
+            cmd.append(w)
+    if cmd: yield cmd
+
+
+def command_head(cmd):
+
+    i = 0
+    while i < len(cmd) and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", cmd[i]) or cmd[i] in {"sudo", "env", "time", "exec", "command"}):
+        i += 1
+    return cmd[i:]
+
+
+def package_script(cmd):
+
+    tool = cmd[0]
+    if tool not in {"npm", "pnpm", "yarn", "bun"}: return None
+    rest, i = cmd[1:], 0
+    takes_value = {"--filter", "-F", "-C", "--dir", "--prefix", "--cwd", "--workspace", "-w"} - ({"-w"} if tool == "pnpm" else set())
+    while i < len(rest) and rest[i].startswith("-"):
+        if rest[i] == "--if-present": return None
+        i += 2 if rest[i] in takes_value else 1
+    if i >= len(rest): return None
+    sub = rest[i]
+    if tool == "yarn" and sub == "workspace": return package_script([tool] + rest[i + 2:]) if i + 2 < len(rest) else None
+    if sub in {"run", "run-script"}:
+        i += 1
+        while i < len(rest) and rest[i].startswith("-"):
+            if rest[i] == "--if-present": return None
+            i += 1
+        if i >= len(rest): return None
+        return tool, rest[i], True
+    if tool == "npm":
+        return (tool, "test", True) if sub in {"test", "t", "tst"} else None
+    if tool == "bun": return None
+    if sub in {"test", "t", "tst"}: return tool, "test", True
+    if sub == "start" or sub in (PNPM_BUILTINS if tool == "pnpm" else YARN_BUILTINS): return None
+    return tool, sub, False
+
+
+def inline_code_spans(text):
+
+    lines = text.splitlines()
+    prose, fence_char, fence_len = [], "", 0
+    for line in lines:
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if not fence_char and marker:
+            fence_char, fence_len = marker.group(1)[0], len(marker.group(1)); prose.append(""); continue
+        if fence_char:
+            if marker and marker.group(1)[0] == fence_char and len(marker.group(1)) >= fence_len and not marker.group(2).strip():
+                fence_char, fence_len = "", 0
+            prose.append(""); continue
+        prose.append("" if line.startswith(("    ", "\t")) else line)
+    joined = "\n".join(prose)
+    starts = [0]
+    for line in prose: starts.append(starts[-1] + len(line) + 1)
+    for m in re.finditer(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n)[\s\S])+?)(?<!`)\1(?!`)", joined):
+        n = bisect_right(starts, m.start())
+        yield n, m.start() - starts[n - 1], " ".join(m.group(2).split())
+
+
+def ref_findings(files, content, tracked=None, root=None):
+    out = []
+    names = set(tracked or files)
+    real_root = root.resolve() if root else None
+
+    def on_disk(path, file):
+
+        if not real_root: return False
+        for candidate in (path, os.path.normpath(str(PurePosixPath(file).parent / path))):
+            try:
+                (real_root / candidate).resolve(strict=True).relative_to(real_root)
+                return True
+            except (OSError, ValueError):
+                continue
+        return False
+
+    deps = set()
+    for p, text in content.items():
+        if Path(p).name != "package.json": continue
+        try: data = json.loads(text)
+        except ValueError: continue
+        if isinstance(data, dict):
+            for field in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+                if isinstance(data.get(field), dict): deps.update(data[field])
+    dirs, suffixes = path_index(names)
+    cargo_names = set()
+    for p, text in content.items():
+        if p.endswith("Cargo.toml"):
+            m = re.search(r"(?m)^\s*name\s*=\s*['\"]([^'\"]+)", text.split("[dependencies]")[0])
+            if m: cargo_names.add(m.group(1))
+    make_targets, have_makefile = set(), False
+    for p, text in content.items():
+        if Path(p).name in {"Makefile", "makefile", "GNUmakefile"} or p.endswith(".mk"):
+            have_makefile = True
+            make_targets |= make_targets_of(text)
+    have_package, scripts, runnable = package_names(content)
+    own_repo = origin_repo(root)
+    sites = find_sites(names)
+
+    def reader_facing(file):
+
+        if Path(file).suffix.lower() == ".mdx": return True
+        site = site_of(file, sites)
+        if not site or re.match(r"(?i)(?:README|CONTRIBUTING|AGENTS|CLAUDE|SECURITY)\b", PurePosixPath(file).name): return False
+        return site.kind in {"vitepress", "vuepress"} or any(b and file.startswith(b + "/") for b in site.bases)
+
+    skill_roots = {str(PurePosixPath(p).parent) for p in names if PurePosixPath(p).name == "SKILL.md"} - {"."}
+
+    def shipped_skill(file):
+
+        parts = PurePosixPath(file).parts
+        if any(part.startswith(".") for part in parts[:-1]): return False
+        return any(str(a) in skill_roots for a in PurePosixPath(file).parents)
+
+    for file in files:
+        if not markdown(file) or file not in content or CHANGELOG.search(file): continue
+        text=content[file]
+
+        spans = []
+        if rst(file):
+            lines, clean, shell = rst_scan(text)
+            for n, line in enumerate(lines, 1):
+                if n in shell:
+                    spans.append((n, len(line) - len(line.lstrip()), line.strip(), True))
+                elif clean[n - 1]:
+                    spans.extend((n, m.start(), m.group(1), False) for m in RST_INLINE_LITERAL.finditer(line))
+            text = ""
+        fence_char, fence_len, fence_lang = "", 0, ""
+        spans.extend((n, col, code, False) for n, col, code in inline_code_spans(text))
+
+        elsewhere, other_block = {}, False
+        body = text.splitlines()
+        for n, line in enumerate(body, 1):
+            marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+            if not fence_char:
+                if marker:
+                    fence_char, fence_len = marker.group(1)[0], len(marker.group(1))
+                    info = marker.group(2).strip().lower().split()
+                    fence_lang = info[0].strip("{}") if info else ""
+                    lead = []
+                    for prev in reversed(body[:n - 1]):
+                        if not prev.strip():
+                            if lead: break
+                            continue
+                        lead.append(prev)
+                        if len(lead) == 3: break
+                    other_block = bool(OTHER_REPO.search(" ".join(reversed(lead))))
+                    continue
+                continue
+            if (marker and marker.group(1)[0] == fence_char
+                    and len(marker.group(1)) >= fence_len and not marker.group(2).strip()):
+                fence_char, fence_len, fence_lang, other_block = "", 0, "", False
+            elif fence_lang in SHELL_LANGS:
+                if other_block: elsewhere[n] = "the text says it runs in another repo"
+                prompt = re.match(r"^\s*[$%]\s+", line)
+
+                if fence_lang in PROMPT_LANGS and not prompt: continue
+                spans.append((n, prompt.end() if prompt else 0, line[prompt.end():] if prompt else line, True))
+        foreign = shipped_skill(file)
+        start = len(out)
+        source_lines = content[file].splitlines()
+        created = set()
+        for n, col, _token, shell_line in spans:
+            ctx = source_lines[n - 1] if n <= len(source_lines) else ""
+            if shell_line:
+                if foreign: elsewhere.setdefault(n, "the skill may run in another repo")
+                continue
+            others = {m.group(1).lower() for m in GITHUB_REPO.finditer(ctx)}
+            if OTHER_REPO.search(ctx) or (own_repo and others - {own_repo}):
+                elsewhere.setdefault(n, "the line names another repo")
+            if CREATES.search(ctx[:col]): created.add((n, col + 1))
+
+        command_level, command_hint = ("note", "; the skill may run in another repo") if foreign else ("warn", "")
+        for n, col, token, shell_line in spans:
+            if shell_line:
+                token = re.sub(r"(?:^|\s)#.*$", "", token).strip()
+            else:
+                token = token.strip("'\"()[]{},;").rstrip(".")
+                if PLACEHOLDER.search(token): continue
+            if not token: continue
+            words = token.split()
+            invoked = invoked_scripts([w.strip("'\"") for w in words])
+            if not shell_line and len(words) == 1 and (words[0][:1] in "'\"" or re.fullmatch(r"\./[\w.-]+", words[0])):
+
+                invoked = []
+            for word in words:
+                if word.strip("'\"") in invoked: continue
+                if "=" in word: word = word.split("=", 1)[1]
+                elif word.startswith("-"): continue
+                word = re.sub(r":\d+(?:-\d+)?$", "", word.strip("'\"()[]{},;").rstrip("."))
+                normalized = word.removeprefix("./").rstrip("/")
+                if ("/" not in normalized or NOT_PATH.search(word) or word.startswith(("~", "/", "$"))
+                        or URL_SCHEME.match(word) or PLACEHOLDER.search(word)):
+                    continue
+                beside = os.path.normpath(str(PurePosixPath(file).parent / normalized)).replace("\\", "/")
+
+                if beside == ".." or beside.startswith("../") or os.path.normpath(normalized).startswith(".."): continue
+                if HOSTNAME.match(normalized): continue
+                first = normalized.split("/")[0]
+                beside_first = os.path.normpath(str(PurePosixPath(file).parent / first)).replace("\\", "/")
+                local_top = first in dirs or beside_first in dirs
+
+                if not (FILE_EXT.search(normalized) or local_top):
+                    continue
+                if first in GENERATED_DIRS and first not in dirs: continue
+
+                if (first in deps or "/".join(normalized.split("/")[:2]) in deps) and not (local_top and FILE_EXT.search(normalized)): continue
+                if not path_exists(normalized, file, names, dirs, suffixes) and not on_disk(normalized, file):
+                    if local_top:
+                        add(out, "R001", "warn", file, n, col+1, "repo path is not tracked", word)
+                    else:
+
+                        add(out, "R005", "note", file, n, col+1, "path is not in this repo; another repo?", word)
+            for cmd in commands_in([w.strip("'\"") for w in words]):
+                cmd = command_head(cmd)
+                if not cmd: continue
+                if cmd[0] == "make" and have_makefile:
+                    i = 1
+                    while i < len(cmd):
+                        w = cmd[i]
+                        if w in {"-C", "-f", "--file", "--directory", "-j", "-I"}:
+
+                            if w in {"-C", "-f", "--file", "--directory"}: break
+                            i += 2 if i + 1 < len(cmd) and cmd[i + 1].isdigit() else 1
+                            continue
+                        if w.startswith("-") or "=" in w: i += 1; continue
+                        if not re.fullmatch(r"[A-Za-z0-9_.-]+", w) or PLACEHOLDER.search(w) or w.startswith(("<", ">")): break
+                        if w not in make_targets:
+                            add(out, "R002", command_level, file, n, col+1, "make target is not declared" + command_hint, w)
+                        i += 1
+                call = package_script(cmd) if have_package else None
+                if call:
+                    tool, script, explicit = call
+                    if (re.fullmatch(r"[A-Za-z0-9_:.@/-]+", script) and not PLACEHOLDER.search(script)
+                            and script not in scripts and (explicit or script not in runnable)
+                            and not (tool == "bun" and ("/" in script or "." in script))):
+                        hint = get_close_matches(script, sorted(scripts), n=1)
+                        add(out, "R006", command_level, file, n, col+1,
+                            "package.json script is not declared" + (f"; did you mean {hint[0]}?" if hint else "") + command_hint, f"{tool} {script}")
+            for cmd in commands_in(words):
+                cmd = command_head(cmd)
+                if len(cmd) < 2 or cmd[0] != "cargo": continue
+                for i, w in enumerate(cmd[:-1]):
+                    if w in {"-p", "--package"} and re.fullmatch(r"[A-Za-z0-9_-]+", cmd[i + 1]) and cmd[i + 1] not in cargo_names:
+                        add(out, "R003", command_level, file, n, col+1, "cargo package is not declared" + command_hint, cmd[i + 1])
+            for path in invoked:
+                if path.startswith("./"): path = path[2:]
+                if path.startswith("-") or NOT_PATH.search(path) or PLACEHOLDER.search(path) or re.fullmatch(r"[A-Z][A-Z_]*", path): continue
+                if path.endswith("/") or (path.split("/")[0] in GENERATED_DIRS and path.split("/")[0] not in dirs): continue
+                if not path_exists(path, file, names, dirs, suffixes) and not on_disk(path, file):
+                    if "/" not in path:
+
+                        add(out, "R005", "note", file, n, col+1, "invoked script is not in this repo; one the reader creates?", path)
+                    else:
+                        add(out, "R004", "warn", file, n, col+1, "invoked script is not tracked", path)
+        reader_page = reader_facing(file)
+        out[start:] = [demoted(f, elsewhere[f.line]) if f.line in elsewhere
+                       else demoted(f, "a docs-site page may describe the reader's project") if reader_page and f.code in {"R001", "R004"}
+                       else demoted(f, "the text has the reader create it") if f.code == "R001" and (f.line, f.col) in created
+                       else f for f in out[start:]]
+    return out
+
+
+
+EMBED = re.compile(r"\b(?:include_str|include_bytes|include)!|#\s*include\b|\bgo:embed\b|\bembed\s*\(")
+CONFIG_EXTS = {".toml", ".yaml", ".yml", ".json", ".cfg", ".ini", ".txt", ".in", ".mk"}
+DOC_LITERAL = re.compile(r"(?<![\w/.@+-])((?:\.{1,2}/)*[\w@+-][\w.@+-]*(?:/[\w.@+-]+)*\.(?:mdx?|markdown|rst))(?![\w])", re.I)
+
+
+def consumer_findings(files, content):
+    out = []
+    seen = set()
+    targets = {p for p in files if markdown(p) and not LEGAL.search(p)}
+    docs = {p for p in content if markdown(p)} | targets
+    by_name = {}
+    for doc in docs:
+        by_name.setdefault(Path(doc).name, []).append(doc)
+    for file, text in content.items():
+        if markdown(file): continue
+        here = PurePosixPath(file).parent
+        for n, line in enumerate(text.splitlines(), 1):
+            for m in DOC_LITERAL.finditer(line):
+                literal = m.group(1)
+
+                candidates = [os.path.normpath(str(here / literal)).replace("\\", "/")]
+
+                if "/" in literal or str(here) == "." or Path(file).suffix.lower() in CONFIG_EXTS:
+                    candidates.append(literal.removeprefix("./"))
+                resolved = next((c for c in candidates if c in docs), None)
+                left = line[max(0, m.start()-80):m.start()]
+                kind = "C001" if re.search(EMBED, left) else "C002" if re.search(r"\b(?:read|open|load|parse)\w*\s*\([^)]*$", left) else "C003"
+                if resolved:
+                    if resolved not in targets: continue
+                    target_text = resolved
+                else:
+
+                    same = by_name.get(literal, []) if "/" not in literal else []
+                    if kind == "C003" or len(same) != 1 or same[0] not in targets: continue
+                    target_text = f"{same[0]} (name only)"
+                message = {"C001":"embedded documentation can affect built output", "C002":"read documentation can affect a check", "C003":"literal consumer may affect generated data"}[kind]
+
+                if kind == "C003" and (file, target_text) in seen: continue
+                seen.add((file, target_text))
+                add(out, kind, "note" if kind == "C003" else "warn", file, n, m.start(1)+1, message, target_text)
+    return out
+
+
+COMMENT_EXTS = {".py", ".sh", ".bash", ".toml", ".yaml", ".yml", ".mk", ".rb", ".sql", ".lua", ".rs", ".c", ".h", ".cc", ".cpp", ".go", ".java", ".js", ".ts", ".kdl", ".html"}
+DOC_POINTER = re.compile(r"(?:\b(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:mdx?|rst)\b|\bdocs/[\w./-]+|\bREADME(?:\.(?:mdx?|rst))?\b|\bAGENTS\.md\b)")
+
+
+RUST_RAW = re.compile(r'r(#*)"')
+RUST_CHAR = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'")
+
+
+def source_comments(file, text):
+    ext=Path(file).suffix.lower()
+    line_comments={".py":"#",".sh":"#",".bash":"#",".toml":"#",".yaml":"#",".yml":"#",".mk":"#",".rb":"#",".sql":"--",".lua":"--"}
+    marker="<!--" if ext==".html" else line_comments.get(ext,"//")
+    block_comments=ext not in line_comments and ext!=".html"
+    char_literals=ext in {".rs",".c",".h",".cc",".cpp",".go",".java"}
+    newlines=[m.start() for m in re.finditer("\n",text)]
+    def line_at(pos): return bisect_right(newlines,pos-1)+1
+    result=[]; i=0; n=len(text)
+    while i<n:
+        c=text[i]
+        if block_comments and text.startswith("/*",i):
+            end=text.find("*/",i+2); end=n if end<0 else end
+            result.append((line_at(i),text[i+2:end])); i=end+2; continue
+        if text.startswith(marker,i):
+            end=text.find("\n",i); end=n if end<0 else end
+            if ext==".html":
+                close=text.find("-->",i+4)
+                end=n if close<0 else close
+            result.append((line_at(i),text[i+len(marker):end])); i=end+1; continue
+        if c=="r" and ext==".rs" and (i==0 or not (text[i-1].isalnum() or text[i-1]=="_")):
+            raw=RUST_RAW.match(text,i)
+            if raw:
+                end=text.find('"'+raw.group(1),raw.end())
+                i=n if end<0 else end+1+len(raw.group(1)); continue
+        if c=="'" and char_literals:
+
+            char=RUST_CHAR.match(text,i)
+            i=char.end() if char else i+1; continue
+        if c=="'" and ext in line_comments and ext!=".py" and i and text[i-1].isalnum():
+            i+=1; continue
+        if c in "\"'`":
+            width=3 if text.startswith(c*3,i) else 1
+
+            multiline=width==3 or c=="`" or ext in {".sh",".bash"} or (ext==".rs" and c=='"')
+            i+=width
+            while i<n:
+                if text[i]=="\\": i+=2; continue
+                if text[i]=="\n" and not multiline: break
+                if text.startswith(c*width,i): i+=width; break
+                i+=1
+            continue
+        i+=1
+    if ext==".py":
+        try:
+            tree=ast.parse(text)
+            for node in ast.walk(tree):
+                body=getattr(node,"body",None)
+                if isinstance(body,list) and body and isinstance(body[0],ast.Expr) and isinstance(body[0].value,ast.Constant) and isinstance(body[0].value.value,str):
+                    result.append((body[0].lineno,body[0].value.value))
+        except (SyntaxError, ValueError, RecursionError, MemoryError): pass
+    return result
+
+
+SECTION_POINTER = re.compile(r"(?:§\s*|\b(?:section|sec\.|clause|chapter|milestone)\s+)\d+(?:\.\d+)*[a-z]?\b", re.I)
+
+STANDARD = re.compile(r"\b(?:RFCs?|PEPs?|ISO|IEC|IEEE|ECMA\w*|POSIX|W3C|WHATWG|IETF|SARIF|Unicode|UAX|UTS|TR\d+|OAuth|OpenAPI|Promises/A\+|spec\w*|standards?)\b|https?://", re.I)
+
+PLAN_LABEL = re.compile(r"\b(?:M\d{1,2}|Phase\s+\d+)\b")
+PLAN_WORDS = re.compile(r"\b(?:milestones?|roadmap|plan(?:ned|s)?|rollout|TODO|FIXME|XXX|follow[- ]?ups?|defer(?:red)?|not yet|for now|temporar(?:y|ily)|later|until|ships?|lands?)\b", re.I)
+VENDORED = re.compile(r"(?:^|/)(?:vendor(?:ed)?|third[_-]party|node_modules|external)/|\.min\.js$|(?:^|/)lib\.[\w.]+\.d\.ts$")
+
+
+def sentence_around(text, start, end, reach=400):
+
+    lo, hi = max(0, start - reach), min(len(text), end + reach)
+    left = max(lo - 1, text.rfind(". ", lo, start), text.rfind(".\n", lo, start), text.rfind("\n\n", lo, start))
+    right = min((i for i in (text.find(". ", end, hi), text.find(".\n", end, hi), text.find("\n\n", end, hi)) if i >= 0), default=hi)
+    return text[left + 1:right]
+
+
+def comment_blocks(file, text):
+
+    blocks: list[list[Any]] = []
+    for n, comment in source_comments(file, text):
+        if blocks and n == blocks[-1][1] and "\n" not in comment:
+            blocks[-1][2].append(comment); blocks[-1][1] += 1
+        else:
+            blocks.append([n, n + comment.count("\n") + 1, [comment]])
+    return [(start, "\n".join(parts)) for start, _next, parts in blocks]
+
+
+def pointer_findings(files, content, labels=()):
+    out = []
+    tracked = set(files)
+    dirs, _suffixes = path_index(tracked)
+    by_name = {}
+    for p in tracked:
+        by_name.setdefault(Path(p).name, []).append(p)
+    custom_re = re.compile(r"\b(?:" + "|".join(labels) + r")\b", re.I) if labels else None
+    for file, text in content.items():
+        ext = Path(file).suffix.lower()
+
+        if ext not in COMMENT_EXTS or VENDORED.search(file): continue
+        here = PurePosixPath(file).parent
+        for n, comment in comment_blocks(file, text):
+            breaks = [i for i, c in enumerate(comment) if c == "\n"] if "\n" in comment else []
+            def line_at_offset(pos, start_line=n, line_breaks=breaks):
+                return start_line + bisect_right(line_breaks, pos - 1)
+            for m in DOC_POINTER.finditer(comment):
+                target = m.group().rstrip("./")
+                start = max(comment.rfind(" ", 0, m.start()), comment.rfind("\n", 0, m.start())) + 1
+                token = comment[start:m.end()].split()[-1] if comment[start:m.end()].split() else target
+
+                if re.search(r"://|[*{}$<>]", token) or token.startswith(("/", "~")): continue
+                beside = os.path.normpath(str(here / target)).replace("\\", "/")
+                line = line_at_offset(m.start())
+                if target in tracked or beside in tracked:
+                    add(out, "P001", "note", file, line, 1, "comment points to repository documentation", target)
+                elif "/" not in target:
+                    same = by_name.get(target, [])
+
+                    if len(same) == 1 or any(str(PurePosixPath(p).parent) == str(here) for p in same):
+                        add(out, "P001", "note", file, line, 1, "comment points to repository documentation", target)
+                elif target not in dirs and beside not in dirs and markdown(target):
+                    first = target.split("/")[0]
+                    if first in dirs or os.path.normpath(str(here / first)).replace("\\", "/") in dirs:
+                        add(out, "P004", "warn", file, line, 1, "comment points to a missing document", target)
+            quoted = comment.lstrip()[:1] in "\"\u201c>"
+            for m in SECTION_POINTER.finditer(comment):
+
+                context = comment if m.group().startswith("§") else sentence_around(comment, m.start(), m.end())
+                if quoted or STANDARD.search(context): continue
+                add(out, "P002", "warn", file, line_at_offset(m.start()), 1, "comment points to a numbered section", " ".join(m.group().split()))
+            for m in PLAN_LABEL.finditer(comment):
+                if PLAN_WORDS.search(sentence_around(comment, m.start(), m.end())):
+                    add(out, "P003", "warn", file, line_at_offset(m.start()), 1, "comment uses a planning label", m.group())
+            for m in (custom_re.finditer(comment) if custom_re else ()):
+                add(out, "P003", "warn", file, line_at_offset(m.start()), 1, "comment uses a planning label", m.group())
+    return out
+
+
+def words(block):
+    return re.findall(r"[\w]+", re.sub(r"[`*_~#>|\[\]()!-]", " ", block).lower())
+
+
+def dup_findings(files, content, code=False):
+    blocks = []
+    for file in files:
+        text = content.get(file)
+
+        if text is None or LEGAL.search(file) or CHANGELOG.search(file) or generated(text): continue
+        if rst(file) and not code:
+            raw, clean, _shell = rst_scan(text)
+            text = "\n".join(c if c or not r.strip() else "\0" for r, c in zip(raw, clean))
+        chunks = re.split(r"\n\s*\n", text)
+        offset = 1
+        for chunk in chunks:
+            start = offset
+            line_count=max(1,len(chunk.splitlines()))
+            end=start+line_count-1
+            offset += line_count + 1
+            if not code and (re.search(r"(?m)^\s*(```|~~~)", chunk) or "\0" in chunk.replace("\0\0", "")): continue
+            w = words(chunk)
+            rows = [re.sub(r"\s+", " ", row.strip().lower()) for row in re.findall(r"(?m)^\s*\|.*\|\s*$", chunk)]
+            if len(w) >= 40 or len(rows) >= 3:
+                shingles = set(tuple(w[i:i+8]) for i in range(len(w)-7))
+                blocks.append((file, start, end, shingles, len(w), chunk, set(rows)))
+    postings = {}
+    for index, block in enumerate(blocks):
+        for shingle in block[3]:
+            postings.setdefault((0, shingle), []).append(index)
+        for row in block[6]:
+            postings.setdefault((1, row), []).append(index)
+    out = []
+    pairs = []
+    for i, a in enumerate(blocks):
+        candidates = set()
+        for shingle in a[3]:
+            candidates.update(j for j in postings[(0, shingle)] if j > i)
+        for row in a[6]:
+            candidates.update(j for j in postings[(1, row)] if j > i)
+        for j in sorted(candidates):
+            b = blocks[j]
+            shared = len(a[3] & b[3])
+            union_size = len(a[3]) + len(b[3]) - shared
+            sim = shared / union_size if union_size else 0
+            shared_rows = len(a[6] & b[6])
+            row_union_size = len(a[6]) + len(b[6]) - shared_rows
+            row_similarity = shared_rows / row_union_size if row_union_size else 0
+            if sim >= .8 and a[4] >= 40 and b[4] >= 40 or row_similarity >= .8 and len(a[6]) >= 3 and len(b[6]) >= 3:
+                pairs.append((i, j))
+
+    parent = list(range(len(blocks)))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]; x = parent[x]
+        return x
+    for i, j in pairs:
+        parent[find(j)] = find(i)
+    groups = {}
+    for i, j in pairs:
+        groups.setdefault(find(i), set()).update((i, j))
+    for members in groups.values():
+
+        first, *rest = sorted(members)
+        a = blocks[first]
+        where = [f"{blocks[j][0]}:{blocks[j][1]}-{blocks[j][2]}" for j in rest]
+        more = f" (+{len(where) - 3} more)" if len(where) > 3 else ""
+        message = "documentation blocks substantially overlap" + (f"; {len(members)} copies" if len(members) > 2 else "")
+        add(out, "D001", "note", a[0], a[1], 1, message, ", ".join(where[:3]) + more)
+    return out
+
+
+def router_findings(files, content, max_lines=150, tracked=None):
+    out=[]
+
+    def shallow(paths):
+        return min(paths, key=lambda path: (path.count("/"), path), default=None)
+    agents = shallow([p for p in files if Path(p).name == "AGENTS.md"])
+    readme = shallow([p for p in files if Path(p).name.lower() in README_NAMES])
+    docs = [p for p in files if p.startswith("docs/") and markdown(p) and p in content]
+    if not agents:
+        add(out,"T000","note",".",1,1,"repository has no AGENTS.md","AGENTS.md")
+        return out
+    at = content.get(agents, "")
+    if len(at.splitlines()) > max_lines:
+        add(out,"T002","note",agents,max_lines+1,1,"AGENTS.md exceeds the line limit",str(len(at.splitlines())))
+    _raw, lines = visible_lines(at)
+    lines = [line if line or not raw.strip() else "\0" for raw, line in zip(_raw, lines)]
+    titles = sum(1 for line in lines if re.match(r"^#\s+", line))
+    for i,line in enumerate(lines):
+        heading=re.match(r"^(#{1,6})\s+(.+)",line)
+        if not heading or re.search(r"\b(map|layout)\b",heading.group(2),re.I): continue
+
+        if len(heading.group(1)) == 1 and titles == 1: continue
+        end=i+1
+        while end<len(lines):
+            nxt=re.match(r"^(#{1,6})\s+",lines[end])
+            if nxt and len(nxt.group(1))<=len(heading.group(1)): break
+            end+=1
+        if end-i>30:
+            add(out,"T002","note",agents,i+1,1,"router section exceeds 30 lines",heading.group(2))
+    targets=set()
+    linked=set()
+
+    known=set(files) | set(tracked or ())
+    sources=[p for p in (agents,readme) if p and p in content]
+    for source in sources:
+        text=content[source]
+        candidates=[]
+        def line_of(offset, source_text=text):
+            return source_text.count("\n", 0, offset) + 1
+        for m in re.finditer(r"\[[^]]*\]\(([^)#]+)(?:#[^)]*)?\)|`((?:docs/)?[^`]+\.(?:mdx?|markdown|rst))`",text):
+
+            if m.group(2) and "/" not in m.group(2): continue
+            candidates.append((line_of(m.start()), (m.group(1) or m.group(2)).strip()))
+        if rst(source):
+            for m in re.finditer(r"`[^`<]*<([^<>`#]+)(?:#[^<>`]*)?>`__?|^\s*\.\.\s+_[^:]+:\s+(\S+)\s*$",text,re.M):
+                candidates.append((line_of(m.start()), (m.group(1) or m.group(2)).strip()))
+        missing=set()
+        for n,target in candidates:
+            if target.startswith(("http://","https://","mailto:")) or re.search(r"[*?\[<>{}]",target) or HOSTNAME.match(target): continue
+
+            joined=target.lstrip("/") if target.startswith("/") else str(PurePosixPath(source).parent / target)
+            normalized=os.path.normpath(joined).replace("\\","/")
+            if normalized.startswith("../") or normalized=="..": continue
+            if source==agents: targets.add(normalized)
+            if markdown(normalized):
+                if normalized not in content and normalized not in known:
+                    if target not in missing:
+                        missing.add(target)
+                        add(out,"T004","warn",source,n,1,"router names a missing document",target)
+                elif normalized in content:
+                    linked.add(normalized)
+    reached=set(targets)
+    queue=[t for t in targets if rst(t) and t in content]
+    while queue:
+        doc=queue.pop()
+        for _n,_col,entry in rst_toctree(content[doc]):
+            base=os.path.normpath((PurePosixPath(doc).parent/entry).as_posix()).replace("\\","/")
+            for candidate in (base,*(base+ext for ext in sorted(EXTS))):
+                if candidate in content and candidate not in reached:
+                    reached.add(candidate); queue.append(candidate)
+
+    docs=[doc for doc in docs if Path(doc).name not in {"AGENTS.md","CLAUDE.md"} and not CHANGELOG.search(doc)]
+
+    site_dirs=sorted({b for site in find_sites(set(files) | set(tracked or ())).values() for b in site.bases if b.startswith("docs/") or b=="docs"}
+                     | {src for src,*_ in sphinx_projects(content) if src.startswith("docs")}, key=len, reverse=True)
+    def site_of_doc(doc):
+        return next((directory for directory in site_dirs if doc.startswith(directory + "/")), None)
+    routed_sites={site_of_doc(t) for t in targets} | {t for t in targets if t in site_dirs}
+    unlinked=[]
+    for doc in docs:
+        if doc in reached or any(str(a) in targets for a in PurePosixPath(doc).parents if str(a) != "."): continue
+        site=site_of_doc(doc)
+        if site is None: unlinked.append(doc)
+        elif site not in routed_sites:
+            routed_sites.add(site)
+            add(out,"T001","warn",agents,1,1,"docs site is not linked",site+"/")
+
+    by_tree={}
+    for doc in unlinked:
+        parts=doc.split("/")
+        by_tree.setdefault("/".join(parts[:2]) if len(parts) > 2 else doc, []).append(doc)
+    for tree,members in sorted(by_tree.items()):
+        if len(members) > 5:
+            add(out,"T001","warn",agents,1,1,"docs subtree is not linked",tree+"/")
+        else:
+            for doc in members:
+                add(out,"T001","warn",agents,1,1,"docs file is not linked directly",doc)
+    for doc in linked:
+        text=content.get(doc,"")
+        remainder=re.sub(r"(?m)^\s*#.*$|\[[^]]*\]\([^)]*\)|`[^`]*`|\s+","",text)
+        if len(remainder)<40:
+            add(out,"T005","note",doc,1,1,"linked document is short or only links elsewhere",doc)
+    if readme and readme in content and rst(readme):
+        for line,_level,_slug,title in rst_headings(content[readme])[0]:
+            if re.search(r"(?i)\b(build|develop|contribut|architecture|layout|internals|invariant|testing)\b",title):
+                add(out,"T003","note",readme,line,1,"README has a developer-topic heading",title)
+    elif readme and readme in content:
+        text=content[readme]
+        for m in re.finditer(r"(?mi)^#{1,6}\s+.*\b(build|develop|contribut|architecture|layout|internals|invariant|testing)\b",text):
+            add(out,"T003","note",readme,text.count("\n",0,m.start())+1,1,"README has a developer-topic heading",m.group().strip())
+        for m in re.finditer(r"(?s)```.*?\b(?:make\s+ci|cargo\s+test|cargo\s+xtask)\b.*?```",text):
+            add(out,"T003","note",readme,text.count("\n",0,m.start())+1,1,"README contains a developer test command",m.group().splitlines()[0])
+    return out
+
+
+def read_set(root, paths):
+    content, unreadable = {}, []
+    for file in paths:
+        try:
+            value=safe_read(root,file)
+            if value is None: continue
+            content[file]=value
+        except (OSError,ValueError):
+
+            if not ((root/file).is_dir() or (os.path.islink(root/file) and not markdown(file))): unreadable.append(file)
+    return content, unreadable
+
+
+def old_tree(root, rev):
+    entries=run_git(root,["ls-tree","-r","-z","--full-tree",rev])
+    blobs=[]
+    for record in entries.split(b"\0"):
+        if not record: continue
+        meta,path=record.split(b"\t",1)
+        mode,kind,oid=meta.split()
+        if kind == b"blob": blobs.append((path.decode("utf-8","surrogateescape"),oid.decode()))
+    raw=run_git(root,["cat-file","--batch"],("".join(oid+"\n" for _,oid in blobs)).encode())
+    pos=0; data={}
+    for path,_oid in blobs:
+        end=raw.index(b"\n",pos); header=raw[pos:end].split(); size=int(header[2]); start=end+1
+        body=raw[start:start+size]; pos=start+size+1
+        if size<=MAX_BYTES and b"\0" not in body[:8192]: data[path]=body.decode("utf-8","replace")
+    return data
+
+
+def symlink_aliases(root, paths):
+
+    tracked, real = set(paths), root.resolve()
+    aliases = set()
+    for p in paths:
+        if not markdown(p) or not os.path.islink(root / p): continue
+        try:
+            target = (root / p).resolve(strict=True).relative_to(real).as_posix()
+        except (OSError, ValueError):
+            continue
+        if target in tracked and target != p: aliases.add(p)
+    return aliases
+
+
+def ignored_key(f):
+
+    if f.code in {"R001", "R004", "R005"}: return f.target.removeprefix("./")
+    if f.code in {"L001", "T004"} and not URL_SCHEME.match(f.target):
+        path = unquote(f.target.partition("#")[0])
+        if not path: return None
+        return os.path.normpath(path.lstrip("/") if path.startswith("/") else (PurePosixPath(f.file).parent / path).as_posix()).replace("\\", "/")
+    return None
+
+
+def drop_ignored(root, findings):
+
+    targets = {k for k in map(ignored_key, findings) if k}
+
+    targets = {t for t in targets if t and not os.path.normpath(t).startswith(("..", "/"))}
+    if not targets: return findings
+
+    paths = sorted(targets | {t.rstrip("/") + "/" for t in targets})
+    try:
+        p = subprocess.run(["git", "-C", str(root), "check-ignore", "--no-index", "--stdin", "-z"],
+                           input="\0".join(paths).encode("utf-8", "surrogateescape"),
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except OSError:
+        return findings
+    if p.returncode not in (0, 1):
+
+        out = b""
+        for path in paths:
+            try:
+                q = subprocess.run(["git", "-C", str(root), "check-ignore", "--no-index", "-z", "--", path],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            except OSError:
+                return findings
+            if q.returncode == 0: out += q.stdout
+        p = subprocess.CompletedProcess(p.args, 0, out, b"")
+    ignored = {x.decode("utf-8", "surrogateescape") for x in p.stdout.split(b"\0") if x}
+    ignored |= {x.rstrip("/") for x in ignored}
+    return [f for f in findings if (ignored_key(f) or "\0").rstrip("/") not in ignored]
+
+
+def managed_skills(root, content):
+
+    text = content.get("agents.toml")
+    if text is None:
+        try: text = (root / "agents.toml").read_text(encoding="utf-8", errors="replace")
+        except OSError: text = ""
+    managed = {}
+    for block in re.split(r"(?m)^\s*\[\[skills\]\]\s*$", text)[1:]:
+        block = re.split(r"(?m)^\s*\[", block)[0]
+        name = re.search(r"""(?m)^\s*name\s*=\s*["']([^"']+)["']""", block)
+        source = re.search(r"""(?m)^\s*source\s*=\s*["']([^"']+)["']""", block)
+        if name and source and not source.group(1).startswith("path:"):
+            managed[f".agents/skills/{name.group(1)}/"] = source.group(1)
+    return managed
+
+
+def demote_records(root, findings, content):
+
+
+    managed = managed_skills(root, content)
+    result = []
+    for f in findings:
+        source = next((src for prefix, src in managed.items() if f.file.startswith(prefix)), None)
+        if source:
+            f = demoted(f, f"managed by dotagents from {source}; fix it upstream")
+        elif CHANGELOG.search(f.file):
+            f = demoted(f, "release history is a dated record")
+        elif PurePosixPath(f.file).name == "SOURCES.md" and f.code[0] in "LR":
+            f = demoted(f, "provenance names upstream paths")
+        result.append(f)
+    return result
+
+
+def check_command(command, root, files, content, opts, tracked=None):
+    if command == "links": return link_findings(root, [p for p in files if markdown(p)], content, tracked)
+    if command == "refs": return ref_findings(files, content, tracked, root)
+    if command == "consumers": return consumer_findings(files, content)
+    if command == "pointers": return pointer_findings(files, content, opts.label or [])
+    if command == "dups":
+        aliases = getattr(opts, "aliases", set())
+        return dup_findings([p for p in files if markdown(p) and p not in aliases], content, opts.code)
+    if command == "router": return router_findings(files, content, opts.max_lines, tracked)
+    return []
+
+
+def all_check_findings(root, files, content, opts, tracked):
+    docs = [p for p in files if markdown(p)]
+    findings = []
+    scope = set(files)
+    doc_names = {Path(p).name for p in docs}
+    for command in CHECKS:
+        inputs = tracked if command in {"router", "dups", "pointers"} else docs
+        results = check_command(command, root, inputs, content, opts, tracked)
+        if opts.paths and command in {"router", "dups"}:
+            results = [f for f in results if f.file in scope or f.target in scope
+                       or (command == "dups" and any(t.split(" (+")[0].rsplit(":", 1)[0] in scope for t in f.target.split(", ")))]
+        if opts.paths and command == "pointers":
+            wanted = [os.path.normpath(p).replace(os.sep, "/") for p in opts.paths]
+            results = [f for f in results if f.file in scope
+                       or (f.code == "P001" and (f.target in scope
+                           or ("/" not in f.target and f.target in doc_names)))
+
+                       or (f.code == "P004" and any(w == "." or f.target == w or f.target.startswith(w + "/") for w in wanted))]
+        findings.extend(results)
+
+    broken = {(f.file, f.line, f.target) for f in findings if f.code == "L001"}
+    return [f for f in findings if not (f.code == "T004" and (f.file, f.line, f.target) in broken)]
+
+
+def emit(findings, total_files, quiet=False, json_mode=False, extra="", verbose=False):
+    findings.sort(key=lambda f:(f.file,f.line,f.col,f.code,f.target))
+    if json_mode:
+        for f in findings:
+            print(json.dumps({"code":f.code,"severity":f.severity,"file":f.file,"line":f.line,"col":f.col,"message":f.message,"target":f.target},ensure_ascii=False))
+    elif verbose:
+        for f in findings: print(f"{f.file}:{f.line}:{f.col}: {f.severity} {f.code} {f.message}: {f.target}")
+    else:
+        groups = {}
+        for f in findings:
+            groups.setdefault((f.severity, f.code, f.message), {}).setdefault(f.target, []).append(f)
+        hidden = 0
+        for (severity, code, message), targets in sorted(groups.items(), key=lambda item: ({"error":0,"warn":1,"note":2}[item[0][0]], item[0][1:])):
+            count = sum(len(items) for items in targets.values())
+            print(f"{severity} {code} {message} ({count})")
+            for target, items in sorted(targets.items()):
+                locations = {}
+                for f in items[:8]:
+                    locations.setdefault(f.file, []).append(f"{f.line}:{f.col}")
+                where = "; ".join(f"{file}:" + ",".join(rows) for file, rows in locations.items())
+                omitted = len(items) - 8
+                if omitted > 0:
+                    where += f"; +{omitted} occurrences"
+                    hidden += omitted
+                print(f"  {target} — {where}")
+        if hidden:
+            print(f"{hidden} locations omitted; use --verbose or --json for all locations")
+    if not quiet:
+        files={f.file for f in findings}
+        counts=Counter(f.severity for f in findings)
+        print(f"{len(findings)} findings ({counts['error']} errors, {counts['warn']} warnings, {counts['note']} notes); files checked: {total_files}, files with findings: {len(files)}" + (f"; {extra}" if extra else ""),file=sys.stderr)
+    return 1 if any(f.severity == "error" for f in findings) else 0
+
+
+def build_parser():
+    parser=argparse.ArgumentParser(
+        prog="mdtool",
+        description="Read-only audit of a repository's Markdown, MDX, reStructuredText, and the code that depends on those docs. Writes nothing and uses no network; the only subprocess is read-only git.",
+        epilog="Examples:\n"
+               "  mdtool\n"
+               "  mdtool check docs/\n"
+               "  mdtool check --since HEAD\n"
+               "  mdtool links README.md\n"
+               "  mdtool anchors docs/router.md\n"
+               "  mdtool refs --json\n"
+               "  mdtool consumers skills/mine/SKILL.md\n"
+               "Exit status is 0 for no error findings, 1 for at least one, and 2 for a usage, root, or git failure. "
+               "Warnings and notes never change it. Full docs: tools/mdtool/README.md.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"),nargs="?",default="check",help="check (default): all checks; commands: print check names; selftest: embedded tests")
+    parser.add_argument("paths",nargs="*",help="repo-relative files or directories to report; check and consumers read the whole repo for context")
+    parser.add_argument("--root",default=None,help="repository root; defaults to the git top level, or the current directory outside git")
+    parser.add_argument("--untracked",action="store_true",help="include untracked, non-ignored files")
+    parser.add_argument("--since",help="drop findings already present at REV, read without a checkout; not valid for anchors")
+    parser.add_argument("--json",action="store_true",help="one JSON object per finding (mutually exclusive with --verbose)")
+    parser.add_argument("--verbose",action="store_true",help="one text finding per line (mutually exclusive with --json)")
+    parser.add_argument("--ignore",action="append",default=[],help="drop a finding code; repeatable")
+    parser.add_argument("--quiet",action="store_true",help="suppress the summary line")
+    parser.add_argument("--label",action="append",help="extra pointers labels (pointers only)")
+    parser.add_argument("--code",action="store_true",help="dups over fenced code (dups only)")
+    parser.add_argument("--max-lines",type=int,help="AGENTS.md line limit for the router check (router only)")
+    return parser
+
+
+def main(argv=None):
+    parser=build_parser()
+    args=parser.parse_intermixed_args(argv)
+    if args.command == "commands":
+        if args.paths or args.root or args.since or args.untracked or args.json or args.verbose or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
+            parser.error("commands takes no options")
+        print("\n".join(COMMANDS)); return 0
+    if args.command == "selftest":
+        if args.paths or args.root or args.since or args.untracked or args.json or args.verbose or args.ignore or args.quiet or args.label or args.code or args.max_lines is not None:
+            parser.error("selftest takes no options")
+        tmp=Path(__file__).resolve().parents[4]/".work"/"tmp"; tmp.mkdir(parents=True,exist_ok=True); os.environ["TMPDIR"]=str(tmp)
+        suite=unittest.defaultTestLoader.loadTestsFromTestCase(MdtoolTests)
+        return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+    if args.command == "anchors" and not args.paths: parser.error("anchors requires at least one path")
+    if args.command not in {"pointers", "check"} and args.label: parser.error("--label is only valid for pointers or check")
+    if args.command not in {"dups", "check"} and args.code: parser.error("--code is only valid for dups or check")
+    if args.command not in {"router", "check"} and args.max_lines is not None: parser.error("--max-lines is only valid for router or check")
+    if args.json and args.verbose: parser.error("--json and --verbose are mutually exclusive")
+    if args.command == "anchors" and args.verbose: parser.error("--verbose is not supported for anchors")
+    if args.max_lines is None: args.max_lines = 150
+    if args.max_lines < 1: parser.error("--max-lines must be positive")
+    if args.label:
+        try: re.compile("|".join(args.label))
+        except re.error as e: parser.error(f"invalid --label expression: {e}")
+    if args.command == "anchors" and (args.since or args.json or args.ignore): parser.error("unsupported anchors option")
+    if args.since and args.command in {"anchors"}: parser.error("--since is not supported for anchors")
+    invalid=set(args.ignore)-{f"L{i:03}" for i in range(1,10)}-{f"R{i:03}" for i in range(1,7)}-{f"C{i:03}" for i in range(1,4)}-{f"P{i:03}" for i in range(1,5)}-{"D001","T000","T001","T002","T003","T004","T005","IO01"}
+    if invalid: parser.error("unknown ignore code: "+", ".join(sorted(invalid)))
+    try:
+        root=Path(args.root or os.getcwd()).resolve()
+        if not root.is_dir(): raise RuntimeError("root is not a directory")
+        git=in_git(root)
+        if args.root is None and git:
+            root=Path(run_git(root,["rev-parse","--show-toplevel"]).decode().strip()).resolve()
+        git,all_paths=tracked_files(root,args.untracked)
+        skipped=sparse_skipped(root) if git else set()
+        paths=selected(all_paths,args) if args.paths else all_paths if args.command in {"consumers","pointers","check"} else selected(all_paths,args)
+
+        paths=[p for p in paths if p not in skipped]
+        router_paths=list(dict.fromkeys(paths+[p for p in all_paths if Path(p).parent==Path(".") and
+            (Path(p).name=="AGENTS.md" or Path(p).name.lower() in README_NAMES)])) if args.command=="router" else paths
+        if args.command=="anchors" and args.paths:
+            for requested in args.paths:
+                normalized=Path(requested).as_posix().rstrip("/")
+                if normalized not in paths and (root/normalized).is_file(): paths.append(normalized)
+        if args.since and not git: raise RuntimeError("--since requires a Git repository")
+        read_paths=paths
+        if args.command in {"check", "consumers"}: read_paths=all_paths
+        if args.command=="links": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if markdown(p) or Path(p).name=="conf.py"]))
+        if args.command=="router": read_paths=list(dict.fromkeys(router_paths+[p for p in all_paths if Path(p).name=="conf.py"]))
+        if args.command=="refs": read_paths=list(dict.fromkeys(paths+[p for p in all_paths if (Path(p).name in {"Makefile","makefile","GNUmakefile","Cargo.toml","package.json"} or p.endswith(".mk"))]))
+        read_paths=[p for p in read_paths if p not in skipped]
+        contents, unreadable=read_set(root,read_paths)
+        args.aliases=symlink_aliases(root,all_paths)
+        if args.command == "anchors":
+            for file in paths:
+                value=contents.get(file)
+                if value is None:
+                    if file in unreadable: print(f"{file}:1:1: note IO01 file is missing or unreadable: {file}",file=sys.stderr)
+                    continue
+                site=site_of(file,find_sites(all_paths))
+                for line,level,slug,title in slug_headings(value,file,site.kind if site else None)[0]: print(f"{file}:{line}\t{level}\t{slug}\t{title}")
+            return 0
+        findings=(all_check_findings(root,paths,contents,args,all_paths)
+                  if args.command=="check" else check_command(args.command,root,router_paths,contents,args,all_paths))
+        findings=drop_ignored(root,findings) if git else findings
+        findings=demote_records(root,findings,contents)
+        for path in unreadable:
+            message = "file is missing or unreadable" if path in paths else "context file is missing or unreadable; analysis may be incomplete"
+            add(findings,"IO01","note",path,1,1,message,path)
+        if args.since:
+            old=old_tree(root,args.since)
+            old_paths=selected(list(old),args,require_matches=False) if args.paths else list(old)
+            old_router_paths=list(dict.fromkeys(old_paths+[p for p in old if Path(p).parent==Path(".") and
+                (Path(p).name=="AGENTS.md" or Path(p).name.lower() in README_NAMES)])) if args.command=="router" else old_paths
+            oldfind=(all_check_findings(root,old_paths,old,args,list(old))
+                     if args.command=="check" else check_command(args.command,root,old_router_paths,old,args,list(old)))
+            identities={f.identity() for f in oldfind}
+            findings=[f for f in findings if f.identity() not in identities]
+        findings=[f for f in findings if f.code not in args.ignore]
+        extra="runtime-built paths cannot be resolved" if args.command=="consumers" else ""
+        return emit(findings,len(read_paths),args.quiet,args.json,extra,args.verbose)
+    except (OSError,RuntimeError,ValueError) as e:
+        print(f"mdtool: {e}",file=sys.stderr); return 2
+
+
+def git(root, args):
+
+    p=subprocess.run(["git","-C",str(root),*args],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    if p.returncode: raise AssertionError(p.stderr.decode("utf-8","replace"))
+
+
+class MdtoolTests(unittest.TestCase):
+    def test_check_since_groups_new_findings_from_multiple_checks(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"README.md").write_text("[bad](missing.md)\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            (root/"src.py").write_text("# See README.md\n")
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","--root",td,"--untracked","--since","HEAD"])
+            self.assertEqual(rc,0)
+            self.assertIn("note P001",out.getvalue())
+            self.assertIn("note C003",out.getvalue())
+            self.assertNotIn("L001",out.getvalue())
+            self.assertNotIn("T000",out.getvalue())
+
+    def test_group_preview_keeps_full_json_and_verbose_details(self):
+        findings=[Finding("L001","error","a.md",n,1,"missing","missing.md") for n in range(1,13)]
+        out=io.StringIO()
+        with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+            rc=emit(findings,1)
+        self.assertEqual(rc,1)
+        self.assertIn("+4 occurrences",out.getvalue())
+        self.assertIn("--verbose or --json",out.getvalue())
+        for opts in ({"verbose":True},{"json_mode":True}):
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=emit(findings,1,**opts)
+            self.assertEqual(rc,1)
+            self.assertEqual(len(out.getvalue().splitlines()),12)
+
+    def test_scoped_check_since_includes_new_untracked_doc(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"AGENTS.md").write_text("# Repo\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            (root/"new.md").write_text("[bad](missing.md)\n")
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","--root",td,"--untracked","./new.md","--since","HEAD","--json"])
+            self.assertEqual(rc,1)
+            self.assertIn('"code": "L001"',out.getvalue())
+
+    def test_scope_errors_and_dot_scope(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"AGENTS.md").write_text("# Repo\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            for path in ("not-present.md", "../outside", "/outside"):
+                with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                    rc=main(["check",path,"--root",td])
+                self.assertEqual(rc,2)
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check",".","--root",td])
+            self.assertEqual((rc,out.getvalue()),(0,""))
+
+    def test_default_check_groups_repeated_findings(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"a.md").write_text("[bad](missing.md)\n[bad](missing.md)\n")
+            (root/"b.md").write_text("[bad](missing.md)\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out,err=io.StringIO(),io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err):
+                rc=main(["--root",td])
+            self.assertEqual(rc,1)
+            self.assertEqual(out.getvalue().count("destination does not exist"),1)
+            self.assertEqual(out.getvalue().count("missing.md"),1)
+            self.assertIn("a.md:1:1,2:1",out.getvalue())
+            self.assertIn("b.md:1:1",out.getvalue())
+            self.assertIn("3 errors",err.getvalue())
+
+    def test_scoped_check_uses_repository_context(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"AGENTS.md").write_text("[guide](docs/guide.md)\n")
+            (root/"docs/guide.md").write_text("# Guide\n\nRun `make verify`.\n" + "Useful details. "*10)
+            (root/"docs/other.md").write_text("[bad](missing.md)\n")
+            (root/"Makefile").write_text("verify:\n\t@true\n")
+            (root/"src/a.rs").write_text('include_str!("../docs/guide.md");\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","docs/guide.md","--root",td,"--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,0)
+            self.assertEqual([(f["code"],f["file"]) for f in findings],[("C001","src/a.rs")])
+
+    def test_scoped_consumers_read_sources_outside_scope(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"docs/guide.md").write_text("# Guide\n")
+            (root/"src/a.rs").write_text('include_str!("../docs/guide.md");\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["consumers","docs/guide.md","--root",td,"--json"])
+            self.assertEqual(rc,0)
+            self.assertIn('"code": "C001"',out.getvalue())
+
+    def test_scoped_check_finds_comments_pointing_to_selected_doc(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"AGENTS.md").write_text("[guide](docs/guide.md)\n")
+            (root/"docs/guide.md").write_text("# Guide\n\n" + "Useful details. "*10)
+            (root/"docs/other.md").write_text("# Other\n")
+            (root/"src/a.py").write_text("# See docs/guide.md\n# See docs/other.md\n# Phase 1\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","docs/guide.md","--root",td,"--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,0)
+            self.assertEqual([(f["file"],f["target"]) for f in findings if f["code"].startswith("P")],[("src/a.py","docs/guide.md")])
+
+    def test_scoped_check_labels_unreadable_context(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"AGENTS.md").write_text("# Repo\n")
+            (root/"gone.py").write_text("# code\n")
+            git(root,["init","-q"]); git(root,["add","."]); (root/"gone.py").unlink()
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","AGENTS.md","--root",td,"--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,0)
+            self.assertEqual([f["code"] for f in findings],["IO01"])
+            self.assertIn("context",findings[0]["message"])
+
+    def test_check_accepts_component_options(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"src.py").write_text("# CUSTOM\n")
+            (root/"AGENTS.md").write_text("# Repo\n" + "detail\n"*25)
+            for file in ("a.md","b.md"):
+                (root/file).write_text("```text\n" + "example "*45 + "\n```\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["check","--root",td,"--label","CUSTOM","--code","--max-lines","20","--json"])
+            self.assertEqual(rc,0)
+            self.assertEqual({json.loads(line)["code"] for line in out.getvalue().splitlines()}, {"P003","D001","T002"})
+
+    def test_missing_fragment_includes_anchor_suggestion(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"a.md").write_text("[bad](b.md#install)\n")
+            (root/"b.md").write_text("# Installation\n")
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+                rc=main(["links","--root",td])
+            self.assertEqual(rc,1)
+            self.assertIn("#installation",out.getvalue())
+
+    def test_slug_suffix_and_setext(self):
+        h,_=slug_headings("# Same\n# Same\nSetext\n---\n```\n# Fake\n```")
+        self.assertEqual([(x[2],x[1]) for x in h],[("same",1),("same-1",1),("setext",2)])
+
+    def test_anchors_reads_an_explicit_untracked_file(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"new.md").write_text("# Topic\n")
+            git(root,["init","-q"])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out): rc=main(["anchors","new.md","--root",td])
+            self.assertEqual((rc,out.getvalue()),(0,"new.md:1\t1\ttopic\tTopic\n"))
+
+    def test_case_only_and_escape_links(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"Readme.md").write_text("# Hi\n")
+            (root/"index.md").write_text("[case](readme.md) [escape](../outside.md)\n")
+            fs=["Readme.md","index.md"]
+            found=link_findings(root,fs,{p:(root/p).read_text() for p in fs})
+            self.assertEqual([(f.code,f.target) for f in found],[("L003","readme.md"),("L001","../outside.md")])
+            if os.name=="posix":
+                raw=os.fsencode(root)+b"/bad\xff.md"
+                try:
+                    fd=os.open(raw,os.O_CREAT|os.O_WRONLY,0o600)
+                except OSError as e:
+                    if e.errno != errno.EILSEQ: raise
+                else:
+                    os.close(fd)
+                    self.assertIsNotNone(safe_read(root,os.fsdecode(raw).split("/")[-1]))
+
+    def test_symlink_escape_is_never_opened(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td, tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as outside:
+            root=Path(td); (Path(outside)/"secret.md").write_text("# Private\n")
+            try: (root/"link.md").symlink_to(Path(outside)/"secret.md")
+            except (OSError,NotImplementedError): self.skipTest("symlinks unavailable")
+            (root/"index.md").write_text("[private](link.md#private)\n")
+            found=link_findings(root,["index.md","link.md"],{"index.md":"[private](link.md#private)\n"})
+            self.assertEqual([(f.code,f.target) for f in found],[('L001','link.md#private')])
+
+    def test_percent_decoding_and_in_root_symlink(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"space #name.md").write_text("# Found\n")
+            (root/"alias.md").symlink_to(root/"space #name.md")
+            source="[encoded](space%20%23name.md#found) [alias](alias.md#found)\n"
+            (root/"index.md").write_text(source)
+            found=link_findings(root,["index.md","space #name.md","alias.md"],{"index.md":source,"space #name.md":"# Found\n","alias.md":"# Found\n"})
+            self.assertEqual(found,[])
+    def test_html_anchor_and_missing_fragment(self):
+        files=["index.md","target.md"]
+        text="[ok](target.md#named) [bad](target.md#missing)\n\n    [ignored](missing.md)\n"
+        found=link_findings(Path.cwd(),files,{"index.md":text,"target.md":"<a id=\"named\"></a>\n"})
+        self.assertEqual([(f.code,f.target) for f in found],[('L002','target.md#missing')])
+    def test_reference_links_and_unused_definition(self):
+        text="[a][known] [b][unknown]\n\n[known]: target.md\n[unused]: other.md\n"
+        files=["index.md","target.md","other.md"]
+        found=link_findings(Path.cwd(),files,{"index.md":text,"target.md":"ok","other.md":"ok"})
+        self.assertEqual([(f.code,f.target) for f in found],[('L005','unknown'),('L006','unused')])
+
+    def test_comment_scanner_skips_strings_and_reads_docstrings(self):
+        source='''"""README.md"""\nvalue = "# README.md"\ncallback = lambda: "# README.md"\n# see docs/guide.md in section 2.1\n'''
+        found=pointer_findings(["src.py","README.md","docs/guide.md"],{"src.py":source,"README.md":"","docs/guide.md":""})
+        self.assertEqual(sorted((f.code,f.target) for f in found),[('P001','README.md'),('P001','docs/guide.md'),('P002','section 2.1')])
+
+    def test_rust_raw_strings_are_not_comments(self):
+        source='let text = r##("// README.md")##; // README.md\n'
+        found=pointer_findings(["src.rs","README.md"],{"src.rs":source,"README.md":""})
+        self.assertEqual([(f.code,f.target) for f in found],[('P001','README.md')])
+    def test_table_duplicate_blocks(self):
+        table="| Name | Kind | Purpose |\n|---|---|---|\n| One | file | state |\n| Two | file | state |\n"
+        found=dup_findings(["a.md","b.md"],{"a.md":table,"b.md":table})
+        self.assertEqual([(f.code,f.file,f.target) for f in found],[('D001','a.md','b.md:1-4')])
+    def test_duplicate_similarity_keeps_threshold_for_shared_candidates(self):
+        original=[f"token{i}" for i in range(80)]
+        near=original.copy(); near[40]="variant"
+        apart=original.copy(); apart[20]="other20"; apart[60]="other60"
+        content={"a.md":" ".join(original),"b.md":" ".join(near),"c.md":" ".join(apart)}
+        found=dup_findings(list(content),content)
+        self.assertEqual([(f.file,f.target) for f in found],[("a.md","b.md:1-1")])
+    def test_duplicate_findings_preserve_text_table_and_code_pairs(self):
+        paragraph=" ".join(f"word{i}" for i in range(45))
+        table="| Name | Kind | Purpose |\n|---|---|---|\n| One | file | state |\n| Two | file | state |\n"
+        fenced="```text\n"+paragraph+"\n```"
+        content={
+            "a.md":paragraph+"\n\n"+table+"\n"+fenced,
+            "b.md":paragraph+"\n\n"+table+"\n"+fenced,
+            "c.md":paragraph,
+            "d.md":" ".join(f"other{i}" for i in range(45)),
+        }
+        files=list(content)
+        ordinary=dup_findings(files,content)
+        self.assertEqual([(f.file,f.line,f.target) for f in ordinary],[
+            ("a.md",1,"b.md:1-1, c.md:1-1"),
+            ("a.md",3,"b.md:3-6"),
+        ])
+        with_code=dup_findings(files,content,code=True)
+        self.assertTrue(any("b.md:8-10" in f.target for f in with_code))
+    def test_make_target_declarations_include_phony(self):
+        content={"Makefile":".PHONY: check lint\ncheck:\n\t@true\n","guide.md":"Run `make check` and `make missing`.\n"}
+        found=ref_findings(list(content),content)
+        self.assertEqual([(f.code,f.target) for f in found],[('R002','missing')])
+    def test_refs_ignore_non_shell_fences_and_redirections(self):
+        files=["guide.md"]
+        content={
+            "guide.md":"""Run `make 2> err.log`, `crates/foo`, and `src/existing.rs`.\n\n```text\n`missing/fenced.rs`\n```\n\n`missing/path.md`\n""",
+            "Makefile":"test:\n\t@true\n",
+            "Cargo.toml":"[package]\nname = \"sample\"\n",
+            "src/existing.rs":"",
+            "crates/foo/src/lib.rs":"",
+        }
+        found=ref_findings(files,content,list(content))
+        self.assertEqual([(f.code,f.target) for f in found],[("R005","missing/path.md")])
+
+    def test_literal_reference_warning_categories(self):
+        files=["guide.md","Cargo.toml","src/a.py"]
+        content={"Cargo.toml":"[package]\nname = \"sample\"\n","guide.md":"`missing/path.md` `cargo test -p absent` `./scripts/nope` `sh -c` `https://example.com/docs/guide.md` `~/usr`\n","src/a.py":""}
+        self.assertEqual(sorted(f.code for f in ref_findings(files,content)),["R003","R004","R005"])
+    def test_malformed_ipv6_url_examples_do_not_crash(self):
+        url="http://127.0.0.1[:PORT"
+        self.assertEqual(link_findings(Path.cwd(),["guide.md"],{"guide.md":f"[server]({url})\n"}),[])
+        self.assertEqual(ref_findings(["guide.md"],{"guide.md":f"`{url}`\n"}),[])
+    def test_consumer_read_and_literal_categories(self):
+        files=["docs/a.md","src/a.py"]
+        content={"docs/a.md":"# Doc\n","src/a.py":"read_text(\"a.md\")\nvalue = \"docs/a.md\"\n"}
+        self.assertEqual(sorted((f.code,f.target) for f in consumer_findings(files,content)),[("C002","docs/a.md (name only)"),("C003","docs/a.md")])
+    def test_consumers_do_not_report_unrelated_root_files(self):
+        files=["README.md","Cargo.toml","src/a.rs"]
+        content={"README.md":"# Repo\n", "Cargo.toml":"", "src/a.rs":'let path = "Cargo.toml";\ninclude_str!("../README.md");\n'}
+        self.assertEqual([(f.code,f.target) for f in consumer_findings(files,content)],[("C001","README.md")])
+
+    def test_scoped_document_paths_do_not_match_same_basename_elsewhere(self):
+        content={"docs/guide.md":"# Guide\n", "manual/guide.md":"# Other\n",
+                 "src/a.py":'# See manual/guide.md\nopen("manual/guide.md")\n'}
+        self.assertEqual(consumer_findings(["docs/guide.md"],content),[])
+        opts=argparse.Namespace(paths=["docs/guide.md"],label=None,code=False,max_lines=150)
+        found=all_check_findings(Path.cwd(),["docs/guide.md"],content,opts,list(content))
+        self.assertFalse(any(f.code == "P001" for f in found))
+    def test_router_reports_missing_and_unreachable_docs(self):
+        files=["AGENTS.md","README.md","docs/linked.md","docs/lost.md"]
+        content={"AGENTS.md":"[topic](docs/linked.md) [missing](docs/no.md)\n","README.md":"## Testing\n","docs/linked.md":"# Detail\n","docs/lost.md":"# Lost\n"}
+        found=router_findings(files,content)
+        self.assertEqual(sorted(f.code for f in found),["T001","T003","T004","T005"])
+    def test_scoped_router_uses_root_context_and_selected_docs(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            self.commit_repo(root,{
+                "AGENTS.md":"[selected](docs/selected.md)\n",
+                "README.md":"## Testing\n",
+                "docs/selected.md":"# Selected\n"+"Useful detail. "*5+"\n",
+                "docs/other.md":"# Other\n"+"Useful detail. "*5+"\n",
+            })
+            rc,found=self.run_json(root,"router","docs/selected.md")
+            self.assertEqual(rc,0)
+            self.assertNotIn("T000",[finding["code"] for finding in found])
+            self.assertIn(("T003","README.md"),[(finding["code"],finding["file"]) for finding in found])
+            self.assertNotIn("T001",[finding["code"] for finding in found])
+    def test_router_skips_glob_patterns(self):
+        content={"AGENTS.md":"See `docs/config/*.md` and `docs/gone.md`.\n","docs/config/a.md":"# A\n"}
+        found=[(f.code,f.target) for f in router_findings(list(content),content) if f.code=="T004"]
+        self.assertEqual(found,[("T004","docs/gone.md")])
+    def test_repo_paths_resolve_beside_the_document(self):
+        content={"crate/ARCHITECTURE.md":"`src/lib.rs` `src/gone.rs` `scripts/run.sh` `scripts/gone.sh`\n","crate/src/lib.rs":"","crate/scripts/run.sh":""}
+        found=ref_findings(["crate/ARCHITECTURE.md"],content,list(content))
+        self.assertEqual(sorted((f.code,f.target) for f in found),[("R001","src/gone.rs"),("R004","scripts/gone.sh")])
+
+    def test_missing_tracked_file_is_a_note(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"gone.md").write_text("# gone")
+            git(root,["init","-q"]); git(root,["add","gone.md"]); git(root,["commit","-qm","tracked"])
+            (root/"gone.md").unlink()
+            out,err=io.StringIO(),io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(err): rc=main(["links","--root",str(root)])
+            self.assertEqual(rc,0); self.assertIn("note IO01 file is missing or unreadable",out.getvalue())
+            self.assertIn("gone.md:1:1",out.getvalue())
+
+    def test_since_detects_finding_moved_to_new_path(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"bad.md").write_text("[broken](missing.md)\n")
+            git(root,["init","-q"]); git(root,["add","bad.md"]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            git(root,["mv","bad.md","moved.md"]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","move"])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["links","--root",str(root),"--since","HEAD^","--verbose"])
+            self.assertEqual(rc,1); self.assertIn("moved.md:1:1: error L001",out.getvalue())
+
+    def test_links_follow_a_git_move(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"target.md").write_text("# Here\n"); (root/"source.md").write_text("[here](target.md#here)\n")
+            git(root,["init","-q"]); git(root,["add","."]); git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+            git(root,["mv","target.md","renamed.md"]); (root/"source.md").write_text("[here](renamed.md#here)\n")
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["links","--root",str(root)])
+            self.assertEqual(rc,0); self.assertEqual(out.getvalue(),"")
+
+    def test_consumer_embed_classification(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"docs/guide.md").write_text("# Guide\n"); (root/"src/a.rs").write_text('fn main() {\n    include_str!("../docs/guide.md");\n}\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["consumers","--root",td,"--quiet","--json"])
+            expected='{"code": "C001", "severity": "warn", "file": "src/a.rs", "line": 2, "col": 19, "message": "embedded documentation can affect built output", "target": "docs/guide.md"}\n'
+            self.assertEqual((rc,out.getvalue()),(0,expected))
+
+    def test_consumer_embed_needs_an_embed_directive(self):
+        content={"docs/a.md":"# A\n","src/a.py":'embed_path = "docs/a.md"\nembedded = "docs/a.md"\n',
+                 "src/b.go":'//go:embed ../docs/a.md\n',"src/c.js":'const t = embed("../docs/a.md")\n'}
+        found=consumer_findings(["docs/a.md"],content)
+        self.assertEqual(sorted((f.code,f.file) for f in found),
+                         [("C001","src/b.go"),("C001","src/c.js"),("C003","src/a.py")])
+    def test_check_runs_finding_checks_together(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"src").mkdir()
+            (root/"docs/guide.md").write_text("# Guide\n\n[missing](nope.md)\n")
+            (root/"src/a.rs").write_text('fn main() {\n    include_str!("../docs/guide.md");\n}\n')
+            git(root,["init","-q"]); git(root,["add","."])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()): rc=main(["check","--root",td,"--quiet","--json"])
+            findings=[json.loads(line) for line in out.getvalue().splitlines()]
+            self.assertEqual(rc,1)
+            self.assertIn("L001",{finding["code"] for finding in findings})
+            self.assertIn("C001",{finding["code"] for finding in findings})
+    def test_missing_line_ref(self):
+        found=link_findings(Path.cwd(),["a.md","b.md"],{"a.md":"See `b.md:1-4`.\n","b.md":"one\n"})
+        self.assertEqual([(f.code,f.target) for f in found],[('L004','b.md:1-4')])
+    def test_unknown_ignore_is_usage_error(self):
+        with self.assertRaises(SystemExit) as ex: main(["links","--ignore","ZZZ"])
+        self.assertEqual(ex.exception.code,2)
+
+    def test_flags_are_limited_to_their_command(self):
+        with self.assertRaises(SystemExit) as ex: main(["links","--max-lines","150"])
+        self.assertEqual(ex.exception.code,2)
+        with self.assertRaises(SystemExit) as ex: main(["commands","--root","."])
+        self.assertEqual(ex.exception.code,2)
+        with self.assertRaises(SystemExit) as ex: main(["pointers","--label","["])
+        self.assertEqual(ex.exception.code,2)
+
+    def test_rst_headings_and_targets(self):
+        text="=====\nTitle\n=====\n\n.. _setup-label:\n\nUsing ``mdtool``\n----------------\n\nNot a title::\n\n    Fake\n    ----\n\nSub _`inline`\n~~~~~~~~~~~~~\n"
+        headings,anchors=slug_headings(text,"doc.rst")
+        self.assertEqual([(h[0],h[1],h[2]) for h in headings],[(2,1,"title"),(7,2,"using-mdtool"),(15,3,"sub-inline")])
+        self.assertEqual(anchors,{"setup-label","inline"})
+    def test_rst_links_and_references(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir()
+            index=(".. toctree::\n   :maxdepth: 2\n\n   guide\n   Missing <gone>\n   self\n\n"
+                   "See :doc:`guide`, :doc:`nope`, `Python`_, `the\nsite`_, |sub|_, `Bad`_, word_ and [1]_.\n\n"
+                   ">>> value_ = 1\n\n.. include:: missing.inc\n\n"
+                   ".. _python: https://python.org\n.. _the site: https://example.com\n.. _sub: https://example.com/sub\n"
+                   ".. _unused: https://example.com/unused\n.. _word: guide.rst\n.. [1] Note.\n")
+            content={"docs/index.rst":index,"docs/guide.rst":"Guide\n=====\n","x.md":"[ok](docs/guide.rst#guide) [bad](docs/guide.rst#nope)\n"}
+            for name,value in content.items(): (root/name).write_text(value)
+            found=link_findings(root,list(content),content)
+            self.assertEqual(sorted((f.code,f.target) for f in found),[
+                ("L001","gone"),("L001","missing.inc"),("L001","nope"),
+                ("L002","docs/guide.rst#nope"),("L005","bad"),("L006","unused")])
+    def test_mdx_ids_routes_and_site_paths(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir()
+            content={"docs/index.mdx":"[a](page/#custom) [b](page/#sdk_init) [c](/product/) [d](page/#jsx) [e](page/#nope)\n",
+                     "docs/page.mdx":"## Title {#custom}\n\n## `sdk_init`\n\n<Alert id=\"jsx\" />\n"}
+            for name,value in content.items(): (root/name).write_text(value)
+            found=link_findings(root,list(content),content)
+            self.assertEqual([(f.code,f.target) for f in found],[("L002","page/#nope")])
+    def test_refs_check_shell_blocks_make_targets_and_package_scripts(self):
+        pkg=json.dumps({"scripts":{"build":"x","check":"x","test":"x","lint:ts":"x"},"devDependencies":{"vitest":"1","@biomejs/biome":"1"}})
+        guide=("```bash\n"
+               "make test nope VERBOSE=1 && make -C docs html\n"
+               "pnpm lint && pnpm run lint:tsx && pnpm vitest && pnpm biome check && pnpm install\n"
+               "FOO=1 pnpm --filter web build && npm test && pnpm run --if-present gone\n"
+               "mysql -u root -p password && cargo test -p absent\n"
+               "pip install --target ./package . && ls ../sibling/x.py && . ./.venv/bin/activate\n"
+               "```\n\n"
+               "```console\n$ pnpm missing\noutput mentions src/gone.py\n```\n")
+        content={"guide.md":guide,"Makefile":"test lint: deps\n\t@true\n","package.json":pkg,"Cargo.toml":"[package]\nname = \"sample\"\n","src/a.py":""}
+        found=sorted((f.code,f.target) for f in ref_findings(["guide.md"],content,list(content)))
+        self.assertEqual(found,[("R002","nope"),("R003","absent"),("R006","pnpm lint"),("R006","pnpm lint:tsx"),("R006","pnpm missing")])
+        hint=[f.message for f in ref_findings(["guide.md"],content,list(content)) if f.target=="pnpm lint:tsx"][0]
+        self.assertIn("did you mean lint:ts?",hint)
+    def test_refs_without_manifests_skip_make_and_package_checks(self):
+        content={"guide.md":"`make nope` `pnpm nope`\n"}
+        self.assertEqual(ref_findings(["guide.md"],content,list(content)),[])
+    def test_sphinx_orphans_and_ref_labels(self):
+        conf='extensions = ["myst_parser"]\nexclude_patterns = ["_build", "drafts"]\n'
+        content={
+            "docs/conf.py":conf,
+            "docs/index.rst":".. include:: intro.rst\n\n.. toctree::\n   :glob:\n\n   guide\n   api/*\n\n.. _top:\n\nSee :ref:`top`, :ref:`Guide <guide-label>`, :ref:`genindex`, and :ref:`gone\n label`.\n",
+            "docs/intro.rst":"Intro\n=====\n",
+            "docs/guide.md":"(guide-label)=\n# Guide\n\n```{toctree}\n:maxdepth: 1\nnested\n```\n\n{ref}`top` and {ref}`missing-md`.\n",
+            "docs/nested.md":"# Nested\n",
+            "docs/api/one.rst":"One\n===\n",
+            "docs/lost.rst":"Lost\n====\n",
+            "docs/private.rst":":orphan:\n\nPrivate\n=======\n",
+            "docs/drafts/wip.rst":"WIP\n===\n",
+        }
+        docs=[p for p in content if markdown(p)]
+        found=sorted((f.code,f.severity,f.file,f.target) for f in sphinx_findings(docs,content))
+        self.assertEqual(found,[("L007","error","docs/guide.md","missing-md"),("L007","error","docs/index.rst","gone label"),
+                                ("L008","warn","docs/lost.rst","lost")])
+        content["docs/conf.py"]=conf.replace('["myst_parser"]','["myst_parser", "sphinx.ext.intersphinx", "sphinx.ext.autosectionlabel"]')
+        content["docs/index.rst"]+="\n:ref:`Intro` and :ref:`python:tut-files`.\n"
+        found=sorted((f.code,f.severity,f.target) for f in sphinx_findings(docs,content))
+        self.assertEqual(found,[("L007","note","gone label"),("L007","note","missing-md"),("L008","warn","lost")])
+    def test_links_resolve_site_routes_and_refs_resolve_module_paths(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            self.commit_repo(root,{
+                "site/content/docs/guide/setup.md":"# Setup\n",
+                "site/content/docs/index.md":"[setup](/guide/setup/) [anchor](/guide/setup/#setup) [gone](/guide/gone/)\n",
+                "web/layout/Header.tsx":"",
+                "web/README.md":"`layout/Header` `layout/Footer` `../sibling/x.py` `./test` `\"./server\"`\n",
+            })
+            rc,found=self.run_json(root,"check")
+            self.assertEqual(sorted((f["code"],f["target"]) for f in found if f["code"][0] in "LR"),
+                             [("L001","/guide/gone/"),("R001","layout/Footer")])
+    def test_rst_skips_html_fragments_and_example_toctrees(self):
+        content={"docs/index.rst":("Index\n=====\n\nSee `install <install.html#quick>`_.\n\n.. code-block:: rst\n\n   .. toctree::\n\n      example-only\n\n.. toctree::\n\n   real\n"),
+                 "docs/real.rst":"Real\n====\n"}
+        found=link_findings(Path("."),["docs/index.rst","docs/real.rst"],content)
+        self.assertEqual([(f.code,f.target) for f in found],[])
+        self.assertEqual([e for _n,_c,e in rst_toctree(content["docs/index.rst"])],["real"])
+    def test_router_resolves_root_relative_links(self):
+        content={"AGENTS.md":"# Agents\n\nSee [guide](/docs/guide.md).\n","docs/guide.md":"# Guide\n"}
+        found=router_findings(list(content),content)
+        self.assertEqual([(f.code,f.target) for f in found if f.code in {"T001","T004"}],[])
+    def test_rst_refs_router_pointers_and_dups(self):
+        guide="Guide\n=====\n\nRun ``scripts/missing.sh``.\n\n.. code-block:: sh\n\n   ./scripts/gone.sh\n\n.. code-block:: text\n\n   ./scripts/ignored.sh\n"
+        self.assertEqual(sorted(f.target for f in ref_findings(["docs/guide.rst"],{"docs/guide.rst":guide})),["scripts/gone.sh","scripts/missing.sh"])
+        content={"AGENTS.md":"[docs](docs/index.rst)\n","README.rst":"Repo\n====\n\nTesting\n-------\n",
+                 "docs/index.rst":".. toctree::\n\n   sub/page\n","docs/sub/page.rst":"Page\n====\n","docs/sub/lost.rst":"Lost\n====\n"}
+        self.assertEqual(sorted((f.code,f.target) for f in router_findings(list(content),content) if f.code in {"T001","T003"}),
+                         [("T001","docs/sub/lost.rst"),("T003","Testing")])
+        found=pointer_findings(["src.py","docs/guide.rst"],{"src.py":"# See docs/guide.rst\n","docs/guide.rst":""})
+        self.assertEqual([(f.code,f.target) for f in found],[("P001","docs/guide.rst")])
+        block="::\n\n    "+" ".join(f"word{i}" for i in range(45))+"\n"
+        self.assertEqual(dup_findings(["a.rst","b.rst"],{"a.rst":block,"b.rst":block}),[])
+    def run_json(self, root, *argv):
+        out=io.StringIO()
+        with contextlib.redirect_stdout(out),contextlib.redirect_stderr(io.StringIO()):
+            rc=main([*argv,"--root",str(root),"--json"])
+        return rc,[json.loads(line) for line in out.getvalue().splitlines()]
+    def commit_repo(self, root, files):
+        for name,text in files.items():
+            (root/name).parent.mkdir(parents=True,exist_ok=True); (root/name).write_text(text)
+        git(root,["init","-q"]); git(root,["add","."])
+        git(root,["-c","user.name=Test","-c","user.email=t@example.com","commit","-qm","base"])
+    def test_refs_only_check_path_shaped_words(self):
+        content={"src/app.py":"","src/pkg/mod.py":"","guide.md":(
+            "`application/json` `async/await` `getsentry/sentry` `@scope/pkg` `owner/repo:src/a.py` `GET /api/users/`\n"
+            "`TESTPATH=src/app.py pytest` `--app src/app.py` `src/app.py:12` `pkg/mod.py` `path/to/file.py` `src/foo.py`\n"
+            "`src/gone.py` `run --app src/missing.py` `vendor/lib.py` `./scripts/run.sh` `skill/scripts/check.py`\n"
+            "`juniorNitro({ plugins: \"./plugins\" })`\n")}
+        found=ref_findings(["guide.md"],content,list(content))
+        self.assertEqual(sorted((f.code,f.target) for f in found),
+                         [("R001","src/gone.py"),("R001","src/missing.py"),("R004","scripts/run.sh"),("R005","skill/scripts/check.py"),("R005","vendor/lib.py")])
+    def test_refs_drop_paths_git_ignores(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            self.commit_repo(root,{".gitignore":"build/\n.env\n","src/a.py":"","guide.md":"`build/out.json` `src/.env` `src/gone.py`\n"})
+            rc,found=self.run_json(root,"refs")
+            self.assertEqual([(f["code"],f["target"]) for f in found],[("R001","src/gone.py")])
+    def test_links_root_relative_multiline_labels_and_placeholders(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"docs/a.md").write_text("# A\n")
+            text="[a](/docs/a.md) [bad](/docs/b.md) [Doc title](url)\nSee [please\ndonate][] and [def][].\n\n[please donate]: https://example.com\n[def]:\n    https://example.com/x\n"
+            files=["index.md","docs/a.md"]
+            found=link_findings(root,files,{"index.md":text,"docs/a.md":"# A\n"})
+            self.assertEqual([(f.code,f.target) for f in found],[("L001","/docs/b.md")])
+    def test_mdx_named_anchors(self):
+        files=["page.mdx","options.mdx"]
+        target='<a name="raven.Client.capture" />\n<SdkOption name="data_collection" type="dict">\n</SdkOption>\n'
+        text="[a](options.mdx#raven.Client.capture) [b](options.mdx#data_collection) [c](options.mdx#nope)\n"
+        found=link_findings(Path.cwd(),files,{"page.mdx":text,"options.mdx":target})
+        self.assertEqual([f.target for f in found],["options.mdx#nope"])
+    def test_sparse_checkout_paths_are_present(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            self.commit_repo(root,{"a.md":"[b](b.md) `b.md`\n","b.md":"# B\n"})
+            git(root,["update-index","--skip-worktree","b.md"]); (root/"b.md").unlink()
+            rc,found=self.run_json(root,"check")
+            self.assertEqual([f["code"] for f in found if f["code"] in {"L001","IO01","R001"}],[])
+    def test_consumers_resolve_bare_names_from_the_consumer(self):
+        content={"README.md":"# Root\n","pkg/README.md":"# Pkg\n","skills/a/SKILL.md":"","skills/b/SKILL.md":"",
+                 "pkg/pyproject.toml":'readme = "README.md"\n',".github/workflows/ci.yml":"paths-ignore: ['README.md']\n",
+                 "tools/lint.py":'if name == "README.md" or name == "SKILL.md": pass\nopen("SKILL.md")\n'}
+        found=consumer_findings(list(content),content)
+        self.assertEqual(sorted((f.code,f.file,f.target) for f in found),
+                         [("C003",".github/workflows/ci.yml","README.md"),("C003","pkg/pyproject.toml","pkg/README.md")])
+    def test_pointers_report_stale_paths_and_skip_noise(self):
+        content={"docs/guide.md":"","skills/a/SKILL.md":"","skills/b/SKILL.md":"","src/a.py":(
+            "# Requires Python 3.10 and urllib3 2.0; see RFC 7230 section 3.\n"
+            "# Validates SKILL.md frontmatter.\n# See docs/guide.md section 2.1.\n# See docs/old.md and https://x.io/docs/y.md.\n"
+            "# Mirrors getsentry/other/docs/z.md.\n")}
+        found=pointer_findings(list(content),content)
+        self.assertEqual(sorted((f.code,f.target) for f in found),
+                         [("P001","docs/guide.md"),("P002","section 2.1"),("P004","docs/old.md")])
+    def test_duplicate_groups_report_once_and_skip_generated_and_legal(self):
+        paragraph=" ".join(f"word{i}" for i in range(45))
+        content={f"{c}.md":paragraph for c in "abcdef"}
+        found=dup_findings(list(content),content)
+        self.assertEqual([(f.file,f.target) for f in found],[("a.md","b.md:1-1, c.md:1-1, d.md:1-1 (+2 more)")])
+        self.assertIn("6 copies",found[0].message)
+        content={"a.md":paragraph,"LICENSE.md":paragraph,"CHANGELOG.md":paragraph,"gen.md":"<!-- This file is generated. DO NOT EDIT -->\n\n"+paragraph}
+        self.assertEqual(dup_findings(list(content),content),[])
+    def test_duplicates_skip_symlinked_docs(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"AGENTS.md").write_text(" ".join(f"word{i}" for i in range(45))+"\n")
+            (root/"CLAUDE.md").symlink_to("AGENTS.md")
+            git(root,["init","-q"]); git(root,["add","."])
+            rc,found=self.run_json(root,"dups")
+            self.assertEqual(found,[])
+    def test_router_prefers_root_and_groups_site_trees(self):
+        content={"AGENTS.md":"# Repo\n\n## Docs\n\nEach skill has a `SKILL.md`. See [a](docs/a.md), [b](docs/missing.md), and [b](docs/missing.md).\n"+"line\n"*40,
+                 "pkg/AGENTS.md":"# Pkg\n","docs/a.md":"# A\n"+"text "*20+"\n"}
+        content.update({f"docs/site/p{i}.md":"# P\n"+"text "*20+"\n" for i in range(7)})
+        content.update({"docs/b.md":"# B\n"+"text "*20+"\n"})
+        found=router_findings(list(content),content)
+        self.assertEqual(sorted((f.code,f.file,f.line,f.target) for f in found),
+                         [("T001","AGENTS.md",1,"docs/b.md"),("T001","AGENTS.md",1,"docs/site/"),("T002","AGENTS.md",3,"Docs"),("T004","AGENTS.md",5,"docs/missing.md")])
+        content["AGENTS.md"]+="[site](docs/site/)\n"
+        self.assertNotIn("docs/site/",[f.target for f in router_findings(list(content),content)])
+    def test_comment_scanner_lines_lifetimes_and_bad_python(self):
+        rust='let s = r#"\na\nb\n"#;\nfn f<\'a>(x: &\'a str) {}\n// see docs/gone.md\nlet c = \'"\';\n// see docs/also.md\n'
+        self.assertEqual([(n,c.strip()) for n,c in source_comments("a.rs",rust)],[(6,"see docs/gone.md"),(8,"see docs/also.md")])
+        self.assertEqual([n for n,_ in source_comments("a.yml","key: don't\n# see docs/a.md\n")],[2])
+        self.assertEqual(source_comments("a.py","# ok\nx = '\0'\n"),[(1," ok")])
+    def test_pointer_labels_need_planning_context_and_standards_are_citations(self):
+        content={"docs/guide.md":"","src/a.py":(
+            "# Fixed in #1234 and owner/repo#12; see PKCS#8 and page.html#104.\n"
+            "# Phase 1: parse the input.\n# Apple M1 hosts differ.\n"
+            "# TODO: drop this in Phase 2 of the rollout.\n"
+            "# Hosts are limited per RFC 1034\n# section 3.1, so trim.\n"
+            "# See docs/guide.md section 2.1.\n"),
+            "src/b.ts":"/** The profile of RFC 7523 (§2.1); it implements §2.2. */\n",
+            "vendor/lib.js":"// Support: Promises/A+ section 2.3.3\n// Phase 2 TODO\n"}
+        found=sorted((f.code,f.severity,f.line,f.target) for f in pointer_findings(list(content),content))
+        self.assertEqual(found,[("P001","note",7,"docs/guide.md"),("P002","warn",7,"section 2.1"),("P003","warn",4,"Phase 2")])
+    def test_site_routes_slugs_and_assets(self):
+        content={"docs/.vitepress/config.ts":"","docs/guide/features.md":"## build.target\n\n## Glob Import\n",
+                 "docs/public/og.webp":"","docs/guide/index.md":(
+                     "[a](./features) [b](/guide/features.html#glob-import) [c](./features#build-target) ![d](/og.webp)"
+                     " [e](/guide/featurez) [f](./features#buildtarget)\n"),
+                 "mk/mkdocs.yml":"","mk/docs/a.md":"## A / B: c.d\n","mk/docs/b.md":"[x](a.md#a-b-cd)\n",
+                 "gh.md":"## OAuth / SSO Flows\n\n[x](#oauth--sso-flows) [y](#OAuth--SSO-Flows) [z](#L10) [t](#top) [w](#oauth-sso-flows)\n"}
+        found=sorted((f.code,f.file,f.target) for f in link_findings(Path.cwd(),list(content),content,list(content)))
+        self.assertEqual(found,[("L001","docs/guide/index.md","/guide/featurez"),("L002","docs/guide/index.md","./features#buildtarget"),
+                                ("L002","gh.md","#oauth-sso-flows"),("L009","gh.md","#OAuth--SSO-Flows")])
+    def test_mdx_component_name_anchor_and_link_hints(self):
+        content={"a.mdx":'### Using <PlatformIdentifier name="ignore-spans" />\n\n[x](#using-ignore-spans)\n',
+                 "b.md":"[a](github.com/o/r/pull/1) [b]((https://example.com))\n"}
+        found=link_findings(Path.cwd(),list(content),content,list(content))
+        self.assertEqual([(f.file,f.message.split("; ")[-1]) for f in found],
+                         [("b.md","looks like a URL without its scheme"),("b.md","remove the extra parentheses")])
+    def test_refs_skip_changelogs_packages_reader_files_and_shipped_skill_commands(self):
+        content={"package.json":'{"scripts":{"dev":"x"},"devDependencies":{"vite":"1"}}',"vite/one.txt":"",
+                 "CHANGELOG.md":"Moved `src/old.py`.\n","guide.md":(
+                     "Add `vite/client` types. Run `chmod +x greet`, then:\n\n```console\n$ ./greet\n```\n\n"
+                     "Pass `one\nscripts/gone.sh` here. When you import `./Component.jsx`, it resolves.\n"),
+                 "skills/x/SKILL.md":"```sh\npnpm dev-ui\n```\n","CONTRIBUTING.md":"```sh\npnpm dev-ui\n```\n","skills/x/a.txt":"","scripts/real.sh":""}
+        found=sorted((f.code,f.severity,f.file,f.target) for f in ref_findings(list(content),content,list(content)))
+        self.assertEqual(found,[("R001","warn","guide.md","scripts/gone.sh"),("R005","note","guide.md","greet"),
+                                ("R006","note","skills/x/SKILL.md","pnpm dev-ui"),("R006","warn","CONTRIBUTING.md","pnpm dev-ui")])
+    def test_router_collapses_sites_and_skips_nested_agents_changelogs_and_placeholders(self):
+        content={"AGENTS.md":"# R\n\nSee `docs.example.com/<path>.md` and [x](notes/x.md).\n","docs/conf.py":"project='p'\n","notes/x.md":"# X\n"+"text "*20,
+                 "docs/index.rst":"Home\n====\n","docs/api.rst":"API\n===\n\n"+"text "*20,"pkg/docs/AGENTS.md":"x\n",
+                 "docs/AGENTS.md":"# D\n","docs/changelog/v1.md":"# v1\n"}
+        found=sorted((f.code,f.target) for f in router_findings(list(content),content))
+        self.assertEqual(found,[("T001","docs/")])
+        content["AGENTS.md"]+="[api](docs/api.rst)\n"
+        self.assertEqual(router_findings(list(content),content),[])
+    def test_since_ignores_moved_duplicate_lines_and_generated_links(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); para=" ".join(f"word{i}" for i in range(45))
+            self.commit_repo(root,{".gitignore":"/docs/ref/\n","a.md":para,"b.md":para,"c.md":"[x](docs/ref/cli.md#flag) [y](gone.md)\n"})
+            (root/"b.md").write_text("# New heading\n\n"+para)
+            rc,found=self.run_json(root,"check","--since","HEAD")
+            self.assertEqual([(f["code"],f["target"]) for f in found],[])
+            rc,found=self.run_json(root,"links")
+            self.assertEqual([(f["code"],f["target"]) for f in found],[("L001","gone.md")])
+    def test_records_and_other_repo_commands_are_notes(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            self.commit_repo(root,{
+                "agents.toml":'version = 1\n\n[[skills]]\nname = "up"\nsource = "org/skills"\n\n[[skills]]\nname = "mine"\nsource = "path:.agents/skills/mine"\n',
+                ".agents/skills/up/SKILL.md":"[a](gone.md)\n",".agents/skills/mine/SKILL.md":"[a](gone.md)\n",
+                "docs/changelog/v1.md":"[m](./MIGRATION.md)\n","skill/SOURCES.md":"Copied `src/upstream.py`.\n","src/real.py":"",
+                "package.json":'{"scripts":{"dev":"x"}}',
+                "README.md":"Clone that repository, then run:\n\n```sh\nyarn build:bindings\n```\n\nClone the repository, then run:\n\n```sh\nyarn nope\n```\n"})
+            rc,found=self.run_json(root,"check")
+            got=sorted((f["code"],f["severity"],f["file"]) for f in found if f["code"] in {"L001","R001","R006"})
+            self.assertEqual(got,[("L001","error",".agents/skills/mine/SKILL.md"),("L001","note",".agents/skills/up/SKILL.md"),
+                                  ("L001","note","docs/changelog/v1.md"),("R001","note","skill/SOURCES.md"),
+                                  ("R006","note","README.md"),("R006","warn","README.md")])
+            self.assertEqual(rc,1)
+    def test_refs_context_other_repo_created_paths_and_install_dirs(self):
+        content={"src/a.py":"","fx/demo/project/x.ts":"","guide.md":(
+            "Copy `src/a.py` to `src/b.py`. Create a new file `src/c.py`. Edit `src/gone.py`.\n"
+            "Live `src/release.py` in the target repo.\n"
+            "Repo `github.com/other/pi`, package `src/agent.py`.\n"
+            "Home `github.com/me/repo`, file `src/mine.py`.\n"
+            "Write `output/raw.json` and `.nuxt/dev/x.mjs`.\n"),
+            "fx/demo/SKILL.md":"The project lives at `skills/demo/project` and `skills/demo/project/x.ts`.\n",
+            "fx/demo/project/README.md":"Tests live in `fx/demo/tests/project/` and `fx/demo/project/`.\n","SKILL.md":"```sh\n./bin/gone\n```\n",
+            "skills/s/SKILL.md":"```sh\nnode src/tool.mjs\n```\n"}
+        from unittest import mock
+        with mock.patch.object(sys.modules[__name__], "origin_repo", return_value="me/repo"):
+            found=sorted((f.code,f.severity,f.target) for f in ref_findings(list(content),content,list(content),Path(".")))
+        self.assertEqual(found,[("R001","note","src/agent.py"),("R001","note","src/b.py"),("R001","note","src/c.py"),
+                                ("R001","note","src/release.py"),("R001","note","src/tool.mjs"),
+                                ("R001","warn","fx/demo/tests/project/"),("R001","warn","src/gone.py"),("R001","warn","src/mine.py"),
+                                ("R004","warn","bin/gone")])
+    def test_refs_site_pages_placeholder_names_and_generated_paths(self):
+        content={"docs/.vitepress/config.ts":"","docs/guide/deploy.md":"Add `.github/workflows/deploy.yml` to your repo.\n",
+                 "docs/README.md":"Edit `.github/workflows/ci.yml`.\n","site/page.mdx":"Run `./bin/spark-submit`.\n",".github/x.yml":"",
+                 "guide.md":"Add `.github/workflows/workflow-name.yml`. The `fixture` run generated `.github/skills/new/SKILL.md`.\n"}
+        found=sorted((f.code,f.severity,f.file) for f in ref_findings(list(content),content,list(content)))
+        self.assertEqual(found,[("R001","note","docs/guide/deploy.md"),("R001","note","guide.md"),("R001","warn","docs/README.md"),
+                                ("R004","note","site/page.mdx")])
+    def test_source_python39_grammar(self):
+        source=Path(__file__).read_text()
+        ast.parse(source,feature_version=(3,9))
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Search and inspect the local agent session index."""
+import argparse
+import datetime
+import json
+import re
+import sqlite3
+import sys
+import time
+from pathlib import Path
+
+from agent_memory.store import Store, StoreError, default_state_dir, project_identity, rebuild_index, redact
+from agent_memory.transcripts import HARNESSES
+
+
+def _state_dir(args):
+    return Path(args.state_dir).expanduser() if args.state_dir else default_state_dir()
+
+
+def _project(args):
+    if args.all_projects:
+        return None
+    return project_identity(args.project if args.project else Path.cwd())
+
+
+def _roots(args):
+    if not args.root:
+        return None
+    roots = {}
+    for value in args.root:
+        name, separator, path = value.partition("=")
+        if separator and name in HARNESSES:
+            roots.setdefault(name, []).append(path)
+        else:
+            roots.setdefault("codex", []).append(value)
+    return roots
+
+
+def _harnesses(args):
+    return tuple(args.harness) if getattr(args, "harness", None) else HARNESSES
+
+
+def _stats(stats):
+    print(
+        "sessions={sessions_indexed} events={events_added} malformed={malformed_lines} "
+        "partial={partial_files} resets={resets} deleted={deleted} skipped_project={skipped_project} "
+        "skipped_ephemeral={skipped_ephemeral} skipped_learning_workers={skipped_learning_workers} "
+        "archived={archived} archive_errors={archive_errors}".format(**stats)
+    )
+
+
+def _since_value(value):
+    if value is None:
+        return None
+    match = re.fullmatch(r"([0-9]+)([smhdw])", value, re.IGNORECASE)
+    if match:
+        seconds = int(match.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}[match.group(2).lower()]
+        return time.time() - seconds
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("use an ISO date/time or a duration such as 30d") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.timestamp()
+
+
+def _source_label(source, thread_source):
+    if thread_source in ("user", "subagent"):
+        return thread_source
+    if not source:
+        return "unknown"
+    try:
+        value = json.loads(source)
+    except ValueError:
+        return "unknown"
+    if isinstance(value, dict) and "subagent" in value:
+        return "subagent"
+    return value if isinstance(value, str) and value in ("user", "cli", "child") else "unknown"
+
+
+def _display_path(path):
+    return json.dumps(str(path), ensure_ascii=False)
+
+
+def _timestamp_epoch(value):
+    if not value:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.timestamp()
+
+
+def _snippet(text, query, regex):
+    flat = " ".join(text.split())
+    if not flat:
+        return ""
+    if regex:
+        match = re.search(query, flat, re.IGNORECASE)
+        index = match.start() if match else 0
+    else:
+        terms = [term.strip('"') for term in re.findall(r"[\w-]+", query) if term.upper() not in ("AND", "OR", "NOT", "NEAR")]
+        positions = [flat.lower().find(term.lower()) for term in terms if term and flat.lower().find(term.lower()) >= 0]
+        index = min(positions) if positions else 0
+    start = max(0, index - 72)
+    end = min(len(flat), index + 160)
+    snippet = ("…" if start else "") + flat[start:end] + ("…" if end < len(flat) else "")
+    return redact(snippet)
+
+
+def _search(args):
+    state_dir = _state_dir(args)
+    try:
+        with Store(state_dir) as store:
+            project = _project(args)
+            _stats(store.refresh(roots=_roots(args), project=project, harnesses=_harnesses(args)))
+            rows = store.search(args.query, project, limit=args.limit, regex=args.regex, kinds=args.kind, since=args.since)
+            for row in rows:
+                evidence = store.resolve_evidence(row["session"], row["position"], row["digest"])
+                timestamp = evidence.get("timestamp") or datetime.datetime.fromtimestamp(row["updated"], datetime.timezone.utc).isoformat(timespec="seconds")
+                source = _source_label(row.get("source"), row.get("thread_source"))
+                parent = row.get("parent")
+                print(
+                    f"session={row['session']} byte={row['position']} kind={evidence['kind']} "
+                    f"time={timestamp[:19]} source={source} project={_display_path(row['cwd'])} file={_display_path(row['source_path'])} harness={row['harness']}"
+                )
+                if parent:
+                    print("parent=" + parent)
+                print("  " + _snippet(evidence["text"], args.query, args.regex))
+            print("matches=" + str(len(rows)))
+    except (OSError, StoreError) as exc:
+        print("agent-sessions search: " + str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+def _print_event(store, row, max_chars, query=None, regex=False):
+    evidence = store.resolve_evidence(row["session"], row["position"], row["digest"])
+    timestamp = evidence.get("timestamp") or datetime.datetime.fromtimestamp(row["updated"], datetime.timezone.utc).isoformat(timespec="seconds")
+    source = _source_label(row.get("source"), row.get("thread_source"))
+    print(
+        f"session={row['session']} byte={row['position']} kind={evidence['kind']} "
+        f"time={timestamp[:19]} source={source} project={_display_path(row['cwd'])} file={_display_path(row['source_path'])} harness={row['harness']}"
+    )
+    if row.get("parent"):
+        print("parent=" + row["parent"])
+    text = _snippet(evidence["text"], query, regex) if query is not None else redact(evidence["text"])
+    if max_chars and len(text) > max_chars:
+        text = text[:max_chars] + "…"
+    print("  " + text)
+
+
+def _recent(args):
+    try:
+        with Store(_state_dir(args)) as store:
+            project = _project(args)
+            _stats(store.refresh(roots=_roots(args), project=project, harnesses=_harnesses(args)))
+            rows = store.recent(project, limit=args.limit, kinds=args.kind, since=args.since)
+            for row in rows:
+                _print_event(store, row, 240)
+            print("sessions=" + str(len(rows)))
+        return 0
+    except (OSError, StoreError) as exc:
+        print("agent-sessions recent: " + str(exc), file=sys.stderr)
+        return 1
+
+
+def _show(args):
+    if args.before < 0 or args.after < 0:
+        parser().error("--before and --after must not be negative")
+    try:
+        with Store(_state_dir(args)) as store:
+            project = _project(args)
+            _stats(store.refresh(roots=_roots(args), project=project, harnesses=_harnesses(args)))
+            rows = store.session_events(args.session, project, position=args.position, before=args.before, after=args.after)
+            if args.kind:
+                rows = [row for row in rows if row["kind"] in args.kind]
+            if args.since is not None:
+                rows = [row for row in rows if (_timestamp_epoch(row["timestamp"]) or row["updated"]) >= args.since]
+            if not rows:
+                raise StoreError("no events in the requested kind/time window")
+            for row in rows:
+                _print_event(store, row, args.max_chars)
+        return 0
+    except (OSError, StoreError, ValueError) as exc:
+        print("agent-sessions show: " + str(exc), file=sys.stderr)
+        return 1
+
+
+def _doctor(args):
+    state_dir = _state_dir(args)
+    try:
+        if args.rebuild_index:
+            rebuild_index(state_dir)
+        with Store(state_dir) as store:
+            check = store.db.execute("PRAGMA quick_check").fetchone()[0]
+            if check != "ok":
+                raise StoreError("SQLite integrity check failed: " + str(check))
+            try:
+                store.db.execute("INSERT INTO events_fts(events_fts, rank) VALUES('integrity-check', 1)")
+            except sqlite3.DatabaseError as exc:
+                raise StoreError("FTS content is inconsistent; run `agent-sessions doctor --rebuild-index`: " + str(exc)) from exc
+            sessions = store.db.execute("SELECT count(*) FROM sessions").fetchone()[0]
+            events = store.db.execute("SELECT count(*) FROM events").fetchone()[0]
+            malformed = store.db.execute("SELECT coalesce(sum(malformed_lines), 0) FROM sessions").fetchone()[0]
+            partial = store.db.execute("SELECT count(*) FROM sessions WHERE partial_bytes > 0").fetchone()[0]
+            print("ok sqlite=" + store.db.execute("SELECT sqlite_version()").fetchone()[0])
+            print("database=" + str(store.path))
+            print("sessions=" + str(sessions) + " events=" + str(events) + " malformed=" + str(malformed) + " partial=" + str(partial))
+            for row in store.coverage():
+                print("harness=%(harness)s sessions=%(sessions)d events=%(events)d complete=%(complete)d degraded=%(degraded)d unsupported=%(unsupported)d unrecognized_events=%(unrecognized)d unknown_ancestry=%(unknown_ancestry)d" % row)
+            for row in store.unrecognized_kinds():
+                print("unrecognized harness=%(harness)s kind=%(kind)s events=%(events)d" % row)
+            return 0
+    except (OSError, StoreError) as exc:
+        print("agent-sessions doctor: " + str(exc), file=sys.stderr)
+        print("For a valid but stale index, run `agent-sessions doctor --rebuild-index`; this preserves learning tables.", file=sys.stderr)
+        return 1
+
+
+def _refresh(args):
+    try:
+        with Store(_state_dir(args)) as store:
+            _stats(store.refresh(roots=_roots(args), project=_project(args), harnesses=_harnesses(args)))
+        return 0
+    except (OSError, StoreError) as exc:
+        print("agent-sessions refresh: " + str(exc), file=sys.stderr)
+        return 1
+
+
+def parser():
+    result = argparse.ArgumentParser(
+        prog="agent-sessions",
+        description="Search and inspect the local agent session index: every Codex, Claude, Muse, Grok, OpenCode, and Pi transcript on this machine.",
+        epilog="Examples:\n"
+        "  agent-sessions search 'codegen-units' --all-projects --kind user\n"
+        "  agent-sessions search 'thin lto / codegen-units' --all-projects --kind user --since 1d\n"
+        "  agent-sessions recent --kind user --since 2026-10-25\n"
+        "  agent-sessions show opencode:ses_abc123 --position 3553000\n"
+        "\n"
+        "Hyphenated identifiers and slashes are autoquoted, so codegen-units works\n"
+        "unquoted; quoting still forces an exact phrase and AND/OR still combine terms.\n"
+        "Use --kind user to find your own prompts, --all-projects to leave the current\n"
+        "repository, and --regex only for pattern matching.\n"
+        "Full docs: tools/agent-memory/README.md.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    commands = result.add_subparsers(dest="command", required=True, metavar="command")
+
+    refresh = commands.add_parser("refresh", help="incrementally index transcripts")
+    refresh.add_argument("--state-dir")
+    refresh.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    _add_scope(refresh)
+    refresh.set_defaults(run=_refresh)
+
+    search = commands.add_parser("search", help="search indexed transcript text")
+    search.add_argument("query", help="words, hyphenated identifiers, or quoted phrases; AND/OR combine terms")
+    search.add_argument("--state-dir", help="session index state directory")
+    search.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    _add_scope(search)
+    search.add_argument("--regex", action="store_true", help="scan indexed text using a Python regular expression")
+    search.add_argument("--kind", action="append", help="only return this event kind, e.g. user, assistant, tool-call, tool-output; repeatable")
+    search.add_argument("--since", type=_since_value, help="only include event time on or after an ISO date/time or duration such as 30d")
+    search.add_argument("--limit", type=int, default=20, help="max matches (default %(default)s)")
+    search.set_defaults(run=_search)
+
+    recent = commands.add_parser("recent", help="show the latest indexed event for each recent session")
+    recent.add_argument("--state-dir")
+    recent.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    _add_scope(recent)
+    recent.add_argument("--kind", action="append", help="only include sessions whose latest matching event has this kind")
+    recent.add_argument("--since", type=_since_value, help="only include events on or after an ISO date/time or duration such as 30d")
+    recent.add_argument("--limit", type=int, default=20)
+    recent.set_defaults(run=_recent)
+
+    show = commands.add_parser("show", help="show source-verified events around a session byte offset")
+    show.add_argument("session", help="session id as printed by search, e.g. opencode:ses_abc123")
+    show.add_argument("--state-dir", help="session index state directory")
+    show.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    _add_scope(show)
+    show.add_argument("--position", type=int, help="anchor the window at this byte offset; default is latest event")
+    show.add_argument("--before", type=int, default=3, help="events before the anchor (default %(default)s)")
+    show.add_argument("--after", type=int, default=3, help="events after the anchor (default %(default)s)")
+    show.add_argument("--kind", action="append", help="only display this event kind; repeatable")
+    show.add_argument("--since", type=_since_value, help="only display events on or after an ISO date/time or duration such as 30d")
+    show.add_argument("--max-chars", type=int, default=2000, help="max event text chars (default %(default)s)")
+    show.set_defaults(run=_show)
+
+    doctor = commands.add_parser("doctor", help="check the local index and SQLite FTS5")
+    doctor.add_argument("--state-dir")
+    doctor.add_argument("--rebuild-index", action="store_true", help="rebuild derived transcript tables while preserving learning tables")
+    doctor.set_defaults(run=_doctor)
+    return result
+
+
+def _add_scope(command):
+    command.add_argument("--harness", action="append", choices=HARNESSES, help="only index and search this harness; repeatable")
+    command.add_argument("--project", metavar="PATH", help="scope to this project path; defaults to the current repository")
+    command.add_argument("--all-projects", action="store_true", help="search every indexed project")
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    command_parser = parser()
+    if hasattr(args, "limit") and args.limit < 1:
+        command_parser.error("--limit must be positive")
+    if hasattr(args, "max_chars") and args.max_chars < 1:
+        command_parser.error("--max-chars must be positive")
+    if getattr(args, "all_projects", False) and getattr(args, "project", None):
+        command_parser.error("--project and --all-projects cannot be used together")
+    return args.run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

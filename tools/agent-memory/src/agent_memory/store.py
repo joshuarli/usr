@@ -14,7 +14,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
-from agent_transcripts import OPENCODE_DB, OPENCODE_SUBPOSITIONS, DATABASE_HARNESSES, HARNESSES, SUBSTANTIVE_KINDS, opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
+from agent_memory.transcripts import OPENCODE_DB, OPENCODE_SUBPOSITIONS, DATABASE_HARNESSES, HARNESSES, SUBSTANTIVE_KINDS, opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
 
 DB_FILENAME = "sessions.sqlite3"
 SCHEMA_VERSION = 6

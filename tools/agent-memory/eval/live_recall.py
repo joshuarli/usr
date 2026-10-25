@@ -12,23 +12,24 @@ import tempfile
 import time
 from pathlib import Path
 
-REPOSITORY = Path(__file__).resolve().parents[1]
-BIN = REPOSITORY / "dotfiles/base/.local/bin"
-sys.path.insert(0, str(BIN))
-SPEC = importlib.util.spec_from_file_location("agent_learning_live", REPOSITORY / "dotfiles/agent-learning-live.py")
+REPOSITORY = Path(__file__).resolve().parents[3]
+SRC = REPOSITORY / "tools/agent-memory/src"
+SHIM = REPOSITORY / "dotfiles/base/.local/bin/agent-learn"
+sys.path.insert(0, str(SRC))
+SPEC = importlib.util.spec_from_file_location("agent_learning_live", REPOSITORY / "tools/agent-memory/eval/live_learning.py")
 assert SPEC is not None
 LIVE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(LIVE)
-BENCH_SPEC = importlib.util.spec_from_file_location("agent_recall_bench", REPOSITORY / "dotfiles/agent-recall-bench.py")
+BENCH_SPEC = importlib.util.spec_from_file_location("agent_recall_bench", REPOSITORY / "tools/agent-memory/eval/bench_recall.py")
 assert BENCH_SPEC is not None
 BENCH = importlib.util.module_from_spec(BENCH_SPEC)
 assert BENCH_SPEC.loader is not None
 sys.modules[BENCH_SPEC.name] = BENCH
 BENCH_SPEC.loader.exec_module(BENCH)
 
-import agent_learning  # noqa: E402
-import agent_session_store  # noqa: E402
+from agent_memory import learning as agent_learning  # noqa: E402
+from agent_memory import store as agent_session_store  # noqa: E402
 
 TMP_ROOT = REPOSITORY / ".work" / "tmp"
 RUNS_PER_ARM = 3
@@ -110,7 +111,7 @@ def write_shim(repo):
     shim = shim_dir / "agent-learn"
     shim.write_text(
         "#!/bin/sh\nCODEX_HOME=\"%s\" exec %s %s --state-dir \"%s\" \"$@\"\n"
-        % (repo / ".agent/codex", sys.executable, BIN / "agent-learn", repo / ".agent/state"),
+        % (repo / ".agent/codex", sys.executable, SHIM, repo / ".agent/state"),
         encoding="utf-8",
     )
     shim.chmod(shim.stat().st_mode | stat.S_IXUSR)

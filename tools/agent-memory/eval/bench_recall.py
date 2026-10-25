@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 BIN_DIR = ROOT / "dotfiles" / "base" / ".local" / "bin"
+SRC_DIR = ROOT / "tools" / "agent-memory" / "src"
 FIXTURES = ROOT / "dotfiles" / "recall-eval"
 WORK_TMP = ROOT / ".work" / "tmp"
 SPLITS = ("dev", "heldout")
@@ -29,7 +30,7 @@ CATEGORIES = (
     "duplicate", "temporal", "version", "provenance",
 )
 STEP_KEYS = {"user", "assistant", "tool"}
-sys.path.insert(0, str(BIN_DIR))
+sys.path.insert(0, str(SRC_DIR))
 
 
 def _line(value):
@@ -349,7 +350,7 @@ class World:
 
 
 def qualified(harness, native_id):
-    module = importlib.import_module("agent_transcripts") if importlib.util.find_spec("agent_transcripts") else None
+    module = importlib.import_module("agent_memory.transcripts") if importlib.util.find_spec("agent_memory.transcripts") else None
     if module is None:
         return native_id
     return module.qualified_id(harness, native_id)
@@ -429,18 +430,18 @@ class LegacySystem:
 
     def __init__(self, world, learner, store):
         self.learner, self.store, self.world = learner, store, world
-        self.words = importlib.import_module("agent_learning").words
-        self.redact = importlib.import_module("agent_session_store").redact
+        self.words = importlib.import_module("agent_memory.learning").words
+        self.redact = importlib.import_module("agent_memory.store").redact
 
     def run(self, case, limit, now) -> list[dict[str, Any]]:
-        project = importlib.import_module("agent_session_store").project_identity(self.world.cwd(case["project"], case.get("worktree")))
+        project = importlib.import_module("agent_memory.store").project_identity(self.world.cwd(case["project"], case.get("worktree")))
         terms, matches = self.words(case["query"]), []
         db = self.store.db
         cwd = self.world.cwd(case["project"], case.get("worktree"))
         for memory in db.execute("SELECT * FROM learning_memories WHERE project=? AND state='approved'", (project,)):
             try:
                 self.learner._memory_conditions(cwd, json.loads(memory["validity"]))
-            except (importlib.import_module("agent_learning").LearningError, OSError, UnicodeError, ValueError):
+            except (importlib.import_module("agent_memory.learning").LearningError, OSError, UnicodeError, ValueError):
                 continue
             score = len(terms & self.words(memory["action"] + " " + memory["applicability"]))
             if score:
@@ -461,7 +462,7 @@ class RawFtsSystem:
         self.name = "fts5-" + mode
 
     def run(self, case, limit, now) -> list[dict[str, Any]]:
-        project_identity = importlib.import_module("agent_session_store").project_identity
+        project_identity = importlib.import_module("agent_memory.store").project_identity
         project = project_identity(self.world.cwd(case["project"], case.get("worktree")))
         query = case["query"]
         if self.mode == "or":
@@ -469,7 +470,7 @@ class RawFtsSystem:
             query = " OR ".join('"%s"' % t for t in terms)
         try:
             rows = self.store.search(query, project, limit=limit)
-        except importlib.import_module("agent_session_store").StoreError:
+        except importlib.import_module("agent_memory.store").StoreError:
             return []
         seen, out = set(), []
         for row in rows:
@@ -490,7 +491,7 @@ class RecallSystem:
 
     def run(self, case, limit, now) -> list[dict[str, Any]]:
         cwd = self.world.cwd(case["project"], case.get("worktree"))
-        project = importlib.import_module("agent_session_store").project_identity(cwd)
+        project = importlib.import_module("agent_memory.store").project_identity(cwd)
         response = self.learner.retrieve(project, case["query"], cwd=cwd, limit=limit, now=now, weak=self.weak)
         out = []
         for item in response["results"]:
@@ -506,7 +507,7 @@ def install_memories(world, learner, store, capture_ids):
     db = store.db
     world.memory_ids = {}
     project_ids = {}
-    identity = importlib.import_module("agent_session_store").project_identity
+    identity = importlib.import_module("agent_memory.store").project_identity
     for key, entry in world.projects.items():
         project_ids[key] = identity(entry["path"])
     with db:
@@ -552,8 +553,8 @@ def prepare(split, directory, system_names, haystack=0):
         fixture["episodes"].extend(haystack_episodes(list(fixture["projects"]), haystack, 12))
     world = World(fixture, directory)
     world.build()
-    store_module = importlib.import_module("agent_session_store")
-    learning = importlib.import_module("agent_learning")
+    store_module = importlib.import_module("agent_memory.store")
+    learning = importlib.import_module("agent_memory.learning")
     store = store_module.Store(world.state_dir)
     learner = learning.Learner(store, None)
     started = time.perf_counter()
@@ -561,7 +562,7 @@ def prepare(split, directory, system_names, haystack=0):
     world.index_seconds = time.perf_counter() - started
     world.index_stats = stats
     if hasattr(learner, "observe_project") and ("new" in system_names or "new-weak" in system_names):
-        identity = importlib.import_module("agent_session_store").project_identity
+        identity = importlib.import_module("agent_memory.store").project_identity
         world.capture = {}
         for key, entry in world.projects.items():
             world.capture[key] = learner.observe_project(identity(entry["path"]), entry["path"], world.now, 0)
@@ -576,7 +577,7 @@ def retry_requests(split, haystack=0):
     with tempfile.TemporaryDirectory(dir=str(WORK_TMP)) as directory:
         world, store, learner = prepare(split, directory, ["new"], haystack)
         system = RecallSystem(world, learner)
-        identity = importlib.import_module("agent_session_store").project_identity
+        identity = importlib.import_module("agent_memory.store").project_identity
         for case in world.fixture["cases"]:
             if system.run(case, 3, world.now):
                 continue
@@ -592,7 +593,7 @@ def retry_requests(split, haystack=0):
 
 
 def agent_learning_module():
-    return importlib.import_module("agent_learning")
+    return importlib.import_module("agent_memory.learning")
 
 
 def run_systems(split, names, limit=5, repeats=1, haystack=0, retries=None) -> dict[str, Any]:
@@ -693,7 +694,7 @@ def explain_cases(split, case_ids, haystack=0):
     WORK_TMP.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=str(WORK_TMP)) as directory:
         world, store, learner = prepare(split, directory, ["new"], haystack)
-        identity = importlib.import_module("agent_session_store").project_identity
+        identity = importlib.import_module("agent_memory.store").project_identity
         for case in world.fixture["cases"]:
             if case["id"] not in case_ids:
                 continue

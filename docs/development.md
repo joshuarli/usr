@@ -8,18 +8,18 @@ Run the narrowest check that covers the change. `make check-parallel` runs the P
 | --- | --- |
 | `dotfiles/sym` | `cd dotfiles && sh sym-test.sh`, and `dash sym-test.sh` |
 | `dotfiles/base/.local/bin/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/decide-test.py` and `uvx ruff check dotfiles/base/.local/bin/decide dotfiles/base/.local/bin/decide-test.py` |
-| Session search, transcript adapters, and normalization | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-sessions-test.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |
-| Agent learning | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-review-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-promote-test.py`, and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-ops-test.py` |
-| Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-recall-test.py` |
-| Retrieval benchmark | `python3 -I dotfiles/agent-recall-bench.py validate`, then `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-recall-bench.py run --split dev` (offline; see [agent learning](agent-learning.md#evaluation)) |
-| Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-learning-live-test.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/agent-recall-live-test.py` (no inference) |
+| Session search, transcript adapters, and normalization | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_sessions.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |
+| Agent learning | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_review.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_promote.py`, and `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_ops.py` |
+| Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_recall.py` |
+| Retrieval benchmark | `python3 -I tools/agent-memory/eval/bench_recall.py validate`, then `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/bench_recall.py run --split dev` (offline; see [agent learning](../tools/agent-memory/README.md#evaluation)) |
+| Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/test_live_learning.py` and `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/test_live_recall.py` (no inference) |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
 | a skill or agent definition | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` (or `.agents/skills` for repo-only skills); use the focused check for other agent configuration |
 | local workflow composition | Read the directly composed procedures and applicable global rules; check the affected transitions and effects. A short composition instruction is a behavior change, not wording-only. |
 | skill invocation or discovery metadata, global instruction adapters, checker behavior, or fixture behavior | Run the named `SkillCampaignTests` cases that cover the changed mechanism, plus relevant metadata and link checks. Do not run the full suite only because a campaign skill changed. |
-| a hook or `mdtool` | the matching `dotfiles/*-test.sh`, or `python3 -I dotfiles/base/.local/bin/mdtool selftest` and `skill-usage selftest` |
+| a hook or `mdtool` | the matching `tools/mdtool/tests/*-test.sh`, or `python3 -I tools/mdtool/src/mdtool.py selftest` and `skill-usage selftest` |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
 | `setup-linux` | `sh setup-linux-test.sh` and `shellcheck -s sh setup-linux setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I macos/make-sync-test.py` |

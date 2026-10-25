@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_session_store import EvidenceChanged, EvidenceUnavailable, StoreError, redact
+from agent_memory.store import EvidenceChanged, EvidenceUnavailable, StoreError, redact
 
 DEFAULT_LIMIT = 3
 MAX_LIMIT = 8

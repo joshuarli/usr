@@ -80,22 +80,24 @@ check:
 	sh dotfiles/reset-agents-test.sh
 	cd dotfiles && sh pre-push-test.sh
 	cd dotfiles && sh worktree-remove-test.sh
-	sh dotfiles/mdtool-test.sh
+	sh tools/mdtool/tests/mdtool-test.sh
 	python3 -I dotfiles/base/.local/bin/decide-test.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
-	python3 -I dotfiles/agent-sessions-test.py
-	python3 -I dotfiles/agent-learning-test.py
-	python3 -I dotfiles/agent-learning-review-test.py
-	python3 -I dotfiles/agent-learning-promote-test.py
-	python3 -I dotfiles/agent-learning-ops-test.py
-	python3 -I dotfiles/agent-learning-live-test.py
+	python3 -I tools/agent-memory/tests/test_sessions.py
+	python3 -I tools/agent-memory/tests/test_recall.py
+	python3 -I tools/agent-memory/tests/test_learning.py
+	python3 -I tools/agent-memory/tests/test_learning_review.py
+	python3 -I tools/agent-memory/tests/test_learning_promote.py
+	python3 -I tools/agent-memory/tests/test_learning_ops.py
+	python3 -I tools/agent-memory/eval/test_live_learning.py
+	python3 -I tools/agent-memory/eval/test_live_recall.py
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
 	python3 -I dotfiles/skills-campaign-test.py
 
 check-parallel:
 	mkdir -p "$(DL_TMPDIR)"
-	TMPDIR="$(DL_TMPDIR)" uvx --python 3.15 --with 'joshuarli-pytest-parallel==0.4.0' pytest dotfiles macos
+	TMPDIR="$(DL_TMPDIR)" uvx --python 3.15 --with 'joshuarli-pytest-parallel==0.4.0' pytest tools dotfiles macos
 
 lint:
 	@files=$$(git ls-files -co --exclude-standard | while read -r f; do \

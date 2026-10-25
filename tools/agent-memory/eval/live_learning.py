@@ -12,13 +12,13 @@ from pathlib import Path
 from typing import Any
 
 
-REPOSITORY = Path(__file__).resolve().parents[1]
-BIN = REPOSITORY / "dotfiles/base/.local/bin"
-sys.path.insert(0, str(BIN))
+REPOSITORY = Path(__file__).resolve().parents[3]
+SRC = REPOSITORY / "tools/agent-memory/src"
+sys.path.insert(0, str(SRC))
 
-import agent_learning  # noqa: E402
-import agent_learning_review as REVIEW  # noqa: E402
-import agent_session_store  # noqa: E402
+from agent_memory import learning as agent_learning  # noqa: E402
+from agent_memory import learning_review as REVIEW  # noqa: E402
+from agent_memory import store as agent_session_store  # noqa: E402
 
 TMP_ROOT = REPOSITORY / ".work" / "tmp"
 SKILL_NAME = "root-cause"
@@ -121,7 +121,7 @@ def _write_usr_repository(root):
     shutil.copyfile(REPOSITORY / "dotfiles/base/.agents/skills/orchestrate/SKILL.md", skills / "orchestrate/SKILL.md")
     shutil.copyfile(REPOSITORY / "dotfiles/skills-check.sh", root / "dotfiles/skills-check.sh")
     (root / "dotfiles/base/.local/bin").mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(BIN / "mdtool", root / "dotfiles/base/.local/bin/mdtool")
+    shutil.copyfile(REPOSITORY / "tools/mdtool/src/mdtool.py", root / "dotfiles/base/.local/bin/mdtool")
     _git(root, "add", ".")
     _git(root, "commit", "-q", "-m", "chore(live): create synthetic methodology")
 

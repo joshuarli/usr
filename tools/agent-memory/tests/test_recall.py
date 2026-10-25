@@ -10,22 +10,23 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-BIN = ROOT / "dotfiles" / "base" / ".local" / "bin"
+ROOT = Path(__file__).resolve().parents[3]
+SRC = ROOT / "tools" / "agent-memory" / "src"
+SHIM = ROOT / "dotfiles" / "base" / ".local" / "bin" / "agent-learn"
 WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(BIN))
-SPEC = importlib.util.spec_from_file_location("agent_recall_bench", ROOT / "dotfiles" / "agent-recall-bench.py")
+sys.path.insert(0, str(SRC))
+SPEC = importlib.util.spec_from_file_location("agent_recall_bench", ROOT / "tools" / "agent-memory" / "eval" / "bench_recall.py")
 assert SPEC is not None
 BENCH = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 sys.modules[SPEC.name] = BENCH
 SPEC.loader.exec_module(BENCH)
 
-import agent_experience  # noqa: E402
-import agent_learning  # noqa: E402
-import agent_recall  # noqa: E402
-import agent_session_store  # noqa: E402
+from agent_memory import experience as agent_experience  # noqa: E402
+from agent_memory import learning as agent_learning  # noqa: E402
+from agent_memory import recall as agent_recall  # noqa: E402
+from agent_memory import store as agent_session_store  # noqa: E402
 
 NOW = "2026-10-20T12:00:00Z"
 
@@ -988,7 +989,7 @@ class CommandTests(RecallCase):
         self.env.pop("AGENT_LEARN_WORKER", None)
 
     def run_cli(self, *args, check=True):
-        result = subprocess.run([sys.executable, str(BIN / "agent-learn"), "--state-dir", str(self.state), *args], capture_output=True, text=True, env=self.env)
+        result = subprocess.run([sys.executable, str(SHIM), "--state-dir", str(self.state), *args], capture_output=True, text=True, env=self.env)
         if check:
             self.assertEqual(result.returncode, 0, result.stderr)
         return result

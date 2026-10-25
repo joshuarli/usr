@@ -45,7 +45,7 @@ def hook(state_dir: Path, payload: Mapping[str, object]) -> bool:
     if cwd is None:
         return False
 
-    from agent_session_store import Store
+    from agent_memory.store import Store
 
     database_path = Path(Store.database_path(Path(state_dir)))
     if not database_path.is_file():

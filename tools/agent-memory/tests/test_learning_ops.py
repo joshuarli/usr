@@ -1,4 +1,3 @@
-import importlib
 import os
 import plistlib
 import sqlite3
@@ -10,11 +9,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 
-REPOSITORY = Path(__file__).resolve().parents[1]
-BIN = REPOSITORY / "dotfiles/base/.local/bin"
-sys.path.insert(0, str(BIN))
-OPS = importlib.import_module("agent_learning_ops")
-STORE = importlib.import_module("agent_session_store")
+REPOSITORY = Path(__file__).resolve().parents[3]
+SRC = REPOSITORY / "tools" / "agent-memory" / "src"
+sys.path.insert(0, str(SRC))
+from agent_memory import learning_ops as OPS  # noqa: E402
+from agent_memory import store as STORE  # noqa: E402
 
 SCRATCH_ROOT = REPOSITORY / ".work/tmp"
 SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
