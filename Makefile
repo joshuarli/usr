@@ -11,6 +11,7 @@ SYM    := sh dotfiles/sym
 sync: layers
 	mkdir -p "$(DL_TMPDIR)" || exit 1; \
 	mkdir -p "$(dir $(DL_OWNED_FILE))" || exit 1; \
+	sh dotfiles/migrate-pinact.sh "$(TARGET)" "$(DL_OWNED_FILE)" || exit 1; \
 	status=0; \
 	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
 	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || { status=$$?; printf 'sync: dl step failed\n' >&2; }; \
@@ -74,6 +75,8 @@ layers:
 
 check:
 	python3 -I macos/make-sync-test.py
+	python3 -I tools/pinact/test_pinact.py
+	python3 -I dotfiles/base/.local/bin/pinact --check
 	python3 -I dotfiles/pi-test.py
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
 	cd dotfiles && sh agent-tier-gate-test.sh

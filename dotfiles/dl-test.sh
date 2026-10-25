@@ -87,18 +87,6 @@ INSTALLER
             exit 1
         fi
         ;;
-    https://github.com/suzuki-shunsuke/pinact/releases/latest)
-        printf '%s\n' 'https://github.com/suzuki-shunsuke/pinact/releases/tag/v5.0.1'
-        ;;
-    https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.1/pinact_linux_amd64.tar.gz)
-        if [ "$headers" = - ]; then
-            printf '%s\n' 'ETag: pinact-test-etag'
-        elif [ -n "$output" ]; then
-            cp "$PINACT_TAR" "$output"
-        else
-            exit 1
-        fi
-        ;;
     https://github.com/jdx/jactionlint/releases/latest)
         printf '%s\n' 'https://github.com/jdx/jactionlint/releases/tag/v2.3.0'
         ;;
@@ -217,11 +205,6 @@ chmod +x "$mock_bin/jaq"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
 chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
-
-mkdir -p "$test_root/pinact-package"
-printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/pinact-package/pinact"
-chmod +x "$test_root/pinact-package/pinact"
-tar -czf "$test_root/pinact.tar.gz" -C "$test_root/pinact-package" pinact
 
 mkdir -p "$test_root/jactionlint-package"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/jactionlint-package/jactionlint"
@@ -763,34 +746,6 @@ else
 fi
 case "$output" in
     *'sandbox is current (release-0123456789abcdef0123456789abcdef01234567)'*) ;;
-    *) printf '%s\n' "$output" >&2; exit 1 ;;
-esac
-
-pinact_home="$test_root/pinact-home"
-if output=$(HOME="$pinact_home" XDG_STATE_HOME="$pinact_home/.local/state" \
-    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 PINACT_TAR="$test_root/pinact.tar.gz" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" pinact 2>&1); then
-    :
-else
-    printf '%s\n' "$output" >&2
-    exit 1
-fi
-[ -x "$pinact_home/.local/bin/pinact" ]
-[ "$(cat "$pinact_home/.local/state/dl/pinact")" = pinact-test-etag ]
-case "$output" in
-    *"Installed $pinact_home/.local/bin/pinact"*) ;;
-    *) printf '%s\n' "$output" >&2; exit 1 ;;
-esac
-if output=$(HOME="$pinact_home" XDG_STATE_HOME="$pinact_home/.local/state" \
-    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 PINACT_TAR="$test_root/pinact.tar.gz" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" pinact 2>&1); then
-    :
-else
-    printf '%s\n' "$output" >&2
-    exit 1
-fi
-case "$output" in
-    *'pinact is current (v5.0.1)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 

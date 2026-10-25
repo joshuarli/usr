@@ -491,25 +491,6 @@ install_github_archive() {
     tmpbin=
 }
 
-install_pinact() {
-    case "${OS}:${ARCH}" in
-        Darwin:x86_64) pinact_target=darwin_amd64 ;;
-        Darwin:aarch64) pinact_target=darwin_arm64 ;;
-        Linux:x86_64) pinact_target=linux_amd64 ;;
-        Linux:aarch64) pinact_target=linux_arm64 ;;
-        *) skip pinact "no upstream release for ${OS}/${ARCH}"; return ;;
-    esac
-    latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-        "https://github.com/suzuki-shunsuke/pinact/releases/latest") || latest_url=
-    tag=$(printf '%s\n' "$latest_url" \
-        | sed -n 's|.*/releases/tag/\([^/]*\)$|\1|p')
-    if [ -z "$tag" ]; then
-        unchecked pinact "no upstream release found"
-        return
-    fi
-    install_github_archive pinact "$tag" \
-        "https://github.com/suzuki-shunsuke/pinact/releases/download/${tag}/pinact_${pinact_target}.tar.gz"
-}
 
 install_jactionlint() {
     case "${OS}:${ARCH}" in
@@ -1891,7 +1872,7 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg pinact jactionlint jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold sandbox; do
+    for record_prog in fd rg jactionlint jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold sandbox; do
         record_managed_binary "$record_prog"
     done
     nodejs_current_target=$(readlink "${NODEJS_INSTALL_ROOT}/current" 2>/dev/null || :)
@@ -2015,7 +1996,7 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg pinact jactionlint jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv sandbox python3
+    set -- fd rg jactionlint jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv sandbox python3
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
@@ -2053,7 +2034,6 @@ for prog in "$@"; do
     changed=false
     case "$prog" in
         fd|rg) install_fd_or_rg "$prog" ;;
-        pinact) install_pinact ;;
         jactionlint) install_jactionlint ;;
         grok) install_grok ;;
         dsh) install_dsh ;;
