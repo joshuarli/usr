@@ -1892,7 +1892,7 @@ def build_parser():
                "  mdtool refs --json\n"
                "  mdtool consumers skills/mine/SKILL.md\n"
                "Exit status is 0 for no error findings, 1 for at least one, and 2 for a usage, root, or git failure. "
-               "Warnings and notes never change it. Full docs: tools/mdtool/README.md.",
+               f"Warnings and notes never change it. Full docs: {Path(__file__).resolve().parents[1]/'README.md'}.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"),nargs="?",default="check",help="check (default): all checks; commands: print check names; selftest: embedded tests")

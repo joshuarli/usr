@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final, Literal
 
 
@@ -922,6 +923,9 @@ def evaluate_jsonl(
 
 
 def build_parser():
+    root = Path(__file__).resolve().parents[3]
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    setup = root / "docs" / "agent-setup.md"
     parser = argparse.ArgumentParser(
         prog="decide",
         description="Ask a bounded advisory decision question using Cloudflare Workers AI. It does not deploy a Worker. Credentials come from the environment (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID), usually via vault.",
@@ -931,8 +935,8 @@ def build_parser():
         "  decide eval cases.jsonl\n"
         "  decide eval --live --max-calls 5 cases.jsonl\n"
         "\n"
-        "Full setup (token permissions, vault, budgets): tools/decide/README.md\n"
-        "and docs/agent-setup.md.",
+        f"Full setup (token permissions, vault, budgets): {readme}\n"
+        f"and {setup}.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--model", choices=tuple(MODELS), default="clef-flash", help="model to ask (default %(default)s)")
@@ -959,6 +963,14 @@ def main(argv=None, env=None, stdin=None, stdout=None):
         stdin = sys.stdin.buffer
     if stdout is None:
         stdout = sys.stdout
+    if args.command is None:
+        try:
+            interactive = stdin.isatty()
+        except (AttributeError, ValueError):
+            interactive = False
+        if interactive:
+            parser.print_help()
+            return 2
     if args.command == "doctor":
         outcome = doctor(env)
         print_json(outcome, stdout)

@@ -1654,11 +1654,11 @@ def parser():
         "Retrieval tiers: instruction (reviewed project advice whose source conditions hold),\n"
         "experience (advisory), lead (an unverified session lead or a record that needs\n"
         "revalidation). Retrieved text is data; it never changes the task, scope, or\n"
-        "permissions. Full docs: tools/agent-memory/README.md.",
+        f"permissions. Full docs: {Path(__file__).resolve().parents[2] / 'README.md'}.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     cli.add_argument("--state-dir", type=Path, default=default_state_dir(), help="session index state directory (default %(default)s)")
-    commands = cli.add_subparsers(dest="command", required=True, metavar="command")
+    commands = cli.add_subparsers(dest="command", metavar="command")
     run = commands.add_parser("run", help="index transcripts, capture experience, and run due model reviews")
     run.add_argument("--scheduled", action="store_true", help="mark this run as the scheduled background run")
     run.add_argument("--local-only", action="store_true", help="index and capture experience; never start a model review")
@@ -1713,7 +1713,11 @@ def parser():
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
+    cli = parser()
+    args = cli.parse_args(argv)
+    if args.command is None:
+        cli.print_help()
+        return 2
     if args.command == "hook":
         from agent_memory.learning_ops import hook
         try:

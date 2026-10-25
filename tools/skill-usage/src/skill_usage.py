@@ -486,7 +486,7 @@ def main(argv=None):
         "  skill-usage selftest\n"
         "\n"
         "Reads session transcripts through the agent-memory adapters; it never\n"
-        "writes. Full context: tools/agent-memory/README.md.",
+        f"writes. Full context: {Path(__file__).resolve().parents[2] / 'agent-memory' / 'README.md'}.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("command", nargs="?", choices=("report", "selftest"), default="report", help="report (default) or embedded selftest")

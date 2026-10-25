@@ -236,6 +236,10 @@ def _refresh(args):
         return 1
 
 
+def _readme_path():
+    return Path(__file__).resolve().parents[2] / "README.md"
+
+
 def parser():
     result = argparse.ArgumentParser(
         prog="agent-sessions",
@@ -250,10 +254,10 @@ def parser():
         "unquoted; quoting still forces an exact phrase and AND/OR still combine terms.\n"
         "Use --kind user to find your own prompts, --all-projects to leave the current\n"
         "repository, and --regex only for pattern matching.\n"
-        "Full docs: tools/agent-memory/README.md.",
+        f"Full docs: {_readme_path()}.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    commands = result.add_subparsers(dest="command", required=True, metavar="command")
+    commands = result.add_subparsers(dest="command", metavar="command")
 
     refresh = commands.add_parser("refresh", help="incrementally index transcripts")
     refresh.add_argument("--state-dir")
@@ -308,14 +312,17 @@ def _add_scope(command):
 
 
 def main(argv=None):
-    args = parser().parse_args(argv)
-    command_parser = parser()
+    cli = parser()
+    args = cli.parse_args(argv)
+    if args.command is None:
+        cli.print_help()
+        return 2
     if hasattr(args, "limit") and args.limit < 1:
-        command_parser.error("--limit must be positive")
+        cli.error("--limit must be positive")
     if hasattr(args, "max_chars") and args.max_chars < 1:
-        command_parser.error("--max-chars must be positive")
+        cli.error("--max-chars must be positive")
     if getattr(args, "all_projects", False) and getattr(args, "project", None):
-        command_parser.error("--project and --all-projects cannot be used together")
+        cli.error("--project and --all-projects cannot be used together")
     return args.run(args)
 
 

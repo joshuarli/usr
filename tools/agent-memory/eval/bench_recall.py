@@ -712,7 +712,7 @@ def explain_cases(split, case_ids, haystack=0):
 
 def main(argv=None):
     cli = argparse.ArgumentParser(description=__doc__)
-    commands = cli.add_subparsers(dest="command", required=True)
+    commands = cli.add_subparsers(dest="command", metavar="command")
     commands.add_parser("validate")
     why = commands.add_parser("explain")
     why.add_argument("--split", choices=SPLITS, default="dev")
@@ -730,6 +730,9 @@ def main(argv=None):
     requests.add_argument("--split", choices=SPLITS, default="dev")
     requests.add_argument("--haystack", type=int, default=0)
     args = cli.parse_args(argv)
+    if args.command is None:
+        cli.print_help()
+        return 2
     if args.command == "validate":
         bad = 0
         for split in SPLITS:
