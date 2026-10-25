@@ -62,7 +62,7 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 
 ## Environment
 
-macOS and Linux. Use `rg` and `fd` for search. Use `jaq` for all JSON and YAML work, in place of `jq` and `yq` (`jaq --from yaml` reads YAML, `--to yaml` writes it). Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
+macOS and Linux. For shell search always use `rg` (never `grep`/`egrep`/`grep -r`) and `fd` (never `find`/`ls -R`). Prefer harness-native search tools over shell when available; they are `rg`/`fd`-backed. Use `jaq` for all JSON and YAML work, in place of `jq` and `yq` (`jaq --from yaml` reads YAML, `--to yaml` writes it). Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
 
 ## Query structured data with jaq
 
