@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_memory.store import EvidenceChanged, EvidenceUnavailable, StoreError, redact
+from agent_memory.types import Tier
 
 DEFAULT_LIMIT = 3
 MAX_LIMIT = 8
@@ -36,7 +37,7 @@ NEAR_DUPLICATE = 0.6
 SUMMARY_CHARS = 280
 CONTEXT_CHARS = 2400
 AGED_PERFORMANCE_DAYS = 90
-CONTENT_EVENT_KINDS = ("user", "assistant", "tool-call", "tool-output", "task_complete")
+CONTENT_EVENT_KINDS: tuple[str, ...] = ("user", "assistant", "tool-call", "tool-output", "task_complete")
 KIND_WEIGHT = {"tool-output": 1.0, "user": 0.9, "task_complete": 0.7, "assistant": 0.8, "tool-call": 0.6}
 TIER_PRIOR = {"instruction": 0.12, "experience": 0.08, "lead": 0.0}
 RECORD_BM25 = (3.0, 2.0, 2.0, 4.0)
@@ -292,7 +293,7 @@ class Candidate:
     action: str
     text: str
     experience_kind: str
-    tier: str
+    tier: Tier
     observed_at: float
     ranks: dict[int, dict[str, Any]] = dataclasses.field(default_factory=dict)
     supports: list[dict[str, Any]] = dataclasses.field(default_factory=list)

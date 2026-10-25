@@ -1,0 +1,11 @@
+[project]
+name = "skill-usage"
+version = "0.1.0"
+description = "Count how each skill is listed and loaded across real agent sessions"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = "-p no:cacheprovider"

@@ -18,9 +18,10 @@ import urllib.error
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).with_name("decide")
-LOADER = importlib.machinery.SourceFileLoader("decide", str(SCRIPT))
-SPEC = importlib.util.spec_from_loader("decide", LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
+ROOT = Path(__file__).resolve().parents[3]
+SRC = ROOT / "tools/decide/src/decide.py"
+SHIM = ROOT / "dotfiles/base/.local/bin/decide"
+SPEC = importlib.util.spec_from_file_location("decide", SRC)
 assert SPEC is not None
 DECIDE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -251,7 +252,7 @@ class DecideTests(unittest.TestCase):
         for data in inputs:
             step = "surrogate input of %d bytes is rejected without leaking" % (len(data),)
             process = subprocess.run(
-                [sys.executable, "-I", str(SCRIPT)],
+                [sys.executable, "-I", str(SHIM)],
                 env=env,
                 input=data,
                 capture_output=True,
@@ -549,7 +550,7 @@ class DecideTests(unittest.TestCase):
         env["CLOUDFLARE_ACCOUNT_ID"] = self.env["CLOUDFLARE_ACCOUNT_ID"]
         env["CLOUDFLARE_API_TOKEN"] = self.env["CLOUDFLARE_API_TOKEN"]
         process = subprocess.run(
-            [sys.executable, "-I", str(SCRIPT), "doctor"],
+            [sys.executable, "-I", str(SHIM), "doctor"],
             env=env,
             text=True,
             capture_output=True,
@@ -564,7 +565,7 @@ class DecideTests(unittest.TestCase):
         missing_env.pop("CLOUDFLARE_ACCOUNT_ID", None)
         missing_env.pop("CLOUDFLARE_API_TOKEN", None)
         missing = subprocess.run(
-            [sys.executable, "-I", str(SCRIPT), "doctor"],
+            [sys.executable, "-I", str(SHIM), "doctor"],
             env=missing_env,
             text=True,
             capture_output=True,
@@ -578,7 +579,7 @@ class DecideTests(unittest.TestCase):
         env.pop("CLOUDFLARE_ACCOUNT_ID", None)
         env.pop("CLOUDFLARE_API_TOKEN", None)
         valid = subprocess.run(
-            [sys.executable, "-I", str(SCRIPT)],
+            [sys.executable, "-I", str(SHIM)],
             env=env,
             input=json.dumps(self.request),
             text=True,
@@ -595,7 +596,7 @@ class DecideTests(unittest.TestCase):
             "questions": {"q": {"type": [], "instructions": "q"}},
         }
         invalid = subprocess.run(
-            [sys.executable, "-I", str(SCRIPT)],
+            [sys.executable, "-I", str(SHIM)],
             env=env,
             input=json.dumps(invalid_request),
             text=True,

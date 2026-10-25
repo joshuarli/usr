@@ -81,7 +81,7 @@ check:
 	cd dotfiles && sh pre-push-test.sh
 	cd dotfiles && sh worktree-remove-test.sh
 	sh tools/mdtool/tests/mdtool-test.sh
-	python3 -I dotfiles/base/.local/bin/decide-test.py
+	python3 -I tools/decide/tests/test_decide.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
 	python3 -I tools/agent-memory/tests/test_sessions.py
 	python3 -I tools/agent-memory/tests/test_recall.py

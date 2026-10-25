@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import call, patch
 
 
-SCRIPT = Path(__file__).with_name("close-stale-prs.py")
+SCRIPT = Path(__file__).resolve().parents[3] / "tools/close-stale-prs/src/close_stale_prs.py"
 SPEC = importlib.util.spec_from_file_location("close_stale_prs", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 close_stale_prs = importlib.util.module_from_spec(SPEC)

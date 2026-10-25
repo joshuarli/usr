@@ -28,7 +28,7 @@ STORE_SPEC.loader.exec_module(STORE_MODULE)
 Store = STORE_MODULE.Store
 normalize = STORE_MODULE.normalize
 project_identity = STORE_MODULE.project_identity
-SKILL_USAGE_PATH = ROOT / "dotfiles/base/.local/bin/skill-usage"
+SKILL_USAGE_PATH = ROOT / "tools/skill-usage/src/skill_usage.py"
 SKILL_USAGE_LOADER = importlib.machinery.SourceFileLoader("skill_usage_bench", str(SKILL_USAGE_PATH))
 SPEC = importlib.util.spec_from_loader("skill_usage_bench", SKILL_USAGE_LOADER)  # ty: ignore[invalid-argument-type] # typeshed LoaderProtocol still requires legacy load_module, which spec_from_loader never calls
 assert SPEC is not None

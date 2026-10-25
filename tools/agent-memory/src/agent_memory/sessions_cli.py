@@ -8,9 +8,10 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 from agent_memory.store import Store, StoreError, default_state_dir, project_identity, rebuild_index, redact
-from agent_memory.transcripts import HARNESSES
+from agent_memory.types import HARNESSES, Harness
 
 
 def _state_dir(args):
@@ -23,21 +24,24 @@ def _project(args):
     return project_identity(args.project if args.project else Path.cwd())
 
 
-def _roots(args):
+def _roots(args) -> dict[Harness, list[str]] | None:
     if not args.root:
         return None
-    roots = {}
+    roots: dict[Harness, list[str]] = {}
     for value in args.root:
         name, separator, path = value.partition("=")
         if separator and name in HARNESSES:
-            roots.setdefault(name, []).append(path)
+            roots.setdefault(cast(Harness, name), []).append(path)
         else:
             roots.setdefault("codex", []).append(value)
     return roots
 
 
-def _harnesses(args):
-    return tuple(args.harness) if getattr(args, "harness", None) else HARNESSES
+def _harnesses(args) -> tuple[Harness, ...]:
+    selected = getattr(args, "harness", None)
+    if selected:
+        return cast(tuple[Harness, ...], tuple(selected))
+    return HARNESSES
 
 
 def _stats(stats):

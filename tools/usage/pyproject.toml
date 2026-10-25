@@ -1,0 +1,11 @@
+[project]
+name = "usage"
+version = "0.1.0"
+description = "Read subscription quota usage from agent CLIs"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = "-p no:cacheprovider"

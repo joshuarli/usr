@@ -1,5 +1,6 @@
 import argparse
 import collections
+import collections.abc
 import contextlib
 import dataclasses
 import enum
@@ -13,14 +14,14 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_memory.experience import CORRECTION, ERROR, RUNNER as RUNNER_PATTERN, SCHEMA as EXPERIENCE_SCHEMA, observe_project, pair_runs, rebuild_recall_projection, recall_schema, run_outcome
 from agent_memory.recall import technical_tokens
 from agent_memory.learning_ops import SchedulerError
 from agent_memory.recall import DEFAULT_LIMIT, Retriever, SourceError, artifact_text as read_tracked_text
 from agent_memory.store import Store, StoreError, active_branch, default_state_dir, project_identity, redact
-from agent_memory.transcripts import HARNESSES
+from agent_memory.types import HARNESSES, FindingState, Harness, RetryKind, Signal
 
 
 SCHEMA_VERSION = 4
@@ -35,7 +36,7 @@ SAME_ADVICE_SIMILARITY = .9
 CONFLICT_SIMILARITY = .6
 ADVICE_SCOPE_OVERLAP = .5
 CLUSTER_WINDOW = 300
-REGRESSION_SIGNAL = "regression"
+REGRESSION_SIGNAL: Signal = "regression"
 NEIGHBOR_SIMILARITY = .6
 NEIGHBOR_SCAN = 200
 NEIGHBOR_LIMIT = 8
@@ -262,11 +263,11 @@ def canonical_command(text):
     return re.sub(r"\s+", " ", re.sub(r"\b[0-9a-f]{12,}\b", "REV", text)).strip()[:600]
 
 
-def signals(events):
-    calls = {}
-    failed = collections.defaultdict(list)
+def signals(events: collections.abc.Sequence[collections.abc.Mapping[str, Any]]) -> collections.abc.Iterator[tuple[int, Signal, str]]:
+    calls: dict[str, tuple[int, str]] = {}
+    failed: dict[str, list[int]] = collections.defaultdict(list)
     for index, event in enumerate(events):
-        kind, text = event["kind"], event["text"]
+        kind, text = event["kind"], cast(str, event["text"])
         if kind == "user" and len(text) <= 6000 and CORRECTION.search(text):
             yield index, "correction", text
         if kind in ("tool-call", "tool_call", "tool"):
@@ -331,7 +332,7 @@ class Learner:
             raise LearningError("--usr-root must name the tracked usr source")
         return repository
 
-    def enable(self, cwd, repository, now, harnesses=("codex",)):
+    def enable(self, cwd, repository, now, harnesses: tuple[Harness, ...] = ("codex",)):
         cwd = Path(cwd).expanduser().resolve(strict=True)
         repository = self._learning_repository(repository)
         git_revision(cwd)
@@ -347,7 +348,7 @@ class Learner:
                 (identity, str(cwd), now, str(repository), GrantSource.PROJECT.value, granted))
         return identity
 
-    def enable_all(self, repository, now, harnesses=("codex",)):
+    def enable_all(self, repository, now, harnesses: tuple[Harness, ...] = ("codex",)):
         repository = self._learning_repository(repository)
         granted = ",".join(sorted(set(harnesses) & set(HARNESSES)))
         if not granted:
@@ -439,7 +440,7 @@ class Learner:
                     return promoted["id"]
         return None
 
-    def _cluster(self, project, signal, text, now):
+    def _cluster(self, project, signal: Signal, text, now):
         anchors = {"literal-"+hashlib.sha256(value.encode()).hexdigest()[:16] for value in re.findall(r"`([^`]+)`", text)}
         terms = words(text) | anchors | {"negative-correction" if correction_direction(text) else "positive-correction"}
         fingerprint = hashlib.sha256((signal + " " + " ".join(sorted(terms))).encode()).hexdigest()
@@ -670,7 +671,7 @@ class Learner:
                 and len({row["project"] for row in selected}) >= 2
                 and len({row["root_session"] for row in selected if row["root_session"] != "unresolved-ancestry"}) >= 2)
 
-    def _promotion_outcome(self, result):
+    def _promotion_outcome(self, result) -> tuple[FindingState, RetryKind]:
         code = result.get("reason_code")
         if result["status"] == "promoted":
             return "promoted", "none"

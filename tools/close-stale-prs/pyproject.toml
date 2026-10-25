@@ -1,0 +1,11 @@
+[project]
+name = "close-stale-prs"
+version = "0.1.0"
+description = "Find, and optionally delete, old remote branches associated with closed PRs"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = "-p no:cacheprovider"

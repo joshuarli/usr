@@ -11,10 +11,12 @@ import sqlite3
 import stat
 import subprocess
 import urllib.parse
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from agent_memory.transcripts import OPENCODE_DB, OPENCODE_SUBPOSITIONS, DATABASE_HARNESSES, HARNESSES, SUBSTANTIVE_KINDS, opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
+from agent_memory.transcripts import opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
+from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
 DB_FILENAME = "sessions.sqlite3"
 SCHEMA_VERSION = 6
@@ -517,14 +519,14 @@ class Store:
         )
 
     @_guarded
-    def refresh(self, roots=None, project=None, projects=None, *, updated_after=None, harnesses=HARNESSES):
+    def refresh(self, roots=None, project=None, projects=None, *, updated_after=None, harnesses: tuple[Harness, ...] = HARNESSES):
         return self._refresh(roots, project, projects, updated_after=updated_after, harnesses=tuple(harnesses))
 
     @_guarded
     def refresh_headers(self, roots=None):
         return self._refresh(roots, None, set(), headers_only=True, harnesses=("codex",))
 
-    def _refresh(self, roots=None, project=None, projects=None, *, updated_after=None, headers_only=False, harnesses=HARNESSES):
+    def _refresh(self, roots=None, project=None, projects=None, *, updated_after=None, headers_only=False, harnesses: tuple[Harness, ...] = HARNESSES):
         if project is not None and projects is not None:
             raise ValueError("choose either project or projects")
         root_map = coerce_roots(roots)
@@ -743,7 +745,7 @@ class Store:
             for key in ("file_size", "file_mtime_ns", "file_ctime_ns", "file_dev", "file_ino")
         )
 
-    def _discover_database(self, root_order, harness, root, admit, indexed_by_path, unindexed_by_path, cache, present_paths, unreadable_paths, stats, archive, known_sessions, forgotten):
+    def _discover_database(self, root_order, harness: Harness, root, admit, indexed_by_path, unindexed_by_path, cache, present_paths, unreadable_paths, stats, archive, known_sessions, forgotten):
         database = opencode_database(root)
         if database is None:
             return
@@ -1168,7 +1170,7 @@ class Store:
         return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
     @_guarded
-    def search(self, query, project=None, *, limit=20, regex=False, kinds=None, since=None):
+    def search(self, query, project=None, *, limit=20, regex=False, kinds: Sequence[str] | None = None, since=None):
         if int(limit) < 1:
             raise ValueError("limit must be positive")
         project = str(project) if project is not None else None
@@ -1219,7 +1221,7 @@ class Store:
             raise StoreError("FTS5 search failed; quote phrases and use AND/OR between terms: " + str(exc)) from exc
 
     @_guarded
-    def recent(self, project=None, *, limit=20, kinds=None, since=None):
+    def recent(self, project=None, *, limit=20, kinds: Sequence[str] | None = None, since=None):
         if int(limit) < 1:
             raise ValueError("limit must be positive")
         project = str(project) if project is not None else None

@@ -6,14 +6,17 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Any, Optional, cast
 from urllib.parse import unquote
 
-HARNESSES = ("codex", "claude", "muse", "grok", "opencode", "pi")
-DATABASE_HARNESSES = ("opencode",)
-OPENCODE_DB = "opencode.db"
-OPENCODE_SUBPOSITIONS = 1000
-SUBSTANTIVE_KINDS = ("user", "assistant", "developer", "tool-call", "tool-output", "task_complete", "compacted", "context", "skill_read_observed")
+from agent_memory.types import (
+    DATABASE_HARNESSES,
+    HARNESSES,
+    OPENCODE_DB,
+    OPENCODE_SUBPOSITIONS,
+    Harness,
+)
 HEADER_SCAN_LINES = 200
 HEADER_SCAN_BYTES = 524288
 MAX_NATIVE_ID = 256
@@ -35,7 +38,7 @@ _EXIT_PATTERNS = (
 )
 
 
-def qualified_id(harness, native_id):
+def qualified_id(harness: Harness, native_id: str) -> str:
     if harness == "codex" and not _has_harness_prefix(native_id):
         return native_id
     return harness + ":" + native_id
@@ -53,7 +56,7 @@ def clean_native_id(value, path):
     return text
 
 
-def default_roots(environ=None):
+def default_roots(environ: Optional[Mapping[str, str]] = None) -> dict[Harness, list[Path]]:
     environ = os.environ if environ is None else environ
     home = Path(environ.get("HOME") or str(Path.home()))
     codex_home = Path(environ.get("CODEX_HOME") or str(home / ".codex")).expanduser()
@@ -72,14 +75,14 @@ def default_roots(environ=None):
     }
 
 
-def coerce_roots(roots):
+def coerce_roots(roots: Optional[dict[str, Any]] | list[str | os.PathLike[str]] | str | os.PathLike[str]) -> dict[Harness, list[Path]]:
     if roots is None:
         return default_roots()
     if isinstance(roots, dict):
         unknown = set(roots) - set(HARNESSES)
         if unknown:
             raise ValueError("unsupported transcript harness: " + ", ".join(sorted(str(name) for name in unknown)))
-        return {name: [Path(root) for root in _listed(value)] for name, value in roots.items()}
+        return {cast(Harness, name): [Path(root) for root in _listed(value)] for name, value in roots.items()}
     return {"codex": [Path(root) for root in _listed(roots)]}
 
 
@@ -93,7 +96,7 @@ def opencode_database(root):
     return candidate if candidate.is_file() and not candidate.is_symlink() else None
 
 
-def is_source_name(harness, name):
+def is_source_name(harness: Harness, name: str) -> bool:
     if harness in DATABASE_HARNESSES:
         return False
     if harness == "codex":
@@ -425,7 +428,7 @@ def opencode_record(message_type, data_text, subposition):
     return None
 
 
-def normalize(obj, harness="codex"):
+def normalize(obj: dict[str, Any], harness: Harness = "codex") -> list[dict[str, Any]]:
     if not isinstance(obj, dict):
         return [_record("unknown:non_object", "", raw_type=type(obj).__name__)]
     if harness == "codex":

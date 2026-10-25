@@ -1,0 +1,11 @@
+[project]
+name = "decide"
+version = "0.1.0"
+description = "Ask a bounded advisory decision question using Cloudflare Workers AI"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+addopts = "-p no:cacheprovider"

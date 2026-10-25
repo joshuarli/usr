@@ -7,7 +7,7 @@ Run the narrowest check that covers the change. `make check-parallel` runs the P
 | Changed | Run |
 | --- | --- |
 | `dotfiles/sym` | `cd dotfiles && sh sym-test.sh`, and `dash sym-test.sh` |
-| `dotfiles/base/.local/bin/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/decide-test.py` and `uvx ruff check dotfiles/base/.local/bin/decide dotfiles/base/.local/bin/decide-test.py` |
+| `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
 | Session search, transcript adapters, and normalization | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_sessions.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |
 | Agent learning | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_review.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_promote.py`, and `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_ops.py` |
 | Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_recall.py` |

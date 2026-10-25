@@ -21,11 +21,12 @@ from dataclasses import dataclass, replace
 from bisect import bisect_right
 from difflib import get_close_matches
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Final, Literal
 from urllib.parse import unquote
 
-COMMANDS = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
-CHECKS = ("links", "refs", "consumers", "pointers", "dups", "router")
+Command = Literal["links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check"]
+COMMANDS: Final[tuple[Command, ...]] = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
+CHECKS: Final[tuple[Command, ...]] = ("links", "refs", "consumers", "pointers", "dups", "router")
 README_NAMES = {"readme.md", "readme.mdx", "readme.markdown", "readme.rst"}
 MD_EXTS = {".md", ".markdown", ".mdx"}
 RST_EXTS = {".rst"}
