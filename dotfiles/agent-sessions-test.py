@@ -731,7 +731,7 @@ class HarnessIndexTests(unittest.TestCase):
         self.project.mkdir()
         subprocess.run(["git", "init", "-q", str(self.project)], check=True)
         self.project_id = project_identity(self.project)
-        self.roots = {name: self.root / "roots" / name for name in ("codex", "claude", "muse", "grok")}
+        self.roots = {name: self.root / "roots" / name for name in ("codex", "claude", "muse", "grok", "pi")}
         for path in self.roots.values():
             path.mkdir(parents=True)
 
@@ -762,6 +762,12 @@ class HarnessIndexTests(unittest.TestCase):
     def muse(self, session, records):
         meta = {"payload": {"kind": "metadata", "record": {"workspace_root": str(self.project)}}}
         return self.write(self.roots["muse"] / "2026" / "10" / "20" / session / "session.jsonl", [meta, *records])
+
+    def pi(self, session, records, parent_session=None, directory="--proj--", stamp="2026-10-24T23-28-22-773Z"):
+        header = {"type": "session", "version": 3, "id": session, "timestamp": "2026-10-24T23:28:22.773Z", "cwd": str(self.project)}
+        if parent_session:
+            header["parentSession"] = parent_session
+        return self.write(self.roots["pi"] / directory / (stamp + "_" + session + ".jsonl"), [header, *records])
 
     def refresh(self, store, **kwargs):
         return store.refresh({name: [path] for name, path in self.roots.items()}, project=self.project_id, **kwargs)
@@ -829,6 +835,63 @@ class HarnessIndexTests(unittest.TestCase):
             self.assertEqual(kinds, {("muse", "unknown:model_v9_turn"), ("claude", "unknown:turn_v7")})
             summary = {row["harness"]: row for row in store.coverage()}
             self.assertEqual(summary["muse"]["unsupported"], 1)
+
+    def test_pi_tool_calls_results_errors_and_bookkeeping_entries_are_indexed(self):
+        def entry(kind, entry_id, parent, **fields):
+            return dict({"type": kind, "id": entry_id, "parentId": parent, "timestamp": "2026-10-24T23:30:00.000Z"}, **fields)
+
+        def wrapped(entry_id, parent, role, **fields):
+            return entry("message", entry_id, parent, message=dict({"role": role, "timestamp": 1792884611484}, **fields))
+
+        self.pi("pi-1", [
+            entry("model_change", "m1", None, provider="google", modelId="gemini-3.8-flash"),
+            entry("thinking_level_change", "t1", "m1", thinkingLevel="high"),
+            wrapped("s1", "t1", "system", content="", sections={"preamble": "You are an expert coding assistant", "cwd": "/x"}),
+            wrapped("u1", "s1", "user", content="find the pineapple setting"),
+            wrapped("a1", "u1", "assistant", stopReason="toolUse", content=[
+                {"type": "thinking", "thinking": "private reasoning", "thinkingSignature": "sig"},
+                {"type": "text", "text": "looking in two places"},
+                {"type": "toolCall", "id": "call_1", "name": "bash", "arguments": {"command": "rg pineapple"}},
+                {"type": "toolCall", "id": "call_2", "name": "read", "arguments": {"path": "settings.toml"}},
+            ]),
+            wrapped("r1", "a1", "toolResult", toolCallId="call_1", toolName="bash", isError=True, content=[{"type": "text", "text": "rg: not found"}]),
+            wrapped("r2", "r1", "toolResult", toolCallId="call_2", toolName="read", isError=False, content=[{"type": "text", "text": "pineapple = true"}]),
+            wrapped("a2", "r2", "assistant", stopReason="toolUse", content=[
+                {"type": "toolCall", "id": "call_3", "name": "bash", "arguments": {"command": "ls"}}]),
+            entry("context_edit", "e1", "a2", targetId="r1", replacement=None),
+            wrapped("a3", "e1", "assistant", stopReason="error", content=[], errorMessage="429 quota exceeded"),
+            entry("compaction", "c1", "a3", summary="earlier work summarized", firstKeptEntryId="u1", tokensBefore=1000),
+        ])
+        with Store(self.state) as store:
+            self.refresh(store)
+            rows = store.db.execute("SELECT kind, call_id, outcome FROM events WHERE session = 'pi:pi-1' ORDER BY position").fetchall()
+            self.assertEqual([tuple(row) for row in rows], [
+                ("session_meta", None, None), ("model_change", None, None), ("thinking_level_change", None, None), ("system", None, None),
+                ("user", None, None), ("assistant", "call_1,call_2", None),
+                ("tool-output", "call_1", "error"), ("tool-output", "call_2", "ok"),
+                ("tool-call", "call_3", None), ("context_edit", None, None), ("error", None, None), ("compacted", None, None),
+            ])
+            self.assertEqual(store.db.execute("SELECT coverage, unrecognized_events FROM sessions WHERE id = 'pi:pi-1'").fetchone()[:], ("complete", 0))
+            self.assertEqual(store.search("private reasoning", self.project_id), [])
+            self.assertEqual(store.search("You are an expert", self.project_id), [])
+            hit = store.search("rg pineapple", self.project_id)[0]
+            self.assertEqual(hit["kind"], "assistant")
+            evidence = store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
+            self.assertIn("settings.toml", evidence["text"])
+            self.assertEqual(store.search("quota exceeded", self.project_id)[0]["kind"], "error")
+
+    def test_pi_child_session_links_its_parent_and_artifact_jsonl_is_not_a_session(self):
+        self.pi("root_1", [{"type": "message", "id": "u1", "parentId": None, "timestamp": "2026-10-24T23:30:00.000Z", "message": {"role": "user", "content": "root prompt"}}])
+        parent_file = str(self.roots["pi"] / "--proj--" / "2026-10-24T23-28-22-773Z_root_1.jsonl")
+        self.pi("child-1", [{"type": "message", "id": "u1", "parentId": None, "timestamp": "2026-10-24T23:31:00.000Z", "message": {"role": "user", "content": "child prompt"}}],
+                parent_session=parent_file, stamp="2026-10-24T23-31-00-000Z")
+        self.write(self.roots["pi"] / "--proj--" / "subagent-artifacts" / "events.jsonl", [{"type": "subagent.run.started"}])
+        with Store(self.state) as store:
+            self.refresh(store)
+            rows = {row["id"]: row for row in store.db.execute("SELECT id, parent, thread_source, source, ancestry FROM sessions")}
+            self.assertEqual(sorted(rows), ["pi:child-1", "pi:root_1"])
+            self.assertEqual((rows["pi:root_1"]["parent"], rows["pi:root_1"]["thread_source"]), (None, "user"))
+            self.assertEqual((rows["pi:child-1"]["parent"], rows["pi:child-1"]["thread_source"], rows["pi:child-1"]["ancestry"]), ("pi:root_1", None, "known"))
 
     def test_unchanged_refresh_reads_no_bodies_for_any_harness(self):
         self.codex("c1", "alpha")

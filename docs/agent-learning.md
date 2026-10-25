@@ -4,7 +4,7 @@
 
 | Level | What it is | Needs |
 | --- | --- | --- |
-| Session evidence | Indexed transcripts from Codex, Claude Code, Muse Code, Grok Code, and OpenCode 2, with position and digest references that are re-verified against the original file or database row | Nothing; indexing is local |
+| Session evidence | Indexed transcripts from Codex, Claude Code, Muse Code, Grok Code, OpenCode 2, and Pi, with position and digest references that are re-verified against the original file or database row | Nothing; indexing is local |
 | Project experience | Short, immutable, source-backed observations captured without a model: a failure and the run that fixed it, a concrete user correction, an abandoned approach, a grounded finding, a benchmark result, a stated decision | `agent-learn observe` for the project |
 | Reviewed guidance | Project memories and global skill edits that passed independent model review | `agent-learn enable` (paid model calls) |
 
@@ -56,7 +56,7 @@ agent-learn enable --project "$PWD" --usr-root "$HOME/usr"
 agent-learn enable --all-projects --usr-root "$HOME/usr" --schedule
 ```
 
-`enable` allows bounded, sanitized excerpts from that project's eligible sessions to reach Codex for review. It does not change Codex trust settings. Review covers Codex sessions unless you name more with `--harness` (repeatable: `codex`, `claude`, `muse`, `grok`, `opencode`; applies to `--project` and `--all-projects`). Local indexing and observation never imply this grant. The wildcard enrolls Git projects found in session history.
+`enable` allows bounded, sanitized excerpts from that project's eligible sessions to reach Codex for review. It does not change Codex trust settings. Review covers Codex sessions unless you name more with `--harness` (repeatable: `codex`, `claude`, `muse`, `grok`, `opencode`, `pi`; applies to `--project` and `--all-projects`). Local indexing and observation never imply this grant. The wildcard enrolls Git projects found in session history.
 
 On macOS, `--schedule` installs a user LaunchAgent that runs `agent-learn run --scheduled` every 15 minutes. Without it, run reconciliation yourself; Linux has no bundled scheduler. The dotfiles sync does not install or start the LaunchAgent.
 
@@ -85,7 +85,7 @@ The store keeps local transcript indexes and learning records; it never copies o
 
 ## Search sessions
 
-`agent-sessions` indexes Codex, Claude Code, Muse Code, Grok Code, and OpenCode 2 transcripts. Search defaults to the current Git repository and its worktrees; cross-project search requires `--all-projects`.
+`agent-sessions` indexes Codex, Claude Code, Muse Code, Grok Code, OpenCode 2, and Pi transcripts. Search defaults to the current Git repository and its worktrees; cross-project search requires `--all-projects`.
 
 ```sh
 agent-sessions recent
@@ -97,7 +97,7 @@ agent-sessions doctor
 
 A Codex session keeps its bare ID. Other harnesses use `harness:ID`, so identical IDs from different tools never collide. Use the full session ID and byte offset printed with a hit. `show` verifies source bytes before displaying context. `doctor` prints per-harness coverage: complete, degraded, and unsupported sessions, unrecognized event kinds, and sessions whose ancestry is unknown. A session whose lines parse but contain no understood content is `unsupported`, not an empty success. Muse and Grok do not always state their ancestry; unknown ancestry is never counted as an independent root. `doctor --rebuild-index` rebuilds transcript tables while preserving learning records.
 
-Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFIG_DIR/projects`, `$XDG_DATA_HOME/muse/sessions`, `$GROK_HOME/sessions`, and `$XDG_DATA_HOME/opencode`, each falling back to its usual home directory. Pass `--root [HARNESS=]PATH` to override. Indexing never follows symlinks. OpenCode 2 keeps sessions in a SQLite database (`opencode.db`), not transcript files: the indexer opens it read-only, reads only the `session_v2` and `session_message` tables (never the account or credential tables), reindexes a session whenever its message count or update time changes, and takes shell exit codes from the recorded tool metadata. A hit's byte offset is `message sequence × 1000 + block`, and `show` verifies the row's digest. Search matches whole tokens, so a Chinese or Japanese query matches only a whole unsegmented run.
+Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFIG_DIR/projects`, `$XDG_DATA_HOME/muse/sessions`, `$GROK_HOME/sessions`, `$XDG_DATA_HOME/opencode`, and Pi's session directory (`$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`), each falling back to its usual home directory. Pass `--root [HARNESS=]PATH` to override. Indexing never follows symlinks. Pi sessions are the `<timestamp>_<id>.jsonl` files, so pi-subagents artifacts such as `events.jsonl` are not mistaken for sessions. Pi stores one tool call or result per entry; several calls from one assistant entry become one event whose call ID lists them all. A session whose header names a `parentSession` links to that session and is labeled `child`: Pi writes the same field for a user fork and for a delegated subagent. Branches inside one session file (`parentId` not pointing at the preceding entry) are indexed in file order and are not distinguished. OpenCode 2 keeps sessions in a SQLite database (`opencode.db`), not transcript files: the indexer opens it read-only, reads only the `session_v2` and `session_message` tables (never the account or credential tables), reindexes a session whenever its message count or update time changes, and takes shell exit codes from the recorded tool metadata. A hit's byte offset is `message sequence × 1000 + block`, and `show` verifies the row's digest. Search matches whole tokens, so a Chinese or Japanese query matches only a whole unsegmented run.
 
 ## Promotion policy
 

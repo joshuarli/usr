@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote
 
-HARNESSES = ("codex", "claude", "muse", "grok", "opencode")
+HARNESSES = ("codex", "claude", "muse", "grok", "opencode", "pi")
 DATABASE_HARNESSES = ("opencode",)
 OPENCODE_DB = "opencode.db"
 OPENCODE_SUBPOSITIONS = 1000
@@ -26,6 +26,8 @@ _CLAUDE_KNOWN = frozenset((
     "ai-title", "custom-title", "file-history-snapshot", "file-history-delta", "progress", "api-request",
     "api-request-blob", "pr-link", "agent-name", "tag",
 ))
+_PI_SESSION_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}T[\d-]+Z_(.+)\.jsonl$")
+_PI_BOOKKEEPING = frozenset(("model_change", "thinking_level_change", "usage", "context_edit", "label", "session_info", "custom"))
 _EXIT_PATTERNS = (
     re.compile(r"(?im)^\s*exit(?:ed)? (?:code|status)[: ]+(-?\d+)\b"),
     re.compile(r"(?i)\b(?:process )?exited with (?:exit )?code (-?\d+)\b"),
@@ -58,12 +60,15 @@ def default_roots(environ=None):
     claude_home = Path(environ.get("CLAUDE_CONFIG_DIR") or str(home / ".claude")).expanduser()
     data_home = Path(environ.get("XDG_DATA_HOME") or str(home / ".local" / "share")).expanduser()
     grok_home = Path(environ.get("GROK_HOME") or str(home / ".grok")).expanduser()
+    pi_agent_home = Path(environ.get("PI_CODING_AGENT_DIR") or str(home / ".pi" / "agent")).expanduser()
+    pi_sessions = Path(environ.get("PI_CODING_AGENT_SESSION_DIR") or str(pi_agent_home / "sessions")).expanduser()
     return {
         "codex": [codex_home / "sessions", codex_home / "archived_sessions"],
         "claude": [claude_home / "projects"],
         "muse": [data_home / "muse" / "sessions"],
         "grok": [grok_home / "sessions"],
         "opencode": [data_home / "opencode"],
+        "pi": [pi_sessions],
     }
 
 
@@ -97,6 +102,8 @@ def is_source_name(harness, name):
         return name.endswith(".jsonl")
     if harness == "muse":
         return name == "session.jsonl"
+    if harness == "pi":
+        return _PI_SESSION_NAME.match(name) is not None
     return name == "chat_history.jsonl"
 
 
@@ -226,6 +233,57 @@ def _claude_record(obj):
             return _record("assistant", text, timestamp, raw_type=kind, role="assistant")
         return _record("reasoning" if any(block.get("type") in ("thinking", "redacted_thinking") for block in blocks) else "assistant", "", timestamp, raw_type=kind)
     if kind in _CLAUDE_KNOWN:
+        return _record(str(kind), "", timestamp, raw_type=kind)
+    return _record("unknown:" + str(kind), "", timestamp, raw_type=kind)
+
+
+def _pi_message_record(message, timestamp):
+    role = message.get("role")
+    content = message.get("content", "")
+    if role == "user":
+        return _record("user", _content_text(content), timestamp, raw_type="message", role="user")
+    if role == "system":
+        return _record("system", "", timestamp, raw_type="message", role="system")
+    if role == "custom":
+        return _record("context", _content_text(content), timestamp, raw_type="message")
+    if role == "toolResult":
+        text = _content_text(content)
+        failed = message.get("isError")
+        outcome = ("error" if failed else "ok") if isinstance(failed, bool) else exit_outcome(text)
+        return _record("tool-output", text, timestamp, message.get("toolCallId"), "message", outcome=outcome)
+    if role == "assistant":
+        blocks = _claude_blocks(content)
+        calls = [block for block in blocks if block.get("type") == "toolCall"]
+        text = "\n".join(part for part in (_content_text(block) for block in blocks if block.get("type") == "text") if part)
+        if calls:
+            rendered = "\n".join(str(call.get("name") or "tool") + "\n" + _text_value(call.get("arguments", {})) for call in calls)
+            call_id = ",".join(str(call["id"]) for call in calls if call.get("id"))
+            if text:
+                return _record("assistant", text + "\n" + rendered, timestamp, call_id or None, "message", role="assistant")
+            return _record("tool-call", rendered, timestamp, call_id or None, "message", tool_name=str(calls[0].get("name") or "tool"))
+        if text:
+            return _record("assistant", text, timestamp, raw_type="message", role="assistant")
+        if message.get("errorMessage"):
+            return _record("error", _text_value(message["errorMessage"]), timestamp, raw_type="message")
+        return _record("reasoning" if any(block.get("type") == "thinking" for block in blocks) else "assistant", "", timestamp, raw_type="message")
+    return _record("unknown:message:" + str(role), "", timestamp, raw_type="message")
+
+
+def _pi_record(obj):
+    kind = obj.get("type") or "unknown"
+    timestamp = obj.get("timestamp")
+    if kind == "session":
+        return _record("session_meta", "", timestamp, raw_type=kind)
+    if kind == "message":
+        message = obj.get("message")
+        return _pi_message_record(message if isinstance(message, dict) else {}, timestamp)
+    if kind == "compaction":
+        return _record("compacted", _text_value(obj.get("summary", "")), timestamp, raw_type=kind)
+    if kind == "branch_summary":
+        return _record("branch_summary", _text_value(obj.get("summary", "")), timestamp, raw_type=kind)
+    if kind == "custom_message":
+        return _record("context", _content_text(obj.get("content", "")), timestamp, raw_type=kind)
+    if kind in _PI_BOOKKEEPING:
         return _record(str(kind), "", timestamp, raw_type=kind)
     return _record("unknown:" + str(kind), "", timestamp, raw_type=kind)
 
@@ -367,6 +425,8 @@ def normalize(obj, harness="codex"):
         return [_muse_record(obj)]
     if harness == "grok":
         return [_grok_record(obj)]
+    if harness == "pi":
+        return [_pi_record(obj)]
     if harness in DATABASE_HARNESSES:
         raise ValueError("database transcripts are read with opencode_events, not normalize")
     raise ValueError("unsupported transcript harness: " + str(harness))
@@ -493,6 +553,22 @@ def read_header(harness, path, open_source, stats=None):
             if payload.get("kind") == "metadata" and isinstance(workspace_root, str):
                 header["cwd"] = workspace_root
                 break
+        return header
+    if harness == "pi":
+        header["native_id"] = _PI_SESSION_NAME.sub(r"\1", path.name)
+        obj = objects[0] if objects and objects[0].get("type") == "session" else {}
+        if isinstance(obj.get("id"), str):
+            header["native_id"] = obj["id"]
+        header["cwd"] = obj.get("cwd") if isinstance(obj.get("cwd"), str) else ""
+        parent_session = obj.get("parentSession")
+        match = _PI_SESSION_NAME.match(Path(parent_session).name) if isinstance(parent_session, str) else None
+        if match:
+            header["parent_native"] = match.group(1)
+            header["thread_source"] = None
+            header["source"] = _json_text("child")
+        else:
+            header["thread_source"] = "user"
+            header["source"] = _json_text("user")
         return header
     header["native_id"] = path.parent.name
     summary = _sibling_json(path, "summary.json", open_source, stats)
