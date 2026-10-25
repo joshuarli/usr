@@ -75,7 +75,13 @@ layers:
 
 check:
 	python3 -I macos/make-sync-test.py
-	python3 -I tools/pinact/test_pinact.py
+	mkdir -p "$(DL_TMPDIR)"
+	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/test_pinact.py
+	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/tests/test_yaml.py
+	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/tests/test_lint_rules.py
+	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/tests/test_expressions.py
+	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/tests/test_security.py
+	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/tests/test_fix.py
 	python3 -I dotfiles/base/.local/bin/pinact --check
 	python3 -I dotfiles/pi-test.py
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
