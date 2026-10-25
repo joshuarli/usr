@@ -455,63 +455,6 @@ install_fd_or_rg() {
     tmpbin=
 }
 
-install_github_archive() {
-    archive_prog=$1
-    archive_version=$2
-    archive_url=$3
-    archive_name=${archive_url##*/}
-    id=$(asset_id "$archive_url")
-    if [ -z "$id" ]; then
-        unchecked "$archive_prog" "${archive_name} is not available in ${archive_version}"
-        return
-    fi
-    if is_current "$archive_prog" "$id"; then
-        printf '%s\n' "${archive_prog} is current (${archive_version})"
-        return
-    fi
-    printf '%s\n' "Downloading ${archive_name} ..."
-    tmpzip=$(mktemp)
-    if ! curl -fsSL -o "$tmpzip" "$archive_url"; then
-        rm -f "$tmpzip"
-        tmpzip=
-        skip "$archive_prog" "${archive_name} is not available in ${archive_version}"
-        return
-    fi
-    tmpbin=$(mktemp "${DEST}/.${archive_prog}.XXXXXX")
-    if ! tar -xzOf "$tmpzip" "$archive_prog" > "$tmpbin"; then
-        rm -f "$tmpzip" "$tmpbin"
-        tmpzip=
-        tmpbin=
-        skip "$archive_prog" "${archive_name} does not contain ${archive_prog}"
-        return
-    fi
-    rm -f "$tmpzip"
-    tmpzip=
-    install_binary "$archive_prog" "$tmpbin" "$id"
-    tmpbin=
-}
-
-
-install_jactionlint() {
-    case "${OS}:${ARCH}" in
-        Darwin:x86_64) jactionlint_target=darwin_amd64 ;;
-        Darwin:aarch64) jactionlint_target=darwin_arm64 ;;
-        Linux:x86_64) jactionlint_target=linux_amd64 ;;
-        Linux:aarch64) jactionlint_target=linux_arm64 ;;
-        *) skip jactionlint "no upstream release for ${OS}/${ARCH}"; return ;;
-    esac
-    latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-        "https://github.com/jdx/jactionlint/releases/latest") || latest_url=
-    tag=$(printf '%s\n' "$latest_url" \
-        | sed -n 's|.*/releases/tag/\([^/]*\)$|\1|p')
-    if [ -z "$tag" ]; then
-        unchecked jactionlint "no upstream release found"
-        return
-    fi
-    install_github_archive jactionlint "$tag" \
-        "https://github.com/jdx/jactionlint/releases/download/${tag}/jactionlint_${tag#v}_${jactionlint_target}.tar.gz"
-}
-
 install_mold() {
     if [ "${OS}:${ARCH}" != Linux:x86_64 ]; then
         skip mold "only x86_64 Linux is published"
@@ -1872,7 +1815,7 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg jactionlint jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold sandbox; do
+    for record_prog in fd rg jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold sandbox; do
         record_managed_binary "$record_prog"
     done
     nodejs_current_target=$(readlink "${NODEJS_INSTALL_ROOT}/current" 2>/dev/null || :)
@@ -1996,7 +1939,7 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jactionlint jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv sandbox python3
+    set -- fd rg jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv sandbox python3
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
@@ -2034,7 +1977,6 @@ for prog in "$@"; do
     changed=false
     case "$prog" in
         fd|rg) install_fd_or_rg "$prog" ;;
-        jactionlint) install_jactionlint ;;
         grok) install_grok ;;
         dsh) install_dsh ;;
         cmd) install_cmd ;;
