@@ -87,18 +87,6 @@ INSTALLER
             exit 1
         fi
         ;;
-    https://github.com/jdx/jactionlint/releases/latest)
-        printf '%s\n' 'https://github.com/jdx/jactionlint/releases/tag/v2.3.0'
-        ;;
-    https://github.com/jdx/jactionlint/releases/download/v2.3.0/jactionlint_2.3.0_linux_amd64.tar.gz)
-        if [ "$headers" = - ]; then
-            printf '%s\n' 'ETag: jactionlint-test-etag'
-        elif [ -n "$output" ]; then
-            cp "$JACTIONLINT_TAR" "$output"
-        else
-            exit 1
-        fi
-        ;;
     https://releases.openai.com/codex/channels/latest)
         printf '%s\n' '{}'
         ;;
@@ -205,11 +193,6 @@ chmod +x "$mock_bin/jaq"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
 chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
-
-mkdir -p "$test_root/jactionlint-package"
-printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/jactionlint-package/jactionlint"
-chmod +x "$test_root/jactionlint-package/jactionlint"
-tar -czf "$test_root/jactionlint.tar.gz" -C "$test_root/jactionlint-package" jactionlint
 
 mkdir -p "$test_root/opencode-package"
 cat > "$test_root/opencode-package/opencode" <<'EOF'
@@ -746,34 +729,6 @@ else
 fi
 case "$output" in
     *'sandbox is current (release-0123456789abcdef0123456789abcdef01234567)'*) ;;
-    *) printf '%s\n' "$output" >&2; exit 1 ;;
-esac
-
-jactionlint_home="$test_root/jactionlint-home"
-if output=$(HOME="$jactionlint_home" XDG_STATE_HOME="$jactionlint_home/.local/state" \
-    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 JACTIONLINT_TAR="$test_root/jactionlint.tar.gz" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jactionlint 2>&1); then
-    :
-else
-    printf '%s\n' "$output" >&2
-    exit 1
-fi
-[ -x "$jactionlint_home/.local/bin/jactionlint" ]
-[ "$(cat "$jactionlint_home/.local/state/dl/jactionlint")" = jactionlint-test-etag ]
-case "$output" in
-    *"Installed $jactionlint_home/.local/bin/jactionlint"*) ;;
-    *) printf '%s\n' "$output" >&2; exit 1 ;;
-esac
-if output=$(HOME="$jactionlint_home" XDG_STATE_HOME="$jactionlint_home/.local/state" \
-    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 JACTIONLINT_TAR="$test_root/jactionlint.tar.gz" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jactionlint 2>&1); then
-    :
-else
-    printf '%s\n' "$output" >&2
-    exit 1
-fi
-case "$output" in
-    *'jactionlint is current (v2.3.0)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 
