@@ -1,0 +1,6 @@
+interface:
+  display_name: "Test Pyramid"
+  short_description: "Improve focused correctness, performance and memory gates"
+  default_prompt: "Use $test-pyramid to audit and improve this project's testing layers and focused correctness, performance and memory gates."
+policy:
+  allow_implicit_invocation: false

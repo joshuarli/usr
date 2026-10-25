@@ -54,13 +54,18 @@ Rule of thumb:
 
 Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-the-backlog` to implement it. Each can run on its own. `ultratriage` ends open to feedback or the choice to start burn-down; it continues straight into implementation only when you have already asked for both. Accepted designs remain open until implemented, and prerequisite work lands before its dependents.
 
+## Verification
+
+| Skill | Mode | Use it to |
+| --- | --- | --- |
+| `test-pyramid` | Explicit | Audit and improve a project's testing layers, smallest relevant correctness/performance/memory gates, host-aware measurements and concise reports. Also supports audit-only and campaign-planning requests. Full stays manual-only. |
+
 ## Campaigns
 
 A campaign is a long, multi-lane effort run from a design doc. Use them in this order.
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `test-heirarchy` | Explicit | Audit one repo's test, performance and memory hierarchy, then use `campaign-plan` to design change-selected, manual-only full gates. Planning only. |
 | `campaign-plan <goal>` | Explicit | Plan a campaign from a goal: survey, baseline, workstreams, and a command that proves each deliverable. |
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
 | `burn-down-the-backlog` | Explicit | Work the starting `TODO.md` queue through `orchestrate`, honoring prerequisites and priority, one commit per closed ticket, with unattended execution. |
