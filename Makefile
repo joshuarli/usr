@@ -92,14 +92,14 @@ check:
 	sh tools/mdtool/tests/mdtool-test.sh
 	python3 -I tools/decide/tests/test_decide.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
-	python3 -I tools/agent-memory/tests/test_sessions.py
-	python3 -I tools/agent-memory/tests/test_recall.py
-	python3 -I tools/agent-memory/tests/test_learning.py
-	python3 -I tools/agent-memory/tests/test_learning_review.py
-	python3 -I tools/agent-memory/tests/test_learning_promote.py
-	python3 -I tools/agent-memory/tests/test_learning_ops.py
-	python3 -I tools/agent-memory/eval/test_live_learning.py
-	python3 -I tools/agent-memory/eval/test_live_recall.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_sessions.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_recall.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning_review.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning_promote.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning_ops.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/eval/test_live_learning.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/eval/test_live_recall.py
 	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
 	sh dotfiles/skills-check.sh .agents/skills
 	python3 -I dotfiles/skills-campaign-test.py

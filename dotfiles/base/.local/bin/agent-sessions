@@ -3,10 +3,10 @@ import os
 import sys
 from pathlib import Path
 
-if sys.version_info < (3, 12):
+if sys.version_info < (3, 15):
     os.execvp(
         "uv",
-        ["uv", "run", "--no-project", "--python", ">=3.12", "python", str(Path(__file__).resolve()), *sys.argv[1:]],
+        ["uv", "run", "--no-project", "--python", ">=3.15", "python", str(Path(__file__).resolve()), *sys.argv[1:]],
     )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools" / "agent-memory" / "src"))

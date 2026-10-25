@@ -2,17 +2,17 @@
 
 ## Run checks
 
-Run the narrowest check that covers the change. `make check-parallel` runs the Python files in parallel across `dotfiles` and `macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`); `python3 -I` stays the canonical per-file runner.
+Run the narrowest check that covers the change. `make check-parallel` runs the Python files in parallel across `dotfiles` and `macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`). The table lists the per-file runner for each area.
 
 | Changed | Run |
 | --- | --- |
 | `dotfiles/sym` | `cd dotfiles && sh sym-test.sh`, and `dash sym-test.sh` |
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
-| Session search, transcript adapters, and normalization | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_sessions.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |
-| Agent learning | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_review.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_promote.py`, and `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_learning_ops.py` |
-| Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/tests/test_recall.py` |
-| Retrieval benchmark | `python3 -I tools/agent-memory/eval/bench_recall.py validate`, then `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/bench_recall.py run --split dev` (offline; see [agent learning](../tools/agent-memory/README.md#evaluation)) |
-| Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/test_live_learning.py` and `TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/test_live_recall.py` (no inference) |
+| Session search, transcript adapters, and normalization | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_sessions.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |
+| Agent learning | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_learning.py`, `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_learning_review.py`, `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_learning_promote.py`, and `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_learning_ops.py` |
+| Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_recall.py` |
+| Retrieval benchmark | `uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py validate`, then `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py run --split dev` (offline; see [agent learning](../tools/agent-memory/README.md#evaluation)) |
+| Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/test_live_learning.py` and `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/test_live_recall.py` (no inference) |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |

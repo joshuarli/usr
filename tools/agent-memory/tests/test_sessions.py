@@ -2,12 +2,14 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,24 @@ project_identity = STORE_MODULE.project_identity
 redact = STORE_MODULE.redact
 rebuild_index = STORE_MODULE.rebuild_index
 CLI_PATH = ROOT / "dotfiles" / "base" / ".local" / "bin" / "agent-sessions"
+
+
+class LauncherContractTests(unittest.TestCase):
+    def test_launcher_python_floor_matches_project_metadata(self):
+        metadata = tomllib.loads((ROOT / "tools" / "agent-memory" / "pyproject.toml").read_text())
+        requirement = metadata["project"]["requires-python"]
+        match = re.fullmatch(r">=([0-9]+)\.([0-9]+)", requirement)
+        if match is None:
+            self.fail("agent-memory pyproject.toml must declare a numeric Python minimum")
+        major, minor = (int(part) for part in match.groups())
+        constraint = ">=%d.%d" % (major, minor)
+
+        for command in ("agent-learn", "agent-sessions"):
+            launcher = ROOT / "dotfiles" / "base" / ".local" / "bin" / command
+            source = launcher.read_text()
+            with self.subTest(command=command):
+                self.assertIn("if sys.version_info < (%d, %d):" % (major, minor), source)
+                self.assertIn('"--python", "%s"' % constraint, source)
 
 
 def metadata(session, cwd, parent=None, source="cli", thread_source="user"):

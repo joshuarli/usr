@@ -1,5 +1,7 @@
 # Agent learning
 
+The `agent-learn` and `agent-sessions` launchers require Python 3.15 or newer. If `python3` is older, they use `uv` to select a compatible interpreter.
+
 `agent-learn` keeps one local SQLite state at `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/sessions.sqlite3`. It holds three levels of knowledge, each with its own trust and cost boundary:
 
 | Level | What it is | Needs |
@@ -133,9 +135,9 @@ Project memories are stored exactly as reviewed, at most 600 characters of actio
 All evaluation is offline unless a command says otherwise.
 
 ```sh
-python3 -I tools/agent-memory/eval/bench_recall.py validate
-TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/bench_recall.py run --split dev
-TMPDIR="$PWD/.work/tmp" python3 -I tools/agent-memory/eval/bench_recall.py run --split heldout --haystack 150 --detail
+uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py validate
+TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py run --split dev
+TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py run --split heldout --haystack 150 --detail
 ```
 
 The benchmark renders synthetic multi-project episodes into real Git repositories, worktrees, and transcripts in all four harness formats, indexes them, captures experience, installs approved memories, applies source edits, and scores recall against labeled episodes. `--system` selects the legacy word-overlap recall, plain FTS5 search, or the new pipeline. `--haystack N` adds N synthetic routine sessions per project. The `dev` split is for tuning. The `heldout` split was written independently and was not used to choose any parameter. `explain CASE` shows why one case passed or failed.
