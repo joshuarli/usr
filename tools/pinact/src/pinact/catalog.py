@@ -117,11 +117,12 @@ def load_catalog(path: Path) -> dict[str, CatalogEntry]:
     entries: dict[str, CatalogEntry] = {}
     for table, fields in flat.items():
         repo = table.strip().strip('"').strip("'")
+        if repo.startswith("actions."):
+            repo = repo.removeprefix("actions.")
+            if "/" not in repo:
+                repo = "actions/" + repo
         if "/" not in repo:
-            if repo.startswith("actions.") and repo.count(".") == 1:
-                repo = "actions/" + repo[len("actions."):]
-            else:
-                continue
+            continue
         channel = str(fields.get("channel", "")).strip()
         version = str(fields.get("version", "")).strip()
         sha = str(fields.get("sha", "")).strip()
