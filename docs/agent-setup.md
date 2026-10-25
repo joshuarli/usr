@@ -15,7 +15,7 @@
 | DeepSeek Harness | `${DSH_HOME:-~/.dsh}/AGENTS.md` | `${DSH_AGENTS_HOME:-~/.agents}/skills/` |
 | Command Code (`cmd`, opt-in) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
 
-Command Code requires Node.js 26.12.0+ and is installed on demand with `sh dl cmd`, into `~/.local/share/command-code` (or `$XDG_DATA_HOME/command-code`). Grok is likewise opt-in (`sh dl grok`); neither is downloaded by no-argument `dl` or `make`. Sync the tracked configuration with `make` as usual, then run `cmd login` yourself. The installer never touches Command's `~/.commandcode` credentials or sessions.
+Install Node.js 26.12.1 and the latest npm with `sh dl nodejs` on macOS arm64 or Linux x86_64 and arm64. No-argument `dl` also installs Node.js on those platforms. Command Code requires Node.js 26.12.0+ and installs on demand with `sh dl cmd`, into `~/.local/share/command-code` (or `$XDG_DATA_HOME/command-code`). Grok is likewise opt-in (`sh dl grok`); neither is downloaded by no-argument `dl` or `make`. Sync the tracked configuration with `make` as usual, then run `cmd login` yourself. The installer never touches Command's `~/.commandcode` credentials or sessions.
 
 Command shares the canonical global instructions and discovers `~/.agents/skills/` without duplication. Its settings start in unrestricted `yolo` mode, disable Taste learning to avoid overlapping `agent-learn`, and omit the default commit co-author trailer. Edit the tracked `tasteLearning` setting to try Taste. Use `/skill:<name>` if a built-in command shadows a skill. Command sessions run the pinned `meta/muse-spark-1.3-contributor` model, which its `Explore` and `General` subagents inherit; its transcripts are not yet indexed by `agent-sessions` or `agent-learn`.
 

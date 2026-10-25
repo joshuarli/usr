@@ -29,6 +29,8 @@ CMD_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/command-code"
 PI_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pi"
 PYTHON_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/python-build"
 NODE_MINIMUM=26.12.0
+NODEJS_VERSION=26.12.1
+NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
 
 STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
 DL_OWNED_FILE=${DL_OWNED_FILE:-}
@@ -720,6 +722,222 @@ install_python3() {
     own_file "${STATE}/python3"
     changed=true
     printf '%s\n' "Installed ${DEST}/python3"
+}
+
+install_nodejs() {
+    case "${OS}:${ARCH}" in
+        Darwin:aarch64)
+            nodejs_asset="node-v${NODEJS_VERSION}-darwin-arm64.tar.xz"
+            nodejs_url="https://nodejs.org/dist/v${NODEJS_VERSION}/${nodejs_asset}"
+            nodejs_sha256=18830bf448fe187c650dc28c98aa8c968ed1d40b6dd032c081e70a384a1bf660
+            nodejs_target=darwin-arm64
+            ;;
+        Linux:x86_64|Linux:aarch64)
+            if command -v getconf >/dev/null 2>&1 \
+                && getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+                case "$ARCH" in
+                    x86_64)
+                        nodejs_target=linux-x64
+                        nodejs_sha256=6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd
+                        ;;
+                    aarch64)
+                        nodejs_target=linux-arm64
+                        nodejs_sha256=42aa04922591ee5d4dbc7740d452621acf28508239daa512f5ee8c47ee224fdb
+                        ;;
+                esac
+                nodejs_url="https://nodejs.org/dist/v${NODEJS_VERSION}/node-v${NODEJS_VERSION}-${nodejs_target}.tar.xz"
+            else
+                case "$ARCH" in
+                    x86_64)
+                        nodejs_target=linux-x64-musl
+                        nodejs_sha256=4fd7c15fdc930ea48cf144bb302ce30a76c81920e36473d087720d0810efe1cd
+                        nodejs_url="https://nodejs.org/dist/v${NODEJS_VERSION}/node-v${NODEJS_VERSION}-${nodejs_target}.tar.xz"
+                        ;;
+                    aarch64)
+                        nodejs_target=linux-arm64-musl
+                        nodejs_sha256=87d822005776f222f2964c93df055f926d80595a63442b891d3aafe1f0a1dc67
+                        nodejs_url="https://unofficial-builds.nodejs.org/download/release/v${NODEJS_VERSION}/node-v${NODEJS_VERSION}-${nodejs_target}.tar.xz"
+                        ;;
+                esac
+            fi
+            nodejs_asset="node-v${NODEJS_VERSION}-${nodejs_target}.tar.xz"
+            ;;
+        *) skip nodejs "no Node.js ${NODEJS_VERSION} build for ${OS}/${ARCH}"; return ;;
+    esac
+    if [ -L "$NODEJS_INSTALL_ROOT" ]; then
+        skip nodejs "$NODEJS_INSTALL_ROOT is a symlink"
+        return
+    fi
+    nodejs_managed=false
+    previous_release=
+    current_target=$(readlink "${NODEJS_INSTALL_ROOT}/current" 2>/dev/null || :)
+    if [ -n "$current_target" ]; then
+        case "$current_target" in
+            "${NODEJS_INSTALL_ROOT}/"*) previous_release=${current_target##*/} ;;
+            *) skip nodejs "${NODEJS_INSTALL_ROOT}/current points outside its install directory"; return ;;
+        esac
+        printf '%s\n' "$previous_release" \
+            | grep -Eq "^${NODEJS_VERSION}-npm[0-9]+[.][0-9]+[.][0-9]+([.-][A-Za-z0-9.-]+)?-${nodejs_target}$" \
+            || { skip nodejs "invalid install record"; return; }
+        if [ -L "${NODEJS_INSTALL_ROOT}/${previous_release}" ] \
+            || [ ! -d "${NODEJS_INSTALL_ROOT}/${previous_release}" ]; then
+            skip nodejs "${NODEJS_INSTALL_ROOT}/current target is missing"
+            return
+        fi
+        nodejs_managed=true
+    elif [ -e "$NODEJS_INSTALL_ROOT" ] || [ -L "$NODEJS_INSTALL_ROOT" ]; then
+        if [ -L "$NODEJS_INSTALL_ROOT" ] || [ ! -d "$NODEJS_INSTALL_ROOT" ] \
+            || [ -n "$(ls -A "$NODEJS_INSTALL_ROOT" 2>/dev/null)" ]; then
+            skip nodejs "$NODEJS_INSTALL_ROOT already exists outside dl management"
+            return
+        fi
+    fi
+    for nodejs_command in node npm npx; do
+        nodejs_launcher="${DEST}/${nodejs_command}"
+        if [ -e "$nodejs_launcher" ] || [ -L "$nodejs_launcher" ]; then
+            if [ "$nodejs_managed" != true ] \
+                || [ "$(readlink "$nodejs_launcher" 2>/dev/null || :)" \
+                    != "${NODEJS_INSTALL_ROOT}/current/bin/${nodejs_command}" ]; then
+                skip nodejs "$nodejs_launcher already exists outside dl management"
+                return
+            fi
+        fi
+    done
+    if [ "$nodejs_managed" = true ]; then
+        npm_latest=$(PATH="${NODEJS_INSTALL_ROOT}/current/bin:${PATH}" \
+            "${NODEJS_INSTALL_ROOT}/current/bin/npm" view npm@latest version 2>/dev/null) || npm_latest=
+        printf '%s\n' "$npm_latest" \
+            | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+            || { unchecked nodejs "could not resolve the latest npm version"; return; }
+        installed_npm=$("${NODEJS_INSTALL_ROOT}/current/bin/npm" --version 2>/dev/null) || installed_npm=
+        installed_node=$("${NODEJS_INSTALL_ROOT}/current/bin/node" -p 'process.versions.node' 2>/dev/null) || installed_node=
+        if [ "$installed_npm" = "$npm_latest" ] \
+            && [ "$installed_node" = "$NODEJS_VERSION" ]; then
+            own_file "${NODEJS_INSTALL_ROOT}/current"
+            own_dir "${NODEJS_INSTALL_ROOT}/${previous_release}"
+            for nodejs_command in node npm npx; do
+                if [ ! -e "${DEST}/${nodejs_command}" ]; then
+                    tmpbinlink=$(mktemp "${DEST}/.${nodejs_command}.XXXXXX")
+                    rm -f "$tmpbinlink"
+                    ln -s "${NODEJS_INSTALL_ROOT}/current/bin/${nodejs_command}" "$tmpbinlink"
+                    mv -f "$tmpbinlink" "${DEST}/${nodejs_command}"
+                    tmpbinlink=
+                fi
+                own_file "${DEST}/${nodejs_command}"
+            done
+            printf '%s\n' "nodejs is current (${NODEJS_VERSION}, npm ${npm_latest})"
+            return
+        fi
+    else
+        npm_latest=
+        if command -v npm >/dev/null 2>&1; then
+            npm_latest=$(npm view npm@latest version 2>/dev/null) || npm_latest=
+            printf '%s\n' "$npm_latest" \
+                | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+                || npm_latest=
+        fi
+    fi
+    own_missing_dirs "$NODEJS_INSTALL_ROOT"
+    mkdir -p "$NODEJS_INSTALL_ROOT"
+    tmpbundle=$(mktemp -d "${NODEJS_INSTALL_ROOT}/.nodejs.XXXXXX")
+    if [ "$nodejs_managed" = true ]; then
+        if ! cp -R "${NODEJS_INSTALL_ROOT}/current/." "$tmpbundle/"; then
+            skip nodejs "could not stage the existing Node.js installation"
+            return
+        fi
+    else
+        printf '%s\n' "Downloading Node.js ${NODEJS_VERSION} (${nodejs_target}) ..."
+        tmpzip=$(mktemp)
+        if ! curl -fsSL -o "$tmpzip" "$nodejs_url"; then
+            skip nodejs "${nodejs_asset} download failed"
+            return
+        fi
+        if [ "$(sha256_file "$tmpzip")" != "$nodejs_sha256" ]; then
+            skip nodejs "${nodejs_asset} checksum mismatch"
+            return
+        fi
+        if ! tar -tJf "$tmpzip" | awk '
+            BEGIN { bad = 0 }
+            /^\// { bad = 1 }
+            {
+                count = split($0, path, "/")
+                for (component = 1; component <= count; component++) {
+                    if (path[component] == "..") bad = 1
+                }
+            }
+            END { exit bad }
+        '; then
+            skip nodejs "${nodejs_asset} contains an invalid path"
+            return
+        fi
+        if ! tar -xJf "$tmpzip" -C "$tmpbundle" --strip-components=1; then
+            skip nodejs "${nodejs_asset} could not be extracted"
+            return
+        fi
+        rm -f "$tmpzip"
+        tmpzip=
+    fi
+    if [ ! -x "${tmpbundle}/bin/node" ] || [ ! -x "${tmpbundle}/bin/npm" ]; then
+        skip nodejs "Node.js archive is missing node or npm"
+        return
+    fi
+    if [ -z "$npm_latest" ]; then
+        npm_latest=$(PATH="${tmpbundle}/bin:${PATH}" \
+            "${tmpbundle}/bin/npm" view npm@latest version 2>/dev/null) || npm_latest=
+    fi
+    printf '%s\n' "$npm_latest" \
+        | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { skip nodejs "could not resolve the latest npm version"; return; }
+    printf '%s\n' "Installing npm ${npm_latest} ..."
+    if ! PATH="${tmpbundle}/bin:${PATH}" "${tmpbundle}/bin/npm" install \
+        --global --prefix "$tmpbundle" "npm@${npm_latest}"; then
+        skip nodejs "npm ${npm_latest} install failed"
+        return
+    fi
+    if [ "$("${tmpbundle}/bin/node" -p 'process.versions.node')" != "$NODEJS_VERSION" ] \
+        || [ "$("${tmpbundle}/bin/npm" --version)" != "$npm_latest" ]; then
+        skip nodejs "staged Node.js or npm version does not match the requested version"
+        return
+    fi
+    release_name="${NODEJS_VERSION}-npm${npm_latest}-${nodejs_target}"
+    release_dir="${NODEJS_INSTALL_ROOT}/${release_name}"
+    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        if [ -L "$release_dir" ] || [ ! -d "$release_dir" ] \
+            || [ ! -x "${release_dir}/bin/node" ] || [ ! -x "${release_dir}/bin/npm" ] \
+            || [ "$("${release_dir}/bin/node" -p 'process.versions.node' 2>/dev/null || :)" != "$NODEJS_VERSION" ] \
+            || [ "$("${release_dir}/bin/npm" --version 2>/dev/null || :)" != "$npm_latest" ]; then
+            skip nodejs "$release_dir already exists without a matching Node.js install"
+            return
+        fi
+        rm -rf "$tmpbundle"
+        tmpbundle=
+    else
+        mv "$tmpbundle" "$release_dir"
+        tmpbundle=
+    fi
+    own_dir "$release_dir"
+    tmpbinlink=$(mktemp "${NODEJS_INSTALL_ROOT}/.current.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "$release_dir" "$tmpbinlink"
+    case "$OS" in
+        Darwin) mv -fh "$tmpbinlink" "${NODEJS_INSTALL_ROOT}/current" ;;
+        Linux) mv -fT "$tmpbinlink" "${NODEJS_INSTALL_ROOT}/current" ;;
+    esac
+    tmpbinlink=
+    own_file "${NODEJS_INSTALL_ROOT}/current"
+    for nodejs_command in node npm npx; do
+        tmpbinlink=$(mktemp "${DEST}/.${nodejs_command}.XXXXXX")
+        rm -f "$tmpbinlink"
+        ln -s "${NODEJS_INSTALL_ROOT}/current/bin/${nodejs_command}" "$tmpbinlink"
+        mv -f "$tmpbinlink" "${DEST}/${nodejs_command}"
+        tmpbinlink=
+        own_file "${DEST}/${nodejs_command}"
+    done
+    if [ -n "$previous_release" ] && [ "$previous_release" != "$release_name" ]; then
+        rm -rf "${NODEJS_INSTALL_ROOT:?}/${previous_release:?}"
+    fi
+    changed=true
+    printf '%s\n' "Installed ${DEST}/node (${NODEJS_VERSION}, npm ${npm_latest})"
 }
 
 install_mactop_app() {
@@ -1637,20 +1855,29 @@ run_parallel_wave() {
 
 run_parallel() {
     run_failed=false
-    while [ "$#" -gt 0 ]; do
-        wave_tools=
-        deferred_tools=
-        for prog in "$@"; do
-            case " $wave_tools " in
-                *" $prog "*) deferred_tools="${deferred_tools}${deferred_tools:+ }${prog}" ;;
-                *) wave_tools="${wave_tools}${wave_tools:+ }${prog}" ;;
-            esac
-        done
-        # shellcheck disable=SC2086
-        if ! run_parallel_wave $wave_tools; then run_failed=true; fi
-        # shellcheck disable=SC2086
-        set -- $deferred_tools
+    binary_tools=
+    npm_tools=
+    for prog in "$@"; do
+        case " $binary_tools $npm_tools " in
+            *" $prog "*) continue ;;
+        esac
+        case "$prog" in
+            cmd|dsh|pi) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
+            *) binary_tools="${binary_tools}${binary_tools:+ }${prog}" ;;
+        esac
     done
+    if [ -n "$binary_tools" ]; then
+        # shellcheck disable=SC2086
+        if ! run_parallel_wave $binary_tools; then run_failed=true; fi
+    fi
+    if [ -n "$npm_tools" ]; then
+        if [ -x "${DEST}/node" ] && [ -x "${DEST}/npm" ]; then
+            PATH="${DEST}:${PATH}"
+            export PATH
+        fi
+        # shellcheck disable=SC2086
+        if ! run_parallel_wave $npm_tools; then run_failed=true; fi
+    fi
     if $run_failed; then return 1; fi
     return 0
 }
@@ -1667,6 +1894,28 @@ record_managed_installs() {
     for record_prog in fd rg pinact jactionlint jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold sandbox; do
         record_managed_binary "$record_prog"
     done
+    nodejs_current_target=$(readlink "${NODEJS_INSTALL_ROOT}/current" 2>/dev/null || :)
+    case "$nodejs_current_target" in
+        "${NODEJS_INSTALL_ROOT}/"*)
+            nodejs_release=${nodejs_current_target##*/}
+            if [ ! -L "$NODEJS_INSTALL_ROOT" ] \
+                && [ "$nodejs_current_target" = "${NODEJS_INSTALL_ROOT}/${nodejs_release}" ] \
+                && printf '%s\n' "$nodejs_release" \
+                    | grep -Eq "^${NODEJS_VERSION}-npm[0-9]+[.][0-9]+[.][0-9]+([.-][A-Za-z0-9.-]+)?-(darwin-arm64|linux-x64|linux-arm64|linux-x64-musl|linux-arm64-musl)$"; then
+                nodejs_release_dir="${NODEJS_INSTALL_ROOT}/${nodejs_release}"
+                if [ -d "$nodejs_release_dir" ]; then
+                    own_dir "$NODEJS_INSTALL_ROOT"
+                    own_file "${NODEJS_INSTALL_ROOT}/current"
+                    for record_command in node npm npx; do
+                        if [ "$(readlink "${DEST}/${record_command}" 2>/dev/null || :)" \
+                            = "${NODEJS_INSTALL_ROOT}/current/bin/${record_command}" ]; then
+                            own_file "${DEST}/${record_command}"
+                        fi
+                    done
+                fi
+            fi
+            ;;
+    esac
     if [ -s "${STATE}/mold" ] && [ "$(readlink "${DEST}/ld.mold" 2>/dev/null || :)" = mold ]; then
         own_file "${DEST}/ld.mold"
     fi
@@ -1767,6 +2016,9 @@ fi
 
 if [ $# -eq 0 ]; then
     set -- fd rg pinact jactionlint jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv sandbox python3
+    case "${OS}:${ARCH}" in
+        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
+    esac
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
@@ -1815,6 +2067,7 @@ for prog in "$@"; do
         vault) install_release vault ;;
         jaq) install_jaq ;;
         mold) install_mold ;;
+        nodejs) install_nodejs ;;
         python3) install_python3 ;;
         gh) install_release gh ;;
         *)
