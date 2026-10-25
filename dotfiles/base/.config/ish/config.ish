@@ -1,6 +1,6 @@
 set TERM tmux-256color
 
-set PATH "$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:$PATH"
+set PATH "$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/sbin:$PATH"
 set EDITOR $HOME/usr/bin/e
 set PAGER less
 
