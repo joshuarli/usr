@@ -21,6 +21,7 @@ from pinact.model import SourceDocument, mapping_get, parse_document
 from pinact._vendor.yaml.nodes import MappingNode, ScalarNode, SequenceNode
 from pinact import workflow as wf
 from pinact import expressions as expr
+from pinact import security as sec
 
 UNPINNED_USES = "unpinned-uses"
 INVALID_USES = "invalid-uses"
@@ -37,10 +38,13 @@ CORRECTNESS_IDS = frozenset({
 DEFAULT_IDS = CORRECTNESS_IDS | frozenset({
     "unknown-key", "invalid-event", "invalid-cron", "invalid-matrix",
     "invalid-permissions", "invalid-expression",
+    "checkout-credentials", "excessive-permissions", "dangerous-trigger",
+    "template-injection", "credential-exposure", "deprecated-command",
+    "unapproved-pin",
 })
 
 STRICT_IDS = DEFAULT_IDS | frozenset({
-    "suggest-permissions", "suggest-timeout",
+    "suggest-permissions", "suggest-timeout", "missing-permissions",
 })
 
 
@@ -99,7 +103,7 @@ def _build_context(doc: SourceDocument) -> expr.Context:
             continue
         jobs = mapping_get(root, "jobs")
         if isinstance(jobs, MappingNode):
-            for key, val in jobs.value:
+            for key, _ in jobs.value:
                 if isinstance(key, ScalarNode):
                     ctx.job_ids.add(key.value)
             for key, val in jobs.value:
@@ -151,7 +155,7 @@ def _collect_scalars(node: object, seen: set[int], out: list) -> None:
         if id(node) in seen:
             return
         seen.add(id(node))
-        for key, value in node.value:
+        for _, value in node.value:
             _collect_scalars(value, seen, out)
     elif isinstance(node, SequenceNode):
         if id(node) in seen:
@@ -168,7 +172,7 @@ def _collect_scalars_with_location(node: object, seen: set[int], out: list, loca
         if id(node) in seen:
             return
         seen.add(id(node))
-        for key, value in node.value:
+        for _, value in node.value:
             _collect_scalars_with_location(value, seen, out, location)
     elif isinstance(node, SequenceNode):
         if id(node) in seen:
@@ -213,7 +217,8 @@ def _expression_findings(doc: SourceDocument, ctx: expr.Context, profile: str) -
         for err_line, err_col, msg in scan_errors:
             if "expression-syntax" not in _profile_ids(profile):
                 continue
-            out.append(Finding(doc.display, line, col, "expression-syntax", "error", msg, False))
+            out.append(Finding(doc.display, err_line, err_col,
+                               "expression-syntax", "error", msg, False))
         for interp in found:
             status, msg = expr.analyze_expression(interp.inner, local_ctx)
             if status == "syntax-error":
@@ -277,10 +282,10 @@ def _model_invalid_uses(doc: SourceDocument, profile: str) -> list[tuple[int, in
                                     "unsupported inline uses syntax"))
                     elif isinstance(value, ScalarNode) and value.style in ("|", ">"):
                         out.append((key.start_mark.line + 1, key.start_mark.column + 1,
-                                    f"unsupported block-scalar uses value"))
+                                    "unsupported block-scalar uses value"))
                     elif isinstance(value, ScalarNode):
                         try:
-                            parsed = parse_action(value.value)
+                            parse_action(value.value)
                         except Exception as exc:
                             out.append((key.start_mark.line + 1, key.start_mark.column + 1, str(exc)))
                     elif not isinstance(value, ScalarNode):
@@ -353,11 +358,24 @@ def lint_one_file(path: Path, profile: str, catalog: str | None = None) -> tuple
         findings.append(item)
     for item in _strict_suggestions(doc, profile):
         findings.append(item)
+    for root in doc.documents:
+        if not isinstance(root, MappingNode):
+            continue
+        for check in (sec.check_checkout_credentials,
+                      sec.check_permissions_security,
+                      sec.check_dangerous_triggers,
+                      sec.check_template_injection,
+                      sec.check_credential_exposure,
+                      sec.check_deprecated_commands):
+            for item in check(doc, root):
+                if item[2] in _profile_ids(profile):
+                    findings.append(Finding(display, *item))
+    uses: list = []
+    source_text = doc.text
     try:
-        source_text = doc.text
-        _, uses = pinning.scan(path, refresh=False)
+        _, uses = pinning.scan(path, refresh=False, include_pinned=catalog is not None)
         for use in uses:
-            if UNPINNED_USES in _profile_ids(profile):
+            if UNPINNED_USES in _profile_ids(profile) and not pinning.SHA.fullmatch(use.ref):
                 findings.append(Finding(display, use.index + 1, _column(source_text, use.index),
                                         UNPINNED_USES, "error",
                                         f"{use.repo}@{use.ref} is not pinned to an immutable commit SHA",
@@ -377,9 +395,20 @@ def lint_one_file(path: Path, profile: str, catalog: str | None = None) -> tuple
         elif INVALID_USES in _profile_ids(profile):
             findings.append(Finding(display, int(match[1]), 1, INVALID_USES, "error", detail, False))
     if catalog is not None:
-        cpath = Path(catalog)
-        if not cpath.is_file():
-            return [], f"pinact: catalog not found: {catalog}"
+        from pinact.catalog import CatalogError, catalog_approves_use, load_catalog
+        try:
+            entries = load_catalog(Path(catalog))
+        except CatalogError as exc:
+            return [], f"pinact: {exc}"
+        if "unapproved-pin" in _profile_ids(profile):
+            for use in uses:
+                approved, note = catalog_approves_use(use, entries)
+                if not approved:
+                    findings.append(Finding(
+                        display, use.index + 1, _column(source_text, use.index),
+                        "unapproved-pin", "error",
+                        f"{use.repo}@{use.ref} is not approved by the catalog: "
+                        f"{note}", False))
     findings.sort(key=lambda item: (item.filepath, item.line, item.column, item.id, item.message))
     return findings, None
 
