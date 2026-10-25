@@ -876,7 +876,7 @@ install_nodejs() {
         return
     fi
     if [ "$("${tmpbundle}/bin/node" -p 'process.versions.node')" != "$NODEJS_VERSION" ] \
-        || [ "$("${tmpbundle}/bin/npm" --version)" != "$npm_latest" ]; then
+        || [ "$(PATH="${tmpbundle}/bin:${PATH}" "${tmpbundle}/bin/npm" --version)" != "$npm_latest" ]; then
         skip nodejs "staged Node.js or npm version does not match the requested version"
         return
     fi
@@ -1670,7 +1670,9 @@ install_codex() {
 }
 
 install_opencode2() {
-    if installed opencode2 && ! opencode2_launcher_is_legacy_dl; then
+    if installed opencode2 && ! opencode2_launcher_is_legacy_dl \
+        && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" \
+            != "${OPENCODE2_HOME}/bin/opencode2" ]; then
         if [ -f "${DEST}/opencode2" ] && [ ! -L "${DEST}/opencode2" ] \
             && [ -s "${STATE}/opencode2" ] && ! command -v file >/dev/null 2>&1; then
             printf '%s\n' 'Warning: file is required to identify the existing OpenCode 2 launcher; keeping it' >&2
@@ -1698,6 +1700,15 @@ install_opencode2() {
         return
     fi
     if ! opencode2_launcher_is_legacy_dl && is_current opencode2 "$id"; then
+        opencode2_bin_dir="${OPENCODE2_HOME}/bin"
+        tmpbinlink=$(mktemp "${opencode2_bin_dir}/.opencode2-shim.XXXXXX")
+        cat > "$tmpbinlink" <<'EOF'
+#!/bin/sh
+exec "${HOME}/.opencode/bin/opencode" "$@"
+EOF
+        chmod +x "$tmpbinlink"
+        mv -f "$tmpbinlink" "${opencode2_bin_dir}/opencode2"
+        tmpbinlink=
         if [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
             own_file "${OPENCODE2_HOME}/bin/opencode2"
             own_file "${OPENCODE2_HOME}/bin/opencode"

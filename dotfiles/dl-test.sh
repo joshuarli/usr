@@ -848,6 +848,20 @@ fi
 [ -x "$opencode_home/.opencode/bin/opencode" ]
 [ "$(readlink "$opencode_home/.local/bin/opencode2")" = "$opencode_home/.opencode/bin/opencode2" ]
 [ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.1' ]
+cat > "$opencode_home/.opencode/bin/opencode2" <<'EOF'
+#!/bin/sh
+exec "$HOME/.local/bin/opencode" "$@"
+EOF
+chmod +x "$opencode_home/.opencode/bin/opencode2"
+if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" PATH="$mock_bin:$PATH" \
+    sh "$repo_root/dl" opencode2 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.1' ]
 
 opencode_collision_home="$test_root/opencode-collision-home"
 mkdir -p "$opencode_collision_home/.local/bin" "$opencode_collision_home/.local/state/dl" \
