@@ -15,6 +15,7 @@ An error is part of the program's contract, not a string on the unhappy path.
 - **Cancellation is not failure.** Callers can skip noisy diagnostics and wrongful retries.
 - **Batch work has a stated contract** in its type: all-or-nothing, partial result plus errors, stop at first, or best effort. Never silently drop a success or a failure.
 - **One boundary converts errors** to stderr, exit codes, HTTP statuses, or telemetry. Deep code never calls `exit()` or formats the final diagnostic.
+- **Deaths have a status contract.** A process that shuts itself down on a signal exits 128+signal; a crash handler that restores shared state (terminal, lock files) before exiting keeps that contract instead of dying by the signal. State which signals terminate gracefully, which still dump core, and prove it by killing the process mid-operation.
 - **Every ignored error has a reason** (cleanup, flush, close, rollback, logging).
 
 **The test:** can a caller decide between retry, report, and abort from the error's type alone, without reading its text?

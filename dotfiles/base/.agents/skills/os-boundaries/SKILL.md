@@ -1,6 +1,6 @@
 ---
 name: os-boundaries
-description: "Apply when code handles untrusted or user-supplied paths, symlinks, temp files or atomic writes, directory traversal, platform-specific code, syscalls, or unsafe and FFI. Skip incidental path joins."
+description: "Apply when code handles untrusted or user-supplied paths, symlinks, temp files or atomic writes, directory traversal, signal handling, platform-specific code, syscalls, or unsafe and FFI. Skip incidental path joins."
 ---
 
 # OS Boundaries
@@ -14,6 +14,7 @@ The filesystem is a concurrent, stateful external system, and operating systems 
 - **Traversal states its rules:** order if observable, special files, cycles, permission errors, mount boundaries. Metadata is preserved by policy, not by accident. Never compare timestamps finer than the filesystem keeps.
 - **Say what is supported.** Name the OS and architecture pairs. An unsupported target fails at compile or configure time, because compiling is not support. Keep the mechanism behind one contract and do not fork whole workflows for one differing syscall. Every fallback is named for the semantics that differ and has a test that exercises it, so no comment has to carry that.
 - **Unsafe holds only the unsafe operation.** Validation and arithmetic stay outside the block. Document the preconditions (`# Safety`): validity, alignment, initialization, aliasing, lifetime, thread safety. Wrap raw handles in a safe type at the boundary with one owner and one destructor. Check integer and pointer conversions, declare layout explicitly, never unwind across an ABI that forbids it, and read `errno` before anything can clobber it.
+- **Signal handlers do async-signal-safe work only.** Raw descriptor writes, no locks, no allocation; save and restore `errno` across the handler. Prefer one-shot dispositions with direct exit over re-raise, so a fault cannot recurse or wedge the process in the OS crash pipeline. Declare the `sigaction` layout and flag constants per OS explicitly, check the install return, and fail fast when installation fails: a silently uninstalled handler loses shutdown without a trace.
 
 **The test:** if another process swapped a path component between two lines here, could this read or write the wrong file?
 

@@ -1,7 +1,7 @@
 set TERM tmux-256color
 
 set PATH "$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:/sbin:$PATH"
-set EDITOR $HOME/usr/bin/e
+set EDITOR $HOME/.local/bin/e
 set PAGER less
 
 # su=00:sg=00:ca=00 don't colorize setuid/gid or filecaps to avoid expensive syscalls
@@ -18,8 +18,6 @@ set HOMEBREW_NO_INSTALL_CLEANUP 1
 set HOMEBREW_NO_ANALYTICS 1
 
 set CARGO_NET_GIT_FETCH_WITH_CLI true
-
-alias e $HOME/usr/bin/e
 
 alias mpv /Applications/mpv.app/Contents/MacOS/mpv
 alias p   /Applications/mpv.app/Contents/MacOS/mpv -vo null
