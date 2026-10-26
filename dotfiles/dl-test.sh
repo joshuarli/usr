@@ -37,6 +37,33 @@ run_dl() {
     return $_run_dl_status
 }
 
+# Shared across cases: each case runs in a subshell, so anything read by a
+# later case is defined here once. Per-case homes stay local to their case.
+cmd_log="$test_root/cmd-npm.log"
+dsh_home="$test_root/dsh-home"
+dsh_data="$dsh_home/data"
+dsh_state="$dsh_home/state"
+npm_log="$test_root/npm.log"
+
+case_n=0
+nfailed=0
+failed_cases=""
+begin_case() {
+    case_n=$((case_n + 1))
+    _case_label=$1
+    printf 'case %d: %s\n' "$case_n" "$_case_label"
+    set +e
+}
+end_case() {
+    _case_status=$?
+    set -e
+    if [ "$_case_status" -ne 0 ]; then
+        printf 'FAIL case %d: %s\n' "$case_n" "$_case_label" >&2
+        nfailed=$((nfailed + 1))
+        failed_cases="${failed_cases:+$failed_cases }$case_n"
+    fi
+}
+
 cat > "$mock_bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -328,8 +355,9 @@ printf '%s\n' "${CMD_TEST_NODE_VERSION:-26.12.0}"
 EOF
 chmod +x "$mock_bin/node"
 
+begin_case "cmd install, current check, upgrade, and owned-file tracking"
+( set -e
 cmd_home="$test_root/cmd-home"
-cmd_log="$test_root/cmd-npm.log"
 if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
     run_dl "$mock_bin:$PATH" "$repo_root" cmd 2>&1); then
     :
@@ -376,7 +404,11 @@ for owned_path in "$cmd_home/.local/bin/cmd" "$cmd_home/.local/state/dl/cmd"; do
 done
 awk -F '\t' -v path="$cmd_home/.local/share/command-code" \
     '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$cmd_owned_file"
+)
+end_case
 
+begin_case "cmd rejects unmanaged launcher"
+( set -e
 cmd_collision_home="$test_root/cmd-collision-home"
 mkdir -p "$cmd_collision_home/.local/bin"
 printf '%s\n' sentinel > "$cmd_collision_home/.local/bin/cmd"
@@ -386,7 +418,11 @@ if HOME="$cmd_collision_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
     exit 1
 fi
 [ "$(cat "$cmd_collision_home/.local/bin/cmd")" = sentinel ]
+)
+end_case
 
+begin_case "cmd rejects unmanaged npm prefix"
+( set -e
 cmd_prefix_home="$test_root/cmd-prefix-home"
 mkdir -p "$cmd_prefix_home/.local/share/command-code"
 if HOME="$cmd_prefix_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
@@ -395,7 +431,11 @@ if HOME="$cmd_prefix_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
     exit 1
 fi
 [ ! -e "$cmd_prefix_home/.local/bin/cmd" ]
+)
+end_case
 
+begin_case "cmd requires supported node"
+( set -e
 cmd_old_node_home="$test_root/cmd-old-node-home"
 if HOME="$cmd_old_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
     CMD_TEST_NODE_VERSION=26.11.0 run_dl "$mock_bin:$PATH" "$repo_root" cmd >/dev/null 2>&1; then
@@ -403,7 +443,11 @@ if HOME="$cmd_old_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
     exit 1
 fi
 [ ! -e "$cmd_old_node_home/.local/bin/cmd" ]
+)
+end_case
 
+begin_case "cmd cleans up after failed install and recovers"
+( set -e
 cmd_failure_home="$test_root/cmd-failure-home"
 if HOME="$cmd_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
     CMD_INSTALL_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" cmd >/dev/null 2>&1; then
@@ -425,14 +469,22 @@ else
     exit 1
 fi
 [ -x "$cmd_failure_home/.local/share/command-code/bin/cmd" ]
+)
+end_case
 
+begin_case "default targets exclude optional agents"
+( set -e
 default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
 case "$default_targets" in
     *'set -- '*grok*|*'set -- '*cmd*)
         printf 'optional coding agents appeared in the default dl targets\n' >&2
         exit 1 ;;
 esac
+)
+end_case
 
+begin_case "dsh rejects existing root without dl install records"
+( set -e
 unowned_dsh_home="$test_root/unowned-dsh-home"
 unowned_dsh_root="$unowned_dsh_home/data/dsh"
 unowned_dsh_log="$test_root/unowned-dsh-npm.log"
@@ -452,11 +504,11 @@ if [ -f "$unowned_dsh_log" ]; then
     exit 1
 fi
 [ -d "$unowned_dsh_root" ]
+)
+end_case
 
-dsh_home="$test_root/dsh-home"
-dsh_data="$dsh_home/data"
-dsh_state="$dsh_home/state"
-npm_log="$test_root/npm.log"
+begin_case "dsh install removes legacy npm package and repairs TUI patch"
+( set -e
 mkdir -p "$dsh_home/.local/bin" "$dsh_home/.local/lib/node_modules/@deepseek-ai/dsh"
 ln -s ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js "$dsh_home/.local/bin/dsh"
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
@@ -479,6 +531,10 @@ case "$output" in
     *"Installed dsh and dsh-tui under $dsh_data/dsh"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
+begin_case "dsh requires supported node"
+( set -e
 old_node_dsh_home="$test_root/old-node-dsh-home"
 if HOME="$old_node_dsh_home" XDG_DATA_HOME="$old_node_dsh_home/data" \
     XDG_STATE_HOME="$old_node_dsh_home/state" TMPDIR="$test_root/tmp" \
@@ -491,7 +547,11 @@ case "$(cat "$npm_log")" in
     *'@deepseek-ai/dsh@0.2.1-rc.2 @deepseek-harness-tui/dsh-tui@0.16.0'*) ;;
     *) cat "$npm_log" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "dsh keeps repo-managed launcher during legacy cleanup"
+( set -e
 managed_dsh_home="$test_root/managed-dsh-home"
 managed_dsh_data="$managed_dsh_home/data"
 managed_dsh_state="$managed_dsh_home/state"
@@ -516,7 +576,11 @@ case "$output" in
     *"Keeping existing dsh launcher at $managed_dsh_home/.local/bin/dsh"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "dsh current check and TUI patch integrity"
+( set -e
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
     TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     :
@@ -563,7 +627,11 @@ case "$(cat "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis
     *'disabled: false'*) ;;
     *) printf '%s\n' 'dsh changed the unexpected TUI patch row' >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "muse installs official launcher"
+( set -e
 if output=$(HOME="$home" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" muse 2>&1); then
     :
@@ -580,7 +648,11 @@ case "$(cat "$home/.local/bin/muse")" in
     *'#!/bin/sh'*) ;;
     *) printf '%s\n' 'Muse did not install the official launcher' >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "antigravity install and idempotence"
+( set -e
 antigravity_home="$test_root/antigravity-home"
 if output=$(HOME="$antigravity_home" XDG_STATE_HOME="$antigravity_home/.local/state" \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" antigravity 2>&1); then
@@ -606,7 +678,11 @@ case "$output" in
     *'agy is installed'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "jaq ownership recorded exactly once"
+( set -e
 ownership_home="$test_root/ownership-home"
 ownership_file="$ownership_home/.local/state/make/dl-owned"
 mkdir -p "$(dirname "$ownership_file")"
@@ -634,7 +710,11 @@ awk -F '\t' -v path="$ownership_home/.local/bin" \
     '$1 == "E" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file"
 awk -F '\t' -v path="$ownership_home/.local/state/dl" \
     '$1 == "E" && $2 == path { count++ } END { exit count != 1 }' "$ownership_file"
+)
+end_case
 
+begin_case "reconcile records managed installs"
+( set -e
 reconcile_home="$test_root/reconcile-home"
 reconcile_file="$reconcile_home/.local/state/make/dl-owned"
 mkdir -p "$reconcile_home/.local/bin" "$reconcile_home/.local/state/dl" \
@@ -649,7 +729,11 @@ awk -F '\t' -v path="$reconcile_home/.local/bin/jaq" \
     '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$reconcile_file"
 awk -F '\t' -v path="$reconcile_home/.local/state/dl/jaq" \
     '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$reconcile_file"
+)
+end_case
 
+begin_case "unmanaged launcher is not recorded for removal"
+( set -e
 unmanaged_home="$test_root/unmanaged-home"
 unmanaged_file="$unmanaged_home/.local/state/make/dl-owned"
 mkdir -p "$unmanaged_home/.local/bin" "$(dirname "$unmanaged_file")"
@@ -664,7 +748,11 @@ if awk -F '\t' -v path="$unmanaged_home/.local/bin/jaq" \
     exit 1
 fi
 [ -x "$unmanaged_home/.local/bin/jaq" ]
+)
+end_case
 
+begin_case "untracked launcher is reported"
+( set -e
 untracked_home="$test_root/untracked-home"
 mkdir -p "$untracked_home/.local/bin" "$untracked_home/.local/state/dl" \
     "$untracked_home/.local/state/make"
@@ -683,7 +771,11 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 [ -x "$untracked_home/.local/bin/agy" ]
+)
+end_case
 
+begin_case "unsafe codex target is not recorded for removal"
+( set -e
 unsafe_target_home="$test_root/unsafe-target-home"
 unsafe_target_rogue="$unsafe_target_home/.codex/packages/rogue/bin"
 unsafe_target_owned="$unsafe_target_home/.local/state/make/dl-owned"
@@ -712,6 +804,8 @@ if awk -F '\t' -v path="$unsafe_target_home/.local/bin/codex-code-mode-host" \
 fi
 [ -x "$unsafe_target_rogue/codex" ]
 [ -x "$unsafe_target_rogue/codex-code-mode-host" ]
+)
+end_case
 
 cat > "$mock_bin/uname" <<'EOF'
 #!/bin/sh
@@ -723,6 +817,8 @@ esac
 EOF
 chmod +x "$mock_bin/uname"
 
+begin_case "gh is current"
+( set -e
 gh_home="$test_root/gh-home"
 mkdir -p "$gh_home/.local/bin" "$gh_home/.local/state/dl"
 printf '%s\n' 'gh test binary' > "$gh_home/.local/bin/gh"
@@ -740,7 +836,11 @@ case "$output" in
     *'gh is current (release-9be88d806c91cbce8920e188f90fb6df34b45ba9)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "sandbox is current"
+( set -e
 sandbox_home="$test_root/sandbox-home"
 mkdir -p "$sandbox_home/.local/bin" "$sandbox_home/.local/state/dl"
 printf '%s\n' 'sandbox test binary' > "$sandbox_home/.local/bin/sandbox"
@@ -758,7 +858,11 @@ case "$output" in
     *'sandbox is current (release-0123456789abcdef0123456789abcdef01234567)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "grok install"
+( set -e
 grok_home="$test_root/grok-home"
 if output=$(HOME="$grok_home" XDG_STATE_HOME="$grok_home/.local/state" \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" grok 2>&1); then
@@ -770,7 +874,11 @@ fi
 [ "$(readlink "$grok_home/.local/bin/grok")" = "$grok_home/.grok/bin/grok" ]
 [ "$(readlink "$grok_home/.grok/bin/grok")" = ../downloads/grok-linux-x86_64 ]
 [ "$(cat "$grok_home/.grok/downloads/grok-linux-x86_64")" = grok-test-binary ]
+)
+end_case
 
+begin_case "grok collision preserves native install"
+( set -e
 grok_collision_home="$test_root/grok-collision-home"
 mkdir -p "$grok_collision_home/.local/bin" "$grok_collision_home/.local/state/dl" \
     "$grok_collision_home/.grok/bin" "$grok_collision_home/.grok/downloads"
@@ -786,7 +894,11 @@ if output=$(HOME="$grok_collision_home" XDG_STATE_HOME="$grok_collision_home/.lo
 fi
 [ "$(cat "$grok_collision_home/.local/bin/grok")" = 'legacy grok binary' ]
 [ "$(cat "$grok_collision_home/.grok/downloads/grok-linux-x86_64")" = 'native grok binary' ]
+)
+end_case
 
+begin_case "grok legacy migration"
+( set -e
 legacy_grok_home="$test_root/legacy-grok-home"
 mkdir -p "$legacy_grok_home/.local/bin" "$legacy_grok_home/.local/state/dl"
 printf '%s\n' 'legacy grok binary' > "$legacy_grok_home/.local/bin/grok"
@@ -800,7 +912,11 @@ else
     exit 1
 fi
 [ "$(readlink "$legacy_grok_home/.local/bin/grok")" = "$legacy_grok_home/.grok/bin/grok" ]
+)
+end_case
 
+begin_case "muse legacy migration"
+( set -e
 muse_legacy_home="$test_root/legacy-muse-home"
 mkdir -p "$muse_legacy_home/.local/bin" "$muse_legacy_home/.local/state/dl"
 printf '%s\n' 'legacy muse binary' > "$muse_legacy_home/.local/bin/muse"
@@ -817,7 +933,11 @@ case "$(cat "$muse_legacy_home/.local/bin/muse")" in
     *'#!/bin/sh'*) ;;
     *) printf '%s\n' 'Muse legacy install was not migrated to the official launcher' >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "opencode install, shim repair, and managed update"
+( set -e
 opencode_home="$test_root/opencode-home"
 if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
     TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
@@ -855,7 +975,11 @@ case "$output" in
 esac
 [ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.2' ]
 [ "$(cat "$opencode_home/.local/state/dl/opencode2")" = opencode-test-etag-2 ]
+)
+end_case
 
+begin_case "opencode collision preserves native install"
+( set -e
 opencode_collision_home="$test_root/opencode-collision-home"
 mkdir -p "$opencode_collision_home/.local/bin" "$opencode_collision_home/.local/state/dl" \
     "$opencode_collision_home/.opencode/bin"
@@ -870,7 +994,11 @@ if output=$(HOME="$opencode_collision_home" XDG_STATE_HOME="$opencode_collision_
 fi
 [ "$(cat "$opencode_collision_home/.local/bin/opencode2")" = 'legacy opencode binary' ]
 [ "$(cat "$opencode_collision_home/.opencode/bin/opencode")" = 'native opencode binary' ]
+)
+end_case
 
+begin_case "claude install and idempotence"
+( set -e
 claude_home="$test_root/claude-home"
 claude_data="$claude_home/share"
 claude_state="$claude_home/state"
@@ -903,7 +1031,11 @@ case "$output" in
     *'claude is installed'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "claude installer failure passthrough"
+( set -e
 claude_failure_home="$test_root/claude-failure-home"
 if output=$(HOME="$claude_failure_home" XDG_STATE_HOME="$claude_failure_home/.local/state" \
     TMPDIR="$test_root/tmp" CLAUDE_INSTALLER_FAIL=true \
@@ -915,7 +1047,11 @@ case "$output" in
     *'native installer failure'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
 
+begin_case "claude old versioned migration"
+( set -e
 old_claude_home="$test_root/old-claude-home"
 old_claude_data="$old_claude_home/share"
 mkdir -p "$old_claude_home/.local/bin" "$old_claude_home/.local/state/dl" \
@@ -933,7 +1069,11 @@ else
     exit 1
 fi
 [ "$(readlink "$old_claude_home/.local/bin/claude")" = "$old_claude_home/.claude/native/claude" ]
+)
+end_case
 
+begin_case "claude legacy migration"
+( set -e
 legacy_home="$test_root/legacy-home"
 mkdir -p "$legacy_home/.local/bin" "$legacy_home/.local/state/dl"
 printf '%s' 'legacy Claude binary' > "$legacy_home/.local/bin/claude"
@@ -949,7 +1089,11 @@ fi
 legacy_version="$legacy_home/.claude/native/claude"
 [ -L "$legacy_home/.local/bin/claude" ]
 [ "$(readlink "$legacy_home/.local/bin/claude")" = "$legacy_version" ]
+)
+end_case
 
+begin_case "claude custom launcher kept"
+( set -e
 custom_home="$test_root/custom-home"
 mkdir -p "$custom_home/.local/bin" "$custom_home/.local/state/dl"
 printf '%s\n' 'custom launcher' > "$custom_home/.local/bin/claude"
@@ -963,7 +1107,11 @@ else
     exit 1
 fi
 [ "$(cat "$custom_home/.local/bin/claude")" = 'custom launcher' ]
+)
+end_case
 
+begin_case "claude missing file warning"
+( set -e
 missing_file_home="$test_root/missing-file-home"
 missing_file_bin="$test_root/missing-file-bin"
 mkdir -p "$missing_file_home/.local/bin" "$missing_file_home/.local/state/dl" "$missing_file_bin"
@@ -986,7 +1134,11 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 [ "$(cat "$missing_file_home/.local/bin/claude")" = 'legacy Claude binary' ]
+)
+end_case
 
+begin_case "codex multi-tool run with hidden jaq"
+( set -e
 codex_home="$test_root/codex-home"
 mv "$mock_bin/jaq" "$mock_bin/jaq.hidden"
 if output=$(HOME="$codex_home" XDG_STATE_HOME="$codex_home/.local/state" \
@@ -1001,3 +1153,11 @@ fi
 [ -x "$codex_home/.local/bin/jaq" ]
 [ -L "$codex_home/.local/bin/codex" ]
 [ -x "$codex_home/.local/bin/muse" ]
+)
+end_case
+
+if [ "$nfailed" -gt 0 ]; then
+    printf 'FAIL: %d of %d cases failed (cases:%s)\n' "$nfailed" "$case_n" "$failed_cases" >&2
+    exit 1
+fi
+printf 'all %d cases passed\n' "$case_n"
