@@ -21,10 +21,6 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 **Default to `worker`.** Size is not difficulty: a large lane with a known method and acceptance is still worker work. Use `expert` only for unknown paths with costly wrong turns (cross-cutting designs, unexplained failures, multi-owner integration). If the brief specifies steps and acceptance, start with `worker`; escalate only when evidence warrants it.
 
-### Optional tier advice
-
-Consult once per unchanged decision only when `USR_DECIDE_TIER` is already `shadow` or `advisory`; never set it. For bounded, consequential uncertainty, use `decide` only when your harness has a meaningful cheaper-tier choice; skip Command Code's and Pi's pinned-model children. Run `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide` with sanitized JSON on stdin; read its structured result. Shadow never routes. Advisory is parent-assessed within existing tier/model/permission/authorization rules and cannot override user-selected models or mandatory escalation. Exclude `god` and mutating `scout`. Unavailable or invalid advice leaves routing unchanged; notify the user. Details: `~/usr/docs/agent-setup.md`.
-
 If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except for the Codex profile and the Grok and Pi pins below. If a model is unavailable, use a suitable allowed model at the same or lower tier or report it.
 
 ### Codex

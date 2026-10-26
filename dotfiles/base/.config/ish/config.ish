@@ -59,7 +59,6 @@ alias tk tmux -f "$XDG_CONFIG_HOME/tmux/tmux.conf" kill-session -t
 alias o opencode2
 
 set CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION 9001
-set USR_DECIDE_TIER advisory
 
 # it's better to be nicer to the disk than save a few ms
 set OPENCODE_DISABLE_FFF 1
