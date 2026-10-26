@@ -2,6 +2,8 @@
 
 This repository installs my home configuration, personal commands, and machine setup. Clone it to `~/usr`.
 
+For native, dependency-free Python process confinement of coding agents, use [`sbx`](docs/sbx-spec.md) on macOS (Seatbelt) or Linux (Bubblewrap). It grants the current project read/write, accepts explicit extra directories, and keeps unrelated home data out of the sandbox. Linux requires `bwrap`; use the full specification and live tests before trusting it with sensitive information.
+
 ## Install
 
 On macOS, preview setup with `./macos/setup-macos -n`. Run `./macos/setup-macos` to install Homebrew and its packages, configure Touch ID for `sudo`, and start Unbound. The script changes system settings and uses `sudo`. Unbound listens on loopback and forwards to Cloudflare over authenticated DNS-over-TLS. Its DNS step assigns `127.0.0.1` to every enabled network service, including Tailscale. System DNS then depends on Unbound, with no public fallback if it stops.

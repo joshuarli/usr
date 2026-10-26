@@ -1,5 +1,7 @@
 # Agent setup
 
+Use [`sbx`](sbx-spec.md) when running coding agents in a native macOS Seatbelt or Linux Bubblewrap process sandbox. It exposes the current directory read/write and makes the tracked global skills/instructions available read-only without importing host agent authentication state. This is weaker than a VM; review the security specification and run its platform integration checks before using it for sensitive projects.
+
 ## Instructions and skills
 
 [`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) is the canonical global instruction file. The adapters under `dotfiles/base/` point each harness to it.

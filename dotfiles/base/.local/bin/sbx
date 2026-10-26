@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Constrain one command with Seatbelt (macOS) or bubblewrap (Linux)."""
+
+import argparse
+import json
+import os
+import platform
+import pwd
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+
+class SandboxError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Grant:
+    path: Path
+    writable: bool
+
+
+@dataclass(frozen=True)
+class Sources:
+    skills: Path
+    instructions: Path
+    claude_agents: Path | None
+    grok_agents: Path | None
+
+
+@dataclass(frozen=True)
+class Plan:
+    backend: str
+    cwd: Path
+    home: Path
+    grants: tuple[Grant, ...]
+    sources: Sources | None
+    offline: bool
+    command: tuple[str, ...]
+    explain: bool
+
+
+MAC_READ_DIRS = (
+    "/System",
+    "/usr",
+    "/bin",
+    "/sbin",
+    "/Library/Frameworks",
+    "/opt/homebrew",
+    "/private/etc/ssl",
+)
+MAC_READ_FILES = (
+    "/private/etc/hosts",
+    "/private/etc/resolv.conf",
+    "/private/etc/nsswitch.conf",
+    "/private/etc/passwd",
+    "/private/etc/group",
+    "/dev/null",
+    "/dev/zero",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/tty",
+    "/dev/stdin",
+    "/dev/stdout",
+    "/dev/stderr",
+)
+LINUX_READ_DIRS = ("/usr", "/bin", "/lib", "/lib64", "/sbin", "/etc/ssl", "/etc/pki", "/etc/ca-certificates")
+LINUX_READ_FILES = (
+    "/etc/resolv.conf",
+    "/etc/hosts",
+    "/etc/nsswitch.conf",
+    "/etc/gai.conf",
+    "/etc/passwd",
+    "/etc/group",
+    "/etc/localtime",
+    "/etc/ld.so.cache",
+    "/etc/ld.so.conf",
+)
+
+
+def contained(child: Path, parent: Path) -> bool:
+    return child == parent or parent in child.parents
+
+
+def canonical_dir(raw: str) -> Path:
+    try:
+        location = Path(raw).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SandboxError(f"cannot resolve directory {raw!r}: {exc}") from exc
+    if not location.is_dir():
+        raise SandboxError(f"directory expected: {raw}")
+    if any(ord(c) < 32 or ord(c) == 127 for c in str(location)):
+        raise SandboxError(f"control character in directory path: {raw!r}")
+    return location
+
+
+def explicit_grants(cwd: Path, home: Path, readonly: list[str], writable: list[str]) -> tuple[Grant, ...]:
+    if contained(home, cwd):
+        raise SandboxError("refusing to grant the host home or one of its ancestors as CWD")
+    grants = [Grant(cwd, True)]
+    for paths, mode in ((readonly, False), (writable, True)):
+        for raw in paths:
+            location = canonical_dir(raw)
+            if contained(home, location):
+                raise SandboxError(f"refusing to grant the host home or an ancestor: {location}")
+            if any(contained(location, grant.path) or contained(grant.path, location) for grant in grants):
+                raise SandboxError(f"overlapping or duplicate grants: {location}")
+            grants.append(Grant(location, mode))
+    return tuple(grants)
+
+
+def get_sources(home: Path, enabled: bool) -> Sources | None:
+    if not enabled:
+        return None
+    base = home / "usr" / "dotfiles" / "base"
+    if not base.is_dir():
+        return None
+    skills = canonical_dir(str(base / ".agents" / "skills"))
+    instructions = (base / ".codex" / "AGENTS.md").resolve(strict=True)
+    if not instructions.is_file():
+        raise SandboxError(f"not a file: {instructions}")
+    if not contained(skills, base.resolve()) or not contained(instructions, base.resolve()):
+        raise SandboxError("tracked skill or instruction source resolves outside usr")
+    def agents(rel: str) -> Path | None:
+        p = base / rel
+        if p.is_dir():
+            found = canonical_dir(str(p))
+            if not contained(found, base.resolve()):
+                raise SandboxError(f"agent definition source resolves outside usr: {found}")
+            return found
+        return None
+    return Sources(skills, instructions, agents(".claude/agents"), agents(".grok/agents"))
+
+
+def parse(argv: list[str], *, backend: str | None = None, home: Path | None = None,
+          cwd: Path | None = None) -> Plan:
+    ap = argparse.ArgumentParser(description="run a command inside a narrow native process sandbox")
+    ap.add_argument("--ro", action="append", default=[], metavar="DIR", help="additional read-only host directory")
+    ap.add_argument("--rw", action="append", default=[], metavar="DIR", help="additional read/write host directory")
+    ap.add_argument("--offline", action="store_true", help="deny network access")
+    ap.add_argument("--no-skills", action="store_true", help="do not expose tracked usr agent skills/instructions")
+    ap.add_argument("--explain", action="store_true", help="print grants and native enforcement plan without executing")
+    ap.add_argument("command", nargs=argparse.REMAINDER)
+    args = ap.parse_args(argv)
+    backend = backend or platform.system()
+    if backend not in ("Darwin", "Linux"):
+        raise SandboxError(f"unsupported platform: {backend}")
+    home = (home or Path(pwd.getpwuid(os.getuid()).pw_dir)).resolve(strict=True)
+    cwd = canonical_dir(str(cwd or Path.cwd()))
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        command = ["/bin/zsh" if backend == "Darwin" else "/bin/sh"]
+    if any("\x00" in a for a in command):
+        raise SandboxError("NUL byte in command")
+    return Plan(backend, cwd, home, explicit_grants(cwd, home, args.ro, args.rw),
+                get_sources(home, not args.no_skills), args.offline, tuple(command), args.explain)
+
+
+def environment(home: Path, backend: str) -> dict[str, str]:
+    user = pwd.getpwuid(os.getuid()).pw_name
+    env = {
+        "HOME": str(home),
+        "USER": user,
+        "LOGNAME": user,
+        "PATH": (
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            if backend == "Darwin" else
+            "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+        ),
+        "TMPDIR": "/tmp" if backend == "Linux" else str(home.parent / "tmp"),
+        "PYTHONNOUSERSITE": "1",
+    }
+    for name in ("TERM", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE"):
+        value = os.environ.get(name)
+        if value and not any(ord(c) < 32 for c in value):
+            env[name] = value
+    return env
+
+
+def alias_map() -> dict[str, str]:
+    return {
+        ".claude/skills": "../.agents/skills",
+        ".gemini/antigravity-cli/skills": "../../.agents/skills",
+        ".claude/CLAUDE.md": "../.codex/AGENTS.md",
+        ".claude/AGENTS.md": "../.codex/AGENTS.md",
+        ".grok/AGENTS.md": "../.codex/AGENTS.md",
+        ".config/opencode/AGENTS.md": "../../.codex/AGENTS.md",
+        ".config/muse/AGENTS.md": "../../.codex/AGENTS.md",
+        ".gemini/config/AGENTS.md": "../../.codex/AGENTS.md",
+        ".commandcode/AGENTS.md": "../.codex/AGENTS.md",
+        ".dsh/AGENTS.md": "../.codex/AGENTS.md",
+    }
+
+
+def skill_bindings(sources: Sources, home: Path) -> list[tuple[Path, Path]]:
+    bindings = [
+        (sources.skills, home / ".agents/skills"),
+        (sources.instructions, home / ".codex/AGENTS.md"),
+    ]
+    if sources.claude_agents:
+        bindings.append((sources.claude_agents, home / ".claude/agents"))
+    if sources.grok_agents:
+        bindings.append((sources.grok_agents, home / ".grok/agents"))
+    return bindings
+
+
+def linux_command(plan: Plan) -> list[str]:
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        raise SandboxError("bubblewrap (bwrap) is required on Linux; no fallback")
+    args = [bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--clearenv"]
+    if not plan.offline:
+        args.append("--share-net")
+    args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run", "--dir", "/etc", "--dir", "/var/tmp"]
+    for location in LINUX_READ_DIRS:
+        if Path(location).is_dir():
+            args += ["--ro-bind", location, location]
+    for location in LINUX_READ_FILES:
+        if Path(location).is_file():
+            args += ["--ro-bind", location, location]
+    args += ["--dir", str(plan.home)]
+    if plan.sources:
+        reserved = [dest for _, dest in skill_bindings(plan.sources, plan.home)]
+        reserved += [plan.home / path for path in alias_map()]
+        for grant in plan.grants:
+            if any(contained(dest, grant.path) or contained(grant.path, dest) for dest in reserved):
+                raise SandboxError(f"grant conflicts with private home adapter: {grant.path}")
+    for grant in plan.grants:
+        args += ["--bind" if grant.writable else "--ro-bind", str(grant.path), str(grant.path)]
+    protected_git = plan.cwd / ".git"
+    if protected_git.is_symlink():
+        raise SandboxError("refusing symlinked .git metadata")
+    if protected_git.exists():
+        args += ["--ro-bind", str(protected_git), str(protected_git)]
+    if plan.sources:
+        for src, dest in skill_bindings(plan.sources, plan.home):
+            args += ["--ro-bind", str(src), str(dest)]
+        for path, target in alias_map().items():
+            args += ["--symlink", target, str(plan.home / path)]
+    for key, value in environment(plan.home, "Linux").items():
+        args += ["--setenv", key, value]
+    args += ["--chdir", str(plan.cwd), "--", *plan.command]
+    return args
+
+
+def sbpl_path(p: Path, mode: str = "subpath") -> str:
+    if mode not in ("subpath", "literal"):
+        raise ValueError(mode)
+    return f"({mode} {json.dumps(str(p), ensure_ascii=False)})"
+
+
+def macos_profile(plan: Plan, scratch: Path) -> str:
+    system_dirs = [Path(p) for p in MAC_READ_DIRS if Path(p).is_dir()]
+    system_files = [Path(p) for p in MAC_READ_FILES if Path(p).exists()]
+    reads = [sbpl_path(p) for p in system_dirs]
+    reads += [sbpl_path(p, "literal") for p in system_files]
+    reads += [sbpl_path(grant.path) for grant in plan.grants]
+    reads.append(sbpl_path(scratch))
+    if plan.sources:
+        for src, _ in skill_bindings(plan.sources, scratch / "home"):
+            reads.append(sbpl_path(src, "subpath" if src.is_dir() else "literal"))
+    writes = [sbpl_path(grant.path) for grant in plan.grants if grant.writable]
+    writes.append(sbpl_path(scratch))
+    git = plan.cwd / ".git"
+    if git.is_symlink():
+        raise SandboxError("refusing symlinked .git metadata")
+    lines = [
+        "(version 1)", "(deny default)",
+        "(allow process-exec)", "(allow process-fork)",
+        "(allow process-info* (target same-sandbox))", "(allow signal (target same-sandbox))",
+        "(allow sysctl-read)", "(allow ipc-posix-shm)", "(allow ipc-posix-sem)",
+        "(allow file-read-metadata (vnode-type DIRECTORY))",
+        '(allow mach-lookup (global-name "com.apple.system.logger") (global-name "com.apple.logd")',
+        '  (global-name "com.apple.system.opendirectoryd.libinfo")',
+        '  (global-name "com.apple.system.opendirectoryd.membership"))',
+        '(allow file-read* ' + ' '.join(reads) + ')',
+        '(allow file-write* ' + ' '.join(writes) + ')',
+        '(allow file-ioctl (literal "/dev/tty") (literal "/dev/null") (literal "/dev/ptmx"))',
+        '(allow pseudo-tty)',
+        '(allow file-read* file-write* (literal "/dev/ptmx") (regex #"^/dev/ttys[0-9]+$"))',
+        '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/stdout") (literal "/dev/stderr"))',
+    ]
+    if git.exists():
+        lines += [
+            f"(deny file-write* {sbpl_path(git)})",
+            f"(deny file-write-unlink {sbpl_path(git, 'literal')})",
+            f"(deny file-write-create {sbpl_path(git, 'literal')})",
+        ]
+    if not plan.offline:
+        lines.append("(allow network*)")
+    return "\n".join(lines) + "\n"
+
+
+def prepare_private_home(plan: Plan, scratch: Path) -> None:
+    home = scratch / "home"
+    home.mkdir(mode=0o700)
+    (scratch / "tmp").mkdir(mode=0o700)
+    if plan.sources:
+        for src, dest in skill_bindings(plan.sources, home):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.symlink_to(src, target_is_directory=src.is_dir())
+        for path, target in alias_map().items():
+            dest = home / path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.symlink_to(target)
+
+
+def macos_command(plan: Plan, scratch: Path) -> list[str]:
+    sandbox = Path("/usr/bin/sandbox-exec")
+    if not sandbox.is_file():
+        raise SandboxError("/usr/bin/sandbox-exec missing; no fallback")
+    profile = scratch / "profile.sb"
+    profile.write_text(macos_profile(plan, scratch), encoding="utf-8")
+    profile.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return [str(sandbox), "-f", str(profile), *plan.command]
+
+
+def describe(plan: Plan, argv: list[str], profile: str | None = None) -> None:
+    print(f"backend: {'Seatbelt' if plan.backend == 'Darwin' else 'bubblewrap'}")
+    print(f"project (rw): {plan.cwd}")
+    for grant in plan.grants[1:]:
+        print(f"{'rw' if grant.writable else 'ro'}: {grant.path}")
+    print(f"home: {'private temporary directory' if plan.backend == 'Darwin' else 'private namespace at ' + str(plan.home)}")
+    print(f"tracked usr skills: {'read-only' if plan.sources else 'not mounted'}")
+    print(f"network: {'offline' if plan.offline else 'unrestricted'}")
+    print(f"command: {json.dumps(plan.command)}")
+    print(f"backend argv: {json.dumps(argv)}")
+    if profile:
+        print("Seatbelt profile:")
+        print(profile, end="")
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        plan = parse(argv)
+        explain = plan.explain
+        if plan.backend == "Linux":
+            command = linux_command(plan)
+            if explain:
+                describe(plan, command)
+                return 0
+            return subprocess.call(command, close_fds=True)
+        with tempfile.TemporaryDirectory(prefix="sbx-") as temp:
+            scratch = Path(temp).resolve(strict=True)
+            prepare_private_home(plan, scratch)
+            command = macos_command(plan, scratch)
+            if explain:
+                describe(plan, command, (scratch / "profile.sb").read_text(encoding="utf-8"))
+                return 0
+            return subprocess.call(command, cwd=plan.cwd, env=environment(scratch / "home", "Darwin"), close_fds=True)
+    except (SandboxError, OSError, subprocess.SubprocessError) as exc:
+        print(f"sbx: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

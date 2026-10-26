@@ -84,6 +84,7 @@ check:
 	TMPDIR="$(DL_TMPDIR)" python3 -I tools/pinact/tests/test_fix.py
 	python3 -I dotfiles/base/.local/bin/pinact --check
 	python3 -I dotfiles/pi-test.py
+	TMPDIR="$(DL_TMPDIR)" python3 -I dotfiles/sbx-test.py
 	cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; }
 	cd dotfiles && sh agent-tier-gate-test.sh
 	sh dotfiles/reset-agents-test.sh
