@@ -18,40 +18,34 @@
 ## Sequence
 
 - **Items** have an ID, a size, prerequisites, the files they own, and an acceptance proof. Prerequisites that cross workstreams are written on the item. An item that shares code with another is in the same workstream.
-- **Size for speed.** An item is a capability a lane delivers end to end, not a ticket: merge adjacent increments that touch the same files into one item, and a lane takes several in a go. Draw disjoint ownership sets, then set initial width and a provisional-work cap from preparation, review, verification, and shared-service capacity. Machine headroom is a ceiling, not a requirement to fill every slot. A sequence of many small items over the same files is a defect to fix before the doc is ready.
+- **Size for speed.** An item is a slice: a capability a lane delivers end to end, with one local acceptance command that runs in minutes. Merge adjacent increments that touch the same files into one item. Items sharing files run serially. Allow parallel lanes only between disjoint ownership sets, and state which pairs qualify.
 - **Order the phases:**
   1. *P0, ground:* note the known failures on the baseline (so the executor never mistakes a pre-existing red for its own), and the loop timings, and repair the loop itself if it is the bottleneck.
   2. *Parity and completeness:* every deliverable works end to end, and every behavior of the reference has a test that fails if it is wrong. The reference is the thing being ported, replaced, or specified, and the doc names it. The parity register is built as `reference-parity` describes.
   3. *Hardening:* the cases found along the way, the contract changes written up, the docs updated.
   4. *Optimization and polish:* only now. An optimization item earlier than this is moved here unless it unblocks a feature.
   5. *Close:* delete what is dead, run `ultrareview`, fix its P1 and P2 findings, write the final report.
-- **The loop has two speeds.** An item ends on the narrowest check that covers it. A phase ends on the checks of the areas it touched. The full suite runs at named milestones and at the close, each with the reason. Separate commit granularity from validation granularity: compatible provisional candidates may share an exact-tree acceptance wave unless the owner requires otherwise. Keep the last accepted checkpoint, isolate failed groups, and never claim intermediate commits were globally checked. A slow loop gets one bounded repair tied to the next substantive delivery, not an open-ended infrastructure phase. Specify complete-input evidence reuse and invalidation; do not equate full scope with cold execution.
-- **Time-box a failing item** at a stated number of attempts, then park it with evidence, a named prerequisite, and a retry condition. Shared environment blockers get one owner and are not rediscovered per item. Requeue only when the condition changes.
-- **Schedule parent steering.** Follow the [steering checkpoint](../../orchestrate/references/campaigns.md#parent-steering-checkpoint), including attempted-work checkpoints when no wave completes. Preserve the owner's goal and proof floor; delegate revisions to tactics, not permission to change success. Plan explicit responses to queue growth, misleading metrics, and infrastructure without delivery.
+- **The loop has two speeds.** An item ends on its acceptance command and the narrowest affected suite, run on the integrated tree. The full suite runs at named milestones and at the close. Red work never lands on the integration branch.
+- **Time-box a failing item** at a stated number of attempts, then park it on its branch with the cause and a retry condition. A shared environment blocker gets one owner.
+- **Split out unavailable proof.** Anything needing hardware, a second host, or a service the executor lacks goes on **Needs environment** with the command the owner would run.
 
 ## Shape of the final doc
 
-1. **Header:** status, the goal, numbered deliverables, last accepted checkpoint, provisional work, current steering decision, and next substantive milestone.
-2. **Charter:** the rules the executor runs by.
-   - Decide, log the call, and keep going.
-   - Within the owner's execution grant, decide and proceed without waiting for approval. A plan does not provide missing permission. Park an item that needs authority outside the grant, and run until every deliverable is met or every remaining item is parked.
-   - Hard stops are few, and each one parks the item: an irreversible or outside-the-repo action, a boundary the doc forbids, or a loop that cannot check anything. Pushing is always forbidden.
-   - Fix on the way what is egregious, in its own commit, to thresholds stated in numbers: a command over N minutes, a regression of more than N times against the baseline, a test red on the baseline that blocks the item. Record anything else seen and leave it.
-   - Parity before optimization.
-   - Keep bookkeeping minimal: reuse existing results and logs. Record the revision and relevant inputs needed to qualify evidence; do not build a separate provenance system or second progress register.
-   - Size lanes and validation waves by ownership, measured resources, and acceptance capacity, as `orchestrate` sets out. State the memory budget and provisional-work cap; reduce width when queues grow.
-   - The parent reviews direction, not just worker completion. Update current rulings and notify affected lanes after a method change. Do not silently replace owner requirements or waive a failed acceptance check.
-   - Worktrees and all working state live under `.work/` in the repo, never `/tmp`. The doc states the lane worktree path (`.work/wt/<lane>`).
-   - Follow [`orchestrate`'s worktree lifecycle](../../orchestrate/SKILL.md#worktree-lifecycle) for each lane. During winddown, retain a worktree only when it is clean, named in the handoff, and explicitly allowed by the closeout guard.
-   - Every commit, the executor's and the lanes', is a Conventional Commit, with the area or workstream as its scope. The item ID belongs in the body, never the subject.
-   - Code comments never cite this doc.
-3. **Decisions:** the three tiers, each with its reason.
-4. **Baseline:** known failures, source/measurement scope, loop timings, and reference numbers. Keep them comparable through a wave; rebaseline only for a named change and distinguish inherited debt from campaign regressions.
-5. **Sequence:** the items by phase, with the dependency order.
-6. **Acceptance:** each deliverable and the command or test that proves it. Retain distinct user-visible success and failure conditions, including limits such as per-invocation behavior or recovery after interruption; a general test category does not cover them. Nothing waits on a person.
-7. **Execution boundary:** the effects the owner authorized and the effects the executor must not take. The campaign doc cannot grant permission. Each contract change made is listed for the owner.
-8. **Non-goals:** what the campaign does not do, so the executor drops ideas instead of queueing them.
-9. **Reference:** the design, the verified code map, and the background.
-10. **Decision log and campaign log,** short history of consequential rulings and accepted waves. Separate substantive results from metadata cleanup and infrastructure. Keep current instructions in the header/charter synchronized so a resumed agent does not have to reconcile contradictory log entries. Logs summarize evidence; they do not replace it.
-11. **For the owner afterwards:** what to read and cherry-pick. It is a list, not a gate.
+Under 300 lines in total. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
 
+1. **Status** (under 20 lines): the goal; the last accepted revision; slices accepted, red, or parked (with branch and cause); the next slice; and, when paused, the resume prompt and first command.
+2. **Charter:** the rules the executor runs by.
+   - Decide and keep going. Record a decision only when a later slice depends on it.
+   - Within the owner's execution grant, proceed without waiting for approval. A plan does not provide missing permission. Park an item that needs authority outside the grant.
+   - Hard stops are few, and each one parks the item: an irreversible or outside-the-repo action, a boundary the doc forbids, or a loop that cannot check anything. Pushing is always forbidden.
+   - Fix egregious problems met on the way, in their own commit, to thresholds stated in numbers. Record anything else and leave it.
+   - Parity before optimization.
+   - One writer by default. Parallel lanes only for the disjoint pairs named in **Sequence**, in worktrees at `.work/wt/<lane>`, never `/tmp`, following [`orchestrate`'s worktree lifecycle](../../orchestrate/SKILL.md#worktree-lifecycle).
+   - Every commit is a Conventional Commit with the workstream as its scope. The item ID belongs in the body. Code comments never cite this doc.
+3. **Decisions:** only binding ones, each with its reason, marked owner, prescribed, or delegated with a bound.
+4. **Baseline:** known red and loop timings.
+5. **Sequence:** the items in order, each with ID, owned files, prerequisites, and acceptance command.
+6. **Acceptance:** each deliverable and its command, keeping the distinct success and failure conditions.
+7. **Needs environment:** proof that cannot run here, with the command the owner would run.
+8. **Execution boundary and non-goals:** authorized effects, forbidden effects, and what the campaign does not do. List each contract change for the owner.
+9. **Reference** (optional, short): a verified code map. Link longer design material in `docs/` instead of inlining it.

@@ -69,7 +69,7 @@ A campaign is a long, multi-lane effort run from a design doc. Use them in this 
 | `campaign-plan <goal>` | Explicit | Plan a campaign from a goal: survey, baseline, workstreams, and a command that proves each deliverable. |
 | `campaign-preflight` | Explicit | Turn a draft campaign doc into a final plan an agent can run unattended. |
 | `burn-down-the-backlog` | Explicit | Work the starting `TODO.md` queue through `orchestrate`, honoring prerequisites and priority, one commit per closed ticket, with unattended execution. |
-| `accelerate` | Auto | Speed up a running campaign: find the limiting stage, then adjust lane width, batching, or scope. |
+| `accelerate` | Auto | Speed up a running campaign: measure where wall time went, then fix that one cause and land the next slice. |
 | `campaign-winddown` | Explicit | Pause a running campaign cleanly: finish in-flight lanes, start nothing new, leave a handoff that survives a reboot. |
 | `cleanup` | Auto | Remove campaign worktrees once their work is confirmed integrated. |
 

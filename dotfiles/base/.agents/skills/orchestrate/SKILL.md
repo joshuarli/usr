@@ -67,7 +67,7 @@ Use only the DeepSeek TUI table route for DSH work. DSH has `off`, `low`, `high`
 
 Delegate coherent component-sized work. Do not spawn an agent for one command or edit, to restate a plan, or to summarize code the parent must understand anyway. Batch related trivial work into one assignment. When one script or codemod can apply the change to every unit in a single pass, write and run it yourself instead of fanning out children to hand-apply it, and prove it by rerunning it on the unit you did by hand.
 
-Size concurrency for accepted progress. Give parallel writers disjoint ownership, but also bound shared-service contention, review work, and the verification queue. Resource headroom is a ceiling, not a target. Stagger independent preparation when it helps; reduce or pause writers when acceptance is saturated. Give each child a coherent end-to-end slice, not a fragment requiring another handoff.
+Size concurrency for accepted progress. Serial is the default for work that shares files. Give parallel writers disjoint ownership, but also bound shared-service contention, review work, and the verification queue. Resource headroom is a ceiling, not a target. Stagger independent preparation when it helps; reduce or pause writers when acceptance is saturated. Give each child a coherent end-to-end slice, not a fragment requiring another handoff.
 
 When a child reports, a merge lands, or a check fails, reassess the ready work and the limiting stage before launching more. The parent investigates technical blockers within authority, assigns shared prerequisites once, and changes agent-authored tactics when they obstruct the goal. Do not requeue unchanged failures or escalate models merely for missing infrastructure. Owner intent, public contracts, required proof, and permission limits remain fixed unless the owner changes them.
 
@@ -91,12 +91,10 @@ When you park unfinished work and commits are authorized, commit the work, remov
 
 ## Campaigns
 
-For a backlog run as parallel lanes, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work.
+For a backlog too large for one session, read [campaign mechanics and lane contract](references/campaigns.md) before preparing or launching work. The default is one writer on one slice until it is accepted. Add lanes only when they own disjoint files.
 
-The parent must perform the [steering checkpoint](references/campaigns.md#parent-steering-checkpoint), not just replenish lanes. It reviews substantive outcomes and rejected proposals, distinguishes new regressions from newly exposed debt, and corrects the limiting stage within authority. Apply it after validation waves, on resume, and when repeated failures or queue growth appear; do not wait for the owner to complain.
+The parent performs the [steering checkpoint](references/campaigns.md#parent-steering-checkpoint) after each accepted slice, on resume, and after repeated failures, without waiting for the owner to complain. It is a short decision. Record it only by rewriting the campaign doc's **Status** when the ruling changes.
 
-Commit size and global verification size need not match. Use the reference's bounded validation waves, exact accepted checkpoints, and qualified evidence reuse. A loop-speed repair must unblock a named real deliverable; stop expanding infrastructure once that path works. Record rulings in the existing campaign artifact and notify affected children.
+**The test:** the parent can name the accepted slices that landed and the next one, and the integration branch is green.
 
-**The test:** the parent can show verified progress toward the owner's goal, explain the current bottleneck and next milestone, and intervene without weakening required acceptance or manufacturing authority.
-
-**Report:** substantive work accepted, provisional work, decisive checks, the bottleneck and steering decision, contract changes, and blockers needing the owner. Report tooling and metadata cleanup separately; lane counts alone are not progress.
+**Report:** accepted slices and the checks that proved them, what is open and why, contract changes, and blockers needing the owner. Lane counts, doc commits, and audits are not progress.

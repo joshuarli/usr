@@ -8,44 +8,38 @@ metadata:
 
 # Campaign Winddown
 
-Winddown takes a running campaign to a clean stop. Work already in flight is integrated wherever applicable, redundant worktrees are removed to reclaim disk space, no new campaign work begins, and the campaign doc says exactly how to resume. The bar is a reboot: after power loss, the repo, its branches, and the doc alone must be enough to continue, so nothing the campaign needs may live in `/tmp` or in a process. Mechanics (lanes, merges) are as in the Campaigns section of `orchestrate`. You are the coordinator; if that session is gone, rebuild the lane state from `git worktree list`, `git branch`, and the doc.
+Winddown takes a running campaign to a clean stop. In-flight lanes finish or park, green work integrates, checkouts are removed, nothing new starts, and the campaign doc's **Status** says how to resume. After a reboot, the repo, its branches, and the doc must be enough to continue. Mechanics are as in the Campaigns section of `orchestrate`. If the coordinator session is gone, rebuild lane state from `git worktree list`, `git branch`, and the doc.
 
-This workflow requires owner-authorized local commits and does not override repository commit restrictions. Do not use its commit-dependent handoff when commits are forbidden.
+This workflow requires owner-authorized local commits. Do not use it when commits are forbidden. It should take minutes, not hours.
 
 ## Rules
 
-- **Freeze first.** Set the doc's status to `winding down` and commit it before doing anything else. A crash mid-winddown must still read as a stop. Then run `codex-campaign-closeout.py begin` from the integration worktree. Select no items. Launch no lanes or waves. Cancel every loop, cron, or wakeup that would resume the campaign.
-- **Trust the guard.** Before its first use, run `/hooks` in Codex and review the configured `Stop` command. The guard does not run until Codex trusts it.
-- **Finish, don't extend.** Tell each running lane (send a message, do not restart it) to finish the item it holds, commit, report, and take no further item. A lane that is stuck or failing is time-boxed at the doc's attempt limit, then parked: commit its work to its branch and record the finding. Nothing new is picked up, and no defect found on the way is fixed unless it blocks landing an in-flight item.
-- **Integrate before parking.** Review every lane for applicable changes, including incomplete work. Integrate coherent partial changes when they preserve the integration branch's contracts; incompleteness alone is not a reason to retain a worktree. Verify the integrated scope and record what remains unfinished. Do not merge obsolete implementations, changes that introduce known regressions, or unsupported acceptance claims merely to retire a branch. A focused RED test exposing an existing defect may land with its failing status explicit, without claiming the defect is fixed. Preserve incompatible or unsafe partial work on a committed branch, then remove its checkout. Follow [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle). Skip repository-wide rewrites and new feature work.
-- **Reclaim checkout space; preserve useful local data.** Logs, caches, qualified artifacts and failed-run records are worth keeping. Inspect ignored and untracked files before removal; preserve them at a persistent repo-local path under ignored `.work/` or retain the specific tree when an actual consumer requires it. Preserve required consumer paths or update the handoff with their new locations. Keep durable source on the integration branch or a parked branch, so a removable checkout does not become its only copy. Do not blanket-delete ignored files or caches, force-remove trees, or retain every tree just because it once ran a gate. No campaign state may depend on a process or `/tmp`.
-- **No push.** Commit the handoff and merges; never push.
+- **Freeze first.** Set **Status** to `winding down`, commit it, and run `codex-campaign-closeout.py begin` from the integration worktree. Launch nothing. Cancel every loop, cron, or wakeup that would resume the campaign. In Codex, review the `Stop` command in `/hooks` before the guard's first use.
+- **Finish, don't extend.** Message each running lane to commit what it has, report, and stop. Do not wait on a lane past its current attempt; commit its worktree to its branch yourself.
+- **Integrate only green work.** Merge a lane only when its acceptance command and the narrowest affected suite pass on the integrated tree. Everything else stays on its branch, named in **Status** with its cause. Never merge red or unverified work to retire a branch.
+- **Reclaim checkouts, keep data.** Before removing a worktree, check `git -C <path> status --porcelain --ignored=matching` and move logs or artifacts worth keeping under the repo's ignored `.work/`. Follow [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle). Never force-remove.
+- **No push.**
 
 ## Reboot audit
 
-Run each check and fix what fails. Do not report from memory.
+Run each check and fix what fails:
 
-1. Run `git worktree prune` and `git worktree list`. Remove committed campaign checkouts after integration review and preservation of useful local data, including checkouts of parked branches. Keep only baseline checkouts or clean worktrees under `<repo>/.work/` with a concrete current consumer named in the handoff. A historical run or an unmerged branch alone is not a retention reason. Run `git -C <path> status --porcelain` for each retained worktree. Run `codex-campaign-closeout.py allow --path <path> --reason <reason>` for each retained worktree. Record each retained path and reason under **Open lanes** or **Retained worktrees**. Confirm the main checkout is clean.
-2. `rg -n '/tmp|/var/folders|/private/tmp|\$TMPDIR'` over the campaign doc, lane briefs, and agent definitions: every hit is moved under `.work/` or removed. `.work/` must be ignored by `.git/info/exclude` and on disk, not tmpfs (`df -T .work` on Linux).
-3. `git branch --no-merged <campaign-branch>`: every branch is either named in the handoff as parked or in-flight, or deleted because it was empty.
-4. No process remains: no lane, build, test run, or watcher started by the campaign (`ps`), and no scheduled wakeup or cron job.
-5. The campaign doc and everything it points to are committed on the campaign branch. Nothing it needs is untracked or ignored.
-6. Rehearse the resume. From a shell with a clean environment (`env -i HOME=$HOME PATH=$PATH sh`), run every command the handoff gives and open every path and branch it names. One that fails is a defect in the handoff.
+1. `git worktree prune && git worktree list`: only the main checkout remains, plus any tree named in **Status** with a current consumer and allowed with `codex-campaign-closeout.py allow`.
+2. `git branch --no-merged`: every branch is named in **Status** or deleted because it is empty.
+3. No campaign process, cron, or wakeup remains. The doc does not reference `/tmp` or `$TMPDIR`.
+4. The main checkout is clean, and the doc is committed.
 
 ## The handoff
 
-Replace any earlier one, placed directly under the header with status `paused <date>`:
+Rewrite **Status** in place, under 20 lines. Do not add a new section or keep the previous handoff.
 
-- **Resume:** the one-line prompt and first command. Before dispatch, re-read current instructions and perform the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint); do not blindly resume the old queue or rebaseline unchanged inputs.
-- **State:** the branch, last accepted revision, provisional commits awaiting proof, what merged, and known red. A clean checkout or completed measurement does not mean accepted or completed work.
-- **Direction:** substantive progress since the last checkpoint, the limiting stage, current ruling and superseded tactics, next delivery, and next steering checkpoint. Keep owner requirements and authority explicit.
-- **Open lanes:** for each unmerged branch, its item IDs, its state (`parked` with the finding, or `wip` with what remains), the prerequisite or condition that permits a retry, and the next step. Worktrees are recreated at `.work/wt/<lane>` from the branch.
-- **Cleanup:** how many worktrees were removed, disk space recovered, where preserved logs/caches/artifacts remain, and each remaining non-baseline worktree's path, branch or HEAD, clean status, and concrete consumer. Record parked branches so their checkouts can be recreated.
-- **Not started:** the next items in order, and the decisions the owner owes.
-- **Verified:** the audit checks that passed, and anything that could not be checked.
+- `paused <date>`, the resume prompt, and the first command.
+- The last accepted revision, and whether the integration branch is green.
+- Each parked branch with its item, cause, and retry condition.
+- The next slice.
 
-Append one campaign-log line, commit the doc alone as a Conventional Commit (`docs(campaign): ...`), and stop. No further waves, no check-in.
+Commit the doc alone as `docs(campaign): pause ...` and stop.
 
-**The test:** after a reboot, an agent with only the repo, its branches, and the doc can resume at the next item, and every file the campaign created in `/tmp` is one it could lose without noticing.
+**The test:** after a reboot, an agent with only the repo and the doc can start the next slice by reading **Status**.
 
-**Report:** what merged, what is parked or in flight and where, the audit results (any check you could not run), and the path to the handoff.
+**Report:** what merged, what is parked and where, and any audit check that failed or could not run.
