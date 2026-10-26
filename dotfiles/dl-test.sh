@@ -728,7 +728,7 @@ begin_case "default targets exclude optional agents"
 ( set -e
 default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
 case "$default_targets" in
-    *'set -- '*grok*|*'set -- '*cmd*)
+    *'set -- '*grok*|*'set -- '*cmd*|*'set -- '*freebuff*)
         printf 'optional coding agents appeared in the default dl targets\n' >&2
         exit 1 ;;
 esac
