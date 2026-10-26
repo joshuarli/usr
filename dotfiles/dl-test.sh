@@ -12,6 +12,31 @@ mock_bin="$test_root/bin"
 home="$test_root/home"
 mkdir -p "$mock_bin" "$home" "$test_root/tmp"
 
+# Run dl with the mocks first on PATH. Three macOS /bin/sh startup quirks
+# make a plain VAR=value prefix unreliable here: entries prepended to PATH
+# are silently dropped (bypassing mocks for npm/node), login-time
+# XDG_DATA_HOME is restored (bypassing per-scenario data dirs), and
+# assignments preceding a function call persist exported into later
+# scenarios (CMD_TEST_VERSION, DL_RECORD_OWNED, ...). PATH and the XDG
+# variables are therefore rebuilt at runtime inside the child, and the known
+# test-control variables are scrubbed afterwards so every scenario starts
+# clean; each scenario sets what it needs on its own run_dl call.
+unset XDG_DATA_HOME XDG_STATE_HOME
+run_dl() {
+    _run_dl_path=$1
+    _run_dl_root=$2
+    shift 2
+    sh -c 'PATH=$1; export PATH; XDG_DATA_HOME=$2; export XDG_DATA_HOME; XDG_STATE_HOME=$3; export XDG_STATE_HOME; _dl_root=$4; shift 4; exec /bin/sh "$_dl_root/dl" "$@"' \
+        run_dl "$_run_dl_path" "${XDG_DATA_HOME-}" "${XDG_STATE_HOME-}" "$_run_dl_root" "$@"
+    _run_dl_status=$?
+    unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \
+        CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
+        CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
+        DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
+        XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME
+    return $_run_dl_status
+}
+
 cat > "$mock_bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -110,7 +135,7 @@ INSTALLER
         ;;
     https://opencode.ai/update/api/latest/cli/opencode/opencode-linux-x64.tar.gz)
         if [ "$headers" = - ]; then
-            printf '%s\n' 'ETag: opencode-test-etag'
+            printf '%s\n' "ETag: ${OPENCODE_ETAG:-opencode-test-etag}"
         elif [ -n "$output" ]; then
             cp "$OPENCODE_TAR" "$output"
         else
@@ -201,6 +226,13 @@ cat > "$test_root/opencode-package/opencode" <<'EOF'
 EOF
 chmod +x "$test_root/opencode-package/opencode"
 tar -czf "$test_root/opencode.tar.gz" -C "$test_root/opencode-package" opencode
+mkdir -p "$test_root/opencode-package-v2"
+cat > "$test_root/opencode-package-v2/opencode" <<'EOF'
+#!/bin/sh
+[ "$1" = --version ] && printf '%s\n' 'opencode 2.0.2'
+EOF
+chmod +x "$test_root/opencode-package-v2/opencode"
+tar -czf "$test_root/opencode-v2.tar.gz" -C "$test_root/opencode-package-v2" opencode
 
 mkdir -p "$test_root/codex-package/bin" "$test_root/codex-package/codex-path"
 printf '%s\n' '{}' > "$test_root/codex-package/codex-package.json"
@@ -299,7 +331,7 @@ chmod +x "$mock_bin/node"
 cmd_home="$test_root/cmd-home"
 cmd_log="$test_root/cmd-npm.log"
 if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" cmd 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -313,7 +345,7 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" cmd 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -325,7 +357,7 @@ case "$output" in
 esac
 [ "$(wc -l < "$cmd_log")" -eq 1 ]
 if output=$(HOME="$cmd_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    CMD_TEST_VERSION=1.87.4 PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    CMD_TEST_VERSION=1.87.4 run_dl "$mock_bin:$PATH" "$repo_root" cmd 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -337,7 +369,7 @@ fi
 cmd_owned_file="$cmd_home/.local/state/make/dl-owned"
 mkdir -p "$(dirname "$cmd_owned_file")"
 HOME="$cmd_home" DL_RECORD_OWNED=true DL_OWNED_FILE="$cmd_owned_file" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
 for owned_path in "$cmd_home/.local/bin/cmd" "$cmd_home/.local/state/dl/cmd"; do
     awk -F '\t' -v path="$owned_path" \
         '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$cmd_owned_file"
@@ -349,7 +381,7 @@ cmd_collision_home="$test_root/cmd-collision-home"
 mkdir -p "$cmd_collision_home/.local/bin"
 printf '%s\n' sentinel > "$cmd_collision_home/.local/bin/cmd"
 if HOME="$cmd_collision_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    run_dl "$mock_bin:$PATH" "$repo_root" cmd >/dev/null 2>&1; then
     printf 'cmd overwrote an unmanaged launcher\n' >&2
     exit 1
 fi
@@ -358,7 +390,7 @@ fi
 cmd_prefix_home="$test_root/cmd-prefix-home"
 mkdir -p "$cmd_prefix_home/.local/share/command-code"
 if HOME="$cmd_prefix_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    run_dl "$mock_bin:$PATH" "$repo_root" cmd >/dev/null 2>&1; then
     printf 'cmd overwrote an unmanaged npm prefix\n' >&2
     exit 1
 fi
@@ -366,7 +398,7 @@ fi
 
 cmd_old_node_home="$test_root/cmd-old-node-home"
 if HOME="$cmd_old_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    CMD_TEST_NODE_VERSION=26.11.0 PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    CMD_TEST_NODE_VERSION=26.11.0 run_dl "$mock_bin:$PATH" "$repo_root" cmd >/dev/null 2>&1; then
     printf 'cmd accepted an unsupported Node.js version\n' >&2
     exit 1
 fi
@@ -374,7 +406,7 @@ fi
 
 cmd_failure_home="$test_root/cmd-failure-home"
 if HOME="$cmd_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    CMD_INSTALL_FAIL=true PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd >/dev/null 2>&1; then
+    CMD_INSTALL_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" cmd >/dev/null 2>&1; then
     printf 'cmd ignored a failed npm install\n' >&2
     exit 1
 fi
@@ -386,7 +418,7 @@ if find "$cmd_failure_home/.local/share" -name 'command-code.*' | grep -q .; the
     exit 1
 fi
 if output=$(HOME="$cmd_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$cmd_log" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" cmd 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" cmd 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -407,7 +439,7 @@ unowned_dsh_log="$test_root/unowned-dsh-npm.log"
 mkdir -p "$unowned_dsh_root"
 if output=$(HOME="$unowned_dsh_home" XDG_DATA_HOME="$unowned_dsh_home/data" \
     XDG_STATE_HOME="$unowned_dsh_home/state" TMPDIR="$test_root/tmp" \
-    NPM_LOG="$unowned_dsh_log" PATH="$mock_bin:$PATH" sh "$repo_root/dl" dsh 2>&1); then
+    NPM_LOG="$unowned_dsh_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     printf '%s\n' 'dsh install accepted an existing package root without dl install records' >&2
     exit 1
 fi
@@ -428,8 +460,7 @@ npm_log="$test_root/npm.log"
 mkdir -p "$dsh_home/.local/bin" "$dsh_home/.local/lib/node_modules/@deepseek-ai/dsh"
 ln -s ../lib/node_modules/@deepseek-ai/dsh/lib/bin.js "$dsh_home/.local/bin/dsh"
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
-    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" dsh 2>&1); then
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -451,7 +482,7 @@ esac
 old_node_dsh_home="$test_root/old-node-dsh-home"
 if HOME="$old_node_dsh_home" XDG_DATA_HOME="$old_node_dsh_home/data" \
     XDG_STATE_HOME="$old_node_dsh_home/state" TMPDIR="$test_root/tmp" \
-    CMD_TEST_NODE_VERSION=25.9.9 PATH="$mock_bin:$PATH" sh "$repo_root/dl" dsh >/dev/null 2>&1; then
+    CMD_TEST_NODE_VERSION=25.9.9 run_dl "$mock_bin:$PATH" "$repo_root" dsh >/dev/null 2>&1; then
     printf '%s\n' 'dsh accepted an unsupported Node.js version' >&2
     exit 1
 fi
@@ -469,7 +500,7 @@ mkdir -p "$managed_dsh_home/.local/bin" "$managed_dsh_home/.local/lib/node_modul
 ln -s "$repo_root/dotfiles/base/.local/bin/dsh" "$managed_dsh_home/.local/bin/dsh"
 if output=$(HOME="$managed_dsh_home" XDG_DATA_HOME="$managed_dsh_data" \
     XDG_STATE_HOME="$managed_dsh_state" TMPDIR="$test_root/tmp" NPM_LOG="$managed_dsh_log" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" dsh 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -487,8 +518,7 @@ case "$output" in
 esac
 
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
-    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" dsh 2>&1); then
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -501,8 +531,7 @@ esac
 printf '%s\n' '- id: tool-ralph' '  disabled: true' \
     > "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
-    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" dsh 2>&1); then
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -517,8 +546,7 @@ rm "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.ym
 ln -s "$test_root/external-patch.yml" \
     "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
-    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" dsh 2>&1); then
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     printf '%s\n' 'dsh followed a symlinked TUI patch' >&2
     exit 1
 fi
@@ -527,8 +555,7 @@ rm "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.ym
 printf '%s\n' '- id: tool-ralph' '  disabled: false' \
     > "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
 if output=$(HOME="$dsh_home" XDG_DATA_HOME="$dsh_data" XDG_STATE_HOME="$dsh_state" \
-    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" dsh 2>&1); then
+    TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" run_dl "$mock_bin:$PATH" "$repo_root" dsh 2>&1); then
     printf '%s\n' 'dsh accepted a changed TUI compatibility row' >&2
     exit 1
 fi
@@ -538,7 +565,7 @@ case "$(cat "$dsh_data/dsh/lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis
 esac
 
 if output=$(HOME="$home" XDG_DATA_HOME="$home/.local/share" XDG_STATE_HOME="$home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" muse 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" muse 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -556,7 +583,7 @@ esac
 
 antigravity_home="$test_root/antigravity-home"
 if output=$(HOME="$antigravity_home" XDG_STATE_HOME="$antigravity_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" antigravity 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" antigravity 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -569,7 +596,7 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 if output=$(HOME="$antigravity_home" XDG_STATE_HOME="$antigravity_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" antigravity 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" antigravity 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -585,7 +612,7 @@ ownership_file="$ownership_home/.local/state/make/dl-owned"
 mkdir -p "$(dirname "$ownership_file")"
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
     DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" jaq 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -593,7 +620,7 @@ else
 fi
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
     DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" jaq 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" jaq 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -617,7 +644,7 @@ chmod +x "$reconcile_home/.local/bin/jaq"
 printf '%s\n' 'jaq-test-etag' > "$reconcile_home/.local/state/dl/jaq"
 HOME="$reconcile_home" XDG_STATE_HOME="$reconcile_home/.local/state" \
     DL_OWNED_FILE="$reconcile_file" DL_RECORD_OWNED=true \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
 awk -F '\t' -v path="$reconcile_home/.local/bin/jaq" \
     '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$reconcile_file"
 awk -F '\t' -v path="$reconcile_home/.local/state/dl/jaq" \
@@ -630,7 +657,7 @@ printf '%s\n' '#!/bin/sh' 'exit 0' > "$unmanaged_home/.local/bin/jaq"
 chmod +x "$unmanaged_home/.local/bin/jaq"
 HOME="$unmanaged_home" XDG_STATE_HOME="$unmanaged_home/.local/state" \
     DL_OWNED_FILE="$unmanaged_file" DL_RECORD_OWNED=true \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
 if awk -F '\t' -v path="$unmanaged_home/.local/bin/jaq" \
     '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$unmanaged_file"; then
     printf '%s\n' 'launcher without dl install state was recorded for removal' >&2
@@ -645,7 +672,7 @@ printf '%s\n' '#!/bin/sh' 'exit 0' > "$untracked_home/.local/bin/agy"
 chmod +x "$untracked_home/.local/bin/agy"
 if output=$(HOME="$untracked_home" XDG_STATE_HOME="$untracked_home/.local/state" \
     DL_OWNED_FILE="$untracked_home/.local/state/make/dl-owned" DL_RECORD_OWNED=true \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -672,7 +699,7 @@ ln -s "$unsafe_target_home/.codex/packages/standalone/releases/../../rogue/bin/c
     "$unsafe_target_home/.local/bin/codex-code-mode-host"
 HOME="$unsafe_target_home" XDG_STATE_HOME="$unsafe_target_home/.local/state" \
     DL_OWNED_FILE="$unsafe_target_owned" DL_RECORD_OWNED=true \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl"
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
 if awk -F '\t' -v path="$unsafe_target_home/.codex/packages/rogue" \
     '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$unsafe_target_owned"; then
     printf '%s\n' 'unsafe Codex release target was recorded for recursive removal' >&2
@@ -703,7 +730,7 @@ chmod +x "$gh_home/.local/bin/gh"
 printf '%s\n' 'gh-test-etag' > "$gh_home/.local/state/dl/gh"
 if output=$(HOME="$gh_home" XDG_STATE_HOME="$gh_home/.local/state" \
     DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" gh 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" gh 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -721,7 +748,7 @@ chmod +x "$sandbox_home/.local/bin/sandbox"
 printf '%s\n' 'srt-test-etag' > "$sandbox_home/.local/state/dl/sandbox"
 if output=$(HOME="$sandbox_home" XDG_STATE_HOME="$sandbox_home/.local/state" \
     DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 TMPDIR="$test_root/tmp" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" sandbox 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" sandbox 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -734,7 +761,7 @@ esac
 
 grok_home="$test_root/grok-home"
 if output=$(HOME="$grok_home" XDG_STATE_HOME="$grok_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" grok 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" grok 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -753,7 +780,7 @@ chmod +x "$grok_collision_home/.local/bin/grok" "$grok_collision_home/.grok/down
 ln -s ../downloads/grok-linux-x86_64 "$grok_collision_home/.grok/bin/grok"
 printf '%s\n' 'old-grok-test-etag' > "$grok_collision_home/.local/state/dl/grok"
 if output=$(HOME="$grok_collision_home" XDG_STATE_HOME="$grok_collision_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" grok 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" grok 2>&1); then
     printf '%s\n' 'Grok migration replaced an existing native install' >&2
     exit 1
 fi
@@ -766,7 +793,7 @@ printf '%s\n' 'legacy grok binary' > "$legacy_grok_home/.local/bin/grok"
 chmod +x "$legacy_grok_home/.local/bin/grok"
 printf '%s\n' 'old-grok-test-etag' > "$legacy_grok_home/.local/state/dl/grok"
 if output=$(HOME="$legacy_grok_home" XDG_STATE_HOME="$legacy_grok_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" grok 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" grok 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -780,7 +807,7 @@ printf '%s\n' 'legacy muse binary' > "$muse_legacy_home/.local/bin/muse"
 chmod +x "$muse_legacy_home/.local/bin/muse"
 printf '%s\n' 'old-muse-test-etag' > "$muse_legacy_home/.local/state/dl/muse"
 if output=$(HOME="$muse_legacy_home" XDG_STATE_HOME="$muse_legacy_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" muse 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" muse 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -793,8 +820,7 @@ esac
 
 opencode_home="$test_root/opencode-home"
 if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
-    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" opencode2 2>&1); then
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -809,14 +835,26 @@ exec "$HOME/.local/bin/opencode" "$@"
 EOF
 chmod +x "$opencode_home/.opencode/bin/opencode2"
 if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
-    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" opencode2 2>&1); then
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
     exit 1
 fi
 [ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.1' ]
+if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode-v2.tar.gz" OPENCODE_ETAG=opencode-test-etag-2 \
+    run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'already exists'*) printf '%s\n' 'managed OpenCode 2 update was skipped' >&2; exit 1 ;;
+esac
+[ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.2' ]
+[ "$(cat "$opencode_home/.local/state/dl/opencode2")" = opencode-test-etag-2 ]
 
 opencode_collision_home="$test_root/opencode-collision-home"
 mkdir -p "$opencode_collision_home/.local/bin" "$opencode_collision_home/.local/state/dl" \
@@ -826,8 +864,7 @@ printf '%s\n' 'native opencode binary' > "$opencode_collision_home/.opencode/bin
 chmod +x "$opencode_collision_home/.local/bin/opencode2" "$opencode_collision_home/.opencode/bin/opencode"
 printf '%s\n' 'old-opencode-test-etag' > "$opencode_collision_home/.local/state/dl/opencode2"
 if output=$(HOME="$opencode_collision_home" XDG_STATE_HOME="$opencode_collision_home/.local/state" \
-    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" opencode2 2>&1); then
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode.tar.gz" run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
     printf '%s\n' 'OpenCode 2 migration replaced an existing native install' >&2
     exit 1
 fi
@@ -838,7 +875,7 @@ claude_home="$test_root/claude-home"
 claude_data="$claude_home/share"
 claude_state="$claude_home/state"
 if output=$(HOME="$claude_home" XDG_DATA_HOME="$claude_data" XDG_STATE_HOME="$claude_state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" claude 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" claude 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -856,7 +893,7 @@ case "$output" in
     *'native installer output'*) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 if output=$(HOME="$claude_home" XDG_DATA_HOME="$claude_data" XDG_STATE_HOME="$claude_state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" sh "$repo_root/dl" claude 2>&1); then
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" claude 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -869,8 +906,8 @@ esac
 
 claude_failure_home="$test_root/claude-failure-home"
 if output=$(HOME="$claude_failure_home" XDG_STATE_HOME="$claude_failure_home/.local/state" \
-    TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" CLAUDE_INSTALLER_FAIL=true \
-    sh "$repo_root/dl" claude 2>&1); then
+    TMPDIR="$test_root/tmp" CLAUDE_INSTALLER_FAIL=true \
+    run_dl "$mock_bin:$PATH" "$repo_root" claude 2>&1); then
     printf '%s\n' 'Claude installer failure was ignored' >&2
     exit 1
 fi
@@ -889,7 +926,7 @@ ln -s "$old_claude_data/claude/versions/2.1.299" "$old_claude_home/.local/bin/cl
 printf '%s\n' 'old-claude-test-etag' > "$old_claude_home/.local/state/dl/claude"
 if output=$(HOME="$old_claude_home" XDG_DATA_HOME="$old_claude_data" \
     XDG_STATE_HOME="$old_claude_home/.local/state" TMPDIR="$test_root/tmp" \
-    PATH="$mock_bin:$PATH" sh "$repo_root/dl" claude 2>&1); then
+    run_dl "$mock_bin:$PATH" "$repo_root" claude 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -903,8 +940,7 @@ printf '%s' 'legacy Claude binary' > "$legacy_home/.local/bin/claude"
 chmod +x "$legacy_home/.local/bin/claude"
 printf '%s\n' 'old-claude-test-etag' > "$legacy_home/.local/state/dl/claude"
 if output=$(HOME="$legacy_home" XDG_DATA_HOME="$legacy_home/.local/share" \
-    XDG_STATE_HOME="$legacy_home/.local/state" TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" claude 2>&1); then
+    XDG_STATE_HOME="$legacy_home/.local/state" TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" claude 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -920,8 +956,7 @@ printf '%s\n' 'custom launcher' > "$custom_home/.local/bin/claude"
 chmod +x "$custom_home/.local/bin/claude"
 printf '%s\n' 'old-claude-test-etag' > "$custom_home/.local/state/dl/claude"
 if output=$(HOME="$custom_home" XDG_DATA_HOME="$custom_home/.local/share" \
-    XDG_STATE_HOME="$custom_home/.local/state" TMPDIR="$test_root/tmp" PATH="$mock_bin:$PATH" \
-    sh "$repo_root/dl" claude 2>&1); then
+    XDG_STATE_HOME="$custom_home/.local/state" TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" claude 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -940,7 +975,7 @@ ln -s "$(command -v mkdir)" "$missing_file_bin/mkdir"
 ln -s "$(command -v sed)" "$missing_file_bin/sed"
 if output=$(HOME="$missing_file_home" XDG_DATA_HOME="$missing_file_home/.local/share" \
     XDG_STATE_HOME="$missing_file_home/.local/state" TMPDIR="$test_root/tmp" \
-    PATH="$missing_file_bin" /bin/sh "$repo_root/dl" claude 2>&1); then
+    run_dl "$missing_file_bin" "$repo_root" claude 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
@@ -957,8 +992,7 @@ mv "$mock_bin/jaq" "$mock_bin/jaq.hidden"
 if output=$(HOME="$codex_home" XDG_STATE_HOME="$codex_home/.local/state" \
     TMPDIR="$test_root/tmp" CODEX_SHA256="$CODEX_SHA256" CODEX_TAR="$test_root/codex.tar.gz" \
     DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 DL_JAQ_MOCK="$mock_bin/jaq.hidden" \
-    PATH="$mock_bin:/usr/bin:/bin" \
-    sh "$repo_root/dl" jaq codex muse 2>&1); then
+    run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" jaq codex muse 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
