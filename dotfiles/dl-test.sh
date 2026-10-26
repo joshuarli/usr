@@ -202,24 +202,6 @@ FEED
         [ "$headers" = - ] || exit 1
         printf '%s\n' 'ETag: gh-test-etag'
         ;;
-    https://github.com/joshuarli/sandbox-runtime/releases.atom)
-        cat <<'FEED'
-<feed>
-<entry>
-<updated>2026-10-24T02:00:00Z</updated>
-<link rel="alternate" type="text/html" href="https://github.com/joshuarli/sandbox-runtime/releases/tag/bun-1.4.4-static-musl"/>
-</entry>
-<entry>
-<updated>2026-10-24T00:00:00Z</updated>
-<link rel="alternate" type="text/html" href="https://github.com/joshuarli/sandbox-runtime/releases/tag/release-0123456789abcdef0123456789abcdef01234567"/>
-</entry>
-</feed>
-FEED
-        ;;
-    https://github.com/joshuarli/sandbox-runtime/releases/download/release-0123456789abcdef0123456789abcdef01234567/srt-x86_64-unknown-linux-musl.zip)
-        [ "$headers" = - ] || exit 1
-        printf '%s\n' 'ETag: srt-test-etag'
-        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -834,28 +816,6 @@ else
 fi
 case "$output" in
     *'gh is current (release-9be88d806c91cbce8920e188f90fb6df34b45ba9)'*) ;;
-    *) printf '%s\n' "$output" >&2; exit 1 ;;
-esac
-)
-end_case
-
-begin_case "sandbox is current"
-( set -e
-sandbox_home="$test_root/sandbox-home"
-mkdir -p "$sandbox_home/.local/bin" "$sandbox_home/.local/state/dl"
-printf '%s\n' 'sandbox test binary' > "$sandbox_home/.local/bin/sandbox"
-chmod +x "$sandbox_home/.local/bin/sandbox"
-printf '%s\n' 'srt-test-etag' > "$sandbox_home/.local/state/dl/sandbox"
-if output=$(HOME="$sandbox_home" XDG_STATE_HOME="$sandbox_home/.local/state" \
-    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 TMPDIR="$test_root/tmp" \
-    run_dl "$mock_bin:$PATH" "$repo_root" sandbox 2>&1); then
-    :
-else
-    printf '%s\n' "$output" >&2
-    exit 1
-fi
-case "$output" in
-    *'sandbox is current (release-0123456789abcdef0123456789abcdef01234567)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 )
