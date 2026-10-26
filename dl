@@ -200,7 +200,7 @@ trap 'on_signal 143' TERM
 
 unchecked() {
     if [ -x "${DEST}/$1" ]; then
-        _dl_warn "Warning: could not check $1 ($2); keeping the installed one"
+        _dl_warn "Warning: keeping installed $1 ($2; will retry next run)"
     else
         skip "$1" "$2"
     fi
