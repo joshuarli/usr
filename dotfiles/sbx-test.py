@@ -6,7 +6,7 @@ import importlib.machinery
 import importlib.util
 import io
 import os
-import platform
+import socket
 import subprocess
 import sys
 import tempfile
@@ -214,8 +214,13 @@ class PolicyTests(LocalFixture):
         self.assertNotIn('lsopen', profile)
         self.assertNotIn('global-name-prefix', profile)
         self.assertIn('(allow network*)', profile)
+        self.assertIn('com.apple.SystemConfiguration.configd', profile)
+        self.assertIn('com.apple.SystemConfiguration.DNSConfiguration', profile)
+        self.assertIn(SBX.sbpl_path(Path("/var"), "literal"), profile)
         offline = SBX.macos_profile(self.plan("--offline", backend="Darwin"), self.root)
         self.assertNotIn("(allow network*)", offline)
+        self.assertNotIn('com.apple.SystemConfiguration.configd', offline)
+        self.assertNotIn('com.apple.SystemConfiguration.DNSConfiguration', offline)
 
     def test_mac_writes_only_grants_and_scratch(self):
         profile = SBX.macos_profile(self.plan("--ro", str(self.ro), "--rw", str(self.rw), backend="Darwin"), self.root)
@@ -242,7 +247,11 @@ class PolicyTests(LocalFixture):
         git = self.project / ".git"
         git.mkdir()
         profile = SBX.macos_profile(self.plan(backend="Darwin"), self.root)
-        self.assertIn(f"(deny file-write* {SBX.sbpl_path(git)})", profile)
+        # A blanket file-write* deny does not subtract from the parent
+        # project's allow on macOS 27 (verified live); granular denies do.
+        self.assertNotIn(f"(deny file-write* {SBX.sbpl_path(git)})", profile)
+        for operation in ("file-write-data", "file-write-create", "file-write-unlink"):
+            self.assertIn(f"(deny {operation} {SBX.sbpl_path(git)})", profile)
 
     def test_private_home_symlinks_reach_tracked_sources(self):
         self.make_sources()
@@ -270,6 +279,12 @@ class LiveTests(LocalFixture):
         return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=self.project,
                               text=True, capture_output=True, check=False)
 
+    def interpreter(self):
+        for candidate in ("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"):
+            if Path(candidate).is_file():
+                return candidate
+        self.skipTest("no python3 interpreter in a system runtime path")
+
     def test_live_read_write_and_symlink(self):
         (self.project / "ok").write_text("open", encoding="utf-8")
         (self.ro / "readable").write_text("read", encoding="utf-8")
@@ -287,7 +302,7 @@ class LiveTests(LocalFixture):
             f"assert not Path({str(self.ro)!r}, 'no').write_text('x')"
         )
         # The final expression is expected to raise an OS error on a read-only mount.
-        result = self.run_sandbox("--ro", str(self.ro), "--offline", "--", "/usr/bin/python3", "-c", code)
+        result = self.run_sandbox("--ro", str(self.ro), "--offline", "--", self.interpreter(), "-c", code)
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.project / "write").read_text(), "allowed")
         self.assertFalse((self.ro / "no").exists())
@@ -296,16 +311,49 @@ class LiveTests(LocalFixture):
     def test_live_private_path_and_offline_network(self):
         secret = self.root / "host-secret"
         secret.write_text("private", encoding="utf-8")
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            code = (
+                "import pathlib,socket\n"
+                f"assert not pathlib.Path({str(secret)!r}).exists()\n"
+                "s=socket.socket(); s.settimeout(0.5)\n"
+                f"try: s.connect(('127.0.0.1', {port}))\n"
+                "except OSError: print('blocked')\n"
+                "else: raise SystemExit('connected')"
+            )
+            online = self.run_sandbox("--", self.interpreter(), "-c", code)
+            offline = self.run_sandbox("--offline", "--", self.interpreter(), "-c", code)
+        self.assertNotEqual(online.returncode, 0, online.stdout + online.stderr)
+        self.assertEqual(offline.returncode, 0, offline.stdout + offline.stderr)
+        self.assertEqual(offline.stdout.strip(), "blocked")
+
+    def test_live_online_resolves_localhost(self):
         code = (
-            "import pathlib,socket; "
-            f"assert not pathlib.Path({str(secret)!r}).exists(); "
-            "s=socket.socket(); "
-            "s.settimeout(0.5); "
-            "s.connect(('127.0.0.1', 9))"
+            "import socket\n"
+            "assert socket.gethostbyname('localhost') == '127.0.0.1', socket.gethostbyname('localhost')\n"
+            "print('resolved')"
         )
-        result = self.run_sandbox("--offline", "--", "/usr/bin/python3", "-c", code)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Network is unreachable" if platform.system() == "Linux" else "Operation not permitted", result.stderr)
+        result = self.run_sandbox("--", self.interpreter(), "-c", code)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), "resolved")
+
+    def test_live_git_metadata_write_denied(self):
+        git = self.project / ".git"
+        git.mkdir()
+        (git / "config").write_text("original", encoding="utf-8")
+        code = (
+            "from pathlib import Path\n"
+            "for target in ('.git/config', '.git/new'):\n"
+            "    try: Path(target).write_text('changed')\n"
+            "    except OSError: pass\n"
+            "    else: raise SystemExit('wrote ' + target)"
+        )
+        result = self.run_sandbox("--", self.interpreter(), "-c", code)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((git / "config").read_text(encoding="utf-8"), "original")
+        self.assertFalse((git / "new").exists())
 
 
 def main():

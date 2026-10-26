@@ -30,6 +30,7 @@ run_dl() {
         run_dl "$_run_dl_path" "${XDG_DATA_HOME-}" "${XDG_STATE_HOME-}" "$_run_dl_root" "$@"
     _run_dl_status=$?
     unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \
+        FREEBUFF_TEST_VERSION FREEBUFF_INSTALL_FAIL \
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
@@ -315,6 +316,7 @@ case "$1" in
             @deepseek-ai/dsh@next) printf '%s\n' '0.2.1-rc.2' ;;
             @deepseek-harness-tui/dsh-tui) printf '%s\n' '0.16.0' ;;
             command-code@latest) printf '%s\n' "${CMD_TEST_VERSION:-1.87.3}" ;;
+            freebuff@latest) printf '%s\n' "${FREEBUFF_TEST_VERSION:-0.2.34}" ;;
             *) exit 1 ;;
         esac
         ;;
@@ -343,6 +345,26 @@ case "$1" in
             printf '%s\n' "install $*" >> "$NPM_LOG"
             exit 0
         fi
+        for npm_arg in "$@"; do
+            case "$npm_arg" in
+                freebuff@*)
+                    if [ "$npm_arg" != "freebuff@${FREEBUFF_TEST_VERSION:-0.2.34}" ]; then
+                        exit 1
+                    fi
+                    if [ "${FREEBUFF_INSTALL_FAIL:-false}" = true ]; then
+                        mkdir -p "$prefix/lib/node_modules/freebuff"
+                        exit 17
+                    fi
+                    mkdir -p "$prefix/bin" "$prefix/lib/node_modules/freebuff"
+                    printf '%s\n' '#!/usr/bin/env node' 'console.log(1)' > \
+                        "$prefix/lib/node_modules/freebuff/index.js"
+                    chmod +x "$prefix/lib/node_modules/freebuff/index.js"
+                    ln -sf ../lib/node_modules/freebuff/index.js "$prefix/bin/freebuff"
+                    printf '%s\n' "install $*" >> "$NPM_LOG"
+                    exit 0
+                    ;;
+            esac
+        done
         mkdir -p "$prefix/bin"
         mkdir -p "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui"
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh"
@@ -467,6 +489,170 @@ fi
 )
 end_case
 
+sbx_mock_bin="$test_root/sbx-mock-bin"
+mkdir -p "$sbx_mock_bin"
+cat > "$sbx_mock_bin/sbx" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${SBX_LOG:-/dev/null}"
+exit 0
+EOF
+chmod +x "$sbx_mock_bin/sbx"
+
+begin_case "freebuff install, shim sandboxing, current check, upgrade, and owned-file tracking"
+( set -e
+freebuff_home="$test_root/freebuff-home"
+freebuff_owned="$test_root/freebuff-owned"
+mkdir -p "$(dirname "$freebuff_owned")"
+if output=$(HOME="$freebuff_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    DL_OWNED_FILE="$freebuff_owned" \
+    run_dl "$mock_bin:$PATH" "$repo_root" freebuff 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+freebuff_root="$freebuff_home/.local/share/freebuff"
+[ "$(readlink "$freebuff_home/.local/bin/freebuff")" = "$freebuff_root/bin/freebuff-sbx" ]
+[ -x "$freebuff_root/bin/freebuff-sbx" ]
+[ -x "$freebuff_root/bin/freebuff" ]
+[ "$(cat "$freebuff_home/.local/state/dl/freebuff")" = 0.2.34 ]
+case "$output" in
+    *"Installed $freebuff_home/.local/bin/freebuff"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+case "$(cat "$freebuff_root/bin/freebuff-sbx")" in
+    *'exec sbx '*"--rw "*"--ro "*) ;;
+    *) printf '%s\n' 'freebuff shim does not wrap sbx' >&2; exit 1 ;;
+esac
+sbx_log="$test_root/freebuff-sbx.log"
+rm -f "$sbx_log"
+if shim_output=$(HOME="$freebuff_home" SBX_LOG="$sbx_log" \
+    PATH="$sbx_mock_bin:$mock_bin:/usr/bin:/bin" \
+    "$freebuff_home/.local/bin/freebuff" --version 2>&1); then
+    :
+else
+    printf '%s\n' "$shim_output" >&2
+    exit 1
+fi
+[ -d "$freebuff_home/.config/manicode" ]
+sbx_args=$(cat "$sbx_log")
+case "$sbx_args" in
+    *"--rw $freebuff_home/.config/manicode"*) ;;
+    *) printf '%s\n' "$sbx_args" >&2; exit 1 ;;
+esac
+case "$sbx_args" in
+    *"--ro $freebuff_root"*) ;;
+    *) printf '%s\n' "$sbx_args" >&2; exit 1 ;;
+esac
+case "$sbx_args" in
+    *"-- $mock_bin/node"*"/freebuff/index.js --version") ;;
+    *) printf '%s\n' "$sbx_args" >&2; exit 1 ;;
+esac
+case "$sbx_args" in
+    *--offline*) printf '%s\n' 'freebuff shim disables network' >&2; exit 1 ;;
+esac
+if HOME="$freebuff_home" PATH="$mock_bin:/usr/bin:/bin" \
+    "$freebuff_home/.local/bin/freebuff" --version >/dev/null 2>&1; then
+    printf '%s\n' 'freebuff ran without sbx' >&2
+    exit 1
+fi
+if output=$(HOME="$freebuff_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    run_dl "$mock_bin:$PATH" "$repo_root" freebuff 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'freebuff is current (0.2.34)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if output=$(HOME="$freebuff_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    FREEBUFF_TEST_VERSION=0.2.35 run_dl "$mock_bin:$PATH" "$repo_root" freebuff 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(cat "$freebuff_home/.local/state/dl/freebuff")" = 0.2.35 ]
+[ -x "$freebuff_root/bin/freebuff-sbx" ]
+[ -L "$freebuff_root/bin/freebuff" ]
+awk -F '\t' -v path="$freebuff_home/.local/bin/freebuff" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$freebuff_owned"
+awk -F '\t' -v path="$freebuff_home/.local/state/dl/freebuff" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$freebuff_owned"
+awk -F '\t' -v path="$freebuff_home/.local/share/freebuff" \
+    '$1 == "D" && $2 == path { count++ } END { exit count != 1 }' "$freebuff_owned"
+awk -F '\t' -v path="$freebuff_home/.local/share/freebuff/bin/freebuff-sbx" \
+    '$1 == "F" && $2 == path { count++ } END { exit count != 1 }' "$freebuff_owned"
+)
+end_case
+
+begin_case "freebuff rejects unmanaged launcher"
+( set -e
+freebuff_collision_home="$test_root/freebuff-collision-home"
+mkdir -p "$freebuff_collision_home/.local/bin"
+printf '%s\n' sentinel > "$freebuff_collision_home/.local/bin/freebuff"
+if HOME="$freebuff_collision_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    run_dl "$mock_bin:$PATH" "$repo_root" freebuff >/dev/null 2>&1; then
+    printf 'freebuff overwrote an unmanaged launcher\n' >&2
+    exit 1
+fi
+[ "$(cat "$freebuff_collision_home/.local/bin/freebuff")" = sentinel ]
+)
+end_case
+
+begin_case "freebuff rejects unmanaged npm prefix"
+( set -e
+freebuff_prefix_home="$test_root/freebuff-prefix-home"
+mkdir -p "$freebuff_prefix_home/.local/share/freebuff"
+if HOME="$freebuff_prefix_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    run_dl "$mock_bin:$PATH" "$repo_root" freebuff >/dev/null 2>&1; then
+    printf 'freebuff overwrote an unmanaged npm prefix\n' >&2
+    exit 1
+fi
+[ ! -e "$freebuff_prefix_home/.local/bin/freebuff" ]
+)
+end_case
+
+begin_case "freebuff requires supported node"
+( set -e
+freebuff_old_node_home="$test_root/freebuff-old-node-home"
+if HOME="$freebuff_old_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    CMD_TEST_NODE_VERSION=26.11.0 run_dl "$mock_bin:$PATH" "$repo_root" freebuff >/dev/null 2>&1; then
+    printf 'freebuff accepted an unsupported Node.js version\n' >&2
+    exit 1
+fi
+[ ! -e "$freebuff_old_node_home/.local/bin/freebuff" ]
+)
+end_case
+
+begin_case "freebuff cleans up after failed install and recovers"
+( set -e
+freebuff_failure_home="$test_root/freebuff-failure-home"
+if HOME="$freebuff_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    FREEBUFF_INSTALL_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" freebuff >/dev/null 2>&1; then
+    printf 'freebuff ignored a failed npm install\n' >&2
+    exit 1
+fi
+[ ! -e "$freebuff_failure_home/.local/bin/freebuff" ]
+[ ! -e "$freebuff_failure_home/.local/state/dl/freebuff" ]
+[ ! -e "$freebuff_failure_home/.local/share/freebuff" ]
+if find "$freebuff_failure_home/.local/share" -name 'freebuff.*' | grep -q .; then
+    printf 'freebuff kept an incomplete npm installation\n' >&2
+    exit 1
+fi
+if output=$(HOME="$freebuff_failure_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    run_dl "$mock_bin:$PATH" "$repo_root" freebuff 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$freebuff_failure_home/.local/share/freebuff/bin/freebuff-sbx" ]
+)
+end_case
+
 begin_case "cmd cleans up after failed install and recovers"
 ( set -e
 cmd_failure_home="$test_root/cmd-failure-home"
@@ -490,6 +676,51 @@ else
     exit 1
 fi
 [ -x "$cmd_failure_home/.local/share/command-code/bin/cmd" ]
+)
+end_case
+
+begin_case "dl prefers managed node over PATH node"
+( set -e
+managed_node_home="$test_root/managed-node-home"
+mkdir -p "$managed_node_home/.local/share/nodejs/26.12.1/bin"
+cat > "$managed_node_home/.local/share/nodejs/26.12.1/bin/node" <<'EOF'
+#!/bin/sh
+printf '%s\n' '26.12.1'
+EOF
+chmod +x "$managed_node_home/.local/share/nodejs/26.12.1/bin/node"
+ln -s 26.12.1 "$managed_node_home/.local/share/nodejs/current"
+stale_node_dir="$test_root/stale-node-bin"
+mkdir -p "$stale_node_dir"
+cat > "$stale_node_dir/node" <<'EOF'
+#!/bin/sh
+printf '%s\n' '26.11.0'
+EOF
+chmod +x "$stale_node_dir/node"
+if output=$(HOME="$managed_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
+    run_dl "$stale_node_dir:$mock_bin:/usr/bin:/bin" "$repo_root" freebuff 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *"Installed $managed_node_home/.local/bin/freebuff"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+managed_sbx_log="$test_root/managed-node-sbx.log"
+rm -f "$managed_sbx_log"
+if shim_output=$(HOME="$managed_node_home" SBX_LOG="$managed_sbx_log" \
+    PATH="$sbx_mock_bin:/usr/bin:/bin" \
+    "$managed_node_home/.local/bin/freebuff" --version 2>&1); then
+    :
+else
+    printf '%s\n' "$shim_output" >&2
+    exit 1
+fi
+case "$(cat "$managed_sbx_log")" in
+    *"-- $managed_node_home/.local/share/nodejs/26.12.1/bin/node"*) ;;
+    *) cat "$managed_sbx_log" >&2; exit 1 ;;
+esac
 )
 end_case
 

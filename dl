@@ -27,10 +27,19 @@ MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
 OPENCODE2_HOME="${HOME}/.opencode"
 CMD_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/command-code"
 PI_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pi"
+FREEBUFF_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/freebuff"
 PYTHON_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/python-build"
 NODE_MINIMUM=26.12.0
 NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
+
+# Prefer the dl-managed Node.js over whatever `node`/`npm` the inherited
+# PATH resolves to (shell configs reorder PATH). Fall back to PATH when the
+# managed runtime is absent, e.g. before `sh dl nodejs` bootstraps it.
+if [ -x "${NODEJS_INSTALL_ROOT}/current/bin/node" ]; then
+    PATH="${NODEJS_INSTALL_ROOT}/current/bin:${PATH}"
+    export PATH
+fi
 
 STATE="${XDG_STATE_HOME:-${HOME}/.local/state}/dl"
 DL_OWNED_FILE=${DL_OWNED_FILE:-}
@@ -1318,6 +1327,156 @@ install_pi() {
     _dl_ok "Installed ${DEST}/pi"
 }
 
+write_freebuff_shim() {
+    shim_target="${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx"
+    tmpbinlink=$(mktemp "${FREEBUFF_INSTALL_ROOT}/bin/.freebuff-sbx.XXXXXX")
+    cat > "$tmpbinlink" <<'EOF'
+#!/bin/sh
+# Managed by dl (install_freebuff). Runs the dl-installed Freebuff launcher
+# inside sbx: full network access, filesystem limited to the invoking
+# directory (read/write) plus Freebuff's own install, node runtime, and
+# config directories (read/write). Do not edit; dl rewrites this file.
+#
+# The Freebuff npm package is a launcher that downloads its native binary
+# into ~/.config/manicode and keeps auth there, resolved from the process
+# home directory. That directory is granted read/write, so login and the
+# downloaded binary persist on Linux, where the sandbox home keeps the host
+# path. On macOS sbx confines the child to a private home, so each run
+# starts with a fresh config (re-login, re-download). Refuses to run when
+# sbx is unavailable rather than running unsandboxed.
+set -eu
+
+canonical() {
+    p=$1
+    while [ -L "$p" ]; do
+        link_target=$(readlink "$p") || return 1
+        case "$link_target" in
+            /*) p=$link_target ;;
+            *) p=$(dirname "$p")/$link_target ;;
+        esac
+    done
+    dir=$(dirname "$p")
+    base=$(basename "$p")
+    dir=$(CDPATH='' cd -P -- "$dir" >/dev/null 2>&1 && pwd -P) || return 1
+    printf '%s\n' "$dir/$base"
+}
+
+data_home=${XDG_DATA_HOME:-$HOME/.local/share}
+root=$data_home/freebuff
+node_root=$data_home/nodejs
+config_dir=$HOME/.config/manicode
+
+if ! command -v sbx >/dev/null 2>&1; then
+    printf '%s\n' 'freebuff: sbx not found on PATH; refusing to run unsandboxed' >&2
+    exit 1
+fi
+if [ ! -d "$config_dir" ]; then
+    mkdir -p "$config_dir" || exit 1
+fi
+upstream=$root/bin/freebuff
+if [ -L "$upstream" ]; then
+    link_target=$(readlink "$upstream") || exit 1
+    case "$link_target" in
+        /*) launcher=$link_target ;;
+        *) launcher=$root/bin/$link_target ;;
+    esac
+else
+    launcher=$upstream
+fi
+launcher=$(canonical "$launcher") || exit 1
+node_bin=$node_root/current/bin/node
+if [ ! -x "$node_bin" ]; then
+    node_bin=$(command -v node 2>/dev/null) || {
+        printf '%s\n' 'freebuff: no node runtime (run `sh dl nodejs`)' >&2
+        exit 1
+    }
+    case "$node_bin" in
+        */*) ;;
+        *) printf '%s\n' 'freebuff: cannot locate node' >&2; exit 1 ;;
+    esac
+fi
+node_bin=$(canonical "$node_bin") || exit 1
+node_grant=$(dirname "$node_bin")
+exec sbx --rw "$config_dir" --ro "$root" --ro "$node_grant" -- "$node_bin" "$launcher" "$@"
+EOF
+    chmod +x "$tmpbinlink"
+    mv -f "$tmpbinlink" "$shim_target"
+    tmpbinlink=
+    own_file "$shim_target"
+}
+
+install_freebuff() {
+    command -v npm >/dev/null 2>&1 || { unchecked freebuff "npm is required"; return; }
+    if ! node_meets_minimum; then
+        unchecked freebuff "Node.js $NODE_MINIMUM or newer is required"
+        return
+    fi
+    version=$(npm view freebuff@latest version 2>/dev/null) || version=
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked freebuff "no npm release found"; return; }
+    if [ -e "${DEST}/freebuff" ] || [ -L "${DEST}/freebuff" ]; then
+        if [ "$(readlink "${DEST}/freebuff" 2>/dev/null || :)" != "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx" ] \
+            || [ ! -s "${STATE}/freebuff" ]; then
+            skip freebuff "${DEST}/freebuff already exists outside dl management"
+            return
+        fi
+    fi
+    if [ -e "$FREEBUFF_INSTALL_ROOT" ] || [ -L "$FREEBUFF_INSTALL_ROOT" ]; then
+        if [ ! -d "$FREEBUFF_INSTALL_ROOT" ] || [ -L "$FREEBUFF_INSTALL_ROOT" ] \
+            || [ ! -s "${STATE}/freebuff" ]; then
+            skip freebuff "$FREEBUFF_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    fi
+    if [ "$(cat "${STATE}/freebuff" 2>/dev/null)" = "$version" ] \
+        && [ -x "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx" ] \
+        && [ "$(readlink "${DEST}/freebuff" 2>/dev/null || :)" = "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx" ]; then
+        write_freebuff_shim
+        own_dir "$FREEBUFF_INSTALL_ROOT"
+        own_file "${DEST}/freebuff"
+        own_file "${STATE}/freebuff"
+        _dl_current "freebuff is current (${version})"
+        return
+    fi
+    own_parent=${FREEBUFF_INSTALL_ROOT%/*}
+    own_missing_dirs "$own_parent"
+    mkdir -p "$own_parent"
+    install_prefix=$FREEBUFF_INSTALL_ROOT
+    if [ ! -d "$FREEBUFF_INSTALL_ROOT" ]; then
+        tmpbundle=$(mktemp -d "${FREEBUFF_INSTALL_ROOT}.XXXXXX")
+        install_prefix=$tmpbundle
+    fi
+    _dl_fetch "Installing Freebuff (${version}) ..."
+    if ! npm install --global --ignore-scripts --prefix "$install_prefix" "freebuff@${version}"; then
+        skip freebuff "npm install failed"
+        return
+    fi
+    if [ ! -x "${install_prefix}/bin/freebuff" ]; then
+        skip freebuff "npm did not install ${install_prefix}/bin/freebuff"
+        return
+    fi
+    if [ "$install_prefix" != "$FREEBUFF_INSTALL_ROOT" ]; then
+        if [ -e "$FREEBUFF_INSTALL_ROOT" ] || [ -L "$FREEBUFF_INSTALL_ROOT" ]; then
+            skip freebuff "$FREEBUFF_INSTALL_ROOT appeared during install"
+            return
+        fi
+        mv "$install_prefix" "$FREEBUFF_INSTALL_ROOT"
+        tmpbundle=
+    fi
+    own_dir "$FREEBUFF_INSTALL_ROOT"
+    write_freebuff_shim
+    tmpbinlink=$(mktemp "${DEST}/.freebuff.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/freebuff"
+    tmpbinlink=
+    printf '%s\n' "$version" > "${STATE}/freebuff"
+    own_file "${DEST}/freebuff"
+    own_file "${STATE}/freebuff"
+    changed=true
+    _dl_ok "Installed ${DEST}/freebuff"
+}
+
 install_dsh() {
     command -v npm >/dev/null 2>&1 || { unchecked dsh "npm is required"; return; }
     if ! node_meets_minimum; then
@@ -1827,7 +1986,7 @@ run_parallel() {
             *" $prog "*) continue ;;
         esac
         case "$prog" in
-            cmd|dsh|pi) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
+            cmd|dsh|pi|freebuff) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
             *) binary_tools="${binary_tools}${binary_tools:+ }${prog}" ;;
         esac
     done
@@ -1939,6 +2098,16 @@ record_managed_installs() {
             own_file "${DEST}/pi"
         fi
     fi
+    if [ -s "${STATE}/freebuff" ]; then
+        own_file "${STATE}/freebuff"
+        if [ -d "$FREEBUFF_INSTALL_ROOT" ] && [ ! -L "$FREEBUFF_INSTALL_ROOT" ] \
+            && [ -x "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx" ] \
+            && [ "$(readlink "${DEST}/freebuff" 2>/dev/null || :)" = "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx" ]; then
+            own_dir "$FREEBUFF_INSTALL_ROOT"
+            own_file "${DEST}/freebuff"
+            own_file "${FREEBUFF_INSTALL_ROOT}/bin/freebuff-sbx"
+        fi
+    fi
     record_managed_binary opencode2
     if [ -s "${STATE}/opencode2" ] \
         && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
@@ -2025,6 +2194,7 @@ for prog in "$@"; do
         dsh) install_dsh ;;
         cmd) install_cmd ;;
         pi) install_pi ;;
+        freebuff) install_freebuff ;;
         antigravity|agy) install_antigravity ;;
         muse) install_muse ;;
         claude) install_claude ;;

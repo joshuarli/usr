@@ -257,7 +257,13 @@ def sbpl_path(p: Path, mode: str = "subpath") -> str:
 def macos_profile(plan: Plan, scratch: Path) -> str:
     system_dirs = [Path(p) for p in MAC_READ_DIRS if Path(p).is_dir()]
     system_files = [Path(p) for p in MAC_READ_FILES if Path(p).exists()]
-    reads = [sbpl_path(p) for p in system_dirs]
+    reads = [sbpl_path(Path("/"), "literal")]
+    # The standard /var symlink. The resolver reaches its IPC socket through
+    # a /var-spelled path; resolving the link itself needs a metadata read,
+    # which the DIRECTORY-only rule below does not cover. The target is
+    # public knowledge; contents still need their own rules.
+    reads.append(sbpl_path(Path("/var"), "literal"))
+    reads += [sbpl_path(p) for p in system_dirs]
     reads += [sbpl_path(p, "literal") for p in system_files]
     reads += [sbpl_path(grant.path) for grant in plan.grants]
     reads.append(sbpl_path(scratch))
@@ -269,15 +275,29 @@ def macos_profile(plan: Plan, scratch: Path) -> str:
     git = plan.cwd / ".git"
     if git.is_symlink():
         raise SandboxError("refusing symlinked .git metadata")
+    lookup_names = [
+        '"com.apple.system.logger"',
+        '"com.apple.logd"',
+        '"com.apple.system.opendirectoryd.libinfo"',
+        '"com.apple.system.opendirectoryd.membership"',
+    ]
+    if not plan.offline:
+        # Name resolution talks to configd over Mach; without these names
+        # even 'localhost' fails to resolve. Gated on online mode together
+        # with (allow network*): resolution is part of network access.
+        # Verified live on macOS 27; the mDNSResponder IPC socket itself
+        # needs no extra file rule once network* is allowed.
+        lookup_names += [
+            '"com.apple.SystemConfiguration.configd"',
+            '"com.apple.SystemConfiguration.DNSConfiguration"',
+        ]
     lines = [
         "(version 1)", "(deny default)",
         "(allow process-exec)", "(allow process-fork)",
         "(allow process-info* (target same-sandbox))", "(allow signal (target same-sandbox))",
         "(allow sysctl-read)", "(allow ipc-posix-shm)", "(allow ipc-posix-sem)",
         "(allow file-read-metadata (vnode-type DIRECTORY))",
-        '(allow mach-lookup (global-name "com.apple.system.logger") (global-name "com.apple.logd")',
-        '  (global-name "com.apple.system.opendirectoryd.libinfo")',
-        '  (global-name "com.apple.system.opendirectoryd.membership"))',
+        "(allow mach-lookup " + " ".join(f"(global-name {name})" for name in lookup_names) + ")",
         '(allow file-read* ' + ' '.join(reads) + ')',
         '(allow file-write* ' + ' '.join(writes) + ')',
         '(allow file-ioctl (literal "/dev/tty") (literal "/dev/null") (literal "/dev/ptmx"))',
@@ -286,10 +306,14 @@ def macos_profile(plan: Plan, scratch: Path) -> str:
         '(allow file-write* (literal "/dev/null") (literal "/dev/tty") (literal "/dev/stdout") (literal "/dev/stderr"))',
     ]
     if git.exists():
+        # NOTE: a blanket `(deny file-write* (subpath GIT))` does not
+        # subtract from the parent project's `(allow file-write* ...)`
+        # on macOS 27 -- verified live: writes still succeed regardless
+        # of rule order. Granular deny operations do take effect.
         lines += [
-            f"(deny file-write* {sbpl_path(git)})",
-            f"(deny file-write-unlink {sbpl_path(git, 'literal')})",
-            f"(deny file-write-create {sbpl_path(git, 'literal')})",
+            f"(deny file-write-data {sbpl_path(git)})",
+            f"(deny file-write-create {sbpl_path(git)})",
+            f"(deny file-write-unlink {sbpl_path(git)})",
         ]
     if not plan.offline:
         lines.append("(allow network*)")
