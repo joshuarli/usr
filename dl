@@ -352,12 +352,12 @@ install_release() {
     repo=$prog
     case "$prog" in
         e|fz|fdu|fastermod|tm|fs|srv|diff-pretty|vault) owner="laputa-systems" ;;
-        ish|mactop|gh) owner="joshuarli" ;;
+        ish|mactop|gh|syncthing) owner="joshuarli" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
     tag_prefix=
     case "$prog" in
-        vault) tag_prefix=release- ;;
+        vault|syncthing) tag_prefix=release- ;;
     esac
     tag=$(curl -fsSL "https://github.com/${owner}/${repo}/releases.atom" \
         | awk -v prefix="$tag_prefix" '
@@ -387,7 +387,7 @@ install_release() {
         return
     fi
     case "${OS}:${prog}" in
-        Linux:e|Linux:ish|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:e|Linux:ish|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault|Linux:syncthing) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
@@ -1983,6 +1983,9 @@ if [ $# -eq 0 ]; then
     set -- fd rg jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv python3
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
+    esac
+    case "${OS}:${ARCH}" in
+        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" syncthing ;;
     esac
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi

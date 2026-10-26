@@ -202,6 +202,29 @@ FEED
         [ "$headers" = - ] || exit 1
         printf '%s\n' 'ETag: gh-test-etag'
         ;;
+    https://github.com/joshuarli/syncthing/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-24T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/syncthing/releases/tag/release-aaa000aaa000aaa000aaa000aaa000aaa000aaa0001"/>
+</entry>
+<entry>
+<updated>2026-10-25T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/syncthing/releases/tag/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/joshuarli/syncthing/releases/download/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002/syncthing-aarch64-apple-darwin.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: syncthing-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'syncthing-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -227,6 +250,22 @@ chmod +x "$mock_bin/jaq"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
 chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
+cat > "$mock_bin/unzip" <<'EOF'
+#!/bin/sh
+set -eu
+inner=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -p) shift ;;
+        *) inner=$1; shift ;;
+    esac
+done
+case "$inner" in
+    syncthing-aarch64-apple-darwin) printf '%s' 'syncthing-test-binary' ;;
+    *) exit 1 ;;
+esac
+EOF
+chmod +x "$mock_bin/unzip"
 
 mkdir -p "$test_root/opencode-package"
 cat > "$test_root/opencode-package/opencode" <<'EOF'
@@ -816,6 +855,39 @@ else
 fi
 case "$output" in
     *'gh is current (release-9be88d806c91cbce8920e188f90fb6df34b45ba9)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "syncthing install and current check"
+( set -e
+st_home="$test_root/syncthing-home"
+mkdir -p "$st_home/.local/bin" "$st_home/.local/state/dl"
+if output=$(HOME="$st_home" XDG_STATE_HOME="$st_home/.local/state" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" syncthing 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$st_home"'/.local/bin/syncthing'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(cat "$st_home/.local/bin/syncthing")" = 'syncthing-test-binary' ]
+[ "$(cat "$st_home/.local/state/dl/syncthing")" = 'syncthing-test-etag' ]
+if output=$(HOME="$st_home" XDG_STATE_HOME="$st_home/.local/state" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" syncthing 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'syncthing is current (release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 )
