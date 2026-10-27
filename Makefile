@@ -6,6 +6,8 @@ OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
+.DEFAULT_GOAL := sync
+
 .PHONY: sync links tools uninstall plan layers check lint
 
 links: layers
