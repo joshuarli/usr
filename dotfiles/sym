@@ -139,6 +139,8 @@ plan_entry() {
             conflict "$name does not point to the expected destination, so refusing to remove."
             return
         fi
+    elif $dry_run && [ -n "${SYM_PLANNED_PRUNES:-}" ] && grep -Fxq -- "$name_abs" "$SYM_PLANNED_PRUNES" 2>/dev/null; then
+        :
     elif [ -L "$name" ]; then
         [ "$name" -ef "$source_abs" ] && return 0
         if [ "$_kind" = file ] && [ "$(readlink "$name")" = "$dest" ]; then
@@ -244,6 +246,10 @@ if ! $delete && [ -n "${SYM_OWNED_FILE:-}" ] && [ -f "$SYM_OWNED_FILE" ]; then
         case "$linked/" in "$src_phys"/*) ;; *) continue ;; esac
         printf '%s\n' "$owned" >> "$tmp/prune"
     done < "$SYM_OWNED_FILE"
+fi
+
+if $dry_run && [ -n "${SYM_PLANNED_PRUNES:-}" ]; then
+    cat "$tmp/prune" >> "$SYM_PLANNED_PRUNES" || die "failed to record planned prunes in $SYM_PLANNED_PRUNES"
 fi
 
 if [ -s "$tmp/conflicts" ]; then

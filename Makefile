@@ -61,9 +61,12 @@ uninstall:
 	fi
 
 plan: layers
+	mkdir -p "$(DL_TMPDIR)" || exit 1; \
+	planned="$(DL_TMPDIR)/plan-prunes.$$$$"; : > "$$planned" || exit 1; \
+	trap 'rm -f "$$planned"' 0; \
 	status=0; \
 	for layer in $(LAYERS); do \
-		output=$$(SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) --dry-run -t "$(TARGET)" "$$layer" 2>&1) || status=$$?; \
+		output=$$(SYM_OWNED_FILE="$(DL_OWNED_FILE)" SYM_PLANNED_PRUNES="$$planned" $(SYM) --dry-run -t "$(TARGET)" "$$layer" 2>&1) || status=$$?; \
 		printf '%s\n' "$$output"; \
 		case "$$output" in *CONFLICT:*) status=1 ;; esac; \
 	done; \

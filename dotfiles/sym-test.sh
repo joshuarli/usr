@@ -456,5 +456,22 @@ echo "  assertion 1: the file beside the target and the link inside it survive"
 [ -f "$tt/tg" ] && [ -L "$tab_target/ok/f" ] || nfailed=$((nfailed + 1))
 rm -rf "$tt"
 
+printf '\n31: a dry run sees links an earlier layer plans to prune\n'
+rm -rf home; mkdir home
+mkdir -p dotfiles/movefrom dotfiles/moveto
+echo m > dotfiles/movefrom/.moved
+ownership_file="$tmp/move-owned"
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/movefrom > /dev/null
+mv dotfiles/movefrom/.moved dotfiles/moveto/.moved
+planned="$tmp/planned-prunes"; : > "$planned"
+SYM_OWNED_FILE="$ownership_file" SYM_PLANNED_PRUNES="$planned" $sym -t home --dry-run dotfiles/movefrom > /dev/null 2>&1
+SYM_OWNED_FILE="$ownership_file" SYM_PLANNED_PRUNES="$planned" $sym -t home --dry-run dotfiles/moveto > log 2>&1
+expected="dry-run; the following operations are what would have been executed.
+LINK: home/.moved -> ../dotfiles/moveto/.moved"
+echo "  assertion 1: the later layer plans the link instead of a conflict"; assert_output "$expected"
+echo "  assertion 2: the dry runs leave the old link in place"
+[ "$(readlink home/.moved)" = ../dotfiles/movefrom/.moved ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi
