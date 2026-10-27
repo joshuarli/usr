@@ -10,4 +10,4 @@ Run `make plan` to preview links. Resolve each `CONFLICT` before syncing. `make`
 
 The `macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. See [agent learning](agent-learning.md).
 
-Sync prunes a recorded link whose layer source is gone: one pointing into the layer, or mirroring a layer symlink to a path the layer still provides. `make plan` lists these as `PRUNE`. Links that `make` did not create stay in place; remove those yourself or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.
+Sync prunes a recorded link that points into a layer whose source is gone; `make plan` lists these as `PRUNE`. A link copied from a layer symlink points elsewhere, so it stays, as do links `make` did not create. Remove those yourself, or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.

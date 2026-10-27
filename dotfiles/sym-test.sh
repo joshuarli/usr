@@ -389,7 +389,7 @@ rm -rf home; mkdir home outside
 mkdir -p dotfiles/prune dotfiles/other
 echo k > dotfiles/prune/.keep
 echo s > dotfiles/prune/.stale
-ln -s .keep dotfiles/prune/.alias
+ln -s .o dotfiles/prune/.alias
 echo o > dotfiles/other/.o
 echo t > outside/tool
 ownership_file="$tmp/prune-owned"
@@ -399,21 +399,21 @@ home_abs=$(cd home && pwd -P)
 ln -s ../outside/tool home/.tool
 printf 'F\t%s\n' "$home_abs/.tool" >> "$ownership_file"
 ln -s ../dotfiles/prune/.unowned home/.unowned
-rm dotfiles/prune/.stale dotfiles/prune/.alias
+rm dotfiles/prune/.stale
 SYM_OWNED_FILE="$ownership_file" $sym -t home --dry-run dotfiles/prune > log 2>&1
 expected="dry-run; the following operations are what would have been executed.
-PRUNE: $home_abs/.alias
 PRUNE: $home_abs/.stale"
-echo "  assertion 1: dry-run lists the stale links"; assert_output "$expected"
-[ -L home/.stale ] && [ -L home/.alias ] || nfailed=$((nfailed + 1))
+echo "  assertion 1: dry-run lists the stale link"; assert_output "$expected"
+[ -L home/.stale ] || nfailed=$((nfailed + 1))
 SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/prune > /dev/null
-echo "  assertion 2: links to a removed layer file and a removed mirrored layer link are pruned"
-[ ! -L home/.stale ] && [ ! -L home/.alias ] || nfailed=$((nfailed + 1))
-echo "  assertion 3: the live link, another layer's link, a foreign owned link, and an unrecorded link survive"
-[ -L home/.keep ] && [ -L home/.o ] && [ -L home/.tool ] && [ -L home/.unowned ] || nfailed=$((nfailed + 1))
-echo "  assertion 4: pruned links leave the ownership records and the rest stay"
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/other > /dev/null
+echo "  assertion 2: the link to a removed layer file is pruned"
+[ ! -L home/.stale ] || nfailed=$((nfailed + 1))
+echo "  assertion 3: live, other-layer, mirrored-into-another-layer, foreign owned, and unrecorded links survive both layer runs"
+[ -L home/.keep ] && [ -L home/.o ] && [ -L home/.alias ] && [ -L home/.tool ] && [ -L home/.unowned ] || nfailed=$((nfailed + 1))
+echo "  assertion 4: the pruned link leaves the ownership records and the rest stay"
 awk -F '\t' -v stale="$home_abs/.stale" -v alias="$home_abs/.alias" -v keep="$home_abs/.keep" -v tool="$home_abs/.tool" \
-    '$2 == stale || $2 == alias { gone++ } $2 == keep || $2 == tool { kept++ } END { exit gone != 0 || kept != 2 }' \
+    '$2 == stale { gone++ } $2 == keep || $2 == tool || $2 == alias { kept++ } END { exit gone != 0 || kept != 3 }' \
     "$ownership_file" || nfailed=$((nfailed + 1))
 rm -rf home outside; mkdir home
 

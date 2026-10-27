@@ -96,10 +96,6 @@ lexical_path() (
     printf '%s' "${_out:-/}"
 )
 
-source_has() {
-    [ -e "$src/$1" ] || [ -L "$src/$1" ]
-}
-
 source_relative_path() {
     if [ "$1" = "$src" ]; then
         source_rel=$src
@@ -314,14 +310,10 @@ if ! $delete && [ -n "${SYM_OWNED_FILE:-}" ] && [ -f "$SYM_OWNED_FILE" ]; then
         case "$owned" in "$tgt_abs"/*) ;; *) continue ;; esac
         [ -L "$owned" ] || continue
         rel=${owned#"$tgt_abs"/}
-        source_has "$rel" && continue
+        { [ -e "$src/$rel" ] || [ -L "$src/$rel" ]; } && continue
         confined "$owned" || continue
         linked="$(lexical_path "$(physical_parent "$owned")" "$(readlink "$owned")")"
-        case "$linked/" in
-            "$src_phys"/*) ;;
-            "$tgt_phys"/*) source_has "${linked#"$tgt_phys"/}" || continue ;;
-            *) continue ;;
-        esac
+        case "$linked/" in "$src_phys"/*) ;; *) continue ;; esac
         printf '%s\n' "$owned" >> "$tmp/prune"
     done < "$SYM_OWNED_FILE"
 fi
@@ -340,8 +332,12 @@ while IFS= read -r owned; do
     if rm "$owned"; then printf '%s\n' "$owned" >> "$tmp/pruned"; else failed=true; fi
 done < "$tmp/prune"
 if [ -s "$tmp/pruned" ]; then
-    awk -F '\t' 'NR == FNR { gone[$0] = 1; next } !($1 == "F" && ($2 in gone))' \
-        "$tmp/pruned" "$SYM_OWNED_FILE" > "$tmp/owned" && cat "$tmp/owned" > "$SYM_OWNED_FILE" || failed=true
+    if ! awk -F '\t' 'NR == FNR { gone[$0] = 1; next } !($1 == "F" && ($2 in gone))' \
+            "$tmp/pruned" "$SYM_OWNED_FILE" > "$SYM_OWNED_FILE.$$" \
+        || ! mv "$SYM_OWNED_FILE.$$" "$SYM_OWNED_FILE"; then
+        rm -f "$SYM_OWNED_FILE.$$"
+        failed=true
+    fi
 fi
 
 if ! [ -s "$tmp/names" ]; then
