@@ -2,7 +2,6 @@ command = /Users/josh/usr/bin/ish
 fullscreen = true
 theme = IR Black
 
-font-family = Hack
 font-size = 16
 
 shell-integration = none
