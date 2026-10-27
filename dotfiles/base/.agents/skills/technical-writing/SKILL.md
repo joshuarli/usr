@@ -1,11 +1,11 @@
 ---
 name: technical-writing
-description: "Apply when writing or reviewing docs, READMEs, design docs, or PR descriptions: one reader mode per document, one reading per sentence. Skip code comments, product copy, and chat replies."
+description: "Apply when writing or substantially rewriting a doc, README, design doc, or PR description, or reviewing one: one reader mode per document, one reading per sentence. Skip few-line edits to an existing doc, code comments, product copy, and chat replies."
 ---
 
 # Technical Writing
 
-Write so a tired engineer understands on the first read. The codebase is the word list: use the real symbol, file, flag, or command name, never a synonym. Cut every word that does no work, and when a rule makes a sentence worse, fix the sentence another way. Run `unslop` over the result; it owns word choice, sentence-case headings, and keeping articles.
+Write so a tired engineer understands on the first read. The codebase is the word list: use the real symbol, file, flag, or command name, never a synonym. Cut every word that does no work, and when a rule makes a sentence worse, fix the sentence another way. When asked to unslop, `unslop` owns word choice, sentence-case headings, and keeping articles.
 
 ## Pick the mode first
 
