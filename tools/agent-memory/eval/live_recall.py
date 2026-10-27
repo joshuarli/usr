@@ -69,7 +69,7 @@ def _git(cwd, *args):
 def recall_guidance():
     text = (REPOSITORY / "dotfiles/base/.agents/skills/do/SKILL.md").read_text(encoding="utf-8")
     line = next(row for row in text.splitlines() if row.startswith(GUIDANCE_START))
-    return line.replace("~/usr/docs/agent-learning.md", "the project documentation")
+    return line.replace("~/usr/tools/agent-memory/README.md", "the project documentation")
 
 
 def write_repository(root, with_guidance):

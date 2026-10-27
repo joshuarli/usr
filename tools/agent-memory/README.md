@@ -16,6 +16,8 @@ A retrieved record is a lead. Relevance does not establish that a record is true
 
 `recall` searches approved memories, project experience, and session events for one project. It works for any Git project without enrolling it and makes no model request. It indexes the project's new transcript bytes first, so the first call in a project can take a few seconds.
 
+Run one targeted recall before unfamiliar work in a subsystem you may have worked on, when reproducing a familiar error or chasing a repeated failure, when resuming a paused investigation or revisiting a rejected design, before a benchmark or optimization campaign, and when choosing between alternatives that may already be tested. Skip it for trivial edits and routine commands.
+
 ```sh
 agent-learn recall 'ModuleNotFoundError orbit_core' --project "$PWD"
 agent-learn recall 'why does CI OOM only on the big runners' --project "$PWD" --explain
