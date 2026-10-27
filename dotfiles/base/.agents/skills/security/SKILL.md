@@ -1,6 +1,6 @@
 ---
 name: security
-description: "Apply when code handles untrusted input that reaches an interpreter, secrets or credentials, authentication or authorization, cryptography, or a network trust decision. Size the defense to a realistic attacker and the asset at stake. Skip paths and FFI (use os-boundaries), local-only tools with no untrusted input, and internal calls between trusted parts."
+description: "Apply when code handles untrusted input that reaches an interpreter, secrets or credentials, authentication or authorization, cryptography, or a network trust decision. Skip paths and FFI (use os-boundaries), local-only tools with no untrusted input, and internal calls between trusted parts."
 ---
 
 # Security
@@ -15,8 +15,7 @@ Fix what a realistic attacker can reach, in proportion to what they would gain. 
 - **Use vetted crypto with its defaults.** Do not invent a scheme, mode, or token format. Use the OS random source for anything unguessable, a password hash (argon2, scrypt, bcrypt) for passwords, and constant-time comparison for secrets.
 - **Never disable verification to make something work.** TLS certificate checks stay on, and a signature check stays enforced.
 - **Errors tell the caller what to fix, not how the system is built.** Keep stack traces and internals in logs.
-- **A new dependency widens the attack surface.** Vet it as the working contract says.
-- **Maximal hardening is a mode you are asked for.** Absent that request, do not add layers, config knobs, or checks on trusted internal callers. When asked, threat-model first, then defend in depth.
+- **Maximal hardening is a mode you are asked for.** Absent that request, add no layers, config knobs, or checks on trusted internal callers. When asked, threat-model first, then defend in depth.
 
 **The test:** what can a stranger who controls this input, or reaches this port, do that the owner did not intend?
 

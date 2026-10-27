@@ -1,11 +1,11 @@
 ---
 name: make-invalid-states-unrepresentable
-description: "Apply when introducing a type with an invariant: option soups, booleans that exclude each other, magic strings for a closed set, unit-less numbers. Skip plain data carriers with no invariant."
+description: "Apply when a type permits states its contract forbids: option soups, booleans that exclude each other, magic strings for a closed set, unit-less numbers. Skip plain data carriers with no invariant."
 ---
 
 # Make Invalid States Unrepresentable
 
-Make each important type represent the smallest deliberate set of states its contract allows, ideally exactly the valid ones, so valid code is natural and whole classes of bugs cannot be constructed. Move correctness from caller discipline into the representation.
+Each important type admits exactly the states its contract allows, so a whole class of bugs cannot be constructed.
 
 Apply only where invalid states can currently be built from primitives, option soups, magic strings, boolean combinations, or caller discipline. If that is absent, report the evidence and change nothing. Preserve behavior, public contracts, persisted formats, and wire representation unless the request says otherwise.
 
@@ -18,7 +18,7 @@ struct FlagState { held: bool, sold: bool, out_of_order: bool } // 8 combination
 enum State { Open, Held, Sold, OutOfOrder }                      // 4 named states
 ```
 
-For each state-bearing type, write down the intended states and what the current representation permits. Separate independent dimensions (`is_dirty`, `is_cached`: every combination is meaningful, so keep a product) from one hidden state machine (`started`, `finished`, `failed`, `cancelled`: use an enum). A type that began with one boolean is a checkpoint: do not append `failed` or `paused` as another flag when they are alternatives in the same lifecycle. An enum does not validate its payload, so give variant fields precise types too. Keep any unavoidable superset at a boundary and name its owner.
+For each state-bearing type, write down the intended states and what the current representation permits. Separate independent dimensions (`is_dirty`, `is_cached`: every combination is meaningful, so keep a product) from one hidden state machine (`started`, `finished`, `failed`, `cancelled`: use an enum). Before adding a second flag to a one-boolean type, check whether it is an alternative state of the same lifecycle: do not append `failed` or `paused` as another flag. An enum does not validate its payload, so give variant fields precise types too. Name the owner of any superset left at a boundary.
 
 ## Rules
 
@@ -26,7 +26,7 @@ For each state-bearing type, write down the intended states and what the current
 - **Build types from the values you want,** not by carving them out of a looser type with checks. A non-empty list is a head plus a rest. A time range is a start plus a duration.
 - **Distinct meanings get distinct types.** `UserId`, `OrganizationId`, and `ProjectId` are not interchangeable strings when swapping them is plausible. Wrap only where it adds safety. Other candidates: validated paths, addresses, quantities, timestamps with different meanings, opaque tokens.
 - **Closed sets are enums,** matched exhaustively with no wildcard on an internal enum, so a new variant is a compile error where it matters. Convert to wire strings at the boundary.
-- **Validate once, in construction.** Constructors and parsers return a type downstream code can trust (non-empty name, bounded percentage, min <= max, non-zero capacity). Do not re-check afterward. In Rust keep invariant fields private and check `Default`, deserialization, conversions, and struct-update syntax for ways around the constructor.
+- **Validate once, in construction.** Constructors and parsers return a type downstream code can trust (non-empty name, bounded percentage, min <= max, non-zero capacity). Do not re-check afterward. In Rust keep invariant fields private and check the ways around the constructor (see `api-surface-and-module-boundaries`).
 - **Units live in types or names:** `Duration`, byte counts, validated percentages, timestamps over raw epochs; at minimum a unit suffix.
 - **Recover latent state machines.** Find start, stop, finish, cancel, retry, commit, abort, open, close, connect. List legal sources and destinations, terminal and retryable states, idempotent transitions, and transitions that need data. Illegal transitions are errors or impossible, decided in one place and not re-checked by every caller.
 - **Give stages their own types only when it removes real checks:** `RawConfig` to `ValidatedConfig`, `UninitializedSession` to `AuthenticatedSession`. No typestate ceremony for trivial flows.
@@ -35,12 +35,12 @@ For each state-bearing type, write down the intended states and what the current
 
 ## Avoid
 
-Newtypes with no concrete failure mode. Type-level machinery harder to read than the bug. Forcing every lifecycle into typestate. Replacing independent booleans with an enum. Public constructors, `Default`, or deserialization that reopen excluded states. Raw strings for finite states. Changed wire formats.
+Newtypes with no concrete failure mode. Type-level machinery harder to read than the bug. Forcing every lifecycle into typestate. Replacing independent booleans with an enum. Raw strings for finite states.
 
 ## Verify
 
-Test invalid construction, invalid transitions, boundary rejection of malformed input, and unchanged serialization. Check that matches are exhaustive, search for checks the types made redundant, and run the compiler, then the focused tests by name. Separate preexisting failures from regressions.
+Test invalid construction, invalid transitions, boundary rejection of malformed input, and unchanged serialization. Check that matches are exhaustive, search for checks the types made redundant, and run the compiler. Separate preexisting failures from regressions.
 
-Done when each important type has an intended state set, any remaining superset is bounded and owned by a boundary, and the result is simpler to reason about, not merely fancier.
+**The test:** can you name each important type's intended states, with any remaining superset bounded and owned by a boundary, and is the result simpler to reason about, not merely fancier?
 
 **Report:** each type's state set before and after, and any remaining superset with its owner.

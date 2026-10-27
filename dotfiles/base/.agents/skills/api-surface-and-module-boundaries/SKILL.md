@@ -11,7 +11,7 @@ A public API exposes capabilities, not structure, and makes the correct call loo
 - **Every public symbol is a commitment.** For each, ask who needs it and what it promises. Storage, parser internals, cache structures, raw configuration, and dependency adapters stay private. Do not export something because a sibling module needs it.
 - **Invariant-bearing types cannot be corrupted from outside.** No public fields that must be mutated into a valid combination. Check what bypasses the constructor: `Default`, deserialization, struct-update syntax, unchecked conversions.
 - **Do not leak dependency types** unless interop needs them. Do not wrap mature standard types for taste.
-- **One canonical entry point per operation.** Delete the old name and migrate callers in the same change. A compatibility shim needs a proven external or persisted consumer, or an explicit ask, and follows `dead-code-archaeology`.
+- **One canonical entry point per operation.** A compatibility shim needs a proven external or persisted consumer, or an explicit ask (`dead-code-archaeology`).
 - **Feature-gated surface stays coherent.** No half-initialized abstractions when a feature is off.
 
 **The call site**
@@ -28,6 +28,6 @@ A public API exposes capabilities, not structure, and makes the correct call loo
 
 **The test:** could a caller who reads only the signature misuse it without the compiler noticing?
 
-Test intended construction, invalid use, feature combinations, and the forwarding of any shim that exists, running those tests by name. Breaking a public contract needs the user's permission.
+Test intended construction, invalid use, feature combinations, and the forwarding of any shim that exists. Breaking a public contract needs the user's permission.
 
 **Report:** symbols removed or narrowed, call sites clarified, directions fixed, and any contract change.

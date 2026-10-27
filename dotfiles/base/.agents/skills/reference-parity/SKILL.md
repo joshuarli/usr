@@ -13,7 +13,7 @@ A rewrite is done when it is indistinguishable from the reference on every behav
 - **Keep the loop narrow.** Check one behavior with its single case, by name. Organize the corpus by behavior area so a failing area reruns alone, and run the full corpus at phase gates and the close. Shard or sample it for development if it is slow.
 - **Breadth before depth.** Get every behavior to a first passing state end to end before perfecting one, and keep the unported behaviors listed. Speed, memory, and size parity come after functional parity: until then record the numbers against the reference and gate only egregious regressions.
 - **A difference is a decision.** A deliberate difference (a bug not carried over, a changed format) is noted once with its reason. A quirk you cannot reproduce is an open item until decided. A bug found in the reference gets its own commit or finding; never carry it or fix it silently.
-- **No vacuous parity.** Break the port on purpose and see the test fail, the same standard as the Oracle Test in `test-audit`. A comparison that normalizes away the difference proves nothing.
+- **No vacuous parity.** Apply the Oracle Test in `test-audit`: break the port on purpose and see the test fail. A comparison that normalizes away the difference proves nothing.
 - **Finish** with no open behavior, then remove the reference path and any compatibility shim (`dead-code-archaeology`).
 
 **The test:** pick any behavior of the reference at random. A test covers it, fails if the port gets it wrong, and passes.
