@@ -32,37 +32,6 @@ find_real() {
 }
 real=$(find_real "$name") || real=""
 if [ -z "$real" ]; then
-    command_mode=false
-    for arg in "$@"; do
-        case "$arg" in
-            --*) ;;
-            -*c*) command_mode=true; break ;;
-            -*) ;;
-            *) break ;;
-        esac
-    done
-    if [ "$command_mode" = true ]; then
-        real=/bin/sh
-        pending=$#
-        rewriting=true
-        while [ "$pending" -gt 0 ]; do
-            arg=$1
-            shift
-            pending=$((pending - 1))
-            if [ "$rewriting" = true ]; then
-                case "$arg" in
-                    -l|--login) continue ;;
-                    -lc|-cl) arg=-c; rewriting=false ;;
-                    -c) rewriting=false ;;
-                    -*) ;;
-                    *) rewriting=false ;;
-                esac
-            fi
-            set -- "$@" "$arg"
-        done
-    fi
-fi
-if [ -z "$real" ]; then
     echo "$name: no system shell found" >&2
     exit 127
 fi

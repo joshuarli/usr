@@ -99,6 +99,7 @@ check:
 	sh dotfiles/reset-agents-test.sh
 	cd dotfiles && sh pre-push-test.sh
 	cd dotfiles && sh worktree-remove-test.sh
+	cd dotfiles && sh zsh-shim-test.sh
 	sh tools/mdtool/tests/mdtool-test.sh
 	python3 -I tools/decide/tests/test_decide.py
 	python3 -I dotfiles/base/.local/bin/skill-usage selftest
