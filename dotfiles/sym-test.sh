@@ -418,5 +418,43 @@ awk -F '\t' -v stale="$home_abs/.stale" -v alias="$home_abs/.alias" -v keep="$ho
 rm -rf home outside; mkdir home
 
 
+printf '\n28: a source name containing a tab is a conflict, and nothing in the target changes\n'
+tg="$(mktemp -d "$work_root/sym-tab.XXXXXX")"
+mkdir -p "$tg/no-git" "$tg/src/d" "$tg/home/d"
+printf '#!/bin/sh\nexit 1\n' > "$tg/no-git/git"; chmod +x "$tg/no-git/git"
+tab_name="$(printf 'a\tb')"
+echo x > "$tg/src/d/$tab_name"
+ln -s "../../src/d/$tab_name" "$tg/home/d/$tab_name"
+echo keep > "$tg/home/d/a"
+(cd "$tg" && PATH="$tg/no-git:$PATH" $sym -t home -d src > out 2>&1) && nfailed=$((nfailed + 1))
+echo "  assertion 1: delete mode reports the tab name as a conflict"
+grep -q 'CONFLICT: .*contains a tab' "$tg/out" || nfailed=$((nfailed + 1))
+echo "  assertion 2: the unrelated file and the tab-named link survive"
+[ -f "$tg/home/d/a" ] && [ -L "$tg/home/d/$tab_name" ] || nfailed=$((nfailed + 1))
+rm -rf "$tg"
+
+
+printf '\n29: a temp directory with a backslash still links whole directories\n'
+tb="$(mktemp -d "$work_root/sym-bs.XXXXXX")"
+mkdir -p "$tb/no-git" "$tb/src/.cfg" "$tb/home" "$tb/tmp/a\\tb"
+printf '#!/bin/sh\nexit 1\n' > "$tb/no-git/git"; chmod +x "$tb/no-git/git"
+touch "$tb/src/.cfg/.sym-dir"; echo x > "$tb/src/.cfg/f"
+(cd "$tb" && TMPDIR="$tb/tmp/a\\tb" PATH="$tb/no-git:$PATH" $sym -t home src > /dev/null 2>&1)
+echo "  assertion 1: the .sym-dir directory is one link"
+[ -L "$tb/home/.cfg" ] || nfailed=$((nfailed + 1))
+rm -rf "$tb"
+
+printf '\n30: a target path containing a tab is refused before anything changes\n'
+tt="$(mktemp -d "$work_root/sym-ttab.XXXXXX")"
+tab_target="$tt/tg$(printf '\t')t"
+mkdir -p "$tt/src/ok" "$tab_target/ok"
+echo x > "$tt/src/ok/f"
+ln -s "../../src/ok/f" "$tab_target/ok/f"
+echo keep > "$tt/tg"
+$sym -t "$tab_target" -d "$tt/src" > "$tt/out" 2>&1 && nfailed=$((nfailed + 1))
+echo "  assertion 1: the file beside the target and the link inside it survive"
+[ -f "$tt/tg" ] && [ -L "$tab_target/ok/f" ] || nfailed=$((nfailed + 1))
+rm -rf "$tt"
+
 printf '\ntesting finished.\n'
 if [ "$nfailed" -gt 0 ]; then die "failed ${nfailed} assertions"; fi

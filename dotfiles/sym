@@ -2,6 +2,7 @@
 die()   { printf '%s\n' "$*" >&2; exit 1; }
 usage() { printf 'usage: sym [-t TARGET] [-d] [--dry-run] [-v] SOURCE\n' >&2; exit 1; }
 log()   { if "$verbose"; then printf '%s\n' "$1"; fi; }
+conflict() { printf 'CONFLICT: %s\n' "$1" >> "$tmp/conflicts"; }
 record_owned() {
     [ -n "${SYM_OWNED_FILE:-}" ] || return 0
     if [ ! -f "$SYM_OWNED_FILE" ] \
@@ -12,7 +13,7 @@ record_owned() {
 }
 record_missing_target_dirs() {
     record_dir=$1
-    while [ "$record_dir" != "$tgt_abs" ] && [ ! -d "$record_dir" ]; do
+    while [ "$record_dir" != "$tgt_phys" ] && [ ! -d "$record_dir" ]; do
         record_owned E "$record_dir" || return 1
         record_dir=${record_dir%/*}
     done
@@ -36,23 +37,14 @@ target_path() {
 planned_directory() {
     _link_text=$1 _target_dir=$2
     while IFS= read -r _sd; do
-        [ -z "$_sd" ] && continue
-        _nested=false
-        while IFS= read -r _sd2; do
-            [ "$_sd2" = "$_sd" ] && continue
-            case "$_sd" in "$_sd2"/*) _nested=true; break ;; esac
-        done < "$tmp/symlink-dirs"
-        if $_nested; then continue; fi
-
         if [ "$_sd" = "$src" ]; then
-            _sd_target_abs=$tgt_abs
+            _sd_target=$tgt_phys
         else
-            _sd_rel=${_sd#"$src"/}
-            target_path "$tgt_abs" "$_sd_rel"
-            _sd_target_abs=$_target_path
+            target_path "$tgt_phys" "${_sd#"$src"/}"
+            _sd_target=$_target_path
         fi
-        [ "$(relpath "$_sd_target_abs" "$_target_dir")" = "$_link_text" ] && return 0
-    done < "$tmp/symlink-dirs"
+        [ "$(relpath "$_sd_target" "$_target_dir")" = "$_link_text" ] && return 0
+    done < "$tmp/top-dirs"
     return 1
 }
 
@@ -66,10 +58,6 @@ physical_parent() {
     (cd "$_p" && pwd -P)
 }
 
-# confined PATH
-# Succeed if PATH sits inside the physical target and outside the physical source. A
-# symlinked ancestor would otherwise send reads, writes, and deletes into the source tree
-# or out of the target.
 confined() {
     _pp="$(physical_parent "$1")"
     if [ "$tgt_phys" = / ]; then
@@ -111,6 +99,63 @@ source_relative_path() {
     return 0
 }
 
+plan_entry() {
+    _kind=$1 _source=$2
+    case "$_source" in *"$tab"*)
+        conflict "$_source contains a tab, which sym cannot record."
+        return ;;
+    esac
+    if ! source_relative_path "$_source"; then
+        conflict "$_source is not a safe source path."
+        return
+    fi
+    target_path "$tgt" "$source_rel"
+    name=$_target_path
+    target_path "$tgt_phys" "$source_rel"
+    name_abs=$_target_path
+    source_abs="$src_phys/$source_rel"
+    dir_abs="${name_abs%/*}"
+    [ -n "$dir_abs" ] || dir_abs=/
+
+    if [ "$_kind" = file ] && [ -L "$_source" ]; then
+        dest="$(readlink "$_source")"
+        case "$dest" in /*) dest="$(relpath "$dest" "$dir_abs")" ;; esac
+    else
+        dest="$(relpath "$source_abs" "$dir_abs")"
+    fi
+
+    if ! confined "$name"; then
+        conflict "$name passes through a symlinked directory, so sym will not touch it."
+        return
+    fi
+
+    if $delete; then
+        { [ -e "$name" ] || [ -L "$name" ]; } || return 0
+        if [ ! -L "$name" ]; then
+            conflict "$name is not a symlink, so refusing to remove."
+            return
+        fi
+        if ! [ "$name" -ef "$source_abs" ] && { [ "$_kind" = dir ] || [ "$(readlink "$name")" != "$dest" ]; }; then
+            conflict "$name does not point to the expected destination, so refusing to remove."
+            return
+        fi
+    elif [ -L "$name" ]; then
+        [ "$name" -ef "$source_abs" ] && return 0
+        if [ "$_kind" = file ] && [ "$(readlink "$name")" = "$dest" ]; then
+            [ -e "$name" ] && return 0
+            planned_directory "$dest" "$dir_abs" && return 0
+        fi
+        conflict "$name already exists. sym cannot create symlinks if there is an existing file."
+        return
+    elif [ -e "$name" ]; then
+        conflict "$name already exists. sym cannot create symlinks if there is an existing file."
+        return
+    fi
+
+    printf '%s\t%s\t%s\n' "$name" "$dest" "$name_abs" >> "$tmp/jobs"
+}
+
+tab="$(printf '\t')"
 target="$HOME"; delete=false; dry_run=false; verbose=false; failed=false
 
 while [ $# -gt 0 ]; do
@@ -134,182 +179,65 @@ done
 src="${1%/}"
 tgt="${target%/}"
 [ -n "$tgt" ] || tgt=/
-src_abs="$(cd "$src" && pwd -P)"
-tgt_abs="$(cd "$tgt" && pwd -P)"
-src_phys="$src_abs"
-tgt_phys="$tgt_abs"
+src_phys="$(cd "$src" && pwd -P)"
+tgt_phys="$(cd "$tgt" && pwd -P)"
+case "$tgt$tgt_phys" in *"$tab"*) die "target directory $target contains a tab, which sym cannot record" ;; esac
 
 tmp="${TMPDIR:-/tmp}/sym.$$"
 mkdir "$tmp" || die 'failed to create temp directory'
 trap 'rm -rf "$tmp"' 0
 trap 'exit 130' 1 2 3 15
 
-: > "$tmp/files"
+: > "$tmp/all-files"
 : > "$tmp/symlink-dirs"
-: > "$tmp/names"
-: > "$tmp/dests"
-: > "$tmp/absolute-names"
+: > "$tmp/jobs"
 : > "$tmp/prune"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$src" -c core.quotePath=false ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
     ! grep -q '^"' "$tmp/file-relpaths" || die "a file name in $src has a character git quotes; rename it"
     while IFS= read -r rel; do
-        [ -z "$rel" ] && continue
         case "$rel" in
-            .sym-dir)
-                printf '%s\n' "$src" >> "$tmp/symlink-dirs"
-                ;;
-            */.sym-dir)
-                dir="${rel%/.sym-dir}"
-                printf '%s/%s\n' "$src" "$dir" >> "$tmp/symlink-dirs"
-                ;;
-            *)
-                printf '%s/%s\n' "$src" "$rel" >> "$tmp/files"
-                ;;
+            '') ;;
+            .sym-dir) printf '%s\n' "$src" >> "$tmp/symlink-dirs" ;;
+            */.sym-dir) printf '%s/%s\n' "$src" "${rel%/.sym-dir}" >> "$tmp/symlink-dirs" ;;
+            *) printf '%s/%s\n' "$src" "$rel" >> "$tmp/all-files" ;;
         esac
     done < "$tmp/file-relpaths"
 else
-    find "$src" -name '.sym-dir' -type f > "$tmp/sym-dirs"
-    while IFS= read -r marker; do
-        [ -z "$marker" ] && continue
-        dir="${marker%/.sym-dir}"
-        printf '%s\n' "$dir" >> "$tmp/symlink-dirs"
-    done < "$tmp/sym-dirs"
-    find "$src" \( -type f -o -type l \) ! -name '.sym-dir' > "$tmp/files"
+    find "$src" -name '.sym-dir' -type f | sed 's|/\.sym-dir$||' > "$tmp/symlink-dirs"
+    find "$src" \( -type f -o -type l \) ! -name '.sym-dir' > "$tmp/all-files"
 fi
 
+: > "$tmp/top-dirs"
+: > "$tmp/nested-dirs"
+LC_ALL=C sort "$tmp/symlink-dirs" > "$tmp/sorted-dirs" || die 'failed to sort .sym-dir directories'
+TOP="$tmp/top-dirs" NESTED="$tmp/nested-dirs" awk '
+    $0 == "" { next }
+    { for (i = 1; i <= n; i++) if (index($0 "/", kept[i] "/") == 1) { print >> ENVIRON["NESTED"]; next } }
+    { kept[++n] = $0; print >> ENVIRON["TOP"] }' "$tmp/sorted-dirs" \
+    || die 'failed to classify .sym-dir directories'
+TOP="$tmp/top-dirs" awk '
+    BEGIN { while ((getline dir < ENVIRON["TOP"]) > 0) dirs[++n] = dir }
+    { for (i = 1; i <= n; i++) if (index($0, dirs[i] "/") == 1) next; print }' \
+    "$tmp/all-files" > "$tmp/files" || die 'failed to filter files under .sym-dir directories'
+
 while IFS= read -r fp; do
-    if [ -s "$tmp/symlink-dirs" ]; then
-        _in_sd=false
-        while IFS= read -r sd; do
-            case "$fp" in "$sd"/*) _in_sd=true; break ;; esac
-        done < "$tmp/symlink-dirs"
-        if $_in_sd; then continue; fi
-    fi
-
-    if ! source_relative_path "$fp"; then
-        printf 'CONFLICT: %s is not a safe source path.\n' "$fp" >> "$tmp/conflicts"
-        continue
-    fi
-    rel=$source_rel
-    target_path "$tgt" "$rel"
-    name=$_target_path
-    fp_abs="$src_abs/$rel"
-    target_path "$tgt_abs" "$rel"
-    name_abs=$_target_path
-    dir_abs="${name_abs%/*}"
-    [ -n "$dir_abs" ] || dir_abs=/
-
-    if [ -L "$fp" ]; then
-        dest_abs="$(readlink "$fp")"
-        case "$dest_abs" in
-            /*) dest="$(relpath "$dest_abs" "$dir_abs")" ;;
-            *)  dest="$dest_abs" ;;  # already relative
-        esac
-    else
-        dest="$(relpath "$fp_abs" "$dir_abs")"
-    fi
-
-    if ! confined "$name"; then
-        printf 'CONFLICT: %s passes through a symlinked directory, so sym will not touch it.\n' "$name" >> "$tmp/conflicts"
-        continue
-    fi
-
-    if $delete; then
-        if { [ -e "$name" ] || [ -L "$name" ]; }; then
-            if [ ! -L "$name" ]; then
-                printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
-                continue
-            fi
-            if ! [ "$name" -ef "$fp_abs" ] && [ "$(readlink "$name")" != "$dest" ]; then
-                printf 'CONFLICT: %s does not point to the expected destination, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
-                continue
-            fi
-        else
-            continue
-        fi
-    else
-        if [ -L "$name" ]; then
-            [ "$name" -ef "$fp_abs" ] && continue
-            # Same link text as sym would write: correct even when it resolves
-            # into the target's own tree rather than the source's.
-            if [ "$(readlink "$name")" = "$dest" ]; then
-                [ -e "$name" ] && continue
-                planned_directory "$dest" "$dir_abs" && continue
-            fi
-            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
-            continue
-        elif [ -e "$name" ]; then
-            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
-            continue
-        fi
-    fi
-
-    printf '%s\n' "$name" >> "$tmp/names"
-    printf '%s\n' "$dest" >> "$tmp/dests"
-    printf '%s\n' "$name_abs" >> "$tmp/absolute-names"
-
+    plan_entry file "$fp"
 done < "$tmp/files"
 
 while IFS= read -r sd; do
-    [ -z "$sd" ] && continue
-
-    _nested=false
-    while IFS= read -r sd2; do
-        [ "$sd2" = "$sd" ] && continue
-        case "$sd" in "$sd2"/*) _nested=true; break ;; esac
-    done < "$tmp/symlink-dirs"
-    if $_nested; then log "SKIP (nested in another symlink-dir): $sd"; continue; fi
-
-    if ! source_relative_path "$sd"; then
-        printf 'CONFLICT: %s is not a safe source path.\n' "$sd" >> "$tmp/conflicts"
-        continue
-    fi
-    rel=$source_rel
-    target_path "$tgt" "$rel"
-    name=$_target_path
-    fp_abs="$src_abs/$rel"
-    target_path "$tgt_abs" "$rel"
-    name_abs=$_target_path
-
-    if ! confined "$name"; then
-        printf 'CONFLICT: %s passes through a symlinked directory, so sym will not touch it.\n' "$name" >> "$tmp/conflicts"
-        continue
-    fi
-
-    if $delete; then
-        { [ -e "$name" ] || [ -L "$name" ]; } || continue
-        if [ ! -L "$name" ]; then
-            printf 'CONFLICT: %s is not a symlink, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
-            continue
-        fi
-        if ! [ "$name" -ef "$fp_abs" ]; then
-            printf 'CONFLICT: %s does not point to the expected destination, so refusing to remove.\n' "$name" >> "$tmp/conflicts"
-            continue
-        fi
-    else
-        if [ -L "$name" ]; then
-            [ "$name" -ef "$fp_abs" ] && continue
-            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
-            continue
-        elif [ -e "$name" ]; then
-            printf 'CONFLICT: %s already exists. sym cannot create symlinks if there is an existing file.\n' "$name" >> "$tmp/conflicts"
-            continue
-        fi
-    fi
-
-    dest="$(relpath "$fp_abs" "${name_abs%/*}")"
-    printf '%s\n' "$name" >> "$tmp/names"
-    printf '%s\n' "$dest" >> "$tmp/dests"
-    printf '%s\n' "$name_abs" >> "$tmp/absolute-names"
-done < "$tmp/symlink-dirs"
+    log "SKIP (nested in another symlink-dir): $sd"
+done < "$tmp/nested-dirs"
+while IFS= read -r sd; do
+    plan_entry dir "$sd"
+done < "$tmp/top-dirs"
 
 if ! $delete && [ -n "${SYM_OWNED_FILE:-}" ] && [ -f "$SYM_OWNED_FILE" ]; then
     while IFS="$(printf '\t')" read -r kind owned; do
         [ "$kind" = F ] || continue
-        case "$owned" in "$tgt_abs"/*) ;; *) continue ;; esac
+        case "$owned" in "$tgt_phys"/*) ;; *) continue ;; esac
         [ -L "$owned" ] || continue
-        rel=${owned#"$tgt_abs"/}
+        rel=${owned#"$tgt_phys"/}
         { [ -e "$src/$rel" ] || [ -L "$src/$rel" ]; } && continue
         confined "$owned" || continue
         linked="$(lexical_path "$(physical_parent "$owned")" "$(readlink "$owned")")"
@@ -340,47 +268,33 @@ if [ -s "$tmp/pruned" ]; then
     fi
 fi
 
-if ! [ -s "$tmp/names" ]; then
-    if $failed; then die "sym: some operations failed."; fi
-    exit 0
-fi
-
-if $delete; then
-    while IFS= read -r name; do
+while IFS="$tab" read -r name dest name_abs; do
+    dir="${name%/*}"
+    [ -n "$dir" ] || dir=/
+    if $delete; then
         log "UNLINK: $name"
-        $dry_run || rm "$name" || failed=true
-        if ! $dry_run; then
-            dir="${name%/*}"
-            [ -n "$dir" ] || dir=/
-            while [ "$dir" != "$tgt" ] && [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
-                log "RMDIR: $dir"
-                rmdir "$dir" || { failed=true; break; }
-                dir="${dir%/*}"
-            done
+        $dry_run && continue
+        rm "$name" || failed=true
+        while [ "$dir" != "$tgt" ] && [ -d "$dir" ] && [ -z "$(ls -A "$dir")" ]; do
+            log "RMDIR: $dir"
+            rmdir "$dir" || { failed=true; break; }
+            dir="${dir%/*}"
+        done
+        continue
+    fi
+    if [ ! -d "$dir" ] && ! $dry_run; then
+        if ! record_missing_target_dirs "${name_abs%/*}" || ! mkdir -p "$dir"; then
+            failed=true
+            continue
         fi
-    done < "$tmp/names"
-else
-    paste "$tmp/names" "$tmp/dests" "$tmp/absolute-names" > "$tmp/jobs"
-    while IFS="$(printf '\t')" read -r name dest name_abs; do
-        dir="${name%/*}"
-        [ -n "$dir" ] || dir=/
-        if [ ! -d "$dir" ]; then
-            if ! $dry_run; then
-                if ! record_missing_target_dirs "${name_abs%/*}" || ! mkdir -p "$dir"; then
-                    failed=true
-                    continue
-                fi
-            fi
-        fi
-        log "LINK: $name -> $dest"
-        if ! $dry_run; then
-            if ln -s "$dest" "$name"; then
-                record_owned F "$name_abs" || failed=true
-            else
-                failed=true
-            fi
-        fi
-    done < "$tmp/jobs"
-fi
+    fi
+    log "LINK: $name -> $dest"
+    $dry_run && continue
+    if ln -s "$dest" "$name"; then
+        record_owned F "$name_abs" || failed=true
+    else
+        failed=true
+    fi
+done < "$tmp/jobs"
 
 if $failed; then die "sym: some operations failed."; fi

@@ -41,7 +41,7 @@ The layout, the commands, and where each piece of agent configuration lives are 
 
 ## Known gaps
 
-A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins.
+`sym` refuses a source name containing a tab, which test 28 pins. `sym -d` can remove an emptied target directory, which test 12 pins.
 
 **The test:** `skills-check.sh` and the structural tests pass, no rule is stated outside its owner, and `make plan` shows no `CONFLICT`.
 
