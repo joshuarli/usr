@@ -12,10 +12,10 @@ const float RGB_FRINGE = 0.12;
 const float BREATH_PERIOD_S = 11.0;
 const float BREATH_AMPLITUDE = 0.38;
 const float SCANLINE_PERIOD_PX = 6.0;
-const float SCANLINE_DARK = 0.18;
-const float APERTURE_DARK = 0.055;
-const float VIGNETTE_DARK = 0.22;
-const float RIM_DARK = 0.06;
+const float SCANLINE_DARK = 0.13;
+const float APERTURE_DARK = 0.035;
+const float VIGNETTE_DARK = 0.14;
+const float RIM_DARK = 0.035;
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2 uv = fragCoord / iResolution.xy;

@@ -1,29 +1,29 @@
 # Black Phosphor — natural pigments and restrained neon on near-black.
 # Bold default text is ivory; colored bold text uses the bright ANSI palette.
-background = #0b0e10
-foreground = #bec5bd
-cursor-color = #e0d09d
-cursor-text = #0b0e10
-selection-background = #313c42
-selection-foreground = #e9eee7
-bold-color = #eceee7
+background = #101417
+foreground = #d2d9d0
+cursor-color = #e9daa8
+cursor-text = #101417
+selection-background = #3b494e
+selection-foreground = #f4f5ee
+bold-color = #f3f5ed
 
 # Standard ANSI colors: quieter, earthy, readable.
-palette = 0=#14181b
-palette = 1=#cb7469
-palette = 2=#a4c17a
-palette = 3=#ceb77d
-palette = 4=#86a5ba
-palette = 5=#cf87ad
-palette = 6=#79bec5
-palette = 7=#b4bfb9
+palette = 0=#1b2225
+palette = 1=#dc8276
+palette = 2=#b2d28a
+palette = 3=#dbc58e
+palette = 4=#96b6c9
+palette = 5=#de95bc
+palette = 6=#89cdd2
+palette = 7=#cad4cd
 
 # Bright ANSI colors: chalk, lime, lively pink, electric cyan.
-palette = 8=#576269
-palette = 9=#ee907f
-palette = 10=#c5e68e
-palette = 11=#e5cc93
-palette = 12=#a9c5df
-palette = 13=#ef9cc9
-palette = 14=#8fe1df
-palette = 15=#e9eee7
+palette = 8=#77838b
+palette = 9=#f7a090
+palette = 10=#d5f19e
+palette = 11=#f2dba5
+palette = 12=#bad4ed
+palette = 13=#ffaedc
+palette = 14=#a1efee
+palette = 15=#f5f7f0
