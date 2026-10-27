@@ -6,14 +6,16 @@ OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
-.PHONY: sync uninstall plan layers check lint
+.PHONY: sync links uninstall plan layers check lint
 
-sync: layers
+links: layers
 	mkdir -p "$(DL_TMPDIR)" || exit 1; \
 	mkdir -p "$(dir $(DL_OWNED_FILE))" || exit 1; \
 	sh dotfiles/migrate-pinact.sh "$(TARGET)" "$(DL_OWNED_FILE)" || exit 1; \
+	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done
+
+sync: links
 	status=0; \
-	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done; \
 	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl || { status=$$?; printf 'sync: dl step failed\n' >&2; }; \
 	brew_status=0; \
 	if [ "$(OS)" = darwin ]; then TMPDIR="$(DL_TMPDIR)" sh macos/setup-macos brew packages || { brew_status=$$?; [ $$status -ne 0 ] || status=$$brew_status; }; fi; \
