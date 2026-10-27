@@ -6,13 +6,17 @@ OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 LAYERS := $(wildcard dotfiles/base dotfiles/$(OS))
 SYM    := sh dotfiles/sym
 
-.PHONY: sync links uninstall plan layers check lint
+.PHONY: sync links tools uninstall plan layers check lint
 
 links: layers
 	mkdir -p "$(DL_TMPDIR)" || exit 1; \
 	mkdir -p "$(dir $(DL_OWNED_FILE))" || exit 1; \
 	sh dotfiles/migrate-pinact.sh "$(TARGET)" "$(DL_OWNED_FILE)" || exit 1; \
 	for layer in $(LAYERS); do TMPDIR="$(DL_TMPDIR)" SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) -v -t "$(TARGET)" "$$layer" || exit 1; done
+
+tools:
+	mkdir -p "$(DL_TMPDIR)" "$(dir $(DL_OWNED_FILE))" || exit 1; \
+	TMPDIR="$(DL_TMPDIR)" DL_OWNED_FILE="$(DL_OWNED_FILE)" sh dl $(TOOLS)
 
 sync: links
 	status=0; \

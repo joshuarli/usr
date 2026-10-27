@@ -2,7 +2,7 @@
 
 `make` selects `dotfiles/base` and the matching OS layer, then applies them to `$HOME` with `dotfiles/sym`. Each relative path belongs to one layer. `make layers` rejects duplicate claims. See [`sym`](../dotfiles/sym) for link rules.
 
-Run `make plan` to preview links. Resolve each `CONFLICT` before syncing. `make links` applies only the layer links, without `dl` or host setup. `make` applies links before running `dl`; a failed download leaves the links in place and returns failure. `TARGET` changes the symlink destination, but tools still install under `$HOME/.local/bin`.
+Run `make plan` to preview links. Resolve each `CONFLICT` before syncing. `make links` applies only the layer links, without `dl` or host setup, and `make tools TOOLS="ish"` runs `dl` for the named tools only. `make` applies links before running `dl`; a failed download leaves the links in place and returns failure. `TARGET` changes the symlink destination, but tools still install under `$HOME/.local/bin`.
 
 `make uninstall` removes recorded layer links and installed tool paths. It leaves unrecorded pre-existing links and native launchers in place. Ownership records live under `${XDG_STATE_HOME:-$HOME/.local/state}/make`. See [`dl`](../dl) for tool installation and update behavior.
 
