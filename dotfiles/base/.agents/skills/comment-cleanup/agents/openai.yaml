@@ -1,3 +1,5 @@
 interface:
   display_name: "Comment Cleanup"
   short_description: "Delete comments and fix the code they excuse"
+policy:
+  allow_implicit_invocation: false

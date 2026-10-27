@@ -1,6 +1,9 @@
 ---
 name: unslop
-description: "Apply when asked to unslop, or when prose reads machine-written (AI vocabulary, filler, hedging). Skip code, comments, quoted text, and product copy."
+description: "Use for /unslop: rewrite prose that reads machine-written (AI vocabulary, filler, hedging). Skip code, comments, quoted text, and product copy."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Unslop

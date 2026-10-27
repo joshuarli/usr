@@ -1,6 +1,9 @@
 ---
 name: comment-cleanup
-description: "Apply when auditing comments, or about to write one that explains a why, constraint, or workaround: delete it and fix the code it excuses. Skip strings, fixtures, and out-of-scope comments."
+description: "Use for /comment-cleanup: audit comments, deleting each and fixing the code it excuses. Skip strings, fixtures, and out-of-scope comments."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Comment Cleanup
