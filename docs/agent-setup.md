@@ -29,6 +29,8 @@ The tracked skills live in `dotfiles/base/.agents/skills/`. Directory links and 
 
 The [`do`](../dotfiles/base/.agents/skills/do/SKILL.md) skill tells agents when to run one targeted `agent-learn recall` before expensive rediscovery. Retrieval is local, needs no model grant, and returns leads rather than instructions; see [agent learning](agent-learning.md). No harness hook injects memory into every turn.
 
+Antigravity CLI reads skill descriptions and may activate eligible skills automatically, and its skill frontmatter allows only `name` and `description`. Keep explicit-only workflows out of its automatic selection; the user requests one in plain language or with `/<skill-name>`.
+
 Harnesses use native skill metadata and discovery paths. The checker at [`skills-check.sh`](../dotfiles/skills-check.sh) validates tracked skill metadata. See [the skills guide](../SKILLS.md) for invocation rules.
 
 ## Harness configuration
