@@ -46,7 +46,7 @@ Always surface changes to APIs, types, schemas, permissions, invariants, or tran
 
 Keep final replies short: what changed and anything I need to decide. Say what you verified and what you did not.
 
-After long-running or delegated work, add one line each for **Goal**, **Done**, **Next**, **Needs you** (or "nothing") in place of a longer summary.
+After long-running or delegated work, add one line each for **Goal**, **Done**, **Next**, **Needs you** (or "nothing") in place of a longer summary. **Needs you** carries forward every proposal, question, or manual step still awaiting the user from earlier in the session; an item leaves only when the user answers it, it is done, or it no longer applies, and never silently.
 
 ## Workflow Rules
 
