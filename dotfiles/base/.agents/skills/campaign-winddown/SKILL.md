@@ -10,7 +10,7 @@ metadata:
 
 Winddown takes a running campaign to a clean stop. In-flight lanes finish or park, green work integrates, checkouts are removed, nothing new starts, and the campaign doc's **Status** says how to resume. After a reboot, the repo, its branches, and the doc must be enough to continue. Mechanics are as in the Campaigns section of `orchestrate`. If the coordinator session is gone, rebuild lane state from `git worktree list`, `git branch`, and the doc.
 
-This workflow commits locally. Do not use it when the user has forbidden commits. It should take minutes, not hours.
+This workflow commits locally. Do not use it when the user has forbidden commits.
 
 ## Rules
 
@@ -25,7 +25,7 @@ This workflow commits locally. Do not use it when the user has forbidden commits
 Run each check and fix what fails:
 
 1. `git worktree prune && git worktree list`: only the main checkout remains, plus any tree named in **Status** with a current consumer and allowed with `codex-campaign-closeout.py allow`.
-2. `git branch --no-merged`: every branch is named in **Status** or deleted because it is empty.
+2. `git branch --no-merged`: every branch is named in **Status** or is empty and deleted per `orchestrate`'s worktree lifecycle.
 3. No campaign process, cron, or wakeup remains. The doc does not reference `/tmp` or `$TMPDIR`.
 4. The main checkout is clean, and the doc is committed.
 

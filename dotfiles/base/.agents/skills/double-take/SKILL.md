@@ -10,9 +10,7 @@ metadata:
 
 The first pass finds what you went looking for. The second asks what that pass left inconsistent and where the same shape lives elsewhere. A rule changed in one place nearly always has stragglers, and a cleanup you just made usually has a twin.
 
-The first pass is a re-review of the change itself. Widening to other places the change belongs is a second pass, and only the owner starts it.
-
-Scope is the change or finding set from this session, or the one the user names. Do not widen beyond it until the owner says yes.
+Scope is the change or finding set from this session, or the one the user names. The first pass re-reviews that change only. Widening to the rest of the repo is a second pass that only the owner starts.
 
 ## Steps
 
@@ -23,19 +21,17 @@ Scope is the change or finding set from this session, or the one the user names.
 5. **Prove each finding** with a `file:line` and the command that found it. Drop what you cannot show.
 6. **Apply only the trivial fixes:** contradictions to the rule you just applied, and duplicates you introduced, within scope and with no contract change. Report everything else with a recommendation and wait for the owner.
 7. **Check narrowly** with the cheapest command that covers what you touched.
-8. **Ask whether to widen.** End the report with a yes/no question: search the rest of the repo for other places this change applies? Show the transformation, the patterns, and the directories you would search. Search nothing beyond the scope until the owner answers. On no, stop.
+8. **Ask whether to widen.** End the report with a yes/no question: search the rest of the repo for other places this change applies? Show the transformation, the patterns, and the directories you would search. Search nothing beyond the scope until the owner answers. On no, stop. Under AFK, do not ask: state the default (do not widen) in the report and proceed.
 
 ## Widening
 
 Runs only after a yes.
 
 - **State the transformation** in one sentence, "when X, do Y instead", general enough to match other sites and narrow enough to match no false ones. If the change was several, widen each separately.
-- **Search by shape, not by name:** the old form's vocabulary, its aliases and misspellings, and the structure around it, with `rg` or `fd`. Do not reread the repo. Say which directories you did not search. When hits span many layers, fan the search out to read-only children per `orchestrate`.
+- **Repeat steps 2 to 7 across the repo, by shape and not by name:** the old form's vocabulary, its aliases and misspellings, and the structure around it, with `rg` or `fd`. Do not reread the repo. Say which directories you did not search. When hits span many layers, fan the search out to read-only children per `orchestrate`.
 - **Classify every hit:** applies as is, applies with a judgment call, or looks alike and does not apply. Keep the last group with its reason.
-- **Prove each candidate** with a `file:line` and the command that found it.
 - **Apply only the mechanical ones:** the transformation applies unchanged, with no contract change and no new decision. When one script or codemod covers every site, write and run it per `orchestrate`. Report judgment calls with a recommendation and wait.
 - **Do not grow the change.** A candidate that needs a new design, a new dependency, or a contract change is a finding, not an edit. File it per the `todo` skill if the owner asks.
-- **Check narrowly** again.
 
 An empty result is valid. Say which searches came up empty so the owner can trust it.
 

@@ -1,6 +1,6 @@
 ---
 name: correct
-description: "Find the mistakes agents keep repeating in this repo and make each one impossible. Fix at the highest level that works: architecture, then types, then a lint whose error names the fix, then a test, docs last. Prove each check against a real past mistake. Use for /correct, or when the user corrects the same thing twice."
+description: "Find the mistakes agents keep repeating in this repo and make each one impossible. Use for /correct or repeated user corrections."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"
@@ -21,7 +21,7 @@ Read recent commits and reverts, review comments, the `AGENTS.md` chain, comment
 1. **Architecture.** One owner per piece of state and one supported way per task. Hide internals so the wrong import fails. Replace hand-synced lists with one source. Delete the old way and the dead code an agent would copy.
 2. **Types.** Make the bad state unwritable. If it still compiles, add a lint or check whose error names the file, type, or function to use instead. If the pattern is already common, fail only changes that add more of it.
 3. **Tests** of behavior. Fix or delete any test that fails the Oracle Test in `test-audit`.
-4. **Docs and agent rules last,** for judgment calls only. Nothing fails when an agent skips them. Never a code comment: it goes stale and agents copy it.
+4. **Docs and agent rules last,** for judgment calls only. Nothing fails when an agent skips them.
 
 Take the strongest mechanism available. A weaker guard becomes the next template that agents copy.
 

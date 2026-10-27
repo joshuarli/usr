@@ -28,6 +28,7 @@ A deferred item is a ticket in a committed file, not a code comment, a chat repl
 ```
 
 Rate by impact times likelihood, never by effort.
+
 - **P1, fix now:** data loss or corruption, a security exposure, silently wrong results, or a broken build, release, or recovery path, on a reachable path.
 - **P2, fix soon:** a real defect or structural risk that will cause incidents or tax every change, likely but not yet hit.
 - **P3, plan:** a clear payoff at scale and no urgency.
@@ -38,7 +39,7 @@ Rate by impact times likelihood, never by effort.
 - **Filing is not doing.** Read only enough to fill `Where`, and make no code change for the ticket. File one ticket per independent item, and extend a match found in `TODO.md` instead of duplicating it.
 - **Priority comes from the user.** When they give none, choose from the definitions and say it was assumed.
 - **A review finding is a ticket as it stands.** An open decision that blocks one is a draft RFC linked from it.
-- **Never a code comment.** A reminder the code needs becomes a test or a check, and code does not cite ticket IDs.
+- **Code never cites ticket IDs.** A reminder the code needs becomes a test or a check.
 - A commit that finishes a ticket ends its body with `Closes ABC-123`.
 - **Delete a ticket when it is done.** Git history is the record, and no done list is kept. Delete its RFC in the same change when the RFC section calls that RFC done.
 - **Campaign lanes never write `TODO.md`.** A lane reports a deferred item and the integrator files it.

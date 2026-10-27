@@ -31,6 +31,10 @@ Run this after each accepted slice, on resume, and whenever a slice fails twice.
 | Tests red on the integration branch | Fix them before any new slice. |
 | Doc or tooling commits outnumber product commits | Freeze the doc and tooling. Deliver. |
 | A slice needs an unavailable environment | Move it to **Needs environment**. Keep going. |
+| Many short turns, long time to first token | Batch reads, searches, and edits per turn, lower the child's reasoning effort for routine work, and give lanes larger, fully specified briefs. |
+| Audits, checkpoints, handoffs, or doc rewrites dominate | Stop them. Rewrite **Status** once and deliver. |
+| Checks dominate wall time | Run the narrowest acceptance command per slice, reuse evidence whose inputs are unchanged, and group wider suites at milestones. |
+| Implementation is starved and the ready work owns disjoint files | Add one writer within `perf-gate-ready -s` headroom. |
 | The owner asks about progress | Report landed slices only. |
 
 ## Run a slice

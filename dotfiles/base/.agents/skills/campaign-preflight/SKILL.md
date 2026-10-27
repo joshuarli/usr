@@ -8,9 +8,7 @@ metadata:
 
 # Campaign Preflight
 
-A campaign doc is the only thing the executing agent has once the owner walks away. Preflight edits the draft in place until that agent can run to the end without asking anything, then reports whether it is ready. It does not start the campaign. Like `ultrareview` it is a router: the method for each design area lives in the skill named for it. For campaign mechanics (workstreams, waves, lane contract) the doc conforms to the campaign reference linked by `orchestrate` instead of restating it.
-
-An execution-ready plan records an authority boundary; it does not authorize the effects it describes.
+A campaign doc is the only thing the executing agent has once the owner walks away. Preflight edits the draft in place until that agent can run to the end without asking anything, then reports whether it is ready. It does not start the campaign. The method for each design area lives in the skill named for it. For campaign mechanics (workstreams, waves, lane contract) the doc conforms to the campaign reference linked by `orchestrate` instead of restating it.
 
 ## The bar
 
@@ -27,9 +25,9 @@ An execution-ready plan records an authority boundary; it does not authorize the
 - **The code is the truth.** Read it at the current commit. Verify every claim the draft makes about what exists and fix the ones that disagree.
 - **The owner owns intent.** Preflight prescribes anything the code, the evidence, or sound practice settles. It asks the owner only for choices that change the product, the contract, or carry real risk, in one batch with a recommendation each, and records the answers as owner decisions with the date.
 - **Pre-answer every place the global instructions say ask:** contract changes and anything destructive. For dependencies, name the performance gates they must stay within. The executor cannot ask, so the doc permits it, forbids it, or says exactly how to proceed.
-- **No `/tmp`.** Move any worktree, scratch, or state path the draft puts in `/tmp` or `$TMPDIR` to `.work/` in the repo, so a reboot or an OOM-killed tmpfs cannot take the campaign with it.
-- **Cut repetition, not requirements.** The executable core (charter, decisions, sequence, acceptance) comes first and fits comfortably in the executor's context. Rationale, history, and research detail that does not affect execution follow as reference. Preserve every meaningful deliverable, success criterion, scenario, boundary, and constraint from the draft by mapping it to work and proof, a recorded decision, a non-goal with reason, or an explicitly superseded requirement. Keep measurable qualifiers and scope intact: for example, a goal of one authorization per invocation must not become a generic authentication-context test. Delete what only explains how the draft got here, along with superseded handoffs, checkpoints, and logs.
-- **Follow the repo's instructions,** including its verification limits. Time the loop commands; report before running anything expensive. No formatters, no commits, no pushes.
+- **No `/tmp`.** Move any worktree, scratch, or state path the draft puts in `/tmp` or `$TMPDIR` to `.work/` in the repo.
+- **Cut repetition, not requirements.** Put the executable core (charter, decisions, sequence, acceptance) first; rationale and research follow as reference. Map every deliverable, criterion, scenario, boundary, and constraint to work and proof, a recorded decision, a non-goal with reason, or an explicit supersession. Keep measurable qualifiers (one authorization per invocation must not become a generic authentication-context test). Delete history, superseded handoffs, checkpoints, and logs.
+- **Follow the repo's instructions,** including its verification limits. Time the loop commands; report before running anything expensive. No formatters, no pushes.
 
 Read the [procedure, sequencing rules, and final document shape](references/procedure.md) before editing the draft.
 
