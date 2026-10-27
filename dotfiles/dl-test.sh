@@ -1114,6 +1114,7 @@ fi
     = "$apps/Ghostty.app/Contents/MacOS/ghostty" ]
 [ "$(cat "$ghostty_home/.local/state/dl/ghostty")" = 1.4.0 ]
 case "$output" in *"Installed $apps/Ghostty.app (1.4.0)"*) ;; *) exit 1 ;; esac
+case "$output" in *ghostty-fda-check*) ;; *) exit 1 ;; esac
 
 if output=$(HOME="$ghostty_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
     DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 DL_OWNED_FILE="$owned" \

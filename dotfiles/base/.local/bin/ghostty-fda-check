@@ -1,0 +1,99 @@
+#!/bin/sh
+# ghostty-fda-check: report whether Ghostty.app holds Full Disk Access.
+#
+# macOS keeps the TCC database out of reach, so this probes files that only
+# Full Disk Access can read, from a process running inside Ghostty. Children
+# inherit the terminal's grant, so a read that succeeds here means Ghostty
+# holds it. Outside Ghostty the verdict describes the current terminal, and
+# the check says so.
+#
+# Usage: ghostty-fda-check [--no-open]
+# Exit 0: access granted. Exit 1: access missing. Exit 2: Ghostty.app is not
+# installed, or the usage is wrong. Exit 3: no probe target exists, so
+# access is unknown. Access missing or unknown opens System Settings at the
+# Full Disk Access pane, unless --no-open is passed or GHOSTTY_FDA_NO_OPEN=1.
+# GHOSTTY_APPLICATIONS_DIR (default /Applications) selects where Ghostty.app
+# lives. GHOSTTY_FDA_PROBE checks one path instead of the built-in probes.
+set -eu
+
+no_open=${GHOSTTY_FDA_NO_OPEN:-0}
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-open) no_open=1; shift ;;
+        -h|--help) printf 'usage: ghostty-fda-check [--no-open]\n'; exit 0 ;;
+        *) printf 'ghostty-fda-check: unknown argument: %s\n' "$1" >&2; exit 2 ;;
+    esac
+done
+
+apps_dir=${GHOSTTY_APPLICATIONS_DIR:-/Applications}
+app=$apps_dir/Ghostty.app
+[ -d "$app" ] || app=$HOME/Applications/Ghostty.app
+[ -d "$app" ] || app=/Applications/Ghostty.app
+if [ ! -d "$app" ]; then
+    printf 'ghostty-fda-check: Ghostty.app is not installed; install it with `make` or `sh dl ghostty`\n' >&2
+    exit 2
+fi
+
+bundle_id=$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" 2>/dev/null || true)
+[ -n "$bundle_id" ] || bundle_id=com.mitchellh.ghostty
+
+if [ "${TERM_PROGRAM:-}" != ghostty ]; then
+    printf 'ghostty-fda-check: warning: TERM_PROGRAM is %s, not ghostty; this verdict describes the current terminal, so run this inside Ghostty to check Ghostty\n' "${TERM_PROGRAM:-unset}" >&2
+fi
+
+probe_target() {
+    target=$1
+    [ -e "$target" ] || return 3
+    err=$(mktemp "${TMPDIR:-/tmp}/ghostty-fda.XXXXXX") || return 3
+    if [ -d "$target" ]; then
+        ls "$target" >/dev/null 2>"$err"
+    else
+        dd if="$target" of=/dev/null bs=512 count=1 2>"$err"
+    fi
+    status=$?
+    detail=$(cat "$err")
+    rm -f "$err"
+    if [ "$status" -eq 0 ]; then return 0; fi
+    case "$detail" in
+        *'Operation not permitted'*|*'Permission denied'*) return 1 ;;
+        *) return 3 ;;
+    esac
+}
+
+if [ -n "${GHOSTTY_FDA_PROBE:-}" ]; then
+    set -- "$GHOSTTY_FDA_PROBE"
+else
+    set -- "$HOME/Library/Messages/chat.db" "$HOME/Library/Mail" "$HOME/Library/Safari/History.db"
+fi
+
+verdict=3
+for candidate in "$@"; do
+    probe_status=0
+    probe_target "$candidate" || probe_status=$?
+    if [ "$probe_status" -eq 0 ]; then verdict=0; break; fi
+    if [ "$probe_status" -eq 1 ]; then verdict=1; break; fi
+done
+
+open_fda_settings() {
+    if [ "$no_open" = 1 ]; then return 0; fi
+    if command -v open >/dev/null 2>&1; then
+        open 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles' 2>/dev/null \
+        || open 'x-apple.systempreferences:com.apple.preference.security?Privacy' 2>/dev/null \
+        || printf 'ghostty-fda-check: open System Settings > Privacy & Security > Full Disk Access by hand\n' >&2
+    else
+        printf 'ghostty-fda-check: open System Settings > Privacy & Security > Full Disk Access by hand\n' >&2
+    fi
+}
+
+if [ "$verdict" -eq 0 ]; then
+    printf 'ghostty-fda-check: Full Disk Access is granted for %s\n' "$bundle_id"
+    exit 0
+fi
+if [ "$verdict" -eq 1 ]; then
+    printf 'ghostty-fda-check: Full Disk Access is missing for %s; tick Ghostty under System Settings > Privacy & Security > Full Disk Access, then restart Ghostty\n' "$bundle_id" >&2
+    open_fda_settings
+    exit 1
+fi
+printf 'ghostty-fda-check: could not confirm Full Disk Access for %s; check Ghostty under System Settings > Privacy & Security > Full Disk Access\n' "$bundle_id" >&2
+open_fda_settings
+exit 3

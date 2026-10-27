@@ -1140,6 +1140,7 @@ install_ghostty() {
     own_file "${STATE}/ghostty"
     changed=true
     _dl_ok "Installed $GHOSTTY_APP ($GHOSTTY_VERSION)"
+    printf '%s\n' "Run 'ghostty-fda-check' inside Ghostty to verify Full Disk Access."
 }
 
 install_mactop_app() {
