@@ -53,6 +53,8 @@ Always surface changes to APIs, types, schemas, permissions, invariants, or tran
 
 Keep final replies short: what changed and anything I need to decide. Say what you verified and what you did not.
 
+End any turn that reports on long-running or delegated work with a short status: **Goal**, **Done**, **Next**, **Needs you** (or "nothing").
+
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
