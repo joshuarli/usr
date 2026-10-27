@@ -11,15 +11,6 @@ Next: 21
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-17 · P2 · Memory-use effect on agent behavior is unmeasured
-
-- **Area:** Agent learning
-- **Where:** `tools/agent-memory/eval/live_recall.py`, `dotfiles/base/.agents/skills/do/SKILL.md`
-- **Problem:** The live baseline, treatment, and control evaluation exists and its scoring and fixtures are tested offline, but it has never run because it makes paid Codex calls. Whether agents call `agent-learn recall` when the `do` rule says to, in each harness, and whether results change outcomes, is unmeasured.
-- **Recommendation:** Run `python3 tools/agent-memory/eval/live_recall.py --live --runs 5` once with explicit approval, record the result in `tools/agent-memory/README.md`, and check recall invocation in Claude, Muse, and Grok transcripts with `agent-sessions search 'agent-learn recall'`.
-- **Fix with:** none
-- **Effort:** S
-
 ### USR-18 · P3 · Unsegmented scripts match only whole runs
 
 - **Area:** Agent learning

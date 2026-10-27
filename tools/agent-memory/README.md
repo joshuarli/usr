@@ -179,7 +179,7 @@ Latency on the synthetic corpora is about 20 ms per answered query in process (2
 
 ### Not established
 
-- The live memory-use evaluation has not been run; it needs paid model calls and an explicit decision to spend them. Whether agents actually call `recall` in each harness, and whether retrieval changes outcomes, is unmeasured. The offline tests cover the fixture, the real capture pipeline, and the scoring only.
+- The live memory-use evaluation ran once (`eval/live_recall.py --live --runs 5`, one model, one task family, five runs per arm). Treatment did not beat baseline: 1 of 5 treatment runs completed correctly against 0 of 5 baseline runs, and every run in both arms repeated the mistake. No run in any arm invoked `recall`. The control arm stayed clean. Whether retrieval changes outcomes in real work remains unmeasured. In real sessions, `agent-learn recall` appears in tool calls from Codex, Claude, and Grok in projects other than `usr`, but not from Muse. The offline tests cover the fixture, the real capture pipeline, and the scoring.
 - The corpora are synthetic. Quality on real sessions is unknown beyond latency and a spot check that exact identifiers return hits and generic requests abstain.
 - Muse Code transcripts are parsed for user messages, assistant text, tool calls, tool results with exit codes, and skill reads; its lifecycle and streaming records are recognized and skipped. Tool-based experience capture from Muse has not been exercised on real sessions. Chinese and Japanese queries match only whole unsegmented runs.
 - Follow-through and receipts are observational; nothing here shows that a record caused an outcome.
