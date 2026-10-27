@@ -1,7 +1,9 @@
 ---
 name: hurry-up
-description: "Prioritize finishing when the user says to hurry up or asks to cut verification for speed. Skip tasks without an expressed request for urgency, and campaign or session wind-down."
+description: "Use for /hurry-up: prioritize finishing and cut optional verification for speed."
+disable-model-invocation: true
 metadata:
+  opencode/autoinvoke: "false"
   opencode/slash: "true"
 ---
 
