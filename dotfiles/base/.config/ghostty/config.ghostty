@@ -4,6 +4,7 @@ theme = IR Black
 custom-shader = shaders/black-phosphor.glsl
 custom-shader-animation = false
 
+font-family = Hack
 font-size = 16
 
 shell-integration = none
