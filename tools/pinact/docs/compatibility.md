@@ -44,3 +44,15 @@ unscored families in the report.
   policy changes, and unsupported YAML forms remain manual work.
 - The differential suite is local and offline when jactionlint is installed. Pinact itself does not
   require that executable or an online service.
+
+## Scope
+
+Pinact checks and fixes workflow and action files. Callers such as repomod own fleet policy, the
+approved-version catalog, worktrees, commits, and pull requests; Pinact takes a catalog only through
+an explicit `--catalog` path and never ships or selects a default.
+
+Out of scope: other Git hosts, CI execution or GitHub API simulation, a complete shell interpreter or
+type checker, exhaustive shell taint, full JavaScript analysis, SARIF, LSP, persistent caches or
+daemons, plugin or user rule systems, config DSLs, reformatting or reserializing unrelated YAML,
+online advisories, registry scanning, remote mutation, pull request creation, and autonomous
+updates.
