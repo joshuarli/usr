@@ -42,7 +42,7 @@ Complete applicable changes throughout scope. Do not add traits, newtypes, crate
 - Trace evaluation and drop order when changing iterators, borrows, accessors, or matches. For async code preserve cancellation, ownership/joining of tasks, and state or guards held across `.await`; spawning work is not equivalent to awaiting it.
 - Do not mechanically remove poison handling, unwind boundaries, pre-main initialization, required unsafe, or unstable features. Trace their contract first. Prefer a safe equivalent; report necessary departures without adding silent fallbacks or disguising them with lint suppressions.
 - Preserve the selected toolchain and MSRV. Do not install nightly, change dependencies, or rewrite CI just to follow a style preference. Do not install, configure, or run formatters, including `rustfmt`, `cargo fmt`, check-only runs, editor actions, hooks, or aggregate commands that invoke them. Inspect task definitions and run permitted constituent checks instead. Preserve local layout; do not substitute formatting/import-sorting lints or manual reflow for a formatter.
-- Do not weaken types, safety invariants, tests, or check coverage to get green results. Permit a narrow lint suppression only for a demonstrated false positive. Keep commits, pushes, and CI edits within existing authorization; invocation alone does not authorize them.
+- Do not weaken types, safety invariants, tests, or check coverage to get green results. Permit a narrow lint suppression only for a demonstrated false positive. Keep pushes and CI edits within existing authorization; invocation alone does not authorize them.
 
 ## Verify and finish
 

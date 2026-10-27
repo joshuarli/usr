@@ -47,7 +47,7 @@ For each batch, identify its concrete benefit, preserved invariant, and smallest
 
 Do not add abstractions without a responsibility or mechanically rewrite interfaces, classes, or enums. Do not install, configure, or run formatters, including check-only, editor, hook, or aggregate runs. Inspect task definitions and run permitted constituent checks. Do not substitute formatting/import-sorting lints or manual reflow. Keep local layout and correctness lints; avoid blanket pedantic/style groups or forced verbosity.
 
-Keep publication, major contract decisions, and CI edits within existing authorization. Do not edit CI unless asked. An instruction to refactor does not itself authorize committing, pushing, or deploying.
+Keep publication, major contract decisions, and CI edits within existing authorization. Do not edit CI unless asked. An instruction to refactor does not itself authorize pushing or deploying.
 
 ## Verify and finish
 

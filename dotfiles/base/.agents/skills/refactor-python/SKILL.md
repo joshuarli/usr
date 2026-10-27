@@ -18,7 +18,7 @@ Use the requested paths/packages; an unqualified invocation covers the repositor
 - Support Python 3.13 or later only. Use the project's declared minimum when it is newer; do not use features newer than that minimum just because the host supports them. A whole-codebase invocation includes adopting this floor and the tools below. A narrow refactor does not authorize a repository-wide runtime or tooling migration; report an incompatible floor instead of adding old-version shims.
 - Use the latest published non-prerelease **ty** and **Ruff** when adopting/updating tooling, pinned through the project's existing mechanism. Reuse those pins during the refactor. Do not impose a package manager or framework. A narrow task uses existing tools and reports missing gates; it does not add pins or silently raise the runtime floor.
 - Read [Python design](references/python.md) and [ty and Ruff](references/tooling.md) before editing. Use versioned Python docs, the typing specification, and installed tool behavior as authorities. Check official release notes/configuration when changing pins. If upstream is unavailable, use installed evidence and state the limitation.
-- Apply the user's request and active repository instructions before generic preferences. Preserve unrelated work. Keep commits, pushes, deployment, and CI changes within existing authorization; invoking this skill alone does not authorize publishing or editing CI.
+- Apply the user's request and active repository instructions before generic preferences. Preserve unrelated work. Keep pushes, deployment, and CI changes within existing authorization; invoking this skill alone does not authorize publishing or editing CI.
 
 ## Inspect the contract
 

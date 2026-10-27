@@ -2,7 +2,7 @@
 
 A campaign is a backlog too large for one session. It succeeds by landing accepted product slices on the integration branch, one after another. Busy agents, doc commits, audits, and steering notes are not progress. Only one measure counts: product changes whose named acceptance checks pass on the integration branch.
 
-Lane commits and closeout require owner authorization. Without it, work serially or hand off disjoint patches. Campaign mechanics never expand the authority grant.
+Campaign mechanics never expand the authority grant.
 
 ## Default shape: one slice at a time
 
@@ -56,6 +56,6 @@ Choose checks from the diff and the affected consumers. Import, registration, sc
 
 Close when every local deliverable's acceptance passes. **Needs environment** items stay listed for the owner and do not hold the campaign open.
 
-With authorized commits, stop lanes and run `codex-campaign-closeout.py begin` from the integration worktree. Resolve worktrees with the [general lifecycle](../SKILL.md#worktree-lifecycle). Allow only retained trees, with `codex-campaign-closeout.py allow --path <path> --reason <reason>`. If work resumes, run `codex-campaign-closeout.py cancel`.
+To close, stop lanes and run `codex-campaign-closeout.py begin` from the integration worktree. Resolve worktrees with the [general lifecycle](../SKILL.md#worktree-lifecycle). Allow only retained trees, with `codex-campaign-closeout.py allow --path <path> --reason <reason>`. If work resumes, run `codex-campaign-closeout.py cancel`.
 
 To pause, use `campaign-winddown`.

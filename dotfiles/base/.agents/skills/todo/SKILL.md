@@ -39,7 +39,7 @@ Rate by impact times likelihood, never by effort.
 - **Priority comes from the user.** When they give none, choose from the definitions and say it was assumed.
 - **A review finding is a ticket as it stands.** An open decision that blocks one is a draft RFC linked from it.
 - **Never a code comment.** A reminder the code needs becomes a test or a check, and code does not cite ticket IDs.
-- **Do not commit** unless asked. A commit that finishes a ticket ends its body with `Closes ABC-123`.
+- A commit that finishes a ticket ends its body with `Closes ABC-123`.
 - **Delete a ticket when it is done.** Git history is the record, and no done list is kept. Delete its RFC in the same change when the RFC section calls that RFC done.
 - **Campaign lanes never write `TODO.md`.** A lane reports a deferred item and the integrator files it.
 

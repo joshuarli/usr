@@ -31,13 +31,13 @@ Classify each relevant item by what the owner needs on the new host:
 
 **Respect the transfer method.** A fresh clone gets only refs available from its remote; local-only commits, branches, stashes, and submodule commits need to be published or transferred separately. A full repository copy can carry local Git refs and stashes, but ignored and untracked files travel only if the copy includes them. A Git bundle omits the working tree and ignored files. If the method is still unknown and it changes whether local work survives, finish the inventory first, then ask which method they will use. Never push or publish without authorization. Do not apply or drop stashes as part of inspection.
 
-**Preserve authorization boundaries.** Do not commit unless asked or the repository's directly requested workflow requires it. Do not run blanket clean/reset commands or remove preserved data based on its directory name alone. If the user authorizes a merge or cleanup, make the smallest safe changes and keep unrelated working-tree changes untouched.
+**Preserve authorization boundaries.** Commit only your own changes; never commit the user's uncommitted work as part of an inventory. Do not run blanket clean/reset commands or remove preserved data based on its directory name alone. If the user authorizes a merge or cleanup, make the smallest safe changes and keep unrelated working-tree changes untouched.
 
 ## Verify and report
 
 **Verify portability.** After changes, recheck affected branch, stash, submodule, and worktree state; confirm every intended source change is reachable through the chosen transfer method; and inspect remaining local-only data. Run the narrowest relevant check for integrated code or content. Do not claim the destination host is ready if the transfer itself has not been performed or tested.
 
-**Prove the resume path.** Name a copy-pasteable resume command and exercise its read-only parts from a clean checkout of the transfer target; put it in the repository when the request authorizes commits. An inventory that is not exercised this way is not verified.
+**Prove the resume path.** Name a copy-pasteable resume command and exercise its read-only parts from a clean checkout of the transfer target; commit it in the repository. An inventory that is not exercised this way is not verified.
 
 **The test:** after the stated transfer, the owner can recover all intended source work and required local project data without relying on the old machine's processes or unlisted files.
 

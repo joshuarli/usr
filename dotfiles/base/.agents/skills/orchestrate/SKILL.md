@@ -87,7 +87,7 @@ After a child finishes, review its changes and decide whether to integrate or pa
 
 Before removal, run `git -C <child-worktree> status --porcelain --ignored=matching --untracked-files=all`. Keep the worktree if it has modified or untracked files. Review ignored files and preserve any local data worth keeping. Remove the worktree with `git -C <integration-worktree> worktree remove <child-worktree>`. Delete its branch only when `git -C <integration-worktree> merge-base --is-ancestor <branch> HEAD` succeeds, then run `git -C <integration-worktree> branch -d <branch>`. Keep the branch when that check fails, including after squash integration. Never force-delete a branch or worktree.
 
-When you park unfinished work and commits are authorized, commit the work, remove its clean worktree, and keep its branch. Without commit authorization, keep the worktree and report its path. Keep a worktree while its child is running, its changes remain unreviewed, or it contains uncommitted work.
+When you park unfinished work, commit it, remove its clean worktree, and keep its branch. Keep a worktree while its child is running, its changes remain unreviewed, or it contains uncommitted work.
 
 ## Campaigns
 

@@ -44,6 +44,6 @@ Line coverage is not a gate and not a target. It rewards executing code, not che
 
 ## Scope and handback
 
-Work one project or one subsystem at a time, on the narrowest commands that run the affected tests; run the full suite once at the end, saying why. Removing a coverage gate or deleting many tests changes the project's contract: say so. Leave commits to the user.
+Work one project or one subsystem at a time, on the narrowest commands that run the affected tests; run the full suite once at the end, saying why. Removing a coverage gate or deleting many tests changes the project's contract: say so.
 
 **Report:** boundaries found, tests cut/merged/added with counts, the fault-injection results, suite time and flake rate before and after, and anything I must decide (coverage gate removal, tests kept for doubt).

@@ -12,7 +12,7 @@ Close the bounded queue captured from `TODO.md`. Dependencies and existing owner
 
 ## Rules
 
-- **The workflow request authorizes local commits.** Work on a branch named `backlog-<date>` cut from the current branch. Never push, merge to the default branch, or format.
+- **Work on a branch.** Use a branch named `backlog-<date>` cut from the current branch. Never push, merge to the default branch, or format.
 - **Keep the active queue bounded.** Capture the tickets already in `TODO.md` at the start. Record newly discovered tickets for a later run; do not add them to the active queue unless the user asks. Keep incomplete tickets open.
 - **Honor prerequisites and recorded deferrals.** Read dependencies in tickets and accepted RFCs. Hold a dependent until its prerequisites are integrated and verified. If a prerequisite parks, keep its dependents open with the same blocker. Revisit a recorded deferral only when its trigger or evidence changes, or the owner changes the decision. Keep an unresolved owner decision or draft RFC parked. An accepted design does not replace prerequisite implementation.
 - **Let priority schedule ready work.** Start the highest-priority ready ticket first, then work down by priority and ID. Dependencies, file conflicts, and acceptance determine integration. A ticket blocked by active lane ownership is not ready; integrate or park that owner before starting conflicting work. Recompute readiness after integrations. Do not delay an independent verified fix solely to make commit history follow priority order.
