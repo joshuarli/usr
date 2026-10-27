@@ -146,6 +146,7 @@ class SkillCampaignTests(unittest.TestCase):
             base / ".commandcode" / "AGENTS.md",
             base / ".config" / "opencode" / "AGENTS.md",
             base / ".gemini" / "config" / "AGENTS.md",
+            base / ".pi" / "agent" / "AGENTS.md",
         )
         for adapter in adapters:
             step = "adapter %s resolves to the canonical contract" % (adapter,)

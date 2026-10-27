@@ -15,6 +15,7 @@ Use [`sbx`](sbx-spec.md) when running coding agents in a native macOS Seatbelt o
 | OpenCode | `~/.config/opencode/AGENTS.md` | `~/.agents/skills/` |
 | Antigravity CLI | `~/.gemini/config/AGENTS.md` | `~/.gemini/antigravity-cli/skills/` |
 | DeepSeek Harness | `${DSH_HOME:-~/.dsh}/AGENTS.md` | `${DSH_AGENTS_HOME:-~/.agents}/skills/` |
+| Pi | `~/.pi/agent/AGENTS.md` | `~/.agents/skills/` |
 | Command Code (`cmd`, opt-in) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
 
 Install Node.js 26.12.1 and the latest npm with `sh dl nodejs` on macOS arm64 or Linux x86_64 and arm64. No-argument `dl` also installs Node.js on those platforms, preferring the dl-managed runtime over any `node` earlier on `PATH` when it exists. Command Code requires Node.js 26.12.0+ and installs on demand with `sh dl cmd`, into `~/.local/share/command-code` (or `$XDG_DATA_HOME/command-code`). Grok and Freebuff are likewise opt-in (`sh dl grok`, `sh dl freebuff`); none of the three is downloaded by no-argument `dl` or `make`. Sync the tracked configuration with `make` as usual, then run `cmd login` yourself. The installer never touches Command's `~/.commandcode` credentials or sessions.
