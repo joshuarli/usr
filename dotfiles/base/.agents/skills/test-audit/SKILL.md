@@ -44,4 +44,4 @@ Judge assertions, not names; inspect parameterized rows. Missing evidence means 
 
 Make one coherent owner-boundary change. Remove test-only exports, globals, and wrappers and dead production paths after checking callers. Move valuable regressions to their owners. Add no replacement test that restates the implementation or preserves an alias for tests. Inspect the final diff and separate production changes from test changes.
 
-**Report:** scope reviewed, strongest findings with evidence, changes made, checks run, suspicious tests kept and why, open defects. Never push.
+**Report:** scope reviewed, strongest findings with evidence, changes made, checks run, suspicious tests kept and why, open defects.

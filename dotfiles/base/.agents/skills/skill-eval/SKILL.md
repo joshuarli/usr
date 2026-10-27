@@ -1,6 +1,6 @@
 ---
 name: skill-eval
-description: "Use for /skill-eval: judge whether skills earn their place from real usage in existing Claude, Codex, Muse, and Grok sessions, and decide keep, retune, demote, fold, or delete."
+description: "Use for /skill-eval: judge from existing sessions whether skills earn their place, and decide keep, retune, demote, fold, or delete."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"
@@ -8,7 +8,7 @@ metadata:
 
 # Skill Eval
 
-A skill that reads well proves nothing. Sessions you already ran show whether it fires and whether the work was better or cheaper for it, so read those. Loads, misses, and adherence are diagnostic evidence; a skill earns its place by supplying necessary knowledge, preserving a required contract, improving the result, or lowering the cost of reaching it. Run no new experiments, and edit no skill until each decision has counts and outcomes behind it.
+A skill that reads well proves nothing. Read existing sessions to see whether it fires and whether the work was better or cheaper for it. A skill earns its place by supplying necessary knowledge, preserving a required contract, improving the result, or lowering its cost. Run no new experiments, and edit no skill until each decision has counts and outcomes.
 
 ## Data
 
@@ -17,16 +17,16 @@ A skill that reads well proves nothing. Sessions you already ran show whether it
 - `skill-usage [--days N] [--all]` prints each skill's kind (auto or explicit-only), the sessions that listed it, and the sessions that loaded it, for Claude, Codex, Muse, and Grok.
 - `skill-usage --show NAME` prints each load with its date, harness, project, how it loaded, and a clipped excerpt of the preceding prompt.
 
-`agent-learn status` adds before and after counts of relevant skill invocation and recurring corrections for automatic promotions. `agent-learn show ID` exposes evidence and follow-up assessments. These are observational samples; confirm relevance and procedure adherence against the source records using the steps below. Setup and limits live in `~/usr/docs/agent-learning.md`.
+`agent-learn status` adds before and after counts of relevant skill invocation and recurring corrections for automatic promotions. `agent-learn show ID` exposes evidence and follow-up assessments. Observational only; confirm against session records. Setup and limits live in `~/usr/docs/agent-learning.md`.
 
-A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex or Grok, or Muse's recorded skill-read event. Grok does not save the session skill catalog, so its listed count is unavailable and its firing rate cannot be calculated. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. Rate alone decides nothing.
+A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex or Grok, or Muse's recorded skill-read event. Grok saves no session skill catalog, so its listed count, firing rate, and listed-but-not-loaded skips are unavailable; judge it from load examples and session coverage. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. Rate alone decides nothing.
 
 ## Steps
 
 1. **Frame.** Name the skills in question (default: the auto-triggered ones) and the window.
-2. **Count.** Run `skill-usage` and compute loaded over listed for each harness with saved listings. Under about 20 listed sessions is too little for a verdict. Grok has no saved listing count; evaluate its load examples and session coverage without inventing a firing rate.
+2. **Count.** Run `skill-usage` and compute loaded over listed for each harness with saved listings. Under about 20 listed sessions is too little for a verdict.
 3. **Read the loads.** For each skill, sample up to 5 from `--show`. Classify each as right (the task matched the description), wrong, or forced (a slash command or a brief that named it).
-4. **Read the skips.** In Claude, Codex, and Muse, search the session directories with `rg -l` for phrases from the skill's description, and find sessions where the situation occurred, the skill was listed, and it did not load. Sample up to 5. Classify each as a costly miss (the work lacked knowledge or a contract the skill holds, produced a worse result, or spent avoidable effort) or a harmless skip (the work reached a sound result without it). Only costly misses are under-triggering. Grok's saved history has no skill catalog, so it cannot establish listed-but-not-loaded skips.
+4. **Read the skips.** In Claude, Codex, and Muse, search the session directories with `rg -l` for phrases from the skill's description, and find sessions where the situation occurred, the skill was listed, and it did not load. Sample up to 5. Classify each as a costly miss (the work lacked knowledge or a contract the skill holds, produced a worse result, or spent avoidable effort) or a harmless skip (the work reached a sound result without it). Only costly misses are under-triggering.
 5. **Check outcomes.** For a sample of loads, read what the session did next. Did the skill contribute something the work needed, or only add steps? Did the work follow the rules the skill sets? A skill that loads and is ignored needs a rewrite, not a better description. A skill that loads and is followed without improving the result or its cost is a fold or demote candidate.
 6. **Decide each skill,** with its counts and one example:
    - **Keep:** loaded sessions show it contributed, or skipped sessions show it was needed.

@@ -10,9 +10,9 @@ metadata:
 
 Listing callers is not the job; grep does that. The job is the breakage grep will not show.
 
-## Do not trust your own writeup
+## Prove it
 
-A blast-radius writeup that sounds right is worthless, because it reads as convincing whether or not it is true. Find the one or two facts the change's safety depends on and prove them by running code.
+A writeup that sounds right proves nothing. Find the one or two facts the change's safety depends on and prove them by running code.
 
 For each such fact, climb this ladder as far as is cheap and say where you stopped:
 
@@ -22,7 +22,7 @@ For each such fact, climb this ladder as far as is cheap and say where you stopp
 4. You ran a script or test that calls the real code and fails loudly if you are wrong.
 5. You reproduced it in the running app.
 
-Use existing commands first. If a focused probe is needed, keep it in `.work/tmp` or a disposable fixture. Do not edit the product under review, and respect read-only scope.
+Use existing commands first. Keep any focused probe in `.work/tmp` or a disposable fixture, and do not edit the product under review.
 
 ## Steps
 
@@ -32,7 +32,9 @@ Use existing commands first. If a focused probe is needed, keep it in `.work/tmp
 4. **Rate each risk honestly** with a real likelihood and a real cost. Cite a real `file:line`. A search that finds nothing is still an answer. Never invent a caller or an API. List what you checked and cleared separately.
 5. **Prove the one fact:** write a script or test against the real code, run it, and paste what happened.
 
-For a consequential change with meaningful uncertainty, an independent review may catch a missed risk. Follow [review](../review/SKILL.md) and [orchestrate](../orchestrate/SKILL.md). Do not use several reviewers for routine changes.
+For a consequential, uncertain change, an independent review may catch a missed risk: see [review](../review/SKILL.md) and [orchestrate](../orchestrate/SKILL.md).
+
+**The test:** the one fact the change is safe because of is stated, with the ladder rung you reached, or marked `unproven`.
 
 **Report:**
 

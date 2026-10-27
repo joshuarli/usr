@@ -8,21 +8,21 @@ metadata:
 
 # Ultrareview
 
-One repository in, two deliverables out: docs that match the code, and tickets in `TODO.md` (with RFCs where a design or a decision needs sign-off) for the few things most worth fixing. This skill only routes. The method for each topic lives in the skill named for it, so load that skill and use its tests and proof standard. Use the skills for review only: report what they find and do not run their edit steps. The only files you change are documentation, comments, `TODO.md`, and RFCs.
+One repository in, two deliverables out: docs that match the code, and tickets in `TODO.md` (with RFCs where a design or a decision needs sign-off) for the few things most worth fixing. This skill only routes: load the skill named for each topic and use its tests and proof standard, for review only (report what they find; never run their edit steps). The docs refresh below is the one edit step. You may change only documentation, `TODO.md`, RFCs, and comments removed per `comment-cleanup`.
 
 ## Rules
 
 - **The scope is the repo you are in,** not its dependencies or deployment. Name what you did not cover.
 - **The code is the truth.** When docs and code disagree, fix the doc. If the code is what is wrong, leave it and file a finding.
-- **Findings never ask for smoke tests or new CI.** A missing test is a finding only when a named behavior has no check; a missing CI job is not a finding.
-- **Big picture only.** A finding must change what the owner does: a correctness, security, data, reliability, delivery, or maintainability risk, or something that slows every future change. No style, naming, formatting, or anything a linter would catch, unless the missing check is the finding. Most repos yield 8 to 20 findings; none is a valid result.
+- **No smoke-test or CI findings.** A missing test is a finding only when a named behavior has no check.
+- **Big picture only.** A finding must change what the owner does: a correctness, security, data, reliability, delivery, or maintainability risk, or something that slows every future change. No style, naming, formatting, or anything a linter would catch, unless the missing check is the finding. None is a valid result.
 - **No finding without evidence:** a `file:line` you read or a command you ran. Never invent a caller, API, or version.
-- **Follow the repo's instructions.** Read its AGENTS.md first and obey its verification limits. Run the cheapest existing check once for a baseline and say what it was; report before starting anything expensive. No formatters, no commits, no pushes.
+- **Follow the repo's instructions.** Read its AGENTS.md first. Run the cheapest existing check once for a baseline and say what it was.
 
 ## Steps
 
 1. **Orient.** Read AGENTS.md, README, manifests, CI config, the open tickets in `TODO.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
-2. **Review** through the lenses below. On a repo too big to hold in your head, use `orchestrate`: one read-only lane per group of rows, each told which lens skill files to read and returning candidate findings in the `todo` ticket shape and nothing else. Run lanes as `worker`, and as `scout` for pure inventory such as the build, CI, and dependency row. A lane with a named method and a lens skill is a `worker` task however large the code. Use `expert` only for a lane that reasons about crash consistency, races, or `unsafe` soundness where a wrong call is costly, and state why in the lane brief. Merge findings that share a root cause and rank them.
+2. **Review** through the lenses below. On a big repo use `orchestrate`: one read-only lane per group of rows, told which lens skill files to read and returning only candidate findings in the `todo` ticket shape. Lanes are `worker`, or `scout` for pure inventory (the build, CI, and dependency row), however large the code. Use `expert` only for a lane on crash consistency, races, or `unsafe` soundness, and state why in the brief. Merge findings that share a root cause and rank them.
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **File the findings** (below).
@@ -47,7 +47,12 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 | Comments | `comment-cleanup` | Which comments excuse a workaround or claim a constraint nothing enforces? Each is a finding about that code, and the spreading ones are the worst. |
 | Recurring mistakes | `correct` | Which defect classes recur in history and have no guard? |
 
-No skill covers these, so ask directly: security beyond input handling (authn and authz, secrets in the tree or history, injection), which gets a short pass unless the repo has auth, secrets, multi-tenant data, or network exposure, and a hard look when it does; build and release (reproducible, pinned, can it ship and roll back), reading CI config only to learn them and proposing no new CI; dependencies (abandoned, duplicated, unpinned, heavy); operability (can an operator see a failure, configure the system, and recover).
+No skill covers these, so ask directly:
+
+- **Security beyond input handling** (authn and authz, secrets in the tree or history, injection): a short pass, and a hard look when the repo has auth, secrets, multi-tenant data, or network exposure.
+- **Build and release:** reproducible, pinned, can it ship and roll back. Read CI config only to learn this; propose no new CI.
+- **Dependencies:** abandoned, duplicated, unpinned, heavy.
+- **Operability:** can an operator see a failure, configure the system, and recover.
 
 ## Docs refresh
 
