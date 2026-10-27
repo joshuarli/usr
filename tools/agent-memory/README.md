@@ -181,5 +181,5 @@ Latency on the synthetic corpora is about 20 ms per answered query in process (2
 
 - The live memory-use evaluation has not been run; it needs paid model calls and an explicit decision to spend them. Whether agents actually call `recall` in each harness, and whether retrieval changes outcomes, is unmeasured. The offline tests cover the fixture, the real capture pipeline, and the scoring only.
 - The corpora are synthetic. Quality on real sessions is unknown beyond latency and a spot check that exact identifiers return hits and generic requests abstain.
-- Muse Code transcripts index only the events verified from fixtures (user messages, skill reads), so Muse has no tool-based experience capture. Chinese and Japanese queries match only whole unsegmented runs.
+- Muse Code transcripts are parsed for user messages, assistant text, tool calls, tool results with exit codes, and skill reads; its lifecycle and streaming records are recognized and skipped. Tool-based experience capture from Muse has not been exercised on real sessions. Chinese and Japanese queries match only whole unsegmented runs.
 - Follow-through and receipts are observational; nothing here shows that a record caused an outcome.

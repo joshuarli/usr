@@ -109,6 +109,51 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(normalize({"type": "user", "content": ["hello"]}, "grok")[0]["text"], "hello")
         self.assertEqual(normalize({"payload": {"event": {"kind": "model_user_messages", "messages": ["hello"]}}}, "muse")[0]["text"], "hello")
 
+    def test_muse_tool_turns_keep_commands_results_and_exit_outcomes(self):
+        def event(kind, **fields):
+            return {"payload": {"kind": "run", "event": {"kind": kind, **fields}}}
+
+        call = normalize(event("assistant_tool_calls_committed", tool_calls=[
+            {"id": "fc_1", "call_id": "call_1", "name": "bash", "args": json.dumps({"command": "cargo test"})},
+            {"id": "fc_2", "call_id": "call_2", "name": "read", "args": json.dumps({"path": "src/lib.rs"})},
+        ]), "muse")[0]
+        self.assertEqual((call["kind"], call["call_id"], call["tool_name"]), ("tool-call", "call_1,call_2", "bash"))
+        self.assertIn("cargo test", call["text"])
+        failed = normalize(event("tool_result_batch_committed", results=[
+            {"tool_call_id": "call_1", "text": json.dumps({"command": "cargo test", "exit_code": 101, "output": "boom"})},
+        ]), "muse")[0]
+        self.assertEqual((failed["kind"], failed["call_id"], failed["outcome"]), ("tool-output", "call_1", "error"))
+        self.assertIn("boom", failed["text"])
+        passed = normalize(event("tool_result_batch_committed", results=[
+            {"tool_call_id": "call_1", "text": json.dumps({"exit_code": 0, "output": "fine"})},
+        ]), "muse")[0]
+        self.assertEqual(passed["outcome"], "ok")
+        rejected = normalize(event("tool_result_batch_committed", results=[
+            {"tool_call_id": "call_3", "text": '<read-skill-result name="x" status="error">'},
+        ]), "muse")[0]
+        self.assertEqual(rejected["outcome"], "error")
+        said = normalize(event("assistant_message_committed", text="Cleanup verified."), "muse")[0]
+        self.assertEqual((said["kind"], said["text"]), ("assistant", "Cleanup verified."))
+        self.assertEqual(normalize(event("reasoning_committed", text="", encrypted_content="x"), "muse")[0]["kind"], "reasoning")
+
+    def test_runtime_bookkeeping_kinds_are_recognized_not_degraded(self):
+        for harness, obj in (
+            ("claude", {"type": "api-request-shape"}),
+            ("claude", {"type": "cost-state"}),
+            ("claude", {"type": "tools-used"}),
+            ("grok", {"type": "backend_tool_call"}),
+            ("muse", {"payload": {"kind": "task", "event": {"kind": "output", "chunk": "dup"}}}),
+            ("muse", {"payload": {"kind": "run", "event": {"kind": "model_completed"}}}),
+            ("muse", {"payload": {"kind": "scheduled"}}),
+            ("muse", {"retained_marker": "omitted_live_only", "omitted_record": {"omission_class": "task_tool_delta_v1"}}),
+            ("muse", {"retained_frame": "session_permission_transaction", "children": []}),
+            ("muse", {"payload_type": "runtime.session.task_source_committed", "payload": {"task_id": "t"}}),
+            ("muse", {"payload_type": "runtime.user_intent.accepted", "payload": {}}),
+            ("muse", {"payload_type": "session.name.changed", "payload": {"name": "x"}}),
+        ):
+            with self.subTest(harness=harness, obj=obj):
+                self.assertFalse(normalize(obj, harness)[0]["kind"].startswith("unknown:"))
+
     def test_project_refresh_limits_body_reads_and_preserves_other_project(self):
         other = self.root / "other"
         other.mkdir()

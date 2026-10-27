@@ -27,10 +27,31 @@ _SKIP_TEXT_KEYS = frozenset((
 _CLAUDE_KNOWN = frozenset((
     "summary", "system", "attachment", "queue-operation", "permission-mode", "mode", "atis-latch", "last-prompt",
     "ai-title", "custom-title", "file-history-snapshot", "file-history-delta", "progress", "api-request",
-    "api-request-blob", "pr-link", "agent-name", "tag",
+    "api-request-blob", "pr-link", "agent-name", "tag", "api-request-shape", "cost-state", "tools-used",
 ))
 _PI_SESSION_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}T[\d-]+Z_(.+)\.jsonl$")
 _PI_BOOKKEEPING = frozenset(("model_change", "thinking_level_change", "usage", "context_edit", "label", "session_info", "custom"))
+_MUSE_EXIT_CODE = re.compile(r'"exit_code":\s*(-?\d+)')
+_MUSE_ERROR_STATUS = re.compile(r'status="error"')
+_MUSE_BOOKKEEPING_PAYLOAD_PREFIXES = ("runtime.session.", "runtime.user_intent.", "session.name.changed")
+_MUSE_BOOKKEEPING = frozenset((
+    "accepted", "agent_tree_initialized", "async_owner_attempt", "cancelled", "command_intake", "command_invoked",
+    "completed", "context_block_diagnostic", "context_block_updated", "context_compaction_candidate",
+    "context_compaction_installed", "context_projection_checkpoint", "failed", "goal_handoff_safety",
+    "goal_progress_nudge_fired", "goal_run_binding", "goal_usage_attribution", "hook_run_started", "hook_run_terminal",
+    "inbox_delivery_anomaly", "inbox_item_drained", "inbox_item_queued", "memory_reminder_child_session_linked",
+    "model_completed", "model_failure_terminal_intent", "model_input_trace_recorded", "model_reconfigure",
+    "model_response_created", "muse", "output", "provider_request_options_configured", "proposed",
+    "reasoning_summary_committed", "reasoning_summary_delta", "reminder_cleanup", "reminder_installed",
+    "reminder_proposal", "reminder_reconciler_outcome", "rejected", "resource_pressure", "resource_usage_sampled",
+    "retained_runtime_fact", "route_facts", "run_fatal_error_classified", "run_model", "scheduled",
+    "security_mode", "session_end", "session_opened", "session_start_intake_v3", "session_started",
+    "side_effect_intent", "skill_reminder_decision", "started", "startup_phases", "status", "subagent_control",
+    "task_backgrounded", "task_stream_linked", "terminal", "todo_snapshot_updated", "tool_batch_effect",
+    "tool_delta", "tool_output_ref", "tool_results_cleared", "user_input_prompt_requested",
+    "user_input_prompt_settled", "workflow_child_lifecycle", "workflow_child_result_protocol_recorded",
+    "workflow_child_result_submitted", "workflow_launch_reconciled", "workflow_run_launched", "workspace_branch",
+))
 _EXIT_PATTERNS = (
     re.compile(r"(?im)^\s*exit(?:ed)? (?:code|status)[: ]+(-?\d+)\b"),
     re.compile(r"(?i)\b(?:process )?exited with (?:exit )?code (-?\d+)\b"),
@@ -314,14 +335,50 @@ def _muse_record(obj):
         return _record("session_meta", "", timestamp, raw_type="metadata")
     event_type = event.get("kind") or payload.get("kind")
     if not event_type:
+        envelope = next((obj[key] for key in ("retained_marker", "retained_frame") if isinstance(obj.get(key), str)), None)
+        payload_type = obj.get("payload_type")
+        if envelope is None and isinstance(payload_type, str) and payload_type.startswith(_MUSE_BOOKKEEPING_PAYLOAD_PREFIXES):
+            envelope = payload_type
+        if envelope is not None:
+            return _record(envelope, "", timestamp, raw_type=envelope)
         return _record("unknown:muse", "", timestamp, raw_type=payload.get("kind", "event"))
     if event_type == "model_user_messages":
         return _record("user", _content_text(event.get("messages", [])), timestamp, raw_type=event_type, role="user")
     if event_type == "skill_read_observed":
         return _record(str(event_type), _text_value(event), timestamp, raw_type=event_type)
-    if event_type == "model_request_configured":
+    if event_type == "assistant_message_committed":
+        return _record("assistant", _text_value(event.get("text")), timestamp, raw_type=event_type, role="assistant")
+    if event_type == "assistant_tool_calls_committed":
+        calls = [call for call in event.get("tool_calls", []) or [] if isinstance(call, dict)]
+        rendered = "\n".join(str(call.get("name") or "tool") + "\n" + _muse_arguments(call.get("args")) for call in calls)
+        call_id = ",".join(str(call["call_id"]) for call in calls if call.get("call_id"))
+        return _record("tool-call", rendered, timestamp, call_id or None, event_type, tool_name=str(calls[0].get("name") or "tool") if calls else "tool")
+    if event_type == "tool_result_batch_committed":
+        results = [result for result in event.get("results", []) or [] if isinstance(result, dict)]
+        texts = [_text_value(result.get("text")) for result in results]
+        call_id = ",".join(str(result["tool_call_id"]) for result in results if result.get("tool_call_id"))
+        return _record("tool-output", "\n".join(part for part in texts if part), timestamp, call_id or None, event_type, outcome=_muse_outcome(texts))
+    if event_type == "reasoning_committed":
+        return _record("reasoning", "", timestamp, raw_type=event_type)
+    if event_type == "model_request_configured" or event_type in _MUSE_BOOKKEEPING:
         return _record(str(event_type), "", timestamp, raw_type=event_type)
     return _record("unknown:" + str(event_type), "", timestamp, raw_type=event_type)
+
+
+def _muse_arguments(args):
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return args
+    return _text_value(args)
+
+
+def _muse_outcome(texts):
+    codes = [int(match.group(1)) for match in (_MUSE_EXIT_CODE.search(text[:4000]) for text in texts) if match]
+    if any(code != 0 for code in codes) or any(_MUSE_ERROR_STATUS.search(text[:400]) for text in texts):
+        return "error"
+    return "ok" if codes else None
 
 
 def _grok_record(obj):
@@ -351,7 +408,7 @@ def _grok_record(obj):
     if kind == "tool_result":
         text = _content_text(obj.get("content", ""))
         return _record("tool-output", text, timestamp, obj.get("tool_call_id"), kind, outcome=exit_outcome(text))
-    if kind in ("reasoning", "system"):
+    if kind in ("reasoning", "system", "backend_tool_call"):
         return _record(str(kind), "", timestamp, raw_type=kind)
     return _record("unknown:" + str(kind), "", timestamp, raw_type=kind)
 
