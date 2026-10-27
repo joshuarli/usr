@@ -13,19 +13,19 @@ Use this procedure for the `sym` command and repository-level Markdown and skill
 
 ## Scope and prerequisites
 
-The `sym` journey runs in a disposable Git fixture and scratch home under `.work/tmp`. It never uses the real home directory. The helper rejects `.work` or `.work/tmp` symlinks before creating scratch files. The Markdown checks read the repository and write nothing. You need `sh`, `git`, and Python 3.
+The `sym` journey runs in a disposable Git fixture and scratch home under `.work/tmp`. It never uses the real home directory. The Markdown checks read the repository and write nothing. You need `sh`, `git`, and Python 3.
 
 This procedure does not exercise `dl`, home sync, platform setup, installed system services, or applications outside this repository.
 
 ## Launch and readiness
 
-Run from the repository root. The helper checks that `.work` is ignored by `.git/info/exclude` before it creates scratch files.
+Run from the repository root. Before creating scratch files, the helper checks that `.work` is ignored by `.git/info/exclude` and rejects `.work` or `.work/tmp` symlinks.
 
 ```sh
 ./.agents/skills/verify-usr/scripts/sym-journey.sh
 ```
 
-The helper creates no server or long-running process. A zero exit status means it observed a valid link, an idempotent repeat, and a conflict that left the existing destination intact.
+The helper creates no server or long-running process.
 
 ## Doctor
 
@@ -49,13 +49,13 @@ sh dotfiles/skills-check.sh .agents/skills
 python3 -I dotfiles/base/.local/bin/mdtool check --untracked
 ```
 
-`dotfiles-health` defines agent setup invariants. `mdtool` checks links, references, and repository documentation. Neither command proves tool behavior outside its own checks.
+`mdtool` checks links, references, and repository documentation. Neither command proves tool behavior outside its own checks.
 
 ## Evidence and cleanup
 
 The helper prints the path to a text record under `.work/tmp/verify-usr.*.log`. Read it to see the commands' output and the observed filesystem results. It contains no environment dump or credentials. A successful record proves only the exercised `sym` behavior on this platform.
 
-On success, failure, or interruption after the cleanup trap is installed, the helper removes only the fixture directory it created and keeps the evidence file. If interrupted before its first observation, the evidence states that no journey observation was recorded. Run it again to create a fresh fixture; each run uses a unique name, so prior evidence cannot collide. Do not delete evidence as part of fixture cleanup.
+On success, failure, or interruption after the cleanup trap is installed, the helper removes only its own fixture directory and keeps the evidence file. If interrupted before its first observation, the evidence says no observation was recorded. Each run uses a unique name, so rerunning creates a fresh fixture and prior evidence cannot collide. Do not delete evidence as part of fixture cleanup.
 
 Update this procedure if `sym` flags, its fixture assumptions, `.work` handling, or the repository check commands change.
 

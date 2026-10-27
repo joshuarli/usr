@@ -5,7 +5,7 @@ description: "Apply when writing or reviewing docs, READMEs, design docs, or PR 
 
 # Technical Writing
 
-Write so a tired engineer understands on the first read. The codebase is the word list: use the real symbol, file, flag, or command name, never a synonym. Cut every word that does no work, use the short everyday word, and when a rule makes a sentence worse, fix the sentence another way. Run `unslop` over the result.
+Write so a tired engineer understands on the first read. The codebase is the word list: use the real symbol, file, flag, or command name, never a synonym. Cut every word that does no work, and when a rule makes a sentence worse, fix the sentence another way. Run `unslop` over the result; it owns word choice, sentence-case headings, and keeping articles.
 
 ## Pick the mode first
 
@@ -24,17 +24,17 @@ Never mix modes. Split and link.
 - Put the condition before the instruction and the common case before the exception.
 - One instruction per sentence. Split an instruction past about 20 words and any other sentence past about 25.
 - Say who acts. Passive only when the actor is unknown or beside the point.
-- Give each thing one name everywhere. Keep "the" and "a". Call an action by one verb throughout.
+- Give each thing one name everywhere. Call an action by one verb throughout.
 - Keep "only" and "not" next to the word they change. Break long noun strings into a phrase with a verb.
 - Make every "it", "this", and "they" point to one obvious noun. Never use "this" or "which" for a whole clause.
 - Use periods, not semicolons. No slashes ("a, b, or both", not "and/or"), no "(s)", no idioms or Latin abbreviations.
-- Headings carry the point, in sentence case. A task heading is a verb phrase. Numbered lists for sequences, bullets for the rest, each introduced by a full sentence.
+- Headings carry the point. A task heading is a verb phrase. Numbered lists for sequences, bullets for the rest, each introduced by a full sentence.
 - Link with words that say where it goes. Never "click here". Never "simply" or "easy" in a procedure.
 - Vary sentence length on purpose and be specific: not "schema changes can cause issues" but "a column rename fails the build".
 
-## Commits and PRs
+## PR descriptions
 
-A PR body is a briefing a reviewer reads in under a minute: what changed, why, how it was verified, what the reviewer must decide. Do not paste logs, SHA lists, or metric tables; link them. Every count or tree claim must be true at the commit that lands it.
+A PR body is a briefing a reviewer reads in under a minute: what changed, why, how it was verified, what the reviewer must decide. Do not paste logs, SHA lists, or metric tables; link them. Every number or file-tree claim must match the code at the commit that lands the PR.
 
 Before: "Configuration of the budget script is performed via budget.json. Note that it's important to remember that running with --write should only be done when lowering it."
 

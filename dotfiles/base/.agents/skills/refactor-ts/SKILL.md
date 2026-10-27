@@ -9,7 +9,7 @@ metadata:
 
 # Refactor TypeScript
 
-Refactor code and applicable tooling for the chosen stack. Improve domain modeling, boundaries, reactivity, failures, and resource ownership; upgrades or lint alone do not finish actionable work. Preserve behavior and public contracts unless their change is authorized. A justified no-op is valid; do not manufacture edits.
+Refactor code and applicable tooling for the chosen stack. Improve domain modeling, boundaries, reactivity, failures, and resource ownership; upgrades or lint alone do not finish actionable work. Preserve behavior and public contracts unless their change is authorized. A justified no-op is valid; make no edits to look busy.
 
 Use the requested paths/packages; an unqualified invocation covers the current repository's first-party TypeScript. A whole-codebase invocation includes migration of applicable stack layers. A narrow code refactor does not authorize an unrelated framework or runtime migration. Exclude vendored code and generated outputs; change their source only if in scope.
 
@@ -17,7 +17,7 @@ Use the requested paths/packages; an unqualified invocation covers the current r
 
 Keep these decisions: pnpm owns packages; Node.js owns execution; TypeScript owns static checking; Oxlint owns linting; Vite owns frontend compilation; Solid owns UI reactivity; Effect owns I/O and typed failures; Vitest and Playwright own tests. Pure computation stays ordinary TypeScript. Apply only relevant layers: a server needs no Solid, a library no application server.
 
-The selected generations are TypeScript 7, Vite 8, Solid 2, Effect 4, and Vitest 5. Use latest stable Node.js and pnpm when migrating; resolve and pin compatible releases instead of copying remembered version numbers. Solid 2's release-candidate channel is an intentional choice while it remains prerelease. Do not silently downgrade the stack, switch to other prereleases, or reinterpret latest stable as latest LTS.
+Target these majors: TypeScript 7, Vite 8, Solid 2, Effect 4, and Vitest 5. Use latest stable Node.js and pnpm when migrating, and resolve exact versions from the registry, not from memory. Solid 2's release-candidate channel is an intentional choice while it remains prerelease. Do not silently downgrade the stack, switch to other prereleases, or reinterpret latest stable as latest LTS.
 
 Read the relevant references before editing:
 
@@ -34,7 +34,7 @@ Read active instructions, working changes, package manifests/lockfile, runtime t
 
 Identify application versus published-library boundaries and browser, server, worker, and test environments. Trace actual data and resource flows: unknown input to decoded value, service to runner, reactive source to UI, acquisition to release. Establish focused baseline results or record unavailable checks.
 
-For each batch, identify its concrete benefit, preserved invariant, and smallest regression check. Preserve wire formats, property presence, public imports/types, failures/status, initialization, SSR, cancellation, and performance. Stronger validation, changed defaults, and new failure cases are contract changes. Fix incidental bugs only within authorized behavior; otherwise report them and continue independent work. Honor local policy.
+For each batch, identify its concrete benefit, preserved invariant, and smallest regression check. Preserve wire formats, property presence, public imports and types, failures and status, initialization, SSR, cancellation, and performance. Stronger validation, changed defaults, and new failure cases are contract changes. Fix incidental bugs only within authorized behavior; otherwise report them and continue.
 
 ## Refactor in coherent passes
 
@@ -45,18 +45,18 @@ For each batch, identify its concrete benefit, preserved invariant, and smallest
 5. When in scope, migrate packages and commands using the stack reference. Replace each old responsibility with its new owner before deleting the old implementation. Do not retain duplicate frameworks, validators, or orchestration without an actual compatibility need.
 6. Update affected callers, public documentation, and existing tests together. Complete the requested scope, not only the first easy file.
 
-Do not add abstractions without a responsibility or mechanically rewrite interfaces, classes, or enums. Do not install, configure, or run formatters, including check-only, editor, hook, or aggregate runs. Inspect task definitions and run permitted constituent checks. Do not substitute formatting/import-sorting lints or manual reflow. Keep local layout and correctness lints; avoid blanket pedantic/style groups or forced verbosity.
-
-Keep publication, major contract decisions, and CI edits within existing authorization. Do not edit CI unless asked. An instruction to refactor does not itself authorize pushing or deploying.
+Do not add abstractions without a responsibility or mechanically rewrite interfaces, classes, or enums. Do not install, configure, or run formatters, including check-only, editor, hook, or aggregate runs; run the permitted constituent checks instead. Do not stand in for a formatter with import-sorting lints or manual reflow. Keep local layout and correctness lints; avoid blanket pedantic or style groups and forced verbosity. A refactor instruction does not authorize deploying.
 
 ## Verify and finish
 
-Run focused verification by default, honoring explicit opt-outs and active instructions. Use `pnpm run` for scripts and `pnpm exec` for binaries. Keep an independent compiler check for the intended configs, plus applicable Oxlint checks and tests; Node stripping and Vite compilation do not prove type safety. Verify actual file/config discovery. Reuse results only while relevant code, dependencies, configuration, and environment remain unchanged; separate baseline failures from regressions.
+Use `pnpm run` for scripts and `pnpm exec` for binaries. Keep an independent compiler check for the intended configs, plus applicable Oxlint checks and tests; Node stripping and Vite compilation do not prove type safety. Verify actual file and config discovery, and separate baseline failures from regressions.
 
-Check the risks touched: boundary/omission semantics, exhaustive states, failures, cancellation/finalizers, reactivity, request isolation, and exports/declarations. Add tests only for an uncovered observable contract or invariant, never code shape. An authorized bug fix needs a failing reproducer followed by a passing result. Do not make checks green with weaker types/schemas/tests, fabricated guards, broad suppressions, or excluded code; a specific false positive may justify a narrow exception.
+Check the risks touched: boundary/omission semantics, exhaustive states, failures, cancellation/finalizers, reactivity, request isolation, and exports/declarations. Do not make checks green with weaker types or schemas, fabricated guards, broad suppressions, or excluded code; a specific false positive may justify a narrow exception.
 
 For UI changes, exercise affected behavior in a real browser. For changed SSR/routes, cover production serving and nested navigation. For dependency changes, verify a frozen install; for build changes, inspect output for obsolete frameworks and server-only imports/secrets. Use relevant existing performance/size gates; measure performance claims.
 
-Review the final diff and rescan for obsolete code, duplicated ownership, accidental contracts, and churn. Bind evidence to final changes: stale checks, empty test selections, or excluded code are not passes. Missing required proof means unverified/partial, not complete. Report the precise gap without compatibility shims or silently lost coverage.
+Review the final diff and rescan for obsolete code, duplicated ownership, accidental contracts, and churn. Stale checks, empty test selections, and excluded code are not passes. State any missing proof as a specific gap.
+
+**The test:** the compiler, Oxlint, and tests pass on the final diff, no obsolete layer or duplicated ownership remains, and behavior and public contracts are preserved unless a change was authorized.
 
 **Report:** code and stack changes with representative symbols; removed dependencies/layers; contracts preserved or intentionally changed; justified exceptions and remaining blockers; source/version uncertainty; checks run, results, preexisting failures, and checks not run.

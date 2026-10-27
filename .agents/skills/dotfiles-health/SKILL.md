@@ -5,7 +5,7 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 
 # Dotfiles Health
 
-`~/usr` is the source of truth, and `make` makes the home directory match it. Edit the repo, never `~`.
+`~/usr` is the source of truth, and `make` makes the home directory match it.
 
 The layout, the commands, and where each piece of agent configuration lives are in the repo `AGENTS.md`. This skill holds the invariants to check.
 
@@ -18,19 +18,17 @@ The layout, the commands, and where each piece of agent configuration lives are 
 - **A rule has one owner.** The shim rules live in `dead-code-archaeology`, the Oracle Test in `test-audit`, task routing and completion in the canonical global contract and `do`, and explicit-only loading in each skill's shared policy metadata. Other skills point to the owner; do not copy.
 - **Model and effort live once.** Claude's are in `.claude/agents/*.md`, and Grok's are in `.grok/agents/*.md`. `orchestrate` names the agents without repeating them. Codex's sit in the `orchestrate` table and `config.toml`. Muse Code's sit in the `orchestrate` table, with the session default in `.config/muse/settings.json`. OpenCode has no pinned model in its config. The default model and effort in settings belong to the owner; do not change them unprompted.
 - **Permission posture:** Claude uses `bypassPermissions` with sandboxing disabled; Codex uses `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`, and an empty `rules/default.rules`; Muse uses `:unrestricted`; Grok uses yolo with sandbox profile `off`; OpenCode allows everything with a `permissions` allow-all rule; Command Code uses `permissions.defaultMode: yolo`. Preserve the owner's no-approval, no-sandbox preference wherever supported. Repository instructions still govern what work is appropriate.
-- **Check tool behavior against current docs, not memory.** Established so far: Claude agent files take `model` and `effort` and hot-reload, and its permission mode is `bypassPermissions`. Codex skills use `agents/openai.yaml`. Muse's `:unrestricted` profile disables approval and sandboxing. Grok's `yolo` enables always-approve and its sandbox profile `off` disables filesystem sandboxing. OpenCode accepts the global `permissions` allow-all rule.
+- **Check tool behavior against current docs, not memory.** Established so far: Claude agent files take `model` and `effort` and hot-reload. Codex skills use `agents/openai.yaml`. Each posture value above disables approval and sandboxing in its harness; Grok's `yolo` enables always-approve and its sandbox profile `off` disables filesystem sandboxing.
 
 ## sym
 
-- Never run `sym` without `-t <tmpdir>` while experimenting; the default target is `$HOME`.
-- Fix a bug by adding a failing numbered test to `sym-test.sh` first, then the fix.
 - Properties the tests pin: every conflict is reported before anything is written; an existing link with the right text is already correct, but a dangling one is a conflict; a target path that passes through a symlinked directory is a conflict in both modes, so the source survives; delete mode never removes directories above the target; relative links are computed from physical paths; a `.sym-dir` directory links whole and respects Git ignores.
 - Run the suite under `dash` as well as `sh` (`/bin/sh` is bash 3.2 on macOS and dash on Linux), and run `shellcheck -s sh` on the scripts you changed.
 
 ## After a substantive change
 
 - For changes to `sym` that rewrite home paths, get a fresh adversarial review of source preservation. An independent review found a source-deleting bug here.
-- **Choose proof by the mechanism changed.**
+- **Choose proof by the mechanism changed:**
   - Wording with unchanged meaning: inspect the diff and relevant references; stop when checked.
   - Renames, removals, or heading and anchor changes: check the changed files and inbound references.
   - Local workflow composition: read the directly composed procedures and applicable global rules, then check the specific transitions and effects. A short instruction that composes workflows is a behavior change, not cosmetic wording.
@@ -43,6 +41,8 @@ The layout, the commands, and where each piece of agent configuration lives are 
 
 ## Known gaps
 
-A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins. The auto-triggered skills have not been read with `skill-eval` against real sessions.
+A tab in a filename breaks linking. `sym -d` can remove an emptied target directory, which test 12 pins.
+
+**The test:** `skills-check.sh` and the structural tests pass, no rule is stated outside its owner, and `make plan` shows no `CONFLICT`.
 
 **Report:** what changed, which checks ran, and any `CONFLICT` you saw.

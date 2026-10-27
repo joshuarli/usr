@@ -8,7 +8,7 @@ metadata:
 
 # Docs Refresh
 
-Make the docs true, short, and findable, in the standard shape below. Docs and comments are the only files you change, and a comment is only ever deleted, never added or reworded. Prose rots, so a doc claim that a type, test, or lint could enforce is reported as a candidate to enforce and then cut. When the code is what is wrong, leave it and report it.
+Make the docs true, short, and findable, in the standard shape below. Docs and public API doc comments are the only files you change. Every other comment is deleted, never added or reworded. Prose rots, so a doc claim that a type, test, or lint could enforce is reported as a candidate to enforce and then cut. When the code is what is wrong, leave it and report it.
 
 ## Standard format
 
@@ -21,7 +21,7 @@ Size the layout to the repo. A small repo, with under about 200 lines of docs or
 
 ## Scope
 
-Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the comments it added or changed.
+Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs/`, contributing notes, `--help` text, config examples, and public API doc comments. When asked to refresh only a change, cover just the docs that change made stale or should have updated, and the public API doc comments it touched. Delete any other comment it added or changed.
 
 ## Rules
 
@@ -35,7 +35,7 @@ Default to every doc surface in the repo: README, AGENTS.md and CLAUDE.md, `docs
 - **One writer** per file, so edits do not overlap. Create a doc file only for a topic that has no home and would make its nearest existing doc too long to scan.
 - **Verify narrowly:** every `path:line` and link you kept resolves, and any doc check the repo has (a link checker, a doctest) runs on the files you touched.
 
-When `mdtool` is installed, run one `mdtool check` for the refresh scope (`mdtool check PATH...` for selected docs, `--untracked` for drafts, `--since HEAD` for new findings only). It combines links, refs, consumers, pointers, duplicates, and routing with grouped output and anchor suggestions. Use `--verbose` or `--json` only when complete occurrence details are needed; use `mdtool anchors FILE...` only when you need a heading inventory. Without `mdtool`, use `rg -n '\[[^]]+\]\('` to find links, `rg -n '^#{1,6} '` to list headings, search backticked paths with `rg`, search source for each changed doc path to find consumers, and inspect AGENTS.md links and README headings by hand.
+When `mdtool` is installed, run one `mdtool check PATH...` for the refresh scope (`--untracked` for drafts, `--since HEAD` for new findings only). It covers links, refs, consumers, pointers, duplicates, and routing. Add `--verbose` or `--json` only for full occurrence details, and `mdtool anchors FILE...` for a heading inventory. Without `mdtool`, use `rg -n '\[[^]]+\]\('` for links, `rg -n '^#{1,6} '` for headings, `rg` for backticked paths, and a source search for each changed doc path to find consumers. Inspect AGENTS.md links and README headings by hand.
 
 **The test:** an end user can install and use the thing from README alone, a developer reaches any topic in one hop from AGENTS.md, a newcomer can follow every command and reach the code each doc points to, no sentence is there only because it used to be true, and the docs are shorter than before unless a missing topic needed new text.
 

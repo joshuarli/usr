@@ -19,7 +19,7 @@ Scan the text for the patterns below, then rewrite them. Preserve the meaning an
 
 ## Style and filler
 
-- **No em dashes.** Use a period or a comma. Avoid colons as mid-sentence connectors.
+- **No em dashes.** Use a period or a comma. Avoid colons as mid-sentence connectors (a bold lead-in's colon is fine).
 - **Bold, headings, emoji.** Bold only a lead-in that names an item and is followed by new detail; never "**Performance:** Performance improved". Sentence-case headings, no decorative emoji, straight quotes.
 - **Chatbot and sycophantic phrases** ("I hope this helps", "Great question"): remove.
 - **Filler:** "in order to" is "to", "due to the fact that" is "because", "it is important to note that" is nothing.
@@ -28,7 +28,7 @@ Scan the text for the patterns below, then rewrite them. Preserve the meaning an
 
 ## Plain speech
 
-- **Say what it does, not how it feels.** "SQL you can read" becomes "`.toSQL()` returns the exact string sent to the database". If a sentence could appear unchanged in another project's docs, it says nothing about this one. Cut it.
+- **Say what it does, not how it feels.** "SQL you can read" becomes "`.toSQL()` returns the exact string sent to the database". A sentence that fits any project's docs says nothing about this one, so cut it.
 - **One idea per sentence.** Split a sentence the reader has to re-read.
 - **Active voice.** Name the actor: "the loader parses the file".
 - **Plain words, no adverbs.** "Use", not "utilize". "Significantly faster" becomes the measured delta.

@@ -56,6 +56,8 @@ Test the observable contract: each command's parser, `-h` and `--help`, top-leve
 
 ## Finish
 
-Update README and docs to match generated help. Verify with the compiler and focused tests and separate preexisting failures from regressions. Done when lexopt is the only parser with no clap left, no glob imports under `src/cli`, main is only the entrypoint, each subcommand has a module and spec, parsing and help share the schema, every command supports help, version carries the SHA, output is deterministic, tests exist, and behavior is preserved.
+Update README and docs to match generated help. Verify with the compiler and focused tests and separate preexisting failures from regressions.
+
+**The test:** `lexopt` is the only parser with no clap left, `src/cli` has no glob imports, `main.rs` is only the entrypoint, parsing and help share the schema, every command supports help, version carries the SHA, output is deterministic, and behavior is preserved.
 
 **Report:** surface migrated, deviations (global-option placement, `-v` conflicts, extra binaries), checks run and not run, preexisting failures.

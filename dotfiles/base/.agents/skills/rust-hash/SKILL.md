@@ -8,7 +8,7 @@ metadata:
 
 # Rust Hash Migration
 
-Modernize map and set usage with `hashbrown` as the default table, choosing each collection from its real semantics and workload. This is not "replace every `BTreeMap` with `HashMap`": audit each important collection, find the guarantees it needs, and use the cheapest representation that provides them. Implement the changes, preserve observable behavior, measure instead of assuming, and add no abstraction layers or exotic dependencies without a measured win. Remove dead fast-hash crates such as `fxhash`.
+Use `hashbrown` as the default table and pick each collection's representation from its real semantics and workload, not by replacing every `BTreeMap` with `HashMap`. Preserve observable behavior, measure instead of assuming, and add no abstraction layers or exotic dependencies without a measured win.
 
 ## Baseline
 
@@ -23,7 +23,7 @@ hashbrown = { version = "0.17", default-features = false, features = ["default-h
 - Table and hasher are separate choices. `std::collections::HashMap` is a hashbrown fork; its weakness is the SipHash default hasher.
 - Use `hashbrown::{HashMap, HashSet}` with plain `HashMap<K, V>`; do not add hasher parameters mechanically. Never use `std` maps in application code, and do not use `foldhash::HashMap` (an alias of the std type).
 - Attacker-controlled keys (request data, external strings, remote protocol fields) use `hashbrown::HashMap<K, V, std::hash::RandomState>`. Trusted internal keys may use fast hashers. Never trade a security property for a microbenchmark.
-- **rustc-hash:** for trusted keys dominated by small integers, IDs, enums, handles, or small tuples, benchmark `rustc_hash::FxBuildHasher` (2.x) against the default via `HashMap<K, V, FxBuildHasher>`. Fx is fastest on such keys but clusters aligned or strided IDs, so adopt it only if the real workload wins. Never use the obsolete `fxhash`.
+- **rustc-hash:** for trusted keys dominated by small integers, IDs, enums, handles, or small tuples, benchmark `rustc_hash::FxBuildHasher` (2.x) against the default via `HashMap<K, V, FxBuildHasher>`. Fx is fastest on such keys but clusters aligned or strided IDs, so adopt it only if the real workload wins.
 
 ## Audit every `BTreeMap` and `BTreeSet`
 
@@ -55,6 +55,8 @@ Check key domains and cardinality before reaching for a hash table:
 
 Measure representative workloads, not isolated hash functions unless hashing is the bottleneck: wall and CPU time, allocations, peak memory, and instructions or cache misses where relevant. Use the project's infrastructure, else Criterion and `perf stat` on Linux. For hot collections compare the existing code, the hashbrown default, and Fx if plausible; keep no losing variant or feature flag. Vet numbers with `benchmark-checklist`.
 
-Remove `fxhash`, unused hasher and collection crates, and run the dependency checks. Every remaining dependency must match a chosen implementation; add no `ahash`, `foldhash`, `rustc-hash`, or bitmap crate speculatively.
+Remove `fxhash` (obsolete) and unused hasher and collection crates, and run the dependency checks. Every remaining dependency must match a chosen implementation; add no `ahash`, `foldhash`, `rustc-hash`, or bitmap crate speculatively.
+
+**The test:** every `BTreeMap` and `BTreeSet` is classified, each change or kept tree is justified by its guarantees and measured numbers, and no unused hasher crate remains.
 
 **Report:** each collection representation changed; why each `BTreeMap`/`BTreeSet` changed or stayed, naming those deliberately kept; the hashing strategy; specialized representations adopted; before and after numbers; remaining collection bottlenecks.
