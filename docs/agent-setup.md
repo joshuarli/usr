@@ -36,7 +36,7 @@ Harnesses use native skill metadata and discovery paths. The checker at [`skills
 
 ## Harness configuration
 
-Codex defaults to `gpt-6.1-sol` at `medium` effort and to `gpt-6-luna` at `high` effort for unspecified children; the `orchestrate` tiers explicitly select their own models and efforts. These models select multi-agent V2, whose eight resident-thread slots include the parent. The V1 `agents.max_depth` setting does not restrict V2 nesting; the orchestration skill instructs V2 children not to spawn other children.
+Codex defaults to `gpt-6.1-terra` at `high` effort and to `gpt-6-luna` at `high` effort for unspecified children; the `orchestrate` tiers explicitly select their own models and efforts. These models select multi-agent V2, whose eight resident-thread slots include the parent. The V1 `agents.max_depth` setting does not restrict V2 nesting; the orchestration skill instructs V2 children not to spawn other children.
 
 The tracked configs are under [`dotfiles/base`](../dotfiles/base/). Review changes after a harness writes its own config. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. OpenCode restores its `cli.json` when missing, so install its tracked symlink while the client is stopped.
 
