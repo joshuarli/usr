@@ -80,12 +80,9 @@ Repo upkeep and getting work merged.
 | Skill | Mode | Use it to |
 | --- | --- | --- |
 | `pr-ready` | Explicit | Bring one open PR toward merge-ready with unattended execution: resolve conflicts, judge bot comments, reply on GitHub, and check required CI. It never merges. |
-| `pr-stack` | Explicit | Drive a PR or stack toward merge-ready with unattended execution, or land a verified stack bottom-up. It merges only when you ask. |
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
 | `settle` | Explicit | Before moving to another computer: find unmerged and local-only work and separate what must travel from what regenerates. |
-
-Choose between the PR skills by size: `pr-ready` for one PR, `pr-stack` for a stack.
 
 ## Keep the skills themselves honest
 
