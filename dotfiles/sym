@@ -81,6 +81,25 @@ confined() {
     return 0
 }
 
+lexical_path() (
+    case $2 in /*) _lp=$2 ;; *) _lp=$1/$2 ;; esac
+    _out=''
+    IFS=/
+    set -f
+    for _seg in $_lp; do
+        case $_seg in
+            ''|.) ;;
+            ..) _out=${_out%/*} ;;
+            *) _out=$_out/$_seg ;;
+        esac
+    done
+    printf '%s' "${_out:-/}"
+)
+
+source_has() {
+    [ -e "$src/$1" ] || [ -L "$src/$1" ]
+}
+
 source_relative_path() {
     if [ "$1" = "$src" ]; then
         source_rel=$src
@@ -134,6 +153,7 @@ trap 'exit 130' 1 2 3 15
 : > "$tmp/names"
 : > "$tmp/dests"
 : > "$tmp/absolute-names"
+: > "$tmp/prune"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$src" -c core.quotePath=false ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
     ! grep -q '^"' "$tmp/file-relpaths" || die "a file name in $src has a character git quotes; rename it"
@@ -288,6 +308,24 @@ while IFS= read -r sd; do
     printf '%s\n' "$name_abs" >> "$tmp/absolute-names"
 done < "$tmp/symlink-dirs"
 
+if ! $delete && [ -n "${SYM_OWNED_FILE:-}" ] && [ -f "$SYM_OWNED_FILE" ]; then
+    while IFS="$(printf '\t')" read -r kind owned; do
+        [ "$kind" = F ] || continue
+        case "$owned" in "$tgt_abs"/*) ;; *) continue ;; esac
+        [ -L "$owned" ] || continue
+        rel=${owned#"$tgt_abs"/}
+        source_has "$rel" && continue
+        confined "$owned" || continue
+        linked="$(lexical_path "$(physical_parent "$owned")" "$(readlink "$owned")")"
+        case "$linked/" in
+            "$src_phys"/*) ;;
+            "$tgt_phys"/*) source_has "${linked#"$tgt_phys"/}" || continue ;;
+            *) continue ;;
+        esac
+        printf '%s\n' "$owned" >> "$tmp/prune"
+    done < "$SYM_OWNED_FILE"
+fi
+
 if [ -s "$tmp/conflicts" ]; then
     cat "$tmp/conflicts" >&2
     $dry_run || die "sym will not start until all conflicts are resolved."
@@ -295,7 +333,21 @@ fi
 
 $dry_run && printf 'dry-run; the following operations are what would have been executed.\n'
 
-[ -s "$tmp/names" ] || exit 0
+: > "$tmp/pruned"
+while IFS= read -r owned; do
+    log "PRUNE: $owned"
+    $dry_run && continue
+    if rm "$owned"; then printf '%s\n' "$owned" >> "$tmp/pruned"; else failed=true; fi
+done < "$tmp/prune"
+if [ -s "$tmp/pruned" ]; then
+    awk -F '\t' 'NR == FNR { gone[$0] = 1; next } !($1 == "F" && ($2 in gone))' \
+        "$tmp/pruned" "$SYM_OWNED_FILE" > "$tmp/owned" && cat "$tmp/owned" > "$SYM_OWNED_FILE" || failed=true
+fi
+
+if ! [ -s "$tmp/names" ]; then
+    if $failed; then die "sym: some operations failed."; fi
+    exit 0
+fi
 
 if $delete; then
     while IFS= read -r name; do

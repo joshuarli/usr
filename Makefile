@@ -63,7 +63,7 @@ uninstall:
 plan: layers
 	status=0; \
 	for layer in $(LAYERS); do \
-		output=$$($(SYM) --dry-run -t "$(TARGET)" "$$layer" 2>&1) || status=$$?; \
+		output=$$(SYM_OWNED_FILE="$(DL_OWNED_FILE)" $(SYM) --dry-run -t "$(TARGET)" "$$layer" 2>&1) || status=$$?; \
 		printf '%s\n' "$$output"; \
 		case "$$output" in *CONFLICT:*) status=1 ;; esac; \
 	done; \
