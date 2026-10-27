@@ -32,6 +32,10 @@ PYTHON_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/python-build"
 NODE_MINIMUM=26.12.0
 NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
+GHOSTTY_VERSION=1.4.0
+GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
+GHOSTTY_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty.app"
+GHOSTTY_EXEC="${GHOSTTY_APP}/Contents/MacOS/ghostty"
 
 # Prefer the dl-managed Node.js over whatever `node`/`npm` the inherited
 # PATH resolves to (shell configs reorder PATH). Fall back to PATH when the
@@ -895,6 +899,105 @@ install_nodejs() {
     fi
     changed=true
     _dl_ok "Installed ${DEST}/node (${NODEJS_VERSION}, npm ${npm_latest})"
+}
+
+install_ghostty() {
+    if [ "$OS" != Darwin ]; then skip ghostty "macOS only"; return; fi
+    case "$ARCH" in
+        aarch64|x86_64) ;;
+        *) skip ghostty "unsupported architecture: $ARCH"; return ;;
+    esac
+
+    installed_version=$(cat "${STATE}/ghostty" 2>/dev/null || :)
+    launcher_target=$(readlink "${DEST}/ghostty" 2>/dev/null || :)
+    if [ -d "$GHOSTTY_APP" ] && [ ! -L "$GHOSTTY_APP" ] \
+        && [ "$installed_version" = "$GHOSTTY_VERSION" ] \
+        && [ -x "$GHOSTTY_EXEC" ] && [ "$launcher_target" = "$GHOSTTY_EXEC" ]; then
+        own_dir "$GHOSTTY_APP"
+        own_file "${DEST}/ghostty"
+        own_file "${STATE}/ghostty"
+        _dl_current "ghostty is current ($GHOSTTY_VERSION)"
+        return
+    fi
+
+    # Never claim or replace an app/launcher that dl did not install.
+    if [ -L "$GHOSTTY_APP" ] \
+        || { [ -e "$GHOSTTY_APP" ] && [ -z "$installed_version" ]; }; then
+        skip ghostty "existing $GHOSTTY_APP is not managed by dl"
+        return
+    fi
+    if { [ -e "${DEST}/ghostty" ] || [ -L "${DEST}/ghostty" ]; } \
+        && [ "$launcher_target" != "$GHOSTTY_EXEC" ]; then
+        skip ghostty "existing ${DEST}/ghostty is not managed by dl"
+        return
+    fi
+
+    _dl_fetch "Downloading Ghostty $GHOSTTY_VERSION ..."
+    tmpzip=$(mktemp "${TMPDIR:-/tmp}/ghostty.XXXXXX")
+    if ! curl -fsSL -o "$tmpzip" \
+        "https://release.files.ghostty.org/${GHOSTTY_VERSION}/ghostty-macos-universal.zip"; then
+        skip ghostty "release download failed"
+        return
+    fi
+    own_missing_dirs "$GHOSTTY_APPLICATIONS_DIR"
+    if ! mkdir -p "$GHOSTTY_APPLICATIONS_DIR"; then
+        skip ghostty "cannot create $GHOSTTY_APPLICATIONS_DIR"
+        return
+    fi
+    tmpbundle=$(mktemp -d "${GHOSTTY_APPLICATIONS_DIR}/.ghostty.XXXXXX") || {
+        skip ghostty "cannot stage application in $GHOSTTY_APPLICATIONS_DIR"
+        return
+    }
+    if ! ditto -x -k "$tmpzip" "$tmpbundle" \
+        || [ ! -x "${tmpbundle}/Ghostty.app/Contents/MacOS/ghostty" ]; then
+        skip ghostty "release archive is invalid"
+        return
+    fi
+    if ! codesign --verify --deep --strict "${tmpbundle}/Ghostty.app" \
+        || ! spctl --assess --type execute "${tmpbundle}/Ghostty.app"; then
+        skip ghostty "upstream signature or Gatekeeper verification failed"
+        return
+    fi
+    actual_version=$(plutil -extract CFBundleShortVersionString raw -o - \
+        "${tmpbundle}/Ghostty.app/Contents/Info.plist" 2>/dev/null || :)
+    if [ "$actual_version" != "$GHOSTTY_VERSION" ]; then
+        skip ghostty "release bundle version ${actual_version:-unknown} does not match $GHOSTTY_VERSION"
+        return
+    fi
+
+    # Stage on the same filesystem, and preserve the prior managed app if
+    # replacing it fails. Never re-sign or remove the upstream signature.
+    previous_app=
+    if [ -d "$GHOSTTY_APP" ]; then
+        previous_app=$(mktemp -d "${GHOSTTY_APPLICATIONS_DIR}/.ghostty-previous.XXXXXX")
+        rmdir "$previous_app"
+        if ! mv "$GHOSTTY_APP" "$previous_app"; then
+            skip ghostty "cannot move previous application"
+            return
+        fi
+    fi
+    if ! mv "${tmpbundle}/Ghostty.app" "$GHOSTTY_APP"; then
+        if [ -n "$previous_app" ]; then
+            mv "$previous_app" "$GHOSTTY_APP" || _dl_warn "Restore manually from $previous_app"
+        fi
+        skip ghostty "cannot install application"
+        return
+    fi
+    if [ -n "$previous_app" ]; then rm -rf "$previous_app"; fi
+
+    if [ "$launcher_target" != "$GHOSTTY_EXEC" ]; then
+        tmpbinlink=$(mktemp "${DEST}/.ghostty.XXXXXX")
+        rm -f "$tmpbinlink"
+        ln -s "$GHOSTTY_EXEC" "$tmpbinlink"
+        mv -f "$tmpbinlink" "${DEST}/ghostty"
+        tmpbinlink=
+    fi
+    own_dir "$GHOSTTY_APP"
+    own_file "${DEST}/ghostty"
+    printf '%s\n' "$GHOSTTY_VERSION" > "${STATE}/ghostty"
+    own_file "${STATE}/ghostty"
+    changed=true
+    _dl_ok "Installed $GHOSTTY_APP ($GHOSTTY_VERSION)"
 }
 
 install_mactop_app() {
@@ -2120,6 +2223,15 @@ record_managed_installs() {
     if [ -s "${STATE}/dsh" ] || [ -s "${STATE}/dsh-tui" ]; then
         if [ -d "$DSH_INSTALL_ROOT" ]; then own_dir "$DSH_INSTALL_ROOT"; fi
     fi
+    if [ -s "${STATE}/ghostty" ]; then
+        own_file "${STATE}/ghostty"
+        if [ -d "$GHOSTTY_APP" ] && [ ! -L "$GHOSTTY_APP" ]; then
+            own_dir "$GHOSTTY_APP"
+        fi
+        if [ "$(readlink "${DEST}/ghostty" 2>/dev/null || :)" = "$GHOSTTY_EXEC" ]; then
+            own_file "${DEST}/ghostty"
+        fi
+    fi
     if [ -s "${STATE}/mactop" ]; then
         if [ -d /Applications/mactop.app ]; then own_dir /Applications/mactop.app; fi
         agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
@@ -2156,7 +2268,7 @@ if [ $# -eq 0 ]; then
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" syncthing ;;
     esac
-    if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh; fi
+    if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh ghostty; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
 fi
 
@@ -2200,6 +2312,7 @@ for prog in "$@"; do
         claude) install_claude ;;
         codex) install_codex ;;
         opencode2) install_opencode2 ;;
+        ghostty) install_ghostty ;;
         vault) install_release vault ;;
         jaq) install_jaq ;;
         mold) install_mold ;;

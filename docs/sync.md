@@ -8,6 +8,8 @@ Run `make plan` to preview links. Resolve each `CONFLICT` before syncing. `make 
 
 `make` also runs host setup: macOS installs Homebrew packages, while Alpine Linux configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID and macOS DNS setup are manual. See [`setup-macos`](../macos/setup-macos) and [macOS preferences](macos-preferences.md).
 
+On macOS, `sh dl ghostty` downloads the pinned official universal Ghostty release ZIP directly (no Homebrew), verifies the signed app with macOS Gatekeeper, and installs it at `/Applications/Ghostty.app` with a `~/.local/bin/ghostty` symlink. Set `GHOSTTY_APPLICATIONS_DIR="$HOME/Applications"` if `/Applications` is not writable. It will not overwrite an existing unmanaged app or launcher; `make uninstall` removes a dl-managed installation. Ghostty auto-updates are disabled by the linked config; change `GHOSTTY_VERSION` in `dl` to upgrade.
+
 The `macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. See [agent learning](agent-learning.md).
 
 Sync prunes a recorded link that points into a layer whose source is gone; `make plan` lists these as `PRUNE`. A link copied from a layer symlink points elsewhere, so it stays, as do links `make` did not create. Remove those yourself, or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.

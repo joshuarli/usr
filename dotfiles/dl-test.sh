@@ -34,7 +34,9 @@ run_dl() {
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
-        XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME
+        XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
+        GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
+        GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION
     return $_run_dl_status
 }
 
@@ -185,6 +187,10 @@ INSTALLER
             exit 1
         fi
         ;;
+    https://release.files.ghostty.org/1.4.0/ghostty-macos-universal.zip)
+        [ -n "$output" ] || exit 1
+        printf '%s\n' 'ghostty-test-zip' > "$output"
+        ;;
     https://github.com/joshuarli/gh/releases.atom)
         cat <<'FEED'
 <feed>
@@ -267,6 +273,26 @@ case "$inner" in
 esac
 EOF
 chmod +x "$mock_bin/unzip"
+
+cat > "$mock_bin/ditto" <<'EOF'
+#!/bin/sh
+set -eu
+[ "$1" = -x ] && [ "$2" = -k ] && [ -f "$3" ] || exit 1
+[ "${GHOSTTY_TEST_EXTRACT_FAIL:-false}" != true ] || exit 1
+mkdir -p "$4/Ghostty.app/Contents/MacOS"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$4/Ghostty.app/Contents/MacOS/ghostty"
+chmod +x "$4/Ghostty.app/Contents/MacOS/ghostty"
+printf '%s\n' 'mock plist' > "$4/Ghostty.app/Contents/Info.plist"
+EOF
+cat > "$mock_bin/spctl" <<'EOF'
+#!/bin/sh
+[ "${GHOSTTY_TEST_BAD_SIGNATURE:-false}" != true ]
+EOF
+cat > "$mock_bin/plutil" <<'EOF'
+#!/bin/sh
+printf '%s\n' "${GHOSTTY_TEST_VERSION:-1.4.0}"
+EOF
+chmod +x "$mock_bin/ditto" "$mock_bin/spctl" "$mock_bin/plutil"
 
 mkdir -p "$test_root/opencode-package"
 cat > "$test_root/opencode-package/opencode" <<'EOF'
@@ -1068,6 +1094,96 @@ case "$1" in
 esac
 EOF
 chmod +x "$mock_bin/uname"
+
+begin_case "ghostty direct macOS install, idempotency, and ownership"
+( set -e
+ghostty_home="$test_root/ghostty-home"
+apps="$ghostty_home/Applications"
+owned="$ghostty_home/.local/state/make/dl-owned"
+mkdir -p "$(dirname "$owned")"
+if output=$(HOME="$ghostty_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 DL_OWNED_FILE="$owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" ghostty 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$apps/Ghostty.app/Contents/MacOS/ghostty" ]
+[ "$(readlink "$ghostty_home/.local/bin/ghostty")" \
+    = "$apps/Ghostty.app/Contents/MacOS/ghostty" ]
+[ "$(cat "$ghostty_home/.local/state/dl/ghostty")" = 1.4.0 ]
+case "$output" in *"Installed $apps/Ghostty.app (1.4.0)"*) ;; *) exit 1 ;; esac
+
+if output=$(HOME="$ghostty_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 DL_OWNED_FILE="$owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" ghostty 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in *'ghostty is current (1.4.0)'*) ;; *) exit 1 ;; esac
+HOME="$ghostty_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_RECORD_OWNED=true DL_OWNED_FILE="$owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
+awk -F '\t' -v path="$apps/Ghostty.app" \
+    '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$owned"
+for f in "$ghostty_home/.local/bin/ghostty" "$ghostty_home/.local/state/dl/ghostty"; do
+    awk -F '\t' -v path="$f" \
+        '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$owned"
+done
+)
+end_case
+
+begin_case "ghostty refuses existing unmanaged app and launcher"
+( set -e
+collision_home="$test_root/ghostty-collision"
+apps="$collision_home/Applications"
+mkdir -p "$apps/Ghostty.app" "$collision_home/.local/bin"
+printf '%s\n' "unmanaged" > "$apps/Ghostty.app/keep"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$collision_home/.local/bin/ghostty"
+chmod +x "$collision_home/.local/bin/ghostty"
+if HOME="$collision_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" ghostty; then exit 1; fi
+[ "$(cat "$apps/Ghostty.app/keep")" = unmanaged ]
+[ -f "$collision_home/.local/bin/ghostty" ]
+[ ! -e "$collision_home/.local/state/dl/ghostty" ]
+)
+end_case
+
+begin_case "ghostty rejects invalid upstream signature or version"
+( set -e
+for fault in signature version extract; do
+    broken_home="$test_root/ghostty-broken-$fault"
+    apps="$broken_home/Applications"
+    case "$fault" in
+        signature) GHOSTTY_TEST_BAD_SIGNATURE=true ;;
+        version) GHOSTTY_TEST_VERSION=0.0.0 ;;
+        extract) GHOSTTY_TEST_EXTRACT_FAIL=true ;;
+    esac
+    export GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION GHOSTTY_TEST_EXTRACT_FAIL
+    if HOME="$broken_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+        DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+        run_dl "$mock_bin:$PATH" "$repo_root" ghostty; then exit 1; fi
+    [ ! -e "$apps/Ghostty.app" ]
+    [ ! -e "$broken_home/.local/bin/ghostty" ]
+    [ ! -e "$broken_home/.local/state/dl/ghostty" ]
+    unset GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION GHOSTTY_TEST_EXTRACT_FAIL
+done
+)
+end_case
+
+begin_case "ghostty is macOS-only"
+( set -e
+linux_home="$test_root/ghostty-linux"
+if HOME="$linux_home" GHOSTTY_APPLICATIONS_DIR="$linux_home/Applications" \
+    DL_TEST_OS=Linux TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" ghostty; then exit 1; fi
+[ ! -e "$linux_home/Applications/Ghostty.app" ]
+)
+end_case
 
 begin_case "gh is current"
 ( set -e

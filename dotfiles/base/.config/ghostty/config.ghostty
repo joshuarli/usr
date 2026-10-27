@@ -1,0 +1,25 @@
+command = /Users/josh/usr/bin/ish
+fullscreen = true
+
+font-family = Hack
+font-size = 16
+
+shell-integration = none
+cursor-style-blink = false
+copy-on-select = false
+
+scrollbar = never
+resize-overlay = never
+link-previews = false
+progress-style = false
+desktop-notifications = false
+image-storage-limit = 0
+
+window-save-state = never
+macos-applescript = false
+macos-shortcuts = deny
+auto-update = off
+
+bell-features = audio,no-system,no-attention,no-title,no-border
+bell-audio-path = /System/Library/Sounds/Glass.aiff
+bell-audio-volume = 1
