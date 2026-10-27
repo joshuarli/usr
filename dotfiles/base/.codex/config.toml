@@ -5,13 +5,14 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6.1-terra"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "medium"
 
 notify = ["/Users/josh/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
 
 [features]
 goals = true
+memories = true
 apps = false
 plugins = false
 remote_plugin = false
@@ -21,19 +22,24 @@ prevent_idle_sleep = true
 
 [agents]
 enabled = true
-max_concurrent_threads_per_session = 32
+max_concurrent_threads_per_session = 8
 
-# Nesting cap: root plus three levels of children. Every child is the same
-# model, so depth is the only thing to bound. Honored by multi_agent (V1); V2
-# ignores it, so do not enable multi_agent_v2 without another depth control.
+# V1-only depth limit; V2 ignores it and delegates from the root only.
 max_depth = 3
 
 # Default model and effort for every unspecified child.
 default_subagent_model = "gpt-6-luna"
-default_subagent_reasoning_effort = "xhigh"
+default_subagent_reasoning_effort = "high"
 
 [features.multi_agent_v2]
 expose_spawn_agent_model_overrides = true
+max_concurrent_threads_per_session = 8
+
+[memories]
+extract_model = "gpt-6-luna"
+consolidation_model = "gpt-6.1-terra"
+min_rollout_idle_hours = 12
+min_rate_limit_remaining_percent = 50
 
 [analytics]
 enabled = false

@@ -28,13 +28,15 @@ The tracked skills live in `dotfiles/base/.agents/skills/`. Directory links and 
 
 [`SKILLS.md`](../SKILLS.md) explains skill selection and the `/do` and `/yea` workflows. To invoke `/do` directly, use `$do <task>` in Codex, `/do <task>` in Claude Code, Muse Code, Grok Code, or OpenCode. Codex also provides `/skills`. Antigravity uses `/<skill-name>`. DeepSeek Harness loads matching skills through its skill tool. In interactive Muse Code, invoke an explicit skill with a leading `/<skill-name>` (for example `/refactor-python`, not `/skill <name>`); `/skills` lists skills and `/skills reload` refreshes after changes. A mid-sentence mention does not inject the body. Muse Code API, `muse serve` raw text, and headless (`muse exec`) sessions have no slash injection: when the user explicitly names an explicit-only skill and the skill tool rejects it as disabled, read the skill body directly (`~/.agents/skills/<name>/SKILL.md`, project skills under `.agents/skills/`) and work under it within existing scope and authority.
 
-The [`do`](../dotfiles/base/.agents/skills/do/SKILL.md) skill tells agents when to run one targeted `agent-learn recall` before expensive rediscovery. Retrieval is local, needs no model grant, and returns leads rather than instructions; see [agent learning](agent-learning.md). No harness hook injects memory into every turn.
+The [`do`](../dotfiles/base/.agents/skills/do/SKILL.md) skill tells agents when to run one targeted `agent-learn recall` before expensive rediscovery. Retrieval is local, needs no model grant, and returns leads rather than instructions; see [agent learning](agent-learning.md). No harness hook injects memory into every turn. Codex native memories are enabled separately for advisory cross-session hints; `agent-learn` remains the source-verified path for engineering decisions. Native extraction uses Luna, consolidation uses Terra, and background work waits at least 12 hours after activity with at least 50% rate-limit headroom.
 
 Antigravity CLI reads skill descriptions and may activate eligible skills automatically, and its skill frontmatter allows only `name` and `description`. Keep explicit-only workflows out of its automatic selection; the user requests one in plain language or with `/<skill-name>`.
 
 Harnesses use native skill metadata and discovery paths. The checker at [`skills-check.sh`](../dotfiles/skills-check.sh) validates tracked skill metadata. See [the skills guide](../SKILLS.md) for invocation rules.
 
 ## Harness configuration
+
+Codex defaults to `gpt-6.1-sol` at `medium` effort and to `gpt-6-luna` at `high` effort for unspecified children; the `orchestrate` tiers explicitly select their own models and efforts. These models select multi-agent V2, whose eight resident-thread slots include the parent. The V1 `agents.max_depth` setting does not restrict V2 nesting; the orchestration skill instructs V2 children not to spawn other children.
 
 The tracked configs are under [`dotfiles/base`](../dotfiles/base/). Review changes after a harness writes its own config. Claude may rewrite `settings.json`, Codex may append trusted projects to `config.toml`, and Grok may rewrite `config.toml` from `/settings`. OpenCode restores its `cli.json` when missing, so install its tracked symlink while the client is stopped.
 

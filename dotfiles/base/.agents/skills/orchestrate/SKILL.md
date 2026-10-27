@@ -27,6 +27,8 @@ If work exceeds the parent's delegation ceiling, keep it local at the highest su
 
 Assign each Codex child only the model and effort in the Codex column. This profile overrides the parent's effort ceiling. Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
 
+For V2, spawn children only from the root and explicitly forbid further spawning in every child brief. `agents.max_depth` limits only V1; V2 has a separate resident-thread cap, not a nesting limit.
+
 ### Claude and Grok
 
 Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that order. A caller spawns only a lower tier, and `scout` spawns nothing. `agent-tier-gate` enforces that: Claude matches `Agent`, Grok matches `spawn_subagent`. `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps Claude nesting at 3. Model and effort come from `~/.claude/agents` or `~/.grok/agents`, not from the call. Every Grok definition pins `grok-4.7`. Do not use another model or `xhigh`. Change a type's model or effort in its file. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed, or a decision others build on. Add a definition when none of the five fit. Prefer a fresh agent; fork only when the child needs the conversation.
@@ -73,7 +75,7 @@ Carry forward findings and failed approaches. Every child gets:
 - A concrete deliverable with only the needed context.
 - Proportionate checks, an attempt limit, and a stopping condition.
 - The current campaign ruling, plus a duty to report misleading metrics, repeated gate failures, or shared blockers rather than work around them.
-- No further delegation unless the brief grants it, and then only to lower tiers (Claude and Grok) within the depth cap. Codex children are all one tier, so `agents.max_depth` is the only limit.
+- No further delegation unless the brief grants it; Claude and Grok may delegate to lower tiers within their depth cap. Codex V2 children never delegate because V1's `agents.max_depth` does not apply.
 
 ## Worktree lifecycle
 
