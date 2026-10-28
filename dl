@@ -567,6 +567,7 @@ install_release() {
     case "$prog" in
         e|fz|fdu|fastermod|tm|fs|srv|diff-pretty|vault) owner="laputa-systems" ;;
         ish|mactop|gh|syncthing) owner="joshuarli" ;;
+        bylaws) owner="joshuarli"; repo="swift-bylaws" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
     tag_prefix=
@@ -607,6 +608,10 @@ install_release() {
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
     asset="${prog}-${artifact_target}"
+    case "$prog" in
+        bylaws) asset_inner=$prog ;;
+        *) asset_inner=$asset ;;
+    esac
     url="https://github.com/${owner}/${repo}/releases/download/${tag}/${asset}.zip"
     id=$(asset_id "$url")
     if [ -z "$id" ]; then
@@ -626,11 +631,11 @@ install_release() {
         return
     fi
     tmpbin=$(mktemp "${DEST}/.${prog}.XXXXXX")
-    if ! unzip -p "$tmpzip" "$asset" > "$tmpbin"; then
+    if ! unzip -p "$tmpzip" "$asset_inner" > "$tmpbin"; then
         rm -f "$tmpzip" "$tmpbin"
         tmpzip=
         tmpbin=
-        skip "$prog" "${asset}.zip does not contain ${asset}"
+        skip "$prog" "${asset}.zip does not contain ${asset_inner}"
         return
     fi
     rm -f "$tmpzip"
@@ -2968,7 +2973,7 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg jaq fastermod tm ish e fz fdu fs srv mactop vault gh mold; do
+    for record_prog in fd rg jaq fastermod tm ish e fz fdu fs srv mactop vault gh bylaws mold; do
         record_managed_binary "$record_prog"
     done
     nodejs_current_target=$(readlink "${NODEJS_INSTALL_ROOT}/current" 2>/dev/null || :)
