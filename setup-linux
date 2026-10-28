@@ -58,14 +58,6 @@ else
     as_root "$package_manager" add --interactive=no unbound unbound-openrc ca-certificates
 fi
 
-if "$package_manager" info -e jemalloc >/dev/null 2>&1; then
-    info "jemalloc is installed for the rustc shim"
-else
-    info "Installing jemalloc for the rustc shim"
-    as_root "$package_manager" add --interactive=no jemalloc
-fi
-[ -r /usr/lib/libjemalloc.so.2 ] || die "/usr/lib/libjemalloc.so.2 is missing after installation"
-
 command -v unbound-checkconf >/dev/null 2>&1 || die "unbound-checkconf is missing after installation"
 command -v rc-service >/dev/null 2>&1 || die "OpenRC rc-service is missing"
 command -v rc-update >/dev/null 2>&1 || die "OpenRC rc-update is missing"

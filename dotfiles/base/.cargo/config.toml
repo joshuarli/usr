@@ -1,8 +1,5 @@
 [build]
 rustc-wrapper = "kache"
-# Relative to $HOME. On a musl host the shim preloads jemalloc: musl's
-# allocator puts most of a thin-LTO rustc build in the kernel.
-rustc = ".local/libexec/jemalloc-rustc/rustc"
 
 [env]
 CC_KNOWN_WRAPPER_CUSTOM = "kache"
