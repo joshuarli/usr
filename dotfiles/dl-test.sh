@@ -1653,15 +1653,16 @@ case "$output" in
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
 git_release="$git_home/.local/share/git/releases/${git_tag}-${git_triple}"
+git_current="$git_home/.local/share/git/current"
 [ -x "$git_release/git" ]
 [ -x "$git_release/git-shell" ]
-[ "$(readlink "$git_home/.local/bin/git")" = "$git_release/git" ]
-[ "$(readlink "$git_home/.local/bin/git-shell")" = "$git_release/git-shell" ]
+[ "$(readlink "$git_current")" = "$git_release" ]
+[ "$(readlink "$git_home/.local/bin/git")" = "$git_current/git" ]
+[ "$(readlink "$git_home/.local/bin/git-shell")" = "$git_current/git-shell" ]
 for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
-    [ "$(readlink "$git_home/.local/bin/$git_helper")" = "$git_release/$git_helper" ]
+    [ "$(readlink "$git_home/.local/bin/$git_helper")" = "$git_current/$git_helper" ]
     [ "$(readlink "$git_release/$git_helper")" = git ]
 done
-[ "$(readlink "$git_home/.local/share/git/current")" = "$git_release" ]
 [ "$(cat "$git_home/.local/state/dl/git")" = 'git-test-etag' ]
 if output=$(HOME="$git_home" XDG_STATE_HOME="$git_home/.local/state" \
     TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
@@ -1691,7 +1692,9 @@ else
     exit 1
 fi
 git_bad_release="$git_bad_home/.local/share/git/releases/${git_old_tag}-${git_triple}"
-[ "$(readlink "$git_bad_home/.local/bin/git")" = "$git_bad_release/git" ]
+git_bad_current="$git_bad_home/.local/share/git/current"
+[ "$(readlink "$git_bad_current")" = "$git_bad_release" ]
+[ "$(readlink "$git_bad_home/.local/bin/git")" = "$git_bad_current/git" ]
 printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$git_asset" > "$test_root/git-bad.SHA256SUMS"
 if output=$(HOME="$git_bad_home" XDG_STATE_HOME="$git_bad_home/.local/state" \
     TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git-bad.SHA256SUMS" \
@@ -1703,10 +1706,10 @@ case "$output" in
     *'checksum mismatch'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
-[ "$(readlink "$git_bad_home/.local/bin/git")" = "$git_bad_release/git" ]
-[ "$(readlink "$git_bad_home/.local/bin/git-shell")" = "$git_bad_release/git-shell" ]
+[ "$(readlink "$git_bad_home/.local/bin/git")" = "$git_bad_current/git" ]
+[ "$(readlink "$git_bad_home/.local/bin/git-shell")" = "$git_bad_current/git-shell" ]
 for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
-    [ "$(readlink "$git_bad_home/.local/bin/$git_helper")" = "$git_bad_release/$git_helper" ]
+    [ "$(readlink "$git_bad_home/.local/bin/$git_helper")" = "$git_bad_current/$git_helper" ]
 done
 [ "$(readlink "$git_bad_home/.local/share/git/current")" = "$git_bad_release" ]
 [ "$(cat "$git_bad_home/.local/state/dl/git")" = 'git-test-etag-a' ]
@@ -1740,8 +1743,13 @@ case "$output" in
 esac
 git_new_release="$git_update_home/.local/share/git/releases/${git_tag}-${git_triple}"
 git_old_release="$git_update_home/.local/share/git/releases/${git_old_tag}-${git_triple}"
-[ "$(readlink "$git_update_home/.local/bin/git")" = "$git_new_release/git" ]
-[ "$(readlink "$git_update_home/.local/share/git/current")" = "$git_new_release" ]
+git_update_current="$git_update_home/.local/share/git/current"
+[ "$(readlink "$git_update_home/.local/bin/git")" = "$git_update_current/git" ]
+[ "$(readlink "$git_update_home/.local/bin/git-shell")" = "$git_update_current/git-shell" ]
+for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
+    [ "$(readlink "$git_update_home/.local/bin/$git_helper")" = "$git_update_current/$git_helper" ]
+done
+[ "$(readlink "$git_update_current")" = "$git_new_release" ]
 [ "$(cat "$git_update_home/.local/state/dl/git")" = 'git-test-etag' ]
 [ -x "$git_old_release/git" ]
 if output=$(HOME="$git_update_home" XDG_STATE_HOME="$git_update_home/.local/state" \
@@ -1817,6 +1825,63 @@ esac
 [ "$(cat "$git_rogue_home/.local/bin/git")" = '#!/bin/sh
 exit 0' ]
 [ ! -e "$git_rogue_home/.local/state/dl/git" ]
+)
+end_case
+
+begin_case "git unmanaged symlink is preserved"
+( set -e
+git_symlink_home="$test_root/git-symlink-home"
+mkdir -p "$git_symlink_home/.local/bin" "$git_symlink_home/.local/state/dl"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/git-symlink-rogue"
+chmod +x "$test_root/git-symlink-rogue"
+ln -s "$test_root/git-symlink-rogue" "$git_symlink_home/.local/bin/git"
+if output=$(HOME="$git_symlink_home" XDG_STATE_HOME="$git_symlink_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'is not a dl-managed symlink'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(readlink "$git_symlink_home/.local/bin/git")" = "$test_root/git-symlink-rogue" ]
+[ ! -e "$git_symlink_home/.local/state/dl/git" ]
+[ ! -e "$git_symlink_home/.local/share/git/releases" ]
+)
+end_case
+
+begin_case "git drifted launcher is repaired"
+( set -e
+git_drift_home="$test_root/git-drift-home"
+if output=$(HOME="$git_drift_home" XDG_STATE_HOME="$git_drift_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+git_drift_release="$git_drift_home/.local/share/git/releases/${git_tag}-${git_triple}"
+git_drift_current="$git_drift_home/.local/share/git/current"
+ln -sfn "$git_drift_release/git" "$git_drift_home/.local/bin/git-shell"
+if output=$(HOME="$git_drift_home" XDG_STATE_HOME="$git_drift_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'git is current ('"$git_tag"')'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+case "$output" in
+    *'missing ]'*) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(readlink "$git_drift_home/.local/bin/git-shell")" = "$git_drift_current/git-shell" ]
+[ "$(readlink "$git_drift_current")" = "$git_drift_release" ]
 )
 end_case
 

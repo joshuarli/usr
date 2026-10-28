@@ -58,7 +58,7 @@ tmpbin=
 tmpoutput=
 tmpbundle=
 tmpbinlink=
-tmpcurrentlink=
+git_tmplink=
 worker_pids=
 worker_count=0
 log_dir=
@@ -165,6 +165,50 @@ own_git_release_target() {
     own_dir "${git_release_prefix}${git_release_name}"
 }
 
+own_git_current_target() {
+    case "$1" in
+        "${GIT_HOME}/current/"*) ;;
+        *) return 1 ;;
+    esac
+    git_current_command=${1#"${GIT_HOME}/current/"}
+    case "$git_current_command" in
+        git|git-shell|git-upload-archive|git-upload-pack|git-receive-pack) ;;
+        *) return 1 ;;
+    esac
+    [ -L "${GIT_HOME}/current" ] || return 1
+    git_pointed=$(readlink "${GIT_HOME}/current") || return 1
+    own_git_release_target "${git_pointed}/${git_current_command}" || return 1
+    [ -d "$git_pointed" ] || return 1
+}
+
+ensure_git_link() {
+    git_dest_link="${DEST}/$1"
+    git_want=$2
+    if [ -L "$git_dest_link" ]; then
+        git_have=$(readlink "$git_dest_link") || git_have=
+        if [ "$git_have" = "$git_want" ]; then
+            own_file "$git_dest_link"
+            return 0
+        fi
+        if own_git_release_target "$git_have" 2>/dev/null \
+            || own_git_current_target "$git_have" 2>/dev/null; then
+            :
+        else
+            skip git "${git_dest_link} is not a dl-managed symlink"
+            return 1
+        fi
+    elif [ -e "$git_dest_link" ]; then
+        skip git "${git_dest_link} is not a dl-managed symlink"
+        return 1
+    fi
+    git_tmplink=$(mktemp "${DEST}/.git.XXXXXX")
+    rm -f "$git_tmplink"
+    ln -s "$git_want" "$git_tmplink"
+    mv -f "$git_tmplink" "$git_dest_link"
+    git_tmplink=
+    own_file "$git_dest_link"
+}
+
 own_missing_dirs "$DEST"
 mkdir -p "$DEST"
 own_missing_dirs "$STATE"
@@ -191,9 +235,9 @@ cleanup_temporary_files() {
         rm -f "$tmpbinlink" || _dl_warn "Warning: could not remove $tmpbinlink"
         tmpbinlink=
     fi
-    if [ -n "$tmpcurrentlink" ]; then
-        rm -f "$tmpcurrentlink" || _dl_warn "Warning: could not remove $tmpcurrentlink"
-        tmpcurrentlink=
+    if [ -n "$git_tmplink" ]; then
+        rm -f "$git_tmplink" || _dl_warn "Warning: could not remove $git_tmplink"
+        git_tmplink=
     fi
     if [ -n "$log_dir" ]; then
         rm -rf "$log_dir" || _dl_warn "Warning: could not remove $log_dir"
@@ -2102,9 +2146,14 @@ install_git() {
     url="https://github.com/laputa-systems/git-build/releases/download/${tag}/${asset}"
     sums_url="https://github.com/laputa-systems/git-build/releases/download/${tag}/SHA256SUMS"
     for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
-        if [ -e "${DEST}/${git_command}" ] && [ ! -L "${DEST}/${git_command}" ]; then
-            skip git "${DEST}/${git_command} is not a dl-managed symlink"
-            return
+        git_existing="${DEST}/${git_command}"
+        if [ -e "$git_existing" ] || [ -L "$git_existing" ]; then
+            git_existing_target=$(readlink "$git_existing" 2>/dev/null || :)
+            if ! own_git_release_target "$git_existing_target" \
+                && ! own_git_current_target "$git_existing_target"; then
+                skip git "${git_existing} is not a dl-managed symlink"
+                return
+            fi
         fi
     done
     releases="${GIT_HOME}/releases"
@@ -2112,32 +2161,43 @@ install_git() {
         skip git "$releases is not a directory"
         return
     fi
+    if [ -e "${GIT_HOME}/current" ] && [ ! -L "${GIT_HOME}/current" ]; then
+        skip git "${GIT_HOME}/current is not a dl-managed symlink"
+        return
+    fi
     id=$(asset_id "$url")
     if [ -z "$id" ]; then
         unchecked git "$asset is unavailable"
         return
     fi
-    if is_current git "$id"; then
+    if is_current git "$id" && [ -L "${GIT_HOME}/current" ]; then
+        git_pointed=$(readlink "${GIT_HOME}/current") || git_pointed=
         current_ok=true
-        for git_command in git-shell git-upload-archive git-upload-pack git-receive-pack; do
-            git_target=$(readlink "${DEST}/${git_command}" 2>/dev/null || :)
-            if ! own_git_release_target "$git_target"; then
+        [ -d "$git_pointed" ] || current_ok=false
+        for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
+            git_have_link=$(readlink "${DEST}/${git_command}" 2>/dev/null || :)
+            if [ "$git_have_link" != "${GIT_HOME}/current/${git_command}" ]; then
                 current_ok=false
             else
                 own_file "${DEST}/${git_command}"
             fi
         done
-        git_target=$(readlink "${DEST}/git" 2>/dev/null || :)
-        if ! own_git_release_target "$git_target"; then
-            current_ok=false
-        fi
-        if $current_ok; then
+        if $current_ok && own_git_release_target "${git_pointed}/git" && [ -d "$git_pointed" ]; then
             _dl_current "git is current (${tag})"
             return
         fi
     fi
     release_dir="${releases}/${tag}-${triple}"
     if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        if [ -L "${GIT_HOME}/current" ] \
+            && [ "$(readlink "${GIT_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
+            && is_current git "$id"; then
+            for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
+                ensure_git_link "$git_command" "${GIT_HOME}/current/${git_command}" || return
+            done
+            _dl_current "git is current (${tag})"
+            return
+        fi
         skip git "$release_dir already exists"
         return
     fi
@@ -2208,21 +2268,14 @@ install_git() {
     mv "$tmpbundle" "$release_dir"
     tmpbundle=
     own_dir "$release_dir"
-    for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
-        tmpbinlink=$(mktemp "${DEST}/.git.XXXXXX")
-        rm -f "$tmpbinlink"
-        ln -s "${release_dir}/${git_command}" "$tmpbinlink"
-        mv -f "$tmpbinlink" "${DEST}/${git_command}"
-        tmpbinlink=
-        own_file "${DEST}/${git_command}"
-    done
-    tmpcurrentlink=$(mktemp "${GIT_HOME}/.current.XXXXXX")
-    rm -f "$tmpcurrentlink"
-    ln -s "$release_dir" "$tmpcurrentlink"
-    rm -f "${GIT_HOME}/current"
-    mv -f "$tmpcurrentlink" "${GIT_HOME}/current"
-    tmpcurrentlink=
+    if ! ln -sfn "$release_dir" "${GIT_HOME}/current"; then
+        skip git "could not switch ${GIT_HOME}/current"
+        return
+    fi
     own_file "${GIT_HOME}/current"
+    for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
+        ensure_git_link "$git_command" "${GIT_HOME}/current/${git_command}" || return
+    done
     printf '%s\n' "$id" > "${STATE}/git"
     own_file "${STATE}/git"
     changed=true
