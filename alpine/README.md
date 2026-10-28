@@ -47,10 +47,8 @@ explanation if a check fails. It then:
 - installs `home-session`, the `home-runtime` service, and a tty1 login hook,
 - adds the user to the `seat` group and starts `seatd` and `home-runtime`,
 - links the enclosing checkout's dotfiles and installs ish with
-  `alpine/usr-sync.sh links` and `alpine/usr-sync.sh tools ish` as the user.
-  These are the `make links` and `make tools TOOLS=ish` equivalents in plain
-  POSIX sh, so provisioning needs no `make`. It does not run the rest of `dl`
-  or `setup-linux`.
+  `sh sync links` and `sh sync tools ish` as the user. It does not run the
+  rest of `dl` or `setup-linux`.
 
 Log out, then log in on tty1. dwl starts with a foot terminal running ish.
 The login shell stays `/bin/ash`: ish has no `-c` command mode and reads no

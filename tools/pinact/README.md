@@ -1,7 +1,7 @@
 # pinact
 
 `pinact` pins GitHub Actions references, checks workflows, and applies a limited set of safe fixes.
-`make sync` installs its launcher at `~/.local/bin/pinact`. It needs Python 3.11+ and Git. The
+`sh sync` installs its launcher at `~/.local/bin/pinact`. It needs Python 3.11+ and Git. The
 runtime is self-contained: it has no required config file, package installation, site-packages
 import, compiled extension, GitHub API, or token.
 
@@ -82,8 +82,8 @@ bytes and refuses symlinks, changed files, unsafe edit shapes, and unsupported i
 
 ## Development
 
-The source lives in `src/pinact/`; the launcher resolves this tree through the `make sync`
-symlink and runs under `python3 -I`. Pinact vendors pure-Python PyYAML 6.0.3 under
+The source lives in `src/pinact/`; the launcher resolves this tree through the `sh sync`
+links and runs under `python3 -I`. Pinact vendors pure-Python PyYAML 6.0.3 under
 `src/pinact/_vendor/yaml/`; its MIT license and source details are in `PROVENANCE.txt`.
 
 Run the focused suites from the repository root:

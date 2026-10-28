@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-scripts='install.sh verify.sh usr-sync.sh build/dwl.sh config/home-session config/profile.sh tests/static.sh tests/vm.sh'
+scripts='install.sh verify.sh build/dwl.sh config/home-session config/profile.sh tests/static.sh tests/vm.sh'
 services=services/home-runtime
 
 for script in $scripts $services; do

@@ -675,7 +675,7 @@ fi
 [ "$(cat "$cmd_home/.local/state/dl/cmd")" = 1.87.4 ]
 [ "$(wc -l < "$cmd_log")" -eq 2 ]
 
-cmd_owned_file="$cmd_home/.local/state/make/dl-owned"
+cmd_owned_file="$cmd_home/.local/state/sync/dl-owned"
 mkdir -p "$(dirname "$cmd_owned_file")"
 HOME="$cmd_home" DL_RECORD_OWNED=true DL_OWNED_FILE="$cmd_owned_file" \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
@@ -1180,7 +1180,7 @@ end_case
 begin_case "jaq ownership recorded exactly once"
 ( set -e
 ownership_home="$test_root/ownership-home"
-ownership_file="$ownership_home/.local/state/make/dl-owned"
+ownership_file="$ownership_home/.local/state/sync/dl-owned"
 mkdir -p "$(dirname "$ownership_file")"
 if output=$(HOME="$ownership_home" XDG_STATE_HOME="$ownership_home/.local/state" \
     DL_OWNED_FILE="$ownership_file" DL_JAQ_MOCK="$mock_bin/jaq" \
@@ -1212,7 +1212,7 @@ end_case
 begin_case "reconcile records managed installs"
 ( set -e
 reconcile_home="$test_root/reconcile-home"
-reconcile_file="$reconcile_home/.local/state/make/dl-owned"
+reconcile_file="$reconcile_home/.local/state/sync/dl-owned"
 mkdir -p "$reconcile_home/.local/bin" "$reconcile_home/.local/state/dl" \
     "$(dirname "$reconcile_file")"
 printf '%s\n' 'managed jaq' > "$reconcile_home/.local/bin/jaq"
@@ -1231,7 +1231,7 @@ end_case
 begin_case "unmanaged launcher is not recorded for removal"
 ( set -e
 unmanaged_home="$test_root/unmanaged-home"
-unmanaged_file="$unmanaged_home/.local/state/make/dl-owned"
+unmanaged_file="$unmanaged_home/.local/state/sync/dl-owned"
 mkdir -p "$unmanaged_home/.local/bin" "$(dirname "$unmanaged_file")"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$unmanaged_home/.local/bin/jaq"
 chmod +x "$unmanaged_home/.local/bin/jaq"
@@ -1251,11 +1251,11 @@ begin_case "untracked launcher is reported"
 ( set -e
 untracked_home="$test_root/untracked-home"
 mkdir -p "$untracked_home/.local/bin" "$untracked_home/.local/state/dl" \
-    "$untracked_home/.local/state/make"
+    "$untracked_home/.local/state/sync"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$untracked_home/.local/bin/agy"
 chmod +x "$untracked_home/.local/bin/agy"
 if output=$(HOME="$untracked_home" XDG_STATE_HOME="$untracked_home/.local/state" \
-    DL_OWNED_FILE="$untracked_home/.local/state/make/dl-owned" DL_RECORD_OWNED=true \
+    DL_OWNED_FILE="$untracked_home/.local/state/sync/dl-owned" DL_RECORD_OWNED=true \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" 2>&1); then
     :
 else
@@ -1274,7 +1274,7 @@ begin_case "unsafe codex target is not recorded for removal"
 ( set -e
 unsafe_target_home="$test_root/unsafe-target-home"
 unsafe_target_rogue="$unsafe_target_home/.codex/packages/rogue/bin"
-unsafe_target_owned="$unsafe_target_home/.local/state/make/dl-owned"
+unsafe_target_owned="$unsafe_target_home/.local/state/sync/dl-owned"
 mkdir -p "$unsafe_target_rogue" "$unsafe_target_home/.local/bin" \
     "$unsafe_target_home/.local/state/dl" "$(dirname "$unsafe_target_owned")"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$unsafe_target_rogue/codex"
@@ -1317,7 +1317,7 @@ begin_case "ghostty direct macOS install, idempotency, and ownership"
 ( set -e
 ghostty_home="$test_root/ghostty-home"
 apps="$ghostty_home/Applications"
-owned="$ghostty_home/.local/state/make/dl-owned"
+owned="$ghostty_home/.local/state/sync/dl-owned"
 mkdir -p "$(dirname "$owned")"
 if output=$(HOME="$ghostty_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
     DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 DL_OWNED_FILE="$owned" \

@@ -51,7 +51,7 @@ check 'no passwordless doas' sh -c '! cat /etc/doas.conf /etc/doas.d/*.conf 2>/d
 
 check "ish installed for $user" test -x "$home/.local/bin/ish"
 check 'sudo not installed' sh -c '! apk info -e sudo'
-check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/alpine/usr-sync.sh' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
+check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
 
 if [ "$failures" -ne 0 ]; then
 	echo "verify: $failures check(s) failed"

@@ -5,7 +5,7 @@ description: "Apply when changing anything in dotfiles/ that configures AI agent
 
 # Dotfiles Health
 
-`~/usr` is the source of truth, and `make` makes the home directory match it.
+`~/usr` is the source of truth, and `sh sync` makes the home directory match it.
 
 The layout, the commands, and where each piece of agent configuration lives are in the repo `AGENTS.md`. This skill holds the invariants to check.
 
@@ -43,6 +43,6 @@ The layout, the commands, and where each piece of agent configuration lives are 
 
 `sym` refuses a source name containing a tab, which test 28 pins. `sym -d` can remove an emptied target directory, which test 12 pins.
 
-**The test:** `skills-check.sh` and the structural tests pass, no rule is stated outside its owner, and `make plan` shows no `CONFLICT`.
+**The test:** `skills-check.sh` and the structural tests pass, no rule is stated outside its owner, and `sh sync plan` shows no `CONFLICT`.
 
 **Report:** what changed, which checks ran, and any `CONFLICT` you saw.

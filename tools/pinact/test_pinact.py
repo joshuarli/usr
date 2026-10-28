@@ -226,7 +226,7 @@ class PinactTests(unittest.TestCase):
         home = self.root / "home"
         binary = home / ".local" / "bin" / "pinact"
         marker = home / ".local" / "state" / "dl" / "pinact"
-        ledger = home / ".local" / "state" / "make" / "dl-owned"
+        ledger = home / ".local" / "state" / "sync" / "dl-owned"
         for file in (binary, marker, ledger):
             file.parent.mkdir(parents=True, exist_ok=True)
         binary.write_text("legacy executable")

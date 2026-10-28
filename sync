@@ -1,0 +1,178 @@
+#!/bin/sh
+set -eu
+root=$(cd "$(dirname "$0")" && pwd)
+cd "$root"
+
+cmd=${1:-sync}
+case $cmd in
+sync | links | plan | tools | layers | uninstall | check | lint | check-parallel) ;;
+*) printf 'usage: sync [links|plan|tools|layers|uninstall|check|lint|check-parallel] [TOOL...]\n' >&2; exit 1 ;;
+esac
+if [ "$cmd" != tools ] && [ "$#" -gt 1 ]; then
+	printf 'usage: sync %s takes no arguments\n' "$cmd" >&2
+	exit 1
+fi
+
+target=${TARGET:-$HOME}
+kache=${KACHE:-${CARGO_HOME:-$HOME/.cargo}/bin/kache}
+owned=${DL_OWNED_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/sync/dl-owned}
+tmpdir=${TMPDIR:-$root/.work/tmp}
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+layer_list='dotfiles/base'
+[ -d "$root/dotfiles/$os" ] && layer_list="$layer_list dotfiles/$os"
+
+legacy=${XDG_STATE_HOME:-$HOME/.local/state}/make/dl-owned
+if [ -z "${DL_OWNED_FILE:-}" ] && [ ! -e "$owned" ] && [ -f "$legacy" ]; then
+	mkdir -p "$(dirname "$owned")"
+	mv "$legacy" "$owned"
+	rmdir "${XDG_STATE_HOME:-$HOME/.local/state}/make" 2>/dev/null || :
+fi
+
+check_layers() {
+	dup=$(for layer in $layer_list; do git ls-files -- "$layer" | sed "s|^$layer/||"; done | sort | uniq -d)
+	[ -z "$dup" ] || { printf 'in more than one layer:\n%s\n' "$dup" >&2; exit 1; }
+}
+
+do_links() {
+	check_layers
+	mkdir -p "$tmpdir" "$(dirname "$owned")"
+	sh "$root/dotfiles/migrate-pinact.sh" "$target" "$owned"
+	for layer in $layer_list; do
+		TMPDIR="$tmpdir" SYM_OWNED_FILE="$owned" sh "$root/dotfiles/sym" -v -t "$target" "$root/$layer"
+	done
+}
+
+do_plan() {
+	check_layers
+	mkdir -p "$tmpdir"
+	planned=$tmpdir/plan-prunes.$$
+	: > "$planned"
+	trap 'rm -f "$planned"' EXIT HUP INT TERM
+	status=0
+	for layer in $layer_list; do
+		output=$(SYM_OWNED_FILE="$owned" SYM_PLANNED_PRUNES="$planned" sh "$root/dotfiles/sym" --dry-run -t "$target" "$root/$layer" 2>&1) || status=$?
+		printf '%s\n' "$output"
+		case $output in *CONFLICT:*) status=1 ;; esac
+	done
+	exit "$status"
+}
+
+do_tools() {
+	shift
+	mkdir -p "$tmpdir" "$(dirname "$owned")"
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/dl" "$@"
+}
+
+do_sync() {
+	do_links
+	status=0
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/dl" || { status=$?; printf 'sync: dl step failed\n' >&2; }
+	brew_status=0
+	if [ "$os" = darwin ]; then TMPDIR="$tmpdir" sh "$root/macos/setup-macos" brew packages || { brew_status=$?; [ "$status" -ne 0 ] || status=$brew_status; }; fi
+	if [ "$os" = linux ] && [ -r /etc/os-release ]; then
+		. /etc/os-release
+		if [ "${ID:-}" = alpine ]; then TMPDIR="$tmpdir" sh "$root/setup-linux" || status=$?; fi
+	fi
+	if [ ! -x "$kache" ]; then
+		if [ "$os" != darwin ] || [ "$brew_status" -eq 0 ]; then
+			if [ "$os" = darwin ]; then PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" TMPDIR="$tmpdir" sh "$root/dotfiles/base/.local/bin/setup-kache" </dev/null || status=$?
+			else TMPDIR="$tmpdir" sh "$root/dotfiles/base/.local/bin/setup-kache" </dev/null || status=$?; fi
+			if [ -x "$kache" ] && { [ ! -f "$owned" ] || ! awk -F '\t' -v path="$kache" '$1 == "K" && $2 == path { found = 1 } END { exit !found }' "$owned"; }; then printf 'K\t%s\n' "$kache" >> "$owned" || status=$?; fi
+		fi
+	fi
+	exit "$status"
+}
+
+do_uninstall() {
+	mkdir -p "$tmpdir" "$(dirname "$owned")"
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" DL_RECORD_OWNED=true sh "$root/dl" || exit 1
+	if [ -f "$owned" ]; then
+		while IFS="$(printf '\t')" read -r kind path; do
+			[ "$kind" = F ] || continue
+			if [ "$os" = darwin ] && [ "$path" = "$HOME/Library/LaunchAgents/com.mactop.plist" ]; then launchctl bootout "gui/$(id -u)" "$path" 2>/dev/null || :; fi
+			rm -f "$path" || exit 1
+		done < "$owned"
+		while IFS="$(printf '\t')" read -r kind path; do
+			[ "$kind" = D ] || continue
+			rm -rf "$path" || exit 1
+		done < "$owned"
+		while :; do
+			removed=false
+			while IFS="$(printf '\t')" read -r kind path; do
+				[ "$kind" = E ] || continue
+				if rmdir "$path" 2>/dev/null; then removed=true; fi
+			done < "$owned"
+			[ "$removed" = true ] || break
+		done
+		while IFS="$(printf '\t')" read -r kind path; do
+			[ "$kind" = K ] || continue
+			TMPDIR="$tmpdir" sh "$root/dotfiles/base/.local/bin/setup-kache" uninstall --purge </dev/null || exit 1
+		done < "$owned"
+		rm -f "$owned"
+		rmdir "$(dirname "$owned")" 2>/dev/null || :
+	fi
+}
+
+do_check() {
+	python3 -I macos/sync-test.py
+	mkdir -p "$tmpdir"
+	TMPDIR="$tmpdir" python3 -I tools/pinact/test_pinact.py
+	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_yaml.py
+	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_lint_rules.py
+	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_expressions.py
+	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_security.py
+	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_fix.py
+	python3 -I dotfiles/base/.local/bin/pinact --check
+	python3 -I dotfiles/pi-test.py
+	TMPDIR="$tmpdir" python3 -I dotfiles/sbx-test.py
+	(cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; })
+	(cd dotfiles && sh agent-tier-gate-test.sh)
+	sh dotfiles/reset-agents-test.sh
+	(cd dotfiles && sh pre-push-test.sh)
+	(cd dotfiles && sh worktree-remove-test.sh)
+	(cd dotfiles && sh zsh-shim-test.sh)
+	sh tools/mdtool/tests/mdtool-test.sh
+	python3 -I tools/decide/tests/test_decide.py
+	python3 -I dotfiles/base/.local/bin/skill-usage selftest
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_sessions.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_recall.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning_review.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning_promote.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/tests/test_learning_ops.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/eval/test_live_learning.py
+	uv run --no-project --python ">=3.15" python -I tools/agent-memory/eval/test_live_recall.py
+	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
+	sh dotfiles/skills-check.sh .agents/skills
+	python3 -I dotfiles/skills-campaign-test.py
+}
+
+do_lint() {
+	files=$(git ls-files -co --exclude-standard | while read -r f; do
+		[ -f "$f" ] && [ ! -L "$f" ] || continue
+		{ [ "${f%.sh}" != "$f" ] || head -n 1 "$f" | grep -Eq '^#!.*(sh|bash|dash)( |$)'; } && echo "$f"
+	done)
+	# shellcheck disable=SC2086
+	shellcheck -S warning -e SC3013 -s sh $files
+	files=$(git ls-files -co --exclude-standard | while read -r f; do
+		[ -f "$f" ] && [ ! -L "$f" ] || continue
+		{ [ "${f%.py}" != "$f" ] || head -n 1 "$f" | grep -Eq '^#!.*python'; } && echo "$f"
+	done)
+	# shellcheck disable=SC2086
+	uvx ruff check --no-cache $files
+}
+
+case $cmd in
+sync) do_sync ;;
+links) do_links ;;
+plan) do_plan ;;
+tools) do_tools "$@" ;;
+layers) check_layers ;;
+uninstall) do_uninstall ;;
+check) do_check ;;
+lint) do_lint ;;
+check-parallel)
+	mkdir -p "$tmpdir"
+	TMPDIR="$tmpdir" uvx --python 3.15 --with 'joshuarli-pytest-parallel==0.4.0' pytest tools dotfiles macos
+	;;
+esac

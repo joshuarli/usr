@@ -6,7 +6,7 @@ Pi uses the Google Gemini API, not Gemini CLI OAuth or OpenRouter. The parent an
 
 Install Node.js 26.12.0+ and npm first. `make` syncs the profile and includes Pi in the normal `dl` tools. `sh dl pi` installs or updates only Pi, resolving the latest `@earendil-works/pi-coding-agent` release (1.4.0 when this profile was restored on 2026-10-24). It installs with lifecycle scripts disabled under `${XDG_DATA_HOME:-~/.local/share}/pi` and links `~/.local/bin/pi`. Existing unmanaged launchers or install directories are not overwritten.
 
-The settings declare Nico Bailon's `pi-subagents` 0.82.0, the latest release checked on 2026-10-24, as `npm:pi-subagents@0.82.0`. Pi manages that package and its dependencies separately from the CLI. After reviewing `make plan` and syncing with `make`, reconcile the declared package without trusting the current project's configuration:
+The settings declare Nico Bailon's `pi-subagents` 0.82.0, the latest release checked on 2026-10-24, as `npm:pi-subagents@0.82.0`. Pi manages that package and its dependencies separately from the CLI. After reviewing `sh sync plan` and syncing with `sh sync`, reconcile the declared package without trusting the current project's configuration:
 
 ```sh
 pi update --extensions --no-approve
@@ -42,13 +42,13 @@ Scout has only `read`, `grep`, `find`, and `ls`. The other tiers additionally ha
 
 The starting point was `dotfiles/base/.pi/agent/settings.json` at `0c9534f60c88b28210cbb3a6fbbdd2333b591b6c`. The dark theme, high-thinking default, quiet startup, hidden thinking, cache notices, disabled install telemetry, and always-trust preference are retained. The old OpenRouter default, generated changelog marker, and custom goal/cache extensions are not restored.
 
-Unlike that historical configuration, `.pi/agent` is not a whole-directory `.sym-dir` link. Only tracked configuration and agent definitions are linked. Credentials, sessions, downloaded packages, and runtime state remain under the real home directory, outside the repository. `make uninstall` records the isolated CLI installation, not the entire `.pi` state directory. If an old whole-directory link still exists, preserve its state and resolve the conflict shown by `make plan` before syncing; the installer does not migrate or delete it.
+Unlike that historical configuration, `.pi/agent` is not a whole-directory `.sym-dir` link. Only tracked configuration and agent definitions are linked. Credentials, sessions, downloaded packages, and runtime state remain under the real home directory, outside the repository. `sh sync uninstall` records the isolated CLI installation, not the entire `.pi` state directory. If an old whole-directory link still exists, preserve its state and resolve the conflict shown by `sh sync plan` before syncing; the installer does not migrate or delete it.
 
 `agent-sessions` and `agent-learn` index Pi transcripts (see [agent learning](agent-learning.md)). They are not yet part of `reset-agents`, and pi-subagents run artifacts are not read.
 
 ## Checks and upstream references
 
-Run `python3 -I dotfiles/pi-test.py` for offline installer and profile checks (also included in `make check`). These use a scratch home under `.work/` and mock npm; they do not prove live provider access or run a real Pi/subagents session.
+Run `python3 -I dotfiles/pi-test.py` for offline installer and profile checks (also included in `sh sync check`). These use a scratch home under `.work/` and mock npm; they do not prove live provider access or run a real Pi/subagents session.
 
 - [Pi installation](https://github.com/earendil-works/pi/tree/v1.4.0/packages/coding-agent)
 - [Pi package configuration](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/packages.md)

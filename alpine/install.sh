@@ -70,7 +70,7 @@ printf '%s\n' "$repos" | grep -Eqv '/edge/(main|community)/*$' &&
 printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 
-for script in install.sh verify.sh usr-sync.sh build/dwl.sh config/home-session config/profile.sh services/home-runtime; do
+for script in install.sh verify.sh build/dwl.sh config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
 done
 
@@ -94,7 +94,7 @@ if [ -e /usr/local/bin/dwl ]; then
 		*) die '/usr/local/bin/dwl was not built by home; move it aside' ;;
 	esac
 fi
-[ -f "$usr_root/dotfiles/sym" ] && [ -f "$usr_root/dl" ] && [ -f "$usr_root/alpine/usr-sync.sh" ] ||
+[ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ] && [ -f "$usr_root/dl" ] ||
 	die "$usr_root is not the usr checkout; clone $usr_url and run usr/alpine/install.sh from it"
 origin=$(as_user "git -C '$usr_root' remote get-url origin" 2>/dev/null) ||
 	die "$usr_root is not a git checkout"
@@ -106,8 +106,8 @@ esac
 say 'checking network and repositories'
 apk update --quiet || die 'apk update failed; check networking and /etc/apk/repositories'
 
-as_user "sh '$usr_root/alpine/usr-sync.sh' plan >/dev/null" ||
-	die "dotfile links conflict with existing files; run sh $usr_root/alpine/usr-sync.sh plan as $user and resolve each CONFLICT"
+as_user "sh '$usr_root/sync' plan >/dev/null" ||
+	die "dotfile links conflict with existing files; run sh $usr_root/sync plan as $user and resolve each CONFLICT"
 
 packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 [ ! -f "packages-$arch.txt" ] || packages="$packages $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "packages-$arch.txt")"
@@ -131,7 +131,7 @@ for service in seatd home-runtime; do
 	rc-service --ifstopped "$service" start
 done
 
-as_user "sh '$usr_root/alpine/usr-sync.sh' links >/dev/null" || die "linking dotfiles from $usr_root failed"
-[ -x "$home/.local/bin/ish" ] || as_user "sh '$usr_root/alpine/usr-sync.sh' tools ish >/dev/null" || die "installing ish from $usr_root failed"
+as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
+[ -x "$home/.local/bin/ish" ] || as_user "sh '$usr_root/sync' tools ish >/dev/null" || die "installing ish from $usr_root failed"
 
 say "provisioned. Log out, then log in as $user on tty1. Run: doas sh usr/alpine/verify.sh"
