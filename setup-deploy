@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+root=$(cd "$(dirname "$0")" && pwd)
+
+cd "$root/workers/setup"
+npm install
+npm run deploy
