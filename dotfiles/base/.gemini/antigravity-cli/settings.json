@@ -1,7 +1,7 @@
 {
   "agentMode": "accept-edits",
-  "runningLightSpeed": "slow",
   "notifications": true,
+  "runningLightSpeed": "slow",
   "showFeedbackSurvey": false,
   "showTips": false,
   "toolPermission": "always-proceed",
