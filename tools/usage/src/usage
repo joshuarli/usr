@@ -13,6 +13,7 @@ import select
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import unicodedata
 
@@ -143,7 +144,7 @@ def is_percent(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def query_muse(binary: str) -> dict[str, object]:
+def run_muse_usage(binary: str) -> dict[str, object]:
     try:
         process = subprocess.run(
             [binary, "usage", "--json"],
@@ -159,9 +160,6 @@ def query_muse(binary: str) -> dict[str, object]:
         raise RuntimeError(f"cannot run Muse usage: {error.strerror}") from error
     if process.returncode:
         detail = (process.stderr or process.stdout).strip() or "command failed"
-        fallback = muse_last_observed(binary)
-        if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
-            return json_object(fallback, "Muse returned an invalid usage response")
         raise RuntimeError(detail)
     try:
         result = json.loads(process.stdout)
@@ -169,19 +167,62 @@ def query_muse(binary: str) -> dict[str, object]:
         raise RuntimeError("Muse returned invalid usage JSON") from error
     if not isinstance(result, dict):
         raise RuntimeError("Muse returned an invalid usage response")
+    return result
+
+
+def muse_allowance_complete(result: dict[str, object]) -> bool:
     allowance = result.get("allowance")
-    if isinstance(allowance, dict) and any(
+    return isinstance(allowance, dict) and any(
         isinstance(section, dict) and is_percent(section.get("usedPercent"))
         for section in (allowance.get("window"), allowance.get("weekly"))
-    ):
-        return json_object(result, "Muse returned an invalid usage response")
+    )
+
+
+def muse_last_observed_usage(binary: str) -> dict[str, object] | None:
     fallback = muse_last_observed(binary)
     if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
         return json_object(fallback, "Muse returned an invalid usage response")
-    reason = result.get("reason") or result.get("hint")
-    if isinstance(reason, str) and reason.strip():
-        raise RuntimeError(reason.strip())
-    raise RuntimeError("Muse returned no subscription quota")
+    return None
+
+
+def muse_failure_reason(result: dict[str, object] | None, error: str | None) -> str:
+    if result is not None:
+        reason = result.get("reason") or result.get("hint")
+        if isinstance(reason, str) and reason.strip():
+            if reason.strip() == "server_sent_no_usage":
+                return (
+                    "Muse server sent no usage; this is usually transient, "
+                    "try again in a bit"
+                )
+            return reason.strip()
+    if error is not None:
+        return error
+    return "Muse returned no subscription quota"
+
+
+def query_muse(binary: str) -> dict[str, object]:
+    try:
+        result = run_muse_usage(binary)
+    except RuntimeError:
+        observed = muse_last_observed_usage(binary)
+        if observed is not None:
+            return observed
+        raise
+    if muse_allowance_complete(result):
+        return json_object(result, "Muse returned an invalid usage response")
+    time.sleep(2)
+    try:
+        retried = run_muse_usage(binary)
+    except RuntimeError:
+        pass
+    else:
+        if muse_allowance_complete(retried):
+            return json_object(retried, "Muse returned an invalid usage response")
+        result = retried
+    observed = muse_last_observed_usage(binary)
+    if observed is not None:
+        return observed
+    raise RuntimeError(muse_failure_reason(result, None))
 
 
 def grok_usage(result: object) -> dict[str, object]:
@@ -1103,8 +1144,8 @@ def main(arguments):
         "agy": print_agy,
         "opencode": print_opencode,
     }
-    results = {}
     failures = {}
+    output_lock = threading.Lock()
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(available)) as pool:
         futures = {
             pool.submit(query[key], binary): key
@@ -1113,16 +1154,20 @@ def main(arguments):
         for future in concurrent.futures.as_completed(futures):
             key = futures[future]
             try:
-                results[key] = future.result()
+                result = future.result()
             except Exception as error:
-                failures[key] = str(error)
-    for key, title, _ in providers.values():
-        if key not in results and key not in failures:
-            continue
-        if key in failures:
-            print(color(f"{title}: {failures[key]}", "1;31", sys.stderr), file=sys.stderr)
-            continue
-        render[key](results[key])
+                with output_lock:
+                    failures[key] = str(error)
+                    title = {item[0]: item[1] for item in PROVIDERS}[key]
+                    print(
+                        color(f"{title}: {failures[key]}", "1;31", sys.stderr),
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
+            else:
+                with output_lock:
+                    render[key](result)
+                    sys.stdout.flush()
     return 1 if failures else 0
 
 
