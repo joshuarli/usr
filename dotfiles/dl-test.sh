@@ -33,6 +33,7 @@ run_dl() {
         FREEBUFF_TEST_VERSION FREEBUFF_INSTALL_FAIL \
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
+        GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
         XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
@@ -232,6 +233,57 @@ FEED
             exit 1
         fi
         ;;
+    https://github.com/laputa-systems/git-build/releases.atom)
+        if [ "${GIT_FEED_OLD:-false}" = true ]; then
+            cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-26T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/git-build/releases/tag/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+</entry>
+</feed>
+FEED
+        else
+            cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-26T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/git-build/releases/tag/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+</entry>
+<entry>
+<updated>2026-10-27T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/git-build/releases/tag/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"/>
+</entry>
+</feed>
+FEED
+        fi
+        ;;
+    https://github.com/laputa-systems/git-build/releases/download/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/git-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: git-test-etag-a'
+        elif [ -n "$output" ]; then
+            cp "$GIT_ZIP" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/laputa-systems/git-build/releases/download/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/SHA256SUMS)
+        [ -n "$output" ] || exit 1
+        cp "$GIT_SUMS" "$output"
+        ;;
+    https://github.com/laputa-systems/git-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/git-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: git-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$GIT_ZIP" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/laputa-systems/git-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/SHA256SUMS)
+        [ -n "$output" ] || exit 1
+        cp "$GIT_SUMS" "$output"
+        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -260,19 +312,50 @@ chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
 cat > "$mock_bin/unzip" <<'EOF'
 #!/bin/sh
 set -eu
+mode=
+zipfile=
 inner=
+dest=
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        -p) shift ;;
-        *) inner=$1; shift ;;
+        -p) mode=print; shift ;;
+        -q) shift ;;
+        -d) dest=$2; shift 2 ;;
+        -*) shift ;;
+        *) if [ -z "$zipfile" ]; then zipfile=$1; else inner=$1; fi; shift ;;
     esac
 done
-case "$inner" in
-    syncthing-aarch64-apple-darwin) printf '%s' 'syncthing-test-binary' ;;
-    *) exit 1 ;;
+case "$mode" in
+    print)
+        case "$inner" in
+            syncthing-aarch64-apple-darwin) printf '%s' 'syncthing-test-binary' ;;
+            *) exit 1 ;;
+        esac
+        ;;
+    *)
+        [ -n "$dest" ] || exit 1
+        [ "${GIT_UNZIP_EXTRACT_FAIL:-false}" != true ] || exit 1
+        for git_command in git git-shell; do
+            printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/$git_command"
+            chmod +x "$dest/$git_command"
+        done
+        for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
+            ln -s git "$dest/$git_helper"
+        done
+        ;;
 esac
 EOF
 chmod +x "$mock_bin/unzip"
+cat > "$mock_bin/zipinfo" <<'EOF'
+#!/bin/sh
+[ "$1" = -1 ] && [ -n "${2:-}" ] || exit 1
+if [ "${GIT_UNZIP_LIST_FAIL:-false}" = true ]; then
+    printf '%s\n' '../evil' 'git'
+else
+    printf '%s\n' git git-shell git-upload-archive git-upload-pack git-receive-pack
+fi
+EOF
+chmod +x "$mock_bin/zipinfo"
 
 cat > "$mock_bin/ditto" <<'EOF'
 #!/bin/sh
@@ -318,11 +401,23 @@ done
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$test_root/codex-package/codex-path/rg"
 chmod +x "$test_root/codex-package/codex-path/rg"
 tar -czf "$test_root/codex.tar.gz" -C "$test_root/codex-package" .
+
 if command -v sha256sum >/dev/null 2>&1; then
     CODEX_SHA256=$(sha256sum "$test_root/codex.tar.gz" | awk '{print $1}')
 else
     CODEX_SHA256=$(shasum -a 256 "$test_root/codex.tar.gz" | awk '{print $1}')
 fi
+
+git_tag=release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+git_triple=x86_64-unknown-linux-musl
+git_asset="git-${git_triple}.zip"
+printf '%s' 'git-test-zip' > "$test_root/git.zip"
+if command -v sha256sum >/dev/null 2>&1; then
+    GIT_ZIP_SHA256=$(sha256sum "$test_root/git.zip" | awk '{print $1}')
+else
+    GIT_ZIP_SHA256=$(shasum -a 256 "$test_root/git.zip" | awk '{print $1}')
+fi
+printf '%s  %s\n' "$GIT_ZIP_SHA256" "$git_asset" > "$test_root/git.SHA256SUMS"
 
 cat > "$mock_bin/file" <<'EOF'
 #!/bin/sh
@@ -1533,6 +1628,189 @@ fi
 [ -x "$codex_home/.local/bin/jaq" ]
 [ -L "$codex_home/.local/bin/codex" ]
 [ -x "$codex_home/.local/bin/muse" ]
+)
+end_case
+
+begin_case "git install, current check, and bundle layout"
+( set -e
+git_home="$test_root/git-home"
+if output=$(HOME="$git_home" XDG_STATE_HOME="$git_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$git_home"'/.local/bin/git'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+git_release="$git_home/.local/share/git/releases/${git_tag}-${git_triple}"
+[ -x "$git_release/git" ]
+[ -x "$git_release/git-shell" ]
+[ "$(readlink "$git_home/.local/bin/git")" = "$git_release/git" ]
+[ "$(readlink "$git_home/.local/bin/git-shell")" = "$git_release/git-shell" ]
+for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
+    [ "$(readlink "$git_home/.local/bin/$git_helper")" = "$git_release/$git_helper" ]
+    [ "$(readlink "$git_release/$git_helper")" = git ]
+done
+[ "$(readlink "$git_home/.local/share/git/current")" = "$git_release" ]
+[ "$(cat "$git_home/.local/state/dl/git")" = 'git-test-etag' ]
+if output=$(HOME="$git_home" XDG_STATE_HOME="$git_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'git is current ('"$git_tag"')'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "git checksum mismatch preserves prior install"
+( set -e
+git_bad_home="$test_root/git-bad-home"
+git_old_tag=release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+if output=$(HOME="$git_bad_home" XDG_STATE_HOME="$git_bad_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    GIT_FEED_OLD=true run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+git_bad_release="$git_bad_home/.local/share/git/releases/${git_old_tag}-${git_triple}"
+[ "$(readlink "$git_bad_home/.local/bin/git")" = "$git_bad_release/git" ]
+printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$git_asset" > "$test_root/git-bad.SHA256SUMS"
+if output=$(HOME="$git_bad_home" XDG_STATE_HOME="$git_bad_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git-bad.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'checksum mismatch'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(readlink "$git_bad_home/.local/bin/git")" = "$git_bad_release/git" ]
+[ "$(readlink "$git_bad_home/.local/bin/git-shell")" = "$git_bad_release/git-shell" ]
+for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
+    [ "$(readlink "$git_bad_home/.local/bin/$git_helper")" = "$git_bad_release/$git_helper" ]
+done
+[ "$(readlink "$git_bad_home/.local/share/git/current")" = "$git_bad_release" ]
+[ "$(cat "$git_bad_home/.local/state/dl/git")" = 'git-test-etag-a' ]
+[ "$(ls "$git_bad_home/.local/share/git/releases" | wc -l)" -eq 1 ]
+)
+end_case
+
+begin_case "git update installs the new bundle"
+( set -e
+git_update_home="$test_root/git-update-home"
+git_old_tag=release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+if output=$(HOME="$git_update_home" XDG_STATE_HOME="$git_update_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    GIT_FEED_OLD=true run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+if output=$(HOME="$git_update_home" XDG_STATE_HOME="$git_update_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$git_update_home"'/.local/bin/git'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+git_new_release="$git_update_home/.local/share/git/releases/${git_tag}-${git_triple}"
+git_old_release="$git_update_home/.local/share/git/releases/${git_old_tag}-${git_triple}"
+[ "$(readlink "$git_update_home/.local/bin/git")" = "$git_new_release/git" ]
+[ "$(readlink "$git_update_home/.local/share/git/current")" = "$git_new_release" ]
+[ "$(cat "$git_update_home/.local/state/dl/git")" = 'git-test-etag' ]
+[ -x "$git_old_release/git" ]
+if output=$(HOME="$git_update_home" XDG_STATE_HOME="$git_update_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'git is current ('"$git_tag"')'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "git traversal archive is rejected with no partial state"
+( set -e
+git_evil_home="$test_root/git-evil-home"
+if output=$(HOME="$git_evil_home" XDG_STATE_HOME="$git_evil_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    GIT_UNZIP_LIST_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'contains an invalid path'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ ! -e "$git_evil_home/.local/bin/git" ]
+[ ! -e "$git_evil_home/.local/state/dl/git" ]
+[ ! -e "$git_evil_home/.local/share/git/releases/${git_tag}-${git_triple}" ]
+)
+end_case
+
+begin_case "git extract failure leaves no partial state"
+( set -e
+git_extract_home="$test_root/git-extract-home"
+if output=$(HOME="$git_extract_home" XDG_STATE_HOME="$git_extract_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    GIT_UNZIP_EXTRACT_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'could not be extracted'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ ! -e "$git_extract_home/.local/bin/git" ]
+[ ! -e "$git_extract_home/.local/state/dl/git" ]
+[ ! -e "$git_extract_home/.local/share/git/releases/${git_tag}-${git_triple}" ]
+)
+end_case
+
+begin_case "git unmanaged launcher is preserved"
+( set -e
+git_rogue_home="$test_root/git-rogue-home"
+mkdir -p "$git_rogue_home/.local/bin" "$git_rogue_home/.local/state/dl"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$git_rogue_home/.local/bin/git"
+chmod +x "$git_rogue_home/.local/bin/git"
+if output=$(HOME="$git_rogue_home" XDG_STATE_HOME="$git_rogue_home/.local/state" \
+    TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" git 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'is not a dl-managed symlink'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ ! -L "$git_rogue_home/.local/bin/git" ]
+[ "$(cat "$git_rogue_home/.local/bin/git")" = '#!/bin/sh
+exit 0' ]
+[ ! -e "$git_rogue_home/.local/state/dl/git" ]
 )
 end_case
 
