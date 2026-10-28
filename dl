@@ -2602,7 +2602,7 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv python3
+    set -- fd rg jaq codex claude opencode2 pi fastermod tm ish e fz fdu fs srv git python3
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac

@@ -853,6 +853,12 @@ case "$default_targets" in
         printf 'optional coding agents appeared in the default dl targets\n' >&2
         exit 1 ;;
 esac
+case "$default_targets" in
+    *' git '*) ;;
+    *)
+        printf 'git is missing from the default dl targets\n' >&2
+        exit 1 ;;
+esac
 )
 end_case
 
