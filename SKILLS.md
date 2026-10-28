@@ -23,6 +23,7 @@ You rarely need to name a skill. `do` loads on its own for work with real uncert
 | Skill | Mode | Use it to |
 | --- | --- | --- |
 | `in-your-own-words` | Explicit | Make the agent restate what you want and why, before it starts. Use it when you suspect a misread. |
+| `eli5` | Explicit | Explain the topic, or your last reply, in plain words with one everyday comparison, in a few short sentences. |
 | `self-contained-prompt` | Explicit | Draft a prompt another agent can follow without this conversation's context. |
 | `yea` | Explicit | Accept every recommendation from the agent's last reply and have it do all of them in full, not the smallest version. |
 | `hurry-up` | Explicit | Tell the agent to finish and cut verification. Run it with `/hurry-up`. |
