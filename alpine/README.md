@@ -28,11 +28,22 @@ Reboot into the installed system and log in as that user.
 ## 2. Provision
 
 ```sh
+wget -O - https://example.com/setup.sh | sh
+```
+
+`setup.sh` detects Alpine and refuses anywhere else. It installs `git`
+if missing, clones this repository to `~/usr` (or reuses that checkout),
+then runs `install.sh` as root through `doas` or `sudo`.
+Without the bootstrap, do it by hand instead:
+
+```sh
 doas apk add git && git clone https://github.com/joshuarli/usr && doas sh usr/alpine/install.sh
 ```
 
-`install.sh` defaults to user `josh` (`USER_NAME`); override with
-`doas env USER_NAME=other sh usr/alpine/install.sh` if needed.
+Provisioning defaults to user `josh` (`USER_NAME`); override with
+`wget -O - https://example.com/setup.sh | USER_NAME=other sh`
+for the bootstrap, or
+`doas env USER_NAME=other sh usr/alpine/install.sh` by hand, if needed.
 
 `install.sh` checks the system before changing anything and stops with an
 explanation if a check fails. It then:
