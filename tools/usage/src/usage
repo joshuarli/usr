@@ -487,6 +487,26 @@ def query_dsh(binary: str) -> dict[str, object]:
     return json_object(result, "DeepSeek returned an invalid balance response")
 
 
+def agy_groups(result):
+    if not isinstance(result, dict):
+        return None
+    command = result.get("command")
+    if isinstance(command, dict):
+        data = command.get("data")
+        if isinstance(data, dict):
+            groups = data.get("groups")
+            if isinstance(groups, list):
+                return groups
+    structured = result.get("structured_output")
+    if isinstance(structured, dict):
+        inner = structured.get("data")
+        container = inner if isinstance(inner, dict) else structured
+        groups = container.get("groups")
+        if isinstance(groups, list):
+            return groups
+    return None
+
+
 def query_agy(binary: str) -> dict[str, object]:
     process = subprocess.run(
         [binary, "-p", "/usage", "--output-format", "json", "--print-timeout", "30s"],
@@ -502,12 +522,16 @@ def query_agy(binary: str) -> dict[str, object]:
         result = json.loads(process.stdout)
     except json.JSONDecodeError as error:
         raise RuntimeError("Antigravity returned invalid JSON") from error
-    if result.get("status") == "ERROR":
+    if isinstance(result, dict) and result.get("status") == "ERROR":
         raise RuntimeError(result.get("error") or result.get("response") or "usage read failed")
-    report = result.get("response") or result.get("structured_output")
-    if not report:
+    groups = agy_groups(result)
+    report = result.get("response") if isinstance(result, dict) else None
+    if not isinstance(report, str):
+        structured = result.get("structured_output") if isinstance(result, dict) else None
+        report = structured if isinstance(structured, str) else None
+    if (not report or not report.strip()) and not groups:
         raise RuntimeError("Antigravity returned no quota report")
-    return {"report": report}
+    return {"report": report, "groups": groups}
 
 
 def read_opencode_account(binary: str) -> dict[str, object]:
@@ -908,10 +932,95 @@ def print_dsh(result: dict[str, object]) -> None:
         )
 
 
+def agy_bucket_used(bucket: object) -> object:
+    if not isinstance(bucket, dict):
+        return None
+    remaining = bucket.get("remaining_fraction")
+    if remaining is None:
+        remaining = bucket.get("remainingFraction")
+    if (
+        isinstance(remaining, bool)
+        or not isinstance(remaining, (int, float))
+        or not math.isfinite(remaining)
+    ):
+        for key in ("usedPercent", "used_percent", "percent", "usage_percent"):
+            candidate = bucket.get(key)
+            if (
+                isinstance(candidate, (int, float))
+                and not isinstance(candidate, bool)
+                and math.isfinite(candidate)
+            ):
+                return candidate
+        return None
+    return (1 - remaining) * 100
+
+
+def agy_bucket_reset(bucket: object) -> object:
+    if not isinstance(bucket, dict):
+        return None
+    for key in ("reset_time", "resetTime", "resetsAt", "reset_at", "reset"):
+        value = bucket.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def agy_windows(result: dict[str, object]) -> list[tuple[str, object, object]]:
+    windows = []
+    groups = result.get("groups")
+    if isinstance(groups, list):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            name = group.get("name")
+            name = name.strip() if isinstance(name, str) and name.strip() else None
+            buckets = group.get("buckets")
+            if not isinstance(buckets, list):
+                continue
+            for bucket in buckets:
+                if not isinstance(bucket, dict):
+                    continue
+                bucket_id = bucket.get("id")
+                window_label = normalize_window_label(
+                    bucket.get("window"),
+                    normalize_window_label(
+                        bucket.get("name"),
+                        bucket_id if isinstance(bucket_id, str) else "quota",
+                    ),
+                )
+                label = f"{window_label} {name}" if name else window_label
+                windows.append((label, agy_bucket_used(bucket), agy_bucket_reset(bucket)))
+    if windows:
+        return windows
+    report = result.get("report")
+    if not isinstance(report, str) or not report.strip():
+        return []
+    for line in report.strip().splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        group_name = parts[0].strip()
+        bucket_name = parts[1].strip()
+        try:
+            used = 100 - float(parts[2].strip().removesuffix("%").strip())
+        except ValueError:
+            used = None
+        window_label = normalize_window_label(bucket_name, group_name or bucket_name)
+        label = f"{window_label} {group_name}" if group_name else window_label
+        windows.append((label, used, parts[3].strip() or None))
+    return windows
+
+
 def print_agy(result: dict[str, object]) -> None:
     print_heading("Antigravity")
-    for line in str(result.get("report")).strip().splitlines():
-        print(f"  {line}")
+    windows = agy_windows(result)
+    if not windows:
+        print(f"  {color('no subscription quota returned', '33')}")
+        return
+    for label, used, reset in windows:
+        print_window(label, used, reset)
 
 
 def opencode_windows(result):
