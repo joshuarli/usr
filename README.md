@@ -16,5 +16,7 @@ On Alpine Linux, run `./setup-linux` for the initial setup. It installs Unbound 
 
 On Linux, skip the macOS setup. Run `make plan` on either platform and resolve any reported conflicts. Then run `make` to link the current OS layer into your home directory, download supported tools, and install kache if it is missing. On macOS, `make` checks Homebrew packages but does not configure system DNS. To configure DNS explicitly, run `./macos/setup-macos dns`. Run `./macos/fix-dns` to restore automatic DNS for Wi-Fi and Tailscale. On Alpine Linux, `make` runs `setup-linux` to install or update Unbound and verify system DNS. Other Linux distributions skip the Unbound setup. On glibc Linux, run `setup-mold`. Musl builds expect mold at `/usr/local/libexec/mold`.
 
+To provision an Alpine edge desktop (dwl + foot) instead, run `doas sh alpine/install.sh` from this checkout as documented in [`alpine/README.md`](alpine/README.md); it links dotfiles and installs ish only, and leaves networking and DNS alone.
+
 See [sync details](docs/sync.md) for what `make` changes and how the layers work.
 
