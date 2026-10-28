@@ -34,6 +34,7 @@ run_dl() {
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
+        SSH_ZIP SSH_SUMS SSH_UNZIP_LIST_FAIL SSH_UNZIP_EXTRACT_FAIL SSH_FEED_OLD \
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
         XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
@@ -284,6 +285,57 @@ FEED
         [ -n "$output" ] || exit 1
         cp "$GIT_SUMS" "$output"
         ;;
+    https://github.com/laputa-systems/ssh-build/releases.atom)
+        if [ "${SSH_FEED_OLD:-false}" = true ]; then
+            cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-26T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/ssh-build/releases/tag/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+</entry>
+</feed>
+FEED
+        else
+            cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-26T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/ssh-build/releases/tag/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"/>
+</entry>
+<entry>
+<updated>2026-10-27T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/ssh-build/releases/tag/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"/>
+</entry>
+</feed>
+FEED
+        fi
+        ;;
+    https://github.com/laputa-systems/ssh-build/releases/download/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/ssh-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: ssh-test-etag-a'
+        elif [ -n "$output" ]; then
+            cp "$SSH_ZIP" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/laputa-systems/ssh-build/releases/download/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/SHA256SUMS)
+        [ -n "$output" ] || exit 1
+        cp "$SSH_SUMS" "$output"
+        ;;
+    https://github.com/laputa-systems/ssh-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/ssh-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: ssh-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$SSH_ZIP" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/laputa-systems/ssh-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/SHA256SUMS)
+        [ -n "$output" ] || exit 1
+        cp "$SSH_SUMS" "$output"
+        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -334,6 +386,14 @@ case "$mode" in
         ;;
     *)
         [ -n "$dest" ] || exit 1
+        if [ "$(cat "$zipfile")" = ssh-test-zip ]; then
+            [ "${SSH_UNZIP_EXTRACT_FAIL:-false}" != true ] || exit 1
+            for ssh_command in ssh ssh-keygen ssh-agent ssh-add sftp scp; do
+                printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/$ssh_command"
+                chmod +x "$dest/$ssh_command"
+            done
+            exit 0
+        fi
         [ "${GIT_UNZIP_EXTRACT_FAIL:-false}" != true ] || exit 1
         for git_command in git git-shell; do
             printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/$git_command"
@@ -349,7 +409,13 @@ chmod +x "$mock_bin/unzip"
 cat > "$mock_bin/zipinfo" <<'EOF'
 #!/bin/sh
 [ "$1" = -1 ] && [ -n "${2:-}" ] || exit 1
-if [ "${GIT_UNZIP_LIST_FAIL:-false}" = true ]; then
+if [ "$(cat "$2")" = ssh-test-zip ]; then
+    if [ "${SSH_UNZIP_LIST_FAIL:-false}" = true ]; then
+        printf '%s\n' '../evil' 'ssh'
+    else
+        printf '%s\n' ssh ssh-keygen ssh-agent ssh-add sftp scp
+    fi
+elif [ "${GIT_UNZIP_LIST_FAIL:-false}" = true ]; then
     printf '%s\n' '../evil' 'git'
 else
     printf '%s\n' git git-shell git-upload-archive git-upload-pack git-receive-pack
@@ -418,6 +484,18 @@ else
     GIT_ZIP_SHA256=$(shasum -a 256 "$test_root/git.zip" | awk '{print $1}')
 fi
 printf '%s  %s\n' "$GIT_ZIP_SHA256" "$git_asset" > "$test_root/git.SHA256SUMS"
+
+ssh_tag=release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+ssh_old_tag=release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ssh_asset="ssh-${git_triple}.zip"
+printf '%s' 'ssh-test-zip' > "$test_root/ssh.zip"
+if command -v sha256sum >/dev/null 2>&1; then
+    SSH_ZIP_SHA256=$(sha256sum "$test_root/ssh.zip" | awk '{print $1}')
+else
+    SSH_ZIP_SHA256=$(shasum -a 256 "$test_root/ssh.zip" | awk '{print $1}')
+fi
+printf '%s  %s\n' "$SSH_ZIP_SHA256" "$ssh_asset" > "$test_root/ssh.SHA256SUMS"
+printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$ssh_asset" > "$test_root/ssh-bad.SHA256SUMS"
 
 cat > "$mock_bin/file" <<'EOF'
 #!/bin/sh
@@ -1783,6 +1861,113 @@ esac
 [ ! -e "$git_evil_home/.local/bin/git" ]
 [ ! -e "$git_evil_home/.local/state/dl/git" ]
 [ ! -e "$git_evil_home/.local/share/git/releases/${git_tag}-${git_triple}" ]
+)
+end_case
+
+begin_case "ssh install, current check, update, and bundle layout"
+( set -e
+ssh_home="$test_root/ssh-home"
+ssh_env() {
+    HOME="$ssh_home" XDG_STATE_HOME="$ssh_home/.local/state" TMPDIR="$test_root/tmp" \
+        SSH_ZIP="$test_root/ssh.zip" SSH_SUMS="${ssh_sums:-$test_root/ssh.SHA256SUMS}" \
+        SSH_FEED_OLD="${ssh_feed_old:-false}" run_dl "$mock_bin:$PATH" "$repo_root" ssh 2>&1
+}
+ssh_feed_old=true
+output=$(ssh_env) || { printf '%s\n' "$output" >&2; exit 1; }
+ssh_current="$ssh_home/.local/share/ssh/current"
+[ "$(readlink "$ssh_current")" = "$ssh_home/.local/share/ssh/releases/${ssh_old_tag}-${git_triple}" ]
+ssh_feed_old=false
+output=$(ssh_env) || { printf '%s\n' "$output" >&2; exit 1; }
+case "$output" in
+    *'Installed '"$ssh_home"'/.local/bin/ssh'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+ssh_release="$ssh_home/.local/share/ssh/releases/${ssh_tag}-${git_triple}"
+[ "$(readlink "$ssh_current")" = "$ssh_release" ]
+[ -x "$ssh_home/.local/share/ssh/releases/${ssh_old_tag}-${git_triple}/ssh" ]
+for ssh_command in ssh ssh-keygen ssh-agent ssh-add sftp scp; do
+    [ -x "$ssh_release/$ssh_command" ]
+    [ "$(readlink "$ssh_home/.local/bin/$ssh_command")" = "$ssh_current/$ssh_command" ]
+done
+[ "$(cat "$ssh_home/.local/state/dl/ssh")" = 'ssh-test-etag' ]
+output=$(ssh_env) || { printf '%s\n' "$output" >&2; exit 1; }
+case "$output" in
+    *'ssh is current ('"$ssh_tag"')'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "ssh failures preserve the prior install"
+( set -e
+ssh_bad_home="$test_root/ssh-bad-home"
+ssh_bad_env() {
+    HOME="$ssh_bad_home" XDG_STATE_HOME="$ssh_bad_home/.local/state" TMPDIR="$test_root/tmp" \
+        SSH_ZIP="$test_root/ssh.zip" SSH_SUMS="${ssh_bad_sums:-$test_root/ssh.SHA256SUMS}" \
+        SSH_FEED_OLD="${ssh_bad_feed_old:-false}" run_dl "$mock_bin:$PATH" "$repo_root" ssh 2>&1
+}
+ssh_bad_feed_old=true
+output=$(ssh_bad_env) || { printf '%s\n' "$output" >&2; exit 1; }
+ssh_bad_feed_old=false
+ssh_bad_release="$ssh_bad_home/.local/share/ssh/releases/${ssh_old_tag}-${git_triple}"
+ssh_bad_current="$ssh_bad_home/.local/share/ssh/current"
+ssh_bad_sums="$test_root/ssh-bad.SHA256SUMS"
+if output=$(ssh_bad_env); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'checksum mismatch'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+ssh_bad_sums=
+if output=$(HOME="$ssh_bad_home" XDG_STATE_HOME="$ssh_bad_home/.local/state" TMPDIR="$test_root/tmp" \
+    SSH_ZIP="$test_root/ssh.zip" SSH_SUMS="$test_root/ssh.SHA256SUMS" \
+    SSH_UNZIP_LIST_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" ssh 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'contains an invalid path'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if output=$(HOME="$ssh_bad_home" XDG_STATE_HOME="$ssh_bad_home/.local/state" TMPDIR="$test_root/tmp" \
+    SSH_ZIP="$test_root/ssh.zip" SSH_SUMS="$test_root/ssh.SHA256SUMS" \
+    SSH_UNZIP_EXTRACT_FAIL=true run_dl "$mock_bin:$PATH" "$repo_root" ssh 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$ssh_bad_current")" = "$ssh_bad_release" ]
+for ssh_command in ssh ssh-keygen ssh-agent ssh-add sftp scp; do
+    [ "$(readlink "$ssh_bad_home/.local/bin/$ssh_command")" = "$ssh_bad_current/$ssh_command" ]
+done
+[ "$(cat "$ssh_bad_home/.local/state/dl/ssh")" = 'ssh-test-etag-a' ]
+[ "$(ls "$ssh_bad_home/.local/share/ssh/releases" | wc -l)" -eq 1 ]
+)
+end_case
+
+begin_case "ssh refuses to replace an unmanaged launcher and stays out of the default set"
+( set -e
+ssh_own_home="$test_root/ssh-own-home"
+mkdir -p "$ssh_own_home/.local/bin"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$ssh_own_home/.local/bin/ssh"
+chmod +x "$ssh_own_home/.local/bin/ssh"
+if output=$(HOME="$ssh_own_home" XDG_STATE_HOME="$ssh_own_home/.local/state" TMPDIR="$test_root/tmp" \
+    SSH_ZIP="$test_root/ssh.zip" SSH_SUMS="$test_root/ssh.SHA256SUMS" \
+    run_dl "$mock_bin:$PATH" "$repo_root" ssh 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'is not a dl-managed symlink'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ ! -L "$ssh_own_home/.local/bin/ssh" ]
+[ ! -e "$ssh_own_home/.local/share/ssh/current" ]
+default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
+case "$default_targets" in
+    *' ssh '*) printf 'ssh appeared in the default dl targets\n' >&2; exit 1 ;;
+esac
 )
 end_case
 

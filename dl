@@ -23,6 +23,8 @@ DSH_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/dsh"
 CODEX_HOME="${CODEX_HOME:-${HOME}/.codex}"
 CODEX_LEGACY_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
 GIT_HOME="${GIT_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/git}"
+SSH_HOME="${SSH_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/ssh}"
+SSH_COMMANDS="ssh ssh-keygen ssh-agent ssh-add sftp scp"
 GROK_HOME="${HOME}/.grok"
 MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
 OPENCODE2_HOME="${HOME}/.opencode"
@@ -207,6 +209,69 @@ ensure_git_link() {
     mv -f "$git_tmplink" "$git_dest_link"
     git_tmplink=
     own_file "$git_dest_link"
+}
+
+own_ssh_release_target() {
+    ssh_release_prefix="${SSH_HOME}/releases/"
+    case "$1" in
+        "${ssh_release_prefix}"*/*) ;;
+        *) return 1 ;;
+    esac
+    ssh_release_rest=${1#"$ssh_release_prefix"}
+    ssh_release_name=${ssh_release_rest%%/*}
+    case "$ssh_release_name" in
+        ''|*/*|.|..) return 1 ;;
+    esac
+    ssh_release_command=${ssh_release_rest#"${ssh_release_name}/"}
+    case " $SSH_COMMANDS " in
+        *" $ssh_release_command "*) ;;
+        *) return 1 ;;
+    esac
+    own_dir "${ssh_release_prefix}${ssh_release_name}"
+}
+
+own_ssh_current_target() {
+    case "$1" in
+        "${SSH_HOME}/current/"*) ;;
+        *) return 1 ;;
+    esac
+    ssh_current_command=${1#"${SSH_HOME}/current/"}
+    case " $SSH_COMMANDS " in
+        *" $ssh_current_command "*) ;;
+        *) return 1 ;;
+    esac
+    [ -L "${SSH_HOME}/current" ] || return 1
+    ssh_pointed=$(readlink "${SSH_HOME}/current") || return 1
+    own_ssh_release_target "${ssh_pointed}/${ssh_current_command}" || return 1
+    [ -d "$ssh_pointed" ] || return 1
+}
+
+ensure_ssh_link() {
+    ssh_dest_link="${DEST}/$1"
+    ssh_want=$2
+    if [ -L "$ssh_dest_link" ]; then
+        ssh_have=$(readlink "$ssh_dest_link") || ssh_have=
+        if [ "$ssh_have" = "$ssh_want" ]; then
+            own_file "$ssh_dest_link"
+            return 0
+        fi
+        if own_ssh_release_target "$ssh_have" 2>/dev/null \
+            || own_ssh_current_target "$ssh_have" 2>/dev/null; then
+            :
+        else
+            skip ssh "${ssh_dest_link} is not a dl-managed symlink"
+            return 1
+        fi
+    elif [ -e "$ssh_dest_link" ]; then
+        skip ssh "${ssh_dest_link} is not a dl-managed symlink"
+        return 1
+    fi
+    ssh_tmplink=$(mktemp "${DEST}/.ssh.XXXXXX")
+    rm -f "$ssh_tmplink"
+    ln -s "$ssh_want" "$ssh_tmplink"
+    mv -f "$ssh_tmplink" "$ssh_dest_link"
+    ssh_tmplink=
+    own_file "$ssh_dest_link"
 }
 
 own_missing_dirs "$DEST"
@@ -2282,6 +2347,173 @@ install_git() {
     _dl_ok "Installed ${DEST}/git"
 }
 
+install_ssh() {
+    case "$OS:$ARCH" in
+        Darwin:aarch64) triple=aarch64-apple-darwin ;;
+        Linux:x86_64) triple=x86_64-unknown-linux-musl ;;
+        Linux:aarch64) triple=aarch64-unknown-linux-musl ;;
+        *) skip ssh "no ssh-build release for ${OS}/${ARCH}"; return ;;
+    esac
+    tag=$(curl -fsSL "https://github.com/laputa-systems/ssh-build/releases.atom" \
+        | awk '
+            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+            in_entry && /<updated>/ {
+                updated = $0
+                sub(/^.*<updated>/, "", updated)
+                sub(/<.*/, "", updated)
+            }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+            }
+            /<\/entry>/ {
+                if (updated > newest_updated && tag != "") {
+                    newest_updated = updated
+                    newest_tag = tag
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
+    if [ -z "$tag" ]; then
+        unchecked ssh "no release found"
+        return
+    fi
+    asset="ssh-${triple}.zip"
+    url="https://github.com/laputa-systems/ssh-build/releases/download/${tag}/${asset}"
+    sums_url="https://github.com/laputa-systems/ssh-build/releases/download/${tag}/SHA256SUMS"
+    for ssh_command in $SSH_COMMANDS; do
+        ssh_existing="${DEST}/${ssh_command}"
+        if [ -e "$ssh_existing" ] || [ -L "$ssh_existing" ]; then
+            ssh_existing_target=$(readlink "$ssh_existing" 2>/dev/null || :)
+            if ! own_ssh_release_target "$ssh_existing_target" \
+                && ! own_ssh_current_target "$ssh_existing_target"; then
+                skip ssh "${ssh_existing} is not a dl-managed symlink"
+                return
+            fi
+        fi
+    done
+    releases="${SSH_HOME}/releases"
+    if [ -L "$releases" ] || { [ -e "$releases" ] && [ ! -d "$releases" ]; }; then
+        skip ssh "$releases is not a directory"
+        return
+    fi
+    if [ -e "${SSH_HOME}/current" ] && [ ! -L "${SSH_HOME}/current" ]; then
+        skip ssh "${SSH_HOME}/current is not a dl-managed symlink"
+        return
+    fi
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked ssh "$asset is unavailable"
+        return
+    fi
+    if is_current ssh "$id" && [ -L "${SSH_HOME}/current" ]; then
+        ssh_pointed=$(readlink "${SSH_HOME}/current") || ssh_pointed=
+        current_ok=true
+        [ -d "$ssh_pointed" ] || current_ok=false
+        for ssh_command in $SSH_COMMANDS; do
+            ssh_have_link=$(readlink "${DEST}/${ssh_command}" 2>/dev/null || :)
+            if [ "$ssh_have_link" != "${SSH_HOME}/current/${ssh_command}" ]; then
+                current_ok=false
+            else
+                own_file "${DEST}/${ssh_command}"
+            fi
+        done
+        if $current_ok && own_ssh_release_target "${ssh_pointed}/ssh" && [ -d "$ssh_pointed" ]; then
+            _dl_current "ssh is current (${tag})"
+            return
+        fi
+    fi
+    release_dir="${releases}/${tag}-${triple}"
+    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        if [ -L "${SSH_HOME}/current" ] \
+            && [ "$(readlink "${SSH_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
+            && is_current ssh "$id"; then
+            for ssh_command in $SSH_COMMANDS; do
+                ensure_ssh_link "$ssh_command" "${SSH_HOME}/current/${ssh_command}" || return
+            done
+            _dl_current "ssh is current (${tag})"
+            return
+        fi
+        skip ssh "$release_dir already exists"
+        return
+    fi
+    own_missing_dirs "$releases"
+    mkdir -p "$releases"
+    _dl_fetch "Downloading ${asset} ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip ssh "$asset download failed"
+        return
+    fi
+    tmpoutput=$(mktemp)
+    if ! curl -fsSL -o "$tmpoutput" "$sums_url"; then
+        rm -f "$tmpzip" "$tmpoutput"
+        tmpzip=
+        tmpoutput=
+        skip ssh "SHA256SUMS download failed"
+        return
+    fi
+    expected_sha256=$(grep -F "  ${asset}" "$tmpoutput" | awk '{print $1}')
+    rm -f "$tmpoutput"
+    tmpoutput=
+    if [ "${#expected_sha256}" -ne 64 ] || [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip ssh "$asset checksum mismatch"
+        return
+    fi
+    if ! zipinfo -1 "$tmpzip" | awk '
+        BEGIN { bad = 0 }
+        /^\// { bad = 1 }
+        {
+            count = split($0, path, "/")
+            for (component = 1; component <= count; component++) {
+                if (path[component] == "..") bad = 1
+            }
+        }
+        END { exit bad }
+    '; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip ssh "$asset contains an invalid path"
+        return
+    fi
+    tmpbundle=$(mktemp -d "${releases}/.ssh.XXXXXX")
+    if ! unzip -q "$tmpzip" -d "$tmpbundle"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip ssh "$asset could not be extracted"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    for ssh_command in $SSH_COMMANDS; do
+        if [ ! -f "${tmpbundle}/${ssh_command}" ] || [ ! -x "${tmpbundle}/${ssh_command}" ]; then
+            skip ssh "$asset is missing the ssh bundle"
+            return
+        fi
+    done
+    mv "$tmpbundle" "$release_dir"
+    tmpbundle=
+    own_dir "$release_dir"
+    if ! ln -sfn "$release_dir" "${SSH_HOME}/current"; then
+        skip ssh "could not switch ${SSH_HOME}/current"
+        return
+    fi
+    own_file "${SSH_HOME}/current"
+    for ssh_command in $SSH_COMMANDS; do
+        ensure_ssh_link "$ssh_command" "${SSH_HOME}/current/${ssh_command}" || return
+    done
+    printf '%s\n' "$id" > "${STATE}/ssh"
+    own_file "${STATE}/ssh"
+    changed=true
+    _dl_ok "Installed ${DEST}/ssh"
+}
+
 install_opencode2() {
     if installed opencode2 && ! opencode2_launcher_is_legacy_dl \
         && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" \
@@ -2715,6 +2947,7 @@ for prog in "$@"; do
         node-build) install_nodebuild ;;
         gh) install_release gh ;;
         git) install_git ;;
+        ssh) install_ssh ;;
         *)
             install_release "$prog"
             if [ "$prog" = mactop ] && [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ] \
