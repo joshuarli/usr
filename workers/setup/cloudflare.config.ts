@@ -1,9 +1,8 @@
-/// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bindings, defineConfig, triggers } from "cf/config";
-import * as entrypoint from "./src/index.ts" with { type: "cf-worker" };
+import * as entrypoint from "./src/index.js" with { type: "cf-worker" };
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const setupSh = readFileSync(join(repoRoot, "setup.sh"), "utf8");

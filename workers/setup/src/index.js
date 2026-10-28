@@ -4,7 +4,7 @@ const headers = {
 };
 
 export default {
-	fetch(request, env): Response {
+	fetch(request, env) {
 		if (new URL(request.url).pathname !== "/setup.sh") {
 			return new Response("not found", { status: 404 });
 		}
@@ -16,4 +16,4 @@ export default {
 		}
 		return new Response(env.SETUP_SH, { headers });
 	},
-} satisfies ExportedHandler<{ SETUP_SH: string }>;
+};
