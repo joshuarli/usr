@@ -34,7 +34,7 @@ run_dl() {
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
-        SSH_ZIP SSH_SUMS SSH_UNZIP_LIST_FAIL SSH_UNZIP_EXTRACT_FAIL SSH_FEED_OLD \
+        SSH_ZIP SSH_SUMS SSH_UNZIP_LIST_FAIL SSH_UNZIP_EXTRACT_FAIL SSH_FEED_OLD OXISH_ZIP OXISH_SUMS OXISH_UNZIP_EXTRACT_FAIL \
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
         XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
@@ -321,7 +321,7 @@ FEED
         ;;
     https://github.com/laputa-systems/ssh-build/releases/download/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/SHA256SUMS)
         [ -n "$output" ] || exit 1
-        cp "$SSH_SUMS" "$output"
+        cp "${OXISH_SUMS:-$SSH_SUMS}" "$output"
         ;;
     https://github.com/laputa-systems/ssh-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/ssh-x86_64-unknown-linux-musl.zip)
         if [ "$headers" = - ]; then
@@ -334,7 +334,25 @@ FEED
         ;;
     https://github.com/laputa-systems/ssh-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/SHA256SUMS)
         [ -n "$output" ] || exit 1
-        cp "$SSH_SUMS" "$output"
+        cp "${OXISH_SUMS:-$SSH_SUMS}" "$output"
+        ;;
+    https://github.com/laputa-systems/ssh-build/releases/download/release-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/oxish-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: oxish-test-etag-a'
+        elif [ -n "$output" ]; then
+            cp "$OXISH_ZIP" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/laputa-systems/ssh-build/releases/download/release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/oxish-x86_64-unknown-linux-musl.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: oxish-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$OXISH_ZIP" "$output"
+        else
+            exit 1
+        fi
         ;;
     *) exit 1 ;;
 esac
@@ -386,6 +404,15 @@ case "$mode" in
         ;;
     *)
         [ -n "$dest" ] || exit 1
+        if [ "$(cat "$zipfile")" = oxish-test-zip ]; then
+            [ "${OXISH_UNZIP_EXTRACT_FAIL:-false}" != true ] || exit 1
+            mkdir -p "$dest/bin"
+            for oxish_command in oxish-server oxish-session; do
+                printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/bin/$oxish_command"
+                chmod +x "$dest/bin/$oxish_command"
+            done
+            exit 0
+        fi
         if [ "$(cat "$zipfile")" = ssh-test-zip ]; then
             [ "${SSH_UNZIP_EXTRACT_FAIL:-false}" != true ] || exit 1
             for ssh_command in ssh ssh-keygen ssh-agent ssh-add sftp scp; do
@@ -409,7 +436,9 @@ chmod +x "$mock_bin/unzip"
 cat > "$mock_bin/zipinfo" <<'EOF'
 #!/bin/sh
 [ "$1" = -1 ] && [ -n "${2:-}" ] || exit 1
-if [ "$(cat "$2")" = ssh-test-zip ]; then
+if [ "$(cat "$2")" = oxish-test-zip ]; then
+    printf '%s\n' bin/oxish-server bin/oxish-session provenance.json
+elif [ "$(cat "$2")" = ssh-test-zip ]; then
     if [ "${SSH_UNZIP_LIST_FAIL:-false}" = true ]; then
         printf '%s\n' '../evil' 'ssh'
     else
@@ -496,6 +525,16 @@ else
 fi
 printf '%s  %s\n' "$SSH_ZIP_SHA256" "$ssh_asset" > "$test_root/ssh.SHA256SUMS"
 printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$ssh_asset" > "$test_root/ssh-bad.SHA256SUMS"
+
+oxish_asset="oxish-${git_triple}.zip"
+printf '%s' 'oxish-test-zip' > "$test_root/oxish.zip"
+if command -v sha256sum >/dev/null 2>&1; then
+    OXISH_ZIP_SHA256=$(sha256sum "$test_root/oxish.zip" | awk '{print $1}')
+else
+    OXISH_ZIP_SHA256=$(shasum -a 256 "$test_root/oxish.zip" | awk '{print $1}')
+fi
+printf '%s  %s\n' "$OXISH_ZIP_SHA256" "$oxish_asset" > "$test_root/oxish.SHA256SUMS"
+printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$oxish_asset" > "$test_root/oxish-bad.SHA256SUMS"
 
 cat > "$mock_bin/file" <<'EOF'
 #!/bin/sh
@@ -1967,6 +2006,49 @@ esac
 default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
 case "$default_targets" in
     *' ssh '*) printf 'ssh appeared in the default dl targets\n' >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "oxish installs opt-in, updates atomically, and failures keep the prior install"
+( set -e
+oxish_home="$test_root/oxish-home"
+oxish_run() {
+    HOME="$oxish_home" XDG_STATE_HOME="$oxish_home/.local/state" TMPDIR="$test_root/tmp" \
+        OXISH_ZIP="$test_root/oxish.zip" OXISH_SUMS="${oxish_sums:-$test_root/oxish.SHA256SUMS}" \
+        SSH_FEED_OLD="${oxish_feed_old:-false}" OXISH_UNZIP_EXTRACT_FAIL="${oxish_extract_fail:-false}" \
+        run_dl "$mock_bin:$PATH" "$repo_root" oxish 2>&1
+}
+oxish_feed_old=true
+output=$(oxish_run) || { printf '%s\n' "$output" >&2; exit 1; }
+oxish_current="$oxish_home/.local/share/oxish/current"
+oxish_old="$oxish_home/.local/share/oxish/releases/${ssh_old_tag}-${git_triple}"
+[ "$(readlink "$oxish_current")" = "$oxish_old" ]
+oxish_feed_old=false
+oxish_sums="$test_root/oxish-bad.SHA256SUMS"
+if output=$(oxish_run); then printf '%s\n' "$output" >&2; exit 1; fi
+case "$output" in *'checksum mismatch'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
+oxish_sums=
+oxish_extract_fail=true
+if output=$(oxish_run); then printf '%s\n' "$output" >&2; exit 1; fi
+oxish_extract_fail=false
+[ "$(readlink "$oxish_current")" = "$oxish_old" ]
+for oxish_command in oxish-server oxish-session; do
+    [ "$(readlink "$oxish_home/.local/bin/$oxish_command")" = "$oxish_current/bin/$oxish_command" ]
+done
+[ "$(cat "$oxish_home/.local/state/dl/oxish-server")" = 'oxish-test-etag-a' ]
+[ "$(ls "$oxish_home/.local/share/oxish/releases" | wc -l)" -eq 1 ]
+output=$(oxish_run) || { printf '%s\n' "$output" >&2; exit 1; }
+case "$output" in *'Installed '"$oxish_home"'/.local/bin/oxish-server'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
+oxish_new="$oxish_home/.local/share/oxish/releases/${ssh_tag}-${git_triple}"
+[ "$(readlink "$oxish_current")" = "$oxish_new" ]
+[ -x "$oxish_old/bin/oxish-server" ]
+[ -x "$oxish_new/bin/oxish-session" ]
+output=$(oxish_run) || { printf '%s\n' "$output" >&2; exit 1; }
+case "$output" in *'oxish is current ('"$ssh_tag"')'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
+default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
+case "$default_targets" in
+    *' oxish '*|*' ssh '*) printf 'ssh or oxish appeared in the default dl targets\n' >&2; exit 1 ;;
 esac
 )
 end_case

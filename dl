@@ -25,6 +25,8 @@ CODEX_LEGACY_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
 GIT_HOME="${GIT_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/git}"
 SSH_HOME="${SSH_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/ssh}"
 SSH_COMMANDS="ssh ssh-keygen ssh-agent ssh-add sftp scp"
+OXISH_HOME="${OXISH_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/oxish}"
+OXISH_COMMANDS="oxish-server oxish-session"
 GROK_HOME="${HOME}/.grok"
 MUSE_LAUNCHER_URL=https://dev.meta.ai/install.sh
 OPENCODE2_HOME="${HOME}/.opencode"
@@ -272,6 +274,71 @@ ensure_ssh_link() {
     mv -f "$ssh_tmplink" "$ssh_dest_link"
     ssh_tmplink=
     own_file "$ssh_dest_link"
+}
+
+own_oxish_release_target() {
+    oxish_release_prefix="${OXISH_HOME}/releases/"
+    case "$1" in
+        "${oxish_release_prefix}"*/*) ;;
+        *) return 1 ;;
+    esac
+    oxish_release_rest=${1#"$oxish_release_prefix"}
+    oxish_release_name=${oxish_release_rest%%/*}
+    case "$oxish_release_name" in
+        ''|*/*|.|..) return 1 ;;
+    esac
+    oxish_release_command=${oxish_release_rest#"${oxish_release_name}/bin/"}
+    [ "$oxish_release_command" != "$oxish_release_rest" ] || return 1
+    case " $OXISH_COMMANDS " in
+        *" $oxish_release_command "*) ;;
+        *) return 1 ;;
+    esac
+    own_dir "${oxish_release_prefix}${oxish_release_name}"
+}
+
+own_oxish_current_target() {
+    case "$1" in
+        "${OXISH_HOME}/current/"*) ;;
+        *) return 1 ;;
+    esac
+    oxish_current_command=${1#"${OXISH_HOME}/current/bin/"}
+    [ "$oxish_current_command" != "${1#"${OXISH_HOME}/current/"}" ] || return 1
+    case " $OXISH_COMMANDS " in
+        *" $oxish_current_command "*) ;;
+        *) return 1 ;;
+    esac
+    [ -L "${OXISH_HOME}/current" ] || return 1
+    oxish_pointed=$(readlink "${OXISH_HOME}/current") || return 1
+    own_oxish_release_target "${oxish_pointed}/bin/${oxish_current_command}" || return 1
+    [ -d "$oxish_pointed" ] || return 1
+}
+
+ensure_oxish_link() {
+    oxish_dest_link="${DEST}/$1"
+    oxish_want=$2
+    if [ -L "$oxish_dest_link" ]; then
+        oxish_have=$(readlink "$oxish_dest_link") || oxish_have=
+        if [ "$oxish_have" = "$oxish_want" ]; then
+            own_file "$oxish_dest_link"
+            return 0
+        fi
+        if own_oxish_release_target "$oxish_have" 2>/dev/null \
+            || own_oxish_current_target "$oxish_have" 2>/dev/null; then
+            :
+        else
+            skip oxish "${oxish_dest_link} is not a dl-managed symlink"
+            return 1
+        fi
+    elif [ -e "$oxish_dest_link" ]; then
+        skip oxish "${oxish_dest_link} is not a dl-managed symlink"
+        return 1
+    fi
+    oxish_tmplink=$(mktemp "${DEST}/.oxish.XXXXXX")
+    rm -f "$oxish_tmplink"
+    ln -s "$oxish_want" "$oxish_tmplink"
+    mv -f "$oxish_tmplink" "$oxish_dest_link"
+    oxish_tmplink=
+    own_file "$oxish_dest_link"
 }
 
 own_missing_dirs "$DEST"
@@ -2514,6 +2581,173 @@ install_ssh() {
     _dl_ok "Installed ${DEST}/ssh"
 }
 
+install_oxish() {
+    case "$OS:$ARCH" in
+        Darwin:aarch64) triple=aarch64-apple-darwin ;;
+        Linux:x86_64) triple=x86_64-unknown-linux-musl ;;
+        Linux:aarch64) triple=aarch64-unknown-linux-musl ;;
+        *) skip oxish "no ssh-build release for ${OS}/${ARCH}"; return ;;
+    esac
+    tag=$(curl -fsSL "https://github.com/laputa-systems/ssh-build/releases.atom" \
+        | awk '
+            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+            in_entry && /<updated>/ {
+                updated = $0
+                sub(/^.*<updated>/, "", updated)
+                sub(/<.*/, "", updated)
+            }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+            }
+            /<\/entry>/ {
+                if (updated > newest_updated && tag != "") {
+                    newest_updated = updated
+                    newest_tag = tag
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
+    if [ -z "$tag" ]; then
+        unchecked oxish "no release found"
+        return
+    fi
+    asset="oxish-${triple}.zip"
+    url="https://github.com/laputa-systems/ssh-build/releases/download/${tag}/${asset}"
+    sums_url="https://github.com/laputa-systems/ssh-build/releases/download/${tag}/SHA256SUMS"
+    for oxish_command in $OXISH_COMMANDS; do
+        oxish_existing="${DEST}/${oxish_command}"
+        if [ -e "$oxish_existing" ] || [ -L "$oxish_existing" ]; then
+            oxish_existing_target=$(readlink "$oxish_existing" 2>/dev/null || :)
+            if ! own_oxish_release_target "$oxish_existing_target" \
+                && ! own_oxish_current_target "$oxish_existing_target"; then
+                skip oxish "${oxish_existing} is not a dl-managed symlink"
+                return
+            fi
+        fi
+    done
+    releases="${OXISH_HOME}/releases"
+    if [ -L "$releases" ] || { [ -e "$releases" ] && [ ! -d "$releases" ]; }; then
+        skip oxish "$releases is not a directory"
+        return
+    fi
+    if [ -e "${OXISH_HOME}/current" ] && [ ! -L "${OXISH_HOME}/current" ]; then
+        skip oxish "${OXISH_HOME}/current is not a dl-managed symlink"
+        return
+    fi
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked oxish "$asset is unavailable"
+        return
+    fi
+    if is_current oxish-server "$id" && [ -L "${OXISH_HOME}/current" ]; then
+        oxish_pointed=$(readlink "${OXISH_HOME}/current") || oxish_pointed=
+        current_ok=true
+        [ -d "$oxish_pointed" ] || current_ok=false
+        for oxish_command in $OXISH_COMMANDS; do
+            oxish_have_link=$(readlink "${DEST}/${oxish_command}" 2>/dev/null || :)
+            if [ "$oxish_have_link" != "${OXISH_HOME}/current/bin/${oxish_command}" ]; then
+                current_ok=false
+            else
+                own_file "${DEST}/${oxish_command}"
+            fi
+        done
+        if $current_ok && own_oxish_release_target "${oxish_pointed}/bin/oxish-server" && [ -d "$oxish_pointed" ]; then
+            _dl_current "oxish is current (${tag})"
+            return
+        fi
+    fi
+    release_dir="${releases}/${tag}-${triple}"
+    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        if [ -L "${OXISH_HOME}/current" ] \
+            && [ "$(readlink "${OXISH_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
+            && is_current oxish-server "$id"; then
+            for oxish_command in $OXISH_COMMANDS; do
+                ensure_oxish_link "$oxish_command" "${OXISH_HOME}/current/bin/${oxish_command}" || return
+            done
+            _dl_current "oxish is current (${tag})"
+            return
+        fi
+        skip oxish "$release_dir already exists"
+        return
+    fi
+    own_missing_dirs "$releases"
+    mkdir -p "$releases"
+    _dl_fetch "Downloading ${asset} ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip oxish "$asset download failed"
+        return
+    fi
+    tmpoutput=$(mktemp)
+    if ! curl -fsSL -o "$tmpoutput" "$sums_url"; then
+        rm -f "$tmpzip" "$tmpoutput"
+        tmpzip=
+        tmpoutput=
+        skip oxish "SHA256SUMS download failed"
+        return
+    fi
+    expected_sha256=$(grep -F "  ${asset}" "$tmpoutput" | awk '{print $1}')
+    rm -f "$tmpoutput"
+    tmpoutput=
+    if [ "${#expected_sha256}" -ne 64 ] || [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip oxish "$asset checksum mismatch"
+        return
+    fi
+    if ! zipinfo -1 "$tmpzip" | awk '
+        BEGIN { bad = 0 }
+        /^\// { bad = 1 }
+        {
+            count = split($0, path, "/")
+            for (component = 1; component <= count; component++) {
+                if (path[component] == "..") bad = 1
+            }
+        }
+        END { exit bad }
+    '; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip oxish "$asset contains an invalid path"
+        return
+    fi
+    tmpbundle=$(mktemp -d "${releases}/.oxish.XXXXXX")
+    if ! unzip -q "$tmpzip" -d "$tmpbundle"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip oxish "$asset could not be extracted"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    for oxish_command in $OXISH_COMMANDS; do
+        if [ ! -f "${tmpbundle}/bin/${oxish_command}" ] || [ ! -x "${tmpbundle}/bin/${oxish_command}" ]; then
+            skip oxish "$asset is missing the oxish bundle"
+            return
+        fi
+    done
+    mv "$tmpbundle" "$release_dir"
+    tmpbundle=
+    own_dir "$release_dir"
+    if ! ln -sfn "$release_dir" "${OXISH_HOME}/current"; then
+        skip oxish "could not switch ${OXISH_HOME}/current"
+        return
+    fi
+    own_file "${OXISH_HOME}/current"
+    for oxish_command in $OXISH_COMMANDS; do
+        ensure_oxish_link "$oxish_command" "${OXISH_HOME}/current/bin/${oxish_command}" || return
+    done
+    printf '%s\n' "$id" > "${STATE}/oxish-server"
+    own_file "${STATE}/oxish-server"
+    changed=true
+    _dl_ok "Installed ${DEST}/oxish-server"
+}
+
 install_opencode2() {
     if installed opencode2 && ! opencode2_launcher_is_legacy_dl \
         && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" \
@@ -2948,6 +3182,7 @@ for prog in "$@"; do
         gh) install_release gh ;;
         git) install_git ;;
         ssh) install_ssh ;;
+        oxish) install_oxish ;;
         *)
             install_release "$prog"
             if [ "$prog" = mactop ] && [ "$OS" = Darwin ] && [ -x "${DEST}/mactop" ] \
