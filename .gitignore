@@ -11,3 +11,5 @@ sessions/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+.cloudflare

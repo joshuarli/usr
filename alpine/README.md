@@ -28,7 +28,7 @@ Reboot into the installed system and log in as that user.
 ## 2. Provision
 
 ```sh
-wget -O - https://example.com/setup.sh | sh
+wget -O - https://17166969.xyz/setup.sh | sh
 ```
 
 `setup.sh` detects Alpine and refuses anywhere else. It installs `git`
@@ -41,7 +41,7 @@ doas apk add git && git clone https://github.com/joshuarli/usr && doas sh usr/al
 ```
 
 Provisioning defaults to user `josh` (`USER_NAME`); override with
-`wget -O - https://example.com/setup.sh | USER_NAME=other sh`
+`wget -O - https://17166969.xyz/setup.sh | USER_NAME=other sh`
 for the bootstrap, or
 `doas env USER_NAME=other sh usr/alpine/install.sh` by hand, if needed.
 
