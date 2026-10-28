@@ -766,15 +766,31 @@ def color(text, code, stream=None):
     return f"\033[{code}m{text}\033[0m"
 
 
+def usage_color_code(value) -> str:
+    if value >= 100:
+        return "31"
+    if value >= 80:
+        return "33"
+    return "32"
+
+
+def usage_bar(value: object, width: int = 20) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return ""
+    if not math.isfinite(value):
+        return ""
+    filled = int(round(value / 100 * width))
+    filled = min(width, max(0, filled))
+    return color("█" * filled + "░" * (width - filled), usage_color_code(value))
+
+
 def percentage_text(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return color("unknown", "2") if value is None else str(value)
+    if not math.isfinite(value):
+        return str(value)
     text = f"{value:g}% used"
-    if value >= 100:
-        return color(text, "31")
-    if value >= 80:
-        return color(text, "33")
-    return color(text, "32")
+    return color(text, usage_color_code(value))
 
 
 def print_heading(title):
@@ -795,7 +811,21 @@ def reset_urgency_color(timestamp: object, scale: float = 1) -> str:
 def print_window(label: str, used: object, reset: object, scale: float = 1) -> None:
     delay = reset_delay(reset, scale)
     reset_text = color("resets in " + delay, reset_urgency_color(reset, scale))
-    print(f"  {label}: {percentage_text(used)}, {reset_text}")
+    bar = usage_bar(used)
+    if bar:
+        print(f"  {label}: {bar} {percentage_text(used)}, {reset_text}")
+    else:
+        print(f"  {label}: {percentage_text(used)}, {reset_text}")
+
+
+def print_aligned_windows(rows) -> None:
+    rows = list(rows)
+    width = 0
+    for row in rows:
+        width = max(width, len(str(row[0])))
+    for row in rows:
+        scale = row[3] if len(row) > 3 else 1
+        print_window(str(row[0]).ljust(width), row[1], row[2], scale)
 
 
 def normalize_window_label(raw: object, fallback: str) -> str:
@@ -834,13 +864,15 @@ def print_codex(result: dict[str, object]) -> None:
     if not windows:
         print(f"  {color('no subscription quota returned', '33')}")
         return
+    rows = []
     for slot, window in windows:
         label = duration_name(window.get("windowDurationMins")) or normalize_window_label(
             slot, slot
         )
         label = {"primary": "5h", "secondary": "7d"}.get(label, label)
         used = window.get("usedPercent")
-        print_window(label, used, window.get("resetsAt"))
+        rows.append((label, used, window.get("resetsAt")))
+    print_aligned_windows(rows)
 
 
 def claude_windows(result):
@@ -901,8 +933,7 @@ def print_claude(result: dict[str, object]) -> None:
     if result.get("plan"):
         print(f"  plan: {result['plan']}")
     windows = claude_windows(result["usage"])
-    for label, percent, reset in windows:
-        print_window(label, percent, reset)
+    print_aligned_windows(windows)
 
 
 def print_muse(result: dict[str, object]) -> None:
@@ -914,14 +945,13 @@ def print_muse(result: dict[str, object]) -> None:
             print(f"  plan: {tier}")
         current = allowance.get("window")
         weekly = allowance.get("weekly")
-        shown = False
+        rows = []
         if isinstance(current, dict) and is_percent(current.get("usedPercent")):
-            print_window("5h", current.get("usedPercent"), current.get("resetsAtMs"), 1000)
-            shown = True
+            rows.append(("5h", current.get("usedPercent"), current.get("resetsAtMs"), 1000))
         if isinstance(weekly, dict) and is_percent(weekly.get("usedPercent")):
-            print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
-            shown = True
-        if shown:
+            rows.append(("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000))
+        if rows:
+            print_aligned_windows(rows)
             return
         print(f"  {color('no subscription quota returned', '33')}")
         return
@@ -934,11 +964,13 @@ def print_muse(result: dict[str, object]) -> None:
     print(f"  {color('(last observed)', '2')}")
     current = usage.get("window")
     weekly = usage.get("weekly")
+    rows = []
     if isinstance(current, dict):
         label = duration_name(current.get("windowDurationMins")) or "current window"
-        print_window(label, current.get("usedPercent"), current.get("resetsAtMs"), 1000)
+        rows.append((label, current.get("usedPercent"), current.get("resetsAtMs"), 1000))
     if isinstance(weekly, dict):
-        print_window("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000)
+        rows.append(("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000))
+    print_aligned_windows(rows)
 
 
 def print_grok(result: dict[str, object]) -> None:
@@ -1060,8 +1092,7 @@ def print_agy(result: dict[str, object]) -> None:
     if not windows:
         print(f"  {color('no subscription quota returned', '33')}")
         return
-    for label, used, reset in windows:
-        print_window(label, used, reset)
+    print_aligned_windows(windows)
 
 
 def opencode_windows(result):
@@ -1096,10 +1127,12 @@ def print_opencode(result: dict[str, object]) -> None:
         if isinstance(org, str) and org:
             detail = f"{detail} ({org})"
         print(f"  account: {detail}")
+    rows = []
     for label, percent, reset, status in opencode_windows(result):
         if isinstance(status, str) and status and status != "ok":
             label = f"{label} [{status}]"
-        print_window(label, percent, reset)
+        rows.append((label, percent, reset))
+    print_aligned_windows(rows)
 
 
 def main(arguments):
