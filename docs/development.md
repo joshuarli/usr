@@ -29,7 +29,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | a Python script | `uvx ruff check FILE` and `uvx ty check FILE`, which read `ruff.toml` and `ty.toml` |
 | macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/lean-test.py`, and `uvx ruff check host/macos/macos host/macos/macos-test.py host/macos/lean.py host/macos/lean-test.py` |
 
-`sh sync check` and `sh sync lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from `sync`.
+`sh sync check` and `./lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from `sync`.
 
 ## Agent setup changes
 

@@ -29,7 +29,7 @@ jobs:
           GIT_COMMITTER_NAME=CI \
           GIT_COMMITTER_EMAIL=ci@example.invalid \
           PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" sh sync check
-          PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" sh sync lint
+          PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" ./lint
 
   macos:
     runs-on: macos-26

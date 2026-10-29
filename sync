@@ -5,8 +5,8 @@ cd "$root"
 
 cmd=${1:-sync}
 case $cmd in
-sync | links | plan | tools | layers | uninstall | check | lint | check-parallel) ;;
-*) printf 'usage: sync [links|plan|tools|layers|uninstall|check|lint|check-parallel] [TOOL...]\n' >&2; exit 1 ;;
+sync | links | plan | tools | layers | uninstall | check | check-parallel) ;;
+*) printf 'usage: sync [links|plan|tools|layers|uninstall|check|check-parallel] [TOOL...]\n' >&2; exit 1 ;;
 esac
 if [ "$cmd" != tools ] && [ "$#" -gt 1 ]; then
 	printf 'usage: sync %s takes no arguments\n' "$cmd" >&2
@@ -147,21 +147,6 @@ do_check() {
 	python3 -I dotfiles/skills-campaign-test.py
 }
 
-do_lint() {
-	files=$(git ls-files -co --exclude-standard | while read -r f; do
-		[ -f "$f" ] && [ ! -L "$f" ] || continue
-		{ [ "${f%.sh}" != "$f" ] || head -n 1 "$f" | grep -Eq '^#!.*(sh|bash|dash)( |$)'; } && echo "$f"
-	done)
-	# shellcheck disable=SC2086
-	shellcheck -S warning -e SC3013 -s sh $files
-	files=$(git ls-files -co --exclude-standard | while read -r f; do
-		[ -f "$f" ] && [ ! -L "$f" ] || continue
-		{ [ "${f%.py}" != "$f" ] || head -n 1 "$f" | grep -Eq '^#!.*python'; } && echo "$f"
-	done)
-	# shellcheck disable=SC2086
-	uvx ruff check --no-cache $files
-}
-
 case $cmd in
 sync) do_sync ;;
 links) do_links ;;
@@ -170,7 +155,6 @@ tools) do_tools "$@" ;;
 layers) check_layers ;;
 uninstall) do_uninstall ;;
 check) do_check ;;
-lint) do_lint ;;
 check-parallel)
 	mkdir -p "$tmpdir"
 	TMPDIR="$tmpdir" uvx --python 3.15 --with 'joshuarli-pytest-parallel==0.4.0' pytest tools dotfiles host/macos

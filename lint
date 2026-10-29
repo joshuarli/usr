@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+files=$(git ls-files -co --exclude-standard | while read -r f; do
+	[ -f "$f" ] && [ ! -L "$f" ] || continue
+	{ [ "${f%.sh}" != "$f" ] || head -n 1 "$f" | grep -Eq '^#!.*(sh|bash|dash)( |$)'; } && echo "$f"
+done || true)
+# shellcheck disable=SC2086
+shellcheck -S warning -e SC3013 -s sh $files
+files=$(git ls-files -co --exclude-standard | while read -r f; do
+	[ -f "$f" ] && [ ! -L "$f" ] || continue
+	{ [ "${f%.py}" != "$f" ] || head -n 1 "$f" | grep -Eq '^#!.*python'; } && echo "$f"
+done || true)
+# shellcheck disable=SC2086
+uvx ruff check --no-cache $files
