@@ -415,8 +415,8 @@ else:
         self.assertEqual(result["user_config_ignored"], "verified")
         self.assertEqual(result["ambient_context"], "isolated")
         self.assertEqual(result["ambient_skill_boundary"], "unverified")
-        self.assertEqual([request["model"] for request in result["requests"]], ["gpt-6-luna", "gpt-6-luna"])
-        self.assertEqual([request["reasoning_effort"] for request in result["requests"]], ["medium", "xhigh"])
+        self.assertEqual([request["model"] for request in result["requests"]], ["gpt-6-luna", "gpt-6.1-terra"])
+        self.assertEqual([request["reasoning_effort"] for request in result["requests"]], ["medium", "medium"])
         self.assertEqual([request["tools"] for request in result["requests"]], [[], []])
 
     def test_adversarial_review_returns_independent_verdict_and_combines_usage(self):
