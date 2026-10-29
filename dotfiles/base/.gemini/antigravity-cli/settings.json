@@ -1,9 +1,13 @@
 {
   "agentMode": "accept-edits",
+  "model": "Gemini 4 Argon (Medium)",
   "notifications": true,
   "runningLightSpeed": "slow",
   "showFeedbackSurvey": false,
   "showTips": false,
   "toolPermission": "always-proceed",
+  "trustedWorkspaces": [
+    "/Users/josh/d/niceforge"
+  ],
   "verbosity": "low"
 }

@@ -6,7 +6,7 @@
 # usage: setup-macos [-n] [STEP...]
 #   -n      report what would change and change nothing
 #   STEP    brew        install Homebrew if missing
-#           packages    install the packages listed in macos/Brewfile
+#           packages    install the packages listed in host/macos/Brewfile
 #           touchid     Touch ID for sudo, working inside tmux
 #           dns         unbound as a local caching resolver, and point the system at it
 #                       To undo: networksetup -setdnsservers SERVICE Empty

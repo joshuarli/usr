@@ -46,12 +46,12 @@ jobs:
             if "$brew" list --formula --versions "$package" >/dev/null 2>&1; then
               "$brew" uninstall --force --ignore-dependencies --formula "$package"
             fi
-          done < <("$brew" bundle list --file=macos/Brewfile --formula)
+          done < <("$brew" bundle list --file=host/macos/Brewfile --formula)
           while IFS= read -r package; do
             if "$brew" list --cask --versions "$package" >/dev/null 2>&1; then
               "$brew" uninstall --force --cask "$package"
             fi
-          done < <("$brew" bundle list --file=macos/Brewfile --cask)
+          done < <("$brew" bundle list --file=host/macos/Brewfile --cask)
 
       - name: Run sync with a fresh home
         shell: bash

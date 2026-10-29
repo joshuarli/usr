@@ -39,12 +39,12 @@ setup_alpine() {
         as_root apk add --interactive=no git
     }
 
-    if [ -f ./alpine/install.sh ] && [ -f ./sync ]; then
+    if [ -f ./host/alpine/install.sh ] && [ -f ./sync ]; then
         dest=$PWD
         say "using checkout at $dest"
     else
         [ -n "${HOME:-}" ] || die 'HOME is not set; run from the usr checkout or set HOME'
-        if [ -f "$HOME/usr/alpine/install.sh" ]; then
+        if [ -f "$HOME/usr/host/alpine/install.sh" ]; then
             dest=$HOME/usr
             say "using existing checkout at $dest"
         elif [ -e "$HOME/usr" ]; then
@@ -58,9 +58,9 @@ setup_alpine() {
 
     say 'provisioning the Alpine desktop'
     if [ -n "${USER_NAME:-}" ]; then
-        as_root env "USER_NAME=$USER_NAME" sh "$dest/alpine/install.sh" </dev/null
+        as_root env "USER_NAME=$USER_NAME" sh "$dest/host/alpine/install.sh" </dev/null
     else
-        as_root sh "$dest/alpine/install.sh" </dev/null
+        as_root sh "$dest/host/alpine/install.sh" </dev/null
     fi
 }
 

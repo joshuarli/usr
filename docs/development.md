@@ -2,7 +2,7 @@
 
 ## Run checks
 
-Run the narrowest check that covers the change. `sh sync check-parallel` runs the Python files in parallel across `dotfiles` and `macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`). The table lists the per-file runner for each area.
+Run the narrowest check that covers the change. `sh sync check-parallel` runs the Python files in parallel across `dotfiles` and `host/macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`). The table lists the per-file runner for each area.
 
 | Changed | Run |
 | --- | --- |
@@ -23,11 +23,11 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | skill invocation or discovery metadata, global instruction adapters, checker behavior, or fixture behavior | Run the named `SkillCampaignTests` cases that cover the changed mechanism, plus relevant metadata and link checks. Do not run the full suite only because a campaign skill changed. |
 | a hook or `mdtool` | the matching `tools/mdtool/tests/*-test.sh`, or `python3 -I tools/mdtool/src/mdtool.py selftest` and `skill-usage selftest` |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
-| `setup-linux` | `sh setup-linux-test.sh` and `shellcheck -s sh setup-linux setup-linux-test.sh` |
-| macOS sync side effects | `python3 -I macos/sync-test.py` |
+| `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
+| macOS sync side effects | `python3 -I host/macos/sync-test.py` |
 | a shell script | `shellcheck -s sh FILE` |
 | a Python script | `uvx ruff check FILE` and `uvx ty check FILE`, which read `ruff.toml` and `ty.toml` |
-| macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I macos/lean-test.py`, and `uvx ruff check macos/macos macos/macos-test.py macos/lean.py macos/lean-test.py` |
+| macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/lean-test.py`, and `uvx ruff check host/macos/macos host/macos/macos-test.py host/macos/lean.py host/macos/lean-test.py` |
 
 `sh sync check` and `sh sync lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from `sync`.
 

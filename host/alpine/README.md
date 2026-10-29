@@ -2,7 +2,7 @@
 
 Post-install provisioner that turns a stock Alpine Linux edge install with
 `linux-stable` into a minimal dwl + foot desktop with LLVM/clang 23 or newer. It is not an installer, image, or distribution.
-It lives at `alpine/` in the [usr](https://github.com/joshuarli/usr) checkout; clone that one repository to get it.
+It lives at `host/alpine/` in the [usr](https://github.com/joshuarli/usr) checkout; clone that one repository to get it.
 The target is a Dell XPS 13 9343 (x86_64); aarch64 is supported for VM testing.
 
 ## 1. Install Alpine
@@ -37,13 +37,13 @@ then runs `install.sh` as root through `doas` or `sudo`.
 Without the bootstrap, do it by hand instead:
 
 ```sh
-doas apk add git && git clone https://github.com/joshuarli/usr && doas sh usr/alpine/install.sh
+doas apk add git && git clone https://github.com/joshuarli/usr && doas sh usr/host/alpine/install.sh
 ```
 
 Provisioning defaults to user `josh` (`USER_NAME`); override with
 `wget -O - https://17166969.xyz/setup.sh | USER_NAME=other sh`
 for the bootstrap, or
-`doas env USER_NAME=other sh usr/alpine/install.sh` by hand, if needed.
+`doas env USER_NAME=other sh usr/host/alpine/install.sh` by hand, if needed.
 
 `install.sh` checks the system before changing anything and stops with an
 explanation if a check fails. It then:
@@ -59,7 +59,7 @@ explanation if a check fails. It then:
 - adds the user to the `seat` group and starts `seatd` and `home-runtime`,
 - links the enclosing checkout's dotfiles and installs ish with
   `sh sync links` and `sh sync tools ish` as the user. It does not run the
-  rest of `dl` or `setup-linux`.
+  rest of `dl` or `host/setup-linux`.
 
 Log out, then log in on tty1. dwl starts with a foot terminal running ish.
 The login shell stays `/bin/ash`: ish has no `-c` command mode and reads no
@@ -81,7 +81,7 @@ profile, so it cannot serve ssh commands or start the desktop.
 ## 3. Verify
 
 ```sh
-doas sh usr/alpine/verify.sh
+doas sh usr/host/alpine/verify.sh
 ```
 
 ## 4. Recover
@@ -93,7 +93,7 @@ a `seat` member, so `doas delgroup "$USER" seat` disables it.
 
 ## 5. Reapply
 
-Pull or edit the `usr` checkout and run `doas sh usr/alpine/install.sh` again.
+Pull or edit the `usr` checkout and run `doas sh usr/host/alpine/install.sh` again.
 Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
 `config/dwl.h` changes, and ish is installed only if missing (update it with
 `usr`'s own `dl`). A managed path holding something home did not install
@@ -115,7 +115,7 @@ time; home refuses to run while `linux-lts` is installed.
 `sh tests/static.sh` runs syntax, shellcheck and package-name checks. `sh tests/vm.sh`
 installs Alpine edge with `linux-stable` on aarch64 from the virt ISO in QEMU,
 provisions it twice, reboots, logs in on tty1 and checks the desktop. It needs `qemu` and `nc`, and provisions
-the committed `HEAD` of the `usr` checkout. Run both from `alpine/`.
+the committed `HEAD` of the `usr` checkout. Run both from `host/alpine/`.
 
 ## Hardware checklist (XPS 13 9343)
 

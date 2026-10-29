@@ -1,7 +1,7 @@
 # home
 
 Post-install provisioner for stock Alpine edge with linux-stable, not an ISO or OS distribution.
-It lives at `alpine/` in the `usr` checkout.
+It lives at `host/alpine/` in the `usr` checkout.
 
 - Keep POSIX sh, apk, OpenRC, seatd, udev, dwl and foot. No display manager, XWayland, D-Bus or session daemons. No `make` orchestration: `install.sh`, `verify.sh` and `tests/` are plain POSIX sh; dotfiles come from `sh sync` in the enclosing checkout.
 - Never manage disks, bootloaders, kernels, initramfs, repositories, passwords, doas policy or networking; check them instead (edge only, no linux-lts).

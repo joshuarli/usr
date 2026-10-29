@@ -1,7 +1,7 @@
 #!/bin/sh
 set -u
 cd "$(dirname "$0")" || exit 1
-usr_root=$(cd .. && pwd)
+usr_root=$(cd ../.. && pwd)
 
 failures=0
 fail() { printf 'FAIL: %s\n' "$*"; failures=$((failures + 1)); }

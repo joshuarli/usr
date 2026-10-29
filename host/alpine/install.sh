@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-usr_root=$(cd .. && pwd)
+usr_root=$(cd ../.. && pwd)
 usr_url=https://github.com/joshuarli/usr
 
 die() { printf 'home: %s\n' "$*" >&2; exit 1; }
@@ -33,7 +33,7 @@ install_managed() {
 	fi
 }
 
-[ "$(id -u)" -eq 0 ] || die 'run as root, for example: doas sh usr/alpine/install.sh'
+[ "$(id -u)" -eq 0 ] || die 'run as root, for example: doas sh usr/host/alpine/install.sh'
 [ -r /etc/os-release ] && . /etc/os-release
 [ "${ID:-}" = alpine ] || die 'this provisioner supports only Alpine Linux'
 case ${VERSION_ID:-} in
@@ -95,7 +95,7 @@ if [ -e /usr/local/bin/dwl ]; then
 	esac
 fi
 [ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ] && [ -f "$usr_root/dl" ] ||
-	die "$usr_root is not the usr checkout; clone $usr_url and run usr/alpine/install.sh from it"
+	die "$usr_root is not the usr checkout; clone $usr_url and run usr/host/alpine/install.sh from it"
 origin=$(as_user "git -C '$usr_root' remote get-url origin" 2>/dev/null) ||
 	die "$usr_root is not a git checkout"
 case $origin in
@@ -134,4 +134,4 @@ done
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
 [ -x "$home/.local/bin/ish" ] || as_user "sh '$usr_root/sync' tools ish >/dev/null" || die "installing ish from $usr_root failed"
 
-say "provisioned. Log out, then log in as $user on tty1. Run: doas sh usr/alpine/verify.sh"
+say "provisioned. Log out, then log in as $user on tty1. Run: doas sh usr/host/alpine/verify.sh"

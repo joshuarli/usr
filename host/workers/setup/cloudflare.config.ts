@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { bindings, defineConfig, triggers } from "cf/config";
 import * as entrypoint from "./src/index.js" with { type: "cf-worker" };
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const setupSh = readFileSync(join(repoRoot, "setup.sh"), "utf8");
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const setupSh = readFileSync(join(repoRoot, "host", "setup.sh"), "utf8");
 
 export default defineConfig({
 	worker: {
