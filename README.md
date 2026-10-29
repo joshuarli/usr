@@ -33,5 +33,5 @@ On Linux, skip the macOS setup. Run `sh sync plan` on either platform and resolv
 
 To provision an Alpine edge desktop (dwl + foot) instead, bootstrap a fresh machine with the one-liner in [`host/alpine/README.md`](host/alpine/README.md), or run `doas sh host/alpine/install.sh` from this checkout; it links dotfiles and installs ish only, and leaves networking and DNS alone.
 
-See [sync details](docs/sync.md) for what `make` changes and how the layers work.
+Run `sh sync doctor` to inspect installed links, tools, agent configuration, and relevant platform dependencies without applying repairs. See [sync details](docs/sync.md) for what `make` changes and how the layers work.
 

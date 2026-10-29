@@ -5,7 +5,7 @@ cd "$root"
 
 cmd=${1:-sync}
 case $cmd in
-sync | links | plan | tools | layers | uninstall | check | check-parallel) ;;
+sync | links | plan | tools | layers | uninstall | check | check-parallel | doctor) ;;
 *) printf 'usage: sync [links|plan|tools|layers|uninstall|check|check-parallel] [TOOL...]\n' >&2; exit 1 ;;
 esac
 if [ "$cmd" != tools ] && [ "$#" -gt 1 ]; then
@@ -115,6 +115,8 @@ do_uninstall() {
 
 do_check() {
 	python3 -I host/macos/sync-test.py
+	sh dotfiles/doctor-test.sh
+	node dotfiles/pi-git-guard-test.mjs
 	mkdir -p "$tmpdir"
 	TMPDIR="$tmpdir" python3 -I tools/pinact/test_pinact.py
 	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_yaml.py
@@ -149,6 +151,7 @@ do_check() {
 }
 
 case $cmd in
+doctor) sh "$root/dotfiles/doctor" ;;
 sync) do_sync ;;
 links) do_links ;;
 plan) do_plan ;;

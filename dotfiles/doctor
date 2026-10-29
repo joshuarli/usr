@@ -1,0 +1,118 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+target=${TARGET:-$HOME}
+owned=${DL_OWNED_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/sync/dl-owned}
+issues=0
+
+ok() { printf 'ok: %s\n' "$1"; }
+problem() { printf 'problem: %s\n' "$1"; issues=$((issues + 1)); }
+
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/usr-doctor.XXXXXX") || exit 1
+trap 'rm -rf "$scratch"' EXIT
+trap 'exit 130' HUP INT TERM
+
+printf 'links:\n'
+plan_status=0
+TARGET="$target" TMPDIR="$scratch" sh "$root/sync" plan > "$scratch/plan" 2>&1 || plan_status=$?
+missing=$(grep -c '^LINK:' "$scratch/plan" || :)
+conflicts=$(grep -c '^CONFLICT:' "$scratch/plan" || :)
+prunes=$(grep -c '^PRUNE:' "$scratch/plan" || :)
+if [ "$missing" -eq 0 ] && [ "$conflicts" -eq 0 ] && [ "$prunes" -eq 0 ] && [ "$plan_status" -eq 0 ]; then
+    ok 'all declared layer links match'
+else
+    if [ "$missing" -gt 0 ] || [ "$conflicts" -gt 0 ] || [ "$prunes" -gt 0 ]; then
+        problem "$missing missing, $conflicts conflicting, $prunes obsolete layer links"
+        grep -E '^(LINK|CONFLICT|PRUNE):' "$scratch/plan" || :
+    fi
+    if [ "$plan_status" -ne 0 ] && [ "$conflicts" -eq 0 ]; then
+        problem "sync plan failed ($plan_status)"
+        cat "$scratch/plan"
+    fi
+fi
+
+printf 'owned paths:\n'
+owned_missing=0
+if [ -f "$owned" ]; then
+    tab=$(printf '\t')
+    while IFS="$tab" read -r kind path; do
+        case $kind in
+            F) [ -e "$path" ] && continue ;;
+            D) [ -d "$path" ] && continue ;;
+            K) [ -x "$path" ] && continue ;;
+            *) continue ;;
+        esac
+        printf 'missing: %s\n' "$path"
+        owned_missing=$((owned_missing + 1))
+    done < "$owned"
+    if [ "$owned_missing" -eq 0 ]; then ok 'recorded files and installations exist';
+    else problem "$owned_missing recorded paths are missing or broken"; fi
+else
+    ok 'no ownership record (fresh installation)'
+fi
+
+printf 'default tools:\n'
+if sh "$root/dl" --list > "$scratch/tools" 2> "$scratch/tool-errors"; then
+    tool_missing=0
+    while IFS= read -r tool; do
+        [ -n "$tool" ] || continue
+        case "$tool" in nodejs) launcher=node ;; *) launcher=$tool ;; esac
+        if [ ! -x "$target/.local/bin/$launcher" ]; then
+            printf 'missing: %s (~/.local/bin/%s)\n' "$tool" "$launcher"
+            tool_missing=$((tool_missing + 1))
+        fi
+    done < "$scratch/tools"
+    if [ "$tool_missing" -eq 0 ]; then ok 'default tool launchers exist';
+    else problem "$tool_missing default tool launchers are missing"; fi
+else
+    problem 'could not read dl default tools'
+    cat "$scratch/tool-errors"
+fi
+
+printf 'agent configuration:\n'
+if [ -f "$root/dotfiles/base/.codex/AGENTS.md" ] && [ ! -r "$target/.codex/AGENTS.md" ]; then
+    problem 'canonical agent instructions are unavailable at ~/.codex/AGENTS.md'
+else
+    ok 'canonical agent instructions are available or not declared'
+fi
+if [ -d "$root/dotfiles/base/.agents/skills" ] && [ ! -d "$target/.agents/skills" ]; then
+    problem 'shared agent skills are unavailable at ~/.agents/skills'
+else
+    ok 'shared agent skills are available or not declared'
+fi
+
+case $(uname -s) in
+    Darwin)
+        printf 'macOS packages:\n'
+        if ! command -v brew >/dev/null 2>&1; then
+            problem 'Homebrew is missing'
+        elif HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 brew bundle check --file="$root/host/macos/Brewfile" > "$scratch/brew" 2>&1; then
+            ok 'Brewfile packages are installed'
+        else
+            problem 'Brewfile packages missing or check failed'
+            cat "$scratch/brew"
+        fi
+        ;;
+    Linux)
+        if [ -r /etc/os-release ]; then
+            os_id=$( ( . /etc/os-release; printf '%s' "${ID:-}" ) )
+            if [ "$os_id" = alpine ]; then
+                printf 'Alpine DNS:\n'
+                if command -v unbound-checkconf >/dev/null 2>&1 && [ -f /etc/unbound/unbound.conf ]; then
+                    if unbound-checkconf /etc/unbound/unbound.conf > "$scratch/unbound" 2>&1; then
+                        ok 'Unbound configuration parses'
+                    else
+                        problem 'Unbound configuration fails validation'
+                        cat "$scratch/unbound"
+                    fi
+                else
+                    problem 'Unbound configuration or validator is missing'
+                fi
+            fi
+        fi
+        ;;
+esac
+
+if [ "$issues" -eq 0 ]; then ok 'doctor passed'; else printf 'doctor: %s issue(s)\n' "$issues" >&2; fi
+[ "$issues" -eq 0 ]

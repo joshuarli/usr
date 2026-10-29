@@ -26,6 +26,7 @@ Instructions drift as they grow: two skills give opposite orders, a rule is rest
    - Rules without one owner: the same rule in several skills, or overlapping scopes that should merge or point. Check against the owner list in `dotfiles-health`.
    - Bloat: sentences that can be cut or halved with no lost decision.
    - Unclear wording: more than one reading, jargon where a plain word works, stacked qualifiers.
+   - Invocation precision: an auto-skill description must name the distinct tasks that require its body, not merely describe its topic. Test whether each description would trigger for a concrete user request and stay silent for an adjacent request; explicitly gated skills must remain manual-only.
    - Descriptions that are vague or would fire too broadly; skills missing `**The test:**` or `**Report:**`.
 
    Each finding gives `file:line`, the quoted text, a proposed replacement or "delete", and a one-line reason.

@@ -46,6 +46,10 @@ Unlike that historical configuration, `.pi/agent` is not a whole-directory `.sym
 
 `agent-sessions` and `agent-learn` index Pi transcripts (see [agent learning](agent-learning.md)). They are not yet part of `reset-agents`, and pi-subagents run artifacts are not read.
 
+## Git command guard
+
+The shared profile syncs `~/.pi/agent/extensions/git-execution-guard.js`. For Pi `bash` tool calls that visibly invoke Git, it supplies noninteractive `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, and `GIT_MERGE_AUTOEDIT` settings to avoid hanging on an editor, and rejects obvious `git --no-verify` hook bypass attempts. This is a convenience guard, **not a security boundary**: indirect shell commands and other agents are outside its scope. The Git pre-push hook remains the independent push control. Check the behavior offline with `node dotfiles/pi-git-guard-test.mjs`.
+
 ## Checks and upstream references
 
 Run `python3 -I dotfiles/pi-test.py` for offline installer and profile checks (also included in `sh sync check`). These use a scratch home under `.work/` and mock npm; they do not prove live provider access or run a real Pi/subagents session.

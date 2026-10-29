@@ -3120,8 +3120,17 @@ report_unowned_launcher() {
     fi
 }
 
+if [ "${1:-}" = --list ]; then
+    [ "$#" -eq 1 ] || { _dl_fail 'usage: dl --list'; exit 2; }
+    DL_RECORD_OWNED=false
+    list_only=true
+    set --
+else
+    list_only=false
+fi
+
 if [ "$DL_RECORD_OWNED" = true ]; then
-    [ -n "$DL_OWNED_FILE" ] || { _dl_fail 'DL_OWNED_FILE is required to record installed paths'; exit 1; }
+    [ -n "$DL_OWNED_FILE" || { _dl_fail 'DL_OWNED_FILE is required to record installed paths'; exit 1; }
     record_managed_installs
     for report_prog in agy muse claude; do report_unowned_launcher "$report_prog"; done
     exit 0
@@ -3137,6 +3146,11 @@ if [ $# -eq 0 ]; then
     esac
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh ghostty; fi
     if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
+fi
+
+if $list_only; then
+    printf '%s\n' "$@"
+    exit 0
 fi
 
 needs_jaq=false

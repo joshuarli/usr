@@ -4,6 +4,8 @@
 
 Run `sh sync plan` to preview links. Resolve each `CONFLICT` before syncing. `sh sync links` applies only the layer links, without `dl` or host setup, and `sh sync tools ish` runs `dl` for the named tools only. `sh sync` applies links before running `dl`; a failed download leaves the links in place and returns failure. `TARGET` changes the symlink destination, but tools still install under `$HOME/.local/bin`.
 
+`sh sync doctor` inspects the installed environment without changing managed files or host settings. It reuses `sync plan` to report missing, conflicting, or obsolete layer links, checks ownership records and default `dl` launchers (`sh dl --list`), verifies shared agent entry points, and checks Homebrew bundle state on macOS or the installed Unbound configuration on Alpine. It may create temporary scratch files, which it removes. It performs no installation, package upgrade, sudo operation, or intentional network request; a nonzero exit means at least one problem was detected. Use `sh sync plan` to see exact link repairs before applying anything.
+
 `sh sync uninstall` removes recorded layer links and installed tool paths. It leaves unrecorded pre-existing links and native launchers in place. Ownership records live under `${XDG_STATE_HOME:-$HOME/.local/state}/sync`. See [`dl`](../dl) for tool installation and update behavior.
 
 `make` also runs host setup: macOS installs Homebrew packages, while Alpine Linux configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID and macOS DNS setup are manual. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
