@@ -26,6 +26,7 @@ const float SEL_MIN = 0.025;
 const float SEL_FULL = 0.075;
 const float PROBE_X_PX = 7.0;
 const float PROBE_Y_PX = 5.0;
+const float BRIGHTNESS = 1.18;
 
 // Small channel-wise maximum distance (cheaper than length/distance).
 float maxChannelDelta(vec3 a, vec3 b) {
@@ -79,6 +80,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float glass = smoothstep(0.0, GLASS_EDGE_WIDTH, edge);
     float rim = smoothstep(0.44, 0.5, max(abs(p.x), abs(p.y)));
     color *= (1.0 - VIGNETTE_DARK * dot(p, p) - RIM_DARK * rim) * glass;
+    color *= BRIGHTNESS;
 
     // The cursor uniforms encode a *glyph rectangle*, not a stable cell
     // grid. Bar/underline cursors and hidden cursors must not disable this.
@@ -117,5 +119,5 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                       vec3(0.0), vec3(1.0));
     }
 
-    fragColor = vec4(color, center.a);
+    fragColor = vec4(clamp(color, vec3(0.0), vec3(1.0)), center.a);
 }
