@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Static and synthetic checks for Black Phosphor's automatic ANSI pulse.
+"""CPU-reference tests for the automatic Black Phosphor highlight pulse.
 
-No external dependencies; real GLSL compilation requires Ghostty on macOS.
+The original detector mistook cursor glyph dimensions for the text cell.
+These tests verify actual pixel-color classification with synthetic terminal
+screens, including bar-cursor independence, reverse video, and selections.
+GLSL compilation and visual GPU behavior still need testing in Ghostty.
 """
 
 from __future__ import annotations
@@ -15,85 +18,123 @@ SHADER = (ROOT / "shaders/black-phosphor.glsl").read_text()
 CONFIG = (ROOT / "config.ghostty").read_text()
 THEME = (ROOT / "themes/Black Phosphor").read_text()
 
-
 def number(name: str) -> float:
-    match = re.search(r"const float " + name + r" = ([0-9.]+);", SHADER)
-    assert match, name
-    return float(match.group(1))
+    result = re.search(r"const float " + name + r" = ([0-9.]+);", SHADER)
+    assert result, f"missing shader constant: {name}"
+    return float(result.group(1))
 
+def rgb(hex_color: str) -> tuple[float, float, float]:
+    return tuple(int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
 
-def rgb(hex_value: str) -> tuple[float, float, float]:
-    return tuple(int(hex_value[i:i + 2], 16) / 255 for i in (1, 3, 5))
-
-
-def delta(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+def max_delta(a: tuple[float, ...], b: tuple[float, ...]) -> float:
     return max(abs(x - y) for x, y in zip(a, b, strict=True))
 
+def theme_delta(value: tuple[float, ...], reference: tuple[float, ...]) -> float:
+    return min(max_delta(value, reference),
+               max_delta(value, tuple(x*x for x in reference)))
 
-def smoothstep(low: float, high: float, x: float) -> float:
-    p = max(0.0, min(1.0, (x - low) / (high - low)))
-    return p * p * (3.0 - 2.0 * p)
+def smoothstep(a: float, b: float, value: float) -> float:
+    x = max(0.0, min(1.0, (value - a)/(b - a)))
+    return x*x*(3.0 - 2.0*x)
 
+def gate(a: tuple[float, ...], b: tuple[float, ...],
+         bg: tuple[float, ...], selection: tuple[float, ...]) -> float:
+    fill = tuple((x+y)*0.5 for x, y in zip(a, b, strict=True))
+    stable = 1.0 - smoothstep(0.07, 0.16, max_delta(a, b))
+    color = smoothstep(number("BG_MIN"), number("BG_FULL"), theme_delta(fill, bg))
+    unselected = smoothstep(number("SEL_MIN"), number("SEL_FULL"),
+                            theme_delta(fill, selection))
+    return stable * color * unselected
 
-def grid_column(pixel: float, cursor: float, width: float) -> int:
-    return math.floor((pixel - cursor % width) / width)
-
-
-def pulse(t: float, col: int, row: int) -> float:
-    phase = (
-        t / number("PULSE_PERIOD_S") - col * number("PHASE_PER_CELL")
-        + row * number("ROW_PHASE")
-    ) % 1.0
-    return smoothstep(0.20, 0.92, 1.0 - abs(2.0 * phase - 1.0))
-
+def pulse(time: float, pixel_x: float) -> float:
+    phase = (time / number("PULSE_PERIOD_S") -
+             pixel_x * number("PHASE_PER_PIXEL")) % 1.0
+    triangle = 1.0 - abs(2.0*phase - 1.0)
+    return smoothstep(0.27, 0.93, triangle)
 
 def main() -> None:
     assert "custom-shader = shaders/black-phosphor.glsl" in CONFIG
     assert "custom-shader-animation = true" in CONFIG
     assert "custom-shader-animation = always" not in CONFIG
     assert "font-family = Glass TTY Soft" in CONFIG
-    assert SHADER.count("texture(iChannel0,") == 6
     assert SHADER.count("void mainImage(") == 1
-    assert all(name in SHADER for name in (
-        "iBackgroundColor", "iSelectionBackgroundColor", "iCurrentCursor.zw",
-        "iCursorVisible", "iTime",
-    ))
+    assert SHADER.count("texture(iChannel0,") == 7
+    assert "iTime" in SHADER
+    assert "iCurrentCursor" not in SHADER
+    assert "iCursorVisible" not in SHADER
+    assert "themeColorDistance(fill, iBackgroundColor)" in SHADER
+    assert "themeColorDistance(fill, iSelectionBackgroundColor)" in SHADER
     assert "fragColor = vec4(color, center.a)" in SHADER
     assert not re.search(r"\b(?:for|while|do|sin|cos|tan|pow|sqrt|exp)\s*\(", SHADER)
 
-    # The character wave must not jump as the cursor moves horizontally.
-    for width in (17.0, 20.5, 21.333):
-        for col in (0, 1, 8, 32, 79):
-            x = 24.0 + (col + 0.5) * width
-            for cursor_col in (0, 1, 16, 48):
-                assert grid_column(x, 24.0 + cursor_col * width, width) == col
+    bg = rgb(re.search(r"^background = (#[0-9a-f]{6})$", THEME, re.M).group(1))
+    selection = rgb(re.search(r"^selection-background = (#[0-9a-f]{6})$", THEME, re.M).group(1))
+    highlighted = rgb("#eed9a3")
+    dark_ink = rgb("#242118")
+    regular_ink = rgb("#eaf0e7")
+    w, h = 240, 90
+    screen = [[bg for _ in range(w)] for _ in range(h)]
 
-    background = rgb(re.search(r"^background = (#[a-f0-9]{6})$", THEME, re.M).group(1))
-    selection = rgb(re.search(r"^selection-background = (#[a-f0-9]{6})$", THEME, re.M).group(1))
+    # Two labeled regions plus ordinary bright text on default black.
+    for y in range(20, 60):
+        for x in range(35, 205):
+            screen[y][x] = highlighted
+    for col in range(8):
+        x0 = 40 + col * 19
+        for y in range(28, 52):
+            for x in range(x0 + 7, x0 + 10):
+                screen[y][x] = dark_ink
+    for y in range(29, 53):
+        for x in range(8, 11):
+            screen[y][x] = regular_ink
 
-    def gate(hex_color: str) -> float:
-        color = rgb(hex_color)
-        return (
-            smoothstep(number("BG_MIN"), number("BG_FULL"), delta(color, background))
-            * smoothstep(number("SEL_MIN"), number("SEL_FULL"), delta(color, selection))
-        )
+    def sample(image: list[list[tuple[float, ...]]], x: int, y: int) -> tuple[float, ...]:
+        return image[max(0, min(h-1, y))][max(0, min(w-1, x))]
 
-    assert gate("#0b0f12") == 0.0  # Ordinary terminal cells
-    assert gate("#435158") == 0.0  # Native mouse selection
-    assert gate("#1b2225") > 0.1  # ANSI black, distinct from theme background
-    for color in ("#f09386", "#c4e891", "#344f6d", "#eaf0e7"):
-        assert gate(color) > 0.9  # ANSI, truecolor, and reversed video
+    def screen_gate(image: list[list[tuple[float, ...]]], x: int, y: int) -> float:
+        dx, dy = int(number("PROBE_X_PX")), int(number("PROBE_Y_PX"))
+        return gate(sample(image, x+dx, y+dy), sample(image, x-dx, y-dy),
+                    bg, selection)
 
+    assert screen_gate(screen, 48, 39) > 0.95  # Dark glyph on ANSI yellow
+    assert screen_gate(screen, 85, 39) > 0.95  # Highlighted background
+    assert screen_gate(screen, 10, 39) == 0.0  # Ordinary bright glyph
+    assert screen_gate(screen, 50, 15) == 0.0  # Default background
+    assert screen_gate(screen, 206, 39) == 0.0 # Outside highlight region
+
+    # At least 60% of the central highlight remains active, even with ink.
+    coverage = sum(screen_gate(screen,x,y) > 0.5
+                   for x in range(48,195) for y in range(30,50)) / (147*20)
+    assert coverage > 0.60, coverage
+
+    # Selection color is excluded, including in linear-ish color space.
+    selected = [[bg for _ in range(w)] for _ in range(h)]
+    for y in range(20, 60):
+        for x in range(35,205):
+            selected[y][x] = selection
+    assert screen_gate(selected, 100, 40) == 0.0
+    approx_linear = tuple(x*x for x in selection)
+    assert gate(approx_linear,approx_linear,bg,selection) == 0.0
+
+    # Reverse-video (light background/dark ink) and truecolor both trigger.
+    for hcolor in ("#eaf0e7", "#344f6d", "#f09386", "#a1e6e9"):
+        c = rgb(hcolor)
+        assert gate(c,c,bg,selection) > 0.9, hcolor
+
+    # Simulate vertical-bar, underline and hidden cursors: classification
+    # has no cursor input and MUST remain active for all three.
+    for cursor_width in (2, 18, 0):
+        assert screen_gate(screen, 85, 39) > 0.95, cursor_width
+
+    # Temporal movement is nontrivial, periodic, and varies across columns.
     period = number("PULSE_PERIOD_S")
     assert 3.0 < period < 5.0
-    assert 0.1 < number("PULSE_STRENGTH") < 0.25
-    assert max(pulse(i * period / 20, 3, 0) for i in range(20)) > 0.95
-    assert min(pulse(i * period / 20, 3, 0) for i in range(20)) == 0.0
-    assert abs(pulse(2.0, 3, 0) - pulse(2.0, 4, 0)) > 0.05
-    assert abs(pulse(2.0, 3, 0) - pulse(2.0, 3, 1)) > 0.05
-    assert abs(pulse(2.0, 3, 0) - pulse(2.0 + period, 3, 0)) < 1e-10
-    print("Ghostty CRT pulse: static and synthetic checks passed.")
-
+    assert 0.15 < number("PULSE_INK") < 0.35
+    values = [pulse(i*period/30, 85.0) for i in range(30)]
+    assert min(values) == 0.0 and max(values) > 0.95
+    assert abs(pulse(1.2, 85.0)-pulse(1.2+period,85.0)) < 1e-10
+    assert abs(pulse(1.2, 85.0)-pulse(1.2,185.0)) > 0.1
+    print("Ghostty CRT highlight: pixel-color and animation tests passed.")
 
 if __name__ == "__main__":
     main()

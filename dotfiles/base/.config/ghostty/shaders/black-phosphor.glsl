@@ -1,7 +1,7 @@
 // Black Phosphor — static curved-glass CRT, with sharp glyph cores.
-// One pass, six texture samples; no loops, noise, or trigonometry.
-// Only non-default background cells receive the moving phosphor wave.
-// Ghostty redraws the focused terminal continuously to animate the wave.
+// One pass, seven texture samples; no loops, noise, or trigonometry.
+// Color-aware highlights breathe without relying on cursor glyph dimensions.
+// Ghostty redraws the focused terminal continuously for animation.
 const float CURVATURE = 0.048;
 const float GLOW_RADIUS_PX = 2.35;
 const float GLOW_STRENGTH = 0.82;
@@ -13,18 +13,32 @@ const float VIGNETTE_DARK = 0.165;
 const float RIM_DARK = 0.05;
 const float GLASS_EDGE_WIDTH = 0.006;
 
+// A traveling band spans roughly 15-20 characters at 16 pt on Retina.
+// A continuous phase, rather than an assumed character pitch, prevents
+// partial-glyph artifacts when fonts, DPI, or padding change.
 const float PULSE_PERIOD_S = 3.8;
-const float PHASE_PER_CELL = 0.075;
-const float ROW_PHASE = 0.085;
-const float PULSE_STRENGTH = 0.18;
-const float BG_MIN = 0.045;
-const float BG_FULL = 0.105;
+const float PHASE_PER_PIXEL = 0.0029;
+const float PULSE_INK = 0.28;
+const float PULSE_FILL = 0.11;
+const float BG_MIN = 0.065;
+const float BG_FULL = 0.14;
 const float SEL_MIN = 0.025;
 const float SEL_FULL = 0.075;
+const float PROBE_X_PX = 7.0;
+const float PROBE_Y_PX = 5.0;
 
+// Small channel-wise maximum distance (cheaper than length/distance).
 float maxChannelDelta(vec3 a, vec3 b) {
     vec3 d = abs(a - b);
     return max(d.r, max(d.g, d.b));
+}
+
+// Ghostty exposes configured colors as normalized sRGB, while the input
+// texture may be sampled in linear space. Compare in both representations.
+// Squaring is a cheap approximation for dark, configured UI colors.
+float themeColorDistance(vec3 sampled, vec3 reference) {
+    return min(maxChannelDelta(sampled, reference),
+               maxChannelDelta(sampled, reference * reference));
 }
 
 void mainImage(out vec4 fragColor, in vec2 fragCoord) {
@@ -66,60 +80,41 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float rim = smoothstep(0.44, 0.5, max(abs(p.x), abs(p.y)));
     color *= (1.0 - VIGNETTE_DARK * dot(p, p) - RIM_DARK * rim) * glass;
 
-    // Detect ANSI background-highlighted cells from their rendered fill.
-    // SGR attributes aren't available to a postprocess shader; this is a
-    // color-based approximation, not an exact reverse-video flag.
-    // Cursor metrics give the true character grid without font-size guesses.
-    if (iCurrentCursor.z >= 6.0 && iCurrentCursor.w >= 12.0) {
-        vec2 cellSize = iCurrentCursor.zw;
-        vec2 pixel = warped * iResolution.xy;
-        // Modulo origin stays fixed when the cursor advances by whole cells.
-        vec2 origin = mod(iCurrentCursor.xy, cellSize);
-        vec2 cell = floor(vec2((pixel.x - origin.x) / cellSize.x,
-                               (origin.y - pixel.y) / cellSize.y));
+    // The cursor uniforms encode a *glyph rectangle*, not a stable cell
+    // grid. Bar/underline cursors and hidden cursors must not disable this.
+    // Two opposite diagonal probes sample the unfiltered terminal image.
+    // In filled ANSI highlight regions they agree on the background color;
+    // on ordinary bright glyphs they typically agree on the default black.
+    vec2 probe = vec2(PROBE_X_PX, PROBE_Y_PX) / iResolution.xy;
+    vec3 probeA = texture(iChannel0, warped + probe).rgb;
+    vec3 probeB = texture(iChannel0, warped - probe).rgb;
+    vec3 fill = 0.5 * (probeA + probeB);
 
-        // A glyph usually leaves the upper-left interior corner empty.
-        // Sample the *input* terminal, before CRT masking and vignetting.
-        vec2 corner = vec2(origin.x + (cell.x + 0.12) * cellSize.x,
-                           origin.y - (cell.y + 0.12) * cellSize.y);
-        if (all(greaterThan(corner, vec2(1.0))) &&
-            all(lessThan(corner, iResolution.xy - vec2(1.0)))) {
-            vec3 cellBg = texture(iChannel0, corner / iResolution.xy).rgb;
-            float changedBg = maxChannelDelta(cellBg, iBackgroundColor);
-            float selectionBg = maxChannelDelta(cellBg, iSelectionBackgroundColor);
+    float uniformity = 1.0 - smoothstep(0.07, 0.16,
+                                       maxChannelDelta(probeA, probeB));
+    float colored = smoothstep(BG_MIN, BG_FULL,
+                              themeColorDistance(fill, iBackgroundColor));
+    float notSelected = smoothstep(SEL_MIN, SEL_FULL,
+                              themeColorDistance(fill, iSelectionBackgroundColor));
+    float highlighted = uniformity * colored * notSelected;
 
-            // SGR 7, 40-47/100-107, 48;5 and 48;2 all produce a
-            // non-default fill. Do not animate mouse selections.
-            float active = smoothstep(BG_MIN, BG_FULL, changedBg) *
-                           smoothstep(SEL_MIN, SEL_FULL, selectionBg);
-            vec2 cellTopLeft = vec2(origin.x + cell.x * cellSize.x,
-                                     origin.y - cell.y * cellSize.y);
-            if (iCursorVisible != 0 &&
-                all(lessThan(abs(cellTopLeft - iCurrentCursor.xy), vec2(0.5)))) {
-                active = 0.0;
-            }
+    if (highlighted > 0.02) {
+        // A wave travels across the highlighted region. Using pixels for
+        // phase avoids incorrectly inferring character-cell dimensions
+        // from the cursor style; it still passes visibly letter-by-letter.
+        float phase = fract(iTime / PULSE_PERIOD_S -
+                            (warped.x * iResolution.x) * PHASE_PER_PIXEL);
+        float triangle = 1.0 - abs(2.0 * phase - 1.0);
+        float wave = smoothstep(0.27, 0.93, triangle);
+        float amount = highlighted * wave;
 
-            // Skip pulse math for the vast majority of ordinary cells.
-            // One extra cached sample, still a single postprocess pass.
-            if (active > 0.01) {
-                float ink = smoothstep(0.08, 0.24,
-                    maxChannelDelta(center.rgb, cellBg));
-                float phase = fract(iTime / PULSE_PERIOD_S -
-                                    cell.x * PHASE_PER_CELL +
-                                    cell.y * ROW_PHASE);
-                float triangle = 1.0 - abs(2.0 * phase - 1.0);
-                float wave = smoothstep(0.20, 0.92, triangle);
-
-                // Contrast-preserving phosphor pulse: bright glyphs get
-                // brighter and inverse-video dark glyphs get darker.
-                // The neighboring phosphor halo breathes with the glyph.
-                vec3 inkSignal = (center.rgb - cellBg) +
-                                 0.45 * max(halo - center.rgb, vec3(0.0));
-                color = clamp(color +
-                    (PULSE_STRENGTH * active * ink * wave) * inkSignal,
-                    vec3(0.0), vec3(1.0));
-            }
-        }
+        // Animate the background slightly as well as the foreground.
+        // That ensures even inverse-video (dark-on-light) labels visibly
+        // pulse without blurring strokes or changing text geometry.
+        vec3 contrast = center.rgb - fill;
+        color = clamp(color + amount *
+                      (PULSE_INK * contrast + PULSE_FILL * fill),
+                      vec3(0.0), vec3(1.0));
     }
 
     fragColor = vec4(color, center.a);
