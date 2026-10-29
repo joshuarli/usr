@@ -14,7 +14,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Recall, experience capture, and lifecycle | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_recall.py` |
 | Retrieval benchmark | `uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py validate`, then `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py run --split dev` (offline; see [agent learning](../tools/agent-memory/README.md#evaluation)) |
 | Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/test_live_learning.py` and `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/test_live_recall.py` (no inference) |
-| `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor dotfiles/doctor-test.sh`, and `dash -n dotfiles/doctor dotfiles/doctor-test.sh` |
+| `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
