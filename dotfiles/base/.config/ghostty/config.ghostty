@@ -1,7 +1,7 @@
 command = /Users/josh/usr/bin/ish
 fullscreen = true
 theme = Black Phosphor
-custom-shader = shaders/black-phosphor.glsl
+custom-shader = shaders/black-phosphor-pulse.glsl
 custom-shader-animation = true
 
 window-padding-x = 12

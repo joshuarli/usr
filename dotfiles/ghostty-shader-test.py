@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent / "base/.config/ghostty"
-SHADER = (ROOT / "shaders/black-phosphor.glsl").read_text()
+SHADER = (ROOT / "shaders/black-phosphor-pulse.glsl").read_text()
 CONFIG = (ROOT / "config.ghostty").read_text()
 THEME = (ROOT / "themes/Black Phosphor").read_text()
 
@@ -53,12 +53,15 @@ def pulse(time: float, pixel_x: float) -> float:
     return smoothstep(0.27, 0.93, triangle)
 
 def main() -> None:
-    assert "custom-shader = shaders/black-phosphor.glsl" in CONFIG
+    assert "custom-shader = shaders/black-phosphor-pulse.glsl" in CONFIG
     assert "custom-shader-animation = true" in CONFIG
     assert "custom-shader-animation = always" not in CONFIG
     assert "font-family = Glass TTY Soft" in CONFIG
     assert SHADER.count("void mainImage(") == 1
     assert SHADER.count("texture(iChannel0,") == 7
+    assert "PULSE_LIFT" in SHADER
+    assert number("BG_MIN") < 0.025
+    assert number("BG_FULL") < 0.070
     assert "iTime" in SHADER
     assert "iCurrentCursor" not in SHADER
     assert "iCursorVisible" not in SHADER
@@ -116,6 +119,9 @@ def main() -> None:
     approx_linear = tuple(x*x for x in selection)
     assert gate(approx_linear,approx_linear,bg,selection) == 0.0
 
+    # Low-intensity ANSI black now needs strong gating too, not near-zero.
+    assert gate(rgb("#1b2225"), rgb("#1b2225"), bg, selection) > 0.95
+
     # Reverse-video (light background/dark ink) and truecolor both trigger.
     for hcolor in ("#eaf0e7", "#344f6d", "#f09386", "#a1e6e9"):
         c = rgb(hcolor)
@@ -136,5 +142,24 @@ def main() -> None:
     assert abs(pulse(1.2, 85.0)-pulse(1.2,185.0)) > 0.1
     print("Ghostty CRT highlight: pixel-color and animation tests passed.")
 
+def demo() -> None:
+    """Hold actual ANSI backgrounds on screen for a visible shader test."""
+    import time
+
+    print("\nHold Ghostty focused for at least 4 seconds.")
+    print("The filled labels should shimmer in place; normal text should not.\n")
+    print("\033[43;30m  COMPILING  ANSI YELLOW BACKGROUND  \033[0m")
+    print("\033[7m  REVERSE VIDEO  INVERSE TEXT  \033[0m")
+    print("\033[40;97m  ANSI BLACK BACKGROUND  \033[0m")
+    print("\033[48;2;42;60;80;97m  DARK TRUECOLOR BACKGROUND  \033[0m")
+    print("\033[48;2;110;47;84;97m  MUTED RED TRUECOLOR BACKGROUND  \033[0m")
+    print("Ordinary text: no animation should be visible.")
+    time.sleep(12)
+
+
 if __name__ == "__main__":
+    import sys
+
     main()
+    if "--demo" in sys.argv:
+        demo()

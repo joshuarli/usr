@@ -1,6 +1,7 @@
 // Black Phosphor — static curved-glass CRT, with sharp glyph cores.
 // One pass, seven texture samples; no loops, noise, or trigonometry.
 // Color-aware highlights breathe without relying on cursor glyph dimensions.
+// Even nearly black ANSI backgrounds pulse; the static CRT optics are preserved.
 // Ghostty redraws the focused terminal continuously for animation.
 const float CURVATURE = 0.048;
 const float GLOW_RADIUS_PX = 2.35;
@@ -18,10 +19,11 @@ const float GLASS_EDGE_WIDTH = 0.006;
 // partial-glyph artifacts when fonts, DPI, or padding change.
 const float PULSE_PERIOD_S = 3.8;
 const float PHASE_PER_PIXEL = 0.0029;
-const float PULSE_INK = 0.28;
-const float PULSE_FILL = 0.11;
-const float BG_MIN = 0.065;
-const float BG_FULL = 0.14;
+const float PULSE_INK = 0.32;
+const float PULSE_FILL = 0.17;
+const float PULSE_LIFT = 0.040;
+const float BG_MIN = 0.018;
+const float BG_FULL = 0.060;
 const float SEL_MIN = 0.025;
 const float SEL_FULL = 0.075;
 const float PROBE_X_PX = 7.0;
@@ -110,12 +112,13 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float wave = smoothstep(0.27, 0.93, triangle);
         float amount = highlighted * wave;
 
-        // Animate the background slightly as well as the foreground.
+        // Animate the background as well as the foreground. A small additive
+        // floor makes low-luminance ANSI background colors perceptible.
         // That ensures even inverse-video (dark-on-light) labels visibly
         // pulse without blurring strokes or changing text geometry.
         vec3 contrast = center.rgb - fill;
         color = clamp(color + amount *
-                      (PULSE_INK * contrast + PULSE_FILL * fill),
+                      (PULSE_INK * contrast + PULSE_FILL * fill + vec3(PULSE_LIFT)),
                       vec3(0.0), vec3(1.0));
     }
 
