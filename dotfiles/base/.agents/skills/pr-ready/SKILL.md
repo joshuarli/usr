@@ -10,7 +10,7 @@ metadata:
 
 Get the named pull request into a state where the owner can merge it by hand. Stop there. Merging, approving, enabling auto-merge, and clicking the merge button are the owner's, even when they say "finish", "land", or "get it over the line".
 
-Use [AFK unattended execution](../afk/SKILL.md#unattended-execution) for this workflow.
+Use [sleep](../sleep/SKILL.md) for this workflow.
 
 ## Rules
 

@@ -8,7 +8,7 @@ metadata:
 
 # Burn Down the Backlog
 
-Close the bounded queue captured from `TODO.md`. Dependencies and existing ownership determine readiness; priority chooses the next ready ticket. A ticket is a delivery and accounting unit, not an agent unit. Use an existing [ultratriage](../ultratriage/SKILL.md) result as the decision handoff; do not invoke that workflow unless asked. Use [AFK unattended execution](../afk/SKILL.md#unattended-execution) for this workflow.
+Close the bounded queue captured from `TODO.md`. Dependencies and existing ownership determine readiness; priority chooses the next ready ticket. A ticket is a delivery and accounting unit, not an agent unit. Use an existing [ultratriage](../ultratriage/SKILL.md) result as the decision handoff; do not invoke that workflow unless asked. Use [sleep](../sleep/SKILL.md) for this workflow.
 
 ## Rules
 
@@ -19,7 +19,7 @@ Close the bounded queue captured from `TODO.md`. Dependencies and existing owner
 - **Choose lanes economically.** Complete a trivial ticket directly when that costs less than a handoff. A worker may take a coherent group of small related tickets when that reduces briefing and integration cost. Use separate worktrees when concurrency, isolation, or conflict risk justifies them; do not create one per ticket by default. For multiple lanes, follow [orchestrate](../orchestrate/SKILL.md) and its [lane contract](../orchestrate/references/campaigns.md#lane-contract).
 - **Route by difficulty.** Follow `orchestrate` for model choice. Actual difficulty, uncertainty, and consequences set the effort; priority sets scheduling and scrutiny, not the tier. Escalate when evidence shows the task is harder than briefed, not because another attempt slot exists.
 - **Prove uncertain reports before fixing.** For an `unproven` ticket, establish its fact with a failing test or command and report that evidence before changing code. If the fact cannot be established within scope, leave the ticket open and explain what would prove it.
-- **Park precisely.** Parking follows the AFK rule. A routine download alone is not a reason to park. Do not close a ticket while its required acceptance remains blocked.
+- **Park precisely.** Parking follows the sleep rule. A routine download alone is not a reason to park. Do not close a ticket while its required acceptance remains blocked.
 - **Keep ticket ownership clear.** Workers do not edit `TODO.md`. They report each ticket's diff, checks, acceptance evidence, and any defect outside the ticket. The parent owns integration and ticket accounting.
 - **Reuse valid acceptance evidence.** Read each diff against the ticket's `Recommendation`. Reject unrelated edits, changes outside its `Where` files, unbriefed dependencies, and weakened or deleted tests. Reuse successful checks while their inputs and assumptions hold, and rerun them only when integration, changed inputs, or a binding requirement could invalidate them. Keep before-fix failure evidence for bug fixes.
 - **Commit each closed ticket separately.** Put the accepted change and ticket removal in the same commit. Delete a linked RFC in that commit only when `todo` defines the ticket as complete. Use a Conventional Commit with a `Closes ABC-123` footer. A worker handling several tickets still delivers a separate commit for each. Do not close an incomplete ticket.

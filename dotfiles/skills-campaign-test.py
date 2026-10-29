@@ -99,7 +99,7 @@ class SkillCampaignTests(unittest.TestCase):
         source = ROOT / "dotfiles" / "base" / ".agents" / "skills"
         automatic = ("do", "architect", "review", "blast-radius")
         explicit = (
-            "afk",
+            "sleep",
             "burn-down-the-backlog",
             "campaign-plan",
             "campaign-preflight",

@@ -21,7 +21,7 @@ Scope is the change or finding set from this session, or the one the user names.
 5. **Prove each finding** with a `file:line` and the command that found it. Drop what you cannot show.
 6. **Apply only the trivial fixes:** contradictions to the rule you just applied, and duplicates you introduced, within scope and with no contract change. Report everything else with a recommendation and wait for the owner.
 7. **Check narrowly** with the cheapest command that covers what you touched.
-8. **Ask whether to widen.** End the report with a yes/no question: search the rest of the repo for other places this change applies? Show the transformation, the patterns, and the directories you would search. Search nothing beyond the scope until the owner answers. On no, stop. Under AFK, do not ask: state the default (do not widen) in the report and proceed.
+8. **Ask whether to widen.** End the report with a yes/no question: search the rest of the repo for other places this change applies? Show the transformation, the patterns, and the directories you would search. Search nothing beyond the scope until the owner answers. On no, stop. Under sleep, do not ask: state the default (do not widen) in the report and proceed.
 
 ## Widening
 

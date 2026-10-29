@@ -27,7 +27,7 @@ You rarely need to name a skill. `do` loads on its own for work with real uncert
 | `self-contained-prompt` | Explicit | Draft a prompt another agent can follow without this conversation's context. |
 | `yea` | Explicit | Accept every recommendation from the agent's last reply and have it do all of them in full, not the smallest version. |
 | `hurry-up` | Explicit | Tell the agent to finish and cut verification. Run it with `/hurry-up`. |
-| `afk` | Explicit | Keep working unattended with bounded decisions and precise owner-dependent blockers. Explicit away/return behavior applies only when you say you are going away. |
+| `sleep` | Explicit | Proceed unattended while you are asleep: keep working without stopping, decide within authority, park only owner-blocked work. |
 | `resume-session` | Explicit | Continue a specific Codex, Claude, Muse, Grok, OpenCode, Pi, Command, Antigravity, or DeepSeek session's unfinished work in this agent: `/resume-session <agent> <session-id>`. |
 | `correct` | Explicit | When you correct the same mistake twice: find the repeated mistakes and make each one impossible (architecture, then types, then a lint, then a test, docs last). |
 
