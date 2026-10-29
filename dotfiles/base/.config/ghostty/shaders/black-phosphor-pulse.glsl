@@ -98,8 +98,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
                                        maxChannelDelta(probeA, probeB));
     float colored = smoothstep(BG_MIN, BG_FULL,
                               themeColorDistance(fill, iBackgroundColor));
+    // macOS native blending uses the selection color directly. Matching
+    // its squared approximation also matches the very dark ANSI black
+    // palette, incorrectly suppressing the pulse in those cells.
     float notSelected = smoothstep(SEL_MIN, SEL_FULL,
-                              themeColorDistance(fill, iSelectionBackgroundColor));
+                              maxChannelDelta(fill, iSelectionBackgroundColor));
     float highlighted = uniformity * colored * notSelected;
 
     if (highlighted > 0.02) {

@@ -42,8 +42,10 @@ def gate(a: tuple[float, ...], b: tuple[float, ...],
     fill = tuple((x+y)*0.5 for x, y in zip(a, b, strict=True))
     stable = 1.0 - smoothstep(0.07, 0.16, max_delta(a, b))
     color = smoothstep(number("BG_MIN"), number("BG_FULL"), theme_delta(fill, bg))
+    # Native macOS color space: direct selection comparison. Comparing the
+    # square of the selection color confuses it with dark ANSI backgrounds.
     unselected = smoothstep(number("SEL_MIN"), number("SEL_FULL"),
-                            theme_delta(fill, selection))
+                            max_delta(fill, selection))
     return stable * color * unselected
 
 def pulse(time: float, pixel_x: float) -> float:
@@ -66,7 +68,7 @@ def main() -> None:
     assert "iCurrentCursor" not in SHADER
     assert "iCursorVisible" not in SHADER
     assert "themeColorDistance(fill, iBackgroundColor)" in SHADER
-    assert "themeColorDistance(fill, iSelectionBackgroundColor)" in SHADER
+    assert "maxChannelDelta(fill, iSelectionBackgroundColor)" in SHADER
     assert "fragColor = vec4(color, center.a)" in SHADER
     assert not re.search(r"\b(?:for|while|do|sin|cos|tan|pow|sqrt|exp)\s*\(", SHADER)
 
@@ -116,8 +118,9 @@ def main() -> None:
         for x in range(35,205):
             selected[y][x] = selection
     assert screen_gate(selected, 100, 40) == 0.0
-    approx_linear = tuple(x*x for x in selection)
-    assert gate(approx_linear,approx_linear,bg,selection) == 0.0
+    # Regress: gamma-space selection approximations must not suppress
+    # nearby dark ANSI palette entries in native macOS mode.
+    assert gate(rgb("#1b2225"),rgb("#1b2225"),bg,selection) > 0.95
 
     # Low-intensity ANSI black now needs strong gating too, not near-zero.
     assert gate(rgb("#1b2225"), rgb("#1b2225"), bg, selection) > 0.95
