@@ -128,6 +128,62 @@ class QueryMuseTest(unittest.TestCase):
         self.assertEqual(result["allowance"]["tier"], "Muse Code Everyday Usage")
 
 
+class QueryCmdTest(unittest.TestCase):
+    def test_print_cmd_renders_plan_credits_and_windows(self):
+        result = {
+            "credits": {
+                "credits": {"monthlyCredits": 9.5, "purchasedCredits": 0, "freeCredits": 0},
+                "windowLimits": {
+                    "fiveHour": {"used": 0.2, "cap": 3, "resetAt": 1793318921557},
+                    "weekly": {"used": 0.2, "cap": 6, "resetAt": 1793905721557},
+                },
+            },
+            "subscription": {
+                "data": {
+                    "status": "active",
+                    "planId": "individual-go-v1",
+                    "currentPeriodEnd": "2026-11-29T19:06:28.000Z",
+                }
+            },
+            "summary": {"totalCost": 0.5},
+        }
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            NS["print_cmd"](result)
+        out = buffer.getvalue()
+        self.assertIn("Command Code", out)
+        self.assertIn("plan: Go", out)
+        self.assertIn("$9.50 of $10.00 credits left", out)
+        self.assertIn("spent this period: $0.50", out)
+        self.assertIn("renews in", out)
+        self.assertIn("5h:", out)
+        self.assertIn("7d:", out)
+
+    def test_print_cmd_without_quota_reports_clearly(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            NS["print_cmd"]({"credits": {}, "subscription": {}, "summary": {}})
+        self.assertIn("no subscription quota returned", buffer.getvalue())
+
+    def test_read_cmd_api_key_prefers_env(self):
+        with mock.patch.dict(
+            NS["os"].environ,
+            {"COMMAND_CODE_API_KEY": "env-key", "COMMANDCODE_API_URL": "https://example.invalid"},
+            clear=False,
+        ):
+            key, base = NS["read_cmd_api_key"]()
+        self.assertEqual((key, base), ("env-key", "https://example.invalid"))
+
+    def test_read_cmd_api_key_requires_login(self):
+        with (
+            mock.patch.dict(NS["os"].environ, {}, clear=True),
+            mock.patch.object(NS["Path"], "home", return_value=Path("/nonexistent")),
+        ):
+            with self.assertRaises(RuntimeError) as raised:
+                NS["read_cmd_api_key"]()
+        self.assertIn("cmd login", str(raised.exception))
+
+
 class StreamingTest(unittest.TestCase):
     def test_renders_in_completion_order(self):
         order = []

@@ -20,6 +20,7 @@ import unicodedata
 
 PROVIDERS = (
     ("claude", "Claude Code", "claude"),
+    ("cmd", "Command Code", "cmd"),
     ("codex", "Codex", "codex"),
     ("muse", "Muse Code", "muse"),
     ("grok", "Grok Build", "grok"),
@@ -27,10 +28,10 @@ PROVIDERS = (
     ("agy", "Antigravity", "agy"),
     ("opencode", "OpenCode Go", "opencode2"),
 )
-HELP = """usage: usage [claude|codex|muse|grok|dsh|agy|opencode]
+HELP = """usage: usage [claude|cmd|codex|muse|grok|dsh|agy|opencode]
 
-Read subscription quota usage from Claude Code, Codex, Muse Code, Grok
-Build, OpenCode Go, and Antigravity, plus the DeepSeek API credit balance.
+Read subscription quota usage from Claude Code, Command Code, Codex,
+Muse Code, Grok Build, OpenCode Go, and Antigravity, plus the DeepSeek API credit balance.
 Grok queries its CLI billing extension over ACP. The DeepSeek balance is not
 a subscription quota. With no provider, query every supported CLI installed
 here. These reads do not submit a model prompt. Claude Code uses its
@@ -696,6 +697,127 @@ def query_opencode(binary: str) -> dict[str, object]:
     }
 
 
+def read_cmd_api_key() -> tuple[str, str]:
+    base_url = os.environ.get("COMMANDCODE_API_URL", "https://api.commandcode.ai")
+    key = os.environ.get("COMMAND_CODE_API_KEY")
+    if key:
+        return key, base_url
+    api_env = os.environ.get("COMMANDCODE_API_ENV", "prod")
+    auth_name = {"staging": "auth.staging.json", "local": "auth.local.json"}.get(api_env, "auth.json")
+    if api_env == "local":
+        base_url = os.environ.get("COMMANDCODE_API_URL", "http://localhost:9090")
+    elif api_env == "staging":
+        base_url = os.environ.get("COMMANDCODE_API_URL", "https://staging-api.commandcode.ai")
+    auth_path = Path.home() / ".commandcode" / auth_name
+    try:
+        credentials = json.loads(auth_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise RuntimeError("Command Code login not found; run `cmd login`") from error
+    except OSError as error:
+        raise RuntimeError(f"cannot read Command Code credentials: {error.strerror}") from error
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("Command Code credential store contains invalid JSON") from error
+    if not isinstance(credentials, dict) or not isinstance(credentials.get("apiKey"), str):
+        raise RuntimeError("Command Code credential store has no API key")
+    return credentials["apiKey"], base_url
+
+
+def request_cmd(base_url: str, token: str, endpoint: str) -> dict[str, object]:
+    curl = shutil.which("curl")
+    if not curl:
+        raise RuntimeError("curl is required to verify Command Code's HTTPS certificate")
+    if any(character in token for character in "\r\n\x00"):
+        raise RuntimeError("Command Code API key contains invalid header characters")
+    headers = (
+        "Accept: application/json",
+        f"Authorization: Bearer {token}",
+        "User-Agent: dotfiles-usage/1",
+    )
+    config = "".join(
+        f'header = "{curl_config_value(header)}"\n'
+        for header in headers
+    )
+    del token
+    process = subprocess.run(
+        [
+            curl,
+            "-q",
+            "--silent",
+            "--show-error",
+            "--connect-timeout",
+            "5",
+            "--max-time",
+            "12",
+            "--config",
+            "-",
+            "--write-out",
+            "\\n%{http_code}",
+            base_url.rstrip("/") + endpoint,
+        ],
+        input=config,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if process.returncode:
+        detail = process.stderr.strip() or f"curl exited with status {process.returncode}"
+        raise RuntimeError(f"Command Code usage request failed: {detail}")
+    body, separator, status = process.stdout.rpartition("\n")
+    if not separator or len(status) != 3 or not status.isdigit():
+        raise RuntimeError("curl returned an invalid HTTP response")
+    status_code = int(status)
+    if status_code in (401, 403):
+        raise RuntimeError("Command Code rejected the stored credential; run `cmd login` to refresh the login")
+    if status_code == 429:
+        raise RuntimeError("Command Code rate-limited the usage request; try again later")
+    if status_code < 200 or status_code >= 300:
+        raise RuntimeError(f"Command Code usage endpoint returned HTTP {status_code}")
+    try:
+        result = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise RuntimeError("Command Code returned invalid usage JSON") from error
+    return json_object(result, "Command Code returned an invalid usage response")
+
+
+def cmd_plan_total(plan_id: object) -> float | None:
+    totals = {
+        "individual-go": 10,
+        "individual-go-v1": 10,
+        "individual-goat": 70,
+        "individual-pro": 30,
+        "individual-pro-v1": 80,
+        "individual-provider": 15,
+        "individual-max": 150,
+        "individual-ultra": 300,
+        "teams-pro": 40,
+    }
+    if not isinstance(plan_id, str):
+        return None
+    normalized = plan_id.lower().replace("_", "-")
+    for known in sorted(totals, key=len, reverse=True):
+        if normalized.startswith(known):
+            return totals[known]
+    return None
+
+
+def query_cmd(binary: str) -> dict[str, object]:
+    token, base_url = read_cmd_api_key()
+    org_id = None
+    try:
+        whoami = request_cmd(base_url, token, "/alpha/whoami?limits=1")
+        org = whoami.get("org")
+        if isinstance(org, dict) and isinstance(org.get("id"), str):
+            org_id = org["id"]
+    except RuntimeError:
+        whoami = None
+    suffix = f"?orgId={org_id}" if org_id else ""
+    credits = request_cmd(base_url, token, f"/alpha/billing/credits{suffix}")
+    subscription = request_cmd(base_url, token, f"/alpha/billing/subscriptions{suffix}")
+    summary = request_cmd(base_url, token, f"/alpha/usage/summary{suffix}")
+    return {"whoami": whoami, "credits": credits, "subscription": subscription, "summary": summary}
+
+
 def local_time(timestamp, scale=1):
     if not isinstance(timestamp, (int, float)):
         return "unknown"
@@ -789,7 +911,7 @@ def percentage_text(value):
         return color("unknown", "2") if value is None else str(value)
     if not math.isfinite(value):
         return str(value)
-    text = f"{value:g}% used"
+    text = f"{value:.1f}% used"
     return color(text, usage_color_code(value))
 
 
@@ -1135,6 +1257,103 @@ def print_opencode(result: dict[str, object]) -> None:
     print_aligned_windows(rows)
 
 
+def cmd_plan_name(plan_id: object) -> str | None:
+    names = {
+        "individual-go": "Go",
+        "individual-go-v1": "Go",
+        "individual-goat": "GOAT",
+        "individual-pro": "Pro",
+        "individual-pro-v1": "Pro",
+        "individual-provider": "Provider",
+        "individual-max": "Max",
+        "individual-ultra": "Ultra",
+        "teams-pro": "Teams Pro",
+    }
+    if not isinstance(plan_id, str):
+        return None
+    normalized = plan_id.lower().replace("_", "-")
+    for known in sorted(names, key=len, reverse=True):
+        if normalized.startswith(known):
+            return names[known]
+    return None
+
+
+def cmd_credit_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value):
+        return None
+    return max(0.0, value)
+
+
+def cmd_windows(result: dict[str, object]) -> list[tuple[str, object, object]]:
+    credits = result.get("credits")
+    credits = credits if isinstance(credits, dict) else {}
+    windows = credits.get("windowLimits")
+    windows = windows if isinstance(windows, dict) else {}
+    rows = []
+    for key, label in (("fiveHour", "5h"), ("weekly", "7d")):
+        window = windows.get(key)
+        if not isinstance(window, dict):
+            continue
+        used = cmd_credit_float(window.get("used"))
+        cap = cmd_credit_float(window.get("cap"))
+        if used is None or cap is None or cap <= 0:
+            continue
+        rows.append((label, min(used / cap * 100, 100), window.get("resetAt"), 1000))
+    return rows
+
+
+def print_cmd(result: dict[str, object]) -> None:
+    print_heading("Command Code")
+    subscription = result.get("subscription")
+    subscription = subscription if isinstance(subscription, dict) else {}
+    data = subscription.get("data")
+    data = data if isinstance(data, dict) else {}
+    plan_id = data.get("planId")
+    plan = cmd_plan_name(plan_id)
+    if plan:
+        print(f"  plan: {plan}")
+    credits = result.get("credits")
+    credits = credits if isinstance(credits, dict) else {}
+    balances = credits.get("credits")
+    balances = balances if isinstance(balances, dict) else {}
+    monthly = cmd_credit_float(balances.get("monthlyCredits")) or 0.0
+    purchased = cmd_credit_float(balances.get("purchasedCredits")) or 0.0
+    free = cmd_credit_float(balances.get("freeCredits")) or 0.0
+    total_credits = None
+    if isinstance(data, dict) and data.get("status") == "active":
+        total_credits = cmd_plan_total(plan_id)
+    total_credits = total_credits if total_credits is not None else monthly
+    remaining = monthly + purchased + free
+    summary = result.get("summary")
+    summary = summary if isinstance(summary, dict) else {}
+    spent = cmd_credit_float(summary.get("totalCost")) or 0.0
+    pool = total_credits + purchased + free if total_credits is not None else remaining + spent
+    has_info = remaining > 0 or spent > 0
+    used = max(pool - remaining, 0.0) if pool else 0.0
+    percent = min(used / pool * 100, 100) if pool > 0 and has_info else None
+    if percent is not None:
+        bar = usage_bar(percent)
+        detail = f"${remaining:.2f} of ${pool:.2f} credits left"
+        print(f"  credits: {bar} {percentage_text(percent)} ({detail})")
+    print(f"  spent this period: ${spent:.2f}")
+    period_end = data.get("currentPeriodEnd")
+    if isinstance(period_end, str) and period_end:
+        delay = reset_delay(period_end)
+        try:
+            stamp = datetime.datetime.fromisoformat(period_end.replace("Z", "+00:00")).timestamp()
+        except (OverflowError, OSError, ValueError):
+            stamp = None
+        when = local_time(stamp) if stamp is not None else "unknown"
+        print(f"  renews in {delay}" + (f" ({when})" if when != "unknown" else ""))
+    rows = cmd_windows(result)
+    if rows:
+        print_aligned_windows(rows)
+    elif percent is None:
+        print(f"  {color('no subscription quota returned', '33')}")
+
+
 def main(arguments):
     if arguments in (["-h"], ["--help"]):
         print(HELP, end="")
@@ -1161,6 +1380,7 @@ def main(arguments):
         return 1
     query = {
         "claude": query_claude,
+        "cmd": query_cmd,
         "codex": query_codex,
         "muse": query_muse,
         "grok": query_grok,
@@ -1170,6 +1390,7 @@ def main(arguments):
     }
     render = {
         "claude": print_claude,
+        "cmd": print_cmd,
         "codex": print_codex,
         "muse": print_muse,
         "grok": print_grok,
