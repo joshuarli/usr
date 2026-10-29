@@ -31,6 +31,7 @@ fi
 printf '%s\\n' "$*" >> "$PK_TEST_CALLS"
 case "$PK_TEST_SELECTION" in
     CANCEL) exit 1 ;;
+    ERROR) printf 'fz: terminal too small\n' >&2; exit 2 ;;
     QUERY) printf '%s\\n' "$PK_TEST_QUERY"; exit 0 ;;
     SPOOF) printf '%s  fake process\\n' "$PK_TEST_PID"; exit 0 ;;
     MIXED)
@@ -139,6 +140,13 @@ exec "$PK_TEST_REAL_PS" "$@"
         proc = self.sleep()
         result = self.run_pk("sleep", PK_TEST_SELECTION="CANCEL")
         self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertIsNone(proc.poll())
+
+    def test_picker_error_is_not_treated_as_cancel(self):
+        proc = self.sleep()
+        result = self.run_pk("sleep", PK_TEST_SELECTION="ERROR")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("fz: terminal too small", result.stderr)
         self.assertIsNone(proc.poll())
 
     def test_unmatched_query_echo_is_not_a_pid(self):

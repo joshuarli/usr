@@ -59,9 +59,14 @@ prompt='TERM> '
 [ "$signal" = KILL ] && prompt='KILL> '
 # fz --multi emits marked rows in marking order, or the focused row if
 # nothing is marked. Cancellation emits nothing; no signal is sent.
-if ! selection=$(printf '%s\n' "$candidates" | \
+if selection=$(printf '%s\n' "$candidates" | \
         fz --multi --query="$query" --prompt="$prompt"); then
-    exit 0
+    :
+else
+    status=$?
+    # In multi mode fz reserves status 1 for cancel/no match and 2 for error.
+    [ "$status" -eq 1 ] && exit 0
+    exit "$status"
 fi
 [ -n "$selection" ] || exit 0
 
