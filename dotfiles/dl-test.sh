@@ -1551,7 +1551,8 @@ else
     exit 1
 fi
 [ -x "$opencode_home/.opencode/bin/opencode" ]
-[ "$(readlink "$opencode_home/.local/bin/opencode2")" = "$opencode_home/.opencode/bin/opencode2" ]
+[ ! -L "$opencode_home/.local/bin/opencode2" ]
+[ -x "$opencode_home/.local/bin/opencode2" ]
 [ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.1' ]
 cat > "$opencode_home/.opencode/bin/opencode2" <<'EOF'
 #!/bin/sh
@@ -1579,6 +1580,34 @@ case "$output" in
 esac
 [ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.2' ]
 [ "$(cat "$opencode_home/.local/state/dl/opencode2")" = opencode-test-etag-2 ]
+cat > "$opencode_home/.opencode/bin/opencode2" <<'EOF'
+#!/bin/sh
+exec "$(dirname "$0")/opencode" "$@"
+EOF
+chmod +x "$opencode_home/.opencode/bin/opencode2"
+[ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.2' ]
+if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode-v2.tar.gz" OPENCODE_ETAG=opencode-test-etag-2 \
+    run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ ! -L "$opencode_home/.local/bin/opencode2" ]
+[ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.2' ]
+rm -f "$opencode_home/.local/bin/opencode2"
+ln -s "$opencode_home/.opencode/bin/opencode2" "$opencode_home/.local/bin/opencode2"
+if output=$(HOME="$opencode_home" XDG_STATE_HOME="$opencode_home/.local/state" \
+    TMPDIR="$test_root/tmp" OPENCODE_TAR="$test_root/opencode-v2.tar.gz" OPENCODE_ETAG=opencode-test-etag-2 \
+    run_dl "$mock_bin:$PATH" "$repo_root" opencode2 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ ! -L "$opencode_home/.local/bin/opencode2" ]
+[ "$(HOME="$opencode_home" "$opencode_home/.local/bin/opencode2" --version)" = 'opencode 2.0.2' ]
 )
 end_case
 

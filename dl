@@ -2753,10 +2753,35 @@ install_oxish() {
     _dl_ok "Installed ${DEST}/oxish-server"
 }
 
+write_opencode2_shim() {
+    opencode2_shim_target=$1
+    opencode2_shim_dir=${opencode2_shim_target%/*}
+    tmpbinlink=$(mktemp "${opencode2_shim_dir}/.opencode2-shim.XXXXXX")
+    cat > "$tmpbinlink" <<'EOF'
+#!/bin/sh
+exec "${HOME}/.opencode/bin/opencode" "$@"
+EOF
+    chmod +x "$tmpbinlink"
+    mv -f "$tmpbinlink" "$opencode2_shim_target"
+    tmpbinlink=
+    own_file "$opencode2_shim_target"
+}
+
+opencode2_dest_is_managed() {
+    if [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
+        return 0
+    fi
+    [ -f "${DEST}/opencode2" ] && [ ! -L "${DEST}/opencode2" ] || return 1
+    [ -x "${DEST}/opencode2" ] || return 1
+    opencode2_dest_content=$(cat "${DEST}/opencode2" 2>/dev/null) || return 1
+    # shellcheck disable=SC2016
+    opencode2_expected=$(printf '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"')
+    [ "$opencode2_dest_content" = "$opencode2_expected" ]
+}
+
 install_opencode2() {
     if installed opencode2 && ! opencode2_launcher_is_legacy_dl \
-        && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" \
-            != "${OPENCODE2_HOME}/bin/opencode2" ]; then
+        && ! opencode2_dest_is_managed; then
         if [ -f "${DEST}/opencode2" ] && [ ! -L "${DEST}/opencode2" ] \
             && [ -s "${STATE}/opencode2" ] && ! command -v file >/dev/null 2>&1; then
             _dl_warn 'Warning: file is required to identify the existing OpenCode 2 launcher; keeping it'
@@ -2785,25 +2810,16 @@ install_opencode2() {
     fi
     if ! opencode2_launcher_is_legacy_dl && is_current opencode2 "$id"; then
         opencode2_bin_dir="${OPENCODE2_HOME}/bin"
-        tmpbinlink=$(mktemp "${opencode2_bin_dir}/.opencode2-shim.XXXXXX")
-        cat > "$tmpbinlink" <<'EOF'
-#!/bin/sh
-exec "${HOME}/.opencode/bin/opencode" "$@"
-EOF
-        chmod +x "$tmpbinlink"
-        mv -f "$tmpbinlink" "${opencode2_bin_dir}/opencode2"
-        tmpbinlink=
-        if [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
-            own_file "${OPENCODE2_HOME}/bin/opencode2"
-            own_file "${OPENCODE2_HOME}/bin/opencode"
-        fi
+        write_opencode2_shim "${opencode2_bin_dir}/opencode2"
+        write_opencode2_shim "${DEST}/opencode2"
+        own_file "${OPENCODE2_HOME}/bin/opencode"
         _dl_current "opencode2 is current"
         return
     fi
     opencode2_bin_dir="${OPENCODE2_HOME}/bin"
     opencode2_binary="${opencode2_bin_dir}/opencode"
     if [ -e "$opencode2_binary" ] || [ -L "$opencode2_binary" ]; then
-        if [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" != "${opencode2_bin_dir}/opencode2" ]; then
+        if ! opencode2_dest_is_managed; then
             skip opencode2 "$opencode2_binary already exists"
             return
         fi
@@ -2841,21 +2857,8 @@ EOF
     mv -f "$tmpbin" "$opencode2_binary"
     tmpbin=
     own_file "$opencode2_binary"
-    tmpbinlink=$(mktemp "${opencode2_bin_dir}/.opencode2-shim.XXXXXX")
-    cat > "$tmpbinlink" <<'EOF'
-#!/bin/sh
-exec "${HOME}/.opencode/bin/opencode" "$@"
-EOF
-    chmod +x "$tmpbinlink"
-    mv -f "$tmpbinlink" "${opencode2_bin_dir}/opencode2"
-    tmpbinlink=
-    own_file "${opencode2_bin_dir}/opencode2"
-    tmpbinlink=$(mktemp "${DEST}/.opencode2.XXXXXX")
-    rm -f "$tmpbinlink"
-    ln -s "${opencode2_bin_dir}/opencode2" "$tmpbinlink"
-    mv -f "$tmpbinlink" "${DEST}/opencode2"
-    tmpbinlink=
-    own_file "${DEST}/opencode2"
+    write_opencode2_shim "${opencode2_bin_dir}/opencode2"
+    write_opencode2_shim "${DEST}/opencode2"
     printf '%s\n' "$id" > "${STATE}/opencode2"
     own_file "${STATE}/opencode2"
     changed=true
@@ -3077,8 +3080,7 @@ record_managed_installs() {
         fi
     fi
     record_managed_binary opencode2
-    if [ -s "${STATE}/opencode2" ] \
-        && [ "$(readlink "${DEST}/opencode2" 2>/dev/null || :)" = "${OPENCODE2_HOME}/bin/opencode2" ]; then
+    if [ -s "${STATE}/opencode2" ] && opencode2_dest_is_managed; then
         own_file "${OPENCODE2_HOME}/bin/opencode2"
         own_file "${OPENCODE2_HOME}/bin/opencode"
     fi
