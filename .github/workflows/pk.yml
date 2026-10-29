@@ -1,0 +1,38 @@
+name: pk
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dotfiles/base/.local/bin/pk'
+      - 'dotfiles/pk-test.py'
+      - '.github/workflows/pk.yml'
+  pull_request:
+    paths:
+      - 'dotfiles/base/.local/bin/pk'
+      - 'dotfiles/pk-test.py'
+      - '.github/workflows/pk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pk (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-26]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Shell syntax and process-safety tests
+        run: |
+          sh -n dotfiles/base/.local/bin/pk
+          python3 -I dotfiles/pk-test.py
+      - name: ShellCheck
+        if: runner.os == 'Linux'
+        run: shellcheck -s sh dotfiles/base/.local/bin/pk

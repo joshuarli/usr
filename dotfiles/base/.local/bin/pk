@@ -65,14 +65,22 @@ if ! selection=$(printf '%s\n' "$candidates" | \
 fi
 [ -n "$selection" ] || exit 0
 
-# Reject the *entire* selection before signaling anything if any returned row
-# was not in the snapshot. This also rejects an unmatched-query echo or a
-# malformed/forged selector result.
+# Validate the entire batch before signaling. Reject invented rows,
+# duplicate PIDs, and unmatched-query echoes even if the selector misbehaves.
+seen=' '
 while IFS= read -r entry; do
     if [ -z "$entry" ] || ! printf '%s\n' "$candidates" | grep -Fxq -- "$entry"; then
         printf 'pk: rejected invalid process selection\n' >&2
         exit 1
     fi
+    pid=${entry%% *}
+    case $seen in
+        *" $pid "*)
+            printf 'pk: rejected duplicate process %s\n' "$pid" >&2
+            exit 1
+            ;;
+    esac
+    seen="$seen$pid "
 done <<EOF_SELECTION
 $selection
 EOF_SELECTION

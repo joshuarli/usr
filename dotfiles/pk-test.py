@@ -39,6 +39,11 @@ case "$PK_TEST_SELECTION" in
         exit 0 ;;
 esac
 data=$(cat)
+if [ "$PK_TEST_SELECTION" = DUP ]; then
+    line=$(printf '%s\n' "$data" | awk -v pid="$PK_TEST_PID" '$1 == pid { print; exit }')
+    printf '%s\n%s\n' "$line" "$line"
+    exit 0
+fi
 for pid in $PK_TEST_SELECTION; do
     printf '%s\\n' "$data" | awk -v pid="$pid" '$1 == pid { print; found=1; exit } END { if (!found) exit 9 }'
 done
@@ -156,6 +161,18 @@ exec "$PK_TEST_REAL_PS" "$@"
         self.assertEqual(result.returncode, 1)
         self.assertIn("rejected invalid", result.stderr)
         self.assertIsNone(proc.poll())
+
+    def test_duplicate_pid_rejected_before_signaling(self):
+        proc = self.sleep()
+        result = self.run_pk("sleep", PK_TEST_SELECTION="DUP", PK_TEST_PID=str(proc.pid))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("rejected duplicate", result.stderr)
+        self.assertIsNone(proc.poll())
+
+    def test_multiword_query_reaches_fz_unchanged(self):
+        result = self.run_pk("node", "server", PK_TEST_SELECTION="CANCEL")
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--query=node server", self.calls()[0])
 
     def test_stale_pid_is_never_signaled(self):
         proc = self.sleep()
