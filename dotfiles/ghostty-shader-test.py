@@ -65,8 +65,10 @@ def main() -> None:
     for width in (17.0, 20.5, 21.333):
         for col in (0, 1, 8, 32, 79):
             x = 24.0 + (col + 0.5) * width
+            expected = grid_column(x, 24.0, width)
             for cursor_col in (0, 1, 16, 48):
-                assert grid_column(x, 24.0 + cursor_col * width, width) == col
+                assert grid_column(x, 24.0 + cursor_col * width, width) == expected
+            assert grid_column(x + width, 24.0, width) == expected + 1
 
     background = rgb(re.search(r"^background = (#[a-f0-9]{6})$", THEME, re.M).group(1))
     selection = rgb(re.search(r"^selection-background = (#[a-f0-9]{6})$", THEME, re.M).group(1))
