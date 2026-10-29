@@ -7,9 +7,11 @@ import hmac
 import json
 import os
 import re
+import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import urllib.parse
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -247,19 +249,60 @@ def _archive_path(archive_dir, harness, source):
     return Path(archive_dir) / harness / os.path.abspath(source).lstrip(os.sep)
 
 
-def _archive_link(source, destination):
+def _live_source_for_archive(path, archive_dir, harness):
+    try:
+        prefix = os.path.abspath(str(Path(archive_dir) / harness))
+        absolute = os.path.abspath(str(path))
+    except (OSError, ValueError):
+        return None
+    if absolute == prefix or not absolute.startswith(prefix + os.sep):
+        return None
+    return absolute[len(prefix):] or None
+
+
+def _copy_file_data(source, staging):
+    if sys.platform == "darwin":
+        try:
+            import ctypes
+
+            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+            clonefile = libc.clonefile
+            clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+            clonefile.restype = ctypes.c_int
+            if clonefile(os.fsencode(str(source)), os.fsencode(str(staging)), 0) == 0:
+                return
+        except (OSError, AttributeError):
+            pass
+        try:
+            staging.unlink(missing_ok=True)
+        except OSError:
+            pass
+    shutil.copyfile(source, staging)
+
+
+def _archive_copy(source, destination):
     source_stat = os.lstat(source)
     if not stat.S_ISREG(source_stat.st_mode):
         raise OSError("refusing to archive a non-regular file: " + str(source))
     try:
-        if os.path.samestat(source_stat, os.lstat(destination)):
-            return False
+        destination_stat = os.lstat(destination)
     except FileNotFoundError:
         pass
+    else:
+        try:
+            same = os.path.samestat(source_stat, destination_stat)
+        except OSError:
+            same = False
+        if not same and destination_stat.st_size == source_stat.st_size and destination_stat.st_mtime_ns >= source_stat.st_mtime_ns:
+            return False
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    staging = destination.with_name(destination.name + ".linking")
-    staging.unlink(missing_ok=True)
-    os.link(source, staging)
+    staging = destination.with_name(destination.name + ".copying")
+    try:
+        staging.unlink(missing_ok=True)
+    except OSError:
+        pass
+    _copy_file_data(source, staging)
+    os.chmod(staging, 0o600)
     os.replace(staging, destination)
     return True
 
@@ -534,6 +577,7 @@ class Store:
         roots = live_roots + [(harness, self._archive_root(harness, root)) for harness, root in live_roots]
         live_count = len(live_roots)
         live_identities = set()
+        live_files: dict[str, tuple[int, int]] = {}
         live_database_sessions = set()
         project = str(project) if project is not None else None
         projects = frozenset(str(value) for value in projects) if projects is not None else None
@@ -566,6 +610,7 @@ class Store:
             for row in self.db.execute("SELECT * FROM unindexed_sources")
         }
         present_paths = set()
+        fresh_archives: set[str] = set()
 
         def admit(meta, existing, unchanged, source_path, root_order, path):
             if _ephemeral(meta):
@@ -589,7 +634,8 @@ class Store:
                         self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (source_path,))
                 stats["skipped_learning_workers"] += 1
                 return
-            self._archive_source(meta, path, stats)
+            for archived in self._archive_source(meta, path, stats):
+                fresh_archives.add(archived)
             if headers_only:
                 if not unchanged:
                     self._cache_unindexed_metadata(meta, unindexed_by_path)
@@ -637,6 +683,15 @@ class Store:
                     continue
                 if root_order < live_count:
                     live_identities.add(identity)
+                    live_files[os.path.abspath(source_path)] = (source_stat.st_size, source_stat.st_mtime_ns)
+                else:
+                    if os.path.abspath(source_path) in fresh_archives:
+                        continue
+                    live_source = _live_source_for_archive(path, self.archive_dir, harness)
+                    if live_source is not None and live_source in live_files:
+                        live_size, live_mtime_ns = live_files[live_source]
+                        if source_stat.st_size == live_size and source_stat.st_mtime_ns >= live_mtime_ns:
+                            continue
                 existing = indexed_by_path.get(source_path)
                 unindexed = unindexed_by_path.get(source_path)
                 if self._cached_metadata_matches(existing, source_stat):
@@ -806,25 +861,20 @@ class Store:
 
     def _archive_source(self, meta, path, stats):
         if meta["harness"] in DATABASE_HARNESSES or _under(path, self.archive_dir):
-            return
-        linked = False
+            return []
+        archived: list[str] = []
         for name in (path.name, *ARCHIVE_COMPANIONS.get(meta["harness"], ())):
             source = path.parent / name
+            destination = _archive_path(self.archive_dir, meta["harness"], source)
             try:
-                if _archive_link(source, _archive_path(self.archive_dir, meta["harness"], source)):
+                if _archive_copy(source, destination):
                     stats["archived"] += 1
-                    linked = linked or source == path
+                    archived.append(os.path.abspath(str(destination)))
             except FileNotFoundError:
                 continue
             except OSError:
                 stats["archive_errors"] += 1
-        if linked:
-            after = os.lstat(path)
-            if (after.st_size, after.st_mtime_ns) == (meta["file_size"], meta["file_mtime_ns"]):
-                meta["file_ctime_ns"] = after.st_ctime_ns
-                with self.db:
-                    for table in ("sessions", "unindexed_sources"):
-                        self.db.execute("UPDATE " + table + " SET file_ctime_ns = ? WHERE source_path = ?", (after.st_ctime_ns, meta["source_path"]))
+        return archived
 
     def _archive_database(self, source, sessions, counts, destination, forgotten):
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1070,24 +1120,21 @@ class Store:
             raise EvidenceUnavailable("session is no longer indexed")
         if row["harness"] in DATABASE_HARNESSES:
             return self._resolve_database_evidence(row, session, position, digest)
-        raw = b""
-        failure = None
-        for candidate in (Path(row["source_path"]), self._archived_copy(row["harness"], row["source_path"])):
+        try:
+            with _open_source(Path(row["source_path"])) as stream:
+                stream.seek(int(position))
+                raw = stream.readline()
+        except FileNotFoundError:
             try:
-                with _open_source(candidate) as stream:
+                with _open_source(self._archived_copy(row["harness"], row["source_path"])) as stream:
                     stream.seek(int(position))
                     raw = stream.readline()
             except FileNotFoundError as exc:
-                failure = failure or exc
-                continue
+                raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
             except OSError as exc:
                 raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
-            if raw and hmac.compare_digest(_sha256(raw), str(digest)):
-                break
-        else:
-            if failure is not None and not raw:
-                raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(failure)) from failure
-            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+        except OSError as exc:
+            raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
         if not raw or not hmac.compare_digest(_sha256(raw), str(digest)):
             raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         try:
@@ -1132,24 +1179,30 @@ class Store:
     def _resolve_database_evidence(self, row, session, position, digest):
         database = row["source_path"].rpartition("#")[0]
         seq, sub = divmod(int(position), OPENCODE_SUBPOSITIONS)
-        message = None
-        failure = None
-        for candidate in (database, str(self._archived_copy(row["harness"], database))):
-            try:
-                with contextlib.closing(_open_database(candidate)) as connection:
-                    found = connection.execute("SELECT type, data FROM session_message WHERE session_id = ? AND seq = ?", (row["native_id"], seq)).fetchone()
-            except (OSError, sqlite3.DatabaseError) as exc:
-                failure = failure or exc
-                continue
-            message = found or message
-            if found is not None and hmac.compare_digest(_sha256(found["data"].encode("utf-8")), str(digest)):
-                break
+        try:
+            with contextlib.closing(_open_database(database)) as connection:
+                found = connection.execute("SELECT type, data FROM session_message WHERE session_id = ? AND seq = ?", (row["native_id"], seq)).fetchone()
+        except (OSError, sqlite3.DatabaseError):
+            found = None
+            live_unavailable = True
         else:
-            if message is None and failure is not None:
-                raise EvidenceUnavailable("indexed OpenCode database is unavailable: " + str(failure)) from failure
-            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
-        if message is None:
-            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+            live_unavailable = False
+        if live_unavailable or found is None:
+            try:
+                with contextlib.closing(_open_database(str(self._archived_copy(row["harness"], database)))) as connection:
+                    message = connection.execute("SELECT type, data FROM session_message WHERE session_id = ? AND seq = ?", (row["native_id"], seq)).fetchone()
+            except (OSError, sqlite3.DatabaseError) as exc:
+                raise EvidenceUnavailable("indexed OpenCode database is unavailable: " + str(exc)) from exc
+            if message is None:
+                if live_unavailable:
+                    raise EvidenceUnavailable("indexed OpenCode database is unavailable")
+                raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+            if not hmac.compare_digest(_sha256(message["data"].encode("utf-8")), str(digest)):
+                raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+        else:
+            message = found
+            if not hmac.compare_digest(_sha256(message["data"].encode("utf-8")), str(digest)):
+                raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         record = opencode_record(message["type"], message["data"], sub)
         if record is None:
             raise EvidenceChanged("transcript evidence no longer contains that event")

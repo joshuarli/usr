@@ -761,7 +761,8 @@ class OpenCodeIndexTests(unittest.TestCase):
             db.execute("UPDATE session_message SET data = replace(data, 'KeyError', 'ValueError') WHERE seq = 2")
             db.commit()
             db.close()
-            self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
+            with self.assertRaises(STORE_MODULE.EvidenceChanged):
+                store.resolve_evidence(hit["session"], hit["position"], hit["digest"])
             path.unlink()
             self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["kind"], "tool-output")
             store.forget_session(hit["session"], 0)

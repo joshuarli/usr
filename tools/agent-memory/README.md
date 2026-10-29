@@ -115,12 +115,12 @@ Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFI
 
 ## Retention
 
-Every refresh also hard-links each transcript file into `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/archive/HARNESS/ORIGINAL_PATH`, a `0700` tree. A link costs no extra disk space and keeps the data alive after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`). When the original is gone, the session is indexed from the link: search, `show`, `agent-learn recall`, and evidence verification keep working with the same positions and digests. Evidence also resolves from the link before the next refresh runs.
+Every refresh also copies each transcript file into `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/archive/HARNESS/ORIGINAL_PATH`, a `0700` tree. Copies use a filesystem clone when available, otherwise a full copy, and never create additional hard links: Muse Code refuses to resume or inspect a session whose log has multiple hard links. A copy keeps the data alive after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`). When the original is gone, the session is indexed from the copy: search, `show`, `agent-learn recall`, and evidence verification keep working with the same positions and digests. Evidence also resolves from the copy before the next refresh runs.
 
 - Capture happens during a refresh, which any `agent-sessions` command or scheduled `agent-learn run` performs for every transcript root regardless of the project filter. A file a harness deletes before any refresh saw it is not recoverable.
-- The link is the same file, so a harness that rewrites a transcript in place changes the archived copy too. A harness that replaces the file leaves the old data in the link until the next refresh relinks it. Grok's `summary.json` and `events.jsonl` are linked with `chat_history.jsonl`.
+- A copy is a point-in-time snapshot, so a harness that rewrites a transcript in place does not change the archived copy. The next refresh replaces the archived copy when the source grows or its modification time moves forward. Grok's `summary.json` and `events.jsonl` are copied with `chat_history.jsonl`.
 - The state directory must share a filesystem with the transcripts. Otherwise the refresh summary shows `archive_errors` and nothing is retained.
-- OpenCode's database cannot be hard-linked. The archive keeps its own `opencode.db` with only the session and message rows, added or updated on refresh and never removed when OpenCode drops them. Credential tables are never copied.
+- OpenCode's database is not copied as a file. The archive keeps its own `opencode.db` with only the session and message rows, added or updated on refresh and never removed when OpenCode drops them. Credential tables are never copied.
 - Learning-worker sessions and forgotten sessions are never archived. `reset-agents` does not touch the archive.
 - The archive holds complete, unredacted transcripts. Keep it out of Git and include it in backup and disk-encryption decisions. `agent-learn forget-session` is the only way to remove an archived session.
 
