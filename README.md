@@ -4,6 +4,21 @@ This repository installs my home configuration, personal commands, and machine s
 
 For native, dependency-free Python process confinement of coding agents, use [`sbx`](docs/sbx-spec.md) on macOS (Seatbelt) or Linux (Bubblewrap). It grants the current project read/write, accepts explicit extra directories, and keeps unrelated home data out of the sandbox. Linux requires `bwrap`; use the full specification and live tests before trusting it with sensitive information.
 
+## Process picker
+
+`pk <query>` is an interactive process killer built on [fz](https://github.com/laputa-systems/fz).
+Type to fuzzy-filter your own processes, press Down to focus the list, and
+press Space to mark or unmark individual processes. Enter sends SIGTERM to all
+marked processes (or the focused process if none are marked). Esc cancels.
+`pk -9 <query>` explicitly sends SIGKILL instead. The command never
+automatically escalates, searches processes belonging to other users, or kills
+all query matches without selection. Before signaling, it checks that each
+selected PID still matches the original process record.
+
+Requires a recent `fz` supporting `--multi`; `sh dl fz` installs the
+managed binary where available, or build it from the fz repository. Run
+`python3 -I dotfiles/pk-test.py` for disposable-process tests.
+
 ## Install
 
 On macOS, preview setup with `./host/macos/setup-macos -n`. Run `./host/macos/setup-macos` to install Homebrew and its packages, configure Touch ID for `sudo`, and start Unbound. The script changes system settings and uses `sudo`. Unbound listens on loopback and forwards to Cloudflare over authenticated DNS-over-TLS. Its DNS step assigns `127.0.0.1` to every enabled network service, including Tailscale. System DNS then depends on Unbound, with no public fallback if it stops.

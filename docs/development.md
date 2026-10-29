@@ -15,6 +15,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Retrieval benchmark | `uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py validate`, then `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/bench_recall.py run --split dev` (offline; see [agent learning](../tools/agent-memory/README.md#evaluation)) |
 | Live evaluation fixtures | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/test_live_learning.py` and `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/eval/test_live_recall.py` (no inference) |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
+| `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
 | `ghostty-fda-check` | `sh dotfiles/ghostty-fda-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/ghostty-fda-check dotfiles/ghostty-fda-test.sh` |
