@@ -3130,7 +3130,7 @@ else
 fi
 
 if [ "$DL_RECORD_OWNED" = true ]; then
-    [ -n "$DL_OWNED_FILE" || { _dl_fail 'DL_OWNED_FILE is required to record installed paths'; exit 1; }
+    [ -n "$DL_OWNED_FILE" ] || { _dl_fail 'DL_OWNED_FILE is required to record installed paths'; exit 1; }
     record_managed_installs
     for report_prog in agy muse claude; do report_unowned_launcher "$report_prog"; done
     exit 0
