@@ -38,7 +38,8 @@ run_dl() {
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
         XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
-        GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION
+        GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION \
+        GHOSTTY_CUSTOM_TEST_BAD_SUMS GHOSTTY_CUSTOM_TEST_BUNDLE_ID
     return $_run_dl_status
 }
 
@@ -236,6 +237,41 @@ FEED
             printf '%s' 'syncthing-test-zip' > "$output"
         else
             exit 1
+        fi
+        ;;
+    https://github.com/joshuarli/ghostty/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-29T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/ghostty/releases/tag/v1.4.1-custom.1"/>
+</entry>
+<entry>
+<updated>2026-10-30T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/ghostty/releases/tag/release-aaa000aaa000aaa000aaa000aaa000aaa000aaa0001"/>
+</entry>
+<entry>
+<updated>2026-10-30T11:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/ghostty/releases/tag/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/joshuarli/ghostty/releases/download/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002/Ghostty-Custom-aarch64-apple-darwin.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: ghostty-custom-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s\n' 'ghostty-custom-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/joshuarli/ghostty/releases/download/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002/SHA256SUMS)
+        [ -n "$output" ] || exit 1
+        if [ "${GHOSTTY_CUSTOM_TEST_BAD_SUMS:-false}" = true ]; then
+            printf '%s\n' '0000000000000000000000000000000000000000000000000000000000000000  Ghostty-Custom-aarch64-apple-darwin.zip' > "$output"
+        else
+            printf '%s\n' '8da6066dfe57453cb8e98d9e5fa376252d60aa001e0b71ec33af5828c463ce21  Ghostty-Custom-aarch64-apple-darwin.zip' > "$output"
         fi
         ;;
     https://github.com/laputa-systems/git-build/releases.atom)
@@ -465,6 +501,10 @@ mkdir -p "$4/Ghostty.app/Contents/MacOS"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$4/Ghostty.app/Contents/MacOS/ghostty"
 chmod +x "$4/Ghostty.app/Contents/MacOS/ghostty"
 printf '%s\n' 'mock plist' > "$4/Ghostty.app/Contents/Info.plist"
+mkdir -p "$4/Ghostty Custom.app/Contents/MacOS"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$4/Ghostty Custom.app/Contents/MacOS/ghostty"
+chmod +x "$4/Ghostty Custom.app/Contents/MacOS/ghostty"
+printf '%s\n' 'mock plist' > "$4/Ghostty Custom.app/Contents/Info.plist"
 EOF
 cat > "$mock_bin/spctl" <<'EOF'
 #!/bin/sh
@@ -472,7 +512,10 @@ cat > "$mock_bin/spctl" <<'EOF'
 EOF
 cat > "$mock_bin/plutil" <<'EOF'
 #!/bin/sh
-printf '%s\n' "${GHOSTTY_TEST_VERSION:-1.4.0}"
+case "$*" in
+    *CFBundleIdentifier*) printf '%s\n' "${GHOSTTY_CUSTOM_TEST_BUNDLE_ID:-com.joshuarli.ghostty-custom}" ;;
+    *) printf '%s\n' "${GHOSTTY_TEST_VERSION:-1.4.0}" ;;
+esac
 EOF
 chmod +x "$mock_bin/ditto" "$mock_bin/spctl" "$mock_bin/plutil"
 
@@ -1428,6 +1471,86 @@ if HOME="$linux_home" GHOSTTY_APPLICATIONS_DIR="$linux_home/Applications" \
     DL_TEST_OS=Linux TMPDIR="$test_root/tmp" \
     run_dl "$mock_bin:$PATH" "$repo_root" ghostty; then exit 1; fi
 [ ! -e "$linux_home/Applications/Ghostty.app" ]
+)
+end_case
+
+begin_case "ghostty-custom installs latest prerelease, is idempotent, and records ownership"
+( set -e
+custom_home="$test_root/ghostty-custom-home"
+apps="$custom_home/Applications"
+owned="$custom_home/.local/state/sync/dl-owned"
+mkdir -p "$(dirname "$owned")"
+if output=$(HOME="$custom_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 DL_OWNED_FILE="$owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" ghostty-custom 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$apps/Ghostty Custom.app/Contents/MacOS/ghostty" ]
+[ "$(readlink "$custom_home/.local/bin/ghostty-custom")" \
+    = "$apps/Ghostty Custom.app/Contents/MacOS/ghostty" ]
+[ "$(cat "$custom_home/.local/state/dl/ghostty-custom")" = ghostty-custom-test-etag ]
+case "$output" in *"Installed $apps/Ghostty Custom.app (release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002)"*) ;; *) exit 1 ;; esac
+
+if output=$(HOME="$custom_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 DL_OWNED_FILE="$owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" ghostty-custom 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in *'ghostty-custom is current (release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002)'*) ;; *) exit 1 ;; esac
+HOME="$custom_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_RECORD_OWNED=true DL_OWNED_FILE="$owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
+awk -F '\t' -v path="$apps/Ghostty Custom.app" \
+    '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$owned"
+for f in "$custom_home/.local/bin/ghostty-custom" "$custom_home/.local/state/dl/ghostty-custom"; do
+    awk -F '\t' -v path="$f" \
+        '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$owned"
+done
+)
+end_case
+
+begin_case "ghostty-custom refuses existing unmanaged app and launcher"
+( set -e
+collision_home="$test_root/ghostty-custom-collision"
+apps="$collision_home/Applications"
+mkdir -p "$apps/Ghostty Custom.app" "$collision_home/.local/bin"
+printf '%s\n' "unmanaged" > "$apps/Ghostty Custom.app/keep"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$collision_home/.local/bin/ghostty-custom"
+chmod +x "$collision_home/.local/bin/ghostty-custom"
+if HOME="$collision_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" ghostty-custom; then exit 1; fi
+[ "$(cat "$apps/Ghostty Custom.app/keep")" = unmanaged ]
+[ -f "$collision_home/.local/bin/ghostty-custom" ]
+[ ! -e "$collision_home/.local/state/dl/ghostty-custom" ]
+)
+end_case
+
+begin_case "ghostty-custom rejects checksum mismatch, bundle id drift, and extract failure"
+( set -e
+for fault in sums bundle extract; do
+    broken_home="$test_root/ghostty-custom-broken-$fault"
+    apps="$broken_home/Applications"
+    case "$fault" in
+        sums) GHOSTTY_CUSTOM_TEST_BAD_SUMS=true ;;
+        bundle) GHOSTTY_CUSTOM_TEST_BUNDLE_ID=com.example.wrong ;;
+        extract) GHOSTTY_TEST_EXTRACT_FAIL=true ;;
+    esac
+    export GHOSTTY_CUSTOM_TEST_BAD_SUMS GHOSTTY_CUSTOM_TEST_BUNDLE_ID GHOSTTY_TEST_EXTRACT_FAIL
+    if HOME="$broken_home" GHOSTTY_APPLICATIONS_DIR="$apps" \
+        DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+        run_dl "$mock_bin:$PATH" "$repo_root" ghostty-custom; then exit 1; fi
+    [ ! -e "$apps/Ghostty Custom.app" ]
+    [ ! -e "$broken_home/.local/bin/ghostty-custom" ]
+    [ ! -e "$broken_home/.local/state/dl/ghostty-custom" ]
+    unset GHOSTTY_CUSTOM_TEST_BAD_SUMS GHOSTTY_CUSTOM_TEST_BUNDLE_ID GHOSTTY_TEST_EXTRACT_FAIL
+done
 )
 end_case
 

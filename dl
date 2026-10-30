@@ -43,8 +43,6 @@ GHOSTTY_VERSION=1.4.0
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
 GHOSTTY_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty.app"
 GHOSTTY_EXEC="${GHOSTTY_APP}/Contents/MacOS/ghostty"
-GHOSTTY_CUSTOM_VERSION=v1.4.1-custom.1
-GHOSTTY_CUSTOM_SHA256=
 GHOSTTY_CUSTOM_ASSET=Ghostty-Custom-aarch64-apple-darwin.zip
 GHOSTTY_CUSTOM_BUNDLE_ID=com.joshuarli.ghostty-custom
 GHOSTTY_CUSTOM_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty Custom.app"
@@ -1353,6 +1351,152 @@ install_ghostty() {
     changed=true
     _dl_ok "Installed $GHOSTTY_APP ($GHOSTTY_VERSION)"
     printf '%s\n' "Run 'ghostty-fda-check' inside Ghostty to verify Full Disk Access."
+}
+
+install_ghostty_custom() {
+    if [ "$OS" != Darwin ]; then skip ghostty-custom "macOS only"; return; fi
+    case "$ARCH" in
+        aarch64) ;;
+        *) skip ghostty-custom "only aarch64 prereleases are published"; return ;;
+    esac
+    tag=$(curl -fsSL "https://github.com/joshuarli/ghostty/releases.atom" \
+        | awk '
+            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+            in_entry && /<updated>/ {
+                updated = $0
+                sub(/^.*<updated>/, "", updated)
+                sub(/<.*/, "", updated)
+            }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+                if (index(tag, "release-") != 1) tag = ""
+            }
+            /<\/entry>/ {
+                if (updated > newest_updated && tag != "") {
+                    newest_updated = updated
+                    newest_tag = tag
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
+    if [ -z "$tag" ]; then
+        unchecked ghostty-custom "no prerelease found"
+        return
+    fi
+    url="https://github.com/joshuarli/ghostty/releases/download/${tag}/${GHOSTTY_CUSTOM_ASSET}"
+    sums_url="https://github.com/joshuarli/ghostty/releases/download/${tag}/SHA256SUMS"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked ghostty-custom "${GHOSTTY_CUSTOM_ASSET} is not available in ${tag}"
+        return
+    fi
+    installed_id=$(cat "${STATE}/ghostty-custom" 2>/dev/null || :)
+    launcher_target=$(readlink "${DEST}/ghostty-custom" 2>/dev/null || :)
+    if [ -d "$GHOSTTY_CUSTOM_APP" ] && [ ! -L "$GHOSTTY_CUSTOM_APP" ] \
+        && [ "$installed_id" = "$id" ] \
+        && [ -x "$GHOSTTY_CUSTOM_EXEC" ] \
+        && [ "$launcher_target" = "$GHOSTTY_CUSTOM_EXEC" ]; then
+        own_dir "$GHOSTTY_CUSTOM_APP"
+        own_file "${DEST}/ghostty-custom"
+        own_file "${STATE}/ghostty-custom"
+        _dl_current "ghostty-custom is current (${tag})"
+        return
+    fi
+    if [ -L "$GHOSTTY_CUSTOM_APP" ] \
+        || { [ -e "$GHOSTTY_CUSTOM_APP" ] && [ -z "$installed_id" ]; }; then
+        skip ghostty-custom "existing $GHOSTTY_CUSTOM_APP is not managed by dl"
+        return
+    fi
+    if { [ -e "${DEST}/ghostty-custom" ] || [ -L "${DEST}/ghostty-custom" ]; } \
+        && [ "$launcher_target" != "$GHOSTTY_CUSTOM_EXEC" ]; then
+        skip ghostty-custom "existing ${DEST}/ghostty-custom is not managed by dl"
+        return
+    fi
+    _dl_fetch "Downloading ${GHOSTTY_CUSTOM_ASSET} (${tag}) ..."
+    tmpzip=$(mktemp "${TMPDIR:-/tmp}/ghostty-custom.XXXXXX")
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip ghostty-custom "download failed"
+        return
+    fi
+    tmpoutput=$(mktemp)
+    if ! curl -fsSL -o "$tmpoutput" "$sums_url"; then
+        rm -f "$tmpzip" "$tmpoutput"
+        tmpzip=
+        tmpoutput=
+        skip ghostty-custom "SHA256SUMS download failed"
+        return
+    fi
+    expected_sha256=$(grep -F "  ${GHOSTTY_CUSTOM_ASSET}" "$tmpoutput" | awk '{print $1}')
+    rm -f "$tmpoutput"
+    tmpoutput=
+    if [ "${#expected_sha256}" -ne 64 ] || [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip ghostty-custom "checksum mismatch"
+        return
+    fi
+    own_missing_dirs "$GHOSTTY_APPLICATIONS_DIR"
+    if ! mkdir -p "$GHOSTTY_APPLICATIONS_DIR"; then
+        skip ghostty-custom "cannot create $GHOSTTY_APPLICATIONS_DIR"
+        return
+    fi
+    tmpbundle=$(mktemp -d "${GHOSTTY_APPLICATIONS_DIR}/.ghostty-custom.XXXXXX") || {
+        skip ghostty-custom "cannot stage application in $GHOSTTY_APPLICATIONS_DIR"
+        return
+    }
+    if ! ditto -x -k "$tmpzip" "$tmpbundle" \
+        || [ ! -x "${tmpbundle}/Ghostty Custom.app/Contents/MacOS/ghostty" ]; then
+        skip ghostty-custom "release archive is invalid"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    actual_bundle_id=$(plutil -extract CFBundleIdentifier raw -o - \
+        "${tmpbundle}/Ghostty Custom.app/Contents/Info.plist" 2>/dev/null || :)
+    if [ "$actual_bundle_id" != "$GHOSTTY_CUSTOM_BUNDLE_ID" ]; then
+        skip ghostty-custom "bundle id ${actual_bundle_id:-unknown} does not match $GHOSTTY_CUSTOM_BUNDLE_ID"
+        return
+    fi
+
+    # Stage on the same filesystem, and preserve the prior managed app if
+    # replacing it fails. The checksum above already pins the exact CI
+    # bytes, so no signature check is needed here.
+    previous_app=
+    if [ -d "$GHOSTTY_CUSTOM_APP" ]; then
+        previous_app=$(mktemp -d "${GHOSTTY_APPLICATIONS_DIR}/.ghostty-custom-previous.XXXXXX")
+        rmdir "$previous_app"
+        if ! mv "$GHOSTTY_CUSTOM_APP" "$previous_app"; then
+            skip ghostty-custom "cannot move previous application"
+            return
+        fi
+    fi
+    if ! mv "${tmpbundle}/Ghostty Custom.app" "$GHOSTTY_CUSTOM_APP"; then
+        if [ -n "$previous_app" ]; then
+            mv "$previous_app" "$GHOSTTY_CUSTOM_APP" || _dl_warn "Restore manually from $previous_app"
+        fi
+        skip ghostty-custom "cannot install application"
+        return
+    fi
+    if [ -n "$previous_app" ]; then rm -rf "$previous_app"; fi
+
+    if [ "$launcher_target" != "$GHOSTTY_CUSTOM_EXEC" ]; then
+        tmpbinlink=$(mktemp "${DEST}/.ghostty-custom.XXXXXX")
+        rm -f "$tmpbinlink"
+        ln -s "$GHOSTTY_CUSTOM_EXEC" "$tmpbinlink"
+        mv -f "$tmpbinlink" "${DEST}/ghostty-custom"
+        tmpbinlink=
+    fi
+    own_dir "$GHOSTTY_CUSTOM_APP"
+    own_file "${DEST}/ghostty-custom"
+    printf '%s\n' "$id" > "${STATE}/ghostty-custom"
+    own_file "${STATE}/ghostty-custom"
+    changed=true
+    _dl_ok "Installed $GHOSTTY_CUSTOM_APP (${tag})"
 }
 
 install_mactop_app() {
@@ -3272,6 +3416,7 @@ for prog in "$@"; do
         codex) install_codex ;;
         opencode2) install_opencode2 ;;
         ghostty) install_ghostty ;;
+        ghostty-custom) install_ghostty_custom ;;
         vault) install_release vault ;;
         jaq) install_jaq ;;
         mold) install_mold ;;
