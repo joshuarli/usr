@@ -1,0 +1,10 @@
+{
+  "provider": "gateway",
+  "models": {
+    "gateway": "meta/muse-spark-1.3-contributor"
+  },
+  "review_model": "meta/muse-spark-1.3-contributor",
+  "permission_mode": "auto",
+  "auto_upgrade": false,
+  "session_titles": false
+}

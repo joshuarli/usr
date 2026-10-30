@@ -14,6 +14,8 @@ On macOS, `sh dl ghostty` downloads the pinned official universal Ghostty releas
 
 **Ghostty shader reload:** After `git pull`, run `sh sync links` to link any new shader file. Ghostty only rebuilds a shader on config reload when the configured shader path changes; editing GLSL at the same path alone may leave an existing terminal using cached code. Open a new Ghostty window or fully quit and relaunch for source-only changes. Run `python3 -I dotfiles/ghostty-shader-test.py --demo` in Ghostty to verify the animation.
 
+`sh dl fx` is an optional pinned native install; no-argument `dl` does not install fx. The `~/.fx/AGENTS.md` and `~/.fx/settings.json` files are dotfiles-managed links; fx credentials, sessions, and all other mutable state stay local. fx auto-updates are disabled in the tracked profile. Change `FX_VERSION` and its checksums in `dl` to upgrade.
+
 The `host/macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. See [agent learning](agent-learning.md).
 
 Sync prunes a recorded link that points into a layer whose source is gone; `sh sync plan` lists these as `PRUNE`. A link copied from a layer symlink points elsewhere, so it stays, as do links `sh sync` did not create. Remove those yourself, or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.

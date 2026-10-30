@@ -31,7 +31,7 @@ run_dl() {
     _run_dl_status=$?
     unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \
         FREEBUFF_TEST_VERSION FREEBUFF_INSTALL_FAIL \
-        CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK \
+        CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK FX_TAR FX_TEST_SHA \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
         SSH_ZIP SSH_SUMS SSH_UNZIP_LIST_FAIL SSH_UNZIP_EXTRACT_FAIL SSH_FEED_OLD OXISH_ZIP OXISH_SUMS OXISH_UNZIP_EXTRACT_FAIL \
@@ -131,6 +131,10 @@ INSTALLER
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$MUSE_INSTALL_DIR/muse"
 chmod +x "$MUSE_INSTALL_DIR/muse"
 INSTALLER
+        ;;
+    https://github.com/vercel-labs/fx/releases/download/v0.0.16/fx-linux-x86_64.tar.gz)
+        [ -n "$output" ] || exit 1
+        cp "$FX_TAR" "$output"
         ;;
     https://x.ai/cli/stable)
         printf '%s\n' '1.2.3'
@@ -486,6 +490,23 @@ cat > "$test_root/opencode-package-v2/opencode" <<'EOF'
 EOF
 chmod +x "$test_root/opencode-package-v2/opencode"
 tar -czf "$test_root/opencode-v2.tar.gz" -C "$test_root/opencode-package-v2" opencode
+
+mkdir -p "$test_root/fx-package" "$test_root/fx-sha-bin"
+cat > "$test_root/fx-package/fx" <<'EOF'
+#!/bin/sh
+[ "${1:-}" = --version ] && printf '%s\n' 'fx-test 0.0.16'
+EOF
+chmod +x "$test_root/fx-package/fx"
+tar -czf "$test_root/fx.tar.gz" -C "$test_root/fx-package" fx
+cat > "$test_root/fx-sha-bin/sha256sum" <<'EOF'
+#!/bin/sh
+case "${FX_TEST_SHA:-}" in
+    valid) printf '%s  %s\n' 'f0fb822c7be546c80bcc89d50521bc1454435e0c6f586e8420c4e2b84fa80599' "$1" ;;
+    bad) printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$1" ;;
+    *) exit 1 ;;
+esac
+EOF
+chmod +x "$test_root/fx-sha-bin/sha256sum"
 
 mkdir -p "$test_root/codex-package/bin" "$test_root/codex-package/codex-path"
 printf '%s\n' '{}' > "$test_root/codex-package/codex-package.json"
@@ -966,7 +987,7 @@ begin_case "default targets exclude optional agents"
 ( set -e
 default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
 case "$default_targets" in
-    *'set -- '*grok*|*'set -- '*cmd*|*'set -- '*freebuff*)
+    *'set -- '*grok*|*'set -- '*cmd*|*'set -- '*freebuff*|*'set -- '*fx*)
         printf 'optional coding agents appeared in the default dl targets\n' >&2
         exit 1 ;;
 esac
@@ -1462,6 +1483,68 @@ case "$output" in
     *'syncthing is current (release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
+
+begin_case "fx installs checksum-pinned archive, stays current, and records ownership"
+( set -e
+fx_home="$test_root/fx-home"
+fx_path="$fx_home/.local/bin/fx"
+fx_state="$fx_home/.local/state/dl/fx"
+fx_path_env="$test_root/fx-sha-bin:$mock_bin:$PATH"
+if output=$(HOME="$fx_home" XDG_STATE_HOME="$fx_home/.local/state" \
+    TMPDIR="$test_root/tmp" FX_TAR="$test_root/fx.tar.gz" FX_TEST_SHA=valid \
+    run_dl "$fx_path_env" "$repo_root" fx 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$fx_path" ]
+[ "$("$fx_path" --version)" = 'fx-test 0.0.16' ]
+[ "$(cat "$fx_state")" = 'v0.0.16:f0fb822c7be546c80bcc89d50521bc1454435e0c6f586e8420c4e2b84fa80599' ]
+if output=$(HOME="$fx_home" XDG_STATE_HOME="$fx_home/.local/state" \
+    TMPDIR="$test_root/tmp" FX_TAR="$test_root/fx.tar.gz" FX_TEST_SHA=bad \
+    run_dl "$fx_path_env" "$repo_root" fx 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in *'fx is current (v0.0.16)'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
+)
+end_case
+
+begin_case "fx rejects archive checksum mismatch"
+( set -e
+fx_home="$test_root/fx-bad-home"
+if output=$(HOME="$fx_home" XDG_STATE_HOME="$fx_home/.local/state" \
+    TMPDIR="$test_root/tmp" FX_TAR="$test_root/fx.tar.gz" FX_TEST_SHA=bad \
+    run_dl "$test_root/fx-sha-bin:$mock_bin:$PATH" "$repo_root" fx 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in *'checksum mismatch'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
+[ ! -e "$fx_home/.local/bin/fx" ]
+[ ! -e "$fx_home/.local/state/dl/fx" ]
+)
+end_case
+
+begin_case "fx preserves unmanaged binary"
+( set -e
+fx_home="$test_root/fx-unmanaged-home"
+mkdir -p "$fx_home/.local/bin"
+printf '%s\n' '#!/bin/sh' 'echo unmanaged' > "$fx_home/.local/bin/fx"
+chmod +x "$fx_home/.local/bin/fx"
+if output=$(HOME="$fx_home" XDG_STATE_HOME="$fx_home/.local/state" \
+    TMPDIR="$test_root/tmp" FX_TAR="$test_root/fx.tar.gz" FX_TEST_SHA=valid \
+    run_dl "$test_root/fx-sha-bin:$mock_bin:$PATH" "$repo_root" fx 2>&1); then
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in *'outside dl management'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
+[ "$("$fx_home/.local/bin/fx")" = unmanaged ]
+[ ! -e "$fx_home/.local/state/dl/fx" ]
 )
 end_case
 

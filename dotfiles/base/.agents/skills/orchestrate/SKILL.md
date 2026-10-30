@@ -11,13 +11,13 @@ The parent keeps tightly coupled investigation, design, and integration, and own
 
 Route by difficulty, uncertainty, and risk. Use the column for the harness you are running in.
 
-| Work | Codex | Claude and Grok | OpenCode | Command Code | Muse Code | Antigravity CLI | DeepSeek TUI | Pi |
+| Work | Codex | Claude and Grok | OpenCode | Command Code | Muse Code | Antigravity CLI | DeepSeek TUI | fx | Pi |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/muse-spark-1.3-contributor#low`, `explore` | `meta/muse-spark-1.3-contributor`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `google/gemini-3.8-flash`, `scout`, `low` |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/muse-spark-1.3-contributor#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `google/gemini-3.8-flash`, `mechanic`, `medium` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-terra`, `medium` | `worker` | `opencode-go/muse-spark-1.3-contributor#xhigh`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` | `google/gemini-3.8-flash`, `worker`, `high` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-terra`, `high` | `expert` | `opencode-go/muse-spark-1.3-contributor#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `google/gemini-3.8-flash`, `expert`, `high` |
-| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | `opencode-go/muse-spark-1.3-contributor#max`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `google/gemini-3.8-flash`, `god`, `high` |
+| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/muse-spark-1.3-contributor#low`, `explore` | `meta/muse-spark-1.3-contributor`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `low` | `google/gemini-3.8-flash`, `scout`, `low` |
+| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/muse-spark-1.3-contributor#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `medium` | `google/gemini-3.8-flash`, `mechanic`, `medium` |
+| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-terra`, `medium` | `worker` | `opencode-go/muse-spark-1.3-contributor#xhigh`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` | `meta/muse-spark-1.3-contributor`, `high` | `google/gemini-3.8-flash`, `worker`, `high` |
+| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-terra`, `high` | `expert` | `opencode-go/muse-spark-1.3-contributor#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `meta/muse-spark-1.3-contributor`, `xhigh` | `google/gemini-3.8-flash`, `expert`, `high` |
+| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | `opencode-go/muse-spark-1.3-contributor#max`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `meta/muse-spark-1.3-contributor`, `xhigh` | `google/gemini-3.8-flash`, `god`, `high` |
 
 **Default to `worker`.** Size is not difficulty: a large lane with a known method and acceptance is still worker work. Use `expert` only for unknown paths with costly wrong turns (cross-cutting designs, unexplained failures, multi-owner integration).
 
@@ -58,6 +58,12 @@ Select the model from the Antigravity CLI column with `agy --model <model>`. Use
 ### DeepSeek TUI
 
 Use only the DeepSeek TUI table route for DSH work. DSH has `off`, `low`, `high`, and `max`, not `medium`: use `high` for workers and `max` for experts and gods. Do not switch providers.
+
+### fx
+
+Keep the parent and every child on Vercel AI Gateway `meta/muse-spark-1.3-contributor`; explicitly choose the fx column's reasoning effort when launching a child. The named tiers are roles in the brief, not built-in fx agent types. Never silently use a stronger, more expensive model. A `god` child repeats `xhigh` in fresh context with evidence of previous failures.
+
+fx children cannot spawn further children. They inherit the parent's workspace and permission limits, so subagent naming does not isolate writes. Default to serial writers. When independent writers justify parallelism, the parent first creates separate `.work/wt/` worktrees, grants additional workspace access as needed, and tells each child to write only its assigned path; do not assume fx changes the child's working directory. Parent owns diff review, integration, and cleanup.
 
 ## Delegation
 
