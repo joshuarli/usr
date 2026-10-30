@@ -31,7 +31,7 @@ DEFAULT_SOURCE = Path(__file__).resolve().parent / "v1.ttf"
 UPSTREAM_GIT_BLOB_SHA = "8ebdd7bba9c82d418979af7bc9d84acd1fee0ffb"
 SOURCE_SIZE = 88404
 STROKE_HEIGHT = 50
-EXPECTED_STROKES = 4448
+EXPECTED_STROKES = 4457
 
 
 @dataclass(frozen=True)

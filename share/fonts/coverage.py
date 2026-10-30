@@ -366,17 +366,14 @@ def _diagonal_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | 
 
 
 def _arc_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | None:
-    mapping = {
-        0x256D: {"up": "l", "right": "l"},
-        0x256E: {"up": "l", "left": "l"},
-        0x256F: {"down": "l", "left": "l"},
-        0x2570: {"down": "l", "right": "l"},
-    }
-    if cp in mapping:
-        e = {"up": " ", "down": " ", "left": " ", "right": " "}
-        e.update(mapping[cp])
-        parts = _box_parts(e)
-        return parts
+    if cp == 0x256D:
+        return _v_bricks(150, 250, skip={350, 450, 550, 650, 750}) + [_rect(0, 350, 500, 400), _vbrick(250, 350, 250)]
+    if cp == 0x256E:
+        return _v_bricks(150, 250, skip={350, 450, 550, 650, 750}) + [_rect(0, 350, 500, 400), _vbrick(50, 150, 250)]
+    if cp == 0x256F:
+        return _v_bricks(150, 250, skip={-150, -50, 50, 150, 250, 350}) + [_rect(0, 350, 500, 400), _vbrick(50, 150, 450)]
+    if cp == 0x2570:
+        return _v_bricks(150, 250, skip={-150, -50, 50, 150, 250, 350}) + [_rect(0, 350, 500, 400), _vbrick(250, 350, 450)]
     return None
 
 
@@ -419,24 +416,20 @@ def _block_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | Non
         return [_rect(437, y0, 500, y0 + 50) for y0 in ROWS]
     if cp == 0x2594:
         return [_rect(0, 750, 500, 800)]
-    if cp in (0x2596, 0x2597, 0x2598, 0x259D, 0x2596):
-        pass
     quad = {
-        0x2596: (False, True, False, False),
+        0x2596: (False, False, True, False),
         0x2597: (False, False, False, True),
-        0x2598: (False, False, True, False),
-        0x259D: (False, False, False, False),
-        0x2599: (True, True, False, True),
+        0x2598: (True, False, False, False),
+        0x259D: (False, True, False, False),
+        0x2599: (True, False, True, True),
         0x259A: (True, False, False, True),
-        0x259B: (True, False, True, False),
-        0x259C: (True, True, True, False),
+        0x259B: (True, True, True, False),
+        0x259C: (True, True, False, True),
         0x259E: (False, True, True, False),
         0x259F: (False, True, True, True),
     }
     if cp in (0x2596, 0x2597, 0x2598, 0x259D, 0x2599, 0x259A, 0x259B, 0x259C, 0x259E, 0x259F):
         ul, ur, ll, lr = quad[cp]
-        if cp == 0x259D:
-            ul, ur, ll, lr = False, True, False, False
         out = []
         top_rows = [350, 450, 550, 650, 750]
         bot_rows = [-150, -50, 50, 150, 250]
