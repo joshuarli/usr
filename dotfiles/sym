@@ -58,15 +58,18 @@ physical_parent() {
     (cd "$_p" && pwd -P)
 }
 
-confined() {
-    _pp="$(physical_parent "$1")"
+confined_parent() {
     if [ "$tgt_phys" = / ]; then
-        case "$_pp/" in /*) ;; *) return 1 ;; esac
+        case "$1/" in /*) ;; *) return 1 ;; esac
     else
-        case "$_pp/" in "$tgt_phys"/*) ;; *) return 1 ;; esac
+        case "$1/" in "$tgt_phys"/*) ;; *) return 1 ;; esac
     fi
-    case "$_pp/" in "$src_phys"/*) return 1 ;; esac
+    case "$1/" in "$src_phys"/*) return 1 ;; esac
     return 0
+}
+
+confined() {
+    confined_parent "$(physical_parent "$1")"
 }
 
 lexical_path() (

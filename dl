@@ -42,6 +42,12 @@ GHOSTTY_VERSION=1.4.0
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
 GHOSTTY_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty.app"
 GHOSTTY_EXEC="${GHOSTTY_APP}/Contents/MacOS/ghostty"
+GHOSTTY_CUSTOM_VERSION=v1.4.1-custom.1
+GHOSTTY_CUSTOM_SHA256=
+GHOSTTY_CUSTOM_ASSET=Ghostty-Custom-aarch64-apple-darwin.zip
+GHOSTTY_CUSTOM_BUNDLE_ID=com.joshuarli.ghostty-custom
+GHOSTTY_CUSTOM_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty Custom.app"
+GHOSTTY_CUSTOM_EXEC="${GHOSTTY_CUSTOM_APP}/Contents/MacOS/ghostty"
 
 # Prefer the dl-managed Node.js over whatever `node`/`npm` the inherited
 # PATH resolves to (shell configs reorder PATH). Fall back to PATH when the
