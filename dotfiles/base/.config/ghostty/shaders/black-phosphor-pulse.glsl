@@ -112,7 +112,7 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
         float phase = fract(iTime / PULSE_PERIOD_S -
                             (warped.x * iResolution.x) * PHASE_PER_PIXEL);
         float triangle = 1.0 - abs(2.0 * phase - 1.0);
-        float wave = smoothstep(0.27, 0.93, triangle);
+        float wave = smoothstep(0.0, 1.0, triangle);
         float amount = highlighted * wave;
 
         // Animate the background as well as the foreground. A small additive
