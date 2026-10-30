@@ -11,6 +11,14 @@ if [ -f "$stamp" ]; then
     fi
 fi
 printf '%s\n' "$now" >"$stamp" 2>/dev/null || true
+if [ -n "${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
+    tty=$(tmux display-message -p -t "$TMUX_PANE" '#{pane_tty}' 2>/dev/null) || tty=""
+    if [ -n "$tty" ] && [ -c "$tty" ]; then
+        if printf '\a' >"$tty" 2>/dev/null; then
+            exit 0
+        fi
+    fi
+fi
 if printf '\a' >/dev/tty 2>/dev/null; then
     exit 0
 fi
