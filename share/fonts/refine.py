@@ -8,9 +8,10 @@
 Original: https://github.com/svofski/glasstty (The Unlicense)
 Run: ./refine.py [--variant both|soft|smooth] [--force]
 
-This deliberately leaves character design, horizontal metrics, Unicode mapping,
-line spacing and scanline contours intact. Only eligible 50-unit-high scanline
-contours are made a little fuller, with their rounded shoulders refined.
+This adds matching box drawing, block, arrow and prompt glyphs in the
+original scanline style, then leaves horizontal metrics, line spacing
+and Unicode mapping intact. Eligible 50-unit-high scanline contours
+are made a little fuller, with their rounded shoulders refined.
 """
 from __future__ import annotations
 
@@ -24,11 +25,13 @@ from pathlib import Path
 
 from fontTools.ttLib import TTFont
 
+import coverage
+
 DEFAULT_SOURCE = Path(__file__).resolve().parent / "v1.ttf"
 UPSTREAM_GIT_BLOB_SHA = "8ebdd7bba9c82d418979af7bc9d84acd1fee0ffb"
 SOURCE_SIZE = 88404
 STROKE_HEIGHT = 50
-EXPECTED_STROKES = 3080
+EXPECTED_STROKES = 4448
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,7 @@ def rename_font(font: TTFont, variant: Variant) -> None:
 
 def build(data: bytes, variant: Variant) -> bytes:
     font = TTFont(io.BytesIO(data), recalcBBoxes=True, recalcTimestamp=False)
+    coverage.add_coverage(font)
     originals = dict(font["hmtx"].metrics)
     cmap = font.getBestCmap()
     count = smooth_scanlines(font, variant)
