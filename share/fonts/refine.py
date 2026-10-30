@@ -3,10 +3,10 @@
 # requires-python = ">=3.11"
 # dependencies = ["fonttools"]
 # ///
-"""Make optically softened variants of Viacheslav Slavinsky's Glass TTY VT220.
+"""Make an optically softened variant of Viacheslav Slavinsky's Glass TTY VT220.
 
 Original: https://github.com/svofski/glasstty (The Unlicense)
-Run: ./refine.py [--variant both|soft|smooth] [--force]
+Run: ./refine.py [--force]
 
 This adds matching box drawing, block, arrow and prompt glyphs in the
 original scanline style, then leaves horizontal metrics, line spacing
@@ -55,7 +55,6 @@ class Variant:
 
 VARIANTS = {
     "soft": Variant("Soft", 62, 3.0),
-    "smooth": Variant("Smooth", 70, 5.0),
 }
 
 
@@ -149,7 +148,7 @@ def rename_font(font: TTFont, variant: Variant) -> None:
         names.setName(value, name_id, 1, 0, 0)
 
     # A different internal fontRevision avoids stale cache collisions.
-    font["head"].fontRevision = 1.0 if variant.label == "Soft" else 1.1
+    font["head"].fontRevision = 1.0
     # The original is fixed-pitch; preserve all advance widths exactly.
     # The original has six zero-advance special glyphs. All ordinary glyphs
     # use the same 500-unit cell; keep those zero advances untouched.
@@ -212,11 +211,8 @@ def main() -> None:
         help="Local original font (default: v1.ttf next to this script)",
     )
     parser.add_argument(
-        "--variant", choices=(*VARIANTS.keys(), "both"), default="both"
-    )
-    parser.add_argument(
         "--install", action="store_true",
-        help="Install the distinct font families into ~/Library/Fonts on macOS"
+        help="Install the font family into ~/Library/Fonts on macOS"
     )
     parser.add_argument(
         "--output-dir", type=Path, default=Path.cwd() / "glasstty-build"
@@ -228,20 +224,16 @@ def main() -> None:
         Path("~/Library/Fonts").expanduser()
         if args.install else args.output_dir.expanduser()
     )
-    choices = (
-        tuple(VARIANTS.values()) if args.variant == "both"
-        else (VARIANTS[args.variant],)
-    )
+    variant = VARIANTS["soft"]
     data = read_source(args.source)
-    for variant in choices:
-        out = output / variant.filename
-        rebuilt = build(data, variant)
-        write_font(out, rebuilt, args.force)
-        print(f"{variant.family}: {out} ({len(rebuilt):,} bytes)")
+    out = output / variant.filename
+    rebuilt = build(data, variant)
+    write_font(out, rebuilt, args.force)
+    print(f"{variant.family}: {out} ({len(rebuilt):,} bytes)")
 
     print(
         "\nRestart Ghostty, run `ghostty +list-fonts`, and set "
-        "`font-family = Glass TTY Soft` or `font-family = Glass TTY Smooth`."
+        "`font-family = Glass TTY Soft`."
     )
     print("Keep your original Glass TTY VT220 installed for comparison.")
 
