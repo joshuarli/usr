@@ -1,16 +1,10 @@
 command = /Users/josh/usr/bin/ish
 fullscreen = true
-theme = Black Phosphor
-custom-shader = shaders/black-phosphor-pulse.glsl
-custom-shader-animation = true
 
 window-padding-x = 4
 window-padding-y = 4
 window-padding-color = background
 window-padding-balance = true
-
-font-family = Glass TTY Soft
-font-size = 16
 
 shell-integration = none
 cursor-style-blink = false
@@ -31,3 +25,4 @@ auto-update = off
 bell-features = audio,no-system,no-attention,no-title,no-border
 bell-audio-path = /System/Library/Sounds/Glass.aiff
 bell-audio-volume = 1
+
