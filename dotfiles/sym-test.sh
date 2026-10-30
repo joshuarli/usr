@@ -372,7 +372,7 @@ echo "  assertion 1: the nearest existing parent is root"
 [ "$parent" = / ] || nfailed=$((nfailed + 1))
 
 printf '\n26: root targets include files beneath existing root directories\n'
-confinement_helpers=$(sed -n '/^physical_parent() {/,/^}/p; /^confined() {/,/^}/p' "$sym")
+confinement_helpers=$(sed -n '/^physical_parent() {/,/^}/p; /^confined_parent() {/,/^}/p; /^confined() {/,/^}/p' "$sym")
 if eval "$confinement_helpers
 tgt_phys=/
 src_phys=/not/source
@@ -471,6 +471,20 @@ LINK: home/.moved -> ../dotfiles/moveto/.moved"
 echo "  assertion 1: the later layer plans the link instead of a conflict"; assert_output "$expected"
 echo "  assertion 2: the dry runs leave the old link in place"
 [ "$(readlink home/.moved)" = ../dotfiles/movefrom/.moved ] || nfailed=$((nfailed + 1))
+rm -rf home; mkdir home
+
+printf '\n32: stale records leave the ownership file when their links are absent\n'
+rm -rf home; mkdir home
+mkdir -p dotfiles/gone
+echo g > dotfiles/gone/.stale-link
+echo v > dotfiles/gone/.vanished-file
+ownership_file="$tmp/stale-owned"
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/gone > /dev/null
+rm dotfiles/gone/.stale-link dotfiles/gone/.vanished-file
+rm home/.stale-link home/.vanished-file
+SYM_OWNED_FILE="$ownership_file" $sym -t home dotfiles/gone > /dev/null
+echo "  assertion 1: absent links are dropped from the ownership file"
+[ ! -s "$ownership_file" ] || nfailed=$((nfailed + 1))
 rm -rf home; mkdir home
 
 printf '\ntesting finished.\n'

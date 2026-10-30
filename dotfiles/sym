@@ -142,7 +142,7 @@ plan_entry() {
             conflict "$name does not point to the expected destination, so refusing to remove."
             return
         fi
-    elif $dry_run && [ -n "${SYM_PLANNED_PRUNES:-}" ] && grep -Fxq -- "$name_abs" "$SYM_PLANNED_PRUNES" 2>/dev/null; then
+    elif $dry_run && [ -s "${SYM_PLANNED_PRUNES:-/dev/null}" ] && grep -Fxq -- "$name_abs" "$SYM_PLANNED_PRUNES" 2>/dev/null; then
         :
     elif [ -L "$name" ]; then
         [ "$name" -ef "$source_abs" ] && return 0
@@ -197,6 +197,7 @@ trap 'exit 130' 1 2 3 15
 : > "$tmp/symlink-dirs"
 : > "$tmp/jobs"
 : > "$tmp/prune"
+: > "$tmp/stale"
 if git -C "$src" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$src" -c core.quotePath=false ls-files --cached --others --exclude-standard -- . > "$tmp/file-relpaths"
     ! grep -q '^"' "$tmp/file-relpaths" || die "a file name in $src has a character git quotes; rename it"
@@ -238,9 +239,13 @@ while IFS= read -r sd; do
 done < "$tmp/top-dirs"
 
 if ! $delete && [ -n "${SYM_OWNED_FILE:-}" ] && [ -f "$SYM_OWNED_FILE" ]; then
-    while IFS="$(printf '\t')" read -r kind owned; do
+    while IFS="$tab" read -r kind owned; do
         [ "$kind" = F ] || continue
         case "$owned" in "$tgt_phys"/*) ;; *) continue ;; esac
+        if [ ! -e "$owned" ] && [ ! -L "$owned" ]; then
+            printf '%s\n' "$owned" >> "$tmp/stale"
+            continue
+        fi
         [ -L "$owned" ] || continue
         rel=${owned#"$tgt_phys"/}
         { [ -e "$src/$rel" ] || [ -L "$src/$rel" ]; } && continue
@@ -268,6 +273,7 @@ while IFS= read -r owned; do
     $dry_run && continue
     if rm "$owned"; then printf '%s\n' "$owned" >> "$tmp/pruned"; else failed=true; fi
 done < "$tmp/prune"
+cat "$tmp/stale" >> "$tmp/pruned" 2>/dev/null || :
 if [ -s "$tmp/pruned" ]; then
     if ! awk -F '\t' 'NR == FNR { gone[$0] = 1; next } !($1 == "F" && ($2 in gone))' \
             "$tmp/pruned" "$SYM_OWNED_FILE" > "$SYM_OWNED_FILE.$$" \
