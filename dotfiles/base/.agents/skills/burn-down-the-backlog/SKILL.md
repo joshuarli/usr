@@ -12,7 +12,7 @@ Close the bounded queue captured from `TODO.md`. Dependencies and existing owner
 
 ## Rules
 
-- **Work on a branch.** Use a branch named `backlog-<date>` cut from the current branch. Never push, merge to the default branch, or format.
+- **Work on a branch, then merge.** Use a branch named `backlog-<date>` cut from the current branch. When the run ends, merge it into the branch it was cut from and end there. Never push or format.
 - **Keep the active queue bounded.** Capture the tickets already in `TODO.md` at the start. Record newly discovered tickets for a later run; do not add them to the active queue unless the user asks. Keep incomplete tickets open.
 - **Honor prerequisites and recorded deferrals.** Read dependencies in tickets and accepted RFCs. Hold a dependent until its prerequisites are integrated and verified. If a prerequisite parks, keep its dependents open with the same blocker. Revisit a recorded deferral only when its trigger or evidence changes, or the owner changes the decision. Keep an unresolved owner decision or draft RFC parked. An accepted design does not replace prerequisite implementation.
 - **Let priority schedule ready work.** Start the highest-priority ready ticket first, then work down by priority and ID. Dependencies, file conflicts, and acceptance determine integration. A ticket blocked by active lane ownership is not ready; integrate or park that owner before starting conflicting work. Recompute readiness after integrations. Do not delay an independent verified fix solely to make commit history follow priority order.
@@ -31,7 +31,8 @@ Close the bounded queue captured from `TODO.md`. Dependencies and existing owner
 2. Start the highest-priority ready work. Choose direct work, a coherent worker group, and worktrees according to `orchestrate` economics.
 3. Integrate accepted work when its dependencies and acceptance allow, one commit per closed ticket.
 4. File new defects, then confirm `TODO.md` contains only open, parked, and newly filed tickets.
+5. Merge `backlog-<date>` into the branch it was cut from, confirm the working tree is clean, and end on that branch.
 
-**The test:** each closed ticket has exactly one commit containing its accepted change and removal with a `Closes` footer; incomplete tickets remain open; prerequisites land before their dependents; priority schedules ready work without imposing priority-sorted history or one lane per ticket; and nothing was pushed.
+**The test:** each closed ticket has exactly one commit containing its accepted change and removal with a `Closes` footer; incomplete tickets remain open; prerequisites land before their dependents; priority schedules ready work without imposing priority-sorted history or one lane per ticket; the run ends on the originating branch with the backlog branch merged; and nothing was pushed.
 
-**Report:** the branch; closed tickets and commits; parked tickets with the exact blocker and unblock condition; newly filed tickets; checks and reused evidence; and confirmation that nothing was pushed.
+**Report:** the branch and its merge into the originating branch; closed tickets and commits; parked tickets with the exact blocker and unblock condition; newly filed tickets; checks and reused evidence; and confirmation that nothing was pushed.
