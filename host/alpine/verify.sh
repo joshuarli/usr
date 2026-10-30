@@ -25,7 +25,7 @@ check "home-runtime configured for $user" grep -qx "home_user=\"$user\"" /etc/co
 check 'dwl build matches build/dwl.sh and config/dwl.h' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
 check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'
 check 'dwl build dependencies removed' sh -c '! apk info -e .home-dwl-build'
-check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'
+check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f][0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'
 check 'ghostty-custom installed, root 0755' sh -c '[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] && [ -x /usr/local/bin/ghostty-custom ] && [ "$(stat -c %u:%g:%a /usr/local/bin/ghostty-custom)" = 0:0:755 ]'
 check 'ghostty-custom shared libraries resolve' sh -c '! ldd /usr/local/bin/ghostty-custom 2>&1 | grep -q "not found"'
 check 'ghostty-custom reports version' sh -c '/usr/local/bin/ghostty-custom --version >/dev/null'

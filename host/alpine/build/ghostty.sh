@@ -39,7 +39,12 @@ latest_tag() {
 }
 
 case ${1:-} in
-	--version) latest_tag; exit $? ;;
+	--version)
+		latest=$(latest_tag)
+		[ -n "$latest" ] || { echo "home: no ghostty release found" >&2; exit 1; }
+		printf '%s\n' "$latest"
+		exit 0
+		;;
 	'') ;;
 	*) echo "usage: $0 [--version]" >&2; exit 2 ;;
 esac
@@ -48,13 +53,13 @@ tag=$(latest_tag)
 [ -n "$tag" ] || { echo "home: no ghostty release found" >&2; exit 1; }
 
 if [ -f "$tagfile" ] && [ "$(cat "$tagfile")" = "$tag" ] &&
-	[ -x "$target" ] && [ -f "$target" ] && [ ! -L "$target" ]; then
+	[ -x "$target" ] && [ -f "$target" ] && [ ! -L "$target" ] &&
+	[ -f /usr/share/terminfo/x/xterm-ghostty ]; then
 	if ldd "$target" 2>&1 | grep -q "not found"; then
 		echo "home: $target has unresolved libraries" >&2
 		exit 1
-	else
-		"$target" --version >/dev/null 2>&1 || { echo "home: $target --version failed" >&2; exit 1; }
-		"$target" +show-config >/dev/null 2>&1 || { echo "home: $target +show-config failed" >&2; exit 1; }
+	elif "$target" --version >/dev/null 2>&1 &&
+		"$target" +show-config >/dev/null 2>&1; then
 		echo "home: $target is current ($tag)"
 		exit 0
 	fi
@@ -84,8 +89,12 @@ printf '%s  %s\n' "$sha" "$tmp/ghostty.tgz" | sha256sum -c -s - || {
 	echo "home: $asset does not match SHA256SUMS" >&2
 	exit 1
 }
-if [ "$(tar -tzf "$tmp/ghostty.tgz" | wc -l)" -ne 1 ] ||
-	tar -tzf "$tmp/ghostty.tgz" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+contents=$(tar -tzf "$tmp/ghostty.tgz") || {
+	echo "home: $asset could not be listed" >&2
+	exit 1
+}
+if [ "$(printf '%s\n' "$contents" | wc -l)" -ne 1 ] ||
+	printf '%s\n' "$contents" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
 	echo "home: $asset does not contain a single top-level binary" >&2
 	exit 1
 fi
@@ -106,5 +115,22 @@ rm -f "$tagfile.tmp"
 
 "$target" +show-terminfo 2>/dev/null | tic -x -o /usr/share/terminfo - || {
 	echo "home: ghostty terminfo install failed" >&2
+	exit 1
+}
+
+ldd "$target" 2>&1 | grep -q "not found" && {
+	echo "home: $target has unresolved libraries" >&2
+	exit 1
+}
+"$target" --version >/dev/null 2>&1 || {
+	echo "home: $target --version failed" >&2
+	exit 1
+}
+"$target" +show-config >/dev/null 2>&1 || {
+	echo "home: $target +show-config failed" >&2
+	exit 1
+}
+[ -f /usr/share/terminfo/x/xterm-ghostty ] || {
+	echo "home: ghostty terminfo is missing after install" >&2
 	exit 1
 }
