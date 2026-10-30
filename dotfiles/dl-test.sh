@@ -257,7 +257,7 @@ FEED
 </feed>
 FEED
         ;;
-    https://github.com/joshuarli/ghostty/releases/download/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002/Ghostty-Custom-aarch64-apple-darwin.zip)
+    https://github.com/joshuarli/ghostty/releases/download/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002/Ghostty-Custom-aarch64-apple-darwin.dmg)
         if [ "$headers" = - ]; then
             printf '%s\n' 'ETag: ghostty-custom-test-etag'
         elif [ -n "$output" ]; then
@@ -269,9 +269,9 @@ FEED
     https://github.com/joshuarli/ghostty/releases/download/release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002/SHA256SUMS)
         [ -n "$output" ] || exit 1
         if [ "${GHOSTTY_CUSTOM_TEST_BAD_SUMS:-false}" = true ]; then
-            printf '%s\n' '0000000000000000000000000000000000000000000000000000000000000000  Ghostty-Custom-aarch64-apple-darwin.zip' > "$output"
+            printf '%s\n' '0000000000000000000000000000000000000000000000000000000000000000  Ghostty-Custom-aarch64-apple-darwin.dmg' > "$output"
         else
-            printf '%s\n' '8da6066dfe57453cb8e98d9e5fa376252d60aa001e0b71ec33af5828c463ce21  Ghostty-Custom-aarch64-apple-darwin.zip' > "$output"
+            printf '%s\n' '8da6066dfe57453cb8e98d9e5fa376252d60aa001e0b71ec33af5828c463ce21  Ghostty-Custom-aarch64-apple-darwin.dmg' > "$output"
         fi
         ;;
     https://github.com/laputa-systems/git-build/releases.atom)
@@ -495,16 +495,59 @@ chmod +x "$mock_bin/zipinfo"
 cat > "$mock_bin/ditto" <<'EOF'
 #!/bin/sh
 set -eu
-[ "$1" = -x ] && [ "$2" = -k ] && [ -f "$3" ] || exit 1
 [ "${GHOSTTY_TEST_EXTRACT_FAIL:-false}" != true ] || exit 1
-mkdir -p "$4/Ghostty.app/Contents/MacOS"
-printf '%s\n' '#!/bin/sh' 'exit 0' > "$4/Ghostty.app/Contents/MacOS/ghostty"
-chmod +x "$4/Ghostty.app/Contents/MacOS/ghostty"
-printf '%s\n' 'mock plist' > "$4/Ghostty.app/Contents/Info.plist"
-mkdir -p "$4/Ghostty Custom.app/Contents/MacOS"
-printf '%s\n' '#!/bin/sh' 'exit 0' > "$4/Ghostty Custom.app/Contents/MacOS/ghostty"
-chmod +x "$4/Ghostty Custom.app/Contents/MacOS/ghostty"
-printf '%s\n' 'mock plist' > "$4/Ghostty Custom.app/Contents/Info.plist"
+if [ "$1" = -x ] && [ "$2" = -k ]; then
+    [ -f "$3" ] || exit 1
+    dest=$4
+    mkdir -p "$dest/Ghostty.app/Contents/MacOS"
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/Ghostty.app/Contents/MacOS/ghostty"
+    chmod +x "$dest/Ghostty.app/Contents/MacOS/ghostty"
+    printf '%s\n' 'mock plist' > "$dest/Ghostty.app/Contents/Info.plist"
+    mkdir -p "$dest/Ghostty Custom.app/Contents/MacOS"
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/Ghostty Custom.app/Contents/MacOS/ghostty"
+    chmod +x "$dest/Ghostty Custom.app/Contents/MacOS/ghostty"
+    printf '%s\n' 'mock plist' > "$dest/Ghostty Custom.app/Contents/Info.plist"
+else
+    case "$1" in *"/Ghostty Custom.app") ;; *) exit 1 ;; esac
+    [ -d "$1" ] || exit 1
+    dest=$2
+    mkdir -p "$dest/Contents/MacOS"
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/Contents/MacOS/ghostty"
+    chmod +x "$dest/Contents/MacOS/ghostty"
+    printf '%s\n' 'mock plist' > "$dest/Contents/Info.plist"
+fi
+EOF
+cat > "$mock_bin/hdiutil" <<'EOF'
+#!/bin/sh
+set -eu
+case "${1:-}" in
+    attach)
+        mnt=
+        dmg=
+        expect_mnt=false
+        for arg in "$@"; do
+            if [ "$expect_mnt" = true ]; then
+                mnt=$arg
+                expect_mnt=false
+            elif [ "$arg" = -mountpoint ]; then
+                expect_mnt=true
+            elif [ "$arg" != attach ] && [ "${arg#-}" = "$arg" ]; then
+                dmg=$arg
+            fi
+        done
+        [ -n "$mnt" ] && [ -f "$dmg" ] || exit 1
+        [ "${GHOSTTY_TEST_EXTRACT_FAIL:-false}" != true ] || exit 1
+        mkdir -p "$mnt/Ghostty Custom.app/Contents/MacOS"
+        printf '%s\n' '#!/bin/sh' 'exit 0' > "$mnt/Ghostty Custom.app/Contents/MacOS/ghostty"
+        chmod +x "$mnt/Ghostty Custom.app/Contents/MacOS/ghostty"
+        printf '%s\n' 'mock plist' > "$mnt/Ghostty Custom.app/Contents/Info.plist"
+        ;;
+    detach)
+        [ -d "${2:-}" ] || exit 1
+        [ "${GHOSTTY_TEST_EXTRACT_FAIL:-false}" != true ] || exit 1
+        ;;
+    *) exit 1 ;;
+esac
 EOF
 cat > "$mock_bin/spctl" <<'EOF'
 #!/bin/sh
@@ -517,7 +560,7 @@ case "$*" in
     *) printf '%s\n' "${GHOSTTY_TEST_VERSION:-1.4.0}" ;;
 esac
 EOF
-chmod +x "$mock_bin/ditto" "$mock_bin/spctl" "$mock_bin/plutil"
+chmod +x "$mock_bin/ditto" "$mock_bin/hdiutil" "$mock_bin/spctl" "$mock_bin/plutil"
 
 mkdir -p "$test_root/opencode-package"
 cat > "$test_root/opencode-package/opencode" <<'EOF'

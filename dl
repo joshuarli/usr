@@ -43,7 +43,7 @@ GHOSTTY_VERSION=1.4.0
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
 GHOSTTY_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty.app"
 GHOSTTY_EXEC="${GHOSTTY_APP}/Contents/MacOS/ghostty"
-GHOSTTY_CUSTOM_ASSET=Ghostty-Custom-aarch64-apple-darwin.zip
+GHOSTTY_CUSTOM_ASSET=Ghostty-Custom-aarch64-apple-darwin.dmg
 GHOSTTY_CUSTOM_BUNDLE_ID=com.joshuarli.ghostty-custom
 GHOSTTY_CUSTOM_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty Custom.app"
 GHOSTTY_CUSTOM_EXEC="${GHOSTTY_CUSTOM_APP}/Contents/MacOS/ghostty"
@@ -66,6 +66,7 @@ tmpzip=
 tmpbin=
 tmpoutput=
 tmpbundle=
+tmpmnt=
 tmpbinlink=
 git_tmplink=
 worker_pids=
@@ -367,6 +368,13 @@ cleanup_temporary_files() {
     if [ -n "$tmpbundle" ]; then
         rm -rf "$tmpbundle" || _dl_warn "Warning: could not remove $tmpbundle"
         tmpbundle=
+    fi
+    if [ -n "$tmpmnt" ]; then
+        if command -v hdiutil >/dev/null 2>&1; then
+            hdiutil detach "$tmpmnt" >/dev/null 2>&1 || true
+        fi
+        rm -rf "$tmpmnt" || _dl_warn "Warning: could not remove $tmpmnt"
+        tmpmnt=
     fi
     if [ -n "$tmpbinlink" ]; then
         rm -f "$tmpbinlink" || _dl_warn "Warning: could not remove $tmpbinlink"
@@ -1416,7 +1424,7 @@ install_ghostty_custom() {
         return
     fi
     _dl_fetch "Downloading ${GHOSTTY_CUSTOM_ASSET} (${tag}) ..."
-    tmpzip=$(mktemp "${TMPDIR:-/tmp}/ghostty-custom.XXXXXX")
+    tmpzip=$(mktemp "${TMPDIR:-/tmp}/ghostty-custom.XXXXXX.dmg")
     if ! curl -fsSL -o "$tmpzip" "$url"; then
         rm -f "$tmpzip"
         tmpzip=
@@ -1449,11 +1457,33 @@ install_ghostty_custom() {
         skip ghostty-custom "cannot stage application in $GHOSTTY_APPLICATIONS_DIR"
         return
     }
-    if ! ditto -x -k "$tmpzip" "$tmpbundle" \
+    tmpmnt=$(mktemp -d "${TMPDIR:-/tmp}/ghostty-custom-mnt.XXXXXX") || {
+        skip ghostty-custom "cannot stage mountpoint in ${TMPDIR:-/tmp}"
+        return
+    }
+    if ! hdiutil attach -nobrowse -mountpoint "$tmpmnt" "$tmpzip" >/dev/null 2>&1; then
+        hdiutil detach "$tmpmnt" >/dev/null 2>&1 || true
+        rm -rf "$tmpmnt"
+        tmpmnt=
+        skip ghostty-custom "release image is invalid"
+        return
+    fi
+    if ! ditto "$tmpmnt/Ghostty Custom.app" "$tmpbundle/Ghostty Custom.app" \
         || [ ! -x "${tmpbundle}/Ghostty Custom.app/Contents/MacOS/ghostty" ]; then
+        hdiutil detach "$tmpmnt" >/dev/null 2>&1 || true
+        rm -rf "$tmpmnt"
+        tmpmnt=
         skip ghostty-custom "release archive is invalid"
         return
     fi
+    if ! hdiutil detach "$tmpmnt" >/dev/null 2>&1; then
+        rm -rf "$tmpmnt"
+        tmpmnt=
+        skip ghostty-custom "cannot detach release image"
+        return
+    fi
+    rm -rf "$tmpmnt"
+    tmpmnt=
     rm -f "$tmpzip"
     tmpzip=
     actual_bundle_id=$(plutil -extract CFBundleIdentifier raw -o - \
