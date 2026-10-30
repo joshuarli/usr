@@ -7,7 +7,7 @@ ROWS = [-150, -50, 50, 150, 250, 350, 450, 550, 650, 750]
 CX = 200
 CY = 375
 
-LIGHT_V = (150, 250)
+LIGHT_V = (125, 275)
 HEAVY_V = (100, 300)
 DOUBLE_V = ((0, 100), (300, 400))
 
@@ -21,7 +21,7 @@ FULL_W = (0, 500)
 def _vbrick(x0: int, x1: int, y0: int) -> tuple[list[tuple[int, int]], list[int]]:
     y1 = y0 + 50
     w = x1 - x0
-    ix = 19 if w <= 120 else 32
+    ix = max(19, round(w * 0.16))
     pts = [
         (x0, y0 + 9),
         (x0, y0 + 41),
@@ -273,14 +273,14 @@ def _dash_parts(cp: int, font) -> list[tuple[list[tuple[int, int]], list[int]]] 
     if "LIGHT TRIPLE DASH VERTICAL" in name:
         out = []
         for y0 in (-150, -50, 50):
-            out.append(_vbrick(150, 250, y0))
+            out.append(_vbrick(125, 275, y0))
         for y0 in (250, 350, 450):
             if y0 == 350:
-                out.append(_rect(150, 350, 250, 400))
+                out.append(_rect(125, 350, 275, 400))
             else:
-                out.append(_vbrick(150, 250, y0))
+                out.append(_vbrick(125, 275, y0))
         for y0 in (550, 650, 750):
-            out.append(_vbrick(150, 250, y0))
+            out.append(_vbrick(125, 275, y0))
         return out
     if "HEAVY TRIPLE DASH VERTICAL" in name:
         out = []
@@ -297,8 +297,8 @@ def _dash_parts(cp: int, font) -> list[tuple[list[tuple[int, int]], list[int]]] 
     if "LIGHT QUADRUPLE DASH VERTICAL" in name:
         out = []
         for y0 in (-150, 50, 250, 550, 650):
-            out.append(_vbrick(150, 250, y0))
-        out.append(_rect(150, 350, 250, 400))
+            out.append(_vbrick(125, 275, y0))
+        out.append(_rect(125, 350, 275, 400))
         return out
     if "HEAVY QUADRUPLE DASH VERTICAL" in name:
         out = []
@@ -313,9 +313,9 @@ def _dash_parts(cp: int, font) -> list[tuple[list[tuple[int, int]], list[int]]] 
     if "LIGHT DOUBLE DASH VERTICAL" in name:
         out = []
         for y0 in (-150, -50, 50, 150, 250):
-            out.append(_vbrick(150, 250, y0))
+            out.append(_vbrick(125, 275, y0))
         for y0 in (450, 550, 650, 750):
-            out.append(_vbrick(150, 250, y0))
+            out.append(_vbrick(125, 275, y0))
         return out
     if "HEAVY DOUBLE DASH VERTICAL" in name:
         out = []
@@ -332,13 +332,13 @@ def _diagonal_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | 
         xs = [300, 250, 200, 150, 100, 50, 0, -50, -100, -150]
         out = []
         for y0, x0 in zip(ROWS, xs):
-            out.append(_vbrick(max(0, x0), max(100, x0 + 100), y0))
+            out.append(_vbrick(max(0, x0), max(150, x0 + 150), y0))
         return [p for p in out if p[0][0][0] < 500 and p[0][0][0] >= -100]
     if cp == 0x2572:
         xs = [-150, -100, -50, 0, 50, 100, 150, 200, 250, 300]
         out = []
         for y0, x0 in zip(ROWS, xs):
-            out.append(_vbrick(max(0, x0), max(100, x0 + 100), y0))
+            out.append(_vbrick(max(0, x0), max(150, x0 + 150), y0))
         return [p for p in out if p[0][0][0] < 500]
     if cp == 0x2573:
         a = _diagonal_parts(0x2571) or []
@@ -367,13 +367,13 @@ def _diagonal_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | 
 
 def _arc_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | None:
     if cp == 0x256D:
-        return _v_bricks(150, 250, skip={350, 450, 550, 650, 750}) + [_rect(0, 350, 500, 400), _vbrick(250, 350, 250)]
+        return _v_bricks(125, 275, skip={350, 450, 550, 650, 750}) + [_rect(0, 350, 500, 400), _vbrick(250, 350, 250)]
     if cp == 0x256E:
-        return _v_bricks(150, 250, skip={350, 450, 550, 650, 750}) + [_rect(0, 350, 500, 400), _vbrick(50, 150, 250)]
+        return _v_bricks(125, 275, skip={350, 450, 550, 650, 750}) + [_rect(0, 350, 500, 400), _vbrick(50, 150, 250)]
     if cp == 0x256F:
-        return _v_bricks(150, 250, skip={-150, -50, 50, 150, 250, 350}) + [_rect(0, 350, 500, 400), _vbrick(50, 150, 450)]
+        return _v_bricks(125, 275, skip={-150, -50, 50, 150, 250, 350}) + [_rect(0, 350, 500, 400), _vbrick(50, 150, 450)]
     if cp == 0x2570:
-        return _v_bricks(150, 250, skip={-150, -50, 50, 150, 250, 350}) + [_rect(0, 350, 500, 400), _vbrick(250, 350, 450)]
+        return _v_bricks(125, 275, skip={-150, -50, 50, 150, 250, 350}) + [_rect(0, 350, 500, 400), _vbrick(250, 350, 450)]
     return None
 
 
@@ -476,9 +476,9 @@ def _symbol_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | No
     if cp == 0x2192:
         return [_rect(200, 350, 500, 400), _vbrick(350, 450, 250), _vbrick(350, 450, 450), _vbrick(250, 350, 150), _vbrick(250, 350, 550)]
     if cp == 0x2191:
-        return [_vbrick(150, 250, -150), _vbrick(150, 250, -50), _vbrick(150, 250, 50), _vbrick(150, 250, 150), _vbrick(150, 250, 250), _vbrick(150, 250, 350), _vbrick(50, 150, 450), _vbrick(250, 350, 450), _vbrick(100, 200, 550), _vbrick(200, 300, 550), _vbrick(150, 250, 650)]
+        return [_vbrick(125, 275, -150), _vbrick(125, 275, -50), _vbrick(125, 275, 50), _vbrick(125, 275, 150), _vbrick(125, 275, 250), _vbrick(125, 275, 350), _vbrick(50, 150, 450), _vbrick(250, 350, 450), _vbrick(100, 200, 550), _vbrick(200, 300, 550), _vbrick(150, 250, 650)]
     if cp == 0x2193:
-        return [_vbrick(150, 250, 650), _vbrick(150, 250, 550), _vbrick(150, 250, 450), _vbrick(150, 250, 350), _vbrick(150, 250, 250), _vbrick(150, 250, 150), _vbrick(50, 150, 50), _vbrick(250, 350, 50), _vbrick(100, 200, -50), _vbrick(200, 300, -50), _vbrick(150, 250, -150)]
+        return [_vbrick(125, 275, 650), _vbrick(125, 275, 550), _vbrick(125, 275, 450), _vbrick(125, 275, 350), _vbrick(125, 275, 250), _vbrick(125, 275, 150), _vbrick(50, 150, 50), _vbrick(250, 350, 50), _vbrick(100, 200, -50), _vbrick(200, 300, -50), _vbrick(150, 250, -150)]
     if cp == 0x25A0:
         return [_rect(0, y0, 400, y0 + 50) for y0 in (150, 250, 350, 450, 550)]
     if cp == 0x25A1:
@@ -526,9 +526,9 @@ def _symbol_parts(cp: int) -> list[tuple[list[tuple[int, int]], list[int]]] | No
             out.append(_rect(500 - w, y0, 500, y0 + 50))
         return out
     if cp == 0xE0B1:
-        return [_vbrick(150, 250, 150), _vbrick(150, 250, 250), _vbrick(150, 250, 350), _vbrick(150, 250, 450), _vbrick(150, 250, 550)]
+        return [_vbrick(125, 275, 150), _vbrick(125, 275, 250), _vbrick(125, 275, 350), _vbrick(125, 275, 450), _vbrick(125, 275, 550)]
     if cp == 0xE0B3:
-        return [_vbrick(250, 350, 150), _vbrick(250, 350, 250), _vbrick(250, 350, 350), _vbrick(250, 350, 450), _vbrick(250, 350, 550)]
+        return [_vbrick(225, 375, 150), _vbrick(225, 375, 250), _vbrick(225, 375, 350), _vbrick(225, 375, 450), _vbrick(225, 375, 550)]
     return None
 
 
