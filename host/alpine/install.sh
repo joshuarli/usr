@@ -70,7 +70,7 @@ printf '%s\n' "$repos" | grep -Eqv '/edge/(main|community)/*$' &&
 printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 
-for script in install.sh verify.sh build/dwl.sh config/home-session config/profile.sh services/home-runtime; do
+for script in install.sh verify.sh build/dwl.sh build/ghostty.sh config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
 done
 
@@ -94,6 +94,12 @@ if [ -e /usr/local/bin/dwl ]; then
 		*) die '/usr/local/bin/dwl was not built by home; move it aside' ;;
 	esac
 fi
+if [ -e /usr/local/bin/ghostty-custom ]; then
+	[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] ||
+		die '/usr/local/bin/ghostty-custom exists and is not a regular file; move it aside'
+	[ -f /usr/local/share/home/ghostty-custom.tag ] ||
+		die '/usr/local/bin/ghostty-custom was not installed by home; move it aside'
+fi
 [ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ] && [ -f "$usr_root/dl" ] ||
 	die "$usr_root is not the usr checkout; clone $usr_url and run usr/host/alpine/install.sh from it"
 origin=$(as_user "git -C '$usr_root' remote get-url origin" 2>/dev/null) ||
@@ -113,6 +119,14 @@ packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 [ ! -f "packages-$arch.txt" ] || packages="$packages $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "packages-$arch.txt")"
 # shellcheck disable=SC2086
 apk add --quiet $packages
+if apk info -e foot >/dev/null 2>&1; then
+	apk del --quiet foot || die 'could not remove foot'
+	say 'removed foot'
+fi
+if apk info -e foot-extra-terminfo >/dev/null 2>&1; then
+	apk del --quiet foot-extra-terminfo || die 'could not remove foot-extra-terminfo'
+	say 'removed foot-extra-terminfo'
+fi
 
 rc-update show sysinit | awk '$1 == "udev" { found = 1 } END { exit !found }' || setup-devd udev
 
@@ -120,6 +134,7 @@ rc-update show sysinit | awk '$1 == "udev" { found = 1 } END { exit !found }' ||
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg" 0644
 sh build/dwl.sh
+sh build/ghostty.sh
 install_managed config/home-session /usr/local/bin/home-session 0755
 install_managed services/home-runtime /etc/init.d/home-runtime 0755
 install_managed "$conf" /etc/conf.d/home-runtime 0644

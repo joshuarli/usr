@@ -25,7 +25,15 @@ check "home-runtime configured for $user" grep -qx "home_user=\"$user\"" /etc/co
 check 'dwl build matches build/dwl.sh and config/dwl.h' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
 check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'
 check 'dwl build dependencies removed' sh -c '! apk info -e .home-dwl-build'
-for cmd in foot bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done
+check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'
+check 'ghostty-custom installed, root 0755' sh -c '[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] && [ -x /usr/local/bin/ghostty-custom ] && [ "$(stat -c %u:%g:%a /usr/local/bin/ghostty-custom)" = 0:0:755 ]'
+check 'ghostty-custom shared libraries resolve' sh -c '! ldd /usr/local/bin/ghostty-custom 2>&1 | grep -q "not found"'
+check 'ghostty-custom reports version' sh -c '/usr/local/bin/ghostty-custom --version >/dev/null'
+check 'ghostty-custom shows config' sh -c '/usr/local/bin/ghostty-custom +show-config >/dev/null'
+check 'ghostty terminfo installed' test -f /usr/share/terminfo/x/xterm-ghostty
+check 'ghostty build dependencies removed' sh -c '! apk info -e .home-ghostty-build'
+check 'foot not installed' sh -c '! apk info -e foot && ! apk info -e foot-extra-terminfo'
+for cmd in ghostty-custom bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done
 check 'Hack font installed' sh -c 'fc-list | grep -q Hack'
 for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_least 23 "$tool"; done
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)

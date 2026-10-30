@@ -10,7 +10,7 @@ export XDG_RUNTIME_DIR="$runtime" XDG_SESSION_TYPE=wayland PATH="$HOME/.local/bi
 unset DISPLAY
 log=$runtime/dwl.log
 status=0
-/usr/local/bin/dwl -s 'foot <&-' >"$log" 2>&1 || status=$?
+/usr/local/bin/dwl -s 'ghostty-custom -e ish <&-' >"$log" 2>&1 || status=$?
 if [ "$status" -ne 0 ]; then
 	echo "home-session: dwl exited with status $status; see $log" >&2
 	exit "$status"

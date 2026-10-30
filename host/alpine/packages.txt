@@ -2,8 +2,11 @@ seatd
 seatd-openrc
 wlroots0.20
 mesa-dri-gallium
+mesa-egl
+wayland-libs-client
+libxkbcommon
+ncurses-terminfo
 xkeyboard-config
-foot
 font-hack
 bemenu
 grim

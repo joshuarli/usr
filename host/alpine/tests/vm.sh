@@ -188,12 +188,12 @@ must "grep -q 'home-session.sh exists and was not installed by home' /root/confl
 must "grep -qx 'echo unmanaged' /etc/profile.d/home-session.sh && cmp /etc/apk/world /root/world.before"
 must 'rm /etc/profile.d/home-session.sh'
 
-managed='/usr/local/bin/dwl /usr/local/bin/home-session /etc/init.d/home-runtime /etc/conf.d/home-runtime /etc/profile.d/home-session.sh /etc/clang*/clang.cfg /etc/clang*/clang++.cfg'
+managed='/usr/local/bin/dwl /usr/local/bin/ghostty-custom /usr/local/share/home/ghostty-custom.tag /usr/local/bin/home-session /etc/init.d/home-runtime /etc/conf.d/home-runtime /etc/profile.d/home-session.sh /etc/clang*/clang.cfg /etc/clang*/clang++.cfg'
 must 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/install.log 2>&1 || { cat /root/install.log; false; }' 2400
 must 'USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh' 120
 must "stat -c '%n %Y %a' $managed > /root/mtimes && cp /etc/apk/world /root/world.first"
 must 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/rerun.log 2>&1 || { cat /root/rerun.log; false; }' 600
-must "! grep -E '^home: (installed|added|cloned)' /root/rerun.log && grep -q 'dwl is current' /root/rerun.log"
+must "! grep -E '^home: (installed|added|cloned|removed)' /root/rerun.log && grep -q 'dwl is current' /root/rerun.log && grep -q 'ghostty-custom is current' /root/rerun.log"
 must "stat -c '%n %Y %a' $managed | cmp - /root/mtimes && cmp /etc/apk/world /root/world.first"
 must 'sha256sum -c -s /root/baseline'
 poweroff
@@ -209,12 +209,12 @@ tty1_prompt 'login:'
 type_tty1 josh
 tty1_prompt 'Password:'
 type_tty1 "$userpw"
-poll 'pidof dwl >/dev/null && pidof foot >/dev/null && pidof ish >/dev/null'
+poll 'pidof dwl >/dev/null && pidof ghostty-custom >/dev/null && pidof ish >/dev/null'
 must "test \"\$(stat -c %U /run/user/\$(id -u josh)/wayland-0)\" = josh"
 monitor 'sendkey meta_l-ret'
-poll 'test $(pidof foot | wc -w) -eq 2'
+poll 'test $(pidof ghostty-custom | wc -w) -eq 2'
 monitor 'sendkey ctrl-ret'
-poll 'test $(pidof foot | wc -w) -eq 3'
+poll 'test $(pidof ghostty-custom | wc -w) -eq 3'
 monitor 'sendkey shift-ret'
 poll 'pidof bemenu-run >/dev/null'
 monitor "screendump $work/desktop.ppm"

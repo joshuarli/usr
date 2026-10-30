@@ -1,7 +1,7 @@
 # home
 
 Post-install provisioner that turns a stock Alpine Linux edge install with
-`linux-stable` into a minimal dwl + foot desktop with LLVM/clang 23 or newer. It is not an installer, image, or distribution.
+`linux-stable` into a minimal dwl + ghostty-custom desktop with LLVM/clang 23 or newer. It is not an installer, image, or distribution.
 It lives at `host/alpine/` in the [usr](https://github.com/joshuarli/usr) checkout; clone that one repository to get it.
 The target is a Dell XPS 13 9343 (x86_64); aarch64 is supported for VM testing.
 
@@ -55,19 +55,22 @@ explanation if a check fails. It then:
   binutils is needed (there is no `cc`; use `CC=clang`),
 - builds the pinned dwl 0.9 with clang and lld using `config/dwl.h`, then removes
   the build-only headers,
+- downloads the newest `release-*` ghostty-custom Wayland binary for the
+  machine architecture with `build/ghostty.sh`, verifies its SHA256SUMS and
+  installs it to `/usr/local/bin/ghostty-custom` with its terminfo,
 - installs `home-session`, the `home-runtime` service, and a tty1 login hook,
 - adds the user to the `seat` group and starts `seatd` and `home-runtime`,
 - links the enclosing checkout's dotfiles and installs ish with
   `sh sync links` and `sh sync tools ish` as the user. It does not run the
   rest of `dl` or `host/setup-linux`.
 
-Log out, then log in on tty1. dwl starts with a foot terminal running ish.
+Log out, then log in on tty1. dwl starts with a ghostty-custom terminal running ish.
 The login shell stays `/bin/ash`: ish has no `-c` command mode and reads no
 profile, so it cannot serve ssh commands or start the desktop.
 
 | Keys | Action |
 | --- | --- |
-| Super+Return, Ctrl+Return | foot |
+| Super+Return, Ctrl+Return | ghostty-custom |
 | Shift+Return | bemenu-run |
 | Super+p | screenshot a region to the clipboard |
 | Super+k | close window |
@@ -95,13 +98,16 @@ a `seat` member, so `doas delgroup "$USER" seat` disables it.
 
 Pull or edit the `usr` checkout and run `doas sh usr/host/alpine/install.sh` again.
 Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
-`config/dwl.h` changes, and ish is installed only if missing (update it with
+`config/dwl.h` changes, ghostty-custom is updated only when a newer
+`release-*` prerelease appears, and ish is installed only if missing (update it with
 `usr`'s own `dl`). A managed path holding something home did not install
 stops the run; move it aside or merge it, then rerun.
 
 home recognizes files it installed by comparing them with every committed
 version of their source, so it needs a full clone; a shallow clone is refused.
 Packages follow the edge repositories, so reruns can upgrade them.
+Ghostty-custom tracks the newest `release-*` prerelease, so reruns can upgrade
+it when a new Linux build is published.
 
 ## Not managed
 
