@@ -243,6 +243,13 @@ class PolicyTests(LocalFixture):
         self.assertIn(SBX.sbpl_path(funky), profile)
         self.assertNotIn(f'(regex "{funky}")', profile)
 
+    def test_mac_allows_pty_ioctl_and_developer_dir_read(self):
+        self.assertIn("/var/select/developer_dir", SBX.MAC_READ_FILES)
+        self.assertIn("/private/var/select/developer_dir", SBX.MAC_READ_FILES)
+        profile = SBX.macos_profile(self.plan(backend="Darwin"), self.root)
+        ioctl = [line for line in profile.splitlines() if line.startswith("(allow file-ioctl")]
+        self.assertTrue(any('^/dev/ttys[0-9]+$' in line for line in ioctl))
+
     def test_mac_git_protection(self):
         git = self.project / ".git"
         git.mkdir()
@@ -338,6 +345,32 @@ class LiveTests(LocalFixture):
         result = self.run_sandbox("--", self.interpreter(), "-c", code)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.strip(), "resolved")
+
+    def test_live_mac_pty_ioctl(self):
+        if sys.platform != "darwin":
+            self.skipTest("pty ioctl profile is macOS-only")
+        import pty
+        controller, replica = pty.openpty()
+        try:
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "--offline", "--",
+                 self.interpreter(), "-c", "import termios; termios.tcgetattr(0)"],
+                stdin=replica, capture_output=True, text=True, cwd=self.project, timeout=60)
+        finally:
+            import os as _os
+            _os.close(controller)
+            _os.close(replica)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_live_mac_developer_dir_readable(self):
+        if sys.platform != "darwin":
+            self.skipTest("xcode-select is macOS-only")
+        host = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, check=False)
+        if host.returncode != 0:
+            self.skipTest("no active developer directory on this host")
+        result = self.run_sandbox("--offline", "--", "xcode-select", "-p")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.strip(), host.stdout.strip())
 
     def test_live_git_metadata_write_denied(self):
         git = self.project / ".git"

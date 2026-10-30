@@ -272,6 +272,12 @@ trust_level = "trusted"
 [projects."/Users/josh/d/ntpd-rs"]
 trust_level = "trusted"
 
+[projects."/Users/josh/d/kache"]
+trust_level = "trusted"
+
+[projects."/Users/josh/d/smolith"]
+trust_level = "trusted"
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
