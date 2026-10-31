@@ -11,10 +11,33 @@ import json
 import socket
 import struct
 import time
+import zlib
 
 PROTOCOL = 1
 MAX_FRAME = 4 * 1024 * 1024
 MAX_BLOB = 64 * 1024 * 1024
+COMPRESSION = "zlib"
+
+
+def compress(data):
+    return zlib.compress(data, 6)
+
+
+def decompress(data, expected):
+    """Inflate to at most the declared size; a larger object is refused."""
+    if expected < 0 or expected > MAX_BLOB:
+        raise TransferError("declared object size is out of bounds")
+    engine = zlib.decompressobj()
+    try:
+        out = engine.decompress(data, expected + 1)
+        if len(out) > expected or engine.unconsumed_tail:
+            raise TransferError("compressed object exceeds its declared size")
+        out += engine.flush()
+    except zlib.error as exc:
+        raise TransferError("object failed to decompress: " + str(exc)) from exc
+    if len(out) != expected:
+        raise TransferError("decompressed object does not match its declared size")
+    return out
 
 
 class TransferError(RuntimeError):
@@ -83,6 +106,7 @@ class Sender:
         self.store, self.remote = store, remote
         self.instream, self.outstream = instream, outstream
         self.origin, self.label = origin, label
+        self.compression = None
 
     def _expect(self, kind):
         message = read_message(self.instream)
@@ -93,10 +117,12 @@ class Sender:
         return message
 
     def handshake(self):
-        write_message(self.outstream, {"type": "hello", "protocol": PROTOCOL, "origin": self.origin, "label": self.label})
+        write_message(self.outstream, {"type": "hello", "protocol": PROTOCOL, "origin": self.origin,
+                                       "label": self.label, "compression": [COMPRESSION]})
         ready = self._expect("ready")
         if ready.get("protocol") != PROTOCOL:
             raise TransferError("central store speaks protocol %r" % ready.get("protocol"))
+        self.compression = ready.get("compression")
 
     def send_tombstones(self):
         rows = self.store.db.execute(
@@ -151,16 +177,12 @@ class Sender:
         for chunk in chunks:
             if chunk["digest"] not in wanted:
                 continue
-            data = self.store.read_object_bytes(chunk["digest"])
-            write_message(self.outstream, {"type": "object", "digest": chunk["digest"]})
-            write_blob(self.outstream, data)
+            self._send_object(chunk["digest"])
             wanted.discard(chunk["digest"])
         for artifact in artifacts:
             if artifact["digest"] not in wanted:
                 continue
-            data = self.store.read_object_bytes(artifact["digest"])
-            write_message(self.outstream, {"type": "object", "digest": artifact["digest"]})
-            write_blob(self.outstream, data)
+            self._send_object(artifact["digest"])
             wanted.discard(artifact["digest"])
         if wanted:
             raise TransferError("central store requested an unknown object")
@@ -169,6 +191,17 @@ class Sender:
         if ack.get("origin_host") != manifest["origin_host"] or ack.get("source_digest") != manifest["source_digest"]:
             raise TransferError("acknowledgement does not match the delivered generation")
         return int(ack["generation"])
+
+    def _send_object(self, digest):
+        data = self.store.read_object_bytes(digest)
+        encoding = "identity"
+        payload = data
+        if self.compression == COMPRESSION:
+            packed = compress(data)
+            if len(packed) < len(data):
+                encoding, payload = COMPRESSION, packed
+        write_message(self.outstream, {"type": "object", "digest": digest, "encoding": encoding})
+        write_blob(self.outstream, payload)
 
     def run(self, attempts=5, progress=None):
         try:
@@ -213,7 +246,9 @@ def receiver(store, instream, outstream, allowed_origins=None):
     if not origin:
         write_message(outstream, {"type": "error", "message": "origin is required"})
         return
-    write_message(outstream, {"type": "ready", "protocol": PROTOCOL})
+    offered = hello.get("compression")
+    compression = COMPRESSION if isinstance(offered, list) and COMPRESSION in offered else None
+    write_message(outstream, {"type": "ready", "protocol": PROTOCOL, "compression": compression})
     while True:
         try:
             message = read_message(instream)
@@ -294,10 +329,20 @@ def _receive_generation(store, instream, outstream, manifest, connection_origin)
         if expected is None:
             write_message(outstream, {"type": "error", "message": "object was not requested"})
             raise TransferError("unexpected object")
-        data = read_blob(instream, expected)
-        if len(data) != expected or _digest(data) != digest:
-            write_message(outstream, {"type": "error", "message": "object failed verification: " + digest})
-            raise TransferError("object failed verification: " + digest)
+        encoding = message.get("encoding") or "identity"
+        try:
+            payload = read_blob(instream)
+            if encoding == COMPRESSION:
+                data = decompress(payload, expected)
+            elif encoding == "identity":
+                data = payload
+            else:
+                raise TransferError("unsupported object encoding: " + str(encoding))
+            if len(data) != expected or _digest(data) != digest:
+                raise TransferError("object failed verification: " + digest)
+        except TransferError as exc:
+            write_message(outstream, {"type": "error", "message": str(exc)})
+            raise
         received[digest] = data
     generation = store.commit_generation(manifest, received)
     write_message(outstream, {"type": "ack", "generation": int(generation), "origin_host": origin,

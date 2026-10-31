@@ -272,6 +272,61 @@ class TransferTests(unittest.TestCase):
         self.assertIn("not an instruction", rows[0]["authority"])
         self.assertEqual(rows[0]["sources"][0]["session"], "a@peer")
 
+    def test_objects_are_compressed_and_still_verify(self):
+        source = self.capture()
+        self.sync(source)
+        central = Store(self.central_state)
+        generation = central.db.execute("SELECT id FROM archive_generation").fetchone()[0]
+        self.assertEqual(ARCHIVE.verify_generation(central.db, central.archive_dir, generation), 1)
+        rows = TRANSFER.handle_query(central, "search", {"query": "alpha"})
+        self.assertEqual(rows[0]["evidence"]["text"], "alpha")
+        original = b"alpha\n" * 4096
+        packed = TRANSFER.compress(original)
+        self.assertLess(len(packed), len(original))
+        self.assertEqual(TRANSFER.decompress(packed, len(original)), original)
+
+    def test_a_compressed_object_that_inflates_past_its_declared_size_is_refused(self):
+        payload = TRANSFER.compress(b"x" * 100000)
+
+        def exchange(instream, outstream):
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "peer",
+                                               "compression": ["zlib"]})
+            ready = TRANSFER.read_message(instream)
+            self.assertEqual(ready["compression"], "zlib")
+            TRANSFER.write_message(outstream, {"type": "generation", "origin_host": "peer", "harness": "codex",
+                                               "native_id": "bomb", "source_path": "/x", "source_digest": "d",
+                                               "source_size": 4, "captured_at": 1.0,
+                                               "chunks": [{"digest": "a" * 64, "size": 4, "offset": 0}],
+                                               "artifacts": []})
+            need = TRANSFER.read_message(instream)
+            self.assertEqual(need["digests"], ["a" * 64])
+            TRANSFER.write_message(outstream, {"type": "object", "digest": "a" * 64, "encoding": "zlib"})
+            TRANSFER.write_blob(outstream, payload)
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["peer"], exchange)
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("declared size", reply["message"])
+
+    def test_a_corrupt_compressed_payload_is_refused(self):
+        def exchange(instream, outstream):
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "peer",
+                                               "compression": ["zlib"]})
+            TRANSFER.read_message(instream)
+            TRANSFER.write_message(outstream, {"type": "generation", "origin_host": "peer", "harness": "codex",
+                                               "native_id": "corrupt", "source_path": "/x", "source_digest": "d",
+                                               "source_size": 4, "captured_at": 1.0,
+                                               "chunks": [{"digest": "b" * 64, "size": 4, "offset": 0}],
+                                               "artifacts": []})
+            TRANSFER.read_message(instream)
+            TRANSFER.write_message(outstream, {"type": "object", "digest": "b" * 64, "encoding": "zlib"})
+            TRANSFER.write_blob(outstream, b"not zlib at all")
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["peer"], exchange)
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("decompress", reply["message"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
