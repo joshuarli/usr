@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from agent_memory import archive as archive_module
 from agent_memory.transcripts import opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, prefers_sibling, qualified_id, read_header
 from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
@@ -214,6 +215,7 @@ def _metadata(path, harness, project_cache, stats=None):
         "branch_tip": header.get("branch_tip"),
         "workspaces": json.dumps(header["workspaces"], separators=(",", ":")) if header.get("workspaces") else None,
         "step_count": header.get("step_count"),
+        "archive_generation": None,
     }, None
 
 
@@ -544,6 +546,7 @@ class Store:
                 "ALTER TABLE sessions ADD COLUMN branch_tip TEXT;"
                 "ALTER TABLE sessions ADD COLUMN workspaces TEXT;"
                 "ALTER TABLE sessions ADD COLUMN step_count INTEGER;"
+                "ALTER TABLE sessions ADD COLUMN archive_generation INTEGER;"
                 "ALTER TABLE events ADD COLUMN synthetic_id INTEGER NOT NULL DEFAULT 0;"
                 "CREATE TABLE IF NOT EXISTS collector_identity ("
                 "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
@@ -558,7 +561,8 @@ class Store:
                 "id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
                 "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
                 "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
-                "tombstoned INTEGER NOT NULL DEFAULT 0, "
+                "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, "
+                "source_mtime_ns INTEGER, source_ctime_ns INTEGER, "
                 "UNIQUE(origin_host, harness, native_id, source_digest));"
                 "CREATE TABLE IF NOT EXISTS archive_generation_object ("
                 "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
@@ -593,7 +597,7 @@ class Store:
             "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete', native_id TEXT, "
             "ancestry TEXT NOT NULL DEFAULT 'known' CHECK(ancestry IN ('known','unknown')), "
             "recognized_events INTEGER NOT NULL DEFAULT 0, unrecognized_events INTEGER NOT NULL DEFAULT 0, "
-            "branch_tip TEXT, workspaces TEXT, step_count INTEGER);"
+            "branch_tip TEXT, workspaces TEXT, step_count INTEGER, archive_generation INTEGER);"
             "CREATE TABLE unindexed_sources ("
             "id TEXT NOT NULL, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, thread_source TEXT, "
             "harness TEXT NOT NULL, source_path TEXT PRIMARY KEY, updated REAL NOT NULL, file_size INTEGER NOT NULL, "
@@ -632,7 +636,8 @@ class Store:
             "id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
             "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
             "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
-            "tombstoned INTEGER NOT NULL DEFAULT 0, "
+            "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, "
+            "source_mtime_ns INTEGER, source_ctime_ns INTEGER, "
             "UNIQUE(origin_host, harness, native_id, source_digest));"
             "CREATE TABLE IF NOT EXISTS archive_generation_object ("
             "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
@@ -665,7 +670,7 @@ class Store:
             raise ValueError("choose either project or projects")
         root_map = coerce_roots(roots)
         live_roots = [(harness, root) for harness in HARNESSES if harness in harnesses for root in root_map.get(harness, [])]
-        roots = live_roots + [(harness, self._archive_root(harness, root)) for harness, root in live_roots]
+        roots = live_roots + [(harness, self._archive_root(harness, root)) for harness, root in live_roots if harness in DATABASE_HARNESSES]
         live_count = len(live_roots)
         live_identities = set()
         live_files: dict[str, tuple[int, int]] = {}
@@ -689,7 +694,7 @@ class Store:
             "skipped_learning_workers": 0, "unreadable": 0,
             "stat_operations": 0, "content_opens": 0, "bytes_read": 0,
             "git_processes": 0, "sqlite_changes": 0, "skipped_forgotten": 0,
-            "archived": 0, "archive_errors": 0,
+            "archived": 0, "archive_errors": 0, "archive_bytes": 0, "archive_objects": 0, "archive_unchanged": 0,
         }
         forgotten = {row[0] for row in self.db.execute("SELECT id FROM forgotten_sessions")}
         indexed_by_path = {
@@ -824,7 +829,7 @@ class Store:
             stats["resets"] += int(changed)
         target_project = project
         scanned_roots = [root.resolve() for _, root in roots if root.is_dir()]
-        rows = self.db.execute("SELECT id, project, source_path FROM sessions").fetchall()
+        rows = self.db.execute("SELECT id, project, source_path, archive_generation FROM sessions").fetchall()
         remove = []
         degraded = []
         for row in rows:
@@ -836,6 +841,8 @@ class Store:
                 continue
             if any(row["source_path"] == path or _under(row["source_path"], path) for path in unreadable_paths):
                 degraded.append(row["id"])
+                continue
+            if row["archive_generation"] is not None and not os.path.exists(row["source_path"]):
                 continue
             if row["id"] not in candidates or (
                 target_project is not None and candidates[row["id"]]["project"] != target_project
@@ -956,19 +963,35 @@ class Store:
     def _archive_source(self, meta, path, stats):
         if meta["harness"] in DATABASE_HARNESSES or _under(path, self.archive_dir):
             return []
-        archived: list[str] = []
-        for name in (path.name, *ARCHIVE_COMPANIONS.get(meta["harness"], ())):
-            source = path.parent / name
-            destination = _archive_path(self.archive_dir, meta["harness"], source)
-            try:
-                if _archive_copy(source, destination):
-                    stats["archived"] += 1
-                    archived.append(os.path.abspath(str(destination)))
-            except FileNotFoundError:
-                continue
-            except OSError:
-                stats["archive_errors"] += 1
-        return archived
+        companions = self._companions(meta["harness"], Path(path))
+        artifacts, refused = archive_module.capture_artifacts(companions)
+        stats["archive_errors"] += refused
+        try:
+            generation, created = archive_module.capture(
+                self.db, self.archive_dir, meta["harness"], meta["native_id"], path,
+                artifacts=artifacts, allow_artifacts=bool(artifacts), stats=stats,
+            )
+        except FileNotFoundError:
+            return []
+        except archive_module.ArchiveError as exc:
+            stats["archive_errors"] += 1
+            stats["archive_error_detail"] = str(exc)
+            return []
+        except OSError:
+            stats["archive_errors"] += 1
+            return []
+        meta["archive_generation"] = generation
+        if not created:
+            return []
+        return [str(path)]
+
+    @staticmethod
+    def _companions(harness, path):
+        names = ARCHIVE_COMPANIONS.get(harness, ())
+        if harness == "cmd":
+            stem = path.stem
+            names = (stem + ".meta.json", stem + ".checkpoints.jsonl", stem + ".prompts.jsonl", stem + ".share.json")
+        return [(name, path.parent / name) for name in names]
 
     def _archive_database(self, source, sessions, counts, destination, forgotten):
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -1001,7 +1024,22 @@ class Store:
         path = Path(path)
         return path if _under(path, self.archive_dir) else _archive_path(self.archive_dir, harness, path)
 
-    def _purge_archive(self, harness, source_path):
+    def _archived_line(self, row, position, digest):
+        generation = row["archive_generation"]
+        if generation is None:
+            found = archive_module.last_generation(self.db, archive_module.origin_for(self.db), row["harness"], row["native_id"])
+            generation = int(found["id"]) if found is not None else None
+        if generation is None:
+            return b""
+        try:
+            raw = archive_module.read_line_at(self.db, self.archive_dir, generation, position)
+        except (archive_module.ArchiveError, OSError):
+            return b""
+        if not hmac.compare_digest(_sha256(raw), str(digest)):
+            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+        return raw
+
+    def _purge_archive(self, harness, source_path, native_id=None):
         if harness in DATABASE_HARNESSES:
             database, _, native = source_path.rpartition("#")
             archive = self._archived_copy(harness, database)
@@ -1011,6 +1049,21 @@ class Store:
                     target.execute("DELETE FROM session_message WHERE session_id = ?", (native,))
                     target.execute("DELETE FROM session_v2 WHERE id = ?", (native,))
             return
+        origin = archive_module.origin_for(self.db)
+        generations = [int(row[0]) for row in self.db.execute(
+            "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ?",
+            (origin, harness, str(native_id)))]
+        if generations:
+            with self.db:
+                for generation in generations:
+                    self.db.execute("DELETE FROM archive_generation WHERE id = ?", (generation,))
+                orphans = [row[0] for row in self.db.execute(
+                    "SELECT digest FROM archive_object WHERE digest NOT IN (SELECT digest FROM archive_generation_object) "
+                    "AND digest NOT IN (SELECT digest FROM archive_artifact)")]
+                for digest in orphans:
+                    self.db.execute("DELETE FROM archive_object WHERE digest = ?", (digest,))
+            for digest in orphans:
+                archive_module.object_path(self.archive_dir, digest).unlink(missing_ok=True)
         archive = self._archived_copy(harness, source_path)
         for name in (archive.name, *ARCHIVE_COMPANIONS.get(harness, ())):
             (archive.parent / name).unlink(missing_ok=True)
@@ -1104,13 +1157,14 @@ class Store:
                 self.db.execute(
                     "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
                     "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, "
-                    "branch_tip, workspaces, step_count) "
-                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ? "
+                    "branch_tip, workspaces, step_count, archive_generation) "
+                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ?, ? "
                     "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
                      meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"],
-                     meta.get("branch_tip"), meta.get("workspaces"), meta.get("step_count"), meta["id"]),
+                     meta.get("branch_tip"), meta.get("workspaces"), meta.get("step_count"),
+                     meta.get("archive_generation"), meta["id"]),
                 )
                 self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
@@ -1223,28 +1277,24 @@ class Store:
 
     @_guarded
     def resolve_evidence(self, session, position, digest):
-        row = self.db.execute("SELECT source_path, harness, native_id FROM sessions WHERE id = ?", (str(session),)).fetchone()
+        row = self.db.execute(
+            "SELECT source_path, harness, native_id, archive_generation FROM sessions WHERE id = ?", (str(session),)
+        ).fetchone()
         if row is None:
             raise EvidenceUnavailable("session is no longer indexed")
         if row["harness"] in DATABASE_HARNESSES:
             return self._resolve_database_evidence(row, session, position, digest)
+        raw = b""
         try:
             with _open_source(Path(row["source_path"])) as stream:
                 stream.seek(int(position))
                 raw = stream.readline()
-        except FileNotFoundError:
-            try:
-                with _open_source(self._archived_copy(row["harness"], row["source_path"])) as stream:
-                    stream.seek(int(position))
-                    raw = stream.readline()
-            except FileNotFoundError as exc:
-                raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
-            except OSError as exc:
-                raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
-        except OSError as exc:
-            raise EvidenceUnavailable("indexed transcript source is unavailable: " + str(exc)) from exc
+        except OSError:
+            raw = b""
         if not raw or not hmac.compare_digest(_sha256(raw), str(digest)):
-            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+            raw = self._archived_line(row, position, digest)
+        if not raw:
+            raise EvidenceUnavailable("indexed transcript source and its captured generation are unavailable")
         try:
             obj = _json_line(raw)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
@@ -1258,12 +1308,19 @@ class Store:
 
     @_guarded
     def forget_session(self, session, now):
-        row = self.db.execute("SELECT harness, source_path FROM sessions WHERE id = ?", (str(session),)).fetchone()
+        row = self.db.execute("SELECT harness, source_path, native_id FROM sessions WHERE id = ?", (str(session),)).fetchone()
+        harness = row["harness"] if row is not None else str(session).partition(":")[0]
+        native = row["native_id"] if row is not None else str(session).partition(":")[2]
         if row is not None:
-            self._purge_archive(row["harness"], row["source_path"])
+            self._purge_archive(row["harness"], row["source_path"], row["native_id"])
+        origin = archive_module.origin_for(self.db)
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)", (str(session), float(now)))
+            if harness not in DATABASE_HARNESSES and native:
+                self.db.execute(
+                    "INSERT OR REPLACE INTO tombstone (origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, 'global', ?)",
+                    (origin, harness, native, float(now)))
 
     @_guarded
     def coverage(self):

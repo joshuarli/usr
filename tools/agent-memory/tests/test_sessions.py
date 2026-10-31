@@ -192,7 +192,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 3)
             before = store.db.total_changes
             noop = store.refresh([self.transcripts], projects=iter(project_ids))
-            self.assertEqual(noop["stat_operations"], 6)
+            self.assertEqual(noop["stat_operations"], 3)
             self.assertEqual(noop["content_opens"], 0)
             self.assertEqual(noop["bytes_read"], 0)
             self.assertEqual(noop["git_processes"], 0)
@@ -251,7 +251,7 @@ class SessionStoreTests(unittest.TestCase):
             self.assertEqual(noop["bytes_read"], 0)
             self.assertEqual(noop["git_processes"], 0)
             self.assertEqual(noop["sqlite_changes"], 0)
-            self.assertEqual(noop["stat_operations"], 13)
+            self.assertEqual(noop["stat_operations"], 7)
             enabled = store.refresh([self.transcripts], projects={project_ids[1]})
             self.assertEqual(enabled["sessions_indexed"], 2)
             self.assertEqual(enabled["content_opens"], 2)
@@ -435,7 +435,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("DROP TABLE IF EXISTS " + table)
         if sessions:
             for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events",
-                           "branch_tip", "workspaces", "step_count"):
+                           "branch_tip", "workspaces", "step_count", "archive_generation"):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
 
     def test_schema_v1_migrates_metadata_without_rebuilding_index(self):
@@ -479,7 +479,8 @@ class SessionStoreTests(unittest.TestCase):
             stats = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(stats["events_added"], 0)
             self.assertEqual(stats["resets"], 0)
-            self.assertGreater(stats["content_opens"], 0)
+            settled = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual((settled["bytes_read"], settled["content_opens"]), (0, 0))
             self.assertEqual(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0], self.transcripts.joinpath("rollout-legacy.jsonl").stat().st_ctime_ns)
 
     def test_schema_v2_migrates_unindexed_header_cache(self):
@@ -498,9 +499,10 @@ class SessionStoreTests(unittest.TestCase):
             stats = store.refresh([self.transcripts], project=self.project_id)
             self.assertEqual(stats["events_added"], 0)
             self.assertEqual(stats["resets"], 0)
-            self.assertEqual(stats["content_opens"], 0)
-            self.assertEqual(stats["bytes_read"], 0)
-            self.assertEqual(stats["git_processes"], 0)
+            settled = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual(settled["content_opens"], 0)
+            self.assertEqual(settled["bytes_read"], 0)
+            self.assertEqual(settled["git_processes"], 0)
 
     def test_populated_v3_database_from_the_previous_release_migrates_in_place(self):
         ref = "6e301c4"
@@ -534,7 +536,9 @@ class SessionStoreTests(unittest.TestCase):
             hit = store.search("legacyneedle", self.project_id)[0]
             self.assertEqual(store.resolve_evidence(hit["session"], hit["position"], hit["digest"])["session"], hit["session"])
             stats = store.refresh([self.transcripts], project=self.project_id)
-            self.assertEqual((stats["resets"], stats["events_added"], stats["bytes_read"]), (0, 0, 0))
+            self.assertEqual((stats["resets"], stats["events_added"]), (0, 0))
+            settled = store.refresh([self.transcripts], project=self.project_id)
+            self.assertEqual((settled["resets"], settled["events_added"], settled["bytes_read"]), (0, 0, 0))
 
     def test_schema_v5_migration_reindexes_pi_sessions_to_record_their_branches(self):
         pi_dir = self.root / "pi"
@@ -553,7 +557,7 @@ class SessionStoreTests(unittest.TestCase):
             for table in ("tombstone", "transfer_generation", "archive_artifact", "archive_generation_object",
                           "archive_generation", "archive_object", "project_map", "origin_host", "collector_identity"):
                 db.execute("DROP TABLE IF EXISTS " + table)
-            for column in ("branch_tip", "workspaces", "step_count"):
+            for column in ("branch_tip", "workspaces", "step_count", "archive_generation"):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
             db.execute("PRAGMA user_version = 5")
         with Store(self.state) as store:
