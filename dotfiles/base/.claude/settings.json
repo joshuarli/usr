@@ -10,7 +10,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "sonnet",
+  "model": "opus",
   "hooks": {
     "Notification": [
       {
@@ -78,6 +78,9 @@
     },
     "claude-haiku-5-5": {
       "effortLevel": "high"
+    },
+    "claude-opus-5-5": {
+      "effortLevel": "xhigh"
     }
   },
   "emojiCompletionEnabled": false,

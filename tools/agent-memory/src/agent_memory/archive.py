@@ -39,7 +39,7 @@ def _fsync_directory(path):
 
 
 def ensure_identity(db, label=None, regenerate=False):
-    row = db.execute("SELECT id, origin_host, display_label FROM collector_identity LIMIT 1").fetchone()
+    row = db.execute("SELECT id, origin_host, display_label FROM collector_identity WHERE singleton = 1").fetchone()
     if row is not None and not regenerate:
         return row["origin_host"], row["display_label"]
     origin = secrets.token_hex(16)
@@ -47,14 +47,13 @@ def ensure_identity(db, label=None, regenerate=False):
     now = time.time()
     with db:
         db.execute("INSERT OR IGNORE INTO origin_host (id, display_label, created_at) VALUES (?, ?, ?)", (origin, display, now))
-        db.execute("DELETE FROM collector_identity")
-        db.execute("INSERT INTO collector_identity (id, origin_host, display_label, created_at) VALUES (?, ?, ?, ?)",
-                   (secrets.token_hex(16), origin, display, now))
+        db.execute("INSERT OR REPLACE INTO collector_identity (singleton, id, origin_host, display_label, created_at) "
+                   "VALUES (1, ?, ?, ?, ?)", (secrets.token_hex(16), origin, display, now))
     return origin, display
 
 
 def origin_for(db):
-    row = db.execute("SELECT origin_host FROM collector_identity LIMIT 1").fetchone()
+    row = db.execute("SELECT origin_host FROM collector_identity WHERE singleton = 1").fetchone()
     if row is None:
         return ensure_identity(db)[0]
     return row["origin_host"]
@@ -205,7 +204,7 @@ def _prefix_to_carry(db, archive_dir, previous, previous_size, stream, stats):
     return chunks, previous_size
 
 
-def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), allow_artifacts=False, stats=None):
+def capture(db, archive_dir, harness, native_id, source_path, *, workspace=None, artifacts=(), allow_artifacts=False, stats=None):
     """Capture the current bytes of source_path as a verified generation.
 
     Returns (generation_id, created). Raises OSError when the source cannot be
@@ -256,10 +255,10 @@ def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), a
     try:
         cursor = db.execute(
             "INSERT INTO archive_generation (origin_host, harness, native_id, source_path, source_digest, source_size, "
-            "captured_at, protocol, stored_at, source_dev, source_ino, source_mtime_ns, source_ctime_ns) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "captured_at, protocol, stored_at, source_dev, source_ino, source_mtime_ns, source_ctime_ns, workspace_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (origin_host, harness, native_id, str(source_path), source_digest, final.st_size, now, PROTOCOL, now,
-             final.st_dev, final.st_ino, final.st_mtime_ns, final.st_ctime_ns),
+             final.st_dev, final.st_ino, final.st_mtime_ns, final.st_ctime_ns, workspace),
         )
     except sqlite3.IntegrityError:
         existing = db.execute(

@@ -11,11 +11,12 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import time
 import sys
 import urllib.parse
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_memory import archive as archive_module
 from agent_memory.transcripts import opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, prefers_sibling, qualified_id, read_header
@@ -547,9 +548,11 @@ class Store:
                 "ALTER TABLE sessions ADD COLUMN workspaces TEXT;"
                 "ALTER TABLE sessions ADD COLUMN step_count INTEGER;"
                 "ALTER TABLE sessions ADD COLUMN archive_generation INTEGER;"
+                "ALTER TABLE sessions ADD COLUMN origin_host TEXT;"
                 "ALTER TABLE events ADD COLUMN synthetic_id INTEGER NOT NULL DEFAULT 0;"
                 "CREATE TABLE IF NOT EXISTS collector_identity ("
-                "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
+                "singleton INTEGER PRIMARY KEY CHECK (singleton = 1), id TEXT NOT NULL, origin_host TEXT NOT NULL, "
+                "display_label TEXT NOT NULL, created_at REAL NOT NULL);"
                 "CREATE TABLE IF NOT EXISTS origin_host ("
                 "id TEXT PRIMARY KEY, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
                 "CREATE TABLE IF NOT EXISTS project_map ("
@@ -562,7 +565,7 @@ class Store:
                 "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
                 "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
                 "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, "
-                "source_mtime_ns INTEGER, source_ctime_ns INTEGER, "
+                "source_mtime_ns INTEGER, source_ctime_ns INTEGER, workspace_path TEXT, "
                 "UNIQUE(origin_host, harness, native_id, source_digest));"
                 "CREATE TABLE IF NOT EXISTS archive_generation_object ("
                 "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
@@ -597,7 +600,7 @@ class Store:
             "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete', native_id TEXT, "
             "ancestry TEXT NOT NULL DEFAULT 'known' CHECK(ancestry IN ('known','unknown')), "
             "recognized_events INTEGER NOT NULL DEFAULT 0, unrecognized_events INTEGER NOT NULL DEFAULT 0, "
-            "branch_tip TEXT, workspaces TEXT, step_count INTEGER, archive_generation INTEGER);"
+            "branch_tip TEXT, workspaces TEXT, step_count INTEGER, archive_generation INTEGER, origin_host TEXT);"
             "CREATE TABLE unindexed_sources ("
             "id TEXT NOT NULL, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, thread_source TEXT, "
             "harness TEXT NOT NULL, source_path TEXT PRIMARY KEY, updated REAL NOT NULL, file_size INTEGER NOT NULL, "
@@ -624,7 +627,8 @@ class Store:
             "session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, position INTEGER NOT NULL, "
             "kind TEXT NOT NULL, PRIMARY KEY(session, position));"
             "CREATE TABLE IF NOT EXISTS collector_identity ("
-            "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
+            "singleton INTEGER PRIMARY KEY CHECK (singleton = 1), id TEXT NOT NULL, origin_host TEXT NOT NULL, "
+                "display_label TEXT NOT NULL, created_at REAL NOT NULL);"
             "CREATE TABLE IF NOT EXISTS origin_host ("
             "id TEXT PRIMARY KEY, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
             "CREATE TABLE IF NOT EXISTS project_map ("
@@ -637,7 +641,7 @@ class Store:
             "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
             "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
             "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, "
-            "source_mtime_ns INTEGER, source_ctime_ns INTEGER, "
+            "source_mtime_ns INTEGER, source_ctime_ns INTEGER, workspace_path TEXT, "
             "UNIQUE(origin_host, harness, native_id, source_digest));"
             "CREATE TABLE IF NOT EXISTS archive_generation_object ("
             "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
@@ -829,7 +833,7 @@ class Store:
             stats["resets"] += int(changed)
         target_project = project
         scanned_roots = [root.resolve() for _, root in roots if root.is_dir()]
-        rows = self.db.execute("SELECT id, project, source_path, archive_generation FROM sessions").fetchall()
+        rows = self.db.execute("SELECT id, project, source_path, archive_generation, harness, native_id FROM sessions").fetchall()
         remove = []
         degraded = []
         for row in rows:
@@ -842,6 +846,9 @@ class Store:
             if any(row["source_path"] == path or _under(row["source_path"], path) for path in unreadable_paths):
                 degraded.append(row["id"])
                 continue
+            if row["archive_generation"] is None and not os.path.exists(row["source_path"]):
+                if self._adopt_legacy_copy(row):
+                    continue
             if row["archive_generation"] is not None and not os.path.exists(row["source_path"]):
                 continue
             if row["id"] not in candidates or (
@@ -969,6 +976,7 @@ class Store:
         try:
             generation, created = archive_module.capture(
                 self.db, self.archive_dir, meta["harness"], meta["native_id"], path,
+                workspace=meta.get("cwd") or None,
                 artifacts=artifacts, allow_artifacts=bool(artifacts), stats=stats,
             )
         except FileNotFoundError:
@@ -984,6 +992,20 @@ class Store:
         if not created:
             return []
         return [str(path)]
+
+    def _adopt_legacy_copy(self, row):
+        legacy = self._archived_copy(row["harness"], row["source_path"])
+        if not legacy.is_file() or legacy.is_symlink():
+            return False
+        try:
+            generation, _created = archive_module.capture(
+                self.db, self.archive_dir, row["harness"], row["native_id"], legacy,
+                stats={}, allow_artifacts=False)
+        except (archive_module.ArchiveError, OSError):
+            return False
+        with self.db:
+            self.db.execute("UPDATE sessions SET archive_generation = ? WHERE id = ?", (generation, row["id"]))
+        return True
 
     @staticmethod
     def _companions(harness, path):
@@ -1157,14 +1179,14 @@ class Store:
                 self.db.execute(
                     "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
                     "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, "
-                    "branch_tip, workspaces, step_count, archive_generation) "
-                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ?, ? "
+                    "branch_tip, workspaces, step_count, archive_generation, origin_host) "
+                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ?, ?, ? "
                     "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
                      meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"],
                      meta.get("branch_tip"), meta.get("workspaces"), meta.get("step_count"),
-                     meta.get("archive_generation"), meta["id"]),
+                     meta.get("archive_generation"), archive_module.origin_for(self.db), meta["id"]),
                 )
                 self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
@@ -1322,6 +1344,188 @@ class Store:
                     "INSERT OR REPLACE INTO tombstone (origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, 'global', ?)",
                     (origin, harness, native, float(now)))
 
+    # -- archive transfer and central indexing -------------------------------
+
+    def read_object_bytes(self, digest):
+        return archive_module.read_object(self.archive_dir, digest)
+
+    def has_object(self, digest):
+        return archive_module.object_path(self.archive_dir, digest).is_file()
+
+    def store_object(self, data):
+        digest = archive_module.sha256(data)
+        path = archive_module.object_path(self.archive_dir, digest)
+        if not path.is_file():
+            archive_module._write_object(self.archive_dir, data)
+        with self.db:
+            self.db.execute("INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)",
+                            (digest, len(data), time.time()))
+        return digest
+
+    def find_generation(self, origin_host, harness, native_id, source_digest):
+        row = self.db.execute(
+            "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ? AND source_digest = ?",
+            (origin_host, harness, native_id, source_digest)).fetchone()
+        return int(row["id"]) if row is not None else None
+
+    def generation_complete(self, generation):
+        for row in self.db.execute("SELECT digest FROM archive_generation_object WHERE generation = ?", (int(generation),)):
+            if not self.has_object(row["digest"]):
+                return False
+        for row in self.db.execute("SELECT digest FROM archive_artifact WHERE generation = ?", (int(generation),)):
+            if not self.has_object(row["digest"]):
+                return False
+        return True
+
+    def commit_generation(self, manifest, received):
+        origin = str(manifest["origin_host"])
+        harness = str(manifest["harness"])
+        native = str(manifest["native_id"])
+        digest = str(manifest["source_digest"])
+        existing = self.find_generation(origin, harness, native, digest)
+        for data in received.values():
+            self.store_object(data)
+        now = time.time()
+        if existing is not None:
+            generation = existing
+            with self.db:
+                self.db.execute("UPDATE archive_generation SET stored_at = ?, indexed_at = COALESCE(indexed_at, ?) WHERE id = ?",
+                                (now, now, generation))
+        else:
+            with self.db:
+                cursor = self.db.execute(
+                    "INSERT INTO archive_generation (origin_host, harness, native_id, source_path, source_digest, source_size, "
+                    "captured_at, protocol, stored_at, workspace_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (origin, harness, native, str(manifest.get("source_path") or ""), digest, int(manifest.get("source_size") or 0),
+                     float(manifest.get("captured_at") or now), int(manifest.get("protocol") or 1), now,
+                     manifest.get("workspace_path")))
+                generation = int(cursor.lastrowid or 0)
+                for index, chunk in enumerate(manifest.get("chunks") or []):
+                    self.db.execute(
+                        "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) VALUES (?, ?, ?, ?, ?)",
+                        (generation, index, str(chunk["digest"]), int(chunk["size"]), int(chunk["offset"])))
+                for artifact in manifest.get("artifacts") or []:
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
+                        (generation, str(artifact["name"]), str(artifact["digest"]), int(artifact["size"])))
+        self.index_generation(generation)
+        return generation
+
+    def index_generation(self, generation):
+        row = self.db.execute("SELECT * FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
+        if row is None:
+            raise StoreError("generation does not exist: " + str(generation))
+        harness = row["harness"]
+        native = row["native_id"]
+        origin = row["origin_host"]
+        local_origin = archive_module.origin_for(self.db)
+        suffix = "" if origin == local_origin else "@" + origin
+        session_id = qualified_id(cast(Harness, harness), native) + suffix
+        if harness in DATABASE_HARNESSES:
+            return
+        data = archive_module.read_generation(self.db, self.archive_dir, generation)
+        workspace = row["workspace_path"] or ""
+        project = self._mapped_project(origin, workspace)
+        lines = data.split(b"\n")
+        now = time.time()
+        recognized = unrecognized = malformed = 0
+        partial = len(lines[-1]) if lines and lines[-1] else 0
+        with self.db:
+            self.db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            self.db.execute(
+                "INSERT INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
+                "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, "
+                "native_id, ancestry, archive_generation, origin_host, workspaces) "
+                "VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, 'degraded', ?, 'known', ?, ?, ?)",
+                (session_id, project, workspace, harness, "generation:%d" % generation, now, int(row["source_size"]),
+                 int(row["source_size"]), _sha256(data.split(b"\n")[0] if data else b""), native, int(generation),
+                 origin, self._workspace_json(data, harness)))
+            offset = 0
+            for raw in lines:
+                if not raw:
+                    offset += 1
+                    continue
+                line_bytes = raw + b"\n"
+                digest = _sha256(line_bytes)
+                try:
+                    records = normalize(_json_line(raw), cast(Harness, harness))
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+                    self.db.execute("INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
+                                    (session_id, offset))
+                    malformed += 1
+                else:
+                    for record in records:
+                        self.db.execute(
+                            "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, "
+                            "outcome, entry, parent_entry, synthetic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (session_id, offset, record["kind"], record["text"], record["timestamp"], record["call_id"],
+                             record["raw_type"], digest, record["outcome"], record.get("entry"), record.get("parent_entry"),
+                             1 if record.get("synthetic_id") else 0))
+                        if record["kind"].startswith("unknown:"):
+                            unrecognized += 1
+                        elif record["kind"] in SUBSTANTIVE_KINDS:
+                            recognized += 1
+                offset += len(line_bytes)
+            coverage = "unsupported" if recognized == 0 and (unrecognized or malformed) else "degraded" if unrecognized or malformed else "complete"
+            self.db.execute(
+                "UPDATE sessions SET coverage = ?, indexed_bytes = ?, partial_bytes = ?, malformed_lines = ?, "
+                "recognized_events = ?, unrecognized_events = ? WHERE id = ?",
+                (coverage, offset - partial, partial, malformed, recognized, unrecognized, session_id))
+            self.db.execute("UPDATE archive_generation SET indexed_at = ? WHERE id = ?", (now, int(generation)))
+
+    def _workspace_json(self, data, harness):
+        try:
+            first = _json_line(data.split(b"\n")[0]) if data else {}
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return None
+        cwd = first.get("cwd") if harness == "cmd" and isinstance(first, dict) else None
+        return json.dumps([cwd], separators=(",", ":")) if isinstance(cwd, str) and cwd else None
+
+    def _mapped_project(self, origin_host, workspace):
+        if not workspace:
+            return None
+        row = self.db.execute(
+            "SELECT name FROM project_map WHERE origin_host = ? AND checkout_path = ?", (origin_host, workspace)).fetchone()
+        return "mapped:" + str(row["name"]) if row is not None else None
+
+    def apply_tombstone(self, origin_host, harness, native_id, scope, forgotten_at):
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO tombstone (origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, ?, ?)",
+                (origin_host, harness, native_id, scope, forgotten_at))
+            self.db.execute("UPDATE archive_generation SET tombstoned = 1 WHERE origin_host = ? AND harness = ? AND native_id = ?",
+                            (origin_host, harness, native_id))
+            for row in self.db.execute("SELECT id FROM sessions WHERE harness = ? AND native_id = ?", (harness, native_id)).fetchall():
+                local = self.db.execute("SELECT origin_host FROM sessions WHERE id = ?", (row["id"],)).fetchone()
+                if local is not None and (local["origin_host"] in (None, origin_host)):
+                    self.db.execute("DELETE FROM sessions WHERE id = ?", (row["id"],))
+            self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)",
+                            (qualified_id(cast(Harness, harness), native_id), float(forgotten_at)))
+
+    def is_tombstoned(self, origin_host, harness, native_id):
+        return self.db.execute(
+            "SELECT 1 FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",
+            (origin_host, harness, native_id)).fetchone() is not None
+
+    def mark_durable(self, source_generation, remote, remote_generation):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO transfer_generation (generation, remote, durable_at, attempts) VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(generation, remote) DO UPDATE SET durable_at = excluded.durable_at, last_error = NULL",
+                (int(source_generation), str(remote), time.time()))
+
+    def record_attempt(self, source_generation, remote, error):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO transfer_generation (generation, remote, attempts, last_error) VALUES (?, ?, 1, ?) "
+                "ON CONFLICT(generation, remote) DO UPDATE SET attempts = attempts + 1, last_error = excluded.last_error",
+                (int(source_generation), str(remote), str(error)[:500]))
+
+    def pending_transfers(self, remote):
+        return self.db.execute(
+            "SELECT count(*) FROM archive_generation g LEFT JOIN transfer_generation t "
+            "ON t.generation = g.id AND t.remote = ? WHERE t.durable_at IS NULL", (str(remote),)).fetchone()[0]
+
     @_guarded
     def coverage(self):
         rows = self.db.execute(
@@ -1397,7 +1601,7 @@ class Store:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
                 raise StoreError("invalid regular expression: " + str(exc)) from exc
-            sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness "
+            sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host "
             sql += "FROM events e JOIN sessions s ON s.id=e.session WHERE e.text != ''"
             params = []
             if project is not None:
@@ -1414,7 +1618,7 @@ class Store:
                     if len(matches) >= limit:
                         break
             return matches
-        sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness "
+        sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host "
         sql += "FROM events_fts JOIN events e ON e.id=events_fts.rowid JOIN sessions s ON s.id=e.session "
         sql += "WHERE events_fts MATCH ?"
         params = [query]
@@ -1449,10 +1653,10 @@ class Store:
             params.insert(0, project)
         sql = (
             "WITH ranked AS (SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, "
-            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, "
+            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host, "
             "row_number() OVER (PARTITION BY e.session ORDER BY e.position DESC) AS rank "
             "FROM events e JOIN sessions s ON s.id=e.session WHERE 1=1" + project_sql + filter_sql + ") "
-            "SELECT session, position, digest, kind, text, timestamp, call_id, project, cwd, parent, source, thread_source, source_path, updated, harness "
+            "SELECT session, position, digest, kind, text, timestamp, call_id, project, cwd, parent, source, thread_source, source_path, updated, harness, origin_host "
             "FROM ranked WHERE rank=1 ORDER BY updated DESC, position DESC LIMIT ?"
         )
         params.append(max(1, int(limit)))
@@ -1477,7 +1681,7 @@ class Store:
                 raise StoreError("event byte offset is not indexed for this session")
         columns = (
             "e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, "
-            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness"
+            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host"
         )
         before_rows = self.db.execute(
             "SELECT " + columns + " FROM events e JOIN sessions s ON s.id=e.session "

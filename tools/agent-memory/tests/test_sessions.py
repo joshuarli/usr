@@ -435,7 +435,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("DROP TABLE IF EXISTS " + table)
         if sessions:
             for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events",
-                           "branch_tip", "workspaces", "step_count", "archive_generation"):
+                           "branch_tip", "workspaces", "step_count", "archive_generation", "origin_host"):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
 
     def test_schema_v1_migrates_metadata_without_rebuilding_index(self):
@@ -557,7 +557,7 @@ class SessionStoreTests(unittest.TestCase):
             for table in ("tombstone", "transfer_generation", "archive_artifact", "archive_generation_object",
                           "archive_generation", "archive_object", "project_map", "origin_host", "collector_identity"):
                 db.execute("DROP TABLE IF EXISTS " + table)
-            for column in ("branch_tip", "workspaces", "step_count", "archive_generation"):
+            for column in ("branch_tip", "workspaces", "step_count", "archive_generation", "origin_host"):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
             db.execute("PRAGMA user_version = 5")
         with Store(self.state) as store:

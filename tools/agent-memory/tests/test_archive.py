@@ -241,6 +241,40 @@ class ArchiveTests(unittest.TestCase):
             self.refresh(store)
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
 
+    def test_partial_trailing_line_is_captured_but_not_indexed_until_complete(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            self.refresh(store)
+            with self.path.open("a") as stream:
+                stream.write('{"timestamp":"2026-10-30T00:00:01Z","type":"response_item","payload":{"type":"mess')
+            stats = self.refresh(store)
+            self.assertEqual(stats["partial_files"], 1)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE kind='user'").fetchone()[0], 1)
+            with self.path.open("a") as stream:
+                stream.write('age","role":"user","content":[{"type":"input_text","text":"complete"}]}}\n')
+            stats = self.refresh(store)
+            self.assertEqual(stats["partial_files"], 0)
+            hit = store.search("complete", self.project_id)
+            self.assertEqual(len(hit), 1)
+
+    def test_a_legacy_path_mirrored_copy_is_adopted_after_the_source_is_gone(self):
+        self.write("legacy survivor")
+        with Store(self.state) as store:
+            self.refresh(store)
+            row = store.db.execute("SELECT source_path, harness, native_id FROM sessions").fetchone()
+            legacy = store._archived_copy("codex", row["source_path"])
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_bytes(self.path.read_bytes())
+            with store.db:
+                store.db.execute("UPDATE sessions SET archive_generation = NULL")
+                store.db.execute("DELETE FROM archive_generation")
+            self.path.unlink()
+            stats = self.refresh(store)
+            self.assertEqual(stats["sessions_seen"], 0)
+            generation = store.db.execute("SELECT archive_generation FROM sessions").fetchone()[0]
+            self.assertIsNotNone(generation)
+            self.assertIn(b"legacy survivor", ARCHIVE.read_generation(store.db, store.archive_dir, generation))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
