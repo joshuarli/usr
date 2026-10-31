@@ -6,7 +6,7 @@ Durable, cross-machine preservation and search for coding-agent sessions, and fi
 
 - **Goal:** every locally available conversation becomes durable before a harness deletes it, one central archive collects from several machines over SSH, and `agent-sessions` searches and verifies that history from any machine — with existing learning records and their authority boundaries intact.
 - **Accepted:** every slice except `W3.7`. Green on the final tree: `test_sessions` 65, `test_archive` 15, `test_transfer` 13, `test_identity` 4, `test_recovery` 4, `test_learning` 56, `test_learning_review` 18, `test_learning_promote` 32, `test_learning_ops` 11, `test_recall` 83.
-- **Parked:** `W3.7` SSH integration is implemented and reviewed (fixed receiver command, drained stderr, watchdog timeout, required allowed origins) but was not exercised against a live `sshd`, because starting a listener is outside the execution boundary. It is on **Needs environment** and is not called tested.
+- **Parked:** nothing. `W3.7` was exercised against a real host (`ubuntu@oracle`, Ubuntu 24.04, Python 3.12.3, Tailscale SSH): capture, delivery, acknowledgement, remote indexing, `--central` search and `show`, tombstone propagation, a backup taken centrally and restored locally, and source-host loss with the evidence still verifying. Two defects came out of it and are fixed: the receiver required an explicit remote user under Tailscale, and the transport timeout measured total duration instead of idleness.
 - **Review:** one focused adversarial review ran before close. It reproduced six P1 defects — a stale-prefix splice on growing rewrites, invisible capture failure, a central forget that tombstoned the wrong origin, a restore that reinstated forgotten sessions and grants, a durable ack over a corrupt object, and an SSH path that could hang. All six are fixed with regression tests; the SSHD hang test remains environment-bound.
 - **Baseline recorded:** see [Baseline](#baseline). Two suites are red for an environment reason, not a code reason.
 - **Next slice:** none. The campaign is closed; the only open item is the environment-bound `W3.7`.
@@ -228,8 +228,7 @@ Every behavior below needs a test that fails if the adapter gets it wrong. Run a
 
 | Item | Why it cannot run here | Command the owner would run |
 | --- | --- | --- |
-| Real SSH destination | No destination is configured, and none may be invented. | `agent-sessions sync --to <alias> --dry-run` after configuring `~/.config/agent-sessions/config.json` |
-| Disposable `sshd` integration (`W3.7`) | `/usr/sbin/sshd` exists but starting a listener is outside the execution boundary. | start `sshd` on a high port with a scratch key, then run `agent-sessions sync --to <alias>` against `agent-sessions-serve ingest --protocol 1 --origin <id>` |
+| Offsite `restic` repository | No bucket or repository is configured, and none may be invented. | `agent-sessions backup restic --repo <url>` after configuring credentials |
 | `restic` and R2/S3 destination | `restic` is not installed and no bucket may be created. | `agent-sessions backup create --restic --repo <url>` |
 | LaunchAgent and cron activation | Installing a service on the real machine is forbidden. | `plutil -lint` on the template, then the owner's install step |
 | Perf-gated timings | Host busy; `perf-gate-ready` exits 75. | `sh dotfiles/perf-gate-ready-test.sh` then the bench, on an idle host |
