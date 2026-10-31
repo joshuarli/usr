@@ -296,9 +296,9 @@ def _sync(args):
                     raise StoreError("ssh central settings need host and command")
                 result = transfer_module.ssh_sender(store, args.to, host, command, origin,
                                                     args.label or "collector", progress=progress)
-            print("delivered=%d pending=%d sent_bytes=%d raw_bytes=%d compression=%s" % (
-                len(result["delivered"]), store.pending_transfers(args.to),
-                result["sent_bytes"], result["raw_bytes"], result["compression"] or "none"))
+            print("delivered=%d pending=%d sent_bytes=%d raw_bytes=%d compression=%s endpoint=%s" % (
+                len(result["delivered"]), store.pending_transfers(result["endpoint"]),
+                result["sent_bytes"], result["raw_bytes"], result["compression"] or "none", result["endpoint"]))
         return 0
     except (OSError, StoreError, transfer_module.TransferError) as exc:
         print("agent-sessions sync: " + str(exc), file=sys.stderr)

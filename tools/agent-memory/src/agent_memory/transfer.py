@@ -14,6 +14,8 @@ import time
 import zlib
 from typing import Any
 
+from agent_memory import archive as archive_module
+
 PROTOCOL = 1
 MAX_FRAME = 4 * 1024 * 1024
 MAX_BLOB = 64 * 1024 * 1024
@@ -108,9 +110,11 @@ class Sender:
         self.instream, self.outstream = instream, outstream
         self.origin, self.label = origin, label
         self.compression = None
+        self.endpoint = str(remote)
         self.raw_bytes = 0
         self.sent_bytes = 0
-        self.stats: dict[str, Any] = {"delivered": [], "raw_bytes": 0, "sent_bytes": 0, "compression": None}
+        self.stats: dict[str, Any] = {"delivered": [], "raw_bytes": 0, "sent_bytes": 0,
+                                      "compression": None, "endpoint": str(remote)}
 
     def _expect(self, kind):
         message = read_message(self.instream)
@@ -127,6 +131,9 @@ class Sender:
         if ready.get("protocol") != PROTOCOL:
             raise TransferError("central store speaks protocol %r" % ready.get("protocol"))
         self.compression = ready.get("compression")
+        store_origin = ready.get("store")
+        if isinstance(store_origin, str) and store_origin:
+            self.endpoint = store_origin
 
     def send_tombstones(self):
         rows = self.store.db.execute(
@@ -145,7 +152,7 @@ class Sender:
         return self.store.db.execute(
             "SELECT g.* FROM archive_generation g LEFT JOIN transfer_generation t "
             "ON t.generation = g.id AND t.remote = ? WHERE t.durable_at IS NULL ORDER BY g.id",
-            (self.remote,)).fetchall()
+            (self.endpoint,)).fetchall()
 
     def send_generation(self, generation):
         if str(generation["origin_host"]) != self.origin:
@@ -215,7 +222,7 @@ class Sender:
             self.send_tombstones()
         except (OSError, TransferError) as exc:
             for generation in self.pending():
-                self.record_attempt(generation["id"], self.remote, str(exc))
+                self.record_attempt(generation["id"], self.endpoint, str(exc))
             raise TransferError("cannot reach the central store: %s" % exc) from exc
         delivered = []
         for generation in self.pending():
@@ -223,21 +230,21 @@ class Sender:
             for attempt in range(attempts):
                 try:
                     local_id = self.send_generation(generation)
-                    self.store.mark_durable(generation["id"], self.remote, local_id)
+                    self.store.mark_durable(generation["id"], self.endpoint, local_id)
                     delivered.append(int(generation["id"]))
                     if progress is not None:
                         progress(len(delivered))
                     break
                 except (OSError, TransferError) as exc:
                     last = exc
-                    self.record_attempt(generation["id"], self.remote, str(exc))
+                    self.record_attempt(generation["id"], self.endpoint, str(exc))
                     if attempt + 1 >= attempts:
                         raise TransferError("delivery failed after %d attempts: %s" % (attempts, last)) from last
                     time.sleep(min(60, 2 ** attempt))
         write_message(self.outstream, {"type": "bye"})
         self._expect("done")
-        self.stats.update({"delivered": delivered, "raw_bytes": self.raw_bytes,
-                           "sent_bytes": self.sent_bytes, "compression": self.compression})
+        self.stats.update({"delivered": delivered, "raw_bytes": self.raw_bytes, "sent_bytes": self.sent_bytes,
+                           "compression": self.compression, "endpoint": self.endpoint})
         return delivered
 
 
@@ -256,7 +263,8 @@ def receiver(store, instream, outstream, allowed_origins=None):
         return
     offered = hello.get("compression")
     compression = COMPRESSION if isinstance(offered, list) and COMPRESSION in offered else None
-    write_message(outstream, {"type": "ready", "protocol": PROTOCOL, "compression": compression})
+    write_message(outstream, {"type": "ready", "protocol": PROTOCOL, "compression": compression,
+                              "store": archive_module.origin_for(store.db)})
     while True:
         try:
             message = read_message(instream)

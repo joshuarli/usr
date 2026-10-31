@@ -105,7 +105,7 @@ class RecoveryTests(unittest.TestCase):
 
         delivered = TRANSFER.local_sync(store, central_state, "central", origin_a, "a")
         self.assertEqual(len(delivered["delivered"]), 2)
-        self.assertEqual(store.pending_transfers("central"), 0)
+        self.assertEqual(store.pending_transfers(delivered["endpoint"]), 0)
 
         home_b, cmd_root_b, agy_root_b = self.source_home("b", "bravo evidence", "antigravity bravo", "conv-b")
         store_b = self.capture(self.root / "state-b", home_b, cmd_root_b, agy_root_b)
