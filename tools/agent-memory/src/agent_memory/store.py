@@ -1418,6 +1418,10 @@ class Store:
         harness = row["harness"]
         native = row["native_id"]
         origin = row["origin_host"]
+        if row["tombstoned"] or self.is_tombstoned(origin, harness, native):
+            with self.db:
+                self.db.execute("UPDATE archive_generation SET tombstoned = 1 WHERE id = ?", (int(generation),))
+            return
         local_origin = archive_module.origin_for(self.db)
         suffix = "" if origin == local_origin else "@" + origin
         session_id = qualified_id(cast(Harness, harness), native) + suffix
@@ -1487,6 +1491,17 @@ class Store:
         row = self.db.execute(
             "SELECT name FROM project_map WHERE origin_host = ? AND checkout_path = ?", (origin_host, workspace)).fetchone()
         return "mapped:" + str(row["name"]) if row is not None else None
+
+    def reindex_generations(self):
+        """Rebuild derived transcript tables from captured bytes alone."""
+        generations = [int(row[0]) for row in self.db.execute(
+            "SELECT id FROM archive_generation WHERE tombstoned = 0 ORDER BY id")]
+        with self.db:
+            for generation in generations:
+                self.db.execute("DELETE FROM sessions WHERE archive_generation = ?", (generation,))
+        for generation in generations:
+            self.index_generation(generation)
+        return len(generations)
 
     def apply_tombstone(self, origin_host, harness, native_id, scope, forgotten_at):
         with self.db:

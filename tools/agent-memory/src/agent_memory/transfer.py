@@ -401,3 +401,38 @@ def handle_query(store, op, args):
 
 def query(store, op, args):
     return handle_query(store, op, args)
+
+
+def query_over_ssh(host, command, op, args, origin, label, timeout=120):
+    import subprocess
+
+    process = subprocess.Popen(["ssh", "-o", "BatchMode=yes", host, "--", command],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        instream, outstream = process.stdout, process.stdin
+        assert instream is not None and outstream is not None
+        write_message(outstream, {"type": "hello", "protocol": PROTOCOL, "origin": origin, "label": label})
+        ready = read_message(instream)
+        if ready.get("type") != "ready":
+            raise TransferError(str(ready.get("message") or "central store refused the query"))
+        write_message(outstream, {"type": "query", "op": op, "args": args})
+        reply = read_message(instream)
+        write_message(outstream, {"type": "bye"})
+        read_message(instream)
+        if reply.get("type") == "error":
+            raise TransferError(str(reply.get("message")))
+        if reply.get("type") != "result":
+            raise TransferError("unexpected query reply")
+        return reply.get("rows") or []
+    finally:
+        stdin = process.stdin
+        if stdin is not None:
+            try:
+                stdin.close()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            process.kill()
+            raise TransferError("central query timed out") from exc
