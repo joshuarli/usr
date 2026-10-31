@@ -154,10 +154,10 @@ server install accepts it.
 
 `sh tests/static.sh` runs syntax, shellcheck and package-name checks. `sh tests/vm.sh`
 installs Alpine edge with `linux-stable` on aarch64 from the virt ISO in QEMU,
-provisions the server base, verifies it, then provisions the desktop on top,
-provisions it twice, reboots, logs in on tty1 and checks the desktop. It needs
-`qemu` and `nc`, and provisions the committed `HEAD` of the `usr` checkout. Run
-both from `host/alpine/`.
+provisions and verifies the server base, layers the desktop over it, provisions
+it twice, reboots, logs in on tty1 and checks the desktop. It needs `qemu` and
+`nc`, and provisions the committed `HEAD` of the `usr` checkout. Run both from
+`host/alpine/`.
 
 ## Hardware checklist (XPS 13 9343)
 
