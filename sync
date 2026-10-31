@@ -66,15 +66,19 @@ do_tools() {
 do_sync() {
 	do_links
 	status=0
-	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/dl" || { status=$?; printf 'sync: dl step failed\n' >&2; }
-	brew_status=0
-	if [ "$os" = darwin ]; then TMPDIR="$tmpdir" sh "$root/host/macos/setup-macos" brew packages || { brew_status=$?; [ "$status" -ne 0 ] || status=$brew_status; }; fi
 	if [ "$os" = linux ] && [ -r /etc/os-release ]; then
 		. /etc/os-release
-		if [ "${ID:-}" = alpine ]; then TMPDIR="$tmpdir" sh "$root/host/setup-linux" || status=$?; fi
+		if [ "${ID:-}" = alpine ]; then
+			TMPDIR="$tmpdir" sh "$root/host/setup-linux" || { status=$?; printf 'sync: Alpine host setup failed\n' >&2; }
+		fi
 	fi
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/dl" || { dl_status=$?; [ "$status" -ne 0 ] || status=$dl_status; printf 'sync: dl step failed\n' >&2; }
+	brew_status=0
+	if [ "$os" = darwin ]; then TMPDIR="$tmpdir" sh "$root/host/macos/setup-macos" brew packages || { brew_status=$?; [ "$status" -ne 0 ] || status=$brew_status; }; fi
 	if [ ! -x "$kache" ]; then
-		if [ "$os" != darwin ] || [ "$brew_status" -eq 0 ]; then
+		if [ "$os" = linux ] && ! command -v rustup >/dev/null 2>&1; then
+			printf 'sync: skipping kache installation (rustup is not installed)\n' >&2
+		elif [ "$os" != darwin ] || [ "$brew_status" -eq 0 ]; then
 			if [ "$os" = darwin ]; then PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" TMPDIR="$tmpdir" sh "$root/dotfiles/base/.local/bin/setup-kache" </dev/null || status=$?
 			else TMPDIR="$tmpdir" sh "$root/dotfiles/base/.local/bin/setup-kache" </dev/null || status=$?; fi
 			if [ -x "$kache" ] && { [ ! -f "$owned" ] || ! awk -F '\t' -v path="$kache" '$1 == "K" && $2 == path { found = 1 } END { exit !found }' "$owned"; }; then printf 'K\t%s\n' "$kache" >> "$owned" || status=$?; fi

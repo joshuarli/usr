@@ -1,5 +1,11 @@
 ncurses-terminfo
 curl
+bash
+jq
+unzip
+openssh-client
+bubblewrap
+uv
 clang>=23
 llvm>=23
 lld>=23

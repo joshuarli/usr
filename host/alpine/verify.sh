@@ -22,6 +22,13 @@ uid=$(id -u "$user") || { echo "verify: no user $user" >&2; exit 1; }
 home=$(getent passwd "$user" | cut -d: -f6)
 
 check 'curl installed' command -v curl
+check 'bash installed' command -v bash
+check 'jq installed' command -v jq
+check 'unzip installed' command -v unzip
+check 'zipinfo installed' command -v zipinfo
+check 'ssh installed' command -v ssh
+check 'uv installed' command -v uv
+check 'bwrap installed' command -v bwrap
 for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_least 23 "$tool"; done
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)
 check 'clang defaults match config/clang.cfg, root 0644' managed config/clang.cfg "$clang_dir/clang.cfg" 644
@@ -32,6 +39,11 @@ check "$user has a password" sh -c "awk -F: '\$1 == \"$user\" { exit !(\$2 ~ /^\
 check 'no getty autologin' no_match -- '--autologin|[[:space:]]-a[[:space:]]' /etc/inittab
 check 'no passwordless doas' sh -c '! cat /etc/doas.conf /etc/doas.d/*.conf 2>/dev/null | sed "s/#.*//" | grep -qw nopass'
 check "ish installed for $user" test -x "$home/.local/bin/ish"
+check "e installed for $user" test -x "$home/.local/bin/e"
+check "fz installed for $user" test -x "$home/.local/bin/fz"
+check "python3 installed for $user" test -x "$home/.local/bin/python3"
+check "node installed for $user" test -x "$home/.local/bin/node"
+check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
 

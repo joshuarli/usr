@@ -148,7 +148,17 @@ install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg" 0644
 
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
-[ -x "$home/.local/bin/ish" ] || as_user "sh '$usr_root/sync' tools ish >/dev/null" || die "installing ish from $usr_root failed"
+missing_tools=
+for tool in ish e fz python3 nodejs; do
+	case $tool in
+		nodejs) [ -x "$home/.local/bin/node" ] && [ -x "$home/.local/bin/npm" ] ;;
+		*) [ -x "$home/.local/bin/$tool" ] ;;
+	esac || missing_tools="$missing_tools $tool"
+done
+if [ -n "$missing_tools" ]; then
+	# shellcheck disable=SC2086
+	as_user "sh '$usr_root/sync' tools$missing_tools" >/dev/null || die "installing$missing_tools from $usr_root failed"
+fi
 
 if [ "$mode" = desktop ]; then
 	desktop_packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages-desktop.txt)

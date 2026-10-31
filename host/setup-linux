@@ -49,19 +49,25 @@ as_root() {
     fi
 }
 
-if "$package_manager" info -e unbound >/dev/null 2>&1 \
-    && "$package_manager" info -e unbound-openrc >/dev/null 2>&1 \
-    && "$package_manager" info -e ca-certificates >/dev/null 2>&1; then
-    info "Unbound and its OpenRC service are installed"
+packages="unbound unbound-openrc ca-certificates curl bash jq unzip libgcc openssh-client bubblewrap uv"
+missing=
+for package in $packages; do
+    "$package_manager" info -e "$package" >/dev/null 2>&1 || missing="$missing $package"
+done
+if [ -z "$missing" ]; then
+    info "Unbound, DNS certificates, and sync prerequisites are installed"
 else
-    info "Installing Unbound, its OpenRC service, and CA certificates"
-    as_root "$package_manager" add --interactive=no unbound unbound-openrc ca-certificates
+    info "Installing Unbound, DNS certificates, and sync prerequisites"
+    # shellcheck disable=SC2086
+    as_root "$package_manager" add --interactive=no $packages
 fi
 
 command -v unbound-checkconf >/dev/null 2>&1 || die "unbound-checkconf is missing after installation"
 command -v rc-service >/dev/null 2>&1 || die "OpenRC rc-service is missing"
 command -v rc-update >/dev/null 2>&1 || die "OpenRC rc-update is missing"
 command -v nslookup >/dev/null 2>&1 || die "nslookup is required to verify DNS"
+command -v curl >/dev/null 2>&1 || die "curl is missing after installation"
+command -v zipinfo >/dev/null 2>&1 || die "zipinfo is missing after installation"
 
 config_changed=false
 if cmp -s "$conf_source" "$conf"; then
