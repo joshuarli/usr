@@ -113,7 +113,20 @@ printf '%s\n' "$tag" > "$tagfile.tmp"
 install -o root -g root -m 0644 "$tagfile.tmp" "$tagfile"
 rm -f "$tagfile.tmp"
 
-"$target" +show-terminfo 2>/dev/null | tic -x -o /usr/share/terminfo - || {
+# ghostty exposes its generated terminfo only through +ssh, so point that at
+# a local shim instead of a remote host.
+ssh_shim=$tmp/ssh
+cat >"$ssh_shim" <<'EOF'
+#!/bin/sh
+if [ "$1" = -G ]; then
+	printf 'user root\nhostname local\nport 22\n'
+	exit 0
+fi
+for arg do last=$arg; done
+TERMINFO=/usr/share/terminfo exec /bin/sh -c "$last"
+EOF
+chmod 0755 "$ssh_shim"
+"$target" +ssh --terminfo=true --cache=false --ssh="$ssh_shim" localhost true </dev/null >/dev/null 2>&1 || {
 	echo "home: ghostty terminfo install failed" >&2
 	exit 1
 }
