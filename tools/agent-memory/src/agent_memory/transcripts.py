@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
+import stat
 import time
 from pathlib import Path
 from collections.abc import Mapping
@@ -12,6 +14,7 @@ from urllib.parse import unquote
 
 from agent_memory.types import (
     DATABASE_HARNESSES,
+    HARNESS_ALIASES,
     HARNESSES,
     OPENCODE_DB,
     OPENCODE_SUBPOSITIONS,
@@ -20,6 +23,8 @@ from agent_memory.types import (
 HEADER_SCAN_LINES = 200
 HEADER_SCAN_BYTES = 524288
 MAX_NATIVE_ID = 256
+ANTIGRAVITY_DB = "conversation_summaries.db"
+_CMD_BOOKKEEPING = frozenset(("model_change", "effort_change", "mode_change", "permission_change", "label", "plan"))
 _SKIP_TEXT_KEYS = frozenset((
     "encrypted_content", "internal_chat_message_metadata_passthrough", "id", "call_id",
     "type", "status", "role", "timestamp", "ordinal",
@@ -59,6 +64,15 @@ _EXIT_PATTERNS = (
 )
 
 
+def canonical_harness(value) -> Harness:
+    text = str(value).strip().lower()
+    if text in HARNESS_ALIASES:
+        return HARNESS_ALIASES[text]
+    if text in HARNESSES:
+        return cast(Harness, text)
+    raise ValueError("unsupported harness: " + str(value))
+
+
 def qualified_id(harness: Harness, native_id: str) -> str:
     if harness == "codex" and not _has_harness_prefix(native_id):
         return native_id
@@ -86,6 +100,8 @@ def default_roots(environ: Optional[Mapping[str, str]] = None) -> dict[Harness, 
     grok_home = Path(environ.get("GROK_HOME") or str(home / ".grok")).expanduser()
     pi_agent_home = Path(environ.get("PI_CODING_AGENT_DIR") or str(home / ".pi" / "agent")).expanduser()
     pi_sessions = Path(environ.get("PI_CODING_AGENT_SESSION_DIR") or str(pi_agent_home / "sessions")).expanduser()
+    commandcode_home = Path(environ.get("COMMANDCODE_HOME") or str(home / ".commandcode")).expanduser()
+    antigravity_home = Path(environ.get("ANTIGRAVITY_HOME") or str(home / ".gemini" / "antigravity-cli")).expanduser()
     return {
         "codex": [codex_home / "sessions", codex_home / "archived_sessions"],
         "claude": [claude_home / "projects"],
@@ -93,6 +109,8 @@ def default_roots(environ: Optional[Mapping[str, str]] = None) -> dict[Harness, 
         "grok": [grok_home / "sessions"],
         "opencode": [data_home / "opencode"],
         "pi": [pi_sessions],
+        "cmd": [commandcode_home / "projects"],
+        "agy": [antigravity_home / "brain"],
     }
 
 
@@ -100,10 +118,14 @@ def coerce_roots(roots: Optional[dict[str, Any]] | list[str | os.PathLike[str]] 
     if roots is None:
         return default_roots()
     if isinstance(roots, dict):
-        unknown = set(roots) - set(HARNESSES)
-        if unknown:
-            raise ValueError("unsupported transcript harness: " + ", ".join(sorted(str(name) for name in unknown)))
-        return {cast(Harness, name): [Path(root) for root in _listed(value)] for name, value in roots.items()}
+        mapped: dict[Harness, list[Path]] = {}
+        for name, value in roots.items():
+            try:
+                harness = canonical_harness(name)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from None
+            mapped.setdefault(harness, []).extend(Path(root) for root in _listed(value))
+        return mapped
     return {"codex": [Path(root) for root in _listed(roots)]}
 
 
@@ -128,7 +150,26 @@ def is_source_name(harness: Harness, name: str) -> bool:
         return name == "session.jsonl"
     if harness == "pi":
         return _PI_SESSION_NAME.match(name) is not None
+    if harness == "cmd":
+        return name.endswith(".jsonl") and not name.endswith(".checkpoints.jsonl")
+    if harness == "agy":
+        return name in ("transcript.jsonl", "transcript_full.jsonl")
     return name == "chat_history.jsonl"
+
+
+def prefers_sibling(harness: Harness, path) -> bool:
+    """True when a better representation of the same native session exists beside this one."""
+    if harness != "agy" or Path(path).name != "transcript.jsonl":
+        return False
+    sibling = Path(path).parent / "transcript_full.jsonl"
+    try:
+        return stat_is_regular(sibling)
+    except OSError:
+        return False
+
+
+def stat_is_regular(path):
+    return stat.S_ISREG(os.lstat(path).st_mode)
 
 
 def _text_value(value):
@@ -381,6 +422,87 @@ def _muse_outcome(texts):
     return "ok" if codes else None
 
 
+def _cmd_blocks(content):
+    return [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+
+
+def _cmd_record(obj):
+    kind = obj.get("type") or "unknown"
+    timestamp = obj.get("timestamp")
+    entry = obj.get("id") if isinstance(obj.get("id"), str) else None
+    parent_entry = obj.get("parentId") if isinstance(obj.get("parentId"), str) else None
+    message = obj.get("message")
+    message = message if isinstance(message, dict) else {}
+    if kind == "session":
+        return _record("session_meta", "", timestamp, raw_type=kind)
+    if kind != "message":
+        if kind in _CMD_BOOKKEEPING:
+            return _record(str(kind), "", timestamp, raw_type=kind)
+        return _record("unknown:" + str(kind), "", timestamp, raw_type=kind)
+    role = message.get("role")
+    content = message.get("content")
+    blocks = _cmd_blocks(content)
+    raw_meta = message.get("meta")
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    injected = bool(meta.get("injected")) or bool(meta.get("isAutomated"))
+    results = [block for block in blocks if block.get("type") == "tool_result"]
+    if results:
+        text = "\n".join(part for part in (_content_text(block.get("content", "")) for block in results) if part)
+        call_id = ",".join(str(block["tool_use_id"]) for block in results if block.get("tool_use_id"))
+        return _record("tool-output", text, timestamp, call_id or None, kind, outcome=exit_outcome(text),
+                       entry=entry, parent_entry=parent_entry, role="user")
+    calls = [block for block in blocks if block.get("type") == "tool_use"]
+    text = "\n".join(part for part in (_content_text(block) for block in blocks if block.get("type") == "text") if part)
+    if calls:
+        rendered = "\n".join(str(call.get("name") or "tool") + "\n" + _text_value(call.get("input", {})) for call in calls)
+        call_id = ",".join(str(call["id"]) for call in calls if call.get("id"))
+        if text:
+            return _record("assistant", text + "\n" + rendered, timestamp, call_id or None, kind,
+                           entry=entry, parent_entry=parent_entry, role="assistant")
+        return _record("tool-call", rendered, timestamp, call_id or None, kind,
+                       entry=entry, parent_entry=parent_entry, tool_name=str(calls[0].get("name") or "tool"))
+    if text:
+        normal = "assistant" if role == "assistant" else "context" if injected else "user"
+        return _record(normal, text, timestamp, raw_type=kind, entry=entry, parent_entry=parent_entry, role=role)
+    if any(block.get("type") == "thinking" for block in blocks):
+        return _record("reasoning", "", timestamp, raw_type=kind, entry=entry, parent_entry=parent_entry)
+    return _record("context" if injected else ("assistant" if role == "assistant" else "user"), "",
+                   timestamp, raw_type=kind, entry=entry, parent_entry=parent_entry)
+
+
+def _agy_record(obj):
+    kind = obj.get("type") or "unknown"
+    timestamp = obj.get("created_at")
+    source = obj.get("source")
+    status = obj.get("status")
+    step = obj.get("step_index")
+    truncated = bool(obj.get("truncated_fields"))
+    text = _content_text(obj.get("content", ""))
+    if kind == "USER_INPUT":
+        return _record("user", text, timestamp, raw_type=kind, role="user", truncated=truncated)
+    if kind == "PLANNER_RESPONSE":
+        calls = [call for call in obj.get("tool_calls") or [] if isinstance(call, dict)]
+        if calls:
+            rendered = "\n".join(str(call.get("name") or "tool") + "\n" + _text_value(call.get("args", {})) for call in calls)
+            call_id = ",".join("%s:%d" % (step, index) for index in range(len(calls)))
+            if text:
+                return _record("assistant", text + "\n" + rendered, timestamp, call_id, kind,
+                               role="assistant", synthetic_id=True, truncated=truncated)
+            return _record("tool-call", rendered, timestamp, call_id, kind,
+                           tool_name=str(calls[0].get("name") or "tool"), synthetic_id=True, truncated=truncated)
+        return _record("assistant", text, timestamp, raw_type=kind, role="assistant", truncated=truncated)
+    if kind == "CHECKPOINT":
+        return _record("compacted", text, timestamp, raw_type=kind, truncated=truncated)
+    if kind == "SYSTEM_MESSAGE":
+        return _record("context", text, timestamp, raw_type=kind, truncated=truncated)
+    if kind == "GENERIC":
+        if source == "SYSTEM":
+            return _record("context", text, timestamp, raw_type=kind, truncated=truncated)
+        outcome = {"ERROR": "error", "DONE": "ok"}.get(str(status)) if status else None
+        return _record("tool-output", text, timestamp, raw_type=kind, outcome=outcome, truncated=truncated)
+    return _record("unknown:" + str(kind), text, timestamp, raw_type=kind, truncated=truncated)
+
+
 def _grok_record(obj):
     kind = obj.get("type") or "unknown"
     timestamp = obj.get("timestamp")
@@ -498,6 +620,10 @@ def normalize(obj: dict[str, Any], harness: Harness = "codex") -> list[dict[str,
         return [_grok_record(obj)]
     if harness == "pi":
         return [_pi_record(obj)]
+    if harness == "cmd":
+        return [_cmd_record(obj)]
+    if harness == "agy":
+        return [_agy_record(obj)]
     if harness in DATABASE_HARNESSES:
         raise ValueError("database transcripts are read with opencode_events, not normalize")
     raise ValueError("unsupported transcript harness: " + str(harness))
@@ -563,12 +689,82 @@ def _json_text(value):
         return None
 
 
+def _cmd_header(path, objects, header, open_source):
+    first = objects[0] if objects and objects[0].get("type") == "session" else {}
+    native = first.get("id") or path.stem
+    header["native_id"] = str(native)
+    header["cwd"] = first.get("cwd") if isinstance(first.get("cwd"), str) else ""
+    meta = _sibling_json(path, path.stem + ".meta.json", open_source, None)
+    meta = meta if isinstance(meta, dict) else {}
+    branch_point = meta.get("branchPoint")
+    header["branch_tip"] = str(branch_point) if isinstance(branch_point, str) else None
+    parent = meta.get("parentSessionId")
+    if not isinstance(parent, str) and isinstance(first.get("parentSession"), str):
+        raw = Path(first["parentSession"]).name
+        parent = raw[:-len(".jsonl")] if raw.endswith(".jsonl") else raw
+    header["parent_native"] = str(parent) if parent else None
+    header["thread_source"] = "child" if parent else "user"
+    header["source"] = _json_text({"subagent": {"parent": parent}} if parent else "user")
+    return header
+
+
+def _antigravity_row(path):
+    conversation = path.parents[2].name
+    database = path.parents[4] / ANTIGRAVITY_DB
+    if not database.is_file() or database.is_symlink():
+        return conversation, None
+    try:
+        connection = sqlite3.connect("file:%s?mode=ro" % database.as_posix(), uri=True, timeout=5)
+        try:
+            connection.row_factory = sqlite3.Row
+            return conversation, connection.execute(
+                "SELECT workspace_uris, parent_conversation_id, nesting_depth, step_count FROM conversation_summaries WHERE conversation_id = ?",
+                (conversation,)).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.DatabaseError:
+        return conversation, None
+
+
+def _antigravity_header(path, header):
+    conversation, row = _antigravity_row(path)
+    header["native_id"] = conversation
+    header["ancestry"] = "known"
+    workspaces = []
+    if row is not None:
+        try:
+            raw = json.loads(row["workspace_uris"] or "[]")
+        except (TypeError, ValueError):
+            raw = []
+        if isinstance(raw, list):
+            for value in raw:
+                if not isinstance(value, str):
+                    continue
+                text = unquote(value[7:]) if value.startswith("file://") else value
+                if text.startswith("/") and text not in workspaces:
+                    workspaces.append(text)
+        parent = row["parent_conversation_id"]
+        header["parent_native"] = str(parent) if parent else None
+        header["step_count"] = int(row["step_count"] or 0)
+        header["thread_source"] = "subagent" if parent else "user"
+        header["source"] = _json_text({"subagent": {"parent": parent}} if parent else "user")
+    else:
+        header["thread_source"] = None
+        header["source"] = None
+        header["ancestry"] = "unknown"
+        header["step_count"] = None
+    header["workspaces"] = workspaces
+    header["cwd"] = workspaces[0] if len(workspaces) == 1 else ""
+    return header
+
+
 def read_header(harness, path, open_source, stats=None):
     lines, info = _head_lines(path, open_source, stats, HEADER_SCAN_LINES if harness in ("claude", "muse") else 1)
     first = lines[0] if lines else b""
     header = {
         "native_id": path.stem, "cwd": "", "parent": None, "source": None, "thread_source": None,
         "ancestry": "known", "first": first, "file_stat": info, "parent_native": None,
+        "branch_tip": None, "workspaces": [], "step_count": None,
     }
     objects = [obj for obj in (_json_object(raw) for raw in lines) if obj is not None]
     if harness == "codex":
@@ -641,6 +837,10 @@ def read_header(harness, path, open_source, stats=None):
             header["thread_source"] = "user"
             header["source"] = _json_text("user")
         return header
+    if harness == "cmd":
+        return _cmd_header(path, objects, header, open_source)
+    if harness == "agy":
+        return _antigravity_header(path, header)
     header["native_id"] = path.parent.name
     summary = _sibling_json(path, "summary.json", open_source, stats)
     raw_info = summary.get("info") if isinstance(summary, dict) else None

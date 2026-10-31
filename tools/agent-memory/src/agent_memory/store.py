@@ -17,12 +17,13 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from agent_memory.transcripts import opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, qualified_id, read_header
+from agent_memory.transcripts import opencode_database, opencode_events, opencode_record, clean_native_id, coerce_roots, is_source_name, normalize, prefers_sibling, qualified_id, read_header
 from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 ARCHIVE_DIRNAME = "archive"
+ARCHIVE_OBJECTS = "objects"
 ARCHIVE_COMPANIONS = {"grok": ("summary.json", "events.jsonl")}
 _REDACTIONS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
@@ -210,6 +211,9 @@ def _metadata(path, harness, project_cache, stats=None):
         "file_ino": file_stat.st_ino,
         "header_digest": _sha256(first) if first else "",
         "updated": file_stat.st_mtime,
+        "branch_tip": header.get("branch_tip"),
+        "workspaces": json.dumps(header["workspaces"], separators=(",", ":")) if header.get("workspaces") else None,
+        "step_count": header.get("step_count"),
     }, None
 
 
@@ -307,12 +311,15 @@ def _archive_copy(source, destination):
     return True
 
 
-def active_branch(events):
+def active_branch(events, tip=None):
     parents = {event["entry"]: event["parent_entry"] for event in events if event["entry"] is not None}
     if not parents:
         return list(events)
     path = set()
-    current = max((event for event in events if event["entry"] is not None), key=lambda event: event["position"])["entry"]
+    if tip is not None and tip in parents:
+        current = tip
+    else:
+        current = max((event for event in events if event["entry"] is not None), key=lambda event: event["position"])["entry"]
     while current in parents and current not in path:
         path.add(current)
         current = parents[current]
@@ -386,7 +393,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, 4, 5, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -412,6 +419,11 @@ class Store:
                 if not self._schema_ready(5):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v5()
+                version = 6
+            if version == 6:
+                if not self._schema_ready(6):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v6()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -449,6 +461,9 @@ class Store:
             and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns))
             and (expected_version < 5 or "forgotten_sessions" in existing)
             and (expected_version < 6 or {"entry", "parent_entry"} <= event_columns)
+            and (expected_version < 7 or ({"branch_tip", "workspaces", "step_count"} <= session_columns
+                 and "synthetic_id" in event_columns
+                 and {"archive_generation", "archive_object", "tombstone", "collector_identity", "project_map"} <= existing))
         )
 
     def _migrate_v1(self):
@@ -522,6 +537,50 @@ class Store:
             self.db.rollback()
             raise
 
+    def _migrate_v6(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "ALTER TABLE sessions ADD COLUMN branch_tip TEXT;"
+                "ALTER TABLE sessions ADD COLUMN workspaces TEXT;"
+                "ALTER TABLE sessions ADD COLUMN step_count INTEGER;"
+                "ALTER TABLE events ADD COLUMN synthetic_id INTEGER NOT NULL DEFAULT 0;"
+                "CREATE TABLE IF NOT EXISTS collector_identity ("
+                "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS origin_host ("
+                "id TEXT PRIMARY KEY, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS project_map ("
+                "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, name TEXT NOT NULL, checkout_path TEXT, "
+                "created_at REAL NOT NULL, UNIQUE(origin_host, name));"
+                "CREATE TABLE IF NOT EXISTS archive_object ("
+                "digest TEXT PRIMARY KEY, size INTEGER NOT NULL, created_at REAL NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS archive_generation ("
+                "id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
+                "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
+                "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
+                "tombstoned INTEGER NOT NULL DEFAULT 0, "
+                "UNIQUE(origin_host, harness, native_id, source_digest));"
+                "CREATE TABLE IF NOT EXISTS archive_generation_object ("
+                "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
+                "ordinal INTEGER NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, offset INTEGER NOT NULL, "
+                "PRIMARY KEY(generation, ordinal));"
+                "CREATE TABLE IF NOT EXISTS archive_artifact ("
+                "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
+                "name TEXT NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(generation, name));"
+                "CREATE TABLE IF NOT EXISTS transfer_generation ("
+                "id INTEGER PRIMARY KEY, generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
+                "remote TEXT NOT NULL, durable_at REAL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, "
+                "UNIQUE(generation, remote));"
+                "CREATE TABLE IF NOT EXISTS tombstone ("
+                "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
+                "scope TEXT NOT NULL CHECK(scope IN ('local','global')), forgotten_at REAL NOT NULL, "
+                "PRIMARY KEY(origin_host, harness, native_id));"
+                "PRAGMA user_version = 7;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
     def _create_schema(self):
         self.db.executescript(
             "BEGIN IMMEDIATE;"
@@ -533,7 +592,8 @@ class Store:
             "checkpoint_position INTEGER, checkpoint_digest TEXT, malformed_lines INTEGER NOT NULL DEFAULT 0, "
             "partial_bytes INTEGER NOT NULL DEFAULT 0, coverage TEXT NOT NULL DEFAULT 'complete', native_id TEXT, "
             "ancestry TEXT NOT NULL DEFAULT 'known' CHECK(ancestry IN ('known','unknown')), "
-            "recognized_events INTEGER NOT NULL DEFAULT 0, unrecognized_events INTEGER NOT NULL DEFAULT 0);"
+            "recognized_events INTEGER NOT NULL DEFAULT 0, unrecognized_events INTEGER NOT NULL DEFAULT 0, "
+            "branch_tip TEXT, workspaces TEXT, step_count INTEGER);"
             "CREATE TABLE unindexed_sources ("
             "id TEXT NOT NULL, project TEXT, cwd TEXT NOT NULL, parent TEXT, source TEXT, thread_source TEXT, "
             "harness TEXT NOT NULL, source_path TEXT PRIMARY KEY, updated REAL NOT NULL, file_size INTEGER NOT NULL, "
@@ -544,7 +604,8 @@ class Store:
             "CREATE TABLE events ("
             "id INTEGER PRIMARY KEY, session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, "
             "position INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, timestamp TEXT, call_id TEXT, "
-            "raw_type TEXT, digest TEXT NOT NULL, outcome TEXT CHECK(outcome IN ('ok','error')), entry TEXT, parent_entry TEXT, UNIQUE(session, position));"
+            "raw_type TEXT, digest TEXT NOT NULL, outcome TEXT CHECK(outcome IN ('ok','error')), entry TEXT, parent_entry TEXT, "
+            "synthetic_id INTEGER NOT NULL DEFAULT 0, UNIQUE(session, position));"
             "CREATE INDEX events_session_position ON events(session, position);"
             "CREATE VIRTUAL TABLE events_fts USING fts5(text, content='events', content_rowid='id');"
             "CREATE TRIGGER events_ai AFTER INSERT ON events BEGIN "
@@ -558,6 +619,36 @@ class Store:
             "CREATE TABLE index_issues ("
             "session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, position INTEGER NOT NULL, "
             "kind TEXT NOT NULL, PRIMARY KEY(session, position));"
+            "CREATE TABLE IF NOT EXISTS collector_identity ("
+            "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS origin_host ("
+            "id TEXT PRIMARY KEY, display_label TEXT NOT NULL, created_at REAL NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS project_map ("
+            "id TEXT PRIMARY KEY, origin_host TEXT NOT NULL, name TEXT NOT NULL, checkout_path TEXT, "
+            "created_at REAL NOT NULL, UNIQUE(origin_host, name));"
+            "CREATE TABLE IF NOT EXISTS archive_object ("
+            "digest TEXT PRIMARY KEY, size INTEGER NOT NULL, created_at REAL NOT NULL);"
+            "CREATE TABLE IF NOT EXISTS archive_generation ("
+            "id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
+            "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
+            "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
+            "tombstoned INTEGER NOT NULL DEFAULT 0, "
+            "UNIQUE(origin_host, harness, native_id, source_digest));"
+            "CREATE TABLE IF NOT EXISTS archive_generation_object ("
+            "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
+            "ordinal INTEGER NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, offset INTEGER NOT NULL, "
+            "PRIMARY KEY(generation, ordinal));"
+            "CREATE TABLE IF NOT EXISTS archive_artifact ("
+            "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
+            "name TEXT NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY(generation, name));"
+            "CREATE TABLE IF NOT EXISTS transfer_generation ("
+            "id INTEGER PRIMARY KEY, generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
+            "remote TEXT NOT NULL, durable_at REAL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, "
+            "UNIQUE(generation, remote));"
+            "CREATE TABLE IF NOT EXISTS tombstone ("
+            "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
+            "scope TEXT NOT NULL CHECK(scope IN ('local','global')), forgotten_at REAL NOT NULL, "
+            "PRIMARY KEY(origin_host, harness, native_id));"
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
@@ -658,7 +749,10 @@ class Store:
                     continue
                 for filename in filenames:
                     if is_source_name(harness, filename):
-                        paths.append(Path(directory) / filename)
+                        candidate = Path(directory) / filename
+                        if prefers_sibling(harness, candidate):
+                            continue
+                        paths.append(candidate)
             for error_path in walk_errors:
                 stats["unreadable"] += 1
                 unreadable_paths.add(str(Path(error_path.filename or root).absolute()))
@@ -1009,12 +1103,14 @@ class Store:
             with self.db:
                 self.db.execute(
                     "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
-                    "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry) "
-                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ? "
+                    "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, "
+                    "branch_tip, workspaces, step_count) "
+                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ? "
                     "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
                     (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
                      meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
-                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"], meta["id"]),
+                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"],
+                     meta.get("branch_tip"), meta.get("workspaces"), meta.get("step_count"), meta["id"]),
                 )
                 self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
@@ -1055,11 +1151,17 @@ class Store:
                         else:
                             for record in records:
                                 self.db.execute(
-                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome, entry, parent_entry) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome, entry, parent_entry, synthetic_id) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                     (meta["id"], position, record["kind"], record["text"], record["timestamp"],
-                                     record["call_id"], record["raw_type"], digest, record["outcome"], record.get("entry"), record.get("parent_entry")),
+                                     record["call_id"], record["raw_type"], digest, record["outcome"], record.get("entry"),
+                                     record.get("parent_entry"), 1 if record.get("synthetic_id") else 0),
                                 )
+                                if record.get("truncated"):
+                                    self.db.execute(
+                                        "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'truncated_content')",
+                                        (meta["id"], position),
+                                    )
                                 added += 1
                                 if record["kind"].startswith("unknown:"):
                                     unrecognized += 1
@@ -1086,6 +1188,12 @@ class Store:
                         coverage = "degraded"
                     else:
                         coverage = "complete"
+                    if coverage == "complete" and meta.get("step_count") and totals[0] + totals[1] < meta["step_count"]:
+                        coverage = "degraded"
+                        self.db.execute(
+                            "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'truncated_session')",
+                            (meta["id"], 0),
+                        )
                     self.db.execute(
                         "UPDATE sessions SET updated = ?, file_size = ?, file_mtime_ns = ?, file_ctime_ns = ?, indexed_bytes = ?, "
                         "checkpoint_position = ?, checkpoint_digest = ?, malformed_lines = ?, partial_bytes = ?, coverage = ?, "

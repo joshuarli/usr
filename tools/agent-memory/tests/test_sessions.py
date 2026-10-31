@@ -28,6 +28,8 @@ sys.modules[SPEC.name] = STORE_MODULE
 SPEC.loader.exec_module(STORE_MODULE)
 Store = STORE_MODULE.Store
 StoreError = STORE_MODULE.StoreError
+active_branch = STORE_MODULE.active_branch
+from agent_memory.transcripts import canonical_harness  # noqa: E402
 normalize = STORE_MODULE.normalize
 project_identity = STORE_MODULE.project_identity
 redact = STORE_MODULE.redact
@@ -426,9 +428,14 @@ class SessionStoreTests(unittest.TestCase):
         db.execute("ALTER TABLE events DROP COLUMN outcome")
         db.execute("ALTER TABLE events DROP COLUMN entry")
         db.execute("ALTER TABLE events DROP COLUMN parent_entry")
+        db.execute("ALTER TABLE events DROP COLUMN synthetic_id")
         db.execute("DROP TABLE forgotten_sessions")
+        for table in ("tombstone", "transfer_generation", "archive_artifact", "archive_generation_object",
+                      "archive_generation", "archive_object", "project_map", "origin_host", "collector_identity"):
+            db.execute("DROP TABLE IF EXISTS " + table)
         if sessions:
-            for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events"):
+            for column in ("native_id", "ancestry", "recognized_events", "unrecognized_events",
+                           "branch_tip", "workspaces", "step_count"):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
 
     def test_schema_v1_migrates_metadata_without_rebuilding_index(self):
@@ -465,7 +472,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("CREATE INDEX sessions_parent ON sessions(parent)")
             db.execute("PRAGMA user_version = 1")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
             self.assertIsNone(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0])
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy'").fetchone()[0], 2)
@@ -485,7 +492,7 @@ class SessionStoreTests(unittest.TestCase):
             self.downgrade_v4_columns(db)
             db.execute("PRAGMA user_version = 2")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy-v2'").fetchone()[0], 2)
             self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 0)
             stats = store.refresh([self.transcripts], project=self.project_id)
@@ -517,7 +524,7 @@ class SessionStoreTests(unittest.TestCase):
             store.refresh([self.transcripts], project=self.project_id)
             before = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
             after = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
             self.assertEqual(before, after)
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints").fetchone()[0], "keep")
@@ -542,9 +549,15 @@ class SessionStoreTests(unittest.TestCase):
         with sqlite3.connect(Store.database_path(self.state)) as db:
             db.execute("ALTER TABLE events DROP COLUMN entry")
             db.execute("ALTER TABLE events DROP COLUMN parent_entry")
+            db.execute("ALTER TABLE events DROP COLUMN synthetic_id")
+            for table in ("tombstone", "transfer_generation", "archive_artifact", "archive_generation_object",
+                          "archive_generation", "archive_object", "project_map", "origin_host", "collector_identity"):
+                db.execute("DROP TABLE IF EXISTS " + table)
+            for column in ("branch_tip", "workspaces", "step_count"):
+                db.execute("ALTER TABLE sessions DROP COLUMN " + column)
             db.execute("PRAGMA user_version = 5")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
             self.assertEqual([row[0] for row in store.db.execute("SELECT id FROM sessions")], ["keep"])
             store.refresh(roots, project=self.project_id)
             self.assertEqual(store.db.execute("SELECT entry, parent_entry FROM events WHERE session = 'pi:p1' AND kind = 'user'").fetchone()[:], ("u1", None))
@@ -1272,6 +1285,187 @@ class HarnessIndexTests(unittest.TestCase):
         self.assertIn("session=claude:cli1", result.stdout)
         self.assertIn("harness=claude", result.stdout)
         self.assertNotIn("session=cx", result.stdout)
+
+
+CMD_HEADER = {"type": "session", "version": 3, "id": "cc-1", "timestamp": "2026-10-30T10:00:00Z"}
+
+
+def cmd_entry(entry_id, parent, role, content, meta=None, timestamp="2026-10-30T10:00:01Z"):
+    message = {"role": role, "content": content, "meta": {"messageId": entry_id, "source": "user" if role == "user" else "model"}}
+    if meta:
+        message["meta"].update(meta)
+    return {"type": "message", "id": entry_id, "parentId": parent, "timestamp": timestamp, "message": message}
+
+
+def agy_record(kind, step, content="", source="MODEL", status="DONE", **extra):
+    record = {"type": kind, "created_at": "2026-10-30T10:00:00Z", "source": source,
+              "status": status, "step_index": step, "content": content}
+    record.update(extra)
+    return record
+
+
+class NewHarnessTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temp.name)
+        self.state = self.root / "state"
+        self.project = self.root / "project"
+        self.project.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        self.project_id = project_identity(self.project)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def cmd_session(self, records, session="cc-1", meta=None, cwd=None):
+        directory = self.root / "cmd" / "users-josh-project"
+        directory.mkdir(parents=True, exist_ok=True)
+        header = dict(CMD_HEADER, id=session, cwd=cwd or str(self.project))
+        path = directory / (session + ".jsonl")
+        path.write_bytes(line(header) + b"".join(line(record) for record in records))
+        if meta is not None:
+            (directory / (session + ".meta.json")).write_text(json.dumps(meta))
+        return directory, path
+
+    def agy_conversation(self, conversation, records, workspaces=None, parent=None, step_count=None, full=True, chunks=False):
+        base = self.root / "agy"
+        logs = base / "brain" / conversation / ".system_generated" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        payload = b"".join(line(record) for record in records)
+        (logs / "transcript_full.jsonl").write_bytes(payload)
+        if not full:
+            (logs / "transcript_full.jsonl").unlink()
+        (logs / "transcript.jsonl").write_bytes(payload)
+        if chunks:
+            chunk_dir = logs / "chunks" / "transcript_full"
+            chunk_dir.mkdir(parents=True, exist_ok=True)
+            (chunk_dir / "00000000.jsonl").write_bytes(payload)
+        database = base / "conversation_summaries.db"
+        with sqlite3.connect(database) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS conversation_summaries (conversation_id TEXT PRIMARY KEY, workspace_uris TEXT, "
+                       "parent_conversation_id TEXT, nesting_depth INTEGER, step_count INTEGER)")
+            db.execute("INSERT OR REPLACE INTO conversation_summaries VALUES (?, ?, ?, ?, ?)",
+                       (conversation, json.dumps([value for value in (workspaces or [])]), parent,
+                        1 if parent else 0, step_count if step_count is not None else len(records)))
+        return base
+
+    def test_cmd_normalizes_blocks_tool_ids_and_keeps_unknown_entries(self):
+        records = [
+            cmd_entry("m1", None, "user", [{"type": "text", "text": "run the tests"}]),
+            cmd_entry("m2", "m1", "assistant", [
+                {"type": "thinking", "thinking": "private", "signature": "s"},
+                {"type": "text", "text": "running"},
+                {"type": "tool_use", "id": "t1", "name": "Shell", "input": {"command": "cargo test"}},
+            ]),
+            cmd_entry("m3", "m2", "user", [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "exited with code 0"}]}]),
+            {"type": "model_change", "id": "m4", "parentId": "m3", "timestamp": "2026-10-30T10:00:02Z", "model": "x"},
+            {"type": "future_entry", "id": "m5", "parentId": "m4", "timestamp": "2026-10-30T10:00:03Z", "detail": "retained"},
+        ]
+        directory, _ = self.cmd_session(records)
+        with Store(self.state) as store:
+            stats = store.refresh({"cmd": [directory]}, project=self.project_id)
+            self.assertEqual(stats["sessions_indexed"], 1)
+            session = "cmd:cc-1"
+            call = store.db.execute("SELECT kind, call_id, text FROM events WHERE session=? AND call_id='t1'", (session,)).fetchone()
+            self.assertEqual((call["kind"], call["call_id"]), ("assistant", "t1"))
+            self.assertIn("cargo test", call["text"])
+            result = store.db.execute("SELECT outcome, text FROM events WHERE session=? AND kind='tool-output'", (session,)).fetchone()
+            self.assertEqual(result["outcome"], "ok")
+            self.assertIn("exited with code 0", result["text"])
+            unknown = store.db.execute("SELECT kind FROM events WHERE session=? AND kind LIKE 'unknown:%'", (session,)).fetchone()
+            self.assertEqual(unknown["kind"], "unknown:future_entry")
+            self.assertEqual(store.coverage()[0]["harness"], "cmd")
+
+    def test_cmd_tool_result_without_status_stays_unknown(self):
+        records = [
+            cmd_entry("m1", None, "user", [{"type": "text", "text": "go"}]),
+            cmd_entry("m2", "m1", "assistant", [{"type": "tool_use", "id": "t1", "name": "Read", "input": {}}]),
+            cmd_entry("m3", "m2", "user", [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "file contents"}]}]),
+        ]
+        directory, _ = self.cmd_session(records)
+        with Store(self.state) as store:
+            store.refresh({"cmd": [directory]}, project=self.project_id)
+            row = store.db.execute("SELECT outcome FROM events WHERE kind='tool-output'").fetchone()
+            self.assertIsNone(row["outcome"])
+
+    def test_cmd_fork_uses_branch_point_not_the_newest_line(self):
+        records = [
+            cmd_entry("m1", None, "user", [{"type": "text", "text": "start"}]),
+            cmd_entry("m2", "m1", "assistant", [{"type": "text", "text": "abandoned failure"}]),
+            cmd_entry("m3", "m2", "assistant", [{"type": "text", "text": "active success"}]),
+        ]
+        directory, _ = self.cmd_session(records, meta={"parentSessionId": "source", "branchPoint": "m2"})
+        with Store(self.state) as store:
+            store.refresh({"cmd": [directory]}, project=self.project_id)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='cmd:cc-1'").fetchone()[0], 4)
+            rows = [dict(row) for row in store.db.execute("SELECT position, text, entry, parent_entry FROM events WHERE session='cmd:cc-1' AND kind='assistant' ORDER BY position")]
+            self.assertEqual(active_branch(rows, "m2")[-1]["text"], "abandoned failure")
+            self.assertEqual(rows[-1]["text"], "active success")
+            self.assertEqual(store.db.execute("SELECT parent FROM sessions WHERE id='cmd:cc-1'").fetchone()[0], "cmd:source")
+
+    def test_agy_prefers_the_full_transcript_and_never_indexes_chunks(self):
+        records = [
+            agy_record("USER_INPUT", 0, "please investigate", source="USER_EXPLICIT"),
+            agy_record("PLANNER_RESPONSE", 1, "looking", tool_calls=[{"name": "read_file", "args": {"path": "a"}}]),
+            agy_record("GENERIC", 2, "result text", status="DONE"),
+        ]
+        base = self.agy_conversation("conv-1", records, workspaces=[str(self.project)], chunks=True)
+        with Store(self.state) as store:
+            stats = store.refresh({"agy": [base / "brain"]}, project=self.project_id)
+            self.assertEqual(stats["sessions_indexed"], 1)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
+            session = "agy:conv-1"
+            kinds = [row[0] for row in store.db.execute("SELECT kind FROM events WHERE session=? ORDER BY position", (session,))]
+            self.assertEqual(kinds, ["user", "assistant", "tool-output"])
+            self.assertEqual(store.db.execute("SELECT cwd FROM sessions WHERE id=?", (session,)).fetchone()[0], str(self.project))
+
+    def test_agy_maps_status_and_reports_truncation(self):
+        records = [
+            agy_record("USER_INPUT", 0, "go", source="USER_EXPLICIT"),
+            agy_record("PLANNER_RESPONSE", 1, "", tool_calls=[{"name": "shell", "args": {}}]),
+            agy_record("GENERIC", 2, "boom", status="ERROR"),
+            agy_record("GENERIC", 3, "short", truncated_fields=["content"]),
+            agy_record("CHECKPOINT", 4, "summary"),
+        ]
+        base = self.agy_conversation("conv-2", records, workspaces=[str(self.project)])
+        with Store(self.state) as store:
+            store.refresh({"agy": [base / "brain"]}, project=self.project_id)
+            session = "agy:conv-2"
+            self.assertEqual(store.db.execute("SELECT outcome FROM events WHERE session=? AND position=(SELECT min(position) FROM events WHERE session=? AND kind='tool-output')", (session, session)).fetchone()[0], "error")
+            self.assertEqual(store.db.execute("SELECT synthetic_id FROM events WHERE session=? AND kind='tool-call'", (session,)).fetchone()[0], 1)
+            self.assertEqual(store.db.execute("SELECT kind FROM events WHERE session=? AND kind='compacted'", (session,)).fetchone()[0], "compacted")
+            self.assertEqual(store.db.execute("SELECT kind FROM index_issues WHERE session=? AND kind='truncated_content'", (session,)).fetchone()[0], "truncated_content")
+            self.assertEqual(store.db.execute("SELECT coverage FROM sessions WHERE id=?", (session,)).fetchone()[0], "degraded")
+
+    def test_agy_distinguishes_multiple_workspaces_and_subagent_lineage(self):
+        records = [agy_record("USER_INPUT", 0, "go", source="USER_EXPLICIT")]
+        base = self.agy_conversation("parent-1", records, workspaces=[str(self.project)])
+        self.agy_conversation("child-1", records, workspaces=[str(self.project), "/other/checkout"], parent="parent-1")
+        with Store(self.state) as store:
+            store.refresh({"agy": [base / "brain"]}, project=None)
+            row = store.db.execute("SELECT cwd, workspaces, parent FROM sessions WHERE id='agy:child-1'").fetchone()
+            self.assertEqual(row["cwd"], "")
+            self.assertEqual(json.loads(row["workspaces"]), [str(self.project), "/other/checkout"])
+            self.assertEqual(row["parent"], "agy:parent-1")
+
+    def test_agy_without_summary_database_reports_unknown_ancestry(self):
+        base = self.root / "agy-missing"
+        logs = base / "brain" / "conv-3" / ".system_generated" / "logs"
+        logs.mkdir(parents=True)
+        (logs / "transcript.jsonl").write_bytes(line(agy_record("USER_INPUT", 0, "go", source="USER_EXPLICIT")))
+        with Store(self.state) as store:
+            store.refresh({"agy": [base / "brain"]}, project=None)
+            row = store.db.execute("SELECT cwd, ancestry, source FROM sessions WHERE id='agy:conv-3'").fetchone()
+            self.assertEqual((row["cwd"], row["ancestry"], row["source"]), ("", "unknown", None))
+
+    def test_harness_aliases_normalize_once(self):
+        self.assertEqual(canonical_harness("command-code"), "cmd")
+        self.assertEqual(canonical_harness("commandcode"), "cmd")
+        self.assertEqual(canonical_harness("command"), "cmd")
+        self.assertEqual(canonical_harness("antigravity"), "agy")
+        self.assertEqual(canonical_harness("cmd"), "cmd")
+        with self.assertRaises(ValueError):
+            canonical_harness("nope")
 
 
 if __name__ == "__main__":

@@ -8,8 +8,13 @@ recognize), so kinds remain plain strings grouped by the *_KINDS tuples.
 """
 from typing import Final, Literal
 
-Harness = Literal["codex", "claude", "muse", "grok", "opencode", "pi"]
-HARNESSES: Final[tuple[Harness, ...]] = ("codex", "claude", "muse", "grok", "opencode", "pi")
+Harness = Literal["codex", "claude", "muse", "grok", "opencode", "pi", "cmd", "agy"]
+HARNESSES: Final[tuple[Harness, ...]] = ("codex", "claude", "muse", "grok", "opencode", "pi", "cmd", "agy")
+
+HARNESS_ALIASES: Final[dict[str, Harness]] = {
+    "command": "cmd", "command-code": "cmd", "commandcode": "cmd",
+    "antigravity": "agy",
+}
 
 DatabaseHarness = Literal["opencode"]
 DATABASE_HARNESSES: Final[tuple[DatabaseHarness, ...]] = ("opencode",)

@@ -430,7 +430,9 @@ class Learner:
     def _events(self, session):
         rows = list(self.db.execute("SELECT * FROM events WHERE session=? ORDER BY position DESC,id DESC LIMIT ?", (session, MAX_EVENTS + 1)))
         truncated = len(rows) > MAX_EVENTS
-        return active_branch([dict(row) for row in reversed(rows[:MAX_EVENTS])]), truncated
+        row = self.db.execute("SELECT branch_tip FROM sessions WHERE id=?", (session,)).fetchone()
+        tip = row["branch_tip"] if row is not None else None
+        return active_branch([dict(item) for item in reversed(rows[:MAX_EVENTS])], tip), truncated
 
     def _attributed_finding(self, signal, text):
         if signal == "correction" and re.search(r"\b(caused|regression|contradicts)\b", text, re.I):

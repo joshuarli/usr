@@ -8,9 +8,9 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from typing import cast
 
 from agent_memory.store import Store, StoreError, default_state_dir, project_identity, rebuild_index, redact
+from agent_memory.transcripts import canonical_harness
 from agent_memory.types import HARNESSES, Harness
 
 
@@ -30,8 +30,11 @@ def _roots(args) -> dict[Harness, list[str]] | None:
     roots: dict[Harness, list[str]] = {}
     for value in args.root:
         name, separator, path = value.partition("=")
-        if separator and name in HARNESSES:
-            roots.setdefault(cast(Harness, name), []).append(path)
+        if separator:
+            try:
+                roots.setdefault(canonical_harness(name), []).append(path)
+            except ValueError:
+                roots.setdefault("codex", []).append(value)
         else:
             roots.setdefault("codex", []).append(value)
     return roots
@@ -40,7 +43,7 @@ def _roots(args) -> dict[Harness, list[str]] | None:
 def _harnesses(args) -> tuple[Harness, ...]:
     selected = getattr(args, "harness", None)
     if selected:
-        return cast(tuple[Harness, ...], tuple(selected))
+        return tuple(canonical_harness(value) for value in selected)
     return HARNESSES
 
 
@@ -261,14 +264,14 @@ def parser():
 
     refresh = commands.add_parser("refresh", help="incrementally index transcripts")
     refresh.add_argument("--state-dir")
-    refresh.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    refresh.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode, pi, cmd or agy (default codex)")
     _add_scope(refresh)
     refresh.set_defaults(run=_refresh)
 
     search = commands.add_parser("search", help="search indexed transcript text")
     search.add_argument("query", help="words, hyphenated identifiers, or quoted phrases; AND/OR combine terms")
     search.add_argument("--state-dir", help="session index state directory")
-    search.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    search.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode, pi, cmd or agy (default codex)")
     _add_scope(search)
     search.add_argument("--regex", action="store_true", help="scan indexed text using a Python regular expression")
     search.add_argument("--kind", action="append", help="only return this event kind, e.g. user, assistant, tool-call, tool-output; repeatable")
@@ -278,7 +281,7 @@ def parser():
 
     recent = commands.add_parser("recent", help="show the latest indexed event for each recent session")
     recent.add_argument("--state-dir")
-    recent.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    recent.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode, pi, cmd or agy (default codex)")
     _add_scope(recent)
     recent.add_argument("--kind", action="append", help="only include sessions whose latest matching event has this kind")
     recent.add_argument("--since", type=_since_value, help="only include events on or after an ISO date/time or duration such as 30d")
@@ -288,7 +291,7 @@ def parser():
     show = commands.add_parser("show", help="show source-verified events around a session byte offset")
     show.add_argument("session", help="session id as printed by search, e.g. opencode:ses_abc123")
     show.add_argument("--state-dir", help="session index state directory")
-    show.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode or pi (default codex)")
+    show.add_argument("--root", action="append", metavar="[HARNESS=]PATH", help="transcript root, repeatable; HARNESS is codex, claude, muse, grok, opencode, pi, cmd or agy (default codex)")
     _add_scope(show)
     show.add_argument("--position", type=int, help="anchor the window at this byte offset; default is latest event")
     show.add_argument("--before", type=int, default=3, help="events before the anchor (default %(default)s)")
@@ -306,7 +309,7 @@ def parser():
 
 
 def _add_scope(command):
-    command.add_argument("--harness", action="append", choices=HARNESSES, help="only index and search this harness; repeatable")
+    command.add_argument("--harness", action="append", metavar="NAME", help="only index and search this harness; repeatable")
     command.add_argument("--project", metavar="PATH", help="scope to this project path; defaults to the current repository")
     command.add_argument("--all-projects", action="store_true", help="search every indexed project")
 

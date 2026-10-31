@@ -582,7 +582,9 @@ def retire_stale(db, now, days=RETIRE_AFTER_DAYS):
 
 def session_events(db, session):
     rows = list(db.execute("SELECT position, digest, kind, text, timestamp, call_id, outcome, entry, parent_entry FROM events WHERE session = ? ORDER BY position DESC LIMIT ?", (session, MAX_EVENTS + 1)))
-    return active_branch([dict(row) for row in reversed(rows[:MAX_EVENTS])]), len(rows) > MAX_EVENTS
+    found = db.execute("SELECT branch_tip FROM sessions WHERE id = ?", (session,)).fetchone()
+    tip = found["branch_tip"] if found is not None else None
+    return active_branch([dict(row) for row in reversed(rows[:MAX_EVENTS])], tip), len(rows) > MAX_EVENTS
 
 
 def record_signatures(db, project, session, events, runs, outcomes, now):
