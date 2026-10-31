@@ -20,6 +20,7 @@ PROTOCOL = 1
 MAX_FRAME = 4 * 1024 * 1024
 MAX_BLOB = 64 * 1024 * 1024
 COMPRESSION = "zlib"
+LOCAL_SOCKET_TIMEOUT = 900
 
 
 def compress(data):
@@ -494,8 +495,8 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
     from agent_memory.store import Store
 
     left, right = socket.socketpair()
-    left.settimeout(30)
-    right.settimeout(30)
+    left.settimeout(LOCAL_SOCKET_TIMEOUT)
+    right.settimeout(LOCAL_SOCKET_TIMEOUT)
     failure = {}
 
     def serve():
@@ -505,6 +506,10 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
                     receiver(central, instream, outstream, allowed_origins=[origin])
         except BaseException as exc:  # noqa: BLE001 - reported to the caller
             failure["error"] = exc
+            try:
+                right.close()
+            except OSError:
+                pass
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()
@@ -512,15 +517,16 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
         with left.makefile("rb") as instream, left.makefile("wb") as outstream:
             sender = Sender(source_store, remote, instream, outstream, origin, label)
             sender.run(attempts, progress=progress)
-            return sender.stats
+            stats = sender.stats
     finally:
         try:
             left.close()
         except OSError:
             pass
-        thread.join(timeout=30)
-        if "error" in failure:
-            raise TransferError("central receiver failed: " + str(failure["error"])) from failure["error"]
+        thread.join(timeout=LOCAL_SOCKET_TIMEOUT)
+    if "error" in failure:
+        raise TransferError("central receiver failed: " + str(failure["error"])) from failure["error"]
+    return stats
 
 
 def handle_query(store, op, args):
