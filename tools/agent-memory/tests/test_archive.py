@@ -309,6 +309,27 @@ class ArchiveTests(unittest.TestCase):
             self.assertIsNotNone(generation)
             self.assertIn(b"legacy survivor", ARCHIVE.read_generation(store.db, store.archive_dir, generation))
 
+    def test_legacy_state_moves_to_the_canonical_directory_once(self):
+        legacy = self.root / "legacy" / "agent-sessions"
+        legacy.mkdir(parents=True)
+        (legacy / "sessions.sqlite3").write_text("db")
+        canonical = self.root / "home" / ".agent-sessions"
+        with mock.patch.object(STORE_MODULE, "legacy_state_dir", lambda: legacy), \
+                mock.patch.object(STORE_MODULE, "canonical_state_dir", lambda: canonical):
+            self.assertTrue(STORE_MODULE.migrate_legacy_state(canonical))
+            self.assertTrue((canonical / "sessions.sqlite3").is_file())
+            self.assertFalse(legacy.exists())
+            self.assertFalse(STORE_MODULE.migrate_legacy_state(canonical))
+            elsewhere = self.root / "elsewhere"
+            self.assertFalse(STORE_MODULE.migrate_legacy_state(elsewhere))
+
+    def test_state_directory_override_beats_the_canonical_default(self):
+        with mock.patch.dict(os.environ, {"AGENT_SESSIONS_STATE_DIR": str(self.root / "override")}):
+            self.assertEqual(STORE_MODULE.default_state_dir(), self.root / "override")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AGENT_SESSIONS_STATE_DIR", None)
+            self.assertEqual(STORE_MODULE.default_state_dir().name, ".agent-sessions")
+
     def test_generation_indexing_buffers_one_line_at_a_time(self):
         self.write("alpha")
         with Store(self.state) as store:

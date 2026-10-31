@@ -44,9 +44,45 @@ class EvidenceChanged(StoreError):
     pass
 
 
-def default_state_dir():
+CANONICAL_DIRNAME = ".agent-sessions"
+
+
+def canonical_state_dir():
+    return Path.home() / CANONICAL_DIRNAME
+
+
+def legacy_state_dir():
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
     return Path(base).expanduser() / "agent-sessions"
+
+
+def default_state_dir():
+    override = os.environ.get("AGENT_SESSIONS_STATE_DIR")
+    if override:
+        return Path(override).expanduser()
+    return canonical_state_dir()
+
+
+def migrate_legacy_state(path):
+    """Move the pre-canonical state directory aside exactly once.
+
+    Only the canonical default migrates. An explicit --state-dir, a test
+    directory, or an AGENT_SESSIONS_STATE_DIR override is left alone.
+    """
+    path = Path(os.path.abspath(str(Path(path).expanduser())))
+    if path != Path(os.path.abspath(str(canonical_state_dir()))):
+        return False
+    legacy = legacy_state_dir()
+    if not legacy.is_dir() or legacy == path or path.exists():
+        return False
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.rename(legacy, path)
+    except OSError as exc:
+        raise StoreError(
+            "legacy agent-sessions state at %s could not move to %s (%s); "
+            "move it with: mv %s %s" % (legacy, path, exc, legacy, path)) from exc
+    return True
 
 
 def redact(text):
@@ -148,6 +184,7 @@ def _open_database(path):
 
 def _prepare_state_dir(state_dir):
     path = Path(os.path.abspath(str(Path(state_dir).expanduser())))
+    migrate_legacy_state(path)
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current = current / part

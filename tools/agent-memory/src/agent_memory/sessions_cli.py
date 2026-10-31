@@ -128,6 +128,9 @@ def _snippet(text, query, regex):
 
 
 def config_path():
+    canonical = Path.home() / ".agent-sessions" / "config.json"
+    if canonical.is_file():
+        return canonical
     base = Path(os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config"))
     return base.expanduser() / "agent-sessions" / "config.json"
 
@@ -150,7 +153,7 @@ def central_settings(args):
     if getattr(args, "central_state", None):
         settings.update({"transport": "local", "state_dir": args.central_state})
     if not settings:
-        raise StoreError("no central store is configured; set ~/.config/agent-sessions/config.json or pass --central-state")
+        raise StoreError("no central store is configured; set ~/.agent-sessions/config.json or pass --central-state")
     return settings
 
 
@@ -274,7 +277,7 @@ def _sync(args):
             if args.central_state:
                 settings.update({"transport": "local", "state_dir": args.central_state})
             if not settings:
-                raise StoreError("no central store is configured; set ~/.config/agent-sessions/config.json or pass --central-state")
+                raise StoreError("no central store is configured; set ~/.agent-sessions/config.json or pass --central-state")
             store.refresh(roots=_roots(args), project=None, harnesses=_harnesses(args))
             origin = archive_module.origin_for(store.db)
             pending = store.pending_transfers(args.to)

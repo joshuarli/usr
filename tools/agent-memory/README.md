@@ -2,7 +2,7 @@
 
 The `agent-learn` and `agent-sessions` launchers require Python 3.15 or newer. If `python3` is older, they use `uv` to select a compatible interpreter.
 
-`agent-learn` keeps one local SQLite state at `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/sessions.sqlite3`. It holds three levels of knowledge, each with its own trust and cost boundary:
+`agent-learn` keeps one local state directory at `~/.agent-sessions`, holding `sessions.sqlite3`, the archive, and an optional `config.json`. `AGENT_SESSIONS_STATE_DIR` overrides it and `--state-dir` overrides both. It holds three levels of knowledge, each with its own trust and cost boundary:
 
 | Level | What it is | Needs |
 | --- | --- | --- |
@@ -64,7 +64,7 @@ agent-learn enable --all-projects --usr-root "$HOME/usr" --schedule
 
 On macOS, `--schedule` installs a user LaunchAgent that runs `agent-learn run --scheduled` every 15 minutes. Without it, run reconciliation yourself; Linux has no bundled scheduler. The dotfiles sync does not install or start the LaunchAgent.
 
-Each run starts at most two finding reviews. A review starts only when the previous 24 hours leave room for its full reservation: four model calls within a 24-call budget, two for a regression monitor. The reservation is written before the first call and replaced by recorded usage when the review finishes, so a crash cannot hide spend and the budget is a hard cap. `agent-learn status` reports `model_calls_24h`, `model_tokens_24h`, deferred reviews, and rejected candidates.
+Each run starts at most two finding reviews. A review starts only when the previous 24 hours leave room for its full reservation: four model calls within a 24-call budget, two for a regression monitor. The reservation is written before the first call and replaced by recorded usage when the review finishes, so a crash cannot hide spend and the budget is a hard cap. A state directory left at the old `${XDG_STATE_HOME:-~/.local/state}/agent-sessions` moves to `~/.agent-sessions` once, on the first command that opens it; an explicit `--state-dir` and a test directory never move. `agent-learn status` reports `model_calls_24h`, `model_tokens_24h`, deferred reviews, and rejected candidates.
 
 Run `agent-learn status` for grants, findings, observation, retrieval counts, transcript coverage, and scheduler state. `agent-learn findings` lists findings and `agent-learn show ID` inspects one.
 
@@ -115,7 +115,7 @@ Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFI
 
 ## Retention
 
-Every refresh captures each transcript into `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/archive`, a `0700` tree of immutable objects named by their SHA-256 digest plus one versioned generation per capture. A generation records the chunk order, offsets, source size, and the source signature that produced it. Search, `show`, `agent-learn recall`, and evidence verification keep working after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`), and after the whole source machine is gone once the generation is acknowledged centrally.
+Every refresh captures each transcript into `~/.agent-sessions/archive`, a `0700` tree of immutable objects named by their SHA-256 digest plus one versioned generation per capture. A generation records the chunk order, offsets, source size, and the source signature that produced it. Search, `show`, `agent-learn recall`, and evidence verification keep working after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`), and after the whole source machine is gone once the generation is acknowledged centrally.
 
 - Capture happens during a refresh, which any `agent-sessions` command, `agent-sessions sync`, or scheduled `agent-learn run` performs for every transcript root regardless of the project filter. A file a harness deletes before any refresh saw it is not recoverable.
 - An unchanged source reads no content bytes and adds no generation. A changed source is read once end to end, and only chunks whose digest is new are written, so one appended line to a 4 MB log writes 160 bytes instead of re-copying it. The read is one sequential pass; the point of the chunk digests is that no prefix is ever trusted without hashing it. A rewrite, truncation, or replacement adds a new generation and keeps the earlier one, and a generation always equals the bytes that were read, never a splice of an older prefix.
@@ -142,7 +142,7 @@ One machine can be the central store for several collectors. It is an ordinary a
 
 ```sh
 # On the central host: nothing to start. The receiver is a fixed command.
-# On each collector, ~/.config/agent-sessions/config.json:
+# On each collector, ~/.agent-sessions/config.json:
 # {"central": {"transport": "ssh", "host": "archive",
 #              "command": "agent-sessions-serve ingest --protocol 1 --origin 1f2e...",
 #              "allowed_origins": ["1f2e..."]}}
@@ -172,7 +172,7 @@ Optional scheduling is explicit and never installed by sync: `dotfiles/launchd/c
 
 ```sh
 agent-sessions backup create /backups/agent-sessions-$(date +%F)
-agent-sessions backup restore /backups/agent-sessions-2026-10-30 --to /new/state --tombstones-from ~/.local/state/agent-sessions
+agent-sessions backup restore /backups/agent-sessions-2026-10-30 --to /new/state --tombstones-from ~/.agent-sessions
 agent-sessions archive verify
 agent-sessions archive reindex
 agent-sessions doctor --json
