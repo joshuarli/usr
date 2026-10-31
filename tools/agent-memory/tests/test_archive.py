@@ -323,6 +323,35 @@ class ArchiveTests(unittest.TestCase):
             elsewhere = self.root / "elsewhere"
             self.assertFalse(STORE_MODULE.migrate_legacy_state(elsewhere))
 
+    def test_legacy_state_merges_into_a_canonical_container_without_a_session_index(self):
+        legacy = self.root / "legacy" / "agent-sessions"
+        legacy.mkdir(parents=True)
+        (legacy / "sessions.sqlite3").write_text("db")
+        (legacy / "archive").mkdir()
+        canonical = self.root / "home" / ".agent-sessions"
+        (canonical / "state").mkdir(parents=True)
+        with mock.patch.object(STORE_MODULE, "legacy_state_dir", lambda: legacy), \
+                mock.patch.object(STORE_MODULE, "canonical_state_dir", lambda: canonical):
+            self.assertTrue(STORE_MODULE.migrate_legacy_state(canonical))
+        self.assertEqual((canonical / "sessions.sqlite3").read_text(), "db")
+        self.assertTrue((canonical / "archive").is_dir())
+        self.assertTrue((canonical / "state").is_dir())
+        self.assertFalse(legacy.exists())
+
+    def test_legacy_state_is_not_merged_over_an_existing_session_index(self):
+        legacy = self.root / "legacy" / "agent-sessions"
+        legacy.mkdir(parents=True)
+        (legacy / "sessions.sqlite3").write_text("legacy")
+        canonical = self.root / "home" / ".agent-sessions"
+        canonical.mkdir(parents=True)
+        (canonical / "sessions.sqlite3").write_text("canonical")
+        with mock.patch.object(STORE_MODULE, "legacy_state_dir", lambda: legacy), \
+                mock.patch.object(STORE_MODULE, "canonical_state_dir", lambda: canonical):
+            with self.assertRaises(StoreError):
+                STORE_MODULE.migrate_legacy_state(canonical)
+        self.assertEqual((canonical / "sessions.sqlite3").read_text(), "canonical")
+        self.assertTrue(legacy.is_dir())
+
     def test_state_directory_override_beats_the_canonical_default(self):
         with mock.patch.dict(os.environ, {"AGENT_SESSIONS_STATE_DIR": str(self.root / "override")}):
             self.assertEqual(STORE_MODULE.default_state_dir(), self.root / "override")

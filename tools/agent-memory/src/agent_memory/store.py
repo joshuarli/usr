@@ -67,21 +67,44 @@ def migrate_legacy_state(path):
     """Move the pre-canonical state directory aside exactly once.
 
     Only the canonical default migrates. An explicit --state-dir, a test
-    directory, or an AGENT_SESSIONS_STATE_DIR override is left alone.
+    directory, or an AGENT_SESSIONS_STATE_DIR override is left alone. A
+    canonical directory that exists without a session index is a container
+    (a central store, a backup, a config file) and receives the legacy
+    entries; two session indexes are never merged silently.
     """
     path = Path(os.path.abspath(str(Path(path).expanduser())))
     if path != Path(os.path.abspath(str(canonical_state_dir()))):
         return False
     legacy = legacy_state_dir()
-    if not legacy.is_dir() or legacy == path or path.exists():
+    if not legacy.is_dir() or legacy == path:
         return False
+    if not path.exists():
+        try:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.rename(legacy, path)
+        except OSError as exc:
+            raise StoreError(
+                "legacy agent-sessions state at %s could not move to %s (%s); "
+                "move it with: mv %s %s" % (legacy, path, exc, legacy, path)) from exc
+        return True
+    if (path / "sessions.sqlite3").exists():
+        raise StoreError(
+            "legacy agent-sessions state at %s was not merged because %s already holds a session index; "
+            "keep one history and move the other aside" % (legacy, path))
+    entries = sorted(legacy.iterdir(), key=lambda entry: entry.name)
+    conflicts = [entry.name for entry in entries if (path / entry.name).exists()]
+    if conflicts:
+        raise StoreError(
+            "legacy agent-sessions state at %s cannot merge into %s because %s already exist there; "
+            "move them by hand" % (legacy, path, ", ".join(conflicts)))
     try:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.rename(legacy, path)
+        for entry in entries:
+            os.rename(entry, path / entry.name)
+        legacy.rmdir()
     except OSError as exc:
         raise StoreError(
-            "legacy agent-sessions state at %s could not move to %s (%s); "
-            "move it with: mv %s %s" % (legacy, path, exc, legacy, path)) from exc
+            "legacy agent-sessions state at %s could not merge into %s (%s); "
+            "move it with: mv %s/* %s/" % (legacy, path, exc, legacy, path)) from exc
     return True
 
 
