@@ -153,6 +153,8 @@ agent-sessions search 'codex-units' --central --kind user
 agent-sessions show 'cmd:ID@ORIGIN' --central
 ```
 
+The central host needs the receiver package (`tools/agent-memory/src/agent_memory`) and a Python with stdlib `sqlite3`. It does not need the launchers, `uv`, or the learning extras: `python3 -m agent_memory.serve ingest --protocol 1 --origin ID STATE_DIR` is the whole server. Tested against Ubuntu 24.04 with Python 3.12.3; the launchers on a collector still require 3.15.
+
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
 - Delivery is at-least-once. A generation is acknowledged as remotely durable only after the receiver has verified every object's digest and size, matched the manifest origin to the authenticated peer, and committed the manifest. A retry of an accepted generation is a no-op that re-acks.
