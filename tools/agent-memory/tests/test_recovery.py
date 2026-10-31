@@ -226,6 +226,10 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(third.db.execute("SELECT count(*) FROM sessions WHERE id LIKE '%s-1%'").fetchone()[0], 0)
             self.assertEqual(third.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
             self.assertEqual(len(third.search("keep me", None)), 1)
+            self.assertEqual(third.db.execute("SELECT count(*) FROM archive_generation WHERE native_id = 's-1'").fetchone()[0], 0)
+            referenced = {row[0] for row in third.db.execute("SELECT digest FROM archive_object")}
+            on_disk = {path.name for path in (restored / "archive" / "objects").rglob("*") if path.is_file()}
+            self.assertEqual(on_disk, referenced)
 
 
 if __name__ == "__main__":

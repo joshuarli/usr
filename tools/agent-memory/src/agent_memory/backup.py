@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from agent_memory import archive as archive_module
+from agent_memory.learning import apply_remote_forget
 
 MANIFEST = "manifest.json"
 
@@ -116,6 +117,6 @@ def restore(backup_dir, new_state_dir, tombstones_from=None):
             with sqlite3.connect("file:%s?mode=ro" % (Path(tombstones_from) / "sessions.sqlite3").as_posix(), uri=True) as current:
                 current.row_factory = sqlite3.Row
                 for row in current.execute("SELECT origin_host, harness, native_id, scope, forgotten_at FROM tombstone"):
-                    store.apply_tombstone(row["origin_host"], row["harness"], row["native_id"],
-                                          row["scope"], row["forgotten_at"])
+                    apply_remote_forget(store, row["origin_host"], row["harness"], row["native_id"],
+                                        row["scope"], row["forgotten_at"])
     return manifest

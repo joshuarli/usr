@@ -15,6 +15,7 @@ import zlib
 from typing import Any, NoReturn
 
 from agent_memory import archive as archive_module
+from agent_memory.learning import apply_remote_forget
 
 PROTOCOL = 2
 MAX_FRAME = 4 * 1024 * 1024
@@ -138,7 +139,8 @@ class Sender:
 
     def send_tombstones(self):
         rows = self.store.db.execute(
-            "SELECT origin_host, harness, native_id, scope, forgotten_at FROM tombstone").fetchall()
+            "SELECT origin_host, harness, native_id, scope, forgotten_at FROM tombstone WHERE origin_host = ?",
+            (self.origin,)).fetchall()
         for row in rows:
             payload = {"type": "tombstone", "origin_host": row["origin_host"], "harness": row["harness"],
                        "native_id": row["native_id"], "scope": row["scope"], "forgotten_at": row["forgotten_at"]}
@@ -247,8 +249,10 @@ def receiver(store, instream, outstream, allowed_origins=None):
             write_message(outstream, {"type": "done"})
             return
         if kind == "tombstone":
-            store.apply_tombstone(origin, str(message["harness"]), str(message["native_id"]),
-                                  str(message["scope"]), float(message["forgotten_at"]))
+            if message.get("origin_host") != origin:
+                _refuse(outstream, "tombstone origin does not match the connection")
+            apply_remote_forget(store, origin, str(message["harness"]), str(message["native_id"]),
+                                str(message["scope"]), float(message["forgotten_at"]))
             write_message(outstream, {"type": "tombstone_ack"})
             continue
         if kind == "generation":

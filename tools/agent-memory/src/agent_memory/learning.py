@@ -319,6 +319,14 @@ def run_lock(directory):
             fcntl.flock(stream, fcntl.LOCK_UN)
 
 
+def apply_remote_forget(store, origin_host, harness, native_id, scope, forgotten_at):
+    """Apply a received forget decision: withdraw what was derived from the session, then purge its evidence."""
+    if store.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'learning_schema'").fetchone() is None:
+        store.apply_tombstone(origin_host, harness, native_id, scope, forgotten_at)
+        return
+    Learner(store).apply_remote_forget(origin_host, harness, native_id, scope, forgotten_at)
+
+
 class Learner:
     def __init__(self, store, reviewer=None):
         self.store, self.db, self.reviewer = store, store.db, reviewer
@@ -1440,6 +1448,14 @@ class Learner:
             self.db.execute("SELECT 1 FROM learning_incidents WHERE session=? UNION SELECT 1 FROM learning_experience_sources WHERE session=?", (session, session)).fetchone()
         if known is None:
             raise LearningError("no indexed or derived record references that session")
+        return self._forget_session(session, now, lambda: self.store.forget_session(session, now))
+
+    def apply_remote_forget(self, origin_host, harness, native_id, scope, forgotten_at):
+        session = self.store.central_session_id(origin_host, harness, native_id)
+        return self._forget_session(
+            session, forgotten_at, lambda: self.store.apply_tombstone(origin_host, harness, native_id, scope, forgotten_at))
+
+    def _forget_session(self, session, now, purge_evidence):
         findings = {row[0] for row in self.db.execute("SELECT DISTINCT finding FROM learning_incidents WHERE session=?", (session,))}
         experiences = [row[0] for row in self.db.execute("SELECT DISTINCT experience FROM learning_experience_sources WHERE session=?", (session,))]
         bridged = {row[0] for exp in experiences for row in self.db.execute("SELECT finding FROM learning_experience_findings WHERE experience=?", (exp,))}
@@ -1465,7 +1481,7 @@ class Learner:
                 self.db.execute("DELETE FROM %s WHERE substr(record,1,?)=?" % table, (len(prefix), prefix))
             self.db.execute("DELETE FROM learning_incidents WHERE session=?", (session,))
             self._purge_findings(sorted(findings | bridged))
-            self.store.forget_session(session, now)
+            purge_evidence()
         return {"forgot_session": session, "unresolved_derived_findings": unresolved}
 
     def feedback(self, ref, verdict, reporter, now, note=None, session=None):

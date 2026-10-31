@@ -356,6 +356,60 @@ class TransferTests(unittest.TestCase):
                 self.assertEqual(reply["type"], "error")
                 self.assertIn(phrase, reply["message"])
 
+    def object_files(self, state):
+        return sorted(path.name for path in (state / "archive" / "objects").rglob("*") if path.is_file() and not path.name.startswith("."))
+
+    def test_a_received_forget_removes_evidence_and_withdraws_derived_records(self):
+        from agent_memory.learning import Learner
+
+        source = self.capture()
+        self.sync(source)
+        origin = ARCHIVE.origin_for(source.db)
+        session = "a@" + origin
+        with Store(self.central_state) as central:
+            Learner(central)
+            with central.db:
+                for index, holder in ((1, session), (2, "kept@elsewhere")):
+                    central.db.execute(
+                        "INSERT INTO learning_experiences (project, kind, claim, applies_when, identifiers, fingerprint, basis, "
+                        "detector, revision, worktree, observed_at, captured_at, validity, tags, state) "
+                        "VALUES ('git:canary','gotcha','claim','cond','[]',?,'deterministic','det','r','w',10,10,'[]','','retained')",
+                        ("fp%d" % index,))
+                    central.db.execute(
+                        "INSERT INTO learning_experience_sources (experience, session, position, digest, role) "
+                        "VALUES (?, ?, 0, 'digest', 'trigger')", (index, holder))
+                central.db.execute("INSERT INTO learning_observed (session, signature, observed_at, experiences) VALUES (?, 'sig', 1, 1)", (session,))
+            self.assertNotEqual(self.object_files(self.central_state), [])
+        source.forget_session("codex:a", 2000.0)
+        self.sync(source)
+        with Store(self.central_state) as central:
+            for table in ("archive_generation", "archive_generation_object", "archive_artifact", "archive_object", "sessions", "events"):
+                self.assertEqual(central.db.execute("SELECT count(*) FROM %s" % table).fetchone()[0], 0, table)
+            self.assertEqual(self.object_files(self.central_state), [])
+            self.assertEqual(central.search("alpha", None), [])
+            self.assertEqual(central.db.execute("SELECT count(*) FROM events_fts WHERE events_fts MATCH 'alpha'").fetchone()[0], 0)
+            self.assertEqual([row[0] for row in central.db.execute("SELECT id FROM learning_experiences")], [2])
+            self.assertEqual(central.db.execute("SELECT count(*) FROM learning_experience_sources WHERE session = ?", (session,)).fetchone()[0], 0)
+            self.assertEqual(central.db.execute("SELECT count(*) FROM learning_observed WHERE session = ?", (session,)).fetchone()[0], 0)
+            self.assertEqual(central.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
+
+    def test_a_received_forget_keeps_objects_another_origin_still_references(self):
+        source = self.capture()
+        origin_one = ARCHIVE.origin_for(source.db)
+        self.sync(source, origin=origin_one)
+        other = Store(self.root / "other-source")
+        origin_two = ARCHIVE.ensure_identity(other.db, label="other", regenerate=True)[0]
+        other.refresh([self.sessions], project=self.project_id)
+        self.sync(other, origin=origin_two)
+        before = self.object_files(self.central_state)
+        source.forget_session("codex:a", 2000.0)
+        self.sync(source, origin=origin_one)
+        with Store(self.central_state) as central:
+            self.assertEqual(self.object_files(self.central_state), before)
+            hits = central.search("alpha", None)
+            self.assertEqual([hit["origin_host"] for hit in hits], [origin_two])
+            self.assertEqual(central.resolve_evidence(hits[0]["session"], hits[0]["position"], hits[0]["digest"])["text"], "alpha")
+
     def test_central_memory_records_carry_origin_evidence_and_no_authority(self):
         from agent_memory.learning import Learner
 
