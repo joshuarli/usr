@@ -21,7 +21,7 @@ from agent_memory.transcripts import opencode_database, opencode_events, opencod
 from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 ARCHIVE_DIRNAME = "archive"
 ARCHIVE_OBJECTS = "objects"
 ARCHIVE_COMPANIONS = {"grok": ("summary.json", "events.jsonl")}
@@ -347,7 +347,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, 4, 5, 6, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -378,6 +378,11 @@ class Store:
                 if not self._schema_ready(6):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v6()
+                version = 7
+            if version == 7:
+                if not self._schema_ready(7):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v7()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -415,9 +420,10 @@ class Store:
             and (expected_version < 4 or ({"native_id", "ancestry", "recognized_events", "unrecognized_events"} <= session_columns and "outcome" in event_columns))
             and (expected_version < 5 or "forgotten_sessions" in existing)
             and (expected_version < 6 or {"entry", "parent_entry"} <= event_columns)
-            and (expected_version < 7 or ({"branch_tip", "workspaces", "step_count"} <= session_columns
+            and (expected_version < 7 or ({"branch_tip", "workspaces", "step_count", "archive_generation", "origin_host"} <= session_columns
                  and "synthetic_id" in event_columns
                  and {"archive_generation", "archive_object", "tombstone", "collector_identity", "project_map"} <= existing))
+            and (expected_version < 8 or {"capture_failure", "transfer_tombstone"} <= existing)
         )
 
     def _migrate_v1(self):
@@ -540,6 +546,22 @@ class Store:
                 "scope TEXT NOT NULL CHECK(scope IN ('local','global')), forgotten_at REAL NOT NULL, "
                 "PRIMARY KEY(origin_host, harness, native_id));"
                 "PRAGMA user_version = 7;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
+    def _migrate_v7(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "CREATE TABLE IF NOT EXISTS capture_failure ("
+                "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, at REAL NOT NULL, error TEXT, "
+                "PRIMARY KEY(origin_host, harness, native_id));"
+                "CREATE TABLE IF NOT EXISTS transfer_tombstone ("
+                "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, remote TEXT NOT NULL, "
+                "durable_at REAL NOT NULL, PRIMARY KEY(origin_host, harness, native_id, remote));"
+                "PRAGMA user_version = 8;COMMIT;"
             )
         except sqlite3.DatabaseError:
             self.db.rollback()

@@ -472,7 +472,7 @@ class SessionStoreTests(unittest.TestCase):
             db.execute("CREATE INDEX sessions_parent ON sessions(parent)")
             db.execute("PRAGMA user_version = 1")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 8)
             self.assertIsNone(store.db.execute("SELECT file_ctime_ns FROM sessions WHERE id='legacy'").fetchone()[0])
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints WHERE id='h1'").fetchone()[0], "keep")
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy'").fetchone()[0], 2)
@@ -493,7 +493,7 @@ class SessionStoreTests(unittest.TestCase):
             self.downgrade_v4_columns(db)
             db.execute("PRAGMA user_version = 2")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 8)
             self.assertEqual(store.db.execute("SELECT count(*) FROM events WHERE session='legacy-v2'").fetchone()[0], 2)
             self.assertEqual(store.db.execute("SELECT count(*) FROM unindexed_sources").fetchone()[0], 0)
             stats = store.refresh([self.transcripts], project=self.project_id)
@@ -526,7 +526,7 @@ class SessionStoreTests(unittest.TestCase):
             store.refresh([self.transcripts], project=self.project_id)
             before = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 8)
             after = [tuple(row) for row in store.db.execute("SELECT session, position, digest, kind FROM events ORDER BY session, position")]
             self.assertEqual(before, after)
             self.assertEqual(store.db.execute("SELECT text FROM learning_hints").fetchone()[0], "keep")
@@ -561,7 +561,7 @@ class SessionStoreTests(unittest.TestCase):
                 db.execute("ALTER TABLE sessions DROP COLUMN " + column)
             db.execute("PRAGMA user_version = 5")
         with Store(self.state) as store:
-            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 8)
             self.assertEqual([row[0] for row in store.db.execute("SELECT id FROM sessions")], ["keep"])
             store.refresh(roots, project=self.project_id)
             self.assertEqual(store.db.execute("SELECT entry, parent_entry FROM events WHERE session = 'pi:p1' AND kind = 'user'").fetchone()[:], ("u1", None))
