@@ -42,8 +42,8 @@ then runs `install.sh` as root through `doas` or `sudo`.
 
 - `server` installs the headless base: `packages.txt` (and
   `packages-x86_64.txt` on x86_64) with the clang toolchain, the dotfile links,
-  and the default runtime tools (`ish`, `e`, `fz`, Python 3.15, Node.js). It
-  installs no Wayland, graphics, or seatd packages.
+  and the default `dl` tool set except `agy`. It installs no Wayland, graphics,
+  or seatd packages.
 - `desktop` runs the server install first, then layers `packages-desktop.txt`,
   udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it.
 
@@ -74,10 +74,10 @@ explanation if a check fails. The server install then:
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by
   default through `/etc/clang<major>/clang.cfg` and `clang++.cfg`, so no gcc or
   binutils is needed (there is no `cc`; use `CC=clang`),
-- links the enclosing checkout's dotfiles and installs the default runtime
-  tools with `sh sync links` and `sh sync tools ish e fz python3 nodejs` as the
-  user. It does not run the rest of `dl` or `host/setup-linux`; install optional
-  tools later with `sh dl TOOL`.
+- links the enclosing checkout's dotfiles and installs every default `dl` tool
+  except `agy` as the user. It does not run the rest of `dl` or
+  `host/setup-linux`; install `agy` or other opt-in tools later with
+  `sh dl TOOL`.
 
 The desktop layer runs its own preflight checks before the first change, then:
 

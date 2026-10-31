@@ -174,7 +174,7 @@ must 'cp /etc/apk/world /root/world.before'
 must "grep -q 'josh has no usable password' /root/nopass.log && cmp /etc/apk/world /root/world.before"
 must "echo 'josh:$userpw' | chpasswd"
 
-must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/server.log 2>&1 || { cat /root/server.log; false; }' 600
+must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/server.log 2>&1 || { cat /root/server.log; false; }' 1800
 must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server' 120
 must 'grep -q "provisioned server for josh" /root/server.log'
 must '! apk info -e seatd && ! apk info -e wlroots0.20 && ! command -v dwl && ! command -v ghostty-custom'

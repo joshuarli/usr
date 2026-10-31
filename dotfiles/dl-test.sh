@@ -1095,7 +1095,7 @@ esac
 )
 end_case
 
-begin_case "default targets exclude optional agents"
+begin_case "default targets include required tools and exclude optional agents"
 ( set -e
 default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
 case "$default_targets" in
@@ -1104,16 +1104,19 @@ case "$default_targets" in
         exit 1 ;;
 esac
 case "$default_targets" in
-    *' git '*) ;;
-    *)
-        printf 'git is missing from the default dl targets\n' >&2
-        exit 1 ;;
+    *' agy '*) printf 'agy is in the default dl targets\n' >&2; exit 1 ;;
 esac
 case "$default_targets" in
-    *' agy '*) ;;
-    *)
-        printf 'agy is missing from the default dl targets\n' >&2
-        exit 1 ;;
+    *' git '*) ;;
+    *) printf 'git is missing from the default dl targets\n' >&2; exit 1 ;;
+esac
+case "$default_targets" in
+    *'set -- "$@" gh'*) ;;
+    *) printf 'gh is missing from the default dl targets\n' >&2; exit 1 ;;
+esac
+case "$default_targets" in
+    *'set -- "$@" mold'*) ;;
+    *) printf 'mold is missing from the default dl targets\n' >&2; exit 1 ;;
 esac
 )
 end_case

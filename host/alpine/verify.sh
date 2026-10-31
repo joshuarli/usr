@@ -37,11 +37,12 @@ check 'clang++ builds and runs C++' sh -c 't=$(mktemp) && printf "#include <cstd
 check "$user has a password" sh -c "awk -F: '\$1 == \"$user\" { exit !(\$2 ~ /^\\$/) }' /etc/shadow"
 check 'no getty autologin' no_match -- '--autologin|[[:space:]]-a[[:space:]]' /etc/inittab
 check 'no passwordless doas' sh -c '! cat /etc/doas.conf /etc/doas.d/*.conf 2>/dev/null | sed "s/#.*//" | grep -qw nopass'
-check "ish installed for $user" test -x "$home/.local/bin/ish"
-check "e installed for $user" test -x "$home/.local/bin/e"
-check "fz installed for $user" test -x "$home/.local/bin/fz"
-check "python3 installed for $user" test -x "$home/.local/bin/python3"
-check "node installed for $user" test -x "$home/.local/bin/node"
+default_tools=$(sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
+for tool in $default_tools; do
+	[ "$tool" = agy ] && continue
+	case $tool in nodejs) launcher=node ;; *) launcher=$tool ;; esac
+	check "$tool installed for $user" test -x "$home/.local/bin/$launcher"
+done
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"

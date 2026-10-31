@@ -148,8 +148,10 @@ install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg" 0644
 
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
+default_tools=$(as_user "sh '$usr_root/dl' --list") || die "reading the default tool list from $usr_root failed"
 missing_tools=
-for tool in ish e fz python3 nodejs; do
+for tool in $default_tools; do
+	[ "$tool" = agy ] && continue
 	case $tool in
 		nodejs) [ -x "$home/.local/bin/node" ] && [ -x "$home/.local/bin/npm" ] ;;
 		*) [ -x "$home/.local/bin/$tool" ] ;;

@@ -618,7 +618,7 @@ install_release() {
     fi
     case "${OS}:${prog}" in
         Linux:ish) artifact_target="${ARCH}-unknown-linux-musl-static" ;;
-        Linux:e|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault|Linux:syncthing|Linux:stuff) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:e|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault|Linux:syncthing|Linux:stuff|Linux:gh) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
@@ -732,10 +732,13 @@ install_fd_or_rg() {
 }
 
 install_mold() {
-    if [ "${OS}:${ARCH}" != Linux:x86_64 ]; then
-        skip mold "only x86_64 Linux is published"
-        return
-    fi
+    case "${OS}:${ARCH}" in
+        Linux:x86_64|Linux:aarch64) ;;
+        *)
+            skip mold "only x86_64 and aarch64 Linux are published"
+            return
+            ;;
+    esac
     tag=$(curl -fsSL "https://github.com/joshuarli/mold/releases.atom" \
         | sed -n 's|.*<link[^>]*releases/tag/\(mold-musl-[^"]*\)".*|\1|p' | head -n 1) || tag=
     if [ -z "$tag" ]; then
@@ -744,7 +747,7 @@ install_mold() {
     fi
     version=${tag#mold-musl-}
     version=${version%-*}
-    asset="mold-${version}-x86_64-linux-musl"
+    asset="mold-${version}-${ARCH}-linux-musl"
     url="https://github.com/joshuarli/mold/releases/download/${tag}/${asset}.tar.gz"
     id=$(asset_id "$url")
     if [ -z "$id" ]; then
@@ -3504,15 +3507,18 @@ if [ $# -eq 0 ]; then
         Linux:aarch64) ;;
         *) set -- "$@" jaq ;;
     esac
-    set -- "$@" codex claude opencode2 pi agy fastermod tm ish stuff e fz fdu fs srv git python3 cf
+    set -- "$@" codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 cf
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" syncthing ;;
     esac
-    if [ "$OS" = Darwin ]; then set -- "$@" mactop vault gh ghostty; fi
-    if [ "${OS}:${ARCH}" = Linux:x86_64 ]; then set -- "$@" mold; fi
+    if [ "$OS" = Darwin ]; then set -- "$@" mactop vault ghostty; fi
+    set -- "$@" gh
+    case "${OS}:${ARCH}" in
+        Linux:x86_64|Linux:aarch64) set -- "$@" mold ;;
+    esac
 fi
 
 if $list_only; then
