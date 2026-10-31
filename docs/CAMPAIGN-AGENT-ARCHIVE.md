@@ -5,11 +5,12 @@ Durable, cross-machine preservation and search for coding-agent sessions, and fi
 ## Status
 
 - **Goal:** every locally available conversation becomes durable before a harness deletes it, one central archive collects from several machines over SSH, and `agent-sessions` searches and verifies that history from any machine — with existing learning records and their authority boundaries intact.
-- **Accepted:** `W1.1`–`W1.4`, `W1.6`, `W2.1`–`W2.6`, `W3.1`–`W3.6`, `W4.1`–`W4.3`, `W5.1`–`W5.5`. Green: `test_sessions` 64, `test_archive` 15, `test_transfer` 12, `test_identity` 4, `test_recovery` 4, plus the five existing learning and recall suites.
-- **Red or parked:** `W1.5` is implemented (`active_branch` takes the recorded branch tip, `_events` and `session_events` pass it) but has no dedicated abandoned-branch test; `W3.7` SSH integration is implemented and reviewed but parked on a disposable `sshd`, which the execution boundary forbids starting. `W4.4` cross-host memory exposure is limited to provenance and no-authority-import; the applicability recheck still runs on local evidence only.
+- **Accepted:** every slice except `W3.7`. Green: `test_sessions` 65, `test_archive` 15, `test_transfer` 13, `test_identity` 4, `test_recovery` 4, `test_learning` 56, `test_learning_review` 18, `test_learning_promote` 32, `test_learning_ops` 11, `test_recall` 83.
+- **Parked:** `W3.7` SSH integration is implemented and reviewed (fixed receiver command, drained stderr, watchdog timeout, required allowed origins) but was not exercised against a live `sshd`, because starting a listener is outside the execution boundary. It is on **Needs environment** and is not called tested.
+- **Review:** one focused adversarial review ran before close. It reproduced six P1 defects — a stale-prefix splice on growing rewrites, invisible capture failure, a central forget that tombstoned the wrong origin, a restore that reinstated forgotten sessions and grants, a durable ack over a corrupt object, and an SSH path that could hang. All six are fixed with regression tests; the SSHD hang test remains environment-bound.
 - **Baseline recorded:** see [Baseline](#baseline). Two suites are red for an environment reason, not a code reason.
-- **Next slice:** `W5.9`, a second focused review of the fixes, then close. Resume with the prompt below.
-- **Resume prompt:** `Execute docs/CAMPAIGN-AGENT-ARCHIVE.md from W5.9. Follow its Charter and Decisions; do not stop before P5 Close.`
+- **Next slice:** none. The campaign is closed; the only open item is the environment-bound `W3.7`.
+- **Reopen prompt:** `Re-execute docs/CAMPAIGN-AGENT-ARCHIVE.md for W3.7 against a disposable sshd, then re-run the recovery test.`
 - **First command:** `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_recovery.py`
 
 ## Charter
@@ -101,6 +102,8 @@ The index already has the property D19 requires. The archive does not:
 | 10 single-line appends (1,480 B total) | 41,955,790 B copied |
 | amplification | 28,348× |
 | generations retained on disk | 1 |
+| **after:** one 160 B append | 160 B written; 17,848 B read (one pass + tail) |
+| **after:** generations retained | 2, oldest still resolvable |
 
 ### Existing test coverage the campaign must not regress
 

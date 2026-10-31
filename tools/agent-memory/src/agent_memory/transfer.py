@@ -135,6 +135,7 @@ class Sender:
             "harness": generation["harness"],
             "native_id": generation["native_id"],
             "source_path": generation["source_path"],
+            "workspace_path": generation["workspace_path"],
             "source_digest": generation["source_digest"],
             "source_size": int(generation["source_size"]),
             "captured_at": float(generation["captured_at"]),

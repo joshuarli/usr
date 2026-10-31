@@ -214,7 +214,8 @@ def _memory(args):
 def _identity(args):
     try:
         with Store(_state_dir(args)) as store:
-            origin, label = archive_module.ensure_identity(store.db, label=args.label, regenerate=args.regenerate)
+            regenerate = args.regenerate or args.action == "regenerate"
+            origin, label = archive_module.ensure_identity(store.db, label=args.label, regenerate=regenerate)
             print("origin_host=" + origin)
             print("label=" + str(label or ""))
             for row in store.db.execute("SELECT id, display_label, created_at FROM origin_host ORDER BY created_at"):
@@ -622,6 +623,7 @@ def parser():
     memory.set_defaults(run=_memory)
 
     identity = commands.add_parser("identity", help="show or regenerate this collector identity")
+    identity.add_argument("action", nargs="?", choices=("show", "regenerate"), default="show")
     identity.add_argument("--state-dir")
     identity.add_argument("--label")
     identity.add_argument("--regenerate", action="store_true", help="mint a new collector id; recorded origins are unchanged")

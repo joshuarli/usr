@@ -1646,7 +1646,7 @@ class Store:
                 pattern = re.compile(query, re.IGNORECASE)
             except re.error as exc:
                 raise StoreError("invalid regular expression: " + str(exc)) from exc
-            sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host "
+            sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host, s.archive_generation, s.archive_generation "
             sql += "FROM events e JOIN sessions s ON s.id=e.session WHERE e.text != ''"
             params = []
             if project is not None:
@@ -1663,7 +1663,7 @@ class Store:
                     if len(matches) >= limit:
                         break
             return matches
-        sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host "
+        sql = "SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host, s.archive_generation, s.archive_generation "
         sql += "FROM events_fts JOIN events e ON e.id=events_fts.rowid JOIN sessions s ON s.id=e.session "
         sql += "WHERE events_fts MATCH ?"
         params = [query]
@@ -1698,10 +1698,10 @@ class Store:
             params.insert(0, project)
         sql = (
             "WITH ranked AS (SELECT e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, "
-            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host, "
+            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host, s.archive_generation, "
             "row_number() OVER (PARTITION BY e.session ORDER BY e.position DESC) AS rank "
             "FROM events e JOIN sessions s ON s.id=e.session WHERE 1=1" + project_sql + filter_sql + ") "
-            "SELECT session, position, digest, kind, text, timestamp, call_id, project, cwd, parent, source, thread_source, source_path, updated, harness, origin_host "
+            "SELECT session, position, digest, kind, text, timestamp, call_id, project, cwd, parent, source, thread_source, source_path, updated, harness, origin_host, archive_generation "
             "FROM ranked WHERE rank=1 ORDER BY updated DESC, position DESC LIMIT ?"
         )
         params.append(max(1, int(limit)))
@@ -1726,7 +1726,7 @@ class Store:
                 raise StoreError("event byte offset is not indexed for this session")
         columns = (
             "e.session, e.position, e.digest, e.kind, e.text, e.timestamp, e.call_id, "
-            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host"
+            "s.project, s.cwd, s.parent, s.source, s.thread_source, s.source_path, s.updated, s.harness, s.origin_host, s.archive_generation"
         )
         before_rows = self.db.execute(
             "SELECT " + columns + " FROM events e JOIN sessions s ON s.id=e.session "
