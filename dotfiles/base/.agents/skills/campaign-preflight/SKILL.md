@@ -17,7 +17,7 @@ A campaign doc is the only thing the executing agent has once the owner walks aw
 - **Autonomy with a floor.** The executor makes the judgment calls and records only those a later slice depends on. It also fixes anything egregiously slow or plainly broken that it meets, to thresholds the doc states in numbers.
 - **Checkable.** Every deliverable has a proof an agent can run, and "done" never waits on the owner.
 - **Delivered in slices.** Each item is a slice with one local acceptance command that runs in minutes. The default is one writer at a time, with parallel lanes only for disjoint files. The doc invokes the [parent steering checkpoint](../orchestrate/references/campaigns.md#parent-steering-checkpoint) after each accepted slice.
-- **Short.** The whole doc stays under 300 lines, and **Status** under 20. Git history is the log. A doc that needs history to be read correctly is not ready.
+- **Organized, not padded.** Put the executable core first. Depth is allowed where it removes a runtime decision or supplies proof; never cut a decision, scenario, or acceptance check to hit a length target, and never pad with repetition, rationale the code or linked references already carry, or history. **Status** stays a short at-a-glance block. Git history is the log; a doc that needs history to be read correctly is not ready.
 
 ## Rules
 

@@ -31,9 +31,9 @@
 
 ## Shape of the final doc
 
-Under 300 lines in total. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
+Length follows the work: keep the executable core and its proof, never cut a decision, scenario, or acceptance check to reach a line count, and never pad with repetition, history, or rationale the code or a linked reference already states. Rewrite sections in place; never append dated checkpoints, handoffs, or logs. Git history keeps the past.
 
-1. **Status** (under 20 lines): the goal; the last accepted revision; slices accepted, red, or parked (with branch and cause); the next slice; and, when paused, the resume prompt and first command.
+1. **Status** (a short at-a-glance block): the goal; the last accepted revision; slices accepted, red, or parked (with branch and cause); the next slice; and, when paused, the resume prompt and first command.
 2. **Charter:** the rules the executor runs by.
    - Decide and keep going. Record a decision only when a later slice depends on it.
    - Within the owner's execution grant, proceed without waiting for approval. A plan does not provide missing permission. Park an item that needs authority outside the grant.
