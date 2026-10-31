@@ -261,12 +261,17 @@ def _receive_generation(store, instream, outstream, manifest, connection_origin)
         write_message(outstream, {"type": "error", "message": "malformed manifest"})
         raise TransferError("malformed manifest")
     wanted = []
+    declared = {}
     for item in [*chunks, *artifacts]:
         digest = str(item.get("digest") or "")
         size = int(item.get("size") or -1)
         if not digest or size < 0:
             write_message(outstream, {"type": "error", "message": "malformed manifest entry"})
             raise TransferError("malformed manifest entry")
+        if digest in declared and declared[digest] != size:
+            write_message(outstream, {"type": "error", "message": "conflicting sizes for one digest"})
+            raise TransferError("conflicting sizes for one digest")
+        declared[digest] = size
         if not store.has_object(digest):
             wanted.append(digest)
     write_message(outstream, {"type": "need", "digests": wanted})
@@ -310,17 +315,54 @@ def local_pair(store, remote, origin, label):
     return store, remote, origin, label
 
 
+def _drain(stream, sink, limit=65536):
+    try:
+        while True:
+            data = stream.read(4096)
+            if not data:
+                return
+            if len(sink[0]) < limit:
+                sink[0] += data
+    except (OSError, ValueError):
+        return
+
+
 def ssh_sender(store, remote, host, command, origin, label, timeout=120):
     import subprocess
+    import threading
 
     process = subprocess.Popen(
         ["ssh", "-o", "BatchMode=yes", host, "--", command],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
+    sink = [b""]
+    assert process.stderr is not None
+    drain = threading.Thread(target=_drain, args=(process.stderr, sink), daemon=True)
+    drain.start()
+    expired = threading.Event()
+
+    def expire():
+        expired.set()
+        for stream in (process.stdin, process.stdout):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
+
+    watchdog = threading.Timer(timeout, expire)
+    watchdog.daemon = True
+    watchdog.start()
     try:
+        assert process.stdout is not None and process.stdin is not None
         sender = Sender(store, remote, process.stdout, process.stdin, origin, label)
         return sender.run()
+    except (OSError, ValueError) as exc:
+        detail = sink[0].decode("utf-8", "replace").strip()[:400]
+        raise TransferError("ssh transport failed: %s%s" % (exc, (" (" + detail + ")") if detail else "")) from exc
     finally:
+        watchdog.cancel()
         stdin = process.stdin
         if stdin is not None:
             try:

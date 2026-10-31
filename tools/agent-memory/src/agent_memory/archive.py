@@ -184,24 +184,31 @@ def _same_source(generation, info):
     )
 
 
-def _prefix_to_carry(db, archive_dir, previous, previous_size, stream, stats):
-    """Reuse every captured chunk of a growing source after verifying its tail.
+def _artifact_digests(db, generation):
+    return {row["name"]: row["digest"] for row in db.execute(
+        "SELECT name, digest FROM archive_artifact WHERE generation = ?", (int(generation),))}
 
-    The tail chunk is re-read and hashed, so an append costs one bounded tail
-    verification plus the delta rather than a copy of the whole log.
-    """
-    if previous is None or not previous_size:
-        return [], 0
-    chunks = generation_chunks(db, previous["id"])
-    if not chunks:
-        return [], 0
-    start, size, digest = chunks[-1]
-    stream.seek(start)
-    data = stream.read(size)
-    stats["bytes_read"] = stats.get("bytes_read", 0) + len(data)
-    if sha256(data) != digest:
-        raise ArchiveError("source was rewritten beneath the captured prefix; retry capture")
-    return chunks, previous_size
+
+def _same_artifacts(db, generation, artifacts):
+    if generation is None:
+        return not artifacts
+    current = _artifact_digests(db, generation["id"])
+    wanted = {str(name): sha256(data) for name, data in artifacts}
+    return current == wanted
+
+
+def _store_artifacts(db, archive_dir, generation, artifacts, allow_artifacts):
+    if not allow_artifacts:
+        return
+    with db:
+        for name, data in artifacts:
+            if len(data) > MAX_ARTIFACT_BYTES:
+                continue
+            artifact_digest, size, _ = _write_object(archive_dir, data)
+            db.execute(
+                "INSERT OR REPLACE INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
+                (int(generation), str(name), artifact_digest, size),
+            )
 
 
 def capture(db, archive_dir, harness, native_id, source_path, *, workspace=None, artifacts=(), allow_artifacts=False, stats=None):
@@ -220,36 +227,37 @@ def capture(db, archive_dir, harness, native_id, source_path, *, workspace=None,
             raise OSError("refusing to capture a non-regular file: " + str(source_path))
         origin_host = origin_for(db)
         previous = last_generation(db, origin_host, harness, native_id)
-        if _same_source(previous, info):
+        if _same_source(previous, info) and _same_artifacts(db, previous, artifacts):
             stats["archive_unchanged"] = stats.get("archive_unchanged", 0) + 1
             return int(previous["id"]), False
-        previous_size = int(previous["source_size"]) if previous is not None else 0
-        if previous is not None and info.st_size > previous_size:
-            carried, start = _prefix_to_carry(db, archive_dir, previous, previous_size, stream, stats)
-        else:
-            carried, start = [], 0
-        stream.seek(start)
-        new_chunks = []
+        if _same_source(previous, info) and previous is not None:
+            _store_artifacts(db, archive_dir, int(previous["id"]), artifacts, allow_artifacts)
+            stats["archive_unchanged"] = stats.get("archive_unchanged", 0) + 1
+            return int(previous["id"]), False
+        previous_chunks = generation_chunks(db, previous["id"]) if previous is not None else []
+        previous_digests = {digest for _offset, _size, digest in previous_chunks}
+        stream.seek(0)
+        all_chunks = []
         digest = hashlib.sha256()
-        for _offset, _size, chunk_digest in carried:
-            digest.update(chunk_digest.encode("ascii"))
+        start = 0
         while True:
             data = stream.read(CHUNK_BYTES)
             if not data:
                 break
             stats["bytes_read"] = stats.get("bytes_read", 0) + len(data)
-            chunk_digest, size, written = _write_object(archive_dir, data)
-            if written:
-                stats["archive_objects"] = stats.get("archive_objects", 0) + 1
-                stats["archive_bytes"] = stats.get("archive_bytes", 0) + size
-            new_chunks.append((start, size, chunk_digest))
+            chunk_digest = sha256(data)
+            if chunk_digest not in previous_digests:
+                chunk_digest, size, written = _write_object(archive_dir, data)
+                if written:
+                    stats["archive_objects"] = stats.get("archive_objects", 0) + 1
+                    stats["archive_bytes"] = stats.get("archive_bytes", 0) + size
+            all_chunks.append((start, len(data), chunk_digest))
             digest.update(chunk_digest.encode("ascii"))
-            start += size
+            start += len(data)
         final = os.fstat(stream.fileno())
         if (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns, final.st_ctime_ns) != (
                 info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns):
             raise ArchiveError("source changed during capture; retry capture")
-        all_chunks = carried + new_chunks
     source_digest = digest.hexdigest()
     now = time.time()
     try:
@@ -278,15 +286,7 @@ def capture(db, archive_dir, harness, native_id, source_path, *, workspace=None,
                 "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) VALUES (?, ?, ?, ?, ?)",
                 (generation, index, chunk_digest, size, offset),
             )
-        if allow_artifacts:
-            for name, data in artifacts:
-                if len(data) > MAX_ARTIFACT_BYTES:
-                    continue
-                artifact_digest, size, _ = _write_object(archive_dir, data)
-                db.execute(
-                    "INSERT OR REPLACE INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
-                    (generation, str(name), artifact_digest, size),
-                )
+        _store_artifacts(db, archive_dir, generation, artifacts, allow_artifacts)
         db.execute("UPDATE archive_generation SET stored_at = ? WHERE id = ?", (now, generation))
     stats["archived"] = stats.get("archived", 0) + 1
     return generation, True

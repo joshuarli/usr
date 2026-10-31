@@ -264,7 +264,7 @@ def _sync(args):
                 delivered = transfer_module.ssh_sender(store, args.to, host, command, origin, args.label or "collector")
             print("delivered=%d pending=%d" % (len(delivered), store.pending_transfers(args.to)))
         return 0
-    except (OSError, StoreError) as exc:
+    except (OSError, StoreError, transfer_module.TransferError) as exc:
         print("agent-sessions sync: " + str(exc), file=sys.stderr)
         return 1
     finally:
@@ -321,7 +321,8 @@ def _backup(args):
             return 0
         if not args.to:
             raise StoreError("backup restore needs --to <new state directory>")
-        manifest = backup_module.restore(Path(args.destination), Path(args.to), args.tombstones_from)
+        tombstones = args.tombstones_from or (str(_state_dir(args)) if (_state_dir(args) / "sessions.sqlite3").is_file() else None)
+        manifest = backup_module.restore(Path(args.destination), Path(args.to), tombstones)
         raw_objects = manifest.get("objects")
         count = len(raw_objects) if isinstance(raw_objects, list) else 0
         print("restored_generations=%s objects=%d destination=%s" % (
@@ -622,7 +623,7 @@ def parser():
     backup.add_argument("--state-dir")
     backup.add_argument("destination", help="backup directory to create, or an existing backup to restore")
     backup.add_argument("--to", help="restore destination for `backup restore`")
-    backup.add_argument("--tombstones-from", help="merge newer tombstones from this state directory")
+    backup.add_argument("--tombstones-from", help="merge newer tombstones from this state directory (defaults to --state-dir)")
     backup.add_argument("--repo", help="restic repository URL for the optional external backup")
     backup.set_defaults(run=_backup)
     return result

@@ -30,20 +30,20 @@ def create(store, destination, protocol=1):
     os.chmod(destination, 0o700)
     objects_dir = destination / "objects"
     objects_dir.mkdir(mode=0o700, exist_ok=True)
-    pinned = []
-    for row in store.db.execute("SELECT digest, size FROM archive_object ORDER BY digest"):
-        digest = row["digest"]
-        source = archive_module.object_path(store.archive_dir, digest)
-        if not source.is_file():
-            raise BackupError("manifest references a missing object: " + digest)
-        target = archive_module.object_path(objects_dir.parent, digest)
-        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
-        pinned.append({"digest": digest, "size": int(row["size"])})
     database = destination / "sessions.sqlite3"
     with sqlite3.connect(str(database)) as target:
         store.db.backup(target)
     os.chmod(database, 0o600)
+    pinned = []
+    with sqlite3.connect("file:%s?mode=ro" % database.as_posix(), uri=True) as snapshot:
+        for digest, size in snapshot.execute("SELECT digest, size FROM archive_object ORDER BY digest"):
+            source = archive_module.object_path(store.archive_dir, digest)
+            if not source.is_file():
+                raise BackupError("snapshot references a missing object: " + digest)
+            target = archive_module.object_path(objects_dir.parent, digest)
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+            pinned.append({"digest": digest, "size": int(size)})
     manifest = {
         "protocol": protocol,
         "created_at": time.time(),
@@ -87,8 +87,8 @@ def restore(backup_dir, new_state_dir, tombstones_from=None):
     if int(manifest.get("schema_version") or 0) > SCHEMA_VERSION:
         raise BackupError("backup schema is newer than this tool")
     state = _prepare_state_dir(new_state_dir)
-    if (state / "sessions.sqlite3").exists() and state != Path(new_state_dir).expanduser().resolve():
-        raise BackupError("restore destination is not empty")
+    if (state / "sessions.sqlite3").exists():
+        raise BackupError("restore destination already holds a session store; choose a new directory")
     archive_dir = state / "archive"
     archive_dir.mkdir(mode=0o700, exist_ok=True)
     for item in manifest.get("objects") or []:
@@ -105,6 +105,12 @@ def restore(backup_dir, new_state_dir, tombstones_from=None):
     except StoreError as exc:
         raise BackupError(str(exc)) from exc
     with store:
+        tables = {row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        with store.db:
+            if "learning_projects" in tables:
+                store.db.execute("UPDATE learning_projects SET enabled = 0, grant_source = 'project'")
+            if "learning_global_grant" in tables:
+                store.db.execute("DELETE FROM learning_global_grant")
         store.reindex_generations()
         if tombstones_from is not None:
             with sqlite3.connect("file:%s?mode=ro" % (Path(tombstones_from) / "sessions.sqlite3").as_posix(), uri=True) as current:

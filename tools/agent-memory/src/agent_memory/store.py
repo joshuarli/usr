@@ -985,13 +985,20 @@ class Store:
             stats["archive_errors"] += 1
             stats["archive_error_detail"] = str(exc)
             return []
-        except OSError:
+        except OSError as exc:
             stats["archive_errors"] += 1
+            stats["archive_error_detail"] = str(exc)
             return []
         meta["archive_generation"] = generation
         if not created:
             return []
         return [str(path)]
+
+    def _origin_for_session(self, harness, native_id):
+        row = self.db.execute(
+            "SELECT origin_host FROM sessions WHERE harness = ? AND native_id = ? ORDER BY updated DESC LIMIT 1",
+            (harness, str(native_id))).fetchone()
+        return row["origin_host"] if row is not None else None
 
     def _adopt_legacy_copy(self, row):
         legacy = self._archived_copy(row["harness"], row["source_path"])
@@ -1071,7 +1078,7 @@ class Store:
                     target.execute("DELETE FROM session_message WHERE session_id = ?", (native,))
                     target.execute("DELETE FROM session_v2 WHERE id = ?", (native,))
             return
-        origin = archive_module.origin_for(self.db)
+        origin = self._origin_for_session(harness, native_id) or archive_module.origin_for(self.db)
         generations = [int(row[0]) for row in self.db.execute(
             "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ?",
             (origin, harness, str(native_id)))]
@@ -1106,12 +1113,12 @@ class Store:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (meta["id"],))
             self.db.execute(
                 "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
-                "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry) "
-                "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'degraded', ?, ? "
+                "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, origin_host) "
+                "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'degraded', ?, ?, ? "
                 "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
                 (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"], meta["harness"], meta["source_path"],
                  meta["updated"], meta["file_size"], meta["file_mtime_ns"], meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["file_size"],
-                 meta["header_digest"], meta["native_id"], meta["ancestry"], meta["id"]))
+                 meta["header_digest"], meta["native_id"], meta["ancestry"], archive_module.origin_for(self.db), meta["id"]))
             if self.db.execute("SELECT 1 FROM sessions WHERE id = ?", (meta["id"],)).fetchone() is None:
                 return False, 0, 0, 0
             for message in messages:
@@ -1330,12 +1337,15 @@ class Store:
 
     @_guarded
     def forget_session(self, session, now):
-        row = self.db.execute("SELECT harness, source_path, native_id FROM sessions WHERE id = ?", (str(session),)).fetchone()
+        row = self.db.execute(
+            "SELECT harness, source_path, native_id, origin_host FROM sessions WHERE id = ?", (str(session),)).fetchone()
         harness = row["harness"] if row is not None else str(session).partition(":")[0]
         native = row["native_id"] if row is not None else str(session).partition(":")[2]
+        if harness not in HARNESSES:
+            raise StoreError("session id does not name a supported harness: " + str(session))
         if row is not None:
             self._purge_archive(row["harness"], row["source_path"], row["native_id"])
-        origin = archive_module.origin_for(self.db)
+        origin = (row["origin_host"] if row is not None else None) or archive_module.origin_for(self.db)
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)", (str(session), float(now)))
@@ -1369,11 +1379,25 @@ class Store:
         return int(row["id"]) if row is not None else None
 
     def generation_complete(self, generation):
-        for row in self.db.execute("SELECT digest FROM archive_generation_object WHERE generation = ?", (int(generation),)):
+        chunks = self.db.execute(
+            "SELECT digest, size FROM archive_generation_object WHERE generation = ? ORDER BY ordinal", (int(generation),))
+        for row in chunks:
             if not self.has_object(row["digest"]):
                 return False
-        for row in self.db.execute("SELECT digest FROM archive_artifact WHERE generation = ?", (int(generation),)):
+            try:
+                data = archive_module.read_object(self.archive_dir, row["digest"])
+            except (archive_module.ArchiveError, OSError):
+                return False
+            if len(data) != int(row["size"]):
+                return False
+        for row in self.db.execute("SELECT digest, size FROM archive_artifact WHERE generation = ?", (int(generation),)):
             if not self.has_object(row["digest"]):
+                return False
+            try:
+                data = archive_module.read_object(self.archive_dir, row["digest"])
+            except (archive_module.ArchiveError, OSError):
+                return False
+            if len(data) != int(row["size"]):
                 return False
         return True
 
@@ -1389,8 +1413,7 @@ class Store:
         if existing is not None:
             generation = existing
             with self.db:
-                self.db.execute("UPDATE archive_generation SET stored_at = ?, indexed_at = COALESCE(indexed_at, ?) WHERE id = ?",
-                                (now, now, generation))
+                self.db.execute("UPDATE archive_generation SET stored_at = ? WHERE id = ?", (now, generation))
         else:
             with self.db:
                 cursor = self.db.execute(
@@ -1408,7 +1431,12 @@ class Store:
                     self.db.execute(
                         "INSERT OR REPLACE INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
                         (generation, str(artifact["name"]), str(artifact["digest"]), int(artifact["size"])))
-        self.index_generation(generation)
+        try:
+            self.index_generation(generation)
+        except BaseException:
+            with self.db:
+                self.db.execute("UPDATE archive_generation SET indexed_at = NULL WHERE id = ?", (generation,))
+            raise
         return generation
 
     def index_generation(self, generation):
@@ -1510,10 +1538,10 @@ class Store:
                 (origin_host, harness, native_id, scope, forgotten_at))
             self.db.execute("UPDATE archive_generation SET tombstoned = 1 WHERE origin_host = ? AND harness = ? AND native_id = ?",
                             (origin_host, harness, native_id))
-            for row in self.db.execute("SELECT id FROM sessions WHERE harness = ? AND native_id = ?", (harness, native_id)).fetchall():
-                local = self.db.execute("SELECT origin_host FROM sessions WHERE id = ?", (row["id"],)).fetchone()
-                if local is not None and (local["origin_host"] in (None, origin_host)):
-                    self.db.execute("DELETE FROM sessions WHERE id = ?", (row["id"],))
+            for row in self.db.execute(
+                    "SELECT id FROM sessions WHERE harness = ? AND native_id = ? AND origin_host = ?",
+                    (harness, native_id, origin_host)).fetchall():
+                self.db.execute("DELETE FROM sessions WHERE id = ?", (row["id"],))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)",
                             (qualified_id(cast(Harness, harness), native_id), float(forgotten_at)))
 

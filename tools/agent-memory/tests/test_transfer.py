@@ -112,30 +112,43 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 0)
         self.assertEqual(central.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
 
-    def test_protocol_mismatch_is_refused_before_writing(self):
-        central = Store(self.central_state)
+
+    def serve_in_thread(self, allowed, exchange):
         left, right = socket.socketpair()
-        thread = threading.Thread(target=lambda: TRANSFER.receiver(
-            central, right.makefile("rb"), right.makefile("wb")), daemon=True)
+        left.settimeout(20)
+        failure = {}
+
+        def serve():
+            try:
+                with Store(self.central_state) as central:
+                    with right.makefile("rb") as instream, right.makefile("wb") as outstream:
+                        TRANSFER.receiver(central, instream, outstream, allowed_origins=allowed)
+            except BaseException as exc:  # noqa: BLE001
+                failure["error"] = exc
+
+        thread = threading.Thread(target=serve, daemon=True)
         thread.start()
-        with left.makefile("rb") as instream, left.makefile("wb") as outstream:
+        try:
+            with left.makefile("rb") as instream, left.makefile("wb") as outstream:
+                return exchange(instream, outstream)
+        finally:
+            left.close()
+            thread.join(timeout=20)
+
+    def test_protocol_mismatch_is_refused_before_writing(self):
+        def exchange(instream, outstream):
             TRANSFER.write_message(outstream, {"type": "hello", "protocol": 99, "origin": "x"})
-            reply = TRANSFER.read_message(instream)
-        left.close()
-        thread.join(timeout=10)
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["x"], exchange)
         self.assertEqual(reply["type"], "error")
 
     def test_untrusted_origin_is_refused(self):
-        central = Store(self.central_state)
-        left, right = socket.socketpair()
-        thread = threading.Thread(target=lambda: TRANSFER.receiver(
-            central, right.makefile("rb"), right.makefile("wb"), allowed_origins=["allowed"]), daemon=True)
-        thread.start()
-        with left.makefile("rb") as instream, left.makefile("wb") as outstream:
+        def exchange(instream, outstream):
             TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "stranger"})
-            reply = TRANSFER.read_message(instream)
-        left.close()
-        thread.join(timeout=10)
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["allowed"], exchange)
         self.assertEqual(reply["type"], "error")
         self.assertIn("not allowed", reply["message"])
 
@@ -192,6 +205,51 @@ class TransferTests(unittest.TestCase):
         attempt = source.db.execute("SELECT attempts, last_error FROM transfer_generation WHERE remote='central'").fetchone()
         self.assertGreaterEqual(attempt["attempts"], 1)
         self.assertTrue(attempt["last_error"])
+
+    def test_forgetting_a_received_session_tombstones_its_own_origin(self):
+        source = self.capture()
+        self.sync(source)
+        central = Store(self.central_state)
+        peer = ARCHIVE.origin_for(source.db)
+        session = central.db.execute("SELECT id FROM sessions").fetchone()[0]
+        self.assertTrue(session.endswith("@" + peer))
+        central.forget_session(session, 3000.0)
+        self.assertTrue(central.is_tombstoned(peer, "codex", "a"))
+        central.reindex_generations()
+        self.assertEqual(central.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+        self.assertEqual(central.search("alpha", None), [])
+
+    def test_a_corrupt_central_object_is_never_acknowledged_as_durable(self):
+        source = self.capture()
+        self.sync(source)
+        central = Store(self.central_state)
+        digest = central.db.execute("SELECT digest FROM archive_generation_object LIMIT 1").fetchone()[0]
+        object_path = ARCHIVE.object_path(central.archive_dir, digest)
+        data = bytearray(object_path.read_bytes())
+        data[0:1] = b"X"
+        object_path.write_bytes(bytes(data))
+        with source.db:
+            source.db.execute("DELETE FROM transfer_generation")
+        with self.assertRaises(TRANSFER.TransferError):
+            self.sync(source, attempts=1)
+        durable = source.db.execute("SELECT count(*) FROM transfer_generation WHERE durable_at IS NOT NULL").fetchone()[0]
+        self.assertEqual(durable, 0)
+
+    def test_conflicting_sizes_for_one_digest_are_refused(self):
+        def exchange(instream, outstream):
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "peer"})
+            TRANSFER.read_message(instream)
+            TRANSFER.write_message(outstream, {"type": "generation", "origin_host": "peer", "harness": "codex",
+                                               "native_id": "x", "source_path": "/x", "source_digest": "d",
+                                               "source_size": 2, "captured_at": 1.0,
+                                               "chunks": [{"digest": "aa", "size": 1, "offset": 0},
+                                                          {"digest": "aa", "size": 2, "offset": 1}],
+                                               "artifacts": []})
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["peer"], exchange)
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("conflicting", reply["message"])
 
 
 if __name__ == "__main__":

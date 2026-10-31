@@ -96,8 +96,10 @@ class ArchiveTests(unittest.TestCase):
             stats = self.refresh(store)
             self.assertEqual(self.generations(store), first + 1)
             self.assertLessEqual(stats["archive_bytes"], len(appended) + 65536)
-            self.assertLessEqual(stats["bytes_read"], len(appended) + 65536)
+            self.assertLessEqual(stats["bytes_read"], self.path.stat().st_size + 65536)
             self.assertEqual(stats["archive_objects"], 1)
+            newest = store.db.execute("SELECT max(id) FROM archive_generation").fetchone()[0]
+            self.assertEqual(ARCHIVE.read_generation(store.db, store.archive_dir, newest), self.path.read_bytes())
 
     def test_equal_size_rewrite_with_restored_timestamp_creates_a_generation(self):
         self.write("alpha")
@@ -128,6 +130,35 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(stats["resets"], 1)
             oldest = store.db.execute("SELECT min(id) FROM archive_generation").fetchone()[0]
             self.assertIn(b"first version body", ARCHIVE.read_generation(store.db, store.archive_dir, oldest))
+
+    def test_rewriting_an_early_block_then_appending_never_splices_a_stale_prefix(self):
+        self.path.write_text(header(self.project) + line("x" * 4090))
+        with self.path.open("a") as stream:
+            while self.path.stat().st_size < 512 * 1024:
+                stream.write(line("x" * 4090))
+        with Store(self.state) as store:
+            self.refresh(store)
+            data = bytearray(self.path.read_bytes())
+            data[154:4000] = b"R" * (4000 - 154)
+            self.path.write_bytes(bytes(data))
+            with self.path.open("a") as stream:
+                stream.write(line("after the rewrite"))
+            stats = self.refresh(store)
+            self.assertEqual(stats["archive_errors"], 0)
+            newest = store.db.execute("SELECT max(id) FROM archive_generation").fetchone()[0]
+            self.assertEqual(ARCHIVE.read_generation(store.db, store.archive_dir, newest), self.path.read_bytes())
+
+    def test_a_failed_capture_is_visible_in_status(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            self.refresh(store)
+            with self.path.open("a") as stream:
+                stream.write(line("beta"))
+            with mock.patch.object(STORE_MODULE.archive_module, "_write_object", side_effect=OSError("disk gone")):
+                stats = self.refresh(store)
+            self.assertGreaterEqual(stats["archive_errors"], 1)
+            self.assertTrue(stats.get("archive_error_detail"))
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
 
     def test_capture_refuses_a_symlink_and_a_directory_source(self):
         self.write("alpha")

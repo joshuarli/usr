@@ -161,7 +161,7 @@ class RecoveryTests(unittest.TestCase):
         with Store(restored) as third:
             self.assertEqual(third.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 4)
             self.assertEqual(third.db.execute("SELECT count(*) FROM learning_experiences").fetchone()[0], 1)
-            self.assertEqual(third.db.execute("SELECT enabled FROM learning_projects WHERE project='git:canary'").fetchone()[0], 1)
+            self.assertEqual(third.db.execute("SELECT enabled FROM learning_projects WHERE project='git:canary'").fetchone()[0], 0)
             hit = third.search("alpha evidence", None)[0]
             self.assertEqual(third.resolve_evidence(hit["session"], hit["position"], hit["digest"])["text"], "alpha evidence")
             self.assertEqual(third.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 4)
@@ -206,6 +206,26 @@ class RecoveryTests(unittest.TestCase):
             db.execute("PRAGMA user_version = 99")
         with self.assertRaises(BACKUP.BackupError):
             BACKUP.restore(backup_dir, self.root / "never")
+
+    def test_restoring_a_pre_forget_backup_with_current_tombstones_stays_forgotten(self):
+        central_state = self.root / "central"
+        home, cmd_root, agy_root = self.source_home("a", "forget me later", "keep me", "conv-a")
+        store = self.capture(self.root / "source", home, cmd_root, agy_root)
+        origin = ARCHIVE.origin_for(store.db)
+        TRANSFER.local_sync(store, central_state, "central", origin, "a")
+        backup_dir = self.root / "pre-forget"
+        with Store(central_state) as central:
+            BACKUP.create(central, backup_dir)
+        store.forget_session("cmd:s-1", 6000.0)
+        TRANSFER.local_sync(store, central_state, "central", origin, "a")
+        self.assertEqual(Store(central_state).db.execute(
+            "SELECT count(*) FROM sessions WHERE id LIKE '%s-1%'").fetchone()[0], 0)
+        restored = self.root / "restored"
+        BACKUP.restore(backup_dir, restored, tombstones_from=central_state)
+        with Store(restored) as third:
+            self.assertEqual(third.db.execute("SELECT count(*) FROM sessions WHERE id LIKE '%s-1%'").fetchone()[0], 0)
+            self.assertEqual(third.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
+            self.assertEqual(len(third.search("keep me", None)), 1)
 
 
 if __name__ == "__main__":
