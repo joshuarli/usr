@@ -7,12 +7,10 @@ import hmac
 import json
 import os
 import re
-import shutil
 import sqlite3
 import stat
 import subprocess
 import time
-import sys
 import urllib.parse
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -265,53 +263,6 @@ def _live_source_for_archive(path, archive_dir, harness):
     if absolute == prefix or not absolute.startswith(prefix + os.sep):
         return None
     return absolute[len(prefix):] or None
-
-
-def _copy_file_data(source, staging):
-    if sys.platform == "darwin":
-        try:
-            import ctypes
-
-            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
-            clonefile = libc.clonefile
-            clonefile.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-            clonefile.restype = ctypes.c_int
-            if clonefile(os.fsencode(str(source)), os.fsencode(str(staging)), 0) == 0:
-                return
-        except (OSError, AttributeError):
-            pass
-        try:
-            staging.unlink(missing_ok=True)
-        except OSError:
-            pass
-    shutil.copyfile(source, staging)
-
-
-def _archive_copy(source, destination):
-    source_stat = os.lstat(source)
-    if not stat.S_ISREG(source_stat.st_mode):
-        raise OSError("refusing to archive a non-regular file: " + str(source))
-    try:
-        destination_stat = os.lstat(destination)
-    except FileNotFoundError:
-        pass
-    else:
-        try:
-            same = os.path.samestat(source_stat, destination_stat)
-        except OSError:
-            same = False
-        if not same and destination_stat.st_size == source_stat.st_size and destination_stat.st_mtime_ns >= source_stat.st_mtime_ns:
-            return False
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    staging = destination.with_name(destination.name + ".copying")
-    try:
-        staging.unlink(missing_ok=True)
-    except OSError:
-        pass
-    _copy_file_data(source, staging)
-    os.chmod(staging, 0o600)
-    os.replace(staging, destination)
-    return True
 
 
 def active_branch(events, tip=None):
