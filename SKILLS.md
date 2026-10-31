@@ -26,7 +26,7 @@ You rarely need to name a skill. `do` loads on its own for work with real uncert
 | `eli5` | Explicit | Give a short, simple, technically correct version of the topic, or of your last reply, without dumbing it down. |
 | `self-contained-prompt` | Explicit | Draft a prompt another agent can follow without this conversation's context. |
 | `be-ambitious` | Explicit | Raise the professional bar of an existing task using primary evidence, specific methods, and independent proof, without enlarging the assignment. |
-| `yea` | Explicit | Accept every recommendation from the agent's last reply and have it do all of them in full, not the smallest version. |
+| `yea` | Explicit | Approve everything in the agent's last reply: it continues, does every recommendation in full, and settles each open question as it recommended. Nothing the reply did not name is approved. |
 | `hurry-up` | Explicit | Tell the agent to finish and cut verification. Run it with `/hurry-up`. |
 | `sleep` | Explicit | Proceed unattended while you are asleep: keep working without stopping, decide within authority, park only owner-blocked work. |
 | `resume-session` | Explicit | Continue a specific Codex, Claude, Muse, Grok, OpenCode, Pi, Command, Antigravity, DeepSeek, or fx session's unfinished work in this agent: `/resume-session <agent> <session-id>`. |
