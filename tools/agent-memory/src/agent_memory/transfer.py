@@ -170,7 +170,7 @@ class Sender:
             raise TransferError("acknowledgement does not match the delivered generation")
         return int(ack["generation"])
 
-    def run(self, attempts=5):
+    def run(self, attempts=5, progress=None):
         try:
             self.handshake()
             self.send_tombstones()
@@ -186,6 +186,8 @@ class Sender:
                     local_id = self.send_generation(generation)
                     self.store.mark_durable(generation["id"], self.remote, local_id)
                     delivered.append(int(generation["id"]))
+                    if progress is not None:
+                        progress(len(delivered))
                     break
                 except (OSError, TransferError) as exc:
                     last = exc
@@ -319,6 +321,34 @@ def local_pair(store, remote, origin, label):
     return store, remote, origin, label
 
 
+class _ActivityStream:
+    """Record activity so the transport timeout measures idleness, not duration."""
+
+    def __init__(self, stream, activity):
+        self._stream = stream
+        self._activity = activity
+
+    def read(self, size=-1):
+        data = self._stream.read(size)
+        self._activity["t"] = time.monotonic()
+        return data
+
+    def write(self, data):
+        written = self._stream.write(data)
+        self._activity["t"] = time.monotonic()
+        return written
+
+    def flush(self):
+        self._stream.flush()
+        self._activity["t"] = time.monotonic()
+
+    def close(self):
+        self._stream.close()
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
 def _drain(stream, sink, limit=65536):
     try:
         while True:
@@ -331,7 +361,7 @@ def _drain(stream, sink, limit=65536):
         return
 
 
-def ssh_sender(store, remote, host, command, origin, label, timeout=120):
+def ssh_sender(store, remote, host, command, origin, label, timeout=120, progress=None):
     import subprocess
     import threading
 
@@ -343,30 +373,34 @@ def ssh_sender(store, remote, host, command, origin, label, timeout=120):
     assert process.stderr is not None
     drain = threading.Thread(target=_drain, args=(process.stderr, sink), daemon=True)
     drain.start()
-    expired = threading.Event()
+    activity = {"t": time.monotonic()}
+    finished = threading.Event()
 
     def expire():
-        expired.set()
-        for stream in (process.stdin, process.stdout):
-            if stream is None:
+        while not finished.wait(2.0):
+            if time.monotonic() - activity["t"] <= timeout:
                 continue
-            try:
-                stream.close()
-            except (OSError, ValueError):
-                pass
+            for stream in (process.stdin, process.stdout):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except (OSError, ValueError):
+                    pass
+            return
 
-    watchdog = threading.Timer(timeout, expire)
-    watchdog.daemon = True
+    watchdog = threading.Thread(target=expire, daemon=True)
     watchdog.start()
     try:
         assert process.stdout is not None and process.stdin is not None
-        sender = Sender(store, remote, process.stdout, process.stdin, origin, label)
-        return sender.run()
+        sender = Sender(store, remote, _ActivityStream(process.stdout, activity),
+                        _ActivityStream(process.stdin, activity), origin, label)
+        return sender.run(progress=progress)
     except (OSError, ValueError, TransferError) as exc:
         detail = sink[0].decode("utf-8", "replace").strip()[-600:]
         raise TransferError("ssh transport failed: %s%s" % (exc, ("; remote stderr: " + detail) if detail else "")) from exc
     finally:
-        watchdog.cancel()
+        finished.set()
         stdin = process.stdin
         if stdin is not None:
             try:
@@ -387,7 +421,7 @@ def socket_timeout(stream, seconds):
         pass
 
 
-def local_sync(source_store, central_state_dir, remote, origin, label, attempts=3):
+def local_sync(source_store, central_state_dir, remote, origin, label, attempts=3, progress=None):
     """Run the sender and receiver over a real socketpair in one process.
 
     The receiver opens its own store: a SQLite connection belongs to the thread
@@ -414,7 +448,7 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
     thread.start()
     try:
         with left.makefile("rb") as instream, left.makefile("wb") as outstream:
-            return Sender(source_store, remote, instream, outstream, origin, label).run(attempts)
+            return Sender(source_store, remote, instream, outstream, origin, label).run(attempts, progress=progress)
     finally:
         try:
             left.close()

@@ -281,15 +281,21 @@ def _sync(args):
             if args.dry_run:
                 print("pending=%d origin=%s remote=%s" % (pending, origin, args.to))
                 return 0
+            def progress(count):
+                if count % 25 == 0:
+                    print("delivered=%d" % count, file=sys.stderr, flush=True)
+
             if settings.get("transport", "local") == "local":
                 delivered = transfer_module.local_sync(
-                    store, Path(os.path.expanduser(str(settings["state_dir"]))), args.to, origin, args.label or "collector")
+                    store, Path(os.path.expanduser(str(settings["state_dir"]))), args.to, origin,
+                    args.label or "collector", progress=progress)
             else:
                 host = settings.get("host")
                 command = settings.get("command")
                 if not host or not command:
                     raise StoreError("ssh central settings need host and command")
-                delivered = transfer_module.ssh_sender(store, args.to, host, command, origin, args.label or "collector")
+                delivered = transfer_module.ssh_sender(store, args.to, host, command, origin,
+                                                       args.label or "collector", progress=progress)
             print("delivered=%d pending=%d" % (len(delivered), store.pending_transfers(args.to)))
         return 0
     except (OSError, StoreError, transfer_module.TransferError) as exc:
