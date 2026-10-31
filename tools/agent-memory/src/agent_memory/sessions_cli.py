@@ -487,9 +487,9 @@ def status_document(store):
     unindexed = store.db.execute(
         "SELECT count(*) FROM archive_generation WHERE indexed_at IS NULL AND harness NOT IN ('opencode')").fetchone()[0]
     pending = store.db.execute(
-        "SELECT remote, count(*) AS pending, max(durable_at) AS last_ack FROM archive_generation g "
-        "LEFT JOIN transfer_generation t ON t.generation = g.id "
-        "WHERE t.durable_at IS NULL GROUP BY remote").fetchall()
+        "SELECT coalesce(remote, 'unattempted') AS remote, count(*) AS pending, max(durable_at) AS last_ack "
+        "FROM archive_generation g LEFT JOIN transfer_generation t ON t.generation = g.id "
+        "WHERE t.durable_at IS NULL GROUP BY coalesce(remote, 'unattempted')").fetchall()
     tombstones = store.db.execute("SELECT count(*) FROM tombstone").fetchone()[0]
     unmapped = store.db.execute(
         "SELECT count(DISTINCT cwd) FROM sessions WHERE project IS NULL AND cwd != ''").fetchone()[0]
