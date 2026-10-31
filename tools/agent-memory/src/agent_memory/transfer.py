@@ -102,8 +102,11 @@ class Sender:
         rows = self.store.db.execute(
             "SELECT origin_host, harness, native_id, scope, forgotten_at FROM tombstone").fetchall()
         for row in rows:
-            write_message(self.outstream, {"type": "tombstone", **dict(row)})
+            payload = {"type": "tombstone", "origin_host": row["origin_host"], "harness": row["harness"],
+                       "native_id": row["native_id"], "scope": row["scope"], "forgotten_at": row["forgotten_at"]}
+            write_message(self.outstream, payload)
             self._expect("tombstone_ack")
+            self.store.mark_tombstone_durable(row["origin_host"], row["harness"], row["native_id"], self.remote)
 
     def record_attempt(self, generation, remote, error):
         self.store.record_attempt(generation, remote, error)

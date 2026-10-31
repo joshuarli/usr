@@ -493,6 +493,7 @@ def status_document(store):
         "pending_remote": [dict(row) for row in pending],
         "unmapped_workspaces": unmapped,
         "pending_deletions": tombstones,
+        "deletions": store.tombstone_states(),
         "artifacts": {"count": artifacts[0], "bytes": artifacts[1]},
         "archive": archive_module.retention_report(store.db),
         "identity": archive_module.origin_for(store.db),

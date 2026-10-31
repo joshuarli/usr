@@ -501,7 +501,10 @@ class Store:
                 "ALTER TABLE sessions ADD COLUMN archive_generation INTEGER;"
                 "ALTER TABLE sessions ADD COLUMN origin_host TEXT;"
                 "ALTER TABLE events ADD COLUMN synthetic_id INTEGER NOT NULL DEFAULT 0;"
-                "CREATE TABLE IF NOT EXISTS capture_failure ("
+                "CREATE TABLE IF NOT EXISTS transfer_tombstone ("
+            "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, remote TEXT NOT NULL, "
+            "durable_at REAL NOT NULL, PRIMARY KEY(origin_host, harness, native_id, remote));"
+            "CREATE TABLE IF NOT EXISTS capture_failure ("
             "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, at REAL NOT NULL, error TEXT, "
             "PRIMARY KEY(origin_host, harness, native_id));"
             "CREATE TABLE IF NOT EXISTS collector_identity ("
@@ -580,6 +583,9 @@ class Store:
             "CREATE TABLE index_issues ("
             "session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, position INTEGER NOT NULL, "
             "kind TEXT NOT NULL, PRIMARY KEY(session, position));"
+            "CREATE TABLE IF NOT EXISTS transfer_tombstone ("
+            "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, remote TEXT NOT NULL, "
+            "durable_at REAL NOT NULL, PRIMARY KEY(origin_host, harness, native_id, remote));"
             "CREATE TABLE IF NOT EXISTS capture_failure ("
             "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, at REAL NOT NULL, error TEXT, "
             "PRIMARY KEY(origin_host, harness, native_id));"
@@ -1519,6 +1525,26 @@ class Store:
         return self.db.execute(
             "SELECT 1 FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",
             (origin_host, harness, native_id)).fetchone() is not None
+
+    def mark_tombstone_durable(self, origin_host, harness, native_id, remote):
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO transfer_tombstone (origin_host, harness, native_id, remote, durable_at) "
+                "VALUES (?, ?, ?, ?, ?)", (origin_host, harness, native_id, str(remote), time.time()))
+
+    def tombstone_states(self, remote="central"):
+        rows = self.db.execute(
+            "SELECT t.origin_host, t.harness, t.native_id, t.scope, t.forgotten_at, a.durable_at "
+            "FROM tombstone t LEFT JOIN transfer_tombstone a ON a.origin_host = t.origin_host "
+            "AND a.harness = t.harness AND a.native_id = t.native_id AND a.remote = ? ORDER BY t.forgotten_at DESC",
+            (str(remote),)).fetchall()
+        return [
+            {"origin_host": row["origin_host"], "harness": row["harness"], "native_id": row["native_id"],
+             "scope": row["scope"], "applied_local": True,
+             "acked_remote": row["durable_at"] is not None,
+             "in_backup": "retained until the backup is rotated"}
+            for row in rows
+        ]
 
     def mark_durable(self, source_generation, remote, remote_generation):
         with self.db:
