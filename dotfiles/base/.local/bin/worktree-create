@@ -6,9 +6,20 @@
 # goes to stderr so it cannot be mistaken for the path.
 set -eu
 
+jsonq() {
+    if command -v jaq >/dev/null 2>&1 && jaq --version >/dev/null 2>&1; then
+        jaq "$@"
+    elif command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
+        jq "$@"
+    else
+        printf '%s\n' 'worktree-create: jaq or jq is required' >&2
+        exit 1
+    fi
+}
+
 input=$(cat)
-name=$(printf '%s' "$input" | jaq -r .name)
-cwd=$(printf '%s' "$input" | jaq -r .cwd)
+name=$(printf '%s' "$input" | jsonq -r .name)
+cwd=$(printf '%s' "$input" | jsonq -r .cwd)
 
 case "$name" in
     ''|null|*/*|.*) printf '%s\n' "worktree-create: refusing worktree name '$name'" >&2; exit 1 ;;

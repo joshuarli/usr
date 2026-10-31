@@ -5,7 +5,18 @@
 # may hold the only copy of the work.
 set -eu
 
-path=$(jaq -r .worktree_path)
+jsonq() {
+    if command -v jaq >/dev/null 2>&1 && jaq --version >/dev/null 2>&1; then
+        jaq "$@"
+    elif command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
+        jq "$@"
+    else
+        printf '%s\n' 'worktree-remove: jaq or jq is required' >&2
+        exit 1
+    fi
+}
+
+path=$(jsonq -r .worktree_path)
 
 case "$path" in
     */.work/wt/?*) ;;

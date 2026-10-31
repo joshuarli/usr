@@ -1,6 +1,6 @@
 export TERM="tmux-256color"
 export PATH="$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:$PATH"
-export EDITOR="$HOME/usr/bin/e"
+export EDITOR="$HOME/.local/bin/e"
 export PAGER="less"
 export LS_COLORS="su=00:sg=00:ca=00:or=40;31;01:"
 export XDG_CONFIG_HOME="$HOME/.config"

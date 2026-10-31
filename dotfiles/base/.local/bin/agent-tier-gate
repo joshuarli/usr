@@ -29,9 +29,9 @@ deny() {
 
 # Exit 2 is the only status that blocks a spawn, so a missing JSON tool or
 # unparseable input must deny explicitly instead of failing with another status.
-if command -v jaq >/dev/null 2>&1; then
+if command -v jaq >/dev/null 2>&1 && jaq --version >/dev/null 2>&1; then
     json=jaq
-elif command -v jq >/dev/null 2>&1; then
+elif command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
     json=jq
 else
     deny "neither jaq nor jq is installed"

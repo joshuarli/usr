@@ -3,6 +3,17 @@ set -eu
 
 unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
 
+jsonq() {
+	if command -v jaq >/dev/null 2>&1 && jaq --version >/dev/null 2>&1; then
+		jaq "$@"
+	elif command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
+		jq "$@"
+	else
+		printf '%s\n' 'claude-api: jaq or jq is required' >&2
+		exit 1
+	fi
+}
+
 help() {
 	echo "usage: claude-api [--budget usd] [--model name] [--] <prompt...>"
 	echo "       claude-api --help"
@@ -108,7 +119,7 @@ vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 	--effort high \
 	--output-format stream-json --verbose |
 	tee "$log" |
-	jaq -nr --argjson budget "$budget" "$filter" |
+	jsonq -nr --argjson budget "$budget" "$filter" |
 	while IFS= read -r line; do
 		case $line in
 		'> '*)
@@ -121,7 +132,7 @@ vault ANTHROPIC_API_KEY -- claude -p "$prompt" \
 	done
 
 # shellcheck disable=SC2016 # $vars are jaq's, not the shell's
-summary=$(jaq -rs '
+summary=$(jsonq -rs '
 	([.[] | select(.type == "assistant") | .message.content[] | select(.type == "tool_use") | .name]
 	 | group_by(.) | map("\(.[0])=\(length)") | join(" ")) as $tools
 	| (last(.[] | select(.type == "result")) // null) as $r
@@ -129,12 +140,12 @@ summary=$(jaq -rs '
 	  else "\($r.subtype) | \($r.num_turns) turns | \($r.duration_ms / 60000 | floor) min | $\($r.total_cost_usd) | \($tools)" end' "$log")
 
 rc=1
-if jaq -es 'any(.[]; .type == "result" and .subtype == "success" and .is_error == false)' "$log" >/dev/null; then
+if jsonq -es 'any(.[]; .type == "result" and .subtype == "success" and .is_error == false)' "$log" >/dev/null; then
 	rc=0
 fi
 
 {
-	jaq -rs 'last(.[] | select(.type == "result")) | .result // empty' "$log"
+	jsonq -rs 'last(.[] | select(.type == "result")) | .result // empty' "$log"
 	# shellcheck disable=SC2016 # backticks are markdown, not substitutions
 	printf '\n---\n\n`%s`\n\nlog: `%s`\n\n```\n' "$summary" "$log"
 	git -C "$root" status --short
