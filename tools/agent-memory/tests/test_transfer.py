@@ -7,8 +7,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 WORK_TMP = ROOT / ".work" / "tmp"
@@ -594,6 +596,92 @@ class CentralParityTests(unittest.TestCase):
                 "SELECT position, entry, parent_entry FROM events WHERE session = ?", ("cmd:s-1@" + origin,))]
         active = STORE_MODULE.active_branch(events, tip)
         self.assertEqual([event["entry"] for event in active if event["entry"]], ["m-a", "m-b"])
+
+
+SILENT_AFTER_HELLO = (
+    "import json, struct, sys, time\n"
+    "head = sys.stdin.buffer.read(8)\n"
+    "sys.stdin.buffer.read(struct.unpack('>Q', head)[0])\n"
+    "body = json.dumps({'type': 'ready', 'protocol': %d, 'compression': None, 'store': 'silent-store'}).encode()\n"
+    "sys.stdout.buffer.write(struct.pack('>Q', len(body)) + body)\n"
+    "sys.stdout.buffer.flush()\n"
+    "time.sleep(120)\n"
+)
+NEVER_ANSWERS = "import time\ntime.sleep(120)\n"
+
+
+class SshTransportTests(unittest.TestCase):
+    """A connected but silent receiver must not hang a query or a sync."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temp.name)
+        self.processes = []
+        real = subprocess.Popen
+
+        def recording(*args, **kwargs):
+            process = real(*args, **kwargs)
+            self.processes.append(process)
+            return process
+
+        self.patches = [
+            mock.patch.object(TRANSFER.subprocess, "Popen", recording),
+        ]
+        for patch in self.patches:
+            patch.start()
+
+    def tearDown(self):
+        for patch in self.patches:
+            patch.stop()
+        for process in self.processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        self.temp.cleanup()
+
+    def receiver_script(self, script):
+        return mock.patch.object(TRANSFER, "ssh_argv", lambda host, command: [sys.executable, "-I", "-c", script])
+
+    def assert_reaped(self):
+        receivers = [process for process in self.processes if process.args[0] == sys.executable]
+        self.assertEqual(len(receivers), 1)
+        self.assertIsNotNone(receivers[0].poll())
+
+    def test_a_query_to_a_receiver_that_never_answers_times_out_and_reaps_the_process(self):
+        started = time.monotonic()
+        with self.receiver_script(NEVER_ANSWERS):
+            with self.assertRaises(TRANSFER.TransferError) as caught:
+                TRANSFER.query_over_ssh("host", "cmd", "search", {"query": "x"}, "origin", "label", timeout=1)
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertIn("without activity", str(caught.exception))
+        self.assert_reaped()
+
+    def test_a_query_to_a_receiver_that_goes_silent_after_the_handshake_times_out(self):
+        started = time.monotonic()
+        with self.receiver_script(SILENT_AFTER_HELLO % TRANSFER.PROTOCOL):
+            with self.assertRaises(TRANSFER.TransferError) as caught:
+                TRANSFER.query_over_ssh("host", "cmd", "search", {"query": "x"}, "origin", "label", timeout=1)
+        self.assertLess(time.monotonic() - started, 15)
+        self.assertIn("without activity", str(caught.exception))
+        self.assert_reaped()
+
+    def test_a_sync_to_a_receiver_that_goes_silent_keeps_the_backlog_and_reaps_the_process(self):
+        sessions = self.root / "sessions"
+        sessions.mkdir()
+        (sessions / "rollout-a.jsonl").write_text(
+            json.dumps({"timestamp": "2026-10-30T00:00:00Z", "type": "session_meta", "payload": {"id": "a", "cwd": str(self.root)}}) + "\n"
+            + line("alpha"))
+        source = Store(self.root / "source")
+        source.refresh([sessions], project=None)
+        origin = ARCHIVE.origin_for(source.db)
+        started = time.monotonic()
+        with self.receiver_script(SILENT_AFTER_HELLO % TRANSFER.PROTOCOL), mock.patch.object(TRANSFER.time, "sleep"):
+            with self.assertRaises(TRANSFER.TransferError) as caught:
+                TRANSFER.ssh_sender(source, "central", "host", "cmd", origin, "label", timeout=1)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertIn("without activity", str(caught.exception))
+        self.assertEqual(source.pending_transfers("silent-store"), 1)
+        self.assert_reaped()
 
 
 if __name__ == "__main__":

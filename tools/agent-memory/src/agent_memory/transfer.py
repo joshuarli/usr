@@ -10,6 +10,8 @@ import hashlib
 import json
 import socket
 import struct
+import subprocess
+import threading
 import time
 import zlib
 from typing import Any, NoReturn
@@ -22,6 +24,7 @@ MAX_FRAME = 4 * 1024 * 1024
 MAX_BLOB = 64 * 1024 * 1024
 COMPRESSION = "zlib"
 LOCAL_SOCKET_TIMEOUT = 900
+IO_SLICE = 65536
 
 
 def compress(data):
@@ -53,7 +56,7 @@ def _read_exactly(stream, size):
     chunks = []
     remaining = size
     while remaining:
-        data = stream.read(remaining)
+        data = stream.read(min(remaining, IO_SLICE))
         if not data:
             raise TransferError("connection closed mid-frame")
         chunks.append(data)
@@ -89,7 +92,9 @@ def write_blob(stream, data):
     if len(data) > MAX_BLOB:
         raise TransferError("object exceeds the protocol limit")
     stream.write(struct.pack(">Q", len(data)))
-    stream.write(data)
+    view = memoryview(data)
+    for start in range(0, len(view), IO_SLICE):
+        stream.write(view[start:start + IO_SLICE])
     stream.flush()
 
 
@@ -338,11 +343,6 @@ def _expect_object_or_commit(instream, outstream, store, wanted):
         store.store_object(data)
 
 
-def local_pair(store, remote, origin, label):
-    """Run sender and receiver in one process over an in-memory pipe."""
-    return store, remote, origin, label
-
-
 class _ActivityStream:
     """Record activity so the transport timeout measures idleness, not duration."""
 
@@ -371,6 +371,10 @@ class _ActivityStream:
         return getattr(self._stream, name)
 
 
+def ssh_argv(host, command):
+    return ["ssh", "-o", "BatchMode=yes", host, "--", command]
+
+
 def _drain(stream, sink, limit=65536):
     try:
         while True:
@@ -383,65 +387,86 @@ def _drain(stream, sink, limit=65536):
         return
 
 
-def ssh_sender(store, remote, host, command, origin, label, timeout=120, progress=None) -> dict[str, Any]:
-    import subprocess
-    import threading
+class SshTransport:
+    """One SSH child process whose silence is bounded by a real inactivity deadline.
 
-    process = subprocess.Popen(
-        ["ssh", "-o", "BatchMode=yes", host, "--", command],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
-    sink = [b""]
-    assert process.stderr is not None
-    drain = threading.Thread(target=_drain, args=(process.stderr, sink), daemon=True)
-    drain.start()
-    activity = {"t": time.monotonic()}
-    finished = threading.Event()
+    A watchdog kills the process when nothing has been read or written for
+    `timeout` seconds, which unblocks any pending read. Leaving the context
+    reaps the process and fails loudly if it cannot be reaped.
+    """
 
-    def expire():
-        while not finished.wait(2.0):
-            if time.monotonic() - activity["t"] <= timeout:
-                continue
-            for stream in (process.stdin, process.stdout):
-                if stream is None:
-                    continue
+    def __init__(self, host, command, timeout=120):
+        self.host, self.command, self.timeout = host, command, timeout
+        self.timed_out = False
+        self._activity = {"t": time.monotonic()}
+        self._finished = threading.Event()
+        self._stderr = [b""]
+
+    def __enter__(self):
+        self.process = subprocess.Popen(ssh_argv(self.host, self.command), stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdin, stdout, stderr = self.process.stdin, self.process.stdout, self.process.stderr
+        assert stdin is not None and stdout is not None and stderr is not None
+        self._pipes = (stdin, stdout, stderr)
+        self.instream = _ActivityStream(stdout, self._activity)
+        self.outstream = _ActivityStream(stdin, self._activity)
+        self._drainer = threading.Thread(target=_drain, args=(stderr, self._stderr), daemon=True)
+        self._drainer.start()
+        self._watchdog = threading.Thread(target=self._expire, daemon=True)
+        self._watchdog.start()
+        return self
+
+    def _expire(self):
+        while not self._finished.wait(min(2.0, self.timeout / 4)):
+            if time.monotonic() - self._activity["t"] > self.timeout:
+                self.timed_out = True
+                self.process.kill()
+                return
+
+    def failure(self, error):
+        if self.timed_out:
+            reason = "ssh transport timed out after %s seconds without activity" % self.timeout
+        else:
+            reason = "ssh transport failed: %s" % error
+        detail = self._stderr[0].decode("utf-8", "replace").strip()[-600:]
+        return TransferError(reason + (("; remote stderr: " + detail) if detail else ""))
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._finished.set()
+        if exc_type is not None:
+            self.process.kill()
+        try:
+            self._pipes[0].close()
+        except (OSError, ValueError):
+            pass
+        try:
+            self.process.wait(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=10)
+            if exc_type is None:
+                raise TransferError("ssh transport did not exit after the stream closed") from None
+        finally:
+            for stream in self._pipes[1:]:
                 try:
                     stream.close()
                 except (OSError, ValueError):
                     pass
-            return
+            self._watchdog.join(timeout=5)
+            self._drainer.join(timeout=5)
+        if self.process.poll() is None:
+            raise TransferError("ssh transport process could not be reaped")
 
-    watchdog = threading.Thread(target=expire, daemon=True)
-    watchdog.start()
-    try:
-        assert process.stdout is not None and process.stdin is not None
-        sender = Sender(store, remote, _ActivityStream(process.stdout, activity),
-                        _ActivityStream(process.stdin, activity), origin, label)
-        sender.run(progress=progress)
-        return sender.stats
-    except (OSError, ValueError, TransferError) as exc:
-        detail = sink[0].decode("utf-8", "replace").strip()[-600:]
-        raise TransferError("ssh transport failed: %s%s" % (exc, ("; remote stderr: " + detail) if detail else "")) from exc
-    finally:
-        finished.set()
-        stdin = process.stdin
-        if stdin is not None:
-            try:
-                stdin.close()
-            except OSError:
-                pass
+
+def ssh_sender(store, remote, host, command, origin, label, timeout=120, progress=None) -> dict[str, Any]:
+    transport = SshTransport(host, command, timeout)
+    with transport:
         try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            process.kill()
-            raise TransferError("ssh transport timed out") from exc
-
-
-def socket_timeout(stream, seconds):
-    try:
-        stream.settimeout(seconds)
-    except (AttributeError, socket.error):
-        pass
+            sender = Sender(store, remote, transport.instream, transport.outstream, origin, label)
+            sender.run(progress=progress)
+            return sender.stats
+        except (OSError, ValueError, TransferError) as exc:
+            raise transport.failure(exc) from exc
 
 
 def local_sync(source_store, central_state_dir, remote, origin, label, attempts=3, progress=None) -> dict[str, Any]:
@@ -536,44 +561,21 @@ def query(store, op, args):
 
 
 def query_over_ssh(host, command, op, args, origin, label, timeout=120):
-    import subprocess
-    import threading
-
-    process = subprocess.Popen(["ssh", "-o", "BatchMode=yes", host, "--", command],
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    sink = [b""]
-    detail = process.stderr
-    assert detail is not None
-    threading.Thread(target=_drain, args=(detail, sink), daemon=True).start()
-    try:
-        instream, outstream = process.stdout, process.stdin
-        assert instream is not None and outstream is not None
-        write_message(outstream, {"type": "hello", "protocol": PROTOCOL, "origin": origin, "label": label})
+    transport = SshTransport(host, command, timeout)
+    with transport:
         try:
-            ready = read_message(instream)
-        except (OSError, TransferError) as exc:
-            text = sink[0].decode("utf-8", "replace").strip()[-400:]
-            raise TransferError("central store unreachable: %s%s" % (exc, ("; " + text) if text else "")) from exc
-        if ready.get("type") != "ready":
-            raise TransferError(str(ready.get("message") or "central store refused the query"))
-        write_message(outstream, {"type": "query", "op": op, "args": args})
-        reply = read_message(instream)
-        write_message(outstream, {"type": "bye"})
-        read_message(instream)
-        if reply.get("type") == "error":
-            raise TransferError(str(reply.get("message")))
-        if reply.get("type") != "result":
-            raise TransferError("unexpected query reply")
-        return reply.get("rows") or []
-    finally:
-        stdin = process.stdin
-        if stdin is not None:
-            try:
-                stdin.close()
-            except OSError:
-                pass
-        try:
-            process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            process.kill()
-            raise TransferError("central query timed out") from exc
+            write_message(transport.outstream, {"type": "hello", "protocol": PROTOCOL, "origin": origin, "label": label})
+            ready = read_message(transport.instream)
+            if ready.get("type") != "ready":
+                raise TransferError(str(ready.get("message") or "central store refused the query"))
+            write_message(transport.outstream, {"type": "query", "op": op, "args": args})
+            reply = read_message(transport.instream)
+            write_message(transport.outstream, {"type": "bye"})
+            read_message(transport.instream)
+        except (OSError, ValueError, TransferError) as exc:
+            raise transport.failure(exc) from exc
+    if reply.get("type") == "error":
+        raise TransferError(str(reply.get("message")))
+    if reply.get("type") != "result":
+        raise TransferError("unexpected query reply")
+    return reply.get("rows") or []
