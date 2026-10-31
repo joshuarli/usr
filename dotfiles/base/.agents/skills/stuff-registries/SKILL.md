@@ -20,27 +20,27 @@ description: "Apply when publishing or consuming packages through the 17166969.x
 ## State and auth
 
 - Publication state lives in `${XDG_STATE_HOME:-$HOME/.local/state}/stuff/<registry>/` (`mycrates/{state,site,token}`, `mynpm/site`, `mypypi/site`, ...). It is the source of truth and is outside the checkout; back it up, never treat a fresh checkout as enough.
-- If state is missing, rebuild it before publishing or the next publish replaces the live registry with the caller's subset:
+- If state is missing, `deploy/publish` adopts the live publication automatically. To do it manually, with `H=${STUFF_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/stuff}`:
   - `deploy/r2-pull.py stuff-mycrates "$H/pull-mycrates"`, then `mycrates init`, `mycrates config set-public-base-url https://crates.17166969.xyz`, `mycrates adopt --from-site ...`
   - `deploy/r2-pull.py stuff-mynpm "$H/mynpm/site/mirror"`, then `mynpm adopt --site-dir ...`
   - `deploy/r2-pull.py stuff-mypypi "$H/mypypi/site"`
-- Syncs need an authenticated `cf` CLI. Check with `cf r2 buckets list` (read-only). Conditional promotion prefers `R2_S3_ENDPOINT`, `R2_S3_ACCESS_KEY_ID`, `R2_S3_SECRET_ACCESS_KEY`; without them set `R2_PROMOTE_UNCONDITIONAL=1` to promote through `cf`, accepting that a competing publisher is not detected.
+- Syncs need an authenticated `cf` CLI. Check with `cf auth whoami`. The normal single-publisher path promotes through `cf` and needs no R2 S3 credentials. Use `R2_S3_ENDPOINT`, `R2_S3_ACCESS_KEY_ID`, and `R2_S3_SECRET_ACCESS_KEY` only for conditional promotion (`--promote=s3`) or files over 300 MB; a competing publisher is not detected in the `cf` mode.
+- `deploy/publish REGISTRY` is the normal entry point. It checks `cf` auth, adopts the live bucket when local state is missing, and runs the matching helper. Pass `--promote=s3` only when another machine or CI can publish concurrently.
 
 ## Cargo
 
-Source repos own their crate list and call the shared script; `STUFF_DIR` must point at this checkout because the script builds the binaries there:
+Source repos own their crate list and pass it to the shared wrapper:
 
 ```sh
-STUFF_DIR=/Users/josh/d/stuff CRATES="pkg-a pkg-b" R2_PROMOTE_UNCONDITIONAL=1 \
-  /Users/josh/d/stuff/deploy/publish-mycrates.sh
+CRATES="pkg-a pkg-b" /Users/josh/d/stuff/deploy/publish mycrates
 ```
 
-It starts a local publish server, runs `cargo publish -p` in dependency order, republishes the site with the public URL, and syncs R2. `cargo publish` refuses a dirty tree, so commit crate-source changes first. Versions already published in the native index cannot be replaced, only yanked.
+The wrapper adopts missing state and then runs `deploy/publish-mycrates.sh`. That helper starts a local publish server, runs `cargo publish -p` in dependency order, republishes the site with the public URL, and syncs R2. `cargo publish` refuses a dirty tree, so commit crate-source changes first. Versions already published in the native index cannot be replaced, only yanked.
 
 - **Native vs mirror.** First-party crates go to the native index (`current/registry/`). Upstream crates come from the archive (`current/crates-io/`), usually via source replacement. Native crates may depend on crates.io crates; those resolve through the mirror or crates.io.
 - **Consuming a native crate.** Configure `[registries.mycrates] index = "sparse+https://crates.17166969.xyz/current/registry/"` and depend on `{ version = "...", registry = "mycrates" }`.
 - **Native → native dependencies.** A plain path dependency is rewritten to crates.io when published. Name the registry on the workspace dependency so the published manifest keeps the same-registry link, e.g. `age-core = { version = "0.12.0", path = "age-core", registry = "mycrates" }`. Local builds still use the path; packing uses the registry.
-- **Verification quirk.** `mycrates` writes `"auth-required": false` into the generated index config but `serve-publish` requires its token for blob GETs, so verifying a crate that depends on another native crate fails with a 401 on download. Publish the dependency first (it verifies normally), then publish the dependent crate with `--no-verify`; prove the result by consuming it from the registry. This is a tool gap, not a reason to publish the dependency to crates.io.
+- **Read auth.** `mycrates` writes require the publish token. Reads follow `auth_required`, which is advertised as `auth-required` in `current/registry/config.json`. Keep it false for the public Worker and static servers, which do not enforce read auth. `serve-publish` serves `blobs/`, so a native dependency can be downloaded during verification and the dependent crate publishes without `--no-verify`.
 - **Adding upstream deps to the mirror.** Import the lockfile that needs them, then fetch and publish:
   `mycrates import-lock Cargo.lock --project <id> --state-dir "$STATE"`,
   `mycrates plan`, `mycrates fetch`, `mycrates verify`, `mycrates publish`, then `deploy/r2-sync.sh "$SITE" stuff-mycrates`.
@@ -49,12 +49,12 @@ It starts a local publish server, runs `cargo publish -p` in dependency order, r
 
 ## npm and PyPI
 
-- npm: `STUFF_DIR=... LOCKFILE=pnpm-lock.yaml PROJECT=<id> deploy/publish-mynpm.sh` (source repos wrap this in `make publish-mynpm`). `TARGETS` adds non-host platforms; state is the `mynpm/site` mirror.
-- PyPI: `STUFF_DIR=... PACKAGES="name==version ..." PLATFORM=linux-aarch64 deploy/publish-mypypi.sh` (source repos wrap this in `make publish-mypypi`). Wheels are validated on a native runner; publish once per platform against the same state/site. Linux uses `deploy/mypypi-container.sh`.
-- Both scripts publish a site generation and sync R2 in one transaction under the registry's publish lock.
+- npm: `LOCKFILE=pnpm-lock.yaml PROJECT=<id> /Users/josh/d/stuff/deploy/publish mynpm` (source repos wrap this in `make publish-mynpm`). `TARGETS` adds non-host platforms; state is the `mynpm/site` mirror.
+- PyPI: `PACKAGES="name==version ..." /Users/josh/d/stuff/deploy/publish mypypi` (source repos wrap this in `make publish-mypypi`). Wheels are validated on a native runner; publish once per platform against the same state/site. Linux uses `deploy/mypypi-container.sh` for build, validate, and publish.
+- Both paths publish a site generation and sync R2 in one transaction under the registry's publish lock.
 
 ## Verify
 
-After a deploy run `deploy/deployed-smoke.sh` (read-only, no credentials) or `stuff doctor --remote --sample-artifacts`. It checks active generations, pinned catalogs, reachable endpoints, and one hash-verified artifact per registry. Roll back a bad cargo/npm/pypi generation with `deploy/r2-rollback.sh <bucket> <generation>`, which verifies the target manifest before moving `current`.
+After a deploy run `deploy/deployed-smoke.sh` (read-only, no credentials) or `stuff doctor --remote --sample-artifacts`. It checks active generations, pinned catalogs, reachable endpoints, and one hash-verified artifact per registry. Roll back a bad cargo/npm/pypi generation with `deploy/r2-rollback.sh <bucket> <generation>`, which verifies the target manifest before moving `current` and defaults to `cf` promotion. Add `--promote=s3` when another publisher can race.
 
 **Report:** which registry and packages were published, the generation synced, the auth mode used, the check run and its result, and anything left unverified.
