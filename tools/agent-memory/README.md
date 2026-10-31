@@ -144,7 +144,7 @@ One machine can be the central store for several collectors. It is an ordinary a
 # On the central host: nothing to start. The receiver is a fixed command.
 # On each collector, ~/.config/agent-sessions/config.json:
 # {"central": {"transport": "ssh", "host": "archive",
-#              "command": "agent-sessions-serve ingest --protocol 1",
+#              "command": "agent-sessions-serve ingest --protocol 1 --origin 1f2e...",
 #              "allowed_origins": ["1f2e..."]}}
 agent-sessions identity show                     # this collector's origin id
 agent-sessions sync --to central --dry-run       # pending generations
@@ -159,7 +159,7 @@ For a local or offline run, point the same commands at a directory: `agent-sessi
 - Stored is not the same as searchable. The central side indexes each accepted generation itself, from the captured bytes, so search and `show` never need the source host or its filesystem.
 - The sender keeps its own copy until the ack. While offline it keeps a backlog with the attempt count and last error, and `doctor --json` reports it.
 - Tombstones travel first. A session forgotten at a collector refuses later re-delivery, so a stale or restored machine cannot resurrect it.
-- `ssh` runs with normal host-key verification. No content, query, path, or session id is ever interpolated into the remote command; the command is fixed in configuration.
+- `ssh` runs with normal host-key verification. No content, query, path, or session id is ever interpolated into the remote command; the command is fixed in configuration, and `agent-sessions-serve` refuses an origin it was not started with. The sender drains stderr and arms a timeout, so a wedged receiver cannot hang a collector.
 - A collector declares one origin identity, a random persisted id, never a hostname or a hardware id. `agent-sessions identity regenerate` mints a new one and leaves recorded origins alone. The same native id from two origins is two sessions; a copied history is not independent evidence.
 
 Optional scheduling is explicit and never installed by sync: `dotfiles/launchd/com.josh.agent-sessions-sync.plist.in` for macOS, or a cron entry such as `*/15 * * * * agent-sessions sync --to central`. Overlapping runs exit immediately with `overlapped=1`. Missed runs are recovered by the next one; a hook hint is optional and never blocks a session on network access.

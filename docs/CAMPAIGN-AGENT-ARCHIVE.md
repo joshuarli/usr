@@ -228,8 +228,8 @@ Every behavior below needs a test that fails if the adapter gets it wrong. Run a
 
 | Item | Why it cannot run here | Command the owner would run |
 | --- | --- | --- |
-| Real SSH destination | No destination is configured, and none may be invented. | `agent-sessions sync --remote <alias> --dry-run` after configuring `~/.config/agent-sessions/config.json` |
-| Disposable `sshd` integration (`W3.7`) | `/usr/sbin/sshd` exists but starting a listener is outside the execution boundary. | `tests/test_transfer.py --sshd` with a scratch key and a high port |
+| Real SSH destination | No destination is configured, and none may be invented. | `agent-sessions sync --to <alias> --dry-run` after configuring `~/.config/agent-sessions/config.json` |
+| Disposable `sshd` integration (`W3.7`) | `/usr/sbin/sshd` exists but starting a listener is outside the execution boundary. | start `sshd` on a high port with a scratch key, then run `agent-sessions sync --to <alias>` against `agent-sessions-serve ingest --protocol 1 --origin <id>` |
 | `restic` and R2/S3 destination | `restic` is not installed and no bucket may be created. | `agent-sessions backup create --restic --repo <url>` |
 | LaunchAgent and cron activation | Installing a service on the real machine is forbidden. | `plutil -lint` on the template, then the owner's install step |
 | Perf-gated timings | Host busy; `perf-gate-ready` exits 75. | `sh dotfiles/perf-gate-ready-test.sh` then the bench, on an idle host |
