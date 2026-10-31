@@ -381,6 +381,7 @@ class Store:
         self.db.execute("PRAGMA busy_timeout = 10000")
         try:
             self._initialize()
+            self._assign_legacy_origin()
         except Exception:
             self.db.close()
             raise
@@ -459,6 +460,13 @@ class Store:
         except sqlite3.DatabaseError as exc:
             self.db.rollback()
             raise StoreError("session index database is unreadable; preserve learning data and run `agent-sessions doctor`: " + str(exc)) from exc
+
+    def _assign_legacy_origin(self):
+        if self.db.execute("SELECT 1 FROM sessions WHERE origin_host IS NULL LIMIT 1").fetchone() is None:
+            return
+        origin = archive_module.origin_for(self.db)
+        with self.db:
+            self.db.execute("UPDATE sessions SET origin_host = ? WHERE origin_host IS NULL", (origin,))
 
     def _schema_ready(self, expected_version=SCHEMA_VERSION):
         try:
@@ -1224,6 +1232,11 @@ class Store:
             and self._file_metadata_matches(existing, meta)
             and existing["indexed_bytes"] + existing["partial_bytes"] == meta["file_size"]
         ):
+            generation = meta.get("archive_generation")
+            if generation is not None and existing["archive_generation"] != generation:
+                with self.db:
+                    self.db.execute(
+                        "UPDATE sessions SET archive_generation = ? WHERE id = ?", (generation, meta["id"]))
             return False, 0, 0, existing["partial_bytes"]
         if existing is not None and not reset and not self._checkpoint_valid(meta, existing, stats):
             reset = True
@@ -1336,9 +1349,9 @@ class Store:
                     self.db.execute(
                         "UPDATE sessions SET updated = ?, file_size = ?, file_mtime_ns = ?, file_ctime_ns = ?, indexed_bytes = ?, "
                         "checkpoint_position = ?, checkpoint_digest = ?, malformed_lines = ?, partial_bytes = ?, coverage = ?, "
-                        "recognized_events = ?, unrecognized_events = ? WHERE id = ?",
+                        "recognized_events = ?, unrecognized_events = ?, archive_generation = COALESCE(?, archive_generation) WHERE id = ?",
                         (updated, size, mtime_ns, ctime_ns, offset, checkpoint_position, checkpoint_digest, malformed_total, partial, coverage,
-                         totals[0], totals[1], meta["id"]),
+                         totals[0], totals[1], meta.get("archive_generation"), meta["id"]),
                     )
         except OSError as exc:
             raise StoreError("cannot read transcript " + meta["source_path"] + ": " + str(exc)) from exc

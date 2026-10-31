@@ -352,6 +352,27 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual((canonical / "sessions.sqlite3").read_text(), "canonical")
         self.assertTrue(legacy.is_dir())
 
+    def test_refresh_relinks_a_migrated_session_to_its_captured_generation(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            self.refresh(store)
+            generation = store.db.execute("SELECT archive_generation FROM sessions").fetchone()[0]
+            with store.db:
+                store.db.execute("UPDATE sessions SET archive_generation = NULL")
+            self.refresh(store)
+            self.assertEqual(store.db.execute("SELECT archive_generation FROM sessions").fetchone()[0], generation)
+
+    def test_a_legacy_session_without_an_origin_gets_the_local_origin(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            self.refresh(store)
+            origin = store.db.execute("SELECT origin_host FROM collector_identity").fetchone()[0]
+            with store.db:
+                store.db.execute("UPDATE sessions SET origin_host = NULL")
+        with Store(self.state) as store:
+            self.assertEqual(store.db.execute("SELECT origin_host FROM sessions").fetchone()[0], origin)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM collector_identity").fetchone()[0], 1)
+
     def test_state_directory_override_beats_the_canonical_default(self):
         with mock.patch.dict(os.environ, {"AGENT_SESSIONS_STATE_DIR": str(self.root / "override")}):
             self.assertEqual(STORE_MODULE.default_state_dir(), self.root / "override")
