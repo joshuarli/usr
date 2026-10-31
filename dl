@@ -38,6 +38,8 @@ NODE_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/node-build"
 NODE_MINIMUM=26.12.0
 NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
+CF_VERSION=1.0.0-beta.26
+CF_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/cf"
 FX_VERSION=v0.0.16
 GHOSTTY_VERSION=1.4.0
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
@@ -579,7 +581,7 @@ install_release() {
     repo=$prog
     case "$prog" in
         e|fz|fdu|fastermod|tm|fs|srv|diff-pretty|vault) owner="laputa-systems" ;;
-        ish|mactop|gh|syncthing) owner="joshuarli" ;;
+        ish|stuff|mactop|gh|syncthing) owner="joshuarli" ;;
         bylaws) owner="joshuarli"; repo="swift-bylaws" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
@@ -616,7 +618,7 @@ install_release() {
     fi
     case "${OS}:${prog}" in
         Linux:ish) artifact_target="${ARCH}-unknown-linux-musl-static" ;;
-        Linux:e|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault|Linux:syncthing) artifact_target="${ARCH}-unknown-linux-musl" ;;
+        Linux:e|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault|Linux:syncthing|Linux:stuff) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
@@ -1990,6 +1992,74 @@ install_cmd() {
     _dl_ok "Installed ${DEST}/cmd"
 }
 
+install_cf() {
+    command -v npm >/dev/null 2>&1 || { unchecked cf "npm is required"; return; }
+    if ! node_meets_minimum; then
+        unchecked cf "Node.js $NODE_MINIMUM or newer is required"
+        return
+    fi
+    version=$CF_VERSION
+    if [ -e "${DEST}/cf" ] || [ -L "${DEST}/cf" ]; then
+        if [ "$(readlink "${DEST}/cf" 2>/dev/null || :)" != "${CF_INSTALL_ROOT}/bin/cf" ] \
+            || [ ! -s "${STATE}/cf" ]; then
+            skip cf "${DEST}/cf already exists outside dl management"
+            return
+        fi
+    fi
+    if [ -e "$CF_INSTALL_ROOT" ] || [ -L "$CF_INSTALL_ROOT" ]; then
+        if [ ! -d "$CF_INSTALL_ROOT" ] || [ -L "$CF_INSTALL_ROOT" ] \
+            || [ ! -s "${STATE}/cf" ]; then
+            skip cf "$CF_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    fi
+    if [ "$(cat "${STATE}/cf" 2>/dev/null)" = "$version" ] \
+        && [ -x "${CF_INSTALL_ROOT}/bin/cf" ] \
+        && [ "$(readlink "${DEST}/cf" 2>/dev/null || :)" = "${CF_INSTALL_ROOT}/bin/cf" ]; then
+        own_dir "$CF_INSTALL_ROOT"
+        own_file "${DEST}/cf"
+        own_file "${STATE}/cf"
+        _dl_current "cf is current (${version})"
+        return
+    fi
+    own_parent=${CF_INSTALL_ROOT%/*}
+    own_missing_dirs "$own_parent"
+    mkdir -p "$own_parent"
+    install_prefix=$CF_INSTALL_ROOT
+    if [ ! -d "$CF_INSTALL_ROOT" ]; then
+        tmpbundle=$(mktemp -d "${CF_INSTALL_ROOT}.XXXXXX")
+        install_prefix=$tmpbundle
+    fi
+    _dl_fetch "Installing Cloudflare cf (${version}) ..."
+    if ! npm install --global --ignore-scripts --prefix "$install_prefix" "cf@${version}"; then
+        skip cf "npm install failed"
+        return
+    fi
+    if [ ! -x "${install_prefix}/bin/cf" ]; then
+        skip cf "npm did not install ${install_prefix}/bin/cf"
+        return
+    fi
+    if [ "$install_prefix" != "$CF_INSTALL_ROOT" ]; then
+        if [ -e "$CF_INSTALL_ROOT" ] || [ -L "$CF_INSTALL_ROOT" ]; then
+            skip cf "$CF_INSTALL_ROOT appeared during install"
+            return
+        fi
+        mv "$install_prefix" "$CF_INSTALL_ROOT"
+        tmpbundle=
+    fi
+    own_dir "$CF_INSTALL_ROOT"
+    tmpbinlink=$(mktemp "${DEST}/.cf.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${CF_INSTALL_ROOT}/bin/cf" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/cf"
+    tmpbinlink=
+    printf '%s\n' "$version" > "${STATE}/cf"
+    own_file "${DEST}/cf"
+    own_file "${STATE}/cf"
+    changed=true
+    _dl_ok "Installed ${DEST}/cf (${version})"
+}
+
 install_pi() {
     command -v npm >/dev/null 2>&1 || { unchecked pi "npm is required"; return; }
     if ! node_meets_minimum; then
@@ -3237,7 +3307,7 @@ run_parallel() {
             *" $prog "*) continue ;;
         esac
         case "$prog" in
-            cmd|dsh|pi|freebuff) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
+            cmd|dsh|pi|freebuff|cf) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
             *) binary_tools="${binary_tools}${binary_tools:+ }${prog}" ;;
         esac
     done
@@ -3266,9 +3336,10 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg jaq fastermod tm ish e fz fdu fs srv mactop vault gh bylaws mold; do
+    for record_prog in fd rg jaq fastermod tm ish stuff e fz fdu fs srv mactop vault gh bylaws mold cf; do
         record_managed_binary "$record_prog"
     done
+    if [ -s "${STATE}/cf" ] && [ -d "$CF_INSTALL_ROOT" ]; then own_dir "$CF_INSTALL_ROOT"; fi
     nodejs_current_target=$(readlink "${NODEJS_INSTALL_ROOT}/current" 2>/dev/null || :)
     case "$nodejs_current_target" in
         "${NODEJS_INSTALL_ROOT}/"*)
@@ -3433,7 +3504,7 @@ if [ $# -eq 0 ]; then
         Linux:aarch64) ;;
         *) set -- "$@" jaq ;;
     esac
-    set -- "$@" codex claude opencode2 pi agy fastermod tm ish e fz fdu fs srv git python3
+    set -- "$@" codex claude opencode2 pi agy fastermod tm ish e fz fdu fs srv git python3 cf
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
@@ -3488,6 +3559,7 @@ for prog in "$@"; do
         fx) install_fx ;;
         dsh) install_dsh ;;
         cmd) install_cmd ;;
+        cf) install_cf ;;
         pi) install_pi ;;
         freebuff) install_freebuff ;;
         antigravity|agy) install_antigravity ;;

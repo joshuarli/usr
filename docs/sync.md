@@ -8,6 +8,8 @@ Run `sh sync plan` to preview links. Resolve each `CONFLICT` before syncing. `sh
 
 `sh sync uninstall` removes recorded layer links and installed tool paths. It leaves unrecorded pre-existing links and native launchers in place. Ownership records live under `${XDG_STATE_HOME:-$HOME/.local/state}/sync`. See [`dl`](../dl) for tool installation and update behavior.
 
+`cf` is installed by default from a pinned npm package under the managed Node.js runtime. `sh dl stuff` installs the `stuff` catalog CLI from its latest GitHub pre-release; it is not in the default tool list until a release exists.
+
 `make` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID and macOS DNS setup are manual. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
 
 On macOS, `sh dl ghostty` downloads the pinned official universal Ghostty release ZIP directly (no Homebrew), verifies the signed app with macOS Gatekeeper, and installs it at `/Applications/Ghostty.app` with a `~/.local/bin/ghostty` symlink. After installing, run `ghostty-fda-check` inside Ghostty to confirm Full Disk Access; it opens System Settings at the Full Disk Access pane when the grant is missing. Set `GHOSTTY_APPLICATIONS_DIR="$HOME/Applications"` if `/Applications` is not writable. It will not overwrite an existing unmanaged app or launcher; `sh sync uninstall` removes a dl-managed installation. Ghostty auto-updates are disabled by the linked config; change `GHOSTTY_VERSION` in `dl` to upgrade.
