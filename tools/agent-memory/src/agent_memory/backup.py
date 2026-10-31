@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Consistent snapshots and restore into a new destination.
 
-A backup is a SQLite-API copy of the catalog plus a copy of every immutable
-object the catalog references, pinned by digest in a manifest. Restore
+A backup is a SQLite-API copy of the catalog plus a verified copy of every
+immutable object the catalog references, pinned by digest in a manifest. Restore
 verifies the manifest, restores the catalog, rebuilds derived indexes from
 the captured bytes, and never activates a service or a review grant.
 """
+import contextlib
 import json
 import os
+import secrets
 import shutil
 import sqlite3
 import time
@@ -23,37 +25,73 @@ class BackupError(RuntimeError):
     pass
 
 
+def _fsync(path):
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def create(store, destination, protocol=1):
+    """Write a complete backup to a staging directory, then publish it with one rename.
+
+    The shared object lock is held from before the catalog snapshot until every
+    referenced object is copied, so a concurrent forget can delete catalog rows
+    but cannot unlink an object this backup still needs. A destination either
+    does not exist or holds a complete backup whose manifest was written last.
+    """
     destination = Path(destination)
     if destination.exists() and any(destination.iterdir()):
         raise BackupError("backup destination must be new or empty: " + str(destination))
-    destination.mkdir(parents=True, exist_ok=True)
-    os.chmod(destination, 0o700)
-    objects_dir = destination / "objects"
-    objects_dir.mkdir(mode=0o700, exist_ok=True)
-    database = destination / "sessions.sqlite3"
-    with sqlite3.connect(str(database)) as target:
-        store.db.backup(target)
-    os.chmod(database, 0o600)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = destination.with_name(destination.name + ".partial-" + secrets.token_hex(4))
+    staging.mkdir(mode=0o700)
+    try:
+        manifest = _populate(store, staging, protocol)
+        if destination.exists():
+            destination.rmdir()
+        os.rename(staging, destination)
+        _fsync(destination.parent)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return manifest
+
+
+def _populate(store, staging, protocol):
+    database = staging / "sessions.sqlite3"
     pinned = []
-    with sqlite3.connect("file:%s?mode=ro" % database.as_posix(), uri=True) as snapshot:
-        for digest, size in snapshot.execute("SELECT digest, size FROM archive_object ORDER BY digest"):
-            source = archive_module.object_path(store.archive_dir, digest)
-            if not source.is_file():
-                raise BackupError("snapshot references a missing object: " + digest)
-            target = archive_module.object_path(objects_dir.parent, digest)
-            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            shutil.copyfile(source, target)
-            pinned.append({"digest": digest, "size": int(size)})
+    with archive_module.object_lock(store.archive_dir):
+        with contextlib.closing(sqlite3.connect(str(database))) as target:
+            store.db.backup(target)
+        os.chmod(database, 0o600)
+        with contextlib.closing(sqlite3.connect("file:%s?mode=ro" % database.as_posix(), uri=True)) as snapshot:
+            counts = {name: snapshot.execute("SELECT count(*) FROM " + name).fetchone()[0]
+                      for name in ("archive_generation", "tombstone")}
+            schema_version = snapshot.execute("PRAGMA user_version").fetchone()[0]
+            for digest, size in snapshot.execute("SELECT digest, size FROM archive_object ORDER BY digest"):
+                try:
+                    data = archive_module.read_object(store.archive_dir, digest)
+                except (OSError, archive_module.ArchiveError) as exc:
+                    raise BackupError("snapshot references an unreadable object: %s (%s)" % (digest, exc)) from exc
+                if len(data) != int(size):
+                    raise BackupError("snapshot object has the wrong size: " + digest)
+                archive_module._write_object(staging, data)
+                pinned.append({"digest": digest, "size": int(size)})
     manifest = {
         "protocol": protocol,
         "created_at": time.time(),
-        "schema_version": store.db.execute("PRAGMA user_version").fetchone()[0],
+        "schema_version": schema_version,
         "objects": pinned,
-        "generations": store.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0],
-        "tombstones": store.db.execute("SELECT count(*) FROM tombstone").fetchone()[0],
+        "generations": counts["archive_generation"],
+        "tombstones": counts["tombstone"],
     }
-    (destination / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True))
+    pending = staging / (MANIFEST + ".tmp")
+    pending.write_text(json.dumps(manifest, indent=1, sort_keys=True))
+    _fsync(pending)
+    os.replace(pending, staging / MANIFEST)
+    _fsync(staging)
     return manifest
 
 

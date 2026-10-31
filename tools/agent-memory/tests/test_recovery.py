@@ -7,8 +7,11 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
 WORK_TMP = ROOT / ".work" / "tmp"
@@ -230,6 +233,87 @@ class RecoveryTests(unittest.TestCase):
             referenced = {row[0] for row in third.db.execute("SELECT digest FROM archive_object")}
             on_disk = {path.name for path in (restored / "archive" / "objects").rglob("*") if path.is_file()}
             self.assertEqual(on_disk, referenced)
+
+
+    def backup_source(self):
+        home, cmd_root, agy_root = self.source_home("a", "forget me", "keep me", "conv-a")
+        return self.capture(self.root / "state", home, cmd_root, agy_root)
+
+    def test_a_backup_that_fails_midway_publishes_nothing(self):
+        store = self.backup_source()
+        destination = self.root / "backups" / "failed"
+        real = BACKUP.archive_module.read_object
+        calls = []
+
+        def flaky(archive_dir, digest):
+            calls.append(digest)
+            if len(calls) == 2:
+                raise OSError("disk gone")
+            return real(archive_dir, digest)
+
+        with mock.patch.object(BACKUP.archive_module, "read_object", flaky):
+            with self.assertRaises(BACKUP.BackupError):
+                BACKUP.create(store, destination)
+        self.assertFalse(destination.exists())
+        self.assertEqual(list(destination.parent.iterdir()), [])
+        with self.assertRaises(BACKUP.BackupError):
+            BACKUP.verify(destination)
+
+    def test_a_corrupt_live_object_is_refused_instead_of_copied_into_a_backup(self):
+        store = self.backup_source()
+        digest = store.db.execute("SELECT digest FROM archive_object LIMIT 1").fetchone()[0]
+        path = ARCHIVE.object_path(store.archive_dir, digest)
+        data = bytearray(path.read_bytes())
+        data[0] ^= 0xFF
+        path.write_bytes(bytes(data))
+        destination = self.root / "backups" / "corrupt"
+        with self.assertRaises(BACKUP.BackupError):
+            BACKUP.create(store, destination)
+        self.assertFalse(destination.exists())
+
+    def test_a_concurrent_forget_cannot_remove_an_object_while_a_backup_copies_it(self):
+        store = self.backup_source()
+        destination = self.root / "backups" / "concurrent"
+        real = BACKUP.archive_module.read_object
+        race = {"started": False}
+
+        def forget_during_copy(archive_dir, digest):
+            if not race["started"]:
+                race["started"] = True
+
+                def forget():
+                    with Store(self.root / "state") as other:
+                        other.forget_session("cmd:s-1", 7000.0)
+
+                race["thread"] = threading.Thread(target=forget)
+                race["thread"].start()
+                deadline = time.monotonic() + 10
+                while store.db.execute("SELECT count(*) FROM archive_generation WHERE native_id = 's-1'").fetchone()[0]:
+                    self.assertLess(time.monotonic(), deadline, "the forget never reached the catalog")
+                    time.sleep(0.01)
+                race["blocked"] = race["thread"].is_alive()
+            return real(archive_dir, digest)
+
+        with mock.patch.object(BACKUP.archive_module, "read_object", forget_during_copy):
+            manifest = BACKUP.create(store, destination)
+        race["thread"].join(10)
+        self.assertTrue(race["blocked"])
+        self.assertFalse(race["thread"].is_alive())
+        self.assertEqual(BACKUP.verify(destination)["objects"], manifest["objects"])
+        with sqlite3.connect(destination / "sessions.sqlite3") as snapshot:
+            self.assertGreaterEqual(snapshot.execute("SELECT count(*) FROM archive_generation WHERE native_id = 's-1'").fetchone()[0], 1)
+        store.db.rollback()
+        live = {path.name for path in (self.root / "state" / "archive" / "objects").rglob("*") if path.is_file()}
+        self.assertEqual(live, {row[0] for row in store.db.execute("SELECT digest FROM archive_object")})
+
+    def test_an_empty_destination_directory_is_accepted_and_a_populated_one_is_refused(self):
+        store = self.backup_source()
+        empty = self.root / "empty"
+        empty.mkdir()
+        BACKUP.create(store, empty)
+        self.assertTrue((empty / "manifest.json").is_file())
+        with self.assertRaises(BACKUP.BackupError):
+            BACKUP.create(store, empty)
 
 
 if __name__ == "__main__":
