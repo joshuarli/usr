@@ -620,17 +620,34 @@ install_release() {
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
     esac
-    asset="${prog}-${artifact_target}"
+    asset_base="${prog}-${artifact_target}"
+    asset_candidates=$asset_base
+    case "${OS}:${artifact_target}" in
+        Linux:*musl)
+            [ "$prog" = ish ] || asset_candidates="$asset_base $asset_base-static"
+            ;;
+    esac
+    asset=
+    url=
+    id=
+    for candidate in $asset_candidates; do
+        candidate_url="https://github.com/${owner}/${repo}/releases/download/${tag}/${candidate}.zip"
+        candidate_id=$(asset_id "$candidate_url")
+        if [ -n "$candidate_id" ]; then
+            asset=$candidate
+            url=$candidate_url
+            id=$candidate_id
+            break
+        fi
+    done
+    if [ -z "$asset" ]; then
+        unchecked "$prog" "${asset_base}.zip is not available in ${tag}"
+        return
+    fi
     case "$prog" in
         bylaws) asset_inner=$prog ;;
         *) asset_inner=$asset ;;
     esac
-    url="https://github.com/${owner}/${repo}/releases/download/${tag}/${asset}.zip"
-    id=$(asset_id "$url")
-    if [ -z "$id" ]; then
-        unchecked "$prog" "${asset}.zip is not available in ${tag}"
-        return
-    fi
     if is_current "$prog" "$id"; then
         _dl_current "${prog} is current (${tag})"
         return
@@ -903,6 +920,10 @@ install_python3() {
     own_file "${STATE}/python3"
     changed=true
     _dl_ok "Installed ${DEST}/python3"
+    if ! "${DEST}/python3" -c 'import sqlite3, ssl' >/dev/null 2>&1; then
+        _dl_warn "Python is installed but sqlite3/ssl imports failed; install libgcc or inspect ${release_dir}"
+        failed=true
+    fi
 }
 
 install_nodebuild() {
@@ -1622,6 +1643,7 @@ install_direct() {
 install_jaq() {
     case "${OS}:${ARCH}" in
         Linux:x86_64) jaq_target=x86_64-unknown-linux-musl ;;
+        Linux:aarch64) skip jaq "no musl release for aarch64; install jq instead"; return ;;
         Linux:*) jaq_target="${ARCH}-unknown-linux-gnu" ;;
         *) jaq_target="${ARCH}-apple-darwin" ;;
     esac
@@ -1629,15 +1651,25 @@ install_jaq() {
         "https://github.com/01mf02/jaq/releases/latest/download/jaq-${jaq_target}"
 }
 
+jaq_runs() {
+    "$1" --version >/dev/null 2>&1
+}
+
 jaq_available() {
-    command -v jaq >/dev/null 2>&1 || [ -x "${DEST}/jaq" ]
+    if command -v jaq >/dev/null 2>&1 && jaq_runs jaq; then return 0; fi
+    if [ -x "${DEST}/jaq" ] && jaq_runs "${DEST}/jaq"; then return 0; fi
+    command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1
 }
 
 run_jaq() {
-    if command -v jaq >/dev/null 2>&1; then
+    if command -v jaq >/dev/null 2>&1 && jaq_runs jaq; then
         jaq "$@"
-    else
+    elif [ -x "${DEST}/jaq" ] && jaq_runs "${DEST}/jaq"; then
         "${DEST}/jaq" "$@"
+    elif command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
+        jq "$@"
+    else
+        return 127
     fi
 }
 
@@ -2497,6 +2529,10 @@ install_codex() {
 }
 
 install_git() {
+    if ! command -v zipinfo >/dev/null 2>&1; then
+        skip git "zipinfo is required to validate the archive"
+        return
+    fi
     case "$OS:$ARCH" in
         Darwin:aarch64) triple=aarch64-apple-darwin ;;
         Linux:x86_64) triple=x86_64-unknown-linux-musl ;;
@@ -2670,6 +2706,10 @@ install_git() {
 }
 
 install_ssh() {
+    if ! command -v zipinfo >/dev/null 2>&1; then
+        skip ssh "zipinfo is required to validate the archive"
+        return
+    fi
     case "$OS:$ARCH" in
         Darwin:aarch64) triple=aarch64-apple-darwin ;;
         Linux:x86_64) triple=x86_64-unknown-linux-musl ;;
@@ -3388,7 +3428,12 @@ if [ "$DL_RECORD_OWNED" = true ]; then
 fi
 
 if [ $# -eq 0 ]; then
-    set -- fd rg jaq codex claude opencode2 pi agy fastermod tm ish e fz fdu fs srv git python3
+    set -- fd rg
+    case "${OS}:${ARCH}" in
+        Linux:aarch64) ;;
+        *) set -- "$@" jaq ;;
+    esac
+    set -- "$@" codex claude opencode2 pi agy fastermod tm ish e fz fdu fs srv git python3
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
@@ -3402,6 +3447,11 @@ fi
 if $list_only; then
     printf '%s\n' "$@"
     exit 0
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+    _dl_fail 'curl is required to download tools'
+    exit 1
 fi
 
 needs_jaq=false

@@ -239,6 +239,25 @@ FEED
             exit 1
         fi
         ;;
+    https://github.com/laputa-systems/fz/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-30T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/fz/releases/tag/release-cccccccccccccccccccccccccccccccccccccccc"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/laputa-systems/fz/releases/download/release-cccccccccccccccccccccccccccccccccccccccc/fz-x86_64-unknown-linux-musl-static.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: fz-static-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'fz-static-test-binary' > "$output"
+        else
+            exit 1
+        fi
+        ;;
     https://github.com/joshuarli/ghostty/releases.atom)
         cat <<'FEED'
 <feed>
@@ -401,6 +420,10 @@ chmod +x "$mock_bin/curl"
 
 cat > "$mock_bin/jaq" <<'EOF'
 #!/bin/sh
+if [ "${1:-}" = --version ]; then
+    printf '%s\n' 'jaq 2.0.0'
+    exit 0
+fi
 for query do :; done
 case "$query" in
     '.tag_name // empty') printf '%s\n' 'rust-v1.2.3' ;;
@@ -416,6 +439,8 @@ case "$query" in
 esac
 EOF
 chmod +x "$mock_bin/jaq"
+printf '%s\n' '#!/bin/sh' 'exit 1' > "$mock_bin/jq"
+chmod +x "$mock_bin/jq"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/codesign"
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$mock_bin/xattr"
 chmod +x "$mock_bin/codesign" "$mock_bin/xattr"
@@ -439,6 +464,7 @@ case "$mode" in
     print)
         case "$inner" in
             syncthing-aarch64-apple-darwin) printf '%s' 'syncthing-test-binary' ;;
+            fz-x86_64-unknown-linux-musl-static) printf '%s' 'fz-static-test-binary' ;;
             *) exit 1 ;;
         esac
         ;;
@@ -2000,6 +2026,7 @@ mkdir -p "$missing_file_home/.local/bin" "$missing_file_home/.local/state/dl" "$
 printf '%s' 'legacy Claude binary' > "$missing_file_home/.local/bin/claude"
 chmod +x "$missing_file_home/.local/bin/claude"
 printf '%s\n' 'old-claude-test-etag' > "$missing_file_home/.local/state/dl/claude"
+ln -s "$mock_bin/curl" "$missing_file_bin/curl"
 ln -s "$mock_bin/uname" "$missing_file_bin/uname"
 ln -s "$(command -v mkdir)" "$missing_file_bin/mkdir"
 ln -s "$(command -v sed)" "$missing_file_bin/sed"
@@ -2035,6 +2062,47 @@ fi
 [ -x "$codex_home/.local/bin/jaq" ]
 [ -L "$codex_home/.local/bin/codex" ]
 [ -x "$codex_home/.local/bin/muse" ]
+)
+end_case
+
+begin_case "codex uses jq when jaq is unavailable"
+( set -e
+jq_home="$test_root/codex-jq-home"
+jq_bin="$test_root/jq-bin"
+mkdir -p "$jq_bin"
+cp "$mock_bin/jaq.hidden" "$jq_bin/jq"
+chmod +x "$jq_bin/jq"
+if output=$(HOME="$jq_home" XDG_STATE_HOME="$jq_home/.local/state" \
+    TMPDIR="$test_root/tmp" CODEX_SHA256="$CODEX_SHA256" CODEX_TAR="$test_root/codex.tar.gz" \
+    DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    run_dl "$jq_bin:$mock_bin:/usr/bin:/bin" "$repo_root" codex 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -L "$jq_home/.local/bin/codex" ]
+[ ! -e "$jq_home/.local/bin/jaq" ]
+)
+end_case
+
+begin_case "release falls back to a musl-static asset"
+( set -e
+fz_home="$test_root/fz-home"
+if output=$(HOME="$fz_home" XDG_STATE_HOME="$fz_home/.local/state" \
+    TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" fz 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$fz_home"'/.local/bin/fz'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(cat "$fz_home/.local/bin/fz")" = 'fz-static-test-binary' ]
+[ "$(cat "$fz_home/.local/state/dl/fz")" = 'fz-static-test-etag' ]
 )
 end_case
 
