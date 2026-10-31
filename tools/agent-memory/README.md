@@ -6,7 +6,7 @@ The `agent-learn` and `agent-sessions` launchers require Python 3.15 or newer. I
 
 | Level | What it is | Needs |
 | --- | --- | --- |
-| Session evidence | Indexed transcripts from Codex, Claude Code, Muse Code, Grok Code, OpenCode 2, and Pi, with position and digest references that are re-verified against the original file or database row | Nothing; indexing is local |
+| Session evidence | Indexed transcripts from Codex, Claude Code, Muse Code, Grok Code, OpenCode 2, Pi, Command Code, and Antigravity CLI, with position and digest references that are re-verified against the original file, database row, or captured generation | Nothing; indexing is local |
 | Project experience | Short, immutable, source-backed observations captured without a model: a failure and the run that fixed it, a concrete user correction, an abandoned approach, a grounded finding, a benchmark result, a stated decision | `agent-learn observe` for the project |
 | Reviewed guidance | Project memories and global skill edits that passed independent model review | `agent-learn enable` (paid model calls) |
 
@@ -60,7 +60,7 @@ agent-learn enable --project "$PWD" --usr-root "$HOME/usr"
 agent-learn enable --all-projects --usr-root "$HOME/usr" --schedule
 ```
 
-`enable` allows bounded, sanitized excerpts from that project's eligible sessions to reach Codex for review. It does not change Codex trust settings. Review covers Codex sessions unless you name more with `--harness` (repeatable: `codex`, `claude`, `muse`, `grok`, `opencode`, `pi`; applies to `--project` and `--all-projects`). Local indexing and observation never imply this grant. The wildcard enrolls Git projects found in session history.
+`enable` allows bounded, sanitized excerpts from that project's eligible sessions to reach Codex for review. It does not change Codex trust settings. Review covers Codex sessions unless you name more with `--harness` (repeatable: `codex`, `claude`, `muse`, `grok`, `opencode`, `pi`, `cmd`, `agy`; applies to `--project` and `--all-projects`). Adding a harness to the index never enrolls it here; a session reaches review only when its harness is named.. Local indexing and observation never imply this grant. The wildcard enrolls Git projects found in session history.
 
 On macOS, `--schedule` installs a user LaunchAgent that runs `agent-learn run --scheduled` every 15 minutes. Without it, run reconciliation yourself; Linux has no bundled scheduler. The dotfiles sync does not install or start the LaunchAgent.
 
@@ -89,7 +89,7 @@ The store keeps local transcript indexes and learning records; it never copies o
 
 ## Search sessions
 
-`agent-sessions` indexes Codex, Claude Code, Muse Code, Grok Code, OpenCode 2, and Pi transcripts. Search defaults to the current Git repository and its worktrees; cross-project search requires `--all-projects`.
+`agent-sessions` indexes Codex, Claude Code, Muse Code, Grok Code, OpenCode 2, Pi, Command Code, and Antigravity CLI transcripts. Search defaults to the current Git repository and its worktrees; cross-project search requires `--all-projects`.
 
 ```sh
 agent-sessions recent
@@ -111,18 +111,80 @@ agent-sessions search '"codegen-units"' --all-projects --kind user --limit 5
 
 A Codex session keeps its bare ID. Other harnesses use `harness:ID`, so identical IDs from different tools never collide. Use the full session ID and byte offset printed with a hit. `show` verifies source bytes before displaying context. `doctor` prints per-harness coverage: complete, degraded, and unsupported sessions, unrecognized event kinds, and sessions whose ancestry is unknown. A session whose lines parse but contain no understood content is `unsupported`, not an empty success. Muse and Grok do not always state their ancestry; unknown ancestry is never counted as an independent root. `doctor --rebuild-index` rebuilds transcript tables while preserving learning records.
 
-Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFIG_DIR/projects`, `$XDG_DATA_HOME/muse/sessions`, `$GROK_HOME/sessions`, `$XDG_DATA_HOME/opencode`, and Pi's session directory (`$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`), each falling back to its usual home directory. Pass `--root [HARNESS=]PATH` to override. Indexing never follows symlinks. Pi sessions are the `<timestamp>_<id>.jsonl` files, so pi-subagents artifacts such as `events.jsonl` are not mistaken for sessions. Pi stores one tool call or result per entry; several calls from one assistant entry become one event whose call ID lists them all. A session whose header names a `parentSession` links to that session and is labeled `child`: Pi writes the same field for a user fork and for a delegated subagent. Every entry of a branched session is indexed and searchable, but experience detectors and review read only the active branch: the chain from the newest entry back through `parentId`, so a failure on an abandoned branch is never paired with a success on another. OpenCode 2 keeps sessions in a SQLite database (`opencode.db`), not transcript files: the indexer opens it read-only, reads only the `session_v2` and `session_message` tables (never the account or credential tables), reindexes a session whenever its message count or update time changes, and takes shell exit codes from the recorded tool metadata. A hit's byte offset is `message sequence × 1000 + block`, and `show` verifies the row's digest. Search matches whole tokens, so a Chinese or Japanese query matches only a whole unsegmented run.
+Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFIG_DIR/projects`, `$XDG_DATA_HOME/muse/sessions`, `$GROK_HOME/sessions`, `$XDG_DATA_HOME/opencode`, Pi's session directory (`$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`), Command Code's `$COMMANDCODE_HOME/projects`, and Antigravity's `$ANTIGRAVITY_HOME/brain`, each falling back to its usual home directory. Pass `--root [HARNESS=]PATH` to override. Indexing never follows symlinks. Pi sessions are the `<timestamp>_<id>.jsonl` files, so pi-subagents artifacts such as `events.jsonl` are not mistaken for sessions. Pi stores one tool call or result per entry; several calls from one assistant entry become one event whose call ID lists them all. A session whose header names a `parentSession` links to that session and is labeled `child`: Pi writes the same field for a user fork and for a delegated subagent. Every entry of a branched session is indexed and searchable, but experience detectors and review read only the active branch: the chain from the newest entry back through `parentId`, so a failure on an abandoned branch is never paired with a success on another. OpenCode 2 keeps sessions in a SQLite database (`opencode.db`), not transcript files: the indexer opens it read-only, reads only the `session_v2` and `session_message` tables (never the account or credential tables), reindexes a session whenever its message count or update time changes, and takes shell exit codes from the recorded tool metadata. A hit's byte offset is `message sequence × 1000 + block`, and `show` verifies the row's digest. Search matches whole tokens, so a Chinese or Japanese query matches only a whole unsegmented run.
 
 ## Retention
 
-Every refresh also copies each transcript file into `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/archive/HARNESS/ORIGINAL_PATH`, a `0700` tree. Copies use a filesystem clone when available, otherwise a full copy, and never create additional hard links: Muse Code refuses to resume or inspect a session whose log has multiple hard links. A copy keeps the data alive after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`). When the original is gone, the session is indexed from the copy: search, `show`, `agent-learn recall`, and evidence verification keep working with the same positions and digests. Evidence also resolves from the copy before the next refresh runs.
+Every refresh captures each transcript into `${XDG_STATE_HOME:-~/.local/state}/agent-sessions/archive`, a `0700` tree of immutable objects named by their SHA-256 digest plus one versioned generation per capture. A generation records the chunk order, offsets, source size, and the source signature that produced it. Search, `show`, `agent-learn recall`, and evidence verification keep working after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`), and after the whole source machine is gone once the generation is acknowledged centrally.
 
-- Capture happens during a refresh, which any `agent-sessions` command or scheduled `agent-learn run` performs for every transcript root regardless of the project filter. A file a harness deletes before any refresh saw it is not recoverable.
-- A copy is a point-in-time snapshot, so a harness that rewrites a transcript in place does not change the archived copy. The next refresh replaces the archived copy when the source grows or its modification time moves forward. Grok's `summary.json` and `events.jsonl` are copied with `chat_history.jsonl`.
-- The state directory must share a filesystem with the transcripts. Otherwise the refresh summary shows `archive_errors` and nothing is retained.
+- Capture happens during a refresh, which any `agent-sessions` command, `agent-sessions sync`, or scheduled `agent-learn run` performs for every transcript root regardless of the project filter. A file a harness deletes before any refresh saw it is not recoverable.
+- An unchanged source reads no content bytes and adds no generation. A growing source reuses its captured chunks after verifying the last one, so one appended line costs the line plus that bounded tail read instead of a copy of the whole log. A rewrite, truncation, or replacement adds a new generation and keeps the earlier one.
+- Capture is refused for a symlink, a non-regular file, or a source that changes while it is being read. Publication writes an object under a unique staging name, fsyncs it and its directory, renames it, then commits the generation in one transaction; an interruption leaves either the previous generation or the complete new one, never a half state.
+- Command Code companions (`<id>.meta.json`, `<id>.checkpoints.jsonl`, `<id>.prompts.jsonl`, `<id>.share.json`) and Grok's `summary.json` and `events.jsonl` are captured as generation artifacts. Antigravity's `tasks/`, `steps/`, `messages/`, and `scratch/` and Command Code's `file-history/` stay outside the default boundary; `--artifacts` on the capture path opts in under an 8 MiB per-file cap.
+- The state directory may be on a different filesystem from the transcripts; capture copies bytes and never links them. Muse Code refuses to resume a log with multiple hard links, and capture never creates one.
 - OpenCode's database is not copied as a file. The archive keeps its own `opencode.db` with only the session and message rows, added or updated on refresh and never removed when OpenCode drops them. Credential tables are never copied.
-- Learning-worker sessions and forgotten sessions are never archived. `reset-agents` does not touch the archive.
+- Learning-worker sessions, ephemeral sessions, and forgotten sessions are never archived. `reset-agents` does not touch the archive.
 - The archive holds complete, unredacted transcripts. Keep it out of Git and include it in backup and disk-encryption decisions. `agent-learn forget-session` is the only way to remove an archived session.
+- What survives: harness cleanup or deletion; a process crash at any publication point (tested); an equal-size rewrite with a restored modification time (a new generation is captured because the inode change time also moves). What is not claimed: power loss beyond what the filesystem and the object fsync establish, an interior rewrite of a growing log that keeps the final captured chunk identical, or recovery of a live process or an external tool side effect. Archiving a transcript is not resuming a process.
+
+## Command Code and Antigravity CLI
+
+Both are indexed like every other harness: discovery, metadata, events, archive, search, `show`, `doctor`, and experience capture. Command Code IDs are `cmd:ID`; Antigravity IDs are `agy:CONVERSATION`. The aliases `command`, `command-code`, `commandcode`, and `antigravity` are accepted anywhere a harness name is, and are normalized once.
+
+- **Command Code** (`cmd 1.88.2`, transcript `version: 3`): `~/.commandcode/projects/<slug>/<id>.jsonl`. The first line is the session header with `cwd`; every later line is a tree entry with `parentId`, Anthropic-shaped content blocks (`text`, `thinking`, `tool_use`, `tool_result`), and per-entry model usage. `tool_use.id` is preserved. `tool_result` has no status field, so its outcome stays `unknown` unless the output itself carries an exit code. Sidecars are companions, never separate sessions. The active branch is the ancestor chain of `meta.json`'s `branchPoint` when a fork records one, otherwise the chain ending at the newest entry, so a failure on an abandoned branch is never paired with a success on the active one. Compaction entries are preserved; their field names are not yet verified, so they surface as `unknown:<type>` until a real record is captured.
+- **Antigravity CLI** (`agy 1.4.10`): `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript_full.jsonl`, else `transcript.jsonl`. The `_full` variant is the untruncated one: `truncated_fields` appears only in the truncated variant. `logs/chunks/**` is a byte-exact split of the same log and is never indexed as a second session. Workspace URIs, `parent_conversation_id`, `nesting_depth`, and `step_count` come from `conversation_summaries.db`, opened read-only; a conversation with more than one workspace reports all of them instead of picking the first. `USER_INPUT` becomes `user`; `PLANNER_RESPONSE` becomes `assistant` plus `tool-call`; `GENERIC` becomes `tool-output` with `status` `ERROR` mapped to an error outcome; `CHECKPOINT` becomes `compacted`; `SYSTEM_MESSAGE` becomes `context`. Antigravity records no tool-call id, so the id is synthesized from `(step_index, ordinal)` and marked `synthetic`. A transcript shorter than its recorded `step_count`, or one carrying `truncated_fields`, is `degraded` with an `index_issues` row rather than a complete success.
+
+Antigravity CLI is not Gemini CLI, the Antigravity app, or the IDE. Its `/resume` verifies a conversation against the backend and can import app conversations, so a resumable cloud conversation is not evidence that a complete local log exists. Both harnesses are excluded from model review unless named with `enable --harness`.
+
+## Central archive
+
+One machine can be the central store for several collectors. It is an ordinary agent-memory state directory; nothing runs as a daemon, and local operation continues while it is unreachable.
+
+```sh
+# On the central host: nothing to start. The receiver is a fixed command.
+# On each collector, ~/.config/agent-sessions/config.json:
+# {"central": {"transport": "ssh", "host": "archive",
+#              "command": "agent-sessions-serve ingest --protocol 1",
+#              "allowed_origins": ["1f2e..."]}}
+agent-sessions identity show                     # this collector's origin id
+agent-sessions sync --to central --dry-run       # pending generations
+agent-sessions sync --to central                 # capture, deliver, ack
+agent-sessions search 'codex-units' --central --kind user
+agent-sessions show 'cmd:ID@ORIGIN' --central
+```
+
+For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
+
+- Delivery is at-least-once. A generation is acknowledged as remotely durable only after the receiver has verified every object's digest and size, matched the manifest origin to the authenticated peer, and committed the manifest. A retry of an accepted generation is a no-op that re-acks.
+- Stored is not the same as searchable. The central side indexes each accepted generation itself, from the captured bytes, so search and `show` never need the source host or its filesystem.
+- The sender keeps its own copy until the ack. While offline it keeps a backlog with the attempt count and last error, and `doctor --json` reports it.
+- Tombstones travel first. A session forgotten at a collector refuses later re-delivery, so a stale or restored machine cannot resurrect it.
+- `ssh` runs with normal host-key verification. No content, query, path, or session id is ever interpolated into the remote command; the command is fixed in configuration.
+- A collector declares one origin identity, a random persisted id, never a hostname or a hardware id. `agent-sessions identity regenerate` mints a new one and leaves recorded origins alone. The same native id from two origins is two sessions; a copied history is not independent evidence.
+
+Optional scheduling is explicit and never installed by sync: `dotfiles/launchd/com.josh.agent-sessions-sync.plist.in` for macOS, or a cron entry such as `*/15 * * * * agent-sessions sync --to central`. Overlapping runs exit immediately with `overlapped=1`. Missed runs are recovered by the next one; a hook hint is optional and never blocks a session on network access.
+
+## Backup, restore, and recovery
+
+```sh
+agent-sessions backup create /backups/agent-sessions-$(date +%F)
+agent-sessions backup restore /backups/agent-sessions-2026-10-30 --to /new/state --tombstones-from ~/.local/state/agent-sessions
+agent-sessions archive verify
+agent-sessions archive reindex
+agent-sessions doctor --json
+```
+
+A backup is a SQLite backup-API snapshot plus a copy of every immutable object pinned by digest in `manifest.json`; garbage collection never removes a pinned object or an unacknowledged generation. Restore defaults to a **new** destination, verifies every object and `PRAGMA integrity_check`, refuses a newer schema, restores canonical learning and lifecycle records, reapplies current tombstones before anything becomes searchable, rebuilds derived indexes from the captured bytes alone, and activates no service and no review grant.
+
+`restic` is optional. `agent-sessions backup restic --repo r2:...` delegates to an installed `restic`, including an R2-compatible S3 endpoint; without it the built-in backup still works and `doctor --json` says so.
+
+Recovery procedures, in the order they are usually needed:
+
+1. **Source machine lost.** On another machine, `search --central` and `show --central` still verify the acknowledged generations. Nothing needs restoring.
+2. **Central store lost.** Restore the newest backup into a new directory, then point `central.state_dir` at it or re-ingest from any surviving collector.
+3. **Interrupted transfer.** Re-run `sync`; accepted generations are not re-sent and the backlog reports what remains.
+4. **Damaged object.** `archive verify` names the digest. Re-restore from backup, or re-sync that generation from a collector that still holds it.
+5. **Forgotten session reappears after a restore.** Restore with `--tombstones-from` pointing at the current state, or re-sync from a collector that carries the tombstone. A tombstoned generation is never reindexed.
 
 ## Promotion policy
 

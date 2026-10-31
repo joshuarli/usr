@@ -23,12 +23,12 @@ Both arguments are required. Normalize the agent name, but never guess the sessi
 | Grok Code | `grok`, `grok-code` | `agent-sessions` |
 | OpenCode | `opencode` | `agent-sessions` |
 | Pi | `pi` | `agent-sessions` |
-| Command Code | `cmd`, `command`, `command-code` | Local JSONL |
-| Antigravity CLI | `agy`, `antigravity` | Local JSONL, if retained |
+| Command Code | `cmd`, `command`, `command-code` | `agent-sessions` |
+| Antigravity CLI | `agy`, `antigravity` | `agent-sessions` |
 | DeepSeek Harness TUI | `dsh`, `deepseek` | Local session log, if readable |
 | Vercel fx | `fx` | Local session snapshot, if readable (not indexed) |
 
-For the first six, use the existing source-verifying index. Codex IDs are bare; the other five use `harness:ID`. Accept an already qualified ID only when its prefix agrees with the requested agent. From the intended project, run (substituting the **single literal** session identifier):
+For the indexed harnesses above, use the source-verifying index. Codex IDs are bare; the others use `harness:ID`. A session received from another machine is `harness:ID@ORIGIN`, and `--central` reads it from the central archive when the source host is gone. Accept an already qualified ID only when its prefix agrees with the requested agent. From the intended project, run (substituting the **single literal** session identifier):
 
 ```sh
 agent-sessions show 'harness:ID' --all-projects --before 40 --after 0 --max-chars 4000
@@ -36,10 +36,8 @@ agent-sessions show 'harness:ID' --all-projects --before 40 --after 0 --max-char
 
 For Codex, substitute `'ID'` instead. The `--all-projects` flag allows retrieval when the session belongs to another worktree or repository; it does **not** authorize editing another project. Inspect the printed `session`, `project`, `file`, `kind`, and `byte` fields. If the relevant context predates the window, page backward with `--position <earlier-byte> --before 40 --after 0`; do not dump an entire long transcript by default. The source is digest-verified, and archived sessions can still be read when their original transcript is gone. A missing or mismatched ID is a failure, not permission to substitute a similarly named session. If the index is unavailable, check `agent-sessions doctor` and report the limit instead of inventing history.
 
-For the four not yet indexed by `agent-sessions`, inspect only the exact local session's files, read-only:
+For the harnesses not indexed by `agent-sessions`, inspect only the exact local session's files, read-only:
 
-- **Command Code:** `~/.commandcode/projects/*/<ID>.jsonl`. Resolve an exact ID (or a uniquely matching prefix) to one file, check its header, and follow the active entry ancestry when the session has branches.
-- **Antigravity CLI:** `~/.gemini/antigravity-cli/brain/<ID>/.system_generated/logs/transcript.jsonl`. Check the conversation ID and workspace; logs may be absent or incomplete even if the cloud conversation can be reopened.
 - **DeepSeek TUI:** look for the exact ID under `~/.dsh/sessions/` (or `DSH_HOME` when set; commonly compressed JSONL). Decode with an already installed reader, if available, and inspect the event structure before deriving any conclusion. Do not treat binary or compressed bytes as text.
 - **fx:** read the exact `~/.fx/sessions/<ID>/session.json` manifest and its `events.jsonl` append-only log, read-only. Validate the manifest's session ID, workspace and committed log extent; treat `history_turn_committed` records as conversation evidence and ignore uncommitted trailing events. fx's log envelope differs from indexed harnesses. Do not attribute a subagent's turns to the parent without explicit lineage. If the session or its committed history is missing, report the gap.
 
