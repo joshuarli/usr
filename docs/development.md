@@ -6,7 +6,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 
 | Changed | Run |
 | --- | --- |
-| `dotfiles/base/.local/bin/sbx` or its policy spec | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py`; on each actual target OS also run `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py --live` |
+| `dotfiles/base/.local/bin/sbx` or its policy spec | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py`; on macOS also run `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py --live` |
 | `dotfiles/sym` | `cd dotfiles && sh sym-test.sh`, and `dash sym-test.sh` |
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
 | Session search, transcript adapters, and normalization | `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_sessions.py` and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/base/.local/bin/skill-usage selftest` |

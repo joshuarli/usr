@@ -49,7 +49,7 @@ as_root() {
     fi
 }
 
-packages="unbound unbound-openrc ca-certificates curl bash jq unzip libgcc openssh-client bubblewrap uv"
+packages="unbound unbound-openrc ca-certificates curl bash jq unzip libgcc openssh-client uv"
 missing=
 for package in $packages; do
     "$package_manager" info -e "$package" >/dev/null 2>&1 || missing="$missing $package"

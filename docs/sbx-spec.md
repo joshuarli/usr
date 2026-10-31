@@ -1,10 +1,10 @@
 # `sbx`: native process confinement (specification and audit contract)
 
-Status: implemented and validated live on macOS 27 (Seatbelt) and Debian stable-slim (bubblewrap); see Verification status. This document is normative for the CLI contract; the [implementation](../dotfiles/base/.local/bin/sbx) and [tests](../dotfiles/sbx-test.py) are the concrete enforcement. The implementation is not a drop-in replacement for Anthropic's sandbox-runtime and **is not a microVM**.
+Status: macOS (Seatbelt) is supported and validated live on macOS 27; see Verification status. The Linux (bubblewrap) backend is out of scope for this setup and is not installed by `usr`. This document is normative for the CLI contract; the [implementation](../dotfiles/base/.local/bin/sbx) and [tests](../dotfiles/sbx-test.py) are the concrete enforcement. The implementation is not a drop-in replacement for Anthropic's sandbox-runtime and **is not a microVM**.
 
 ## Purpose
 
-Run an arbitrary coding-agent process with access to a specific working tree, explicit additional directories, ordinary system executables and libraries, and optionally the checked-in `usr` skills. The same CLI works on macOS and Linux, with no Python packages, daemon, credential proxy, or firewall rules to maintain. Stronger isolation (untrusted binaries, mutually hostile users, hostile root workloads) belongs in `smolvm`/another VM.
+Run an arbitrary coding-agent process with access to a specific working tree, explicit additional directories, ordinary system executables and libraries, and optionally the checked-in `usr` skills. The supported backend is macOS (Seatbelt); the Linux backend is out of scope. There are no Python packages, daemon, credential proxy, or firewall rules to maintain. Stronger isolation (untrusted binaries, mutually hostile users, hostile root workloads) belongs in `smolvm`/another VM.
 
 ## Interface
 
@@ -12,7 +12,7 @@ Run an arbitrary coding-agent process with access to a specific working tree, ex
 sbx [--ro DIR]... [--rw DIR]... [--offline] [--no-skills] [--explain] [-- COMMAND [ARG...]]
 ```
 
-- Default: run an interactive `/bin/zsh` on macOS and `/bin/sh` on Linux. Execute an explicit command with arguments without a shell string or `eval`.
+- Default: run an interactive `/bin/zsh` on macOS. The out-of-scope Linux backend uses `/bin/sh`. Execute an explicit command with arguments without a shell string or `eval`.
 - CWD is implicitly and recursively **read/write**. It stays at its **canonical absolute path** in the child. All edits in it are real host edits. CWD equal to the host home or an ancestor of it is prohibited. A CWD anywhere under the home (including `~/d/project`) is permitted.
 - `--ro DIR` and `--rw DIR` each accept an existing **directory**, more than once. They expose those trees at their canonical absolute host paths. They are read-only and read/write, respectively. Source paths are canonicalized before rules/mounts are built, including symlink resolution. No per-file grants or globs. File/dir access within these trees is still limited by normal host identity/permissions.
 - Overlapping or duplicate explicit grants (including a parent of the project or an alias that resolves into another grant) are rejected, independently of their modes. The host home and any ancestor of it are never eligible as a grant. Granting another directory deliberately grants all of its contents, including secrets it may contain.
@@ -77,7 +77,9 @@ The private home is disposable. The host paths of the skills and instructions ar
 - With `--offline`, no network allow operation is emitted. Online emits `(allow network*)`. Denying direct networking does not guarantee the absence of all system-mediated networking on macOS.
 - Access to nonstandard executables/frameworks/fonts/services can fail. No automatic fallback to relaxed policies. Use the explain output and add **narrow** explicit grants for nonsecret dependencies.
 
-## Linux backend
+## Linux backend (out of scope)
+
+This backend is not installed or supported by `usr`. The section documents the existing implementation for reference only; do not rely on it without independent review and live testing.
 
 **Requirement:** `bwrap` (bubblewrap), installed separately using the OS package manager, and kernel support for its namespace setup (or a distro-provided setuid bubblewrap). No Docker, chroot daemon, systemd, or Python dependency. Rootless execution is preferred.
 
@@ -125,6 +127,6 @@ No domain-specific network allowlists, proxy/CONNECT/SOCKS server, TLS intercept
 
 ## Verification status and upstream reference
 
-Static Python unit/policy tests validate construction of grants, mount arguments, environment and profile clauses; they cannot prove host-kernel isolation. Live validation (`--live`) was run on macOS 27 (Seatbelt) and Debian stable-slim with bubblewrap in a privileged container: CWD/rw/ro enforcement, symlink-escape denial, private-home and credential isolation, offline network denial with online loopback connectivity, `localhost` resolution, initial-`.git` write/rename denial, argv passthrough, and fail-closed behavior all passed. Findings confirmed live and encoded above: the macOS `.git` protection needs granular deny operations, and macOS DNS resolution needs the configd Mach lookups.
+Static Python unit/policy tests validate construction of grants, mount arguments, environment and profile clauses; they cannot prove host-kernel isolation. Live validation (`--live`) was run on macOS 27 (Seatbelt): CWD/rw/ro enforcement, symlink-escape denial, private-home and credential isolation, offline network denial with online loopback connectivity, `localhost` resolution, initial-`.git` write/rename denial, argv passthrough, and fail-closed behavior all passed. Findings confirmed live and encoded above: the macOS `.git` protection needs granular deny operations, and macOS DNS resolution needs the configd Mach lookups. Historical Linux validation in a Debian container is not part of the supported scope.
 
 Implementation references: [Anthropic Sandbox Runtime](https://github.com/anthropics/sandbox-runtime), especially `macos-sandbox-utils.ts` and symlink/move tests; [Bubblewrap](https://github.com/containers/bubblewrap), for mount namespace and argv semantics. This is an independently scoped implementation, not a line-for-line port of either project.

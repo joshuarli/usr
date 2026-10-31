@@ -2,7 +2,7 @@
 
 This repository installs my home configuration, personal commands, and machine setup. Clone it to `~/usr`.
 
-For native, dependency-free Python process confinement of coding agents, use [`sbx`](docs/sbx-spec.md) on macOS (Seatbelt) or Linux (Bubblewrap). It grants the current project read/write, accepts explicit extra directories, and keeps unrelated home data out of the sandbox. Linux requires `bwrap`; use the full specification and live tests before trusting it with sensitive information.
+For native, dependency-free Python process confinement of coding agents, use [`sbx`](docs/sbx-spec.md) on macOS (Seatbelt). It grants the current project read/write, accepts explicit extra directories, and keeps unrelated home data out of the sandbox. Linux sandboxing is out of scope; use the full specification and live tests before trusting `sbx` with sensitive information.
 
 ## Process picker
 
@@ -27,7 +27,7 @@ The service-disabling step is optional. Run `./host/macos/macos lean --audit`, r
 
 Use [`macos`](docs/macos-preferences.md) to snapshot, compare, and apply selected macOS user preferences. Raw snapshots include every user and current-host `defaults` domain, so keep them private and out of Git; check in only selected preferences.
 
-On Alpine Linux, run `./host/setup-linux` for the initial setup. It installs Unbound and its OpenRC service, the sync prerequisites (`curl`, bash, jq, unzip, libgcc, OpenSSH client, bubblewrap, uv), deploys the shared config, points `/etc/resolv.conf` at Unbound, and verifies localhost and system DNS queries. It leaves `/etc/resolv.conf` writable so Tailscale can apply MagicDNS and split DNS settings. DHCP or Tailscale may replace the localhost entries; Tailscale can route DNS through its own resolver instead of Unbound.
+On Alpine Linux, run `./host/setup-linux` for the initial setup. It installs Unbound and its OpenRC service, the sync prerequisites (`curl`, bash, jq, unzip, libgcc, OpenSSH client, uv), deploys the shared config, points `/etc/resolv.conf` at Unbound, and verifies localhost and system DNS queries. It leaves `/etc/resolv.conf` writable so Tailscale can apply MagicDNS and split DNS settings. DHCP or Tailscale may replace the localhost entries; Tailscale can route DNS through its own resolver instead of Unbound.
 
 On Linux, skip the macOS setup. Run `sh sync plan` on either platform and resolve any reported conflicts. Then run `sh sync` to link the current OS layer into your home directory, download supported tools, and install kache if it is missing. On macOS, `sh sync` checks Homebrew packages but does not configure system DNS. To configure DNS explicitly, run `./host/macos/setup-macos dns`. Run `./host/macos/fix-dns` to restore automatic DNS for Wi-Fi and Tailscale. On Alpine Linux, `sh sync` runs `host/setup-linux` first to install or update Unbound, the sync prerequisites, and system DNS. Other Linux distributions skip the Unbound setup. On glibc Linux, run `setup-mold`. Musl builds expect mold at `/usr/local/libexec/mold`.
 
