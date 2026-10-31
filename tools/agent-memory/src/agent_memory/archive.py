@@ -36,6 +36,10 @@ class ArchiveError(RuntimeError):
     pass
 
 
+class ArchiveForgotten(ArchiveError):
+    pass
+
+
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -55,11 +59,14 @@ def ensure_identity(db, label=None, regenerate=False):
     origin = secrets.token_hex(16)
     display = str(label or "collector")
     now = time.time()
+    verb = "INSERT OR REPLACE" if regenerate else "INSERT OR IGNORE"
     with db:
-        db.execute("INSERT OR IGNORE INTO origin_host (id, display_label, created_at) VALUES (?, ?, ?)", (origin, display, now))
-        db.execute("INSERT OR REPLACE INTO collector_identity (singleton, id, origin_host, display_label, created_at) "
+        db.execute(verb + " INTO collector_identity (singleton, id, origin_host, display_label, created_at) "
                    "VALUES (1, ?, ?, ?, ?)", (secrets.token_hex(16), origin, display, now))
-    return origin, display
+        row = db.execute("SELECT origin_host, display_label FROM collector_identity WHERE singleton = 1").fetchone()
+        db.execute("INSERT OR IGNORE INTO origin_host (id, display_label, created_at) VALUES (?, ?, ?)",
+                   (row["origin_host"], row["display_label"], now))
+    return row["origin_host"], row["display_label"]
 
 
 def origin_for(db):
@@ -158,12 +165,16 @@ def read_generation(db, archive_dir, generation, offset=0, length=None):
 
 
 def read_generation_lines(db, archive_dir, generation, state, limit=8 * 1024 * 1024):
-    """Yield (offset, line) for each complete line, buffering one line at a time.
+    """Yield (offset, line, length) for each complete line, buffering one line at a time.
+
+    A line longer than the limit is yielded as None so it can be reported
+    without being held in memory.
 
     The final partial line, if any, is reported through state["partial"] instead
     of being yielded, so an incomplete tail is never indexed as a record.
     """
     buffer = bytearray()
+    length = 0
     offset = 0
     state["partial"] = 0
     for _start, _size, chunk_digest in generation_chunks(db, generation):
@@ -171,17 +182,20 @@ def read_generation_lines(db, archive_dir, generation, state, limit=8 * 1024 * 1
         position = 0
         while True:
             newline = data.find(b"\n", position)
+            end = len(data) if newline < 0 else newline + 1
+            length += end - position
+            if length <= limit:
+                buffer.extend(data[position:end])
+            else:
+                buffer.clear()
             if newline < 0:
-                buffer.extend(data[position:])
-                if len(buffer) > limit:
-                    raise ArchiveError("archived record exceeds the read limit")
                 break
-            buffer.extend(data[position:newline + 1])
-            yield offset, bytes(buffer)
-            offset += len(buffer)
+            yield offset, (bytes(buffer) if length <= limit else None), length
+            offset += length
             buffer.clear()
-            position = newline + 1
-    state["partial"] = len(buffer)
+            length = 0
+            position = end
+    state["partial"] = length
 
 
 def read_line_at(db, archive_dir, generation, position, limit=8 * 1024 * 1024):
@@ -401,11 +415,27 @@ def generation_manifest(db, generation) -> dict[str, Any]:
     }
 
 
-def _write_artifacts(archive_dir, artifacts):
+def _register_objects(db, written):
+    """Catalog newly written objects at once so a failed capture leaves nothing a purge cannot find."""
+    if not written:
+        return
+    now = time.time()
+    with db:
+        db.executemany("INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)",
+                       [(digest, size, now) for digest, size in written])
+
+
+def _write_artifacts(db, archive_dir, artifacts):
     stored = []
-    for name, data in artifacts:
-        artifact_digest, size, _ = _write_object(archive_dir, data)
-        stored.append((str(name), artifact_digest, size))
+    written = []
+    try:
+        for name, data in artifacts:
+            artifact_digest, size, wrote = _write_object(archive_dir, data)
+            if wrote:
+                written.append((artifact_digest, size))
+            stored.append((str(name), artifact_digest, size))
+    finally:
+        _register_objects(db, written)
     return stored
 
 
@@ -415,6 +445,9 @@ def publish_generation(db, *, origin_host, harness, native_id, source_path, sour
     now = time.time()
     db.execute("BEGIN IMMEDIATE")
     try:
+        if db.execute("SELECT 1 FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",
+                      (origin_host, harness, native_id)).fetchone() is not None:
+            raise ArchiveForgotten("session was forgotten: %s %s" % (harness, native_id))
         latest = last_generation(db, origin_host, harness, native_id)
         if latest is not None and latest["manifest_digest"] == identity:
             db.rollback()
@@ -427,10 +460,12 @@ def publish_generation(db, *, origin_host, harness, native_id, source_path, sour
              *stat_fields, workspace, identity, metadata_json(metadata)))
         generation = int(cursor.lastrowid or 0)
         if from_generation is not None:
-            db.execute(
+            copied = db.execute(
                 "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) "
                 "SELECT ?, ordinal, digest, size, offset FROM archive_generation_object WHERE generation = ?",
-                (generation, int(from_generation)))
+                (generation, int(from_generation))).rowcount
+            if copied == 0 and int(source_size) > 0:
+                raise ArchiveError("the previous generation disappeared during capture; retry capture")
         for index, (offset, size, chunk_digest) in enumerate(chunks):
             db.execute("INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)", (chunk_digest, size, now))
             db.execute(
@@ -471,6 +506,9 @@ def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), s
         if not stat.S_ISREG(info.st_mode):
             raise OSError("refusing to capture a non-regular file: " + str(source_path))
         origin_host = origin_for(db)
+        if db.execute("SELECT 1 FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",
+                      (origin_host, harness, native_id)).fetchone() is not None:
+            raise ArchiveForgotten("session was forgotten: %s %s" % (harness, native_id))
         previous = last_generation(db, origin_host, harness, native_id)
         cwd = metadata["cwd"] if metadata is not None else workspace
         if _same_source(previous, info):
@@ -482,7 +520,7 @@ def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), s
                 db, origin_host=origin_host, harness=harness, native_id=native_id, source_path=source_path,
                 source_digest=previous["source_digest"], source_size=previous["source_size"], identity=identity,
                 metadata=metadata, workspace=cwd or None, captured=time.time(), chunks=[],
-                artifacts=_write_artifacts(archive_dir, artifacts),
+                artifacts=_write_artifacts(db, archive_dir, artifacts),
                 stat_fields=(previous["source_dev"], previous["source_ino"], previous["source_mtime_ns"], previous["source_ctime_ns"]),
                 from_generation=previous["id"])
             key = "archived" if created else "archive_unchanged"
@@ -492,20 +530,25 @@ def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), s
         previous_digests = {digest for _offset, _size, digest in previous_chunks}
         stream.seek(0)
         all_chunks = []
+        written = []
         start = 0
-        while True:
-            data = stream.read(CHUNK_BYTES)
-            if not data:
-                break
-            stats["bytes_read"] = stats.get("bytes_read", 0) + len(data)
-            chunk_digest = sha256(data)
-            if chunk_digest not in previous_digests:
-                chunk_digest, size, wrote = _write_object(archive_dir, data)
-                if wrote:
-                    stats["archive_objects"] = stats.get("archive_objects", 0) + 1
-                    stats["archive_bytes"] = stats.get("archive_bytes", 0) + size
-            all_chunks.append((start, len(data), chunk_digest))
-            start += len(data)
+        try:
+            while True:
+                data = stream.read(CHUNK_BYTES)
+                if not data:
+                    break
+                stats["bytes_read"] = stats.get("bytes_read", 0) + len(data)
+                chunk_digest = sha256(data)
+                if chunk_digest not in previous_digests:
+                    chunk_digest, size, wrote = _write_object(archive_dir, data)
+                    if wrote:
+                        written.append((chunk_digest, size))
+                        stats["archive_objects"] = stats.get("archive_objects", 0) + 1
+                        stats["archive_bytes"] = stats.get("archive_bytes", 0) + size
+                all_chunks.append((start, len(data), chunk_digest))
+                start += len(data)
+        finally:
+            _register_objects(db, written)
         final = os.fstat(stream.fileno())
         if (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns, final.st_ctime_ns) != (
                 info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns):
@@ -516,7 +559,7 @@ def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), s
             db, origin_host=origin_host, harness=harness, native_id=native_id, source_path=source_path,
             source_digest=source_digest, source_size=final.st_size, identity=identity, metadata=metadata,
             workspace=cwd or None, captured=time.time(), chunks=all_chunks,
-            artifacts=_write_artifacts(archive_dir, artifacts),
+            artifacts=_write_artifacts(db, archive_dir, artifacts),
             stat_fields=(final.st_dev, final.st_ino, final.st_mtime_ns, final.st_ctime_ns))
     key = "archived" if created else "archive_unchanged"
     stats[key] = stats.get(key, 0) + 1

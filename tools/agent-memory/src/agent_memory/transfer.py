@@ -341,7 +341,7 @@ def _receive_generation(store, instream, outstream, manifest, connection_origin)
         _refuse(outstream, "session is tombstoned")
     acknowledgement = {"type": "ack", "origin_host": origin, "manifest_digest": clean.manifest_digest, "durable": True}
     existing = store.latest_generation_id(origin, harness, native, clean.manifest_digest)
-    if existing is not None and store.generation_complete(existing):
+    if existing is not None and store.generation_complete(existing) and store.generation_indexed(existing):
         write_message(outstream, {"type": "need", "digests": []})
         _expect_object_or_commit(instream, outstream, store, [])
         write_message(outstream, {**acknowledgement, "generation": int(existing)})

@@ -208,6 +208,9 @@ class ArchiveTests(unittest.TestCase):
             store.db.execute("PRAGMA foreign_keys = OFF")
             store.db.executescript(
                 "BEGIN;"
+                "CREATE TABLE unrelated_parent (id INTEGER PRIMARY KEY);"
+                "CREATE TABLE unrelated_child (parent INTEGER REFERENCES unrelated_parent(id));"
+                "INSERT INTO unrelated_child VALUES (404);"
                 "CREATE TABLE archive_generation_v8 (id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, "
                 "native_id TEXT NOT NULL, source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
                 "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
@@ -230,13 +233,96 @@ class ArchiveTests(unittest.TestCase):
                                  ARCHIVE.manifest_digest(row["source_digest"], row["source_size"], artifacts, None))
             self.assertEqual(store.db.execute("SELECT count(*) FROM transfer_generation").fetchone()[0], 1)
             self.assertEqual(store.db.execute("SELECT count(*) FROM archive_generation_object WHERE generation = ?", (generation,)).fetchone()[0], chunks)
-            self.assertEqual(store.db.execute("PRAGMA foreign_key_check").fetchall(), [])
+            for child in ("archive_generation_object", "archive_artifact", "transfer_generation"):
+                self.assertEqual(store.db.execute("PRAGMA foreign_key_check(%s)" % child).fetchall(), [])
             self.assertEqual(store.db.execute("PRAGMA foreign_keys").fetchone()[0], 1)
             self.assertEqual(ARCHIVE.read_generation(store.db, store.archive_dir, ids[-1]), self.path.read_bytes())
             stats = self.refresh(store)
             self.assertEqual(stats["archived"], 1)
             self.assertEqual(stats["archive_objects"], 0)
             self.assertEqual(store.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 3)
+
+    def object_files(self, store):
+        return sorted(path.name for path in (store.archive_dir / "objects").rglob("*") if path.is_file() and not path.name.startswith("."))
+
+    def cmd_session(self, branch="e0"):
+        directory = self.root / "cmd" / "slug"
+        directory.mkdir(parents=True, exist_ok=True)
+        message = json.dumps({"type": "message", "id": "e0", "parentId": None, "timestamp": "2026-10-30T00:00:00Z",
+                              "message": {"role": "user", "content": [{"type": "text", "text": "secret words"}], "meta": {"messageId": "e0"}}})
+        (directory / "s1.jsonl").write_text(json.dumps({"type": "session", "version": 3, "id": "s1", "cwd": str(self.project)}) + "\n" + message + "\n")
+        (directory / "s1.meta.json").write_text(json.dumps({"branchPoint": branch}))
+        return directory / "s1.jsonl"
+
+    def test_a_forgotten_session_is_never_captured_again(self):
+        path = self.cmd_session()
+        with Store(self.state) as store:
+            store.refresh({"cmd": [self.root / "cmd"]}, project=None)
+            store.forget_session("cmd:s1", 5.0)
+            self.assertEqual(self.generations(store), 0)
+            with self.assertRaises(ARCHIVE.ArchiveForgotten):
+                ARCHIVE.capture(store.db, store.archive_dir, "cmd", "s1", path)
+            stats = store.refresh({"cmd": [self.root / "cmd"]}, project=None)
+            self.assertEqual((self.generations(store), stats["archive_errors"]), (0, 0))
+            self.assertEqual(self.object_files(store), [])
+
+    def test_forget_records_the_tombstone_before_it_purges_anything(self):
+        self.cmd_session()
+        with Store(self.state) as store:
+            store.refresh({"cmd": [self.root / "cmd"]}, project=None)
+            seen = {}
+            original = store._purge_generations
+
+            def spy(origin, harness, native):
+                seen["tombstoned"] = store.is_tombstoned(origin, harness, native)
+                return original(origin, harness, native)
+
+            store._purge_generations = spy
+            store.forget_session("cmd:s1", 5.0)
+            self.assertTrue(seen["tombstoned"])
+
+    def test_forgetting_a_captured_session_that_was_never_indexed_purges_its_evidence(self):
+        path = self.cmd_session()
+        with Store(self.state) as store:
+            ARCHIVE.capture(store.db, store.archive_dir, "cmd", "s1", path, artifacts=[("s1.meta.json", b"{}")])
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+            self.assertNotEqual(self.object_files(store), [])
+            store.forget_session("cmd:s1", 5.0)
+            self.assertEqual(self.generations(store), 0)
+            self.assertEqual(self.object_files(store), [])
+            self.assertEqual(store.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
+
+    def test_a_capture_that_fails_midway_leaves_every_object_file_cataloged(self):
+        self.write("alpha")
+        with self.path.open("a") as stream:
+            for _ in range(20):
+                stream.write(line("x" * 4000))
+        with Store(self.state) as store:
+            real = ARCHIVE._write_object
+            calls = {"n": 0}
+
+            def growing(archive_dir, data):
+                result = real(archive_dir, data)
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    with self.path.open("a") as stream:
+                        stream.write(line("appended while capturing"))
+                return result
+
+            with mock.patch.object(STORE_MODULE.archive_module, "_write_object", growing):
+                stats = self.refresh(store)
+            self.assertGreaterEqual(stats["archive_errors"], 1)
+            cataloged = {row[0] for row in store.db.execute("SELECT digest FROM archive_object")}
+            self.assertEqual(set(self.object_files(store)), cataloged)
+
+    def test_the_header_of_a_session_outside_the_selected_project_keeps_its_sidecar_fields(self):
+        self.cmd_session()
+        roots = {"cmd": [self.root / "cmd"]}
+        with Store(self.state) as store:
+            store.refresh(roots, project="git:somewhere-else")
+            store.refresh(roots, project="git:somewhere-else")
+            tips = [json.loads(row[0])["branch_tip"] for row in store.db.execute("SELECT session_metadata FROM archive_generation")]
+            self.assertEqual(tips, ["e0"])
 
     def test_a_failed_capture_is_visible_in_status(self):
         self.write("alpha")
@@ -479,8 +565,8 @@ class ArchiveTests(unittest.TestCase):
             lines = list(ARCHIVE.read_generation_lines(store.db, store.archive_dir, generation, state))
             self.assertEqual(len(lines), 2)
             self.assertEqual(state["partial"], 0)
-            self.assertTrue(all(raw.endswith(b"\n") for _offset, raw in lines))
-            offsets = [offset for offset, _raw in lines]
+            self.assertTrue(all(raw.endswith(b"\n") for _offset, raw, _length in lines))
+            offsets = [offset for offset, _raw, _length in lines]
             self.assertEqual(offsets, sorted(offsets))
             self.assertEqual(offsets[0], 0)
 

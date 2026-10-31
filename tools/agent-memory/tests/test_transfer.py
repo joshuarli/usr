@@ -191,8 +191,11 @@ class TransferTests(unittest.TestCase):
         for row in source.db.execute("SELECT id FROM archive_generation").fetchall():
             source.db.execute("DELETE FROM archive_generation WHERE id = ?", (row["id"],))
         source.db.execute("DELETE FROM transfer_generation")
+        source.db.execute("DELETE FROM tombstone")
+        source.db.execute("DELETE FROM forgotten_sessions")
         source.db.commit()
         source.refresh([self.sessions], project=self.project_id)
+        self.assertEqual(source.pending_transfers("central"), 1)
         with self.assertRaises(TRANSFER.TransferError):
             self.sync(source, attempts=1)
         central = Store(self.central_state)
@@ -496,6 +499,77 @@ class TransferTests(unittest.TestCase):
             return TRANSFER.read_message(instream)
 
         return self.serve_in_thread(["peer"], exchange)
+
+    def test_a_tombstone_that_lands_during_an_upload_refuses_the_commit_and_keeps_no_bytes(self):
+        data = b'{"secret":"words"}\n'
+        digest = ARCHIVE.sha256(data)
+
+        def exchange(instream, outstream):
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "peer"})
+            TRANSFER.read_message(instream)
+            TRANSFER.write_message(outstream, manifest_for([(digest, len(data))], native="racing"))
+            self.assertEqual(TRANSFER.read_message(instream)["digests"], [digest])
+            with Store(self.central_state) as other:
+                other.apply_tombstone("peer", "codex", "racing", "global", 5.0)
+            TRANSFER.write_message(outstream, {"type": "object", "digest": digest, "encoding": "identity"})
+            TRANSFER.write_blob(outstream, data)
+            TRANSFER.write_message(outstream, {"type": "commit"})
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["peer"], exchange)
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("forgotten", reply["message"])
+        with Store(self.central_state) as central:
+            self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 0)
+            self.assertEqual(central.db.execute("SELECT count(*) FROM archive_object").fetchone()[0], 0)
+            self.assertEqual(self.object_files(self.central_state), [])
+
+    def test_a_tombstone_applied_while_a_learning_snapshot_imports_still_removes_its_records(self):
+        record = {"record": "memory", "id": 1, "project": "p", "action": "a", "applicability": "b", "revision": None,
+                  "validity": "[]", "state": "approved", "created_at": 1.0, "links": [],
+                  "sources": [{"session": "cmd:racing", "position": 0, "digest": "dg", "role": "regression"}]}
+        digest = TRANSFER.learning_sync.snapshot_digest([record])
+        racer = {}
+        with Store(self.central_state) as central:
+            original = TRANSFER.learning_sync._tombstoned
+
+            def tombstone_arrives_after_the_check(store, origin, rec):
+                answer = original(store, origin, rec)
+
+                def forget():
+                    with Store(self.central_state) as other:
+                        TRANSFER.learning_sync.forget_session_imports(other.db, "cmd:racing@peer")
+                        other.apply_tombstone("peer", "cmd", "racing", "global", 5.0)
+
+                racer["thread"] = threading.Thread(target=forget)
+                racer["thread"].start()
+                time.sleep(0.3)
+                return answer
+
+            with mock.patch.object(TRANSFER.learning_sync, "_tombstoned", tombstone_arrives_after_the_check):
+                TRANSFER.learning_sync.import_snapshot(central, "peer", [record], digest)
+            racer["thread"].join(10)
+            central.db.rollback()
+            self.assertEqual(central.db.execute("SELECT count(*) FROM learning_import_memory").fetchone()[0], 1)
+            with central.db:
+                TRANSFER.learning_sync.forget_session_imports(central.db, "cmd:racing@peer")
+            self.assertEqual(central.db.execute("SELECT count(*) FROM learning_import_memory").fetchone()[0], 0)
+
+    def test_a_record_longer_than_the_central_read_limit_is_indexed_as_an_issue_not_a_failure(self):
+        big = self.sessions / "rollout-big.jsonl"
+        big.write_text(
+            json.dumps({"timestamp": "2026-10-30T00:00:00Z", "type": "session_meta", "payload": {"id": "big", "cwd": str(self.project)}}) + "\n"
+            + line("x" * (9 * 1024 * 1024)) + line("after the long line"))
+        source = self.capture()
+        stats = self.sync(source)
+        self.assertEqual(len(stats["delivered"]), 2)
+        with Store(self.central_state) as central:
+            session = "big@" + ARCHIVE.origin_for(source.db)
+            self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation WHERE indexed_at IS NULL").fetchone()[0], 0)
+            kinds = [row[0] for row in central.db.execute("SELECT kind FROM index_issues WHERE session = ?", (session,))]
+            self.assertEqual(kinds, ["oversized_record"])
+            self.assertEqual(len(central.search("after the long line", None)), 1)
+            self.assertEqual(central.reindex_generations(), 2)
 
     def test_malformed_or_mismatched_learning_snapshots_are_refused_without_changes(self):
         good = {"record": "memory", "id": 1, "project": "p", "action": "a", "applicability": "b", "revision": None,

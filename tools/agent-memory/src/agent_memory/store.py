@@ -688,8 +688,9 @@ class Store:
             self.db.execute("ALTER TABLE archive_generation_next RENAME TO archive_generation")
             self.db.execute(
                 "CREATE INDEX archive_generation_session ON archive_generation(origin_host, harness, native_id, id)")
-            if self.db.execute("PRAGMA foreign_key_check").fetchone() is not None:
-                raise StoreError("archive generation migration left dangling references")
+            for child in ("archive_generation_object", "archive_artifact", "transfer_generation"):
+                if self.db.execute("PRAGMA foreign_key_check(%s)" % child).fetchone() is not None:
+                    raise StoreError("archive generation migration left dangling references in " + child)
             self.db.execute("PRAGMA user_version = 9")
             self.db.execute("COMMIT")
         except BaseException:
@@ -1090,16 +1091,21 @@ class Store:
         companions = self._companions(meta["harness"], Path(path))
         artifacts, refused = archive_module.capture_artifacts(companions)
         stats["archive_errors"] += refused
-        if meta["harness"] in SIDECAR_HEADER_HARNESSES and self._sidecars_changed(meta, artifacts):
-            fresh, error = _metadata(Path(path), meta["harness"], {}, stats)
-            if fresh is not None:
-                meta.update({field: fresh[field] for field in HEADER_FIELDS})
+        sidecars_changed = meta["harness"] in SIDECAR_HEADER_HARNESSES and self._sidecars_changed(meta, artifacts)
+        if sidecars_changed or "branch_tip" not in meta:
+            recorded = None if sidecars_changed else self._recorded_header(meta)
+            if recorded is not None:
+                meta.update(recorded)
+            else:
+                fresh, error = _metadata(Path(path), meta["harness"], {}, stats)
+                if fresh is not None:
+                    meta.update({field: fresh[field] for field in HEADER_FIELDS})
         try:
             generation, created = archive_module.capture(
                 self.db, self.archive_dir, meta["harness"], meta["native_id"], path,
                 artifacts=artifacts, session_metadata=_session_metadata(meta), stats=stats,
             )
-        except FileNotFoundError:
+        except (FileNotFoundError, archive_module.ArchiveForgotten):
             return []
         except archive_module.ArchiveError as exc:
             self._record_capture_failure(meta, str(exc))
@@ -1118,6 +1124,14 @@ class Store:
         if not created:
             return []
         return [str(path)]
+
+    def _recorded_header(self, meta):
+        previous = archive_module.last_generation(
+            self.db, archive_module.origin_for(self.db), meta["harness"], meta["native_id"])
+        if previous is None or not previous["session_metadata"]:
+            return None
+        recorded = json.loads(previous["session_metadata"])
+        return {field: recorded[field] for field in HEADER_FIELDS}
 
     def _sidecars_changed(self, meta, artifacts):
         previous = archive_module.last_generation(
@@ -1207,7 +1221,7 @@ class Store:
             raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
         return raw
 
-    def _purge_archive(self, harness, source_path, native_id=None):
+    def _purge_archive(self, harness, source_path, native_id, origin_host):
         if harness in DATABASE_HARNESSES:
             database, _, native = source_path.rpartition("#")
             archive = self._archived_copy(harness, database)
@@ -1217,7 +1231,7 @@ class Store:
                     target.execute("DELETE FROM session_message WHERE session_id = ?", (native,))
                     target.execute("DELETE FROM session_v2 WHERE id = ?", (native,))
             return
-        self._purge_generations(self._origin_for_session(harness, native_id) or archive_module.origin_for(self.db), harness, native_id)
+        self._purge_generations(origin_host, harness, native_id)
         archive = self._archived_copy(harness, source_path)
         for name in (archive.name, *ARCHIVE_COMPANIONS.get(harness, ())):
             (archive.parent / name).unlink(missing_ok=True)
@@ -1436,8 +1450,6 @@ class Store:
         native = row["native_id"] if row is not None else str(session).partition(":")[2]
         if harness not in HARNESSES:
             raise StoreError("session id does not name a supported harness: " + str(session))
-        if row is not None:
-            self._purge_archive(row["harness"], row["source_path"], row["native_id"])
         origin = (row["origin_host"] if row is not None else None) or local_origin
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
@@ -1446,6 +1458,10 @@ class Store:
                 self.db.execute(
                     "INSERT OR REPLACE INTO tombstone (origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, 'global', ?)",
                     (origin, harness, native, float(now)))
+        if row is not None:
+            self._purge_archive(row["harness"], row["source_path"], row["native_id"], origin)
+        elif harness not in DATABASE_HARNESSES and native:
+            self._purge_generations(origin, harness, native)
 
     # -- archive transfer and central indexing -------------------------------
 
@@ -1479,20 +1495,28 @@ class Store:
             return False
         return all(self.object_intact(digest, size) for digest, size in clean.sizes.items())
 
+    def generation_indexed(self, generation):
+        row = self.db.execute("SELECT indexed_at, tombstoned, harness FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
+        return row is not None and (row["indexed_at"] is not None or bool(row["tombstoned"]) or row["harness"] in DATABASE_HARNESSES)
+
     def commit_generation(self, manifest, received):
         clean = archive_module.validate_manifest(manifest)
-        with archive_module.object_lock(self.archive_dir):
-            for data in received.values():
-                self.store_object(data)
-            for digest, size in clean.sizes.items():
-                if not self.object_intact(digest, size):
-                    raise StoreError("generation object is missing or corrupt: " + digest)
-            generation, _created = archive_module.publish_generation(
-                self.db, origin_host=clean.origin_host, harness=clean.harness, native_id=clean.native_id,
-                source_path=clean.source_path, source_digest=clean.source_digest, source_size=clean.source_size,
-                identity=clean.manifest_digest, metadata=clean.session_metadata,
-                workspace=(clean.session_metadata or {}).get("cwd") or None, captured=clean.captured_at,
-                chunks=list(clean.chunks), artifacts=list(clean.artifacts), stat_fields=(None, None, None, None))
+        try:
+            with archive_module.object_lock(self.archive_dir):
+                for data in received.values():
+                    self.store_object(data)
+                for digest, size in clean.sizes.items():
+                    if not self.object_intact(digest, size):
+                        raise StoreError("generation object is missing or corrupt: " + digest)
+                generation, _created = archive_module.publish_generation(
+                    self.db, origin_host=clean.origin_host, harness=clean.harness, native_id=clean.native_id,
+                    source_path=clean.source_path, source_digest=clean.source_digest, source_size=clean.source_size,
+                    identity=clean.manifest_digest, metadata=clean.session_metadata,
+                    workspace=(clean.session_metadata or {}).get("cwd") or None, captured=clean.captured_at,
+                    chunks=list(clean.chunks), artifacts=list(clean.artifacts), stat_fields=(None, None, None, None))
+        except BaseException:
+            self._discard_received(list(received))
+            raise
         try:
             self.index_generation(generation)
         except BaseException:
@@ -1597,10 +1621,15 @@ class Store:
             if self.db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone() is None:
                 return
             indexed = 0
-            for line_offset, line_bytes in archive_module.read_generation_lines(
+            for line_offset, line_bytes, line_length in archive_module.read_generation_lines(
                     self.db, self.archive_dir, generation, line_state):
-                self._ingest_line(session_id, harness, line_offset, line_bytes, tally)
-                indexed = line_offset + len(line_bytes)
+                if line_bytes is None:
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'oversized_record')",
+                        (session_id, line_offset))
+                else:
+                    self._ingest_line(session_id, harness, line_offset, line_bytes, tally)
+                indexed = line_offset + line_length
             partial = line_state["partial"]
             coverage, issues = self._assess_coverage(
                 session_id, tally.recognized, tally.unrecognized, partial, metadata["step_count"])
@@ -1612,8 +1641,8 @@ class Store:
 
     def _first_line(self, generation):
         state = {"partial": 0}
-        for _offset, line in archive_module.read_generation_lines(self.db, self.archive_dir, generation, state):
-            return line
+        for _offset, line, _length in archive_module.read_generation_lines(self.db, self.archive_dir, generation, state):
+            return line or b""
         return b""
 
     def _unrecorded_session_metadata(self, row, first_line):
@@ -1660,10 +1689,21 @@ class Store:
                 "AND digest NOT IN (SELECT digest FROM archive_artifact)")]
             for digest in orphans:
                 self.db.execute("DELETE FROM archive_object WHERE digest = ?", (digest,))
+        self._unlink_unreferenced(orphans)
+
+    def _unlink_unreferenced(self, digests):
         with archive_module.object_lock(self.archive_dir, exclusive=True):
-            for digest in orphans:
+            for digest in digests:
                 if self.db.execute("SELECT 1 FROM archive_object WHERE digest = ?", (digest,)).fetchone() is None:
                     archive_module.object_path(self.archive_dir, digest).unlink(missing_ok=True)
+
+    def _discard_received(self, digests):
+        with self.db:
+            for digest in digests:
+                self.db.execute(
+                    "DELETE FROM archive_object WHERE digest = ? AND digest NOT IN (SELECT digest FROM archive_generation_object) "
+                    "AND digest NOT IN (SELECT digest FROM archive_artifact)", (digest,))
+        self._unlink_unreferenced(digests)
 
     def apply_tombstone(self, origin_host, harness, native_id, scope, forgotten_at):
         """Record a forget decision and physically remove the session's captured evidence."""

@@ -219,8 +219,9 @@ def import_snapshot(store, origin_host, records, digest):
     ensure_schema(store.db)
     db = store.db
     now = time.time()
-    accepted = [record for record in clean if not _tombstoned(store, origin_host, record)]
-    with db:
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        accepted = [record for record in clean if not _tombstoned(store, origin_host, record)]
         for table in ("learning_import_experience", "learning_import_memory", "learning_import_source", "learning_import_link"):
             db.execute("DELETE FROM %s WHERE origin_host = ?" % table, (origin_host,))
         for record in accepted:
@@ -250,6 +251,10 @@ def import_snapshot(store, origin_host, records, digest):
                      source["position"], source["digest"], source["role"]))
         db.execute("INSERT OR REPLACE INTO learning_import_state (origin_host, digest, records, received_at) VALUES (?, ?, ?, ?)",
                    (origin_host, digest, len(accepted), now))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
     return len(accepted)
 
 
