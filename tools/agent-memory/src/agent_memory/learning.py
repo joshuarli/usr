@@ -19,6 +19,7 @@ from typing import Any, cast
 from agent_memory.experience import CORRECTION, ERROR, RUNNER as RUNNER_PATTERN, SCHEMA as EXPERIENCE_SCHEMA, observe_project, pair_runs, rebuild_recall_projection, recall_schema, run_outcome
 from agent_memory.recall import technical_tokens
 from agent_memory.learning_ops import SchedulerError
+from agent_memory import learning_sync
 from agent_memory.recall import DEFAULT_LIMIT, Retriever, SourceError, artifact_text as read_tracked_text
 from agent_memory.store import Store, StoreError, active_branch, default_state_dir, project_identity, redact
 from agent_memory.types import HARNESSES, FindingState, Harness, RetryKind, Signal
@@ -145,6 +146,7 @@ def initialize(db):
         );
     """)
     db.executescript(EXPERIENCE_SCHEMA)
+    learning_sync.ensure_schema(db)
     for statement in recall_schema():
         db.execute(statement)
     if row is None:
@@ -321,7 +323,9 @@ def run_lock(directory):
 
 def apply_remote_forget(store, origin_host, harness, native_id, scope, forgotten_at):
     """Apply a received forget decision: withdraw what was derived from the session, then purge its evidence."""
-    if store.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'learning_schema'").fetchone() is None:
+    if not learning_sync.has_learning(store.db):
+        with store.db:
+            learning_sync.forget_session_imports(store.db, store.central_session_id(origin_host, harness, native_id))
         store.apply_tombstone(origin_host, harness, native_id, scope, forgotten_at)
         return
     Learner(store).apply_remote_forget(origin_host, harness, native_id, scope, forgotten_at)
@@ -1481,6 +1485,7 @@ class Learner:
                 self.db.execute("DELETE FROM %s WHERE substr(record,1,?)=?" % table, (len(prefix), prefix))
             self.db.execute("DELETE FROM learning_incidents WHERE session=?", (session,))
             self._purge_findings(sorted(findings | bridged))
+            learning_sync.forget_session_imports(self.db, session)
             purge_evidence()
         return {"forgot_session": session, "unresolved_derived_findings": unresolved}
 

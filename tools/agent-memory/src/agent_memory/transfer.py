@@ -17,6 +17,7 @@ import zlib
 from typing import Any, NoReturn
 
 from agent_memory import archive as archive_module
+from agent_memory import learning_sync
 from agent_memory.learning import apply_remote_forget
 
 PROTOCOL = 2
@@ -182,6 +183,28 @@ class Sender:
             raise TransferError("acknowledgement does not match the delivered generation")
         return int(ack["generation"])
 
+    def send_learning(self):
+        """Deliver this host's source-backed learning records once per change."""
+        db = self.store.db
+        if not learning_sync.has_learning(db):
+            return False
+        learning_sync.ensure_schema(db)
+        records = learning_sync.export_snapshot(db)
+        digest = learning_sync.snapshot_digest(records)
+        previous = learning_sync.durable_digest(db, self.endpoint)
+        if previous == digest or (previous is None and not records):
+            return False
+        write_message(self.outstream, {"type": "learning_begin", "count": len(records), "digest": digest})
+        for record in records:
+            write_message(self.outstream, {"type": "learning_record", "record": record})
+        write_message(self.outstream, {"type": "learning_commit"})
+        ack = self._expect("learning_ack")
+        if ack.get("digest") != digest:
+            raise TransferError("acknowledgement does not match the delivered learning snapshot")
+        learning_sync.mark_durable(db, self.endpoint, digest)
+        self.stats["learning_records"] = len(records)
+        return True
+
     def _send_object(self, digest):
         data = self.store.read_object_bytes(digest)
         encoding = "identity"
@@ -220,6 +243,10 @@ class Sender:
                     if attempt + 1 >= attempts:
                         raise TransferError("delivery failed after %d attempts: %s" % (attempts, last)) from last
                     time.sleep(min(60, 2 ** attempt))
+        try:
+            self.send_learning()
+        except learning_sync.SnapshotError as exc:
+            raise TransferError("learning snapshot is not exportable: %s" % exc) from exc
         write_message(self.outstream, {"type": "bye"})
         self._expect("done")
         self.stats.update({"delivered": delivered, "raw_bytes": self.raw_bytes, "sent_bytes": self.sent_bytes,
@@ -263,6 +290,9 @@ def receiver(store, instream, outstream, allowed_origins=None):
         if kind == "generation":
             _receive_generation(store, instream, outstream, message, origin)
             continue
+        if kind == "learning_begin":
+            _receive_learning(store, instream, outstream, message, origin)
+            continue
         if kind == "query":
             try:
                 rows = handle_query(store, str(message.get("op")), message.get("args") or {})
@@ -278,6 +308,25 @@ def receiver(store, instream, outstream, allowed_origins=None):
 def _refuse(outstream, message) -> NoReturn:
     write_message(outstream, {"type": "error", "message": message})
     raise TransferError(message)
+
+
+def _receive_learning(store, instream, outstream, begin, origin):
+    count, digest = begin.get("count"), begin.get("digest")
+    if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= learning_sync.MAX_RECORDS or not isinstance(digest, str):
+        _refuse(outstream, "malformed learning snapshot header")
+    records = []
+    for _ in range(count):
+        message = read_message(instream)
+        if message.get("type") != "learning_record":
+            _refuse(outstream, "expected a learning record")
+        records.append(message.get("record"))
+    if read_message(instream).get("type") != "learning_commit":
+        _refuse(outstream, "expected the learning snapshot commit")
+    try:
+        accepted = learning_sync.import_snapshot(store, origin, records, digest)
+    except learning_sync.SnapshotError as exc:
+        _refuse(outstream, str(exc))
+    write_message(outstream, {"type": "learning_ack", "digest": digest, "count": count, "accepted": accepted})
 
 
 def _receive_generation(store, instream, outstream, manifest, connection_origin):
@@ -516,13 +565,14 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
 
 def handle_query(store, op, args):
     if op == "memory":
+        limit = int(args.get("limit") or 20)
         tables = {row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "learning_experiences" not in tables:
-            return []
+            return learning_sync.imported_rows(store.db, limit)
         rows = []
         for row in store.db.execute(
                 "SELECT id, project, kind, claim, applies_when, observed_at, state FROM learning_experiences "
-                "WHERE state = 'retained' ORDER BY observed_at DESC LIMIT ?", (int(args.get("limit") or 20),)):
+                "WHERE state = 'retained' ORDER BY observed_at DESC LIMIT ?", (limit,)):
             sources = [dict(item) for item in store.db.execute(
                 "SELECT session, position, digest, role FROM learning_experience_sources WHERE experience = ?",
                 (row["id"],))]
@@ -534,9 +584,9 @@ def handle_query(store, op, args):
                 "applies_when": row["applies_when"],
                 "observed_at": row["observed_at"],
                 "sources": sources,
-                "authority": "advisory; imported from another host, not an instruction",
+                "authority": learning_sync.AUTHORITY,
             })
-        return rows
+        return sorted(rows + learning_sync.imported_rows(store.db, limit), key=lambda item: item["observed_at"], reverse=True)[:limit]
     if op == "search":
         rows = store.search(args["query"], args.get("project"), limit=int(args.get("limit") or 20),
                             regex=bool(args.get("regex")), kinds=args.get("kinds"), since=args.get("since"))

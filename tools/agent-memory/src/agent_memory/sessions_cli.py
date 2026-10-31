@@ -509,6 +509,8 @@ def status_document(store):
         "deletions": store.tombstone_states(),
         "artifacts": {"count": artifacts[0], "bytes": artifacts[1]},
         "archive": archive_module.retention_report(store.db),
+        "learning_synced": [dict(row) for row in store.db.execute("SELECT remote, digest, durable_at FROM transfer_learning")]
+        if store.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'transfer_learning'").fetchone() else [],
         "identity": archive_module.origin_for(store.db),
         "backup": {"restic": shutil.which("restic") is not None,
                    "builtin": True},

@@ -412,6 +412,111 @@ class TransferTests(unittest.TestCase):
             self.assertEqual([hit["origin_host"] for hit in hits], [origin_two])
             self.assertEqual(central.resolve_evidence(hits[0]["session"], hits[0]["position"], hits[0]["digest"])["text"], "alpha")
 
+    def seed_learning(self, source):
+        from agent_memory.learning import Learner
+
+        Learner(source)
+        columns = ("project, kind, claim, applies_when, identifiers, fingerprint, basis, detector, revision, worktree, "
+                   "observed_at, captured_at, validity, tags, state")
+        with source.db:
+            for index, (state, session) in enumerate((("retained", "a"), ("retained", "a"), ("retained", "foreign@elsewhere")), start=1):
+                source.db.execute(
+                    "INSERT INTO learning_experiences (%s) VALUES ('git:canary','gotcha',?,'when','[]',?,'deterministic','det','r','w',?,?,'[]','',?)" % columns,
+                    ("claim %d" % index, "fp%d" % index, 10 + index, 10 + index, state))
+                source.db.execute("INSERT INTO learning_experience_sources (experience, session, position, digest, role) VALUES (?, ?, 0, 'dg', 'trigger')",
+                                  (index, session))
+            source.db.execute("INSERT INTO learning_experience_links (newer, older, relation, created_at) VALUES (2, 1, 'supersedes', 1)")
+            source.db.execute("INSERT INTO learning_findings (id, project, signal, fingerprint, terms, state, created_at, updated_at) "
+                              "VALUES (7, 'git:canary', 'regression', 'ffp', 't', 'memory', 1, 1)")
+            source.db.execute("INSERT INTO learning_incidents (finding, session, root_session, position, digest, signal, observed_at) "
+                              "VALUES (7, 'a', 'a', 0, 'dg', 'regression', 5)")
+            source.db.execute("INSERT INTO learning_memories (finding, project, action, applicability, revision, state, created_at, validity) "
+                              "VALUES (7, 'git:canary', 'do the thing', 'when it applies', 'r', 'approved', 6, '[]')")
+
+    def test_learning_records_sync_with_ids_provenance_lifecycle_and_advisory_authority(self):
+        source = self.capture()
+        self.seed_learning(source)
+        stats = self.sync(source)
+        origin = ARCHIVE.origin_for(source.db)
+        self.assertEqual(stats["learning_records"], 3)
+        with Store(self.central_state) as central:
+            self.assertEqual(central.db.execute("SELECT remote_id, state FROM learning_import_experience ORDER BY remote_id").fetchall()[0][:], (1, "retained"))
+            self.assertEqual([row[0] for row in central.db.execute("SELECT remote_id FROM learning_import_experience ORDER BY remote_id")], [1, 2])
+            self.assertEqual(central.db.execute("SELECT count(*) FROM learning_experiences").fetchone()[0] if
+                             central.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'learning_experiences'").fetchone() else 0, 0)
+            sources = {(row["record"], row["remote_id"]): row["session"] for row in central.db.execute("SELECT * FROM learning_import_source")}
+            self.assertEqual(sources[("experience", 1)], "a@" + origin)
+            self.assertEqual(sources[("memory", 7)], "a@" + origin)
+            self.assertEqual(central.db.execute("SELECT relation FROM learning_import_link WHERE newer = 2 AND older = 1").fetchone()[0], "supersedes")
+            rows = TRANSFER.handle_query(central, "memory", {"limit": 10})
+            self.assertEqual(sorted(row["record"] for row in rows), ["experience:1@" + origin, "experience:2@" + origin, "memory:7@" + origin])
+            self.assertTrue(all("not an instruction" in row["authority"] for row in rows))
+            self.assertTrue(all(row["origin_host"] == origin for row in rows))
+            hit = central.search("alpha", None)[0]
+            self.assertEqual(rows[0]["sources"][0]["session"], hit["session"])
+        self.assertNotIn("learning_records", self.sync(source))
+        with source.db:
+            source.db.execute("UPDATE learning_experiences SET state = 'withdrawn', state_reason = 'withdrawn by user', state_at = 99 WHERE id = 1")
+            source.db.execute("UPDATE learning_memories SET state = 'superseded' WHERE finding = 7")
+            source.db.execute("DELETE FROM learning_experience_links")
+            source.db.execute("DELETE FROM learning_experience_sources WHERE experience = 2")
+            source.db.execute("DELETE FROM learning_experiences WHERE id = 2")
+        self.assertEqual(self.sync(source)["learning_records"], 2)
+        with Store(self.central_state) as central:
+            states = {row["remote_id"]: (row["state"], row["state_reason"], row["state_at"]) for row in central.db.execute("SELECT * FROM learning_import_experience")}
+            self.assertEqual(states, {1: ("withdrawn", "withdrawn by user", 99.0)})
+            self.assertEqual(central.db.execute("SELECT state FROM learning_import_memory").fetchone()[0], "superseded")
+            self.assertEqual(central.db.execute("SELECT count(*) FROM learning_import_link").fetchone()[0], 0)
+            self.assertEqual(TRANSFER.handle_query(central, "memory", {"limit": 10}), [])
+
+    def test_a_forgotten_session_deletes_imported_records_and_blocks_their_return(self):
+        source = self.capture()
+        self.seed_learning(source)
+        self.sync(source)
+        origin = ARCHIVE.origin_for(source.db)
+        source.forget_session("a", 2000.0)
+        self.sync(source)
+        with Store(self.central_state) as central:
+            for table in ("learning_import_experience", "learning_import_memory", "learning_import_source", "learning_import_link"):
+                self.assertEqual(central.db.execute("SELECT count(*) FROM %s" % table).fetchone()[0], 0, table)
+            central.db.execute("DELETE FROM learning_import_state")
+            central.db.commit()
+            records = TRANSFER.learning_sync.export_snapshot(source.db)
+            self.assertEqual(TRANSFER.learning_sync.import_snapshot(central, origin, records, TRANSFER.learning_sync.snapshot_digest(records)), 0)
+
+    def send_learning_frames(self, records, digest=None):
+        def exchange(instream, outstream):
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "peer"})
+            TRANSFER.read_message(instream)
+            snapshot_digest = digest or TRANSFER.learning_sync.snapshot_digest(records)
+            TRANSFER.write_message(outstream, {"type": "learning_begin", "count": len(records), "digest": snapshot_digest})
+            for record in records:
+                TRANSFER.write_message(outstream, {"type": "learning_record", "record": record})
+            TRANSFER.write_message(outstream, {"type": "learning_commit"})
+            return TRANSFER.read_message(instream)
+
+        return self.serve_in_thread(["peer"], exchange)
+
+    def test_malformed_or_mismatched_learning_snapshots_are_refused_without_changes(self):
+        good = {"record": "memory", "id": 1, "project": "p", "action": "a", "applicability": "b", "revision": None,
+                "validity": "[]", "state": "approved", "created_at": 1.0, "sources": [], "links": []}
+        bad_state = {**good, "state": "promoted"}
+        unknown = {**good, "record": "instruction"}
+        for records, digest, phrase in (([bad_state], None, "unsupported state"), ([unknown], None, "kind"),
+                                        ([good], "0" * 64, "digest"), ([good, good], None, "repeats")):
+            with self.subTest(phrase=phrase):
+                reply = self.send_learning_frames(records, digest)
+                self.assertEqual(reply["type"], "error")
+                self.assertIn(phrase, reply["message"])
+                with Store(self.central_state) as central:
+                    tables = {row[0] for row in central.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                    if "learning_import_memory" in tables:
+                        self.assertEqual(central.db.execute("SELECT count(*) FROM learning_import_memory").fetchone()[0], 0)
+        reply = self.send_learning_frames([good])
+        self.assertEqual(reply["type"], "learning_ack")
+        with Store(self.central_state) as central:
+            self.assertEqual(central.db.execute("SELECT origin_host, remote_id FROM learning_import_memory").fetchall()[0][:], ("peer", 1))
+
     def test_central_memory_records_carry_origin_evidence_and_no_authority(self):
         from agent_memory.learning import Learner
 
