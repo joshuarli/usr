@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -159,7 +158,6 @@ class TransferTests(unittest.TestCase):
         central = Store(self.central_state)
         self.assertEqual(central.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
         self.assertEqual(central.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
-        source.refresh_headers if False else None
         for row in source.db.execute("SELECT id FROM archive_generation").fetchall():
             source.db.execute("DELETE FROM archive_generation WHERE id = ?", (row["id"],))
         source.db.execute("DELETE FROM transfer_generation")
