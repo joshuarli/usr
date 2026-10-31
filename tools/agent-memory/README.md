@@ -157,6 +157,7 @@ The central host needs the receiver package (`tools/agent-memory/src/agent_memor
 
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
+- Object frames are zlib-compressed when both ends offer it, which every build of this tool does. The manifest already declares each object's size, so the receiver inflates to at most that size, refuses anything larger, and verifies the digest afterwards; an object that does not shrink travels uncompressed. Measured on 40 of the largest local objects, 2.6 MB became 1.1 MB.
 - Delivery is at-least-once. A generation is acknowledged as remotely durable only after the receiver has verified every object's digest and size, matched the manifest origin to the authenticated peer, and committed the manifest. A retry of an accepted generation is a no-op that re-acks.
 - Stored is not the same as searchable. The central side indexes each accepted generation itself, from the captured bytes, so search and `show` never need the source host or its filesystem.
 - The sender keeps its own copy until the ack. While offline it keeps a backlog with the attempt count and last error, and `doctor --json` reports it.
