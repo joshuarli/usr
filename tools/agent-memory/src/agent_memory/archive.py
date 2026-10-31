@@ -131,6 +131,33 @@ def read_generation(db, archive_dir, generation, offset=0, length=None):
     return b"".join(parts)
 
 
+def read_generation_lines(db, archive_dir, generation, state, limit=8 * 1024 * 1024):
+    """Yield (offset, line) for each complete line, buffering one line at a time.
+
+    The final partial line, if any, is reported through state["partial"] instead
+    of being yielded, so an incomplete tail is never indexed as a record.
+    """
+    buffer = bytearray()
+    offset = 0
+    state["partial"] = 0
+    for _start, _size, chunk_digest in generation_chunks(db, generation):
+        data = read_object(archive_dir, chunk_digest)
+        position = 0
+        while True:
+            newline = data.find(b"\n", position)
+            if newline < 0:
+                buffer.extend(data[position:])
+                if len(buffer) > limit:
+                    raise ArchiveError("archived record exceeds the read limit")
+                break
+            buffer.extend(data[position:newline + 1])
+            yield offset, bytes(buffer)
+            offset += len(buffer)
+            buffer.clear()
+            position = newline + 1
+    state["partial"] = len(buffer)
+
+
 def read_line_at(db, archive_dir, generation, position, limit=8 * 1024 * 1024):
     """Read one newline-terminated record starting at position, across chunks."""
     chunks = generation_chunks(db, generation)

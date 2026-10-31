@@ -309,6 +309,20 @@ class ArchiveTests(unittest.TestCase):
             self.assertIsNotNone(generation)
             self.assertIn(b"legacy survivor", ARCHIVE.read_generation(store.db, store.archive_dir, generation))
 
+    def test_generation_indexing_buffers_one_line_at_a_time(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            self.refresh(store)
+            generation = store.db.execute("SELECT max(id) FROM archive_generation").fetchone()[0]
+            state = {"partial": 0}
+            lines = list(ARCHIVE.read_generation_lines(store.db, store.archive_dir, generation, state))
+            self.assertEqual(len(lines), 2)
+            self.assertEqual(state["partial"], 0)
+            self.assertTrue(all(raw.endswith(b"\n") for _offset, raw in lines))
+            offsets = [offset for offset, _raw in lines]
+            self.assertEqual(offsets, sorted(offsets))
+            self.assertEqual(offsets[0], 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

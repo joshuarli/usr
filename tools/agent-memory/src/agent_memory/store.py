@@ -1459,13 +1459,12 @@ class Store:
         session_id = qualified_id(cast(Harness, harness), native) + suffix
         if harness in DATABASE_HARNESSES:
             return
-        data = archive_module.read_generation(self.db, self.archive_dir, generation)
         workspace = row["workspace_path"] or ""
         project = self._mapped_project(origin, workspace)
-        lines = data.split(b"\n")
         now = time.time()
         recognized = unrecognized = malformed = 0
-        partial = len(lines[-1]) if lines and lines[-1] else 0
+        first_line = self._first_line(generation)
+        line_state = {"partial": 0}
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             self.db.execute(
@@ -1474,17 +1473,15 @@ class Store:
                 "native_id, ancestry, archive_generation, origin_host, workspaces) "
                 "VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, 'degraded', ?, 'known', ?, ?, ?)",
                 (session_id, project, workspace, harness, "generation:%d" % generation, now, int(row["source_size"]),
-                 int(row["source_size"]), _sha256(data.split(b"\n")[0] if data else b""), native, int(generation),
-                 origin, self._workspace_json(data, harness)))
+                 int(row["source_size"]), _sha256(first_line), native, int(generation),
+                 origin, self._workspace_json(first_line, harness)))
             offset = 0
-            for raw in lines:
-                if not raw:
-                    offset += 1
-                    continue
-                line_bytes = raw + b"\n"
+            for line_offset, line_bytes in archive_module.read_generation_lines(
+                    self.db, self.archive_dir, generation, line_state):
+                offset = line_offset
                 digest = _sha256(line_bytes)
                 try:
-                    records = normalize(_json_line(raw), cast(Harness, harness))
+                    records = normalize(_json_line(line_bytes.rstrip(b"\n")), cast(Harness, harness))
                 except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
                     self.db.execute("INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
                                     (session_id, offset))
@@ -1502,16 +1499,23 @@ class Store:
                         elif record["kind"] in SUBSTANTIVE_KINDS:
                             recognized += 1
                 offset += len(line_bytes)
+            partial = line_state["partial"]
             coverage = "unsupported" if recognized == 0 and (unrecognized or malformed) else "degraded" if unrecognized or malformed else "complete"
             self.db.execute(
                 "UPDATE sessions SET coverage = ?, indexed_bytes = ?, partial_bytes = ?, malformed_lines = ?, "
                 "recognized_events = ?, unrecognized_events = ? WHERE id = ?",
-                (coverage, offset - partial, partial, malformed, recognized, unrecognized, session_id))
+                (coverage, offset, partial, malformed, recognized, unrecognized, session_id))
             self.db.execute("UPDATE archive_generation SET indexed_at = ? WHERE id = ?", (now, int(generation)))
 
-    def _workspace_json(self, data, harness):
+    def _first_line(self, generation):
+        state = {"partial": 0}
+        for _offset, line in archive_module.read_generation_lines(self.db, self.archive_dir, generation, state):
+            return line
+        return b""
+
+    def _workspace_json(self, first_line, harness):
         try:
-            first = _json_line(data.split(b"\n")[0]) if data else {}
+            first = _json_line(first_line.rstrip(b"\n")) if first_line else {}
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
             return None
         cwd = first.get("cwd") if harness == "cmd" and isinstance(first, dict) else None
