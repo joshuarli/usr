@@ -13,9 +13,9 @@ Route by difficulty, uncertainty, and risk. Use the column for the harness you a
 
 | Work | Codex | Claude and Grok | OpenCode | Command Code | Muse Code | Antigravity CLI | DeepSeek TUI | fx | Pi |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/muse-spark-1.3-contributor#high`, `explore` | `meta/muse-spark-1.3-contributor`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `low` | `google/gemini-3.8-flash`, `scout`, `low` |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/muse-spark-1.3-contributor#high`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `medium` | `google/gemini-3.8-flash`, `mechanic`, `medium` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-terra`, `medium` | `worker` | `opencode-go/muse-spark-1.3-contributor#xhigh`, `general` | `meta/muse-spark-1.3-contributor`, `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` | `meta/muse-spark-1.3-contributor`, `high` | `google/gemini-3.8-flash`, `worker`, `high` |
+| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/deepseek-v4.1-flash#max`, `explore` | `deepseek/deepseek-v4.1-flash`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `low` | `google/gemini-3.8-flash`, `scout`, `low` |
+| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/deepseek-v4.1-flash#max`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `medium` | `google/gemini-3.8-flash`, `mechanic`, `medium` |
+| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-terra`, `medium` | `worker` | `opencode-go/deepseek-v4.1-flash#max`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` | `meta/muse-spark-1.3-contributor`, `high` | `google/gemini-3.8-flash`, `worker`, `high` |
 | Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-terra`, `high` | `expert` | `opencode-go/deepseek-v4.1-flash#max`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `meta/muse-spark-1.3-contributor`, `xhigh` | `google/gemini-3.8-flash`, `expert`, `high` |
 | The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | unavailable — keep local; do not delegate | unavailable — keep local; do not delegate | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `meta/muse-spark-1.3-contributor`, `xhigh` | `google/gemini-3.8-flash`, `god`, `high` |
 
@@ -35,11 +35,11 @@ Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that ord
 
 ### OpenCode
 
-Keep scout, mechanic, and worker lanes on `opencode-go/muse-spark-1.3-contributor` (`high` for scout and mechanic, `xhigh` for worker). Run `expert` lanes on `opencode-go/deepseek-v4.1-flash#max` (1017 snapshot). Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
+Run every OpenCode lane on `opencode-go/deepseek-v4.1-flash#max` (1017 snapshot). Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
 
 ### Command Code
 
-Run Command Code sessions with `meta/muse-spark-1.3-contributor`. Built-in `Explore` (read-only) and `General` (other work) inherit the session model. Only the `expert` tier overrides its child to `deepseek/deepseek-v4.1-flash`. Do not delegate `god` work in Command Code; keep it local. Never use another model. Children may run in parallel or background but cannot nest.
+Run Command Code sessions with `deepseek/deepseek-v4.1-flash` at `max` effort. Built-in `Explore` (read-only) and `General` (other work) inherit the session model. Do not delegate `god` work in Command Code; keep it local. Never use another model. Children may run in parallel or background but cannot nest.
 
 ### Pi
 
