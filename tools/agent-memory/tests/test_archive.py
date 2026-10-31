@@ -159,6 +159,9 @@ class ArchiveTests(unittest.TestCase):
             self.assertGreaterEqual(stats["archive_errors"], 1)
             self.assertTrue(stats.get("archive_error_detail"))
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM capture_failure").fetchone()[0], 1)
+            self.refresh(store)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM capture_failure").fetchone()[0], 0)
 
     def test_capture_refuses_a_symlink_and_a_directory_source(self):
         self.write("alpha")

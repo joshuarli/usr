@@ -475,8 +475,7 @@ def _show(args):
 
 def status_document(store):
     coverage = store.coverage()
-    capture_failures = store.db.execute(
-        "SELECT count(*) FROM archive_generation WHERE stored_at IS NULL").fetchone()[0]
+    capture_failures = store.db.execute("SELECT count(*) FROM capture_failure").fetchone()[0]
     unindexed = store.db.execute(
         "SELECT count(*) FROM archive_generation WHERE indexed_at IS NULL AND harness NOT IN ('opencode')").fetchone()[0]
     pending = store.db.execute(

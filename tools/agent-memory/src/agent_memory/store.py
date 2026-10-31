@@ -550,7 +550,10 @@ class Store:
                 "ALTER TABLE sessions ADD COLUMN archive_generation INTEGER;"
                 "ALTER TABLE sessions ADD COLUMN origin_host TEXT;"
                 "ALTER TABLE events ADD COLUMN synthetic_id INTEGER NOT NULL DEFAULT 0;"
-                "CREATE TABLE IF NOT EXISTS collector_identity ("
+                "CREATE TABLE IF NOT EXISTS capture_failure ("
+            "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, at REAL NOT NULL, error TEXT, "
+            "PRIMARY KEY(origin_host, harness, native_id));"
+            "CREATE TABLE IF NOT EXISTS collector_identity ("
                 "singleton INTEGER PRIMARY KEY CHECK (singleton = 1), id TEXT NOT NULL, origin_host TEXT NOT NULL, "
                 "display_label TEXT NOT NULL, created_at REAL NOT NULL);"
                 "CREATE TABLE IF NOT EXISTS origin_host ("
@@ -626,6 +629,9 @@ class Store:
             "CREATE TABLE index_issues ("
             "session TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, position INTEGER NOT NULL, "
             "kind TEXT NOT NULL, PRIMARY KEY(session, position));"
+            "CREATE TABLE IF NOT EXISTS capture_failure ("
+            "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, at REAL NOT NULL, error TEXT, "
+            "PRIMARY KEY(origin_host, harness, native_id));"
             "CREATE TABLE IF NOT EXISTS collector_identity ("
             "singleton INTEGER PRIMARY KEY CHECK (singleton = 1), id TEXT NOT NULL, origin_host TEXT NOT NULL, "
                 "display_label TEXT NOT NULL, created_at REAL NOT NULL);"
@@ -982,13 +988,18 @@ class Store:
         except FileNotFoundError:
             return []
         except archive_module.ArchiveError as exc:
+            self._record_capture_failure(meta, str(exc))
             stats["archive_errors"] += 1
             stats["archive_error_detail"] = str(exc)
             return []
         except OSError as exc:
+            self._record_capture_failure(meta, str(exc))
             stats["archive_errors"] += 1
             stats["archive_error_detail"] = str(exc)
             return []
+        with self.db:
+            self.db.execute("DELETE FROM capture_failure WHERE harness = ? AND native_id = ?",
+                            (meta["harness"], meta["native_id"]))
         meta["archive_generation"] = generation
         if not created:
             return []
@@ -1013,6 +1024,12 @@ class Store:
         with self.db:
             self.db.execute("UPDATE sessions SET archive_generation = ? WHERE id = ?", (generation, row["id"]))
         return True
+
+    def _record_capture_failure(self, meta, error):
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO capture_failure (origin_host, harness, native_id, at, error) VALUES (?, ?, ?, ?, ?)",
+                (archive_module.origin_for(self.db), meta["harness"], meta["native_id"], time.time(), str(error)[:500]))
 
     @staticmethod
     def _companions(harness, path):
