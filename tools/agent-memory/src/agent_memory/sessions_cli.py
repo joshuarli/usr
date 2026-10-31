@@ -286,7 +286,7 @@ def _sync(args):
                     print("delivered=%d" % count, file=sys.stderr, flush=True)
 
             if settings.get("transport", "local") == "local":
-                delivered = transfer_module.local_sync(
+                result = transfer_module.local_sync(
                     store, Path(os.path.expanduser(str(settings["state_dir"]))), args.to, origin,
                     args.label or "collector", progress=progress)
             else:
@@ -294,9 +294,11 @@ def _sync(args):
                 command = settings.get("command")
                 if not host or not command:
                     raise StoreError("ssh central settings need host and command")
-                delivered = transfer_module.ssh_sender(store, args.to, host, command, origin,
-                                                       args.label or "collector", progress=progress)
-            print("delivered=%d pending=%d" % (len(delivered), store.pending_transfers(args.to)))
+                result = transfer_module.ssh_sender(store, args.to, host, command, origin,
+                                                    args.label or "collector", progress=progress)
+            print("delivered=%d pending=%d sent_bytes=%d raw_bytes=%d compression=%s" % (
+                len(result["delivered"]), store.pending_transfers(args.to),
+                result["sent_bytes"], result["raw_bytes"], result["compression"] or "none"))
         return 0
     except (OSError, StoreError, transfer_module.TransferError) as exc:
         print("agent-sessions sync: " + str(exc), file=sys.stderr)

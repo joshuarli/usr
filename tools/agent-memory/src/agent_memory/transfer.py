@@ -12,6 +12,7 @@ import socket
 import struct
 import time
 import zlib
+from typing import Any
 
 PROTOCOL = 1
 MAX_FRAME = 4 * 1024 * 1024
@@ -107,6 +108,9 @@ class Sender:
         self.instream, self.outstream = instream, outstream
         self.origin, self.label = origin, label
         self.compression = None
+        self.raw_bytes = 0
+        self.sent_bytes = 0
+        self.stats: dict[str, Any] = {"delivered": [], "raw_bytes": 0, "sent_bytes": 0, "compression": None}
 
     def _expect(self, kind):
         message = read_message(self.instream)
@@ -200,6 +204,8 @@ class Sender:
             packed = compress(data)
             if len(packed) < len(data):
                 encoding, payload = COMPRESSION, packed
+        self.raw_bytes += len(data)
+        self.sent_bytes += len(payload)
         write_message(self.outstream, {"type": "object", "digest": digest, "encoding": encoding})
         write_blob(self.outstream, payload)
 
@@ -230,6 +236,8 @@ class Sender:
                     time.sleep(min(60, 2 ** attempt))
         write_message(self.outstream, {"type": "bye"})
         self._expect("done")
+        self.stats.update({"delivered": delivered, "raw_bytes": self.raw_bytes,
+                           "sent_bytes": self.sent_bytes, "compression": self.compression})
         return delivered
 
 
@@ -406,7 +414,7 @@ def _drain(stream, sink, limit=65536):
         return
 
 
-def ssh_sender(store, remote, host, command, origin, label, timeout=120, progress=None):
+def ssh_sender(store, remote, host, command, origin, label, timeout=120, progress=None) -> dict[str, Any]:
     import subprocess
     import threading
 
@@ -440,7 +448,8 @@ def ssh_sender(store, remote, host, command, origin, label, timeout=120, progres
         assert process.stdout is not None and process.stdin is not None
         sender = Sender(store, remote, _ActivityStream(process.stdout, activity),
                         _ActivityStream(process.stdin, activity), origin, label)
-        return sender.run(progress=progress)
+        sender.run(progress=progress)
+        return sender.stats
     except (OSError, ValueError, TransferError) as exc:
         detail = sink[0].decode("utf-8", "replace").strip()[-600:]
         raise TransferError("ssh transport failed: %s%s" % (exc, ("; remote stderr: " + detail) if detail else "")) from exc
@@ -466,7 +475,7 @@ def socket_timeout(stream, seconds):
         pass
 
 
-def local_sync(source_store, central_state_dir, remote, origin, label, attempts=3, progress=None):
+def local_sync(source_store, central_state_dir, remote, origin, label, attempts=3, progress=None) -> dict[str, Any]:
     """Run the sender and receiver over a real socketpair in one process.
 
     The receiver opens its own store: a SQLite connection belongs to the thread
@@ -493,7 +502,9 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
     thread.start()
     try:
         with left.makefile("rb") as instream, left.makefile("wb") as outstream:
-            return Sender(source_store, remote, instream, outstream, origin, label).run(attempts, progress=progress)
+            sender = Sender(source_store, remote, instream, outstream, origin, label)
+            sender.run(attempts, progress=progress)
+            return sender.stats
     finally:
         try:
             left.close()

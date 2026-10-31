@@ -76,9 +76,9 @@ class TransferTests(unittest.TestCase):
     def test_duplicate_delivery_is_idempotent_and_acks(self):
         source = self.capture()
         first = self.sync(source)
-        self.assertEqual(len(first), 1)
+        self.assertEqual(len(first["delivered"]), 1)
         second = self.sync(source)
-        self.assertEqual(second, [])
+        self.assertEqual(second["delivered"], [])
         central = Store(self.central_state)
         self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 1)
         self.assertEqual(central.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
@@ -96,7 +96,7 @@ class TransferTests(unittest.TestCase):
             self.sync(source, attempts=1)
         source.mark_durable = original
         delivered = self.sync(source)
-        self.assertEqual(len(delivered), 1)
+        self.assertEqual(len(delivered["delivered"]), 1)
         central = Store(self.central_state)
         self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 1)
         durable = source.db.execute("SELECT count(*) FROM transfer_generation WHERE durable_at IS NOT NULL").fetchone()[0]
