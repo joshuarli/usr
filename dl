@@ -3504,7 +3504,7 @@ if [ $# -eq 0 ]; then
         Linux:aarch64) ;;
         *) set -- "$@" jaq ;;
     esac
-    set -- "$@" codex claude opencode2 pi agy fastermod tm ish e fz fdu fs srv git python3 cf
+    set -- "$@" codex claude opencode2 pi agy fastermod tm ish stuff e fz fdu fs srv git python3 cf
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac

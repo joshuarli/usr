@@ -8,7 +8,7 @@ Run `sh sync plan` to preview links. Resolve each `CONFLICT` before syncing. `sh
 
 `sh sync uninstall` removes recorded layer links and installed tool paths. It leaves unrecorded pre-existing links and native launchers in place. Ownership records live under `${XDG_STATE_HOME:-$HOME/.local/state}/sync`. See [`dl`](../dl) for tool installation and update behavior.
 
-`cf` is installed by default from a pinned npm package under the managed Node.js runtime. `sh dl stuff` installs the `stuff` catalog CLI from its latest GitHub pre-release; it is not in the default tool list until a release exists.
+`cf` is installed by default from a pinned npm package under the managed Node.js runtime. `stuff` is installed by default from its latest GitHub pre-release; `sh dl stuff` updates or reinstalls it.
 
 `make` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID and macOS DNS setup are manual. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
 
