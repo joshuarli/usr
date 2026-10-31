@@ -148,6 +148,96 @@ class ArchiveTests(unittest.TestCase):
             newest = store.db.execute("SELECT max(id) FROM archive_generation").fetchone()[0]
             self.assertEqual(ARCHIVE.read_generation(store.db, store.archive_dir, newest), self.path.read_bytes())
 
+    def test_a_changed_companion_or_native_metadata_creates_a_new_generation_and_never_edits_the_old_one(self):
+        self.write("alpha")
+        metadata = {"cwd": str(self.project), "parent": None, "source": None, "thread_source": None,
+                    "ancestry": "known", "branch_tip": "m-b", "workspaces": None, "step_count": None}
+        with Store(self.state) as store:
+            stats = {}
+            first, created = ARCHIVE.capture(store.db, store.archive_dir, "codex", "a", self.path,
+                                             artifacts=[("a.meta.json", b'{"branchPoint":"m-b"}')],
+                                             session_metadata=metadata, stats=stats)
+            self.assertTrue(created)
+            again, created = ARCHIVE.capture(store.db, store.archive_dir, "codex", "a", self.path,
+                                             artifacts=[("a.meta.json", b'{"branchPoint":"m-b"}')],
+                                             session_metadata=metadata, stats=stats)
+            self.assertEqual((again, created), (first, False))
+            before = store.db.execute("SELECT * FROM archive_generation WHERE id = ?", (first,)).fetchone()
+            artifact = store.db.execute("SELECT name, digest, size FROM archive_artifact WHERE generation = ?", (first,)).fetchone()
+            read = stats["bytes_read"]
+            second, created = ARCHIVE.capture(store.db, store.archive_dir, "codex", "a", self.path,
+                                              artifacts=[("a.meta.json", b'{"branchPoint":"m-a"}')],
+                                              session_metadata=metadata, stats=stats)
+            self.assertTrue(created)
+            self.assertNotEqual(second, first)
+            self.assertEqual(stats["bytes_read"], read)
+            third, created = ARCHIVE.capture(store.db, store.archive_dir, "codex", "a", self.path,
+                                             artifacts=[("a.meta.json", b'{"branchPoint":"m-a"}')],
+                                             session_metadata={**metadata, "branch_tip": "m-a"}, stats=stats)
+            self.assertTrue(created)
+            self.assertEqual(tuple(store.db.execute("SELECT * FROM archive_generation WHERE id = ?", (first,)).fetchone()), tuple(before))
+            self.assertEqual(tuple(store.db.execute("SELECT name, digest, size FROM archive_artifact WHERE generation = ?", (first,)).fetchone()), tuple(artifact))
+            self.assertEqual(store.read_object_bytes(artifact["digest"]), b'{"branchPoint":"m-b"}')
+            for generation in (first, second, third):
+                self.assertEqual(ARCHIVE.read_generation(store.db, store.archive_dir, generation), self.path.read_bytes())
+            self.assertEqual(store.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 3)
+
+    def test_a_companion_that_flips_back_to_an_earlier_value_is_a_new_latest_generation(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            ids = [ARCHIVE.capture(store.db, store.archive_dir, "codex", "a", self.path, artifacts=[("a.meta.json", body)])[0]
+                   for body in (b"one", b"two", b"one")]
+            self.assertEqual(len(set(ids)), 3)
+            self.assertEqual(ARCHIVE.last_generation(store.db, ARCHIVE.origin_for(store.db), "codex", "a")["id"], ids[2])
+
+    def test_schema_v8_generations_migrate_with_chunks_artifacts_and_references(self):
+        self.write("alpha")
+        with Store(self.state) as store:
+            self.refresh(store)
+            generation = store.db.execute("SELECT id FROM archive_generation").fetchone()[0]
+            digest = store.store_object(b"one")
+            store.db.execute("INSERT INTO archive_artifact (generation, name, digest, size) VALUES (?, 'a.meta.json', ?, 3)", (generation, digest))
+            store.db.commit()
+            with self.path.open("a") as stream:
+                stream.write(line("beta"))
+            self.refresh(store)
+            ids = [row[0] for row in store.db.execute("SELECT id FROM archive_generation ORDER BY id")]
+            self.assertEqual(len(ids), 2)
+            store.db.execute("INSERT INTO transfer_generation (generation, remote, durable_at, attempts) VALUES (?, 'r', 1, 1)", (ids[-1],))
+            store.db.commit()
+            store.db.execute("PRAGMA foreign_keys = OFF")
+            store.db.executescript(
+                "BEGIN;"
+                "CREATE TABLE archive_generation_v8 (id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, "
+                "native_id TEXT NOT NULL, source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
+                "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
+                "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, source_mtime_ns INTEGER, "
+                "source_ctime_ns INTEGER, workspace_path TEXT, UNIQUE(origin_host, harness, native_id, source_digest));"
+                "INSERT INTO archive_generation_v8 SELECT id, origin_host, harness, native_id, source_path, source_digest, "
+                "source_size, captured_at, protocol, stored_at, indexed_at, tombstoned, source_dev, source_ino, source_mtime_ns, "
+                "source_ctime_ns, workspace_path FROM archive_generation;"
+                "DROP TABLE archive_generation;"
+                "ALTER TABLE archive_generation_v8 RENAME TO archive_generation;"
+                "PRAGMA user_version = 8;COMMIT;")
+            chunks = store.db.execute("SELECT count(*) FROM archive_generation_object WHERE generation = ?", (generation,)).fetchone()[0]
+        with Store(self.state) as store:
+            self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], STORE_MODULE.SCHEMA_VERSION)
+            for row in store.db.execute("SELECT * FROM archive_generation").fetchall():
+                self.assertIsNone(row["session_metadata"])
+                artifacts = [(item["name"], item["digest"]) for item in store.db.execute(
+                    "SELECT name, digest FROM archive_artifact WHERE generation = ?", (row["id"],))]
+                self.assertEqual(row["manifest_digest"],
+                                 ARCHIVE.manifest_digest(row["source_digest"], row["source_size"], artifacts, None))
+            self.assertEqual(store.db.execute("SELECT count(*) FROM transfer_generation").fetchone()[0], 1)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM archive_generation_object WHERE generation = ?", (generation,)).fetchone()[0], chunks)
+            self.assertEqual(store.db.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.assertEqual(store.db.execute("PRAGMA foreign_keys").fetchone()[0], 1)
+            self.assertEqual(ARCHIVE.read_generation(store.db, store.archive_dir, ids[-1]), self.path.read_bytes())
+            stats = self.refresh(store)
+            self.assertEqual(stats["archived"], 1)
+            self.assertEqual(stats["archive_objects"], 0)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 3)
+
     def test_a_failed_capture_is_visible_in_status(self):
         self.write("alpha")
         with Store(self.state) as store:

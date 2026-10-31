@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -41,6 +42,20 @@ LINE = ('{"timestamp":"2026-10-30T00:00:00Z","type":"response_item","payload":'
 
 def line(text):
     return LINE % text
+
+
+def manifest_for(chunks, native="x", artifacts=(), metadata=None, origin="peer"):
+    size = sum(item[1] for item in chunks)
+    offsets, total = [], 0
+    for digest, length in chunks:
+        offsets.append({"digest": digest, "size": length, "offset": total})
+        total += length
+    source_digest = ARCHIVE.source_digest_of(digest for digest, _ in chunks)
+    listed = [{"name": name, "digest": digest, "size": length} for name, digest, length in artifacts]
+    identity = ARCHIVE.manifest_digest(source_digest, size, [(name, digest) for name, digest, _ in artifacts], metadata)
+    return {"type": "generation", "origin_host": origin, "harness": "codex", "native_id": native, "source_path": "/x",
+            "source_digest": source_digest, "source_size": size, "captured_at": 1.0, "chunks": offsets,
+            "artifacts": listed, "session_metadata": metadata, "manifest_digest": identity}
 
 
 class TransferTests(unittest.TestCase):
@@ -145,7 +160,7 @@ class TransferTests(unittest.TestCase):
 
     def test_untrusted_origin_is_refused(self):
         def exchange(instream, outstream):
-            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "stranger"})
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "stranger"})
             return TRANSFER.read_message(instream)
 
         reply = self.serve_in_thread(["allowed"], exchange)
@@ -174,6 +189,7 @@ class TransferTests(unittest.TestCase):
         for row in source.db.execute("SELECT id FROM archive_generation").fetchall():
             source.db.execute("DELETE FROM archive_generation WHERE id = ?", (row["id"],))
         source.db.execute("DELETE FROM transfer_generation")
+        source.db.commit()
         source.refresh([self.sessions], project=self.project_id)
         with self.assertRaises(TRANSFER.TransferError):
             self.sync(source, attempts=1)
@@ -219,37 +235,126 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(central.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
         self.assertEqual(central.search("alpha", None), [])
 
-    def test_a_corrupt_central_object_is_never_acknowledged_as_durable(self):
-        source = self.capture()
-        self.sync(source)
+    def corrupt_central_object(self):
         central = Store(self.central_state)
         digest = central.db.execute("SELECT digest FROM archive_generation_object LIMIT 1").fetchone()[0]
         object_path = ARCHIVE.object_path(central.archive_dir, digest)
         data = bytearray(object_path.read_bytes())
         data[0:1] = b"X"
         object_path.write_bytes(bytes(data))
+        return central, digest
+
+    def test_a_corrupt_central_object_is_never_acknowledged_as_durable(self):
+        source = self.capture()
+        self.sync(source)
+        self.corrupt_central_object()
         with source.db:
             source.db.execute("DELETE FROM transfer_generation")
+        original = source.read_object_bytes
+        source.read_object_bytes = lambda requested: original(requested)[:-1] + b"X"
         with self.assertRaises(TRANSFER.TransferError):
             self.sync(source, attempts=1)
         durable = source.db.execute("SELECT count(*) FROM transfer_generation WHERE durable_at IS NOT NULL").fetchone()[0]
         self.assertEqual(durable, 0)
 
+    def test_a_corrupt_central_object_is_repaired_from_the_sender_before_acknowledging(self):
+        source = self.capture()
+        self.sync(source)
+        central, digest = self.corrupt_central_object()
+        with source.db:
+            source.db.execute("DELETE FROM transfer_generation")
+        self.assertEqual(len(self.sync(source)["delivered"]), 1)
+        self.assertEqual(central.read_object_bytes(digest), source.read_object_bytes(digest))
+
     def test_conflicting_sizes_for_one_digest_are_refused(self):
         def exchange(instream, outstream):
-            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "peer"})
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "peer"})
             TRANSFER.read_message(instream)
-            TRANSFER.write_message(outstream, {"type": "generation", "origin_host": "peer", "harness": "codex",
-                                               "native_id": "x", "source_path": "/x", "source_digest": "d",
-                                               "source_size": 2, "captured_at": 1.0,
-                                               "chunks": [{"digest": "aa", "size": 1, "offset": 0},
-                                                          {"digest": "aa", "size": 2, "offset": 1}],
-                                               "artifacts": []})
+            manifest = manifest_for([("a" * 64, 1)])
+            manifest["chunks"].append({"digest": "a" * 64, "size": 2, "offset": 1})
+            manifest["source_size"] = 3
+            TRANSFER.write_message(outstream, manifest)
             return TRANSFER.read_message(instream)
 
         reply = self.serve_in_thread(["peer"], exchange)
         self.assertEqual(reply["type"], "error")
         self.assertIn("conflicting", reply["message"])
+
+    def cmd_source(self):
+        directory = self.root / "cmd" / "slug"
+        directory.mkdir(parents=True)
+        (directory / "s-1.jsonl").write_text(cmd_header("s-1", self.project) + cmd_message("m-a", None, "alpha")
+                                             + cmd_message("m-b", "m-a", "bravo"))
+        meta = directory / "s-1.meta.json"
+        meta.write_text(json.dumps({"branchPoint": "m-b"}))
+        return directory, meta
+
+    def test_a_changed_companion_reaches_central_as_a_new_generation(self):
+        directory, meta = self.cmd_source()
+        source = Store(self.source_state)
+        roots = {"cmd": [self.root / "cmd"]}
+        source.refresh(roots, project=None)
+        origin = ARCHIVE.origin_for(source.db)
+        endpoint = self.sync(source)["endpoint"]
+        first = source.db.execute("SELECT id FROM archive_generation").fetchone()[0]
+        meta.write_text(json.dumps({"branchPoint": "m-a"}))
+        stats = source.refresh(roots, project=None)
+        self.assertEqual((stats["archived"], stats["archive_objects"], stats["archive_bytes"]), (1, 0, 0))
+        self.assertEqual(source.db.execute("SELECT branch_tip FROM sessions").fetchone()[0], "m-a")
+        generations = [row["id"] for row in source.db.execute("SELECT id FROM archive_generation ORDER BY id")]
+        self.assertEqual(len(generations), 2)
+        old_artifacts = {row["name"]: row["digest"] for row in source.db.execute(
+            "SELECT name, digest FROM archive_artifact WHERE generation = ?", (first,))}
+        self.assertIn("s-1.meta.json", old_artifacts)
+        self.assertEqual(ARCHIVE.sha256(json.dumps({"branchPoint": "m-b"}).encode()), old_artifacts["s-1.meta.json"])
+        self.assertEqual(source.pending_transfers(endpoint), 1)
+        self.assertEqual(len(self.sync(source)["delivered"]), 1)
+        with Store(self.central_state) as central:
+            self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 2)
+            latest = central.db.execute("SELECT max(id) FROM archive_generation").fetchone()[0]
+            stored = {row["name"]: row["digest"] for row in central.db.execute(
+                "SELECT name, digest FROM archive_artifact WHERE generation = ?", (latest,))}
+            self.assertEqual(central.read_object_bytes(stored["s-1.meta.json"]), json.dumps({"branchPoint": "m-a"}).encode())
+            session = "cmd:s-1@" + origin
+            self.assertEqual(central.db.execute("SELECT branch_tip FROM sessions WHERE id = ?", (session,)).fetchone()[0], "m-a")
+
+    def send_raw(self, manifest):
+        def exchange(instream, outstream):
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "peer"})
+            TRANSFER.read_message(instream)
+            TRANSFER.write_message(outstream, manifest)
+            return TRANSFER.read_message(instream)
+
+        reply = self.serve_in_thread(["peer"], exchange)
+        with Store(self.central_state) as central:
+            self.assertEqual(central.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 0)
+            self.assertEqual(central.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+        return reply
+
+    def test_a_nonempty_source_with_no_chunks_is_refused_without_a_session(self):
+        manifest = manifest_for([("c" * 64, 5)])
+        manifest["chunks"] = []
+        reply = self.send_raw(manifest)
+        self.assertEqual(reply["type"], "error")
+        self.assertIn("total 0 bytes", reply["message"])
+
+    def test_a_gap_an_overlap_and_a_wrong_digest_are_each_refused(self):
+        gap = manifest_for([("c" * 64, 5), ("d" * 64, 5)])
+        gap["chunks"][1]["offset"] = 6
+        overlap = manifest_for([("c" * 64, 5), ("d" * 64, 5)])
+        overlap["chunks"][1]["offset"] = 4
+        wrong = manifest_for([("c" * 64, 5)])
+        wrong["source_digest"] = "e" * 64
+        tampered = manifest_for([("c" * 64, 5)])
+        tampered["session_metadata"] = {"cwd": "/x", "parent": None, "source": None, "thread_source": None,
+                                        "ancestry": "known", "branch_tip": "m", "workspaces": None, "step_count": None}
+        escaping = manifest_for([("c" * 64, 5)], artifacts=[("../escape", "d" * 64, 1)])
+        for manifest, phrase in ((gap, "contiguous"), (overlap, "contiguous"), (wrong, "source digest"),
+                                 (tampered, "manifest digest"), (escaping, "artifact name")):
+            with self.subTest(phrase=phrase):
+                reply = self.send_raw(manifest)
+                self.assertEqual(reply["type"], "error")
+                self.assertIn(phrase, reply["message"])
 
     def test_central_memory_records_carry_origin_evidence_and_no_authority(self):
         from agent_memory.learning import Learner
@@ -289,15 +394,11 @@ class TransferTests(unittest.TestCase):
         payload = TRANSFER.compress(b"x" * 100000)
 
         def exchange(instream, outstream):
-            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "peer",
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "peer",
                                                "compression": ["zlib"]})
             ready = TRANSFER.read_message(instream)
             self.assertEqual(ready["compression"], "zlib")
-            TRANSFER.write_message(outstream, {"type": "generation", "origin_host": "peer", "harness": "codex",
-                                               "native_id": "bomb", "source_path": "/x", "source_digest": "d",
-                                               "source_size": 4, "captured_at": 1.0,
-                                               "chunks": [{"digest": "a" * 64, "size": 4, "offset": 0}],
-                                               "artifacts": []})
+            TRANSFER.write_message(outstream, manifest_for([("a" * 64, 4)], native="bomb"))
             need = TRANSFER.read_message(instream)
             self.assertEqual(need["digests"], ["a" * 64])
             TRANSFER.write_message(outstream, {"type": "object", "digest": "a" * 64, "encoding": "zlib"})
@@ -310,14 +411,10 @@ class TransferTests(unittest.TestCase):
 
     def test_a_corrupt_compressed_payload_is_refused(self):
         def exchange(instream, outstream):
-            TRANSFER.write_message(outstream, {"type": "hello", "protocol": 1, "origin": "peer",
+            TRANSFER.write_message(outstream, {"type": "hello", "protocol": TRANSFER.PROTOCOL, "origin": "peer",
                                                "compression": ["zlib"]})
             TRANSFER.read_message(instream)
-            TRANSFER.write_message(outstream, {"type": "generation", "origin_host": "peer", "harness": "codex",
-                                               "native_id": "corrupt", "source_path": "/x", "source_digest": "d",
-                                               "source_size": 4, "captured_at": 1.0,
-                                               "chunks": [{"digest": "b" * 64, "size": 4, "offset": 0}],
-                                               "artifacts": []})
+            TRANSFER.write_message(outstream, manifest_for([("b" * 64, 4)], native="corrupt"))
             TRANSFER.read_message(instream)
             TRANSFER.write_message(outstream, {"type": "object", "digest": "b" * 64, "encoding": "zlib"})
             TRANSFER.write_blob(outstream, b"not zlib at all")
@@ -326,6 +423,123 @@ class TransferTests(unittest.TestCase):
         reply = self.serve_in_thread(["peer"], exchange)
         self.assertEqual(reply["type"], "error")
         self.assertIn("decompress", reply["message"])
+
+
+def cmd_message(identifier, parent, text):
+    return json.dumps({"type": "message", "id": identifier, "parentId": parent, "timestamp": "2026-10-30T00:00:00Z",
+                       "message": {"role": "user", "content": [{"type": "text", "text": text}],
+                                   "meta": {"messageId": identifier}}}, separators=(",", ":")) + "\n"
+
+
+def cmd_header(identifier, cwd):
+    return json.dumps({"type": "session", "version": 3, "id": identifier, "timestamp": "2026-10-30T00:00:00Z",
+                       "cwd": str(cwd)}, separators=(",", ":")) + "\n"
+
+
+def agy_step(text):
+    return json.dumps({"type": "USER_INPUT", "created_at": "2026-10-30T00:00:00Z", "source": "USER_EXPLICIT",
+                       "status": "DONE", "step_index": 0, "content": text}, separators=(",", ":")) + "\n"
+
+
+class CentralParityTests(unittest.TestCase):
+    """A session indexed centrally from captured bytes must equal the locally indexed one."""
+
+    SESSION_COLUMNS = ("harness", "native_id", "cwd", "source", "thread_source", "ancestry", "branch_tip", "workspaces",
+                       "step_count", "coverage", "recognized_events", "unrecognized_events", "malformed_lines",
+                       "partial_bytes", "indexed_bytes")
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temp.name)
+        self.first = self.root / "first"
+        self.second = self.root / "second"
+        self.first.mkdir()
+        self.second.mkdir()
+        self.cmd_dir = self.root / "cmd" / "slug"
+        self.cmd_dir.mkdir(parents=True)
+        self.claude_dir = self.root / "claude" / "proj"
+        (self.claude_dir / "main" / "subagents").mkdir(parents=True)
+        self.agy_root = self.root / "agy"
+        logs = self.agy_root / "brain"
+        database = self.agy_root / "conversation_summaries.db"
+        with sqlite3.connect(self._prepare(database)) as db:
+            db.execute("CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY, workspace_uris TEXT, "
+                       "parent_conversation_id TEXT, nesting_depth INTEGER, step_count INTEGER)")
+            db.execute("INSERT INTO conversation_summaries VALUES ('conv-multi', ?, NULL, 0, 1)",
+                       (json.dumps(["file://%s" % self.first, "file://%s" % self.second]),))
+            db.execute("INSERT INTO conversation_summaries VALUES ('conv-child', ?, 'conv-multi', 1, 5)",
+                       (json.dumps(["file://%s" % self.first]),))
+        for conversation in ("conv-multi", "conv-child"):
+            directory = logs / conversation / ".system_generated" / "logs"
+            directory.mkdir(parents=True)
+            (directory / "transcript_full.jsonl").write_text(agy_step("agy " + conversation))
+            (directory / "transcript.jsonl").write_text(agy_step("agy " + conversation))
+        (self.cmd_dir / "s-1.jsonl").write_text(
+            cmd_header("s-1", self.first) + cmd_message("m-a", None, "alpha") + cmd_message("m-b", "m-a", "bravo")
+            + cmd_message("m-c", "m-b", "charlie") + "{not json}\n" + '{"type":"message","id":"partial"')
+        (self.cmd_dir / "s-1.meta.json").write_text(json.dumps({"branchPoint": "m-b"}))
+        (self.cmd_dir / "s-2.jsonl").write_text(cmd_header("s-2", self.second) + cmd_message("n-a", None, "delta"))
+        (self.cmd_dir / "s-2.meta.json").write_text(json.dumps({"parentSessionId": "s-1"}))
+        main = {"sessionId": "main", "cwd": str(self.first), "isSidechain": False}
+        (self.claude_dir / "main.jsonl").write_text(json.dumps({**main, "type": "user", "message": {"role": "user", "content": "claude parent"}}) + "\n")
+        (self.claude_dir / "main" / "subagents" / "agent-a1.jsonl").write_text(
+            json.dumps({**main, "isSidechain": True, "type": "user", "message": {"role": "user", "content": "claude child"}}) + "\n")
+        self.roots = {"cmd": [self.root / "cmd"], "claude": [self.root / "claude"], "agy": [self.agy_root]}
+
+    @staticmethod
+    def _prepare(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def normalized(self, db, origin_suffix=""):
+        sessions = {}
+        for row in db.execute("SELECT * FROM sessions ORDER BY id"):
+            key = (row["harness"], row["native_id"])
+            parent = row["parent"]
+            if parent and origin_suffix:
+                self.assertTrue(parent.endswith(origin_suffix), parent)
+                parent = parent[:-len(origin_suffix)]
+            events = [tuple(event) for event in db.execute(
+                "SELECT position, kind, text, digest, outcome, entry, parent_entry, synthetic_id FROM events "
+                "WHERE session = ? ORDER BY position", (row["id"],))]
+            issues = [tuple(issue) for issue in db.execute(
+                "SELECT position, kind FROM index_issues WHERE session = ? ORDER BY position, kind", (row["id"],))]
+            sessions[key] = ({column: row[column] for column in self.SESSION_COLUMNS}, parent, events, issues)
+        return sessions
+
+    def test_central_sessions_equal_local_sessions_for_forks_rewinds_subagents_and_workspaces(self):
+        source = Store(self.root / "source")
+        source.refresh(self.roots, project=None)
+        origin = ARCHIVE.origin_for(source.db)
+        TRANSFER.local_sync(source, self.root / "central", "central", origin, "source")
+        local = self.normalized(source.db)
+        with Store(self.root / "central") as central:
+            remote = self.normalized(central.db, "@" + origin)
+        self.assertEqual(set(local), set(remote))
+        self.assertEqual(len(local), 6)
+        for key in local:
+            self.assertEqual(local[key], remote[key], key)
+        self.assertEqual(local[("cmd", "s-1")][0]["branch_tip"], "m-b")
+        self.assertEqual(local[("cmd", "s-2")][1], "cmd:s-1")
+        self.assertEqual(local[("agy", "conv-child")][1], "agy:conv-multi")
+        self.assertEqual(local[("agy", "conv-child")][0]["coverage"], "degraded")
+        self.assertEqual(json.loads(local[("agy", "conv-multi")][0]["workspaces"]), [str(self.first), str(self.second)])
+        self.assertEqual(local[("claude", "agent-a1")][0]["thread_source"], "subagent")
+
+    def test_central_branch_selection_follows_the_captured_branch_tip(self):
+        source = Store(self.root / "source")
+        source.refresh(self.roots, project=None)
+        origin = ARCHIVE.origin_for(source.db)
+        TRANSFER.local_sync(source, self.root / "central", "central", origin, "source")
+        with Store(self.root / "central") as central:
+            tip = central.db.execute("SELECT branch_tip FROM sessions WHERE id = ?", ("cmd:s-1@" + origin,)).fetchone()[0]
+            events = [dict(row) for row in central.db.execute(
+                "SELECT position, entry, parent_entry FROM events WHERE session = ?", ("cmd:s-1@" + origin,))]
+        active = STORE_MODULE.active_branch(events, tip)
+        self.assertEqual([event["entry"] for event in active if event["entry"]], ["m-a", "m-b"])
 
 
 if __name__ == "__main__":

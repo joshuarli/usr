@@ -21,10 +21,12 @@ from agent_memory.transcripts import opencode_database, opencode_events, opencod
 from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 ARCHIVE_DIRNAME = "archive"
 ARCHIVE_OBJECTS = "objects"
 ARCHIVE_COMPANIONS = {"grok": ("summary.json", "events.jsonl")}
+SIDECAR_HEADER_HARNESSES = ("cmd", "grok")
+HEADER_FIELDS = ("parent", "source", "thread_source", "ancestry", "branch_tip", "workspaces", "step_count")
 _REDACTIONS = (
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"),
     re.compile(r"(?i)\b(?:sk-[A-Za-z0-9_-]{12,}|sk_live_[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,}|glpat-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9-]{12,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b"),
@@ -278,6 +280,19 @@ def _metadata(path, harness, project_cache, stats=None):
     }, None
 
 
+def _session_metadata(meta):
+    return {
+        "cwd": meta["cwd"] or "", "parent": meta["parent"], "source": meta["source"],
+        "thread_source": meta["thread_source"], "ancestry": meta["ancestry"],
+        "branch_tip": meta.get("branch_tip"), "workspaces": meta.get("workspaces"), "step_count": meta.get("step_count"),
+    }
+
+
+class _Tally:
+    def __init__(self):
+        self.added = self.malformed = self.recognized = self.unrecognized = 0
+
+
 def _is_learning_worker(meta):
     if not meta.get("source"):
         return False
@@ -408,7 +423,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, 4, 5, 6, 7, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -444,6 +459,11 @@ class Store:
                 if not self._schema_ready(7):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v7()
+                version = 8
+            if version == 8:
+                if not self._schema_ready(8):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v8()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -475,6 +495,7 @@ class Store:
             triggers = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
             session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}
             event_columns = {row[1] for row in self.db.execute("PRAGMA table_info(events)")}
+            generation_columns = {row[1] for row in self.db.execute("PRAGMA table_info(archive_generation)")}
         except sqlite3.DatabaseError:
             return False
         return (
@@ -492,6 +513,7 @@ class Store:
                  and "synthetic_id" in event_columns
                  and {"archive_generation", "archive_object", "tombstone", "collector_identity", "project_map"} <= existing))
             and (expected_version < 8 or {"capture_failure", "transfer_tombstone"} <= existing)
+            and (expected_version < 9 or {"manifest_digest", "session_metadata"} <= generation_columns)
         )
 
     def _migrate_v1(self):
@@ -635,6 +657,47 @@ class Store:
             self.db.rollback()
             raise
 
+    def _migrate_v8(self):
+        from agent_memory import archive as archive_module
+
+        self.db.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("ALTER TABLE archive_generation ADD COLUMN manifest_digest TEXT")
+            self.db.execute("ALTER TABLE archive_generation ADD COLUMN session_metadata TEXT")
+            artifacts = {}
+            for row in self.db.execute("SELECT generation, name, digest FROM archive_artifact"):
+                artifacts.setdefault(row["generation"], []).append((row["name"], row["digest"]))
+            for row in self.db.execute("SELECT id, source_digest, source_size FROM archive_generation").fetchall():
+                identity = archive_module.manifest_digest(
+                    row["source_digest"], row["source_size"], artifacts.get(row["id"], []), None)
+                self.db.execute("UPDATE archive_generation SET manifest_digest = ? WHERE id = ?", (identity, row["id"]))
+            self.db.execute(
+                "CREATE TABLE archive_generation_next ("
+                "id INTEGER PRIMARY KEY, origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
+                "source_path TEXT NOT NULL, source_digest TEXT NOT NULL, source_size INTEGER NOT NULL, "
+                "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
+                "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, "
+                "source_mtime_ns INTEGER, source_ctime_ns INTEGER, workspace_path TEXT, "
+                "manifest_digest TEXT NOT NULL, session_metadata TEXT)")
+            self.db.execute(
+                "INSERT INTO archive_generation_next SELECT id, origin_host, harness, native_id, source_path, source_digest, "
+                "source_size, captured_at, protocol, stored_at, indexed_at, tombstoned, source_dev, source_ino, source_mtime_ns, "
+                "source_ctime_ns, workspace_path, manifest_digest, session_metadata FROM archive_generation")
+            self.db.execute("DROP TABLE archive_generation")
+            self.db.execute("ALTER TABLE archive_generation_next RENAME TO archive_generation")
+            self.db.execute(
+                "CREATE INDEX archive_generation_session ON archive_generation(origin_host, harness, native_id, id)")
+            if self.db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise StoreError("archive generation migration left dangling references")
+            self.db.execute("PRAGMA user_version = 9")
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.rollback()
+            raise
+        finally:
+            self.db.execute("PRAGMA foreign_keys = ON")
+
     def _create_schema(self):
         self.db.executescript(
             "BEGIN IMMEDIATE;"
@@ -695,7 +758,8 @@ class Store:
             "captured_at REAL NOT NULL, protocol INTEGER NOT NULL DEFAULT 1, stored_at REAL, indexed_at REAL, "
             "tombstoned INTEGER NOT NULL DEFAULT 0, source_dev INTEGER, source_ino INTEGER, "
             "source_mtime_ns INTEGER, source_ctime_ns INTEGER, workspace_path TEXT, "
-            "UNIQUE(origin_host, harness, native_id, source_digest));"
+            "manifest_digest TEXT NOT NULL, session_metadata TEXT);"
+            "CREATE INDEX IF NOT EXISTS archive_generation_session ON archive_generation(origin_host, harness, native_id, id);"
             "CREATE TABLE IF NOT EXISTS archive_generation_object ("
             "generation INTEGER NOT NULL REFERENCES archive_generation(id) ON DELETE CASCADE, "
             "ordinal INTEGER NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, offset INTEGER NOT NULL, "
@@ -1026,11 +1090,14 @@ class Store:
         companions = self._companions(meta["harness"], Path(path))
         artifacts, refused = archive_module.capture_artifacts(companions)
         stats["archive_errors"] += refused
+        if meta["harness"] in SIDECAR_HEADER_HARNESSES and self._sidecars_changed(meta, artifacts):
+            fresh, error = _metadata(Path(path), meta["harness"], {}, stats)
+            if fresh is not None:
+                meta.update({field: fresh[field] for field in HEADER_FIELDS})
         try:
             generation, created = archive_module.capture(
                 self.db, self.archive_dir, meta["harness"], meta["native_id"], path,
-                workspace=meta.get("cwd") or None,
-                artifacts=artifacts, allow_artifacts=bool(artifacts), stats=stats,
+                artifacts=artifacts, session_metadata=_session_metadata(meta), stats=stats,
             )
         except FileNotFoundError:
             return []
@@ -1052,6 +1119,14 @@ class Store:
             return []
         return [str(path)]
 
+    def _sidecars_changed(self, meta, artifacts):
+        previous = archive_module.last_generation(
+            self.db, archive_module.origin_for(self.db), meta["harness"], meta["native_id"])
+        if previous is None:
+            return bool(artifacts)
+        recorded = archive_module.artifact_digests(self.db, previous["id"])
+        return recorded != {str(name): archive_module.sha256(data) for name, data in artifacts}
+
     def _origin_for_session(self, harness, native_id):
         row = self.db.execute(
             "SELECT origin_host FROM sessions WHERE harness = ? AND native_id = ? ORDER BY updated DESC LIMIT 1",
@@ -1065,7 +1140,7 @@ class Store:
         try:
             generation, _created = archive_module.capture(
                 self.db, self.archive_dir, row["harness"], row["native_id"], legacy,
-                stats={}, allow_artifacts=False)
+                stats={})
         except (archive_module.ArchiveError, OSError):
             return False
         with self.db:
@@ -1142,21 +1217,7 @@ class Store:
                     target.execute("DELETE FROM session_message WHERE session_id = ?", (native,))
                     target.execute("DELETE FROM session_v2 WHERE id = ?", (native,))
             return
-        origin = self._origin_for_session(harness, native_id) or archive_module.origin_for(self.db)
-        generations = [int(row[0]) for row in self.db.execute(
-            "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ?",
-            (origin, harness, str(native_id)))]
-        if generations:
-            with self.db:
-                for generation in generations:
-                    self.db.execute("DELETE FROM archive_generation WHERE id = ?", (generation,))
-                orphans = [row[0] for row in self.db.execute(
-                    "SELECT digest FROM archive_object WHERE digest NOT IN (SELECT digest FROM archive_generation_object) "
-                    "AND digest NOT IN (SELECT digest FROM archive_artifact)")]
-                for digest in orphans:
-                    self.db.execute("DELETE FROM archive_object WHERE digest = ?", (digest,))
-            for digest in orphans:
-                archive_module.object_path(self.archive_dir, digest).unlink(missing_ok=True)
+        self._purge_generations(self._origin_for_session(harness, native_id) or archive_module.origin_for(self.db), harness, native_id)
         archive = self._archived_copy(harness, source_path)
         for name in (archive.name, *ARCHIVE_COMPANIONS.get(harness, ())):
             (archive.parent / name).unlink(missing_ok=True)
@@ -1214,6 +1275,8 @@ class Store:
         if meta["harness"] in DATABASE_HARNESSES:
             return self._refresh_database_session(meta, stats)
         existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
+        if existing is not None:
+            self._sync_header_fields(existing, meta)
         reset = existing is not None and (
             existing["source_path"] != meta["source_path"]
             or existing["file_dev"] != meta["file_dev"]
@@ -1252,26 +1315,12 @@ class Store:
             return False, 0, 0, existing["partial_bytes"]
         if existing is None:
             with self.db:
-                self.db.execute(
-                    "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
-                    "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, "
-                    "branch_tip, workspaces, step_count, archive_generation, origin_host) "
-                    "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ?, ?, ? "
-                    "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
-                    (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
-                     meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
-                     meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"], meta["ancestry"],
-                     meta.get("branch_tip"), meta.get("workspaces"), meta.get("step_count"),
-                     meta.get("archive_generation"), archive_module.origin_for(self.db), meta["id"]),
-                )
-                self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
+                self._insert_session_row(meta, archive_module.origin_for(self.db))
             existing = self.db.execute("SELECT * FROM sessions WHERE id = ?", (meta["id"],)).fetchone()
             if existing is None:
                 return False, 0, 0, 0
         offset = existing["indexed_bytes"]
-        added = 0
-        malformed = 0
-        recognized = unrecognized = 0
+        tally = _Tally()
         checkpoint_position = existing["checkpoint_position"]
         checkpoint_digest = existing["checkpoint_digest"]
         partial = 0
@@ -1290,41 +1339,10 @@ class Store:
                         if not raw.endswith(b"\n"):
                             partial = len(raw)
                             break
-                        digest = _sha256(raw)
-                        try:
-                            obj = _json_line(raw)
-                            records = normalize(obj, meta["harness"])
-                        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
-                            self.db.execute(
-                                "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
-                                (meta["id"], position),
-                            )
-                            malformed += 1
-                        else:
-                            for record in records:
-                                self.db.execute(
-                                    "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome, entry, parent_entry, synthetic_id) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                    (meta["id"], position, record["kind"], record["text"], record["timestamp"],
-                                     record["call_id"], record["raw_type"], digest, record["outcome"], record.get("entry"),
-                                     record.get("parent_entry"), 1 if record.get("synthetic_id") else 0),
-                                )
-                                if record.get("truncated"):
-                                    self.db.execute(
-                                        "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'truncated_content')",
-                                        (meta["id"], position),
-                                    )
-                                added += 1
-                                if record["kind"].startswith("unknown:"):
-                                    unrecognized += 1
-                                elif record["kind"] in SUBSTANTIVE_KINDS:
-                                    recognized += 1
+                        digest = self._ingest_line(meta["id"], meta["harness"], position, raw, tally)
                         offset = stream.tell()
                         checkpoint_position = position
                         checkpoint_digest = digest
-                    malformed_total = self.db.execute(
-                        "SELECT count(*) FROM index_issues WHERE session = ?", (meta["id"],)
-                    ).fetchone()[0]
                     final_stat = _fstat_source(stream, stats)
                     size = final_stat.st_size
                     mtime_ns = final_stat.st_mtime_ns
@@ -1332,20 +1350,10 @@ class Store:
                     updated = final_stat.st_mtime
                     totals = self.db.execute(
                         "SELECT recognized_events + ?, unrecognized_events + ? FROM sessions WHERE id = ?",
-                        (recognized, unrecognized, meta["id"]),
+                        (tally.recognized, tally.unrecognized, meta["id"]),
                     ).fetchone()
-                    if totals[0] == 0 and (totals[1] or malformed_total):
-                        coverage = "unsupported"
-                    elif malformed_total or partial or totals[1]:
-                        coverage = "degraded"
-                    else:
-                        coverage = "complete"
-                    if coverage == "complete" and meta.get("step_count") and totals[0] + totals[1] < meta["step_count"]:
-                        coverage = "degraded"
-                        self.db.execute(
-                            "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'truncated_session')",
-                            (meta["id"], 0),
-                        )
+                    coverage, malformed_total = self._assess_coverage(
+                        meta["id"], totals[0], totals[1], partial, meta.get("step_count"))
                     self.db.execute(
                         "UPDATE sessions SET updated = ?, file_size = ?, file_mtime_ns = ?, file_ctime_ns = ?, indexed_bytes = ?, "
                         "checkpoint_position = ?, checkpoint_digest = ?, malformed_lines = ?, partial_bytes = ?, coverage = ?, "
@@ -1355,7 +1363,15 @@ class Store:
                     )
         except OSError as exc:
             raise StoreError("cannot read transcript " + meta["source_path"] + ": " + str(exc)) from exc
-        return reset, added, malformed, partial
+        return reset, tally.added, tally.malformed, partial
+
+    def _sync_header_fields(self, existing, meta):
+        changed = {field: meta.get(field) for field in HEADER_FIELDS if meta.get(field) != existing[field]}
+        if changed:
+            with self.db:
+                self.db.execute(
+                    "UPDATE sessions SET " + ", ".join(field + " = ?" for field in changed) + " WHERE id = ?",
+                    (*changed.values(), meta["id"]))
 
     def _checkpoint_valid(self, meta, existing, stats):
         position = existing["checkpoint_position"]
@@ -1436,78 +1452,47 @@ class Store:
     def read_object_bytes(self, digest):
         return archive_module.read_object(self.archive_dir, digest)
 
-    def has_object(self, digest):
-        return archive_module.object_path(self.archive_dir, digest).is_file()
+    def object_intact(self, digest, size):
+        try:
+            return len(archive_module.read_object(self.archive_dir, digest)) == int(size)
+        except (archive_module.ArchiveError, OSError):
+            return False
 
     def store_object(self, data):
         digest = archive_module.sha256(data)
-        path = archive_module.object_path(self.archive_dir, digest)
-        if not path.is_file():
-            archive_module._write_object(self.archive_dir, data)
+        archive_module._write_object(self.archive_dir, data)
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)",
                             (digest, len(data), time.time()))
         return digest
 
-    def find_generation(self, origin_host, harness, native_id, source_digest):
-        row = self.db.execute(
-            "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ? AND source_digest = ?",
-            (origin_host, harness, native_id, source_digest)).fetchone()
-        return int(row["id"]) if row is not None else None
+    def latest_generation_id(self, origin_host, harness, native_id, manifest_digest):
+        row = archive_module.last_generation(self.db, origin_host, harness, native_id)
+        if row is not None and row["manifest_digest"] == manifest_digest:
+            return int(row["id"])
+        return None
 
     def generation_complete(self, generation):
-        chunks = self.db.execute(
-            "SELECT digest, size FROM archive_generation_object WHERE generation = ? ORDER BY ordinal", (int(generation),))
-        for row in chunks:
-            if not self.has_object(row["digest"]):
-                return False
-            try:
-                data = archive_module.read_object(self.archive_dir, row["digest"])
-            except (archive_module.ArchiveError, OSError):
-                return False
-            if len(data) != int(row["size"]):
-                return False
-        for row in self.db.execute("SELECT digest, size FROM archive_artifact WHERE generation = ?", (int(generation),)):
-            if not self.has_object(row["digest"]):
-                return False
-            try:
-                data = archive_module.read_object(self.archive_dir, row["digest"])
-            except (archive_module.ArchiveError, OSError):
-                return False
-            if len(data) != int(row["size"]):
-                return False
-        return True
+        try:
+            clean = archive_module.validate_manifest(archive_module.generation_manifest(self.db, generation))
+        except archive_module.ArchiveError:
+            return False
+        return all(self.object_intact(digest, size) for digest, size in clean.sizes.items())
 
     def commit_generation(self, manifest, received):
-        origin = str(manifest["origin_host"])
-        harness = str(manifest["harness"])
-        native = str(manifest["native_id"])
-        digest = str(manifest["source_digest"])
-        existing = self.find_generation(origin, harness, native, digest)
-        for data in received.values():
-            self.store_object(data)
-        now = time.time()
-        if existing is not None:
-            generation = existing
-            with self.db:
-                self.db.execute("UPDATE archive_generation SET stored_at = ? WHERE id = ?", (now, generation))
-        else:
-            with self.db:
-                cursor = self.db.execute(
-                    "INSERT INTO archive_generation (origin_host, harness, native_id, source_path, source_digest, source_size, "
-                    "captured_at, protocol, stored_at, workspace_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (origin, harness, native, str(manifest.get("source_path") or ""), digest, int(manifest.get("source_size") or 0),
-                     float(manifest.get("captured_at") or now), int(manifest.get("protocol") or 1), now,
-                     manifest.get("workspace_path")))
-                generation = int(cursor.lastrowid or 0)
-                for index, chunk in enumerate(manifest.get("chunks") or []):
-                    self.db.execute(
-                        "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) VALUES (?, ?, ?, ?, ?)",
-                        (generation, index, str(chunk["digest"]), int(chunk["size"]), int(chunk["offset"])))
-                for artifact in manifest.get("artifacts") or []:
-                    self.db.execute(
-                        "INSERT OR REPLACE INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
-                        (generation, str(artifact["name"]), str(artifact["digest"]), int(artifact["size"])))
+        clean = archive_module.validate_manifest(manifest)
+        with archive_module.object_lock(self.archive_dir):
+            for data in received.values():
+                self.store_object(data)
+            for digest, size in clean.sizes.items():
+                if not self.object_intact(digest, size):
+                    raise StoreError("generation object is missing or corrupt: " + digest)
+            generation, _created = archive_module.publish_generation(
+                self.db, origin_host=clean.origin_host, harness=clean.harness, native_id=clean.native_id,
+                source_path=clean.source_path, source_digest=clean.source_digest, source_size=clean.source_size,
+                identity=clean.manifest_digest, metadata=clean.session_metadata,
+                workspace=(clean.session_metadata or {}).get("cwd") or None, captured=clean.captured_at,
+                chunks=list(clean.chunks), artifacts=list(clean.artifacts), stat_fields=(None, None, None, None))
         try:
             self.index_generation(generation)
         except BaseException:
@@ -1515,6 +1500,67 @@ class Store:
                 self.db.execute("UPDATE archive_generation SET indexed_at = NULL WHERE id = ?", (generation,))
             raise
         return generation
+
+    def central_session_id(self, origin_host, harness, native_id):
+        suffix = "" if origin_host == archive_module.origin_for(self.db) else "@" + origin_host
+        return qualified_id(cast(Harness, harness), native_id) + suffix
+
+    def _insert_session_row(self, meta, origin_host):
+        self.db.execute(
+            "INSERT OR IGNORE INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
+            "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, "
+            "branch_tip, workspaces, step_count, archive_generation, origin_host) "
+            "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'degraded', ?, ?, ?, ?, ?, ?, ? "
+            "WHERE NOT EXISTS (SELECT 1 FROM forgotten_sessions WHERE id = ?)",
+            (meta["id"], meta["project"], meta["cwd"], meta["parent"], meta["source"], meta["thread_source"],
+             meta["harness"], meta["source_path"], meta["updated"], meta["file_size"], meta["file_mtime_ns"],
+             meta["file_ctime_ns"], meta["file_dev"], meta["file_ino"], meta["header_digest"], meta["native_id"],
+             meta["ancestry"], meta.get("branch_tip"), meta.get("workspaces"), meta.get("step_count"),
+             meta.get("archive_generation"), origin_host, meta["id"]),
+        )
+        self.db.execute("DELETE FROM unindexed_sources WHERE source_path = ?", (meta["source_path"],))
+
+    def _ingest_line(self, session_id, harness, position, raw, tally):
+        digest = _sha256(raw)
+        try:
+            records = normalize(_json_line(raw), cast(Harness, harness))
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+            self.db.execute(
+                "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
+                (session_id, position))
+            tally.malformed += 1
+            return digest
+        for record in records:
+            self.db.execute(
+                "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome, entry, parent_entry, synthetic_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_id, position, record["kind"], record["text"], record["timestamp"], record["call_id"],
+                 record["raw_type"], digest, record["outcome"], record.get("entry"), record.get("parent_entry"),
+                 1 if record.get("synthetic_id") else 0))
+            if record.get("truncated"):
+                self.db.execute(
+                    "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'truncated_content')",
+                    (session_id, position))
+            tally.added += 1
+            if record["kind"].startswith("unknown:"):
+                tally.unrecognized += 1
+            elif record["kind"] in SUBSTANTIVE_KINDS:
+                tally.recognized += 1
+        return digest
+
+    def _assess_coverage(self, session_id, recognized, unrecognized, partial, step_count):
+        issues = self.db.execute("SELECT count(*) FROM index_issues WHERE session = ?", (session_id,)).fetchone()[0]
+        if recognized == 0 and (unrecognized or issues):
+            coverage = "unsupported"
+        elif issues or partial or unrecognized:
+            coverage = "degraded"
+        else:
+            coverage = "complete"
+        if coverage == "complete" and step_count and recognized + unrecognized < step_count:
+            coverage = "degraded"
+            self.db.execute("INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'truncated_session')",
+                            (session_id, 0))
+        return coverage, issues
 
     def index_generation(self, generation):
         row = self.db.execute("SELECT * FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
@@ -1527,58 +1573,42 @@ class Store:
             with self.db:
                 self.db.execute("UPDATE archive_generation SET tombstoned = 1 WHERE id = ?", (int(generation),))
             return
-        local_origin = archive_module.origin_for(self.db)
-        suffix = "" if origin == local_origin else "@" + origin
-        session_id = qualified_id(cast(Harness, harness), native) + suffix
         if harness in DATABASE_HARNESSES:
             return
-        workspace = row["workspace_path"] or ""
-        project = self._mapped_project(origin, workspace)
-        now = time.time()
-        recognized = unrecognized = malformed = 0
+        session_id = self.central_session_id(origin, harness, native)
         first_line = self._first_line(generation)
+        metadata = json.loads(row["session_metadata"]) if row["session_metadata"] else self._unrecorded_session_metadata(row, first_line)
+        suffix = session_id[len(qualified_id(cast(Harness, harness), native)):]
+        parent = metadata["parent"]
+        tally = _Tally()
         line_state = {"partial": 0}
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-            self.db.execute(
-                "INSERT INTO sessions (id, project, cwd, parent, source, thread_source, harness, source_path, updated, "
-                "file_size, file_mtime_ns, file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, "
-                "native_id, ancestry, archive_generation, origin_host, workspaces) "
-                "VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?, 'degraded', ?, 'known', ?, ?, ?)",
-                (session_id, project, workspace, harness, "generation:%d" % generation, now, int(row["source_size"]),
-                 int(row["source_size"]), _sha256(first_line), native, int(generation),
-                 origin, self._workspace_json(first_line, harness)))
-            offset = 0
+            self._insert_session_row({
+                "id": session_id, "project": self._mapped_project(origin, metadata["cwd"]), "cwd": metadata["cwd"],
+                "parent": parent + suffix if parent else None, "source": metadata["source"],
+                "thread_source": metadata["thread_source"], "harness": harness, "source_path": "generation:%d" % generation,
+                "updated": float(row["captured_at"]), "file_size": int(row["source_size"]), "file_mtime_ns": 0,
+                "file_ctime_ns": 0, "file_dev": 0, "file_ino": 0, "header_digest": _sha256(first_line),
+                "native_id": native, "ancestry": metadata["ancestry"], "branch_tip": metadata["branch_tip"],
+                "workspaces": metadata["workspaces"], "step_count": metadata["step_count"],
+                "archive_generation": int(generation),
+            }, origin)
+            if self.db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone() is None:
+                return
+            indexed = 0
             for line_offset, line_bytes in archive_module.read_generation_lines(
                     self.db, self.archive_dir, generation, line_state):
-                offset = line_offset
-                digest = _sha256(line_bytes)
-                try:
-                    records = normalize(_json_line(line_bytes.rstrip(b"\n")), cast(Harness, harness))
-                except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
-                    self.db.execute("INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
-                                    (session_id, offset))
-                    malformed += 1
-                else:
-                    for record in records:
-                        self.db.execute(
-                            "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, "
-                            "outcome, entry, parent_entry, synthetic_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            (session_id, offset, record["kind"], record["text"], record["timestamp"], record["call_id"],
-                             record["raw_type"], digest, record["outcome"], record.get("entry"), record.get("parent_entry"),
-                             1 if record.get("synthetic_id") else 0))
-                        if record["kind"].startswith("unknown:"):
-                            unrecognized += 1
-                        elif record["kind"] in SUBSTANTIVE_KINDS:
-                            recognized += 1
-                offset += len(line_bytes)
+                self._ingest_line(session_id, harness, line_offset, line_bytes, tally)
+                indexed = line_offset + len(line_bytes)
             partial = line_state["partial"]
-            coverage = "unsupported" if recognized == 0 and (unrecognized or malformed) else "degraded" if unrecognized or malformed else "complete"
+            coverage, issues = self._assess_coverage(
+                session_id, tally.recognized, tally.unrecognized, partial, metadata["step_count"])
             self.db.execute(
                 "UPDATE sessions SET coverage = ?, indexed_bytes = ?, partial_bytes = ?, malformed_lines = ?, "
                 "recognized_events = ?, unrecognized_events = ? WHERE id = ?",
-                (coverage, offset, partial, malformed, recognized, unrecognized, session_id))
-            self.db.execute("UPDATE archive_generation SET indexed_at = ? WHERE id = ?", (now, int(generation)))
+                (coverage, indexed, partial, issues, tally.recognized, tally.unrecognized, session_id))
+            self.db.execute("UPDATE archive_generation SET indexed_at = ? WHERE id = ?", (time.time(), int(generation)))
 
     def _first_line(self, generation):
         state = {"partial": 0}
@@ -1586,13 +1616,17 @@ class Store:
             return line
         return b""
 
-    def _workspace_json(self, first_line, harness):
-        try:
-            first = _json_line(first_line.rstrip(b"\n")) if first_line else {}
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-            return None
-        cwd = first.get("cwd") if harness == "cmd" and isinstance(first, dict) else None
-        return json.dumps([cwd], separators=(",", ":")) if isinstance(cwd, str) and cwd else None
+    def _unrecorded_session_metadata(self, row, first_line):
+        """Metadata for a generation captured before native session metadata was recorded."""
+        workspaces = None
+        if row["harness"] == "cmd":
+            try:
+                cwd = _json_line(first_line.rstrip(b"\n")).get("cwd") if first_line else None
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError, AttributeError):
+                cwd = None
+            workspaces = json.dumps([cwd], separators=(",", ":")) if isinstance(cwd, str) and cwd else None
+        return {"cwd": row["workspace_path"] or "", "parent": None, "source": None, "thread_source": None,
+                "ancestry": "known", "branch_tip": None, "workspaces": workspaces, "step_count": None}
 
     def _mapped_project(self, origin_host, workspace):
         if not workspace:
@@ -1604,27 +1638,45 @@ class Store:
     def reindex_generations(self):
         """Rebuild derived transcript tables from captured bytes alone."""
         generations = [int(row[0]) for row in self.db.execute(
-            "SELECT id FROM archive_generation WHERE tombstoned = 0 ORDER BY id")]
+            "SELECT max(id) FROM archive_generation WHERE tombstoned = 0 GROUP BY origin_host, harness, native_id ORDER BY max(id)")]
         with self.db:
-            for generation in generations:
-                self.db.execute("DELETE FROM sessions WHERE archive_generation = ?", (generation,))
+            self.db.execute("DELETE FROM sessions WHERE archive_generation IS NOT NULL")
         for generation in generations:
             self.index_generation(generation)
         return len(generations)
 
+    def _purge_generations(self, origin_host, harness, native_id):
+        """Delete every generation of one session and the objects only those generations held."""
+        generations = [int(row[0]) for row in self.db.execute(
+            "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ?",
+            (origin_host, harness, str(native_id)))]
+        if not generations:
+            return
+        with self.db:
+            for generation in generations:
+                self.db.execute("DELETE FROM archive_generation WHERE id = ?", (generation,))
+            orphans = [row[0] for row in self.db.execute(
+                "SELECT digest FROM archive_object WHERE digest NOT IN (SELECT digest FROM archive_generation_object) "
+                "AND digest NOT IN (SELECT digest FROM archive_artifact)")]
+            for digest in orphans:
+                self.db.execute("DELETE FROM archive_object WHERE digest = ?", (digest,))
+        with archive_module.object_lock(self.archive_dir, exclusive=True):
+            for digest in orphans:
+                if self.db.execute("SELECT 1 FROM archive_object WHERE digest = ?", (digest,)).fetchone() is None:
+                    archive_module.object_path(self.archive_dir, digest).unlink(missing_ok=True)
+
     def apply_tombstone(self, origin_host, harness, native_id, scope, forgotten_at):
+        """Record a forget decision and physically remove the session's captured evidence."""
+        session_id = self.central_session_id(origin_host, harness, native_id)
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO tombstone (origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, ?, ?)",
                 (origin_host, harness, native_id, scope, forgotten_at))
-            self.db.execute("UPDATE archive_generation SET tombstoned = 1 WHERE origin_host = ? AND harness = ? AND native_id = ?",
-                            (origin_host, harness, native_id))
-            for row in self.db.execute(
-                    "SELECT id FROM sessions WHERE harness = ? AND native_id = ? AND origin_host = ?",
-                    (harness, native_id, origin_host)).fetchall():
-                self.db.execute("DELETE FROM sessions WHERE id = ?", (row["id"],))
+            self.db.execute("DELETE FROM sessions WHERE harness = ? AND native_id = ? AND origin_host = ?",
+                            (harness, native_id, origin_host))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)",
-                            (qualified_id(cast(Harness, harness), native_id), float(forgotten_at)))
+                            (session_id, float(forgotten_at)))
+        self._purge_generations(origin_host, harness, native_id)
 
     def is_tombstoned(self, origin_host, harness, native_id):
         return self.db.execute(

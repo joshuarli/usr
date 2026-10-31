@@ -722,7 +722,7 @@ class SecondReviewRegressionTests(RecallCase):
         store.close()
         store = agent_session_store.Store(state)
         self.addCleanup(store.close)
-        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 8)
+        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 9)
         self.assertEqual(store.db.execute("SELECT count(*) FROM forgotten_sessions").fetchone()[0], 0)
 
     def test_forgetting_scrubs_withdrawn_memories_feedback_and_reviewer_context(self):

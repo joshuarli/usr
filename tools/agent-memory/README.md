@@ -115,11 +115,12 @@ Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFI
 
 ## Retention
 
-Every refresh captures each transcript into `~/.agent-sessions/archive`, a `0700` tree of immutable objects named by their SHA-256 digest plus one versioned generation per capture. A generation records the chunk order, offsets, source size, and the source signature that produced it. Search, `show`, `agent-learn recall`, and evidence verification keep working after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`), and after the whole source machine is gone once the generation is acknowledged centrally.
+Every refresh captures each transcript into `~/.agent-sessions/archive`, a `0700` tree of immutable objects named by their SHA-256 digest plus one versioned generation per capture. A generation records the chunk order, offsets, source size, the source signature that produced it, its companion artifacts, and the native session metadata (parent, source, branch tip, workspaces, step count) the harness reported at capture. A generation is immutable: a change to any of those creates a new generation and leaves the earlier one untouched. Search, `show`, `agent-learn recall`, and evidence verification keep working after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`), and after the whole source machine is gone once the generation is acknowledged centrally.
 
 - Capture happens during a refresh, which any `agent-sessions` command, `agent-sessions sync`, or scheduled `agent-learn run` performs for every transcript root regardless of the project filter. A file a harness deletes before any refresh saw it is not recoverable.
 - An unchanged source reads no content bytes and adds no generation. A changed source is read once end to end, and only chunks whose digest is new are written, so one appended line to a 4 MB log writes 160 bytes instead of re-copying it. The read is one sequential pass; the point of the chunk digests is that no prefix is ever trusted without hashing it. A rewrite, truncation, or replacement adds a new generation and keeps the earlier one, and a generation always equals the bytes that were read, never a splice of an older prefix.
 - Capture is refused for a symlink, a non-regular file, or a source that changes while it is being read. Publication writes an object under a unique staging name, fsyncs it and its directory, renames it, then commits the generation in one transaction; an interruption leaves either the previous generation or the complete new one, never a half state.
+- A changed companion or changed native metadata with an unchanged transcript adds a generation that reuses the transcript's chunks and reads no content bytes. The transfer protocol (version 2) carries the generation's manifest digest, and the receiver recomputes it, so a changed sidecar is always delivered and a central branch tip always equals the collector's.
 - Command Code companions (`<id>.meta.json`, `<id>.checkpoints.jsonl`, `<id>.prompts.jsonl`, `<id>.share.json`) and Grok's `summary.json` and `events.jsonl` are captured as generation artifacts. Antigravity's `tasks/`, `steps/`, `messages/`, and `scratch/` and Command Code's `file-history/` stay outside the default boundary; `--artifacts` on the capture path opts in under an 8 MiB per-file cap.
 - The state directory may be on a different filesystem from the transcripts; capture copies bytes and never links them. Muse Code refuses to resume a log with multiple hard links, and capture never creates one.
 - OpenCode's database is not copied as a file. The archive keeps its own `opencode.db` with only the session and message rows, added or updated on refresh and never removed when OpenCode drops them. Credential tables are never copied.
@@ -144,7 +145,7 @@ One machine can be the central store for several collectors. It is an ordinary a
 # On the central host: nothing to start. The receiver is a fixed command.
 # On each collector, ~/.agent-sessions/config.json:
 # {"central": {"transport": "ssh", "host": "archive",
-#              "command": "agent-sessions-serve ingest --protocol 1 --origin 1f2e...",
+#              "command": "agent-sessions-serve ingest --protocol 2 --origin 1f2e...",
 #              "allowed_origins": ["1f2e..."]}}
 agent-sessions identity show                     # this collector's origin id
 agent-sessions sync --to central --dry-run       # pending generations
@@ -153,12 +154,12 @@ agent-sessions search 'codex-units' --central --kind user
 agent-sessions show 'cmd:ID@ORIGIN' --central
 ```
 
-The central host needs the receiver package (`tools/agent-memory/src/agent_memory`) and a Python with stdlib `sqlite3`. It does not need the launchers, `uv`, or the learning extras: `python3 -m agent_memory.serve ingest --protocol 1 --origin ID STATE_DIR` is the whole server. Tested against Ubuntu 24.04 with Python 3.12.3; the launchers on a collector still require 3.15.
+The central host needs the receiver package (`tools/agent-memory/src/agent_memory`) and a Python with stdlib `sqlite3`. It does not need the launchers, `uv`, or the learning extras: `python3 -m agent_memory.serve ingest --protocol 2 --origin ID STATE_DIR` is the whole server. Tested against Ubuntu 24.04 with Python 3.12.3; the launchers on a collector still require 3.15.
 
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
 - Object frames are zlib-compressed when both ends offer it, which every build of this tool does. The manifest already declares each object's size, so the receiver inflates to at most that size, refuses anything larger, and verifies the digest afterwards; an object that does not shrink travels uncompressed. Measured on 40 of the largest local objects, 2.6 MB became 1.1 MB.
-- Delivery is at-least-once. A generation is acknowledged as remotely durable only after the receiver has verified every object's digest and size, matched the manifest origin to the authenticated peer, and committed the manifest. A retry of an accepted generation is a no-op that re-acks.
+- Delivery is at-least-once. A generation is acknowledged as remotely durable only after the receiver has verified every object's digest and size, matched the manifest origin to the authenticated peer, checked that the chunk offsets tile the declared size, that the source digest and manifest digest follow from the content, and that the artifact and metadata fields are well formed, and committed the manifest. A manifest that fails any check is refused before a session record exists. A retry of an accepted generation is a no-op that re-acks.
 - Durability is recorded against the receiving store's own identity, which it reports when the connection opens, not against the local label. Pointing the same label at a second store therefore re-delivers what that store has not seen, instead of trusting an ack from a different machine.
 - Stored is not the same as searchable. The central side indexes each accepted generation itself, from the captured bytes, so search and `show` never need the source host or its filesystem.
 - The sender keeps its own copy until the ack. While offline it keeps a backlog with the attempt count and last error, and `doctor --json` reports it.

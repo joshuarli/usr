@@ -7,19 +7,29 @@ their offsets, and the source identity. Rewrites and truncations create a new
 generation instead of destroying the previous one, and an unchanged source
 reads no content bytes.
 """
+import contextlib
+import dataclasses
+import fcntl
 import hashlib
 import json
 import os
+import re
 import secrets
-import sqlite3
 import stat
 import time
 from pathlib import Path
+from typing import Any
+
+from agent_memory.types import HARNESSES
 
 CHUNK_BYTES = 65536
 PROTOCOL = 1
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACTS = 200
+MAX_OBJECT_BYTES = 64 * 1024 * 1024
+MAX_METADATA_BYTES = 64 * 1024
+DIGEST = re.compile(r"[0-9a-f]{64}")
+SESSION_METADATA_FIELDS = ("cwd", "parent", "source", "thread_source", "ancestry", "branch_tip", "workspaces", "step_count")
 
 
 class ArchiveError(RuntimeError):
@@ -63,11 +73,27 @@ def object_path(archive_dir, digest):
     return Path(archive_dir) / "objects" / digest[:2] / digest
 
 
+@contextlib.contextmanager
+def object_lock(archive_dir, exclusive=False):
+    """Serialize object removal against everything that reads or publishes objects.
+
+    Capture, receipt, and backup hold the shared lock while they depend on an
+    object file; only the unlink of an unreferenced object takes it exclusively.
+    """
+    path = Path(archive_dir) / ".objects.lock"
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def _write_object(archive_dir, data):
     digest = sha256(data)
     target = object_path(archive_dir, digest)
-    if target.is_file() and not target.is_symlink():
-        if target.stat().st_size == len(data):
+    if target.is_file() and not target.is_symlink() and target.stat().st_size == len(data):
+        if sha256(target.read_bytes()) == digest:
             return digest, len(data), False
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     staging = target.with_name(".tmp." + secrets.token_hex(8))
@@ -211,61 +237,261 @@ def _same_source(generation, info):
     )
 
 
-def _artifact_digests(db, generation):
+def normalize_session_metadata(value):
+    """Validate native session metadata and return it in its canonical form."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != set(SESSION_METADATA_FIELDS):
+        raise ArchiveError("session metadata must carry exactly: " + ", ".join(SESSION_METADATA_FIELDS))
+    for field in ("cwd",):
+        if not isinstance(value[field], str):
+            raise ArchiveError("session metadata field is not text: " + field)
+    for field in ("parent", "source", "thread_source", "branch_tip", "workspaces"):
+        if value[field] is not None and not isinstance(value[field], str):
+            raise ArchiveError("session metadata field is not text: " + field)
+    if value["ancestry"] not in ("known", "unknown"):
+        raise ArchiveError("session metadata ancestry must be known or unknown")
+    steps = value["step_count"]
+    if steps is not None and (isinstance(steps, bool) or not isinstance(steps, int) or steps < 0):
+        raise ArchiveError("session metadata step_count must be a non-negative integer")
+    canonical = {field: value[field] for field in SESSION_METADATA_FIELDS}
+    if len(json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=False)) > MAX_METADATA_BYTES:
+        raise ArchiveError("session metadata exceeds its size limit")
+    return canonical
+
+
+def metadata_json(metadata):
+    if metadata is None:
+        return None
+    return json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def source_digest_of(chunk_digests):
+    digest = hashlib.sha256()
+    for chunk_digest in chunk_digests:
+        digest.update(chunk_digest.encode("ascii"))
+    return digest.hexdigest()
+
+
+def manifest_digest(source_digest, source_size, artifacts, metadata):
+    """Name one immutable generation: its transcript, companions, and native metadata."""
+    body = {
+        "source_digest": source_digest,
+        "source_size": int(source_size),
+        "artifacts": sorted([str(name), digest] for name, digest in artifacts),
+        "metadata": metadata,
+    }
+    return sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
+def _require_digest(value, what):
+    if not isinstance(value, str) or not DIGEST.fullmatch(value):
+        raise ArchiveError("%s is not a sha256 digest" % what)
+    return value
+
+
+def _require_size(value, what, maximum):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value > maximum:
+        raise ArchiveError("%s is out of bounds" % what)
+    return value
+
+
+@dataclasses.dataclass(frozen=True)
+class Manifest:
+    origin_host: str
+    harness: str
+    native_id: str
+    source_path: str
+    source_digest: str
+    source_size: int
+    captured_at: float
+    chunks: tuple[tuple[int, int, str], ...]
+    artifacts: tuple[tuple[str, str, int], ...]
+    session_metadata: dict[str, Any] | None
+    manifest_digest: str
+    sizes: dict[str, int]
+
+
+def validate_manifest(manifest: dict[str, Any]) -> Manifest:
+    """Check a received generation manifest end to end and return its normalized form.
+
+    The chunk list must tile the declared source exactly, and the declared
+    identity digests must be the ones the content implies.
+    """
+    for field in ("origin_host", "harness", "native_id", "source_path"):
+        if not isinstance(manifest.get(field), str) or (field != "source_path" and not manifest[field]):
+            raise ArchiveError("manifest field is missing or not text: " + field)
+    if manifest["harness"] not in HARNESSES:
+        raise ArchiveError("manifest names an unsupported harness: " + manifest["harness"])
+    source_size = _require_size(manifest.get("source_size"), "source size", 1 << 50)
+    captured_at = manifest.get("captured_at")
+    if isinstance(captured_at, bool) or not isinstance(captured_at, (int, float)):
+        raise ArchiveError("manifest capture time is not a number")
+    chunks, artifacts = manifest.get("chunks"), manifest.get("artifacts")
+    if not isinstance(chunks, list) or not isinstance(artifacts, list):
+        raise ArchiveError("manifest chunks and artifacts must be lists")
+    if len(artifacts) > MAX_ARTIFACTS:
+        raise ArchiveError("manifest carries too many artifacts")
+    sizes = {}
+    offset = 0
+    clean_chunks: list[tuple[int, int, str]] = []
+    for item in chunks:
+        if not isinstance(item, dict):
+            raise ArchiveError("manifest chunk is not an object")
+        digest = _require_digest(item.get("digest"), "chunk digest")
+        size = _require_size(item.get("size"), "chunk size", MAX_OBJECT_BYTES)
+        if size == 0:
+            raise ArchiveError("manifest chunk is empty")
+        if item.get("offset") != offset:
+            raise ArchiveError("manifest chunks are not contiguous from offset zero")
+        if sizes.setdefault(digest, size) != size:
+            raise ArchiveError("conflicting sizes for one digest")
+        clean_chunks.append((offset, size, digest))
+        offset += size
+    if offset != source_size:
+        raise ArchiveError("manifest chunks total %d bytes but the source declares %d" % (offset, source_size))
+    source_digest = _require_digest(manifest.get("source_digest"), "source digest")
+    if source_digest_of(digest for _offset, _size, digest in clean_chunks) != source_digest:
+        raise ArchiveError("manifest source digest does not match its chunks")
+    names = set()
+    clean_artifacts: list[tuple[str, str, int]] = []
+    for item in artifacts:
+        if not isinstance(item, dict):
+            raise ArchiveError("manifest artifact is not an object")
+        name = item.get("name")
+        if not isinstance(name, str) or not name or "/" in name or "\0" in name or name in (".", "..") or name in names:
+            raise ArchiveError("manifest artifact name is invalid or repeated")
+        names.add(name)
+        digest = _require_digest(item.get("digest"), "artifact digest")
+        size = _require_size(item.get("size"), "artifact size", MAX_ARTIFACT_BYTES)
+        if sizes.setdefault(digest, size) != size:
+            raise ArchiveError("conflicting sizes for one digest")
+        clean_artifacts.append((name, digest, size))
+    metadata = normalize_session_metadata(manifest.get("session_metadata"))
+    claimed = _require_digest(manifest.get("manifest_digest"), "manifest digest")
+    if manifest_digest(source_digest, source_size, [(name, digest) for name, digest, _size in clean_artifacts], metadata) != claimed:
+        raise ArchiveError("manifest digest does not match its content")
+    return Manifest(
+        origin_host=manifest["origin_host"], harness=manifest["harness"], native_id=manifest["native_id"],
+        source_path=manifest["source_path"], source_digest=source_digest, source_size=source_size,
+        captured_at=float(captured_at), chunks=tuple(clean_chunks), artifacts=tuple(clean_artifacts),
+        session_metadata=metadata, manifest_digest=claimed, sizes=sizes)
+
+
+def artifact_digests(db, generation):
     return {row["name"]: row["digest"] for row in db.execute(
         "SELECT name, digest FROM archive_artifact WHERE generation = ?", (int(generation),))}
 
 
-def _same_artifacts(db, generation, artifacts):
-    if generation is None:
-        return not artifacts
-    current = _artifact_digests(db, generation["id"])
-    wanted = {str(name): sha256(data) for name, data in artifacts}
-    return current == wanted
+def generation_manifest(db, generation) -> dict[str, Any]:
+    """Describe one stored generation in the form validate_manifest and the sender use."""
+    row = db.execute("SELECT * FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
+    if row is None:
+        raise ArchiveError("generation does not exist: " + str(generation))
+    return {
+        "origin_host": row["origin_host"], "harness": row["harness"], "native_id": row["native_id"],
+        "source_path": row["source_path"], "source_digest": row["source_digest"], "source_size": int(row["source_size"]),
+        "captured_at": float(row["captured_at"]),
+        "chunks": [{"digest": digest, "size": size, "offset": offset} for offset, size, digest in generation_chunks(db, generation)],
+        "artifacts": [
+            {"name": item["name"], "digest": item["digest"], "size": int(item["size"])}
+            for item in db.execute("SELECT name, digest, size FROM archive_artifact WHERE generation = ? ORDER BY name", (int(generation),))],
+        "session_metadata": json.loads(row["session_metadata"]) if row["session_metadata"] else None,
+        "manifest_digest": row["manifest_digest"],
+    }
 
 
-def _store_artifacts(db, archive_dir, generation, artifacts, allow_artifacts):
-    if not allow_artifacts:
-        return
-    with db:
-        for name, data in artifacts:
-            if len(data) > MAX_ARTIFACT_BYTES:
-                continue
-            artifact_digest, size, _ = _write_object(archive_dir, data)
+def _write_artifacts(archive_dir, artifacts):
+    stored = []
+    for name, data in artifacts:
+        artifact_digest, size, _ = _write_object(archive_dir, data)
+        stored.append((str(name), artifact_digest, size))
+    return stored
+
+
+def publish_generation(db, *, origin_host, harness, native_id, source_path, source_digest, source_size, identity, metadata,
+             workspace, captured, chunks, artifacts, stat_fields, from_generation=None):
+    """Insert one complete generation atomically; return (generation id, created)."""
+    now = time.time()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        latest = last_generation(db, origin_host, harness, native_id)
+        if latest is not None and latest["manifest_digest"] == identity:
+            db.rollback()
+            return int(latest["id"]), False
+        cursor = db.execute(
+            "INSERT INTO archive_generation (origin_host, harness, native_id, source_path, source_digest, source_size, "
+            "captured_at, protocol, stored_at, source_dev, source_ino, source_mtime_ns, source_ctime_ns, workspace_path, "
+            "manifest_digest, session_metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (origin_host, harness, native_id, str(source_path), source_digest, int(source_size), captured, PROTOCOL, now,
+             *stat_fields, workspace, identity, metadata_json(metadata)))
+        generation = int(cursor.lastrowid or 0)
+        if from_generation is not None:
             db.execute(
-                "INSERT OR REPLACE INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
-                (int(generation), str(name), artifact_digest, size),
-            )
+                "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) "
+                "SELECT ?, ordinal, digest, size, offset FROM archive_generation_object WHERE generation = ?",
+                (generation, int(from_generation)))
+        for index, (offset, size, chunk_digest) in enumerate(chunks):
+            db.execute("INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)", (chunk_digest, size, now))
+            db.execute(
+                "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) VALUES (?, ?, ?, ?, ?)",
+                (generation, index, chunk_digest, size, offset))
+        for name, artifact_digest, size in artifacts:
+            db.execute("INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)", (artifact_digest, size, now))
+            db.execute("INSERT INTO archive_artifact (generation, name, digest, size) VALUES (?, ?, ?, ?)",
+                       (generation, name, artifact_digest, size))
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return generation, True
 
 
-def capture(db, archive_dir, harness, native_id, source_path, *, workspace=None, artifacts=(), allow_artifacts=False, stats=None):
-    """Capture the current bytes of source_path as a verified generation.
+def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), session_metadata=None, workspace=None, stats=None):
+    """Capture the current bytes of source_path as a verified, immutable generation.
 
-    Returns (generation_id, created). Raises OSError when the source cannot be
-    read as a regular file.
+    A generation names its transcript, companion artifacts, and native session
+    metadata together. Any change to one of them creates a new generation; the
+    previous one is never edited. Returns (generation_id, created). Raises
+    OSError when the source cannot be read as a regular file.
     """
     stats = stats if stats is not None else {}
     archive_dir = Path(archive_dir)
+    metadata = normalize_session_metadata(session_metadata)
+    for name, data in artifacts:
+        if len(data) > MAX_ARTIFACT_BYTES:
+            raise ArchiveError("artifact exceeds its size limit: " + str(name))
+    if len(artifacts) > MAX_ARTIFACTS:
+        raise ArchiveError("too many artifacts")
+    artifact_digests = [(str(name), sha256(data)) for name, data in artifacts]
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(source_path, flags)
-    with os.fdopen(descriptor, "rb") as stream:
+    with os.fdopen(descriptor, "rb") as stream, object_lock(archive_dir):
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
             raise OSError("refusing to capture a non-regular file: " + str(source_path))
         origin_host = origin_for(db)
         previous = last_generation(db, origin_host, harness, native_id)
-        if _same_source(previous, info) and _same_artifacts(db, previous, artifacts):
-            stats["archive_unchanged"] = stats.get("archive_unchanged", 0) + 1
-            return int(previous["id"]), False
-        if _same_source(previous, info) and previous is not None:
-            _store_artifacts(db, archive_dir, int(previous["id"]), artifacts, allow_artifacts)
-            stats["archive_unchanged"] = stats.get("archive_unchanged", 0) + 1
-            return int(previous["id"]), False
+        cwd = metadata["cwd"] if metadata is not None else workspace
+        if _same_source(previous, info):
+            identity = manifest_digest(previous["source_digest"], previous["source_size"], artifact_digests, metadata)
+            if previous["manifest_digest"] == identity:
+                stats["archive_unchanged"] = stats.get("archive_unchanged", 0) + 1
+                return int(previous["id"]), False
+            generation, created = publish_generation(
+                db, origin_host=origin_host, harness=harness, native_id=native_id, source_path=source_path,
+                source_digest=previous["source_digest"], source_size=previous["source_size"], identity=identity,
+                metadata=metadata, workspace=cwd or None, captured=time.time(), chunks=[],
+                artifacts=_write_artifacts(archive_dir, artifacts),
+                stat_fields=(previous["source_dev"], previous["source_ino"], previous["source_mtime_ns"], previous["source_ctime_ns"]),
+                from_generation=previous["id"])
+            key = "archived" if created else "archive_unchanged"
+            stats[key] = stats.get(key, 0) + 1
+            return generation, created
         previous_chunks = generation_chunks(db, previous["id"]) if previous is not None else []
         previous_digests = {digest for _offset, _size, digest in previous_chunks}
         stream.seek(0)
         all_chunks = []
-        digest = hashlib.sha256()
         start = 0
         while True:
             data = stream.read(CHUNK_BYTES)
@@ -274,49 +500,27 @@ def capture(db, archive_dir, harness, native_id, source_path, *, workspace=None,
             stats["bytes_read"] = stats.get("bytes_read", 0) + len(data)
             chunk_digest = sha256(data)
             if chunk_digest not in previous_digests:
-                chunk_digest, size, written = _write_object(archive_dir, data)
-                if written:
+                chunk_digest, size, wrote = _write_object(archive_dir, data)
+                if wrote:
                     stats["archive_objects"] = stats.get("archive_objects", 0) + 1
                     stats["archive_bytes"] = stats.get("archive_bytes", 0) + size
             all_chunks.append((start, len(data), chunk_digest))
-            digest.update(chunk_digest.encode("ascii"))
             start += len(data)
         final = os.fstat(stream.fileno())
         if (final.st_dev, final.st_ino, final.st_size, final.st_mtime_ns, final.st_ctime_ns) != (
                 info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns):
             raise ArchiveError("source changed during capture; retry capture")
-    source_digest = digest.hexdigest()
-    now = time.time()
-    try:
-        cursor = db.execute(
-            "INSERT INTO archive_generation (origin_host, harness, native_id, source_path, source_digest, source_size, "
-            "captured_at, protocol, stored_at, source_dev, source_ino, source_mtime_ns, source_ctime_ns, workspace_path) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (origin_host, harness, native_id, str(source_path), source_digest, final.st_size, now, PROTOCOL, now,
-             final.st_dev, final.st_ino, final.st_mtime_ns, final.st_ctime_ns, workspace),
-        )
-    except sqlite3.IntegrityError:
-        existing = db.execute(
-            "SELECT id FROM archive_generation WHERE origin_host = ? AND harness = ? AND native_id = ? AND source_digest = ?",
-            (origin_host, harness, native_id, source_digest),
-        ).fetchone()
-        stats["archive_unchanged"] = stats.get("archive_unchanged", 0) + 1
-        return int(existing["id"]), False
-    generation = int(cursor.lastrowid)
-    with db:
-        for index, (offset, size, chunk_digest) in enumerate(all_chunks):
-            db.execute(
-                "INSERT OR IGNORE INTO archive_object (digest, size, created_at) VALUES (?, ?, ?)",
-                (chunk_digest, size, now),
-            )
-            db.execute(
-                "INSERT INTO archive_generation_object (generation, ordinal, digest, size, offset) VALUES (?, ?, ?, ?, ?)",
-                (generation, index, chunk_digest, size, offset),
-            )
-        _store_artifacts(db, archive_dir, generation, artifacts, allow_artifacts)
-        db.execute("UPDATE archive_generation SET stored_at = ? WHERE id = ?", (now, generation))
-    stats["archived"] = stats.get("archived", 0) + 1
-    return generation, True
+        source_digest = source_digest_of(chunk_digest for _offset, _size, chunk_digest in all_chunks)
+        identity = manifest_digest(source_digest, final.st_size, artifact_digests, metadata)
+        generation, created = publish_generation(
+            db, origin_host=origin_host, harness=harness, native_id=native_id, source_path=source_path,
+            source_digest=source_digest, source_size=final.st_size, identity=identity, metadata=metadata,
+            workspace=cwd or None, captured=time.time(), chunks=all_chunks,
+            artifacts=_write_artifacts(archive_dir, artifacts),
+            stat_fields=(final.st_dev, final.st_ino, final.st_mtime_ns, final.st_ctime_ns))
+    key = "archived" if created else "archive_unchanged"
+    stats[key] = stats.get(key, 0) + 1
+    return generation, created
 
 
 def capture_artifacts(paths, limit=MAX_ARTIFACTS):

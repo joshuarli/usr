@@ -8,14 +8,14 @@ import argparse
 import sys
 
 from agent_memory.store import Store, StoreError, default_state_dir
-from agent_memory.transfer import receiver
+from agent_memory.transfer import PROTOCOL, receiver
 
 
 def parser():
     result = argparse.ArgumentParser(prog="agent-sessions-serve")
     commands = result.add_subparsers(dest="command")
     ingest = commands.add_parser("ingest")
-    ingest.add_argument("--protocol", type=int, default=1)
+    ingest.add_argument("--protocol", type=int, default=PROTOCOL)
     ingest.add_argument("--origin", action="append", required=True, help="origin id allowed to deliver; repeatable")
     ingest.add_argument("state_dir", nargs="?", default=str(default_state_dir()))
     return result

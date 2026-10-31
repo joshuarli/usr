@@ -12,11 +12,11 @@ import socket
 import struct
 import time
 import zlib
-from typing import Any
+from typing import Any, NoReturn
 
 from agent_memory import archive as archive_module
 
-PROTOCOL = 1
+PROTOCOL = 2
 MAX_FRAME = 4 * 1024 * 1024
 MAX_BLOB = 64 * 1024 * 1024
 COMPRESSION = "zlib"
@@ -158,49 +158,20 @@ class Sender:
     def send_generation(self, generation):
         if str(generation["origin_host"]) != self.origin:
             raise TransferError("refusing to send a generation from another origin")
-        chunks = [
-            {"digest": row["digest"], "size": int(row["size"]), "offset": int(row["offset"])}
-            for row in self.store.db.execute(
-                "SELECT digest, size, offset FROM archive_generation_object WHERE generation = ? ORDER BY ordinal",
-                (int(generation["id"]),))
-        ]
-        artifacts = [
-            {"name": row["name"], "digest": row["digest"], "size": int(row["size"])}
-            for row in self.store.db.execute(
-                "SELECT name, digest, size FROM archive_artifact WHERE generation = ? ORDER BY name",
-                (int(generation["id"]),))
-        ]
-        manifest = {
-            "type": "generation",
-            "origin_host": generation["origin_host"],
-            "harness": generation["harness"],
-            "native_id": generation["native_id"],
-            "source_path": generation["source_path"],
-            "workspace_path": generation["workspace_path"],
-            "source_digest": generation["source_digest"],
-            "source_size": int(generation["source_size"]),
-            "captured_at": float(generation["captured_at"]),
-            "chunks": chunks,
-            "artifacts": artifacts,
-        }
+        manifest: dict[str, Any] = {"type": "generation", **archive_module.generation_manifest(self.store.db, int(generation["id"]))}
         write_message(self.outstream, manifest)
         needed = self._expect("need")
         wanted = set(needed.get("digests") or [])
-        for chunk in chunks:
-            if chunk["digest"] not in wanted:
+        for item in [*manifest["chunks"], *manifest["artifacts"]]:
+            if item["digest"] not in wanted:
                 continue
-            self._send_object(chunk["digest"])
-            wanted.discard(chunk["digest"])
-        for artifact in artifacts:
-            if artifact["digest"] not in wanted:
-                continue
-            self._send_object(artifact["digest"])
-            wanted.discard(artifact["digest"])
+            self._send_object(item["digest"])
+            wanted.discard(item["digest"])
         if wanted:
             raise TransferError("central store requested an unknown object")
         write_message(self.outstream, {"type": "commit"})
         ack = self._expect("ack")
-        if ack.get("origin_host") != manifest["origin_host"] or ack.get("source_digest") != manifest["source_digest"]:
+        if ack.get("origin_host") != manifest["origin_host"] or ack.get("manifest_digest") != manifest["manifest_digest"]:
             raise TransferError("acknowledgement does not match the delivered generation")
         return int(ack["generation"])
 
@@ -295,43 +266,29 @@ def receiver(store, instream, outstream, allowed_origins=None):
         return
 
 
+def _refuse(outstream, message) -> NoReturn:
+    write_message(outstream, {"type": "error", "message": message})
+    raise TransferError(message)
+
+
 def _receive_generation(store, instream, outstream, manifest, connection_origin):
-    origin = str(manifest["origin_host"])
+    try:
+        clean = archive_module.validate_manifest(manifest)
+    except archive_module.ArchiveError as exc:
+        _refuse(outstream, str(exc))
+    origin, harness, native = clean.origin_host, clean.harness, clean.native_id
     if origin != connection_origin:
-        write_message(outstream, {"type": "error", "message": "generation origin does not match the connection"})
-        raise TransferError("generation origin does not match the authenticated peer")
-    harness = str(manifest["harness"])
-    native = str(manifest["native_id"])
-    source_digest = str(manifest["source_digest"])
+        _refuse(outstream, "generation origin does not match the connection")
     if store.is_tombstoned(origin, harness, native):
-        write_message(outstream, {"type": "error", "message": "session is tombstoned"})
-        raise TransferError("receiver refused a tombstoned session")
-    existing = store.find_generation(origin, harness, native, source_digest)
+        _refuse(outstream, "session is tombstoned")
+    acknowledgement = {"type": "ack", "origin_host": origin, "manifest_digest": clean.manifest_digest, "durable": True}
+    existing = store.latest_generation_id(origin, harness, native, clean.manifest_digest)
     if existing is not None and store.generation_complete(existing):
         write_message(outstream, {"type": "need", "digests": []})
         _expect_object_or_commit(instream, outstream, store, [])
-        write_message(outstream, {"type": "ack", "generation": int(existing), "origin_host": origin,
-                                  "source_digest": source_digest, "durable": True})
+        write_message(outstream, {**acknowledgement, "generation": int(existing)})
         return
-    chunks = manifest.get("chunks") or []
-    artifacts = manifest.get("artifacts") or []
-    if not isinstance(chunks, list) or not isinstance(artifacts, list):
-        write_message(outstream, {"type": "error", "message": "malformed manifest"})
-        raise TransferError("malformed manifest")
-    wanted = []
-    declared = {}
-    for item in [*chunks, *artifacts]:
-        digest = str(item.get("digest") or "")
-        size = int(item.get("size") or -1)
-        if not digest or size < 0:
-            write_message(outstream, {"type": "error", "message": "malformed manifest entry"})
-            raise TransferError("malformed manifest entry")
-        if digest in declared and declared[digest] != size:
-            write_message(outstream, {"type": "error", "message": "conflicting sizes for one digest"})
-            raise TransferError("conflicting sizes for one digest")
-        declared[digest] = size
-        if not store.has_object(digest):
-            wanted.append(digest)
+    wanted = [digest for digest, size in clean.sizes.items() if not store.object_intact(digest, size)]
     write_message(outstream, {"type": "need", "digests": wanted})
     received = {}
     while True:
@@ -339,13 +296,11 @@ def _receive_generation(store, instream, outstream, manifest, connection_origin)
         if message.get("type") == "commit":
             break
         if message.get("type") != "object":
-            write_message(outstream, {"type": "error", "message": "expected an object or commit"})
-            raise TransferError("unexpected frame during object transfer")
+            _refuse(outstream, "expected an object or commit")
         digest = str(message.get("digest") or "")
-        expected = next((int(item["size"]) for item in [*chunks, *artifacts] if item["digest"] == digest), None)
-        if expected is None:
-            write_message(outstream, {"type": "error", "message": "object was not requested"})
-            raise TransferError("unexpected object")
+        expected = clean.sizes.get(digest)
+        if expected is None or digest not in wanted:
+            _refuse(outstream, "object was not requested")
         encoding = message.get("encoding") or "identity"
         try:
             payload = read_blob(instream)
@@ -358,12 +313,13 @@ def _receive_generation(store, instream, outstream, manifest, connection_origin)
             if len(data) != expected or _digest(data) != digest:
                 raise TransferError("object failed verification: " + digest)
         except TransferError as exc:
-            write_message(outstream, {"type": "error", "message": str(exc)})
-            raise
+            _refuse(outstream, str(exc))
         received[digest] = data
-    generation = store.commit_generation(manifest, received)
-    write_message(outstream, {"type": "ack", "generation": int(generation), "origin_host": origin,
-                              "source_digest": source_digest, "durable": True})
+    try:
+        generation = store.commit_generation(manifest, received)
+    except RuntimeError as exc:
+        _refuse(outstream, "generation was not committed: %s" % exc)
+    write_message(outstream, {**acknowledgement, "generation": int(generation)})
 
 
 def _expect_object_or_commit(instream, outstream, store, wanted):
