@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Constrain one command with Seatbelt (macOS) or bubblewrap (Linux)."""
+"""Constrain one command with Seatbelt (macOS); the Linux backend is out of scope."""
 
 import argparse
 import json
