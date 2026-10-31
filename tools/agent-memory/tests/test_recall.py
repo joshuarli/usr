@@ -712,11 +712,17 @@ class SecondReviewRegressionTests(RecallCase):
             store.db.execute("DROP TABLE forgotten_sessions")
             store.db.execute("ALTER TABLE events DROP COLUMN entry")
             store.db.execute("ALTER TABLE events DROP COLUMN parent_entry")
+            store.db.execute("ALTER TABLE events DROP COLUMN synthetic_id")
+            for table in ("tombstone", "transfer_generation", "archive_artifact", "archive_generation_object",
+                          "archive_generation", "archive_object", "project_map", "origin_host", "collector_identity"):
+                store.db.execute("DROP TABLE IF EXISTS " + table)
+            for column in ("branch_tip", "workspaces", "step_count", "archive_generation", "origin_host"):
+                store.db.execute("ALTER TABLE sessions DROP COLUMN " + column)
             store.db.execute("PRAGMA user_version = 4")
         store.close()
         store = agent_session_store.Store(state)
         self.addCleanup(store.close)
-        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+        self.assertEqual(store.db.execute("PRAGMA user_version").fetchone()[0], 7)
         self.assertEqual(store.db.execute("SELECT count(*) FROM forgotten_sessions").fetchone()[0], 0)
 
     def test_forgetting_scrubs_withdrawn_memories_feedback_and_reviewer_context(self):

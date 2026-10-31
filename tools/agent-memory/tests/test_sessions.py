@@ -1462,6 +1462,23 @@ class NewHarnessTests(unittest.TestCase):
             row = store.db.execute("SELECT cwd, ancestry, source FROM sessions WHERE id='agy:conv-3'").fetchone()
             self.assertEqual((row["cwd"], row["ancestry"], row["source"]), ("", "unknown", None))
 
+    def test_abandoned_branch_failure_is_invisible_to_experience_capture(self):
+        from agent_memory.learning import Learner
+
+        records = [
+            cmd_entry("m1", None, "user", [{"type": "text", "text": "start"}]),
+            cmd_entry("m3", "m1", "assistant", [{"type": "text", "text": "active success"}]),
+            cmd_entry("m2", "m1", "assistant", [{"type": "text", "text": "abandoned failure"}]),
+        ]
+        directory, _ = self.cmd_session(records, meta={"branchPoint": "m3"})
+        with Store(self.state) as store:
+            store.refresh({"cmd": [directory]}, project=self.project_id)
+            learner = Learner(store)
+            events, _truncated = learner._events("cmd:cc-1")
+            texts = [event["text"] for event in events if event["text"]]
+            self.assertIn("active success", texts)
+            self.assertNotIn("abandoned failure", texts)
+
     def test_harness_aliases_normalize_once(self):
         self.assertEqual(canonical_harness("command-code"), "cmd")
         self.assertEqual(canonical_harness("commandcode"), "cmd")

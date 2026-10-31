@@ -10,6 +10,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from agent_memory import archive as archive_module
 from agent_memory import backup as backup_module
@@ -160,7 +161,7 @@ def open_central(args):
     return Store(Path(os.path.expanduser(str(settings["state_dir"]))))
 
 
-def central_rows(args, op, payload):
+def central_rows(args, op, payload) -> list[dict[str, Any]]:
     settings = central_settings(args)
     if settings.get("transport", "local") == "local":
         with Store(Path(os.path.expanduser(str(settings["state_dir"])))) as store:
@@ -184,6 +185,30 @@ def _print_central_row(row, query=None, regex=False):
         print("parent=" + str(row["parent"]))
     text = _snippet(evidence["text"], query, regex) if query is not None else redact(evidence["text"])
     print("  " + text)
+
+
+def _memory(args):
+    try:
+        rows = central_rows(args, "memory", {"limit": args.limit})
+        for raw in rows:
+            row = dict(raw)
+            observed = datetime.datetime.fromtimestamp(float(row["observed_at"]), datetime.timezone.utc)
+            print("record=%s origin=%s project=%s kind=%s observed=%s" % (
+                row["record"], row.get("origin_host") or "central", row["project"], row["kind"],
+                observed.isoformat(timespec="seconds")))
+            print("  claim=" + redact(row["claim"]))
+            if row.get("applies_when"):
+                print("  applies_when=" + redact(row["applies_when"]))
+            for item in row.get("sources") or []:
+                source = dict(item)
+                print("  evidence=%s byte=%s digest=%s role=%s" % (
+                    source["session"], source["position"], str(source["digest"])[:16], source["role"]))
+            print("  authority=" + str(row["authority"]))
+        print("records=%d scope=central" % len(rows))
+        return 0
+    except (OSError, StoreError) as exc:
+        print("agent-sessions memory: " + str(exc), file=sys.stderr)
+        return 1
 
 
 def _identity(args):
@@ -589,6 +614,12 @@ def parser():
     doctor.add_argument("--json", action="store_true", help="print a machine-readable status document")
     doctor.add_argument("--rebuild-index", action="store_true", help="rebuild derived transcript tables while preserving learning tables")
     doctor.set_defaults(run=_doctor)
+
+    memory = commands.add_parser("memory", help="list retained experience records exposed by the central store")
+    memory.add_argument("--state-dir")
+    memory.add_argument("--central-state")
+    memory.add_argument("--limit", type=int, default=20)
+    memory.set_defaults(run=_memory)
 
     identity = commands.add_parser("identity", help="show or regenerate this collector identity")
     identity.add_argument("--state-dir")

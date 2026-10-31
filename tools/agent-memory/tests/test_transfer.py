@@ -197,7 +197,7 @@ class TransferTests(unittest.TestCase):
     def test_offline_backlog_persists_and_reports(self):
         source = self.capture()
         self.assertEqual(source.pending_transfers("central"), 1)
-        with self.assertRaises((TRANSFER.TransferError, OSError, Exception)):
+        with self.assertRaises((TRANSFER.TransferError, OSError)):
             tree = self.root / "not-a-store"
             tree.write_text("x")
             TRANSFER.local_sync(source, tree, "central", ARCHIVE.origin_for(source.db), "t", attempts=1)
@@ -250,6 +250,27 @@ class TransferTests(unittest.TestCase):
         reply = self.serve_in_thread(["peer"], exchange)
         self.assertEqual(reply["type"], "error")
         self.assertIn("conflicting", reply["message"])
+
+    def test_central_memory_records_carry_origin_evidence_and_no_authority(self):
+        from agent_memory.learning import Learner
+
+        source = self.capture()
+        self.sync(source)
+        central = Store(self.central_state)
+        Learner(central)
+        with central.db:
+            central.db.execute(
+                "INSERT INTO learning_experiences (project, kind, claim, applies_when, identifiers, fingerprint, basis, "
+                "detector, revision, worktree, observed_at, captured_at, validity, tags, state) "
+                "VALUES ('git:canary','gotcha','imported claim','cond','[]','fp','deterministic','det','r','w',10,10,'[]','','retained')")
+            central.db.execute(
+                "INSERT INTO learning_experience_sources (experience, session, position, digest, role) "
+                "VALUES (1, 'a@peer', 0, 'digest', 'trigger')")
+        rows = TRANSFER.handle_query(central, "memory", {"limit": 5})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["record"], "experience:1")
+        self.assertIn("not an instruction", rows[0]["authority"])
+        self.assertEqual(rows[0]["sources"][0]["session"], "a@peer")
 
 
 if __name__ == "__main__":

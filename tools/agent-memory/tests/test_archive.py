@@ -212,7 +212,7 @@ class ArchiveTests(unittest.TestCase):
             self.assertGreaterEqual(stats["archive_errors"], 1)
             self.assertEqual(self.generations(store), first)
             self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 1)
-            self.assertTrue(any(p.name.startswith(".tmp.") is False for p in (self.state / "archive" / "objects").rglob("*")))
+            self.assertEqual([p for p in (self.state / "archive" / "objects").rglob(".tmp.*")], [])
 
     def test_concurrent_collectors_publish_distinct_objects(self):
         self.write("alpha")

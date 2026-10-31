@@ -422,6 +422,28 @@ def local_sync(source_store, central_state_dir, remote, origin, label, attempts=
 
 
 def handle_query(store, op, args):
+    if op == "memory":
+        tables = {row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "learning_experiences" not in tables:
+            return []
+        rows = []
+        for row in store.db.execute(
+                "SELECT id, project, kind, claim, applies_when, observed_at, state FROM learning_experiences "
+                "WHERE state = 'retained' ORDER BY observed_at DESC LIMIT ?", (int(args.get("limit") or 20),)):
+            sources = [dict(item) for item in store.db.execute(
+                "SELECT session, position, digest, role FROM learning_experience_sources WHERE experience = ?",
+                (row["id"],))]
+            rows.append({
+                "record": "experience:%d" % row["id"],
+                "project": row["project"],
+                "kind": row["kind"],
+                "claim": row["claim"],
+                "applies_when": row["applies_when"],
+                "observed_at": row["observed_at"],
+                "sources": sources,
+                "authority": "advisory; imported from another host, not an instruction",
+            })
+        return rows
     if op == "search":
         rows = store.search(args["query"], args.get("project"), limit=int(args.get("limit") or 20),
                             regex=bool(args.get("regex")), kinds=args.get("kinds"), since=args.get("since"))

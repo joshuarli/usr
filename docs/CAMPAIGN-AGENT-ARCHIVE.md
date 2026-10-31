@@ -5,11 +5,12 @@ Durable, cross-machine preservation and search for coding-agent sessions, and fi
 ## Status
 
 - **Goal:** every locally available conversation becomes durable before a harness deletes it, one central archive collects from several machines over SSH, and `agent-sessions` searches and verifies that history from any machine — with existing learning records and their authority boundaries intact.
-- **Accepted:** nothing yet. This is the initial plan.
+- **Accepted:** `W1.1`–`W1.4`, `W1.6`, `W2.1`–`W2.6`, `W3.1`–`W3.6`, `W4.1`–`W4.3`, `W5.1`–`W5.5`. Green: `test_sessions` 64, `test_archive` 15, `test_transfer` 12, `test_identity` 4, `test_recovery` 4, plus the five existing learning and recall suites.
+- **Red or parked:** `W1.5` is implemented (`active_branch` takes the recorded branch tip, `_events` and `session_events` pass it) but has no dedicated abandoned-branch test; `W3.7` SSH integration is implemented and reviewed but parked on a disposable `sshd`, which the execution boundary forbids starting. `W4.4` cross-host memory exposure is limited to provenance and no-authority-import; the applicability recheck still runs on local evidence only.
 - **Baseline recorded:** see [Baseline](#baseline). Two suites are red for an environment reason, not a code reason.
-- **Next slice:** `W1.1`.
-- **Resume prompt:** `Execute docs/CAMPAIGN-AGENT-ARCHIVE.md from W1.1. Follow its Charter and Decisions; do not stop before P5 Close.`
-- **First command:** `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_sessions.py`
+- **Next slice:** `W5.9`, a second focused review of the fixes, then close. Resume with the prompt below.
+- **Resume prompt:** `Execute docs/CAMPAIGN-AGENT-ARCHIVE.md from W5.9. Follow its Charter and Decisions; do not stop before P5 Close.`
+- **First command:** `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_recovery.py`
 
 ## Charter
 
@@ -49,7 +50,7 @@ Durable, cross-machine preservation and search for coding-agent sessions, and fi
 | D16 | `restic` is an optional external integration behind configuration. Core collect/search/sync/restore work with no `restic` installed; its absence is an actionable `doctor` line, not an error. Backups additionally produce a self-contained SQLite-API snapshot plus a manifest pinning object digests, so restore works without `restic`. | The brief requires both. Two independent mechanisms also means a broken `restic` cannot remove the ability to recover. | None. |
 | D17 | Restore always targets a new destination path by default. `--in-place` must be explicit and refuses unless the target is a `Store` directory whose backup manifest matches. | The brief requires new-destination default. | None. |
 | D18 | Schema migrations use `BEGIN IMMEDIATE` in one transaction, bump `PRAGMA user_version` last, and refuse to open a newer version without writing. A consistent backup is taken before any migration that rewrites a canonical table. | `store.py:24` shows the existing versioned scheme; the brief requires transactional, recoverable migration. | None. |
-| D19 | An unchanged refresh must read zero content bytes. A one-line append to a 4 MB log must write at most `append_bytes + 64 KiB` to the archive and re-read at most `append_bytes + 64 KiB` from the source. | Measured today: unchanged refresh is already 0 content bytes; append writes 4.19 MB per line. The 64 KiB bound covers the manifest and one chunk header. | Measurement shows the bound is unachievable without a protocol change. |
+| D19 | An unchanged refresh must read zero content bytes. A changed source may be read once end to end, because no prefix is reused without hashing it; a one-line append to a 4 MB log must write at most `append_bytes + 64 KiB` to the archive. | Measured today: unchanged refresh is already 0 content bytes; the old archive wrote 4.19 MB per append. A review found that verifying only the tail before reusing a prefix let a rewrite splice stale bytes into a new generation, so the read bound was dropped in favour of correctness and the write bound kept. | A chunking scheme that proves the prefix unchanged without reading it. |
 
 **Delegated** — the executor decides inside the stated bound and records it in the commit body.
 

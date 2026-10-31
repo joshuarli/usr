@@ -1320,7 +1320,9 @@ class Store:
                 raw = stream.readline()
         except OSError:
             raw = b""
-        if not raw or not hmac.compare_digest(_sha256(raw), str(digest)):
+        if raw and not hmac.compare_digest(_sha256(raw), str(digest)):
+            raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+        if not raw:
             raw = self._archived_line(row, position, digest)
         if not raw:
             raise EvidenceUnavailable("indexed transcript source and its captured generation are unavailable")
