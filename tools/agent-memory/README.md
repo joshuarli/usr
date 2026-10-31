@@ -159,6 +159,7 @@ For a local or offline run, point the same commands at a directory: `agent-sessi
 
 - Object frames are zlib-compressed when both ends offer it, which every build of this tool does. The manifest already declares each object's size, so the receiver inflates to at most that size, refuses anything larger, and verifies the digest afterwards; an object that does not shrink travels uncompressed. Measured on 40 of the largest local objects, 2.6 MB became 1.1 MB.
 - Delivery is at-least-once. A generation is acknowledged as remotely durable only after the receiver has verified every object's digest and size, matched the manifest origin to the authenticated peer, and committed the manifest. A retry of an accepted generation is a no-op that re-acks.
+- Durability is recorded against the receiving store's own identity, which it reports when the connection opens, not against the local label. Pointing the same label at a second store therefore re-delivers what that store has not seen, instead of trusting an ack from a different machine.
 - Stored is not the same as searchable. The central side indexes each accepted generation itself, from the captured bytes, so search and `show` never need the source host or its filesystem.
 - The sender keeps its own copy until the ack. While offline it keeps a backlog with the attempt count and last error, and `doctor --json` reports it.
 - Tombstones travel first. A session forgotten at a collector refuses later re-delivery, so a stale or restored machine cannot resurrect it.
