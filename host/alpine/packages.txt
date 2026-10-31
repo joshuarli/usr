@@ -1,17 +1,4 @@
-seatd
-seatd-openrc
-wlroots0.20
-mesa-dri-gallium
-mesa-egl
-wayland-libs-client
-libxkbcommon
 ncurses-terminfo
-xkeyboard-config
-font-hack
-bemenu
-grim
-slurp
-wl-clipboard
 curl
 clang>=23
 llvm>=23

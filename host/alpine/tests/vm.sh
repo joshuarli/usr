@@ -169,30 +169,37 @@ must 'apk add -q git' 600
 must "su josh -c 'cd ~ && git clone -q /media/share/usr.bundle usr && git -C usr remote set-url origin https://github.com/joshuarli/usr'"
 must 'cp /etc/apk/world /root/world.before'
 
-[ "$(run 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/nopass.log 2>&1')" != 0 ] ||
+[ "$(run 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/nopass.log 2>&1')" != 0 ] ||
 	fail 'install accepted a user without a password'
 must "grep -q 'josh has no usable password' /root/nopass.log && cmp /etc/apk/world /root/world.before"
 must "echo 'josh:$userpw' | chpasswd"
 
-[ "$(run 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/tty0.log 2>&1')" != 0 ] ||
+must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/server.log 2>&1 || { cat /root/server.log; false; }' 600
+must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server' 120
+must 'grep -q "provisioned server for josh" /root/server.log'
+must '! apk info -e seatd && ! apk info -e wlroots0.20 && ! command -v dwl && ! command -v ghostty-custom'
+must 'test ! -e /usr/local/bin/home-session && test ! -e /etc/init.d/home-runtime && test ! -e /etc/profile.d/home-session.sh'
+must 'cp /etc/apk/world /root/world.server'
+
+[ "$(run 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/tty0.log 2>&1')" != 0 ] ||
 	fail 'install accepted a tty0 getty that shares tty1'
-must "grep -q 'getty on tty0 shares the tty1 console' /root/tty0.log && cmp /etc/apk/world /root/world.before"
+must "grep -q 'getty on tty0 shares the tty1 console' /root/tty0.log && cmp /etc/apk/world /root/world.server"
 must "sed -i 's/^tty0::/#tty0::/' /etc/inittab && kill -HUP 1"
 must "echo 'export WLR_RENDERER=pixman' > /etc/profile.d/00-vm-renderer.sh"
 must 'find /boot /etc/network /etc/fstab /etc/inittab /etc/doas.conf /etc/doas.d /etc/apk/repositories /etc/hostname -type f 2>/dev/null | sort | xargs sha256sum > /root/baseline'
 
 must "echo 'echo unmanaged' > /etc/profile.d/home-session.sh"
-[ "$(run 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/conflict.log 2>&1')" != 0 ] ||
+[ "$(run 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/conflict.log 2>&1')" != 0 ] ||
 	fail 'install accepted an unmanaged conflicting file'
 must "grep -q 'home-session.sh exists and was not installed by home' /root/conflict.log || { cat /root/conflict.log; false; }"
-must "grep -qx 'echo unmanaged' /etc/profile.d/home-session.sh && cmp /etc/apk/world /root/world.before"
+must "grep -qx 'echo unmanaged' /etc/profile.d/home-session.sh && cmp /etc/apk/world /root/world.server"
 must 'rm /etc/profile.d/home-session.sh'
 
 managed='/usr/local/bin/dwl /usr/local/bin/ghostty-custom /usr/local/share/home/ghostty-custom.tag /usr/local/bin/home-session /etc/init.d/home-runtime /etc/conf.d/home-runtime /etc/profile.d/home-session.sh /etc/clang*/clang.cfg /etc/clang*/clang++.cfg'
-must 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/install.log 2>&1 || { cat /root/install.log; false; }' 2400
+must 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/install.log 2>&1 || { cat /root/install.log; false; }' 2400
 must 'USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh' 120
 must "stat -c '%n %Y %a' $managed > /root/mtimes && cp /etc/apk/world /root/world.first"
-must 'USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/rerun.log 2>&1 || { cat /root/rerun.log; false; }' 600
+must 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/rerun.log 2>&1 || { cat /root/rerun.log; false; }' 600
 must "! grep -E '^home: (installed|added|cloned|removed)' /root/rerun.log && grep -q 'dwl is current' /root/rerun.log && grep -q 'ghostty-custom is current' /root/rerun.log"
 must "stat -c '%n %Y %a' $managed | cmp - /root/mtimes && cmp /etc/apk/world /root/world.first"
 must 'sha256sum -c -s /root/baseline'

@@ -33,6 +33,24 @@ install_managed() {
 	fi
 }
 
+clang_major() { clang -dumpversion | cut -d. -f1; }
+
+mode=${INSTALL_MODE:-}
+if [ -z "$mode" ]; then
+	[ -r /dev/tty ] || die 'no terminal for the install type prompt; set INSTALL_MODE=server or INSTALL_MODE=desktop'
+	while :; do
+		printf 'home: install type, server or desktop: ' >/dev/tty
+		IFS= read -r answer </dev/tty || die 'no install type chosen; set INSTALL_MODE=server or INSTALL_MODE=desktop'
+		case $answer in
+			server | s) mode=server; break ;;
+			desktop | d) mode=desktop; break ;;
+			*) printf 'home: answer server or desktop\n' >/dev/tty ;;
+		esac
+	done
+fi
+case $mode in server | desktop) ;; *) die "INSTALL_MODE must be server or desktop, not $mode" ;; esac
+say "installing $mode"
+
 [ "$(id -u)" -eq 0 ] || die 'run as root, for example: doas sh usr/host/alpine/install.sh'
 [ -r /etc/os-release ] && . /etc/os-release
 [ "${ID:-}" = alpine ] || die 'this provisioner supports only Alpine Linux'
@@ -47,8 +65,6 @@ case $rootfs in tmpfs | ramfs | '') die "root filesystem is $rootfs; install Alp
 command -v git >/dev/null || die 'git is required: apk add git'
 [ "$(git -c safe.directory="$PWD" -c safe.directory="$usr_root" rev-parse --is-shallow-repository)" = false ] ||
 	die 'this checkout is shallow; home recognizes its installed files from full history: git fetch --unshallow'
-! apk info -e linux-lts >/dev/null 2>&1 ||
-	die 'linux-lts is installed; this desktop runs linux-stable: apk add linux-stable && apk del linux-lts, then reboot'
 
 user=${USER_NAME:-josh}
 [ "$user" != root ] || die 'USER_NAME must be a regular user, not root'
@@ -59,9 +75,6 @@ home=$(printf '%s\n' "$entry" | cut -d: -f6)
 [ -d "$home" ] && [ "$(stat -c %u "$home")" = "$uid" ] || die "home directory $home of $user is missing or not owned by $user"
 hash=$(awk -F: -v u="$user" '$1 == u { print $2 }' /etc/shadow)
 case $hash in '$'*) ;; *) die "user $user has no usable password; set one with: passwd $user" ;; esac
-
-! awk -F: '$1 == "tty0" && $3 == "respawn"' /etc/inittab | grep -q . ||
-	die 'a getty on tty0 shares the tty1 console with the desktop login; comment out the tty0 line in /etc/inittab and run: kill -HUP 1'
 
 [ -s /etc/apk/repositories ] || die '/etc/apk/repositories is empty; run setup-apkrepos'
 repos=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' /etc/apk/repositories)
@@ -74,32 +87,6 @@ for script in install.sh verify.sh build/dwl.sh build/ghostty.sh config/home-ses
 	sh -n "$script" || die "$script has a syntax error"
 done
 
-conf=$(mktemp)
-trap 'rm -f "$conf"' EXIT HUP INT TERM
-printf 'home_user="%s"\n' "$user" > "$conf"
-check_managed config/home-session /usr/local/bin/home-session
-check_managed services/home-runtime /etc/init.d/home-runtime
-check_managed config/profile.sh /etc/profile.d/home-session.sh
-clang_major() { clang -dumpversion | cut -d. -f1; }
-if command -v clang >/dev/null; then
-	check_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg"
-	check_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg"
-fi
-if [ -e /etc/conf.d/home-runtime ] && ! cmp -s "$conf" /etc/conf.d/home-runtime; then
-	die "/etc/conf.d/home-runtime configures a different user or was not written by home; remove it to provision $user"
-fi
-if [ -e /usr/local/bin/dwl ]; then
-	case $(/usr/local/bin/dwl -v 2>&1) in
-		'dwl '*-home.*) ;;
-		*) die '/usr/local/bin/dwl was not built by home; move it aside' ;;
-	esac
-fi
-if [ -e /usr/local/bin/ghostty-custom ]; then
-	[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] ||
-		die '/usr/local/bin/ghostty-custom exists and is not a regular file; move it aside'
-	[ -f /usr/local/share/home/ghostty-custom.tag ] ||
-		die '/usr/local/bin/ghostty-custom was not installed by home; move it aside'
-fi
 [ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ] && [ -f "$usr_root/dl" ] ||
 	die "$usr_root is not the usr checkout; clone $usr_url and run usr/host/alpine/install.sh from it"
 origin=$(as_user "git -C '$usr_root' remote get-url origin" 2>/dev/null) ||
@@ -109,44 +96,90 @@ case $origin in
 	*) die "$usr_root is a checkout of $origin, not $usr_url" ;;
 esac
 
-say 'checking network and repositories'
-apk update --quiet || die 'apk update failed; check networking and /etc/apk/repositories'
+if command -v clang >/dev/null; then
+	check_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg"
+	check_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg"
+fi
 
 as_user "sh '$usr_root/sync' plan >/dev/null" ||
 	die "dotfile links conflict with existing files; run sh $usr_root/sync plan as $user and resolve each CONFLICT"
+
+conf=
+if [ "$mode" = desktop ]; then
+	! apk info -e linux-lts >/dev/null 2>&1 ||
+		die 'linux-lts is installed; this desktop runs linux-stable: apk add linux-stable && apk del linux-lts, then reboot'
+
+	! awk -F: '$1 == "tty0" && $3 == "respawn"' /etc/inittab | grep -q . ||
+		die 'a getty on tty0 shares the tty1 console with the desktop login; comment out the tty0 line in /etc/inittab and run: kill -HUP 1'
+
+	conf=$(mktemp)
+	trap 'rm -f "$conf"' EXIT HUP INT TERM
+	printf 'home_user="%s"\n' "$user" > "$conf"
+	check_managed config/home-session /usr/local/bin/home-session
+	check_managed services/home-runtime /etc/init.d/home-runtime
+	check_managed config/profile.sh /etc/profile.d/home-session.sh
+	if [ -e /etc/conf.d/home-runtime ] && ! cmp -s "$conf" /etc/conf.d/home-runtime; then
+		die "/etc/conf.d/home-runtime configures a different user or was not written by home; remove it to provision $user"
+	fi
+	if [ -e /usr/local/bin/dwl ]; then
+		case $(/usr/local/bin/dwl -v 2>&1) in
+			'dwl '*-home.*) ;;
+			*) die '/usr/local/bin/dwl was not built by home; move it aside' ;;
+		esac
+	fi
+	if [ -e /usr/local/bin/ghostty-custom ]; then
+		[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] ||
+			die '/usr/local/bin/ghostty-custom exists and is not a regular file; move it aside'
+		[ -f /usr/local/share/home/ghostty-custom.tag ] ||
+			die '/usr/local/bin/ghostty-custom was not installed by home; move it aside'
+	fi
+fi
+
+say 'checking network and repositories'
+apk update --quiet || die 'apk update failed; check networking and /etc/apk/repositories'
 
 packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 [ ! -f "packages-$arch.txt" ] || packages="$packages $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "packages-$arch.txt")"
 # shellcheck disable=SC2086
 apk add --quiet $packages
-if apk info -e foot >/dev/null 2>&1; then
-	apk del --quiet foot || die 'could not remove foot'
-	say 'removed foot'
-fi
-if apk info -e foot-extra-terminfo >/dev/null 2>&1; then
-	apk del --quiet foot-extra-terminfo || die 'could not remove foot-extra-terminfo'
-	say 'removed foot-extra-terminfo'
-fi
-
-rc-update show sysinit | awk '$1 == "udev" { found = 1 } END { exit !found }' || setup-devd udev
 
 [ "$(clang_major)" -ge 23 ] || die "clang $(clang -dumpversion) is older than 23; check the edge repositories"
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg" 0644
-sh build/dwl.sh
-sh build/ghostty.sh
-install_managed config/home-session /usr/local/bin/home-session 0755
-install_managed services/home-runtime /etc/init.d/home-runtime 0755
-install_managed "$conf" /etc/conf.d/home-runtime 0644
-install_managed config/profile.sh /etc/profile.d/home-session.sh 0644
-
-id -Gn "$user" | tr ' ' '\n' | grep -qx seat || { addgroup "$user" seat; say "added $user to seat"; }
-for service in seatd home-runtime; do
-	rc-update show default | awk -v s="$service" '$1 == s { found = 1 } END { exit !found }' || rc-update add "$service" default
-	rc-service --ifstopped "$service" start
-done
 
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
 [ -x "$home/.local/bin/ish" ] || as_user "sh '$usr_root/sync' tools ish >/dev/null" || die "installing ish from $usr_root failed"
 
-say "provisioned. Log out, then log in as $user on tty1. Run: doas sh usr/host/alpine/verify.sh"
+if [ "$mode" = desktop ]; then
+	desktop_packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages-desktop.txt)
+	# shellcheck disable=SC2086
+	apk add --quiet $desktop_packages
+	if apk info -e foot >/dev/null 2>&1; then
+		apk del --quiet foot || die 'could not remove foot'
+		say 'removed foot'
+	fi
+	if apk info -e foot-extra-terminfo >/dev/null 2>&1; then
+		apk del --quiet foot-extra-terminfo || die 'could not remove foot-extra-terminfo'
+		say 'removed foot-extra-terminfo'
+	fi
+
+	rc-update show sysinit | awk '$1 == "udev" { found = 1 } END { exit !found }' || setup-devd udev
+
+	sh build/dwl.sh
+	sh build/ghostty.sh
+	install_managed config/home-session /usr/local/bin/home-session 0755
+	install_managed services/home-runtime /etc/init.d/home-runtime 0755
+	install_managed "$conf" /etc/conf.d/home-runtime 0644
+	install_managed config/profile.sh /etc/profile.d/home-session.sh 0644
+
+	id -Gn "$user" | tr ' ' '\n' | grep -qx seat || { addgroup "$user" seat; say "added $user to seat"; }
+	for service in seatd home-runtime; do
+		rc-update show default | awk -v s="$service" '$1 == s { found = 1 } END { exit !found }' || rc-update add "$service" default
+		rc-service --ifstopped "$service" start
+	done
+fi
+
+case $mode in
+server) say "provisioned server for $user. Run: doas sh usr/host/alpine/verify.sh server" ;;
+desktop) say "provisioned desktop. Log out, then log in as $user on tty1. Run: doas sh usr/host/alpine/verify.sh" ;;
+esac

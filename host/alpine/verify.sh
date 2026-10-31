@@ -3,6 +3,9 @@ set -u
 cd "$(dirname "$0")" || exit 1
 usr_root=$(cd ../.. && pwd)
 
+mode=${1:-desktop}
+case $mode in server | desktop) ;; *) echo "usage: $0 [server|desktop]" >&2; exit 2 ;; esac
+
 failures=0
 fail() { printf 'FAIL: %s\n' "$*"; failures=$((failures + 1)); }
 pass() { printf 'ok: %s\n' "$*"; }
@@ -18,51 +21,57 @@ user=${USER_NAME:-josh}
 uid=$(id -u "$user") || { echo "verify: no user $user" >&2; exit 1; }
 home=$(getent passwd "$user" | cut -d: -f6)
 
-check 'home-session matches config/home-session, root 0755' managed config/home-session /usr/local/bin/home-session 755
-check 'home-runtime service matches services/home-runtime, root 0755' managed services/home-runtime /etc/init.d/home-runtime 755
-check 'tty1 hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
-check "home-runtime configured for $user" grep -qx "home_user=\"$user\"" /etc/conf.d/home-runtime
-check 'dwl build matches build/dwl.sh and config/dwl.h' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
-check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'
-check 'dwl build dependencies removed' sh -c '! apk info -e .home-dwl-build'
-check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f][0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'
-check 'ghostty-custom installed, root 0755' sh -c '[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] && [ -x /usr/local/bin/ghostty-custom ] && [ "$(stat -c %u:%g:%a /usr/local/bin/ghostty-custom)" = 0:0:755 ]'
-check 'ghostty-custom shared libraries resolve' sh -c '! ldd /usr/local/bin/ghostty-custom 2>&1 | grep -q "not found"'
-check 'ghostty-custom reports version' sh -c '/usr/local/bin/ghostty-custom --version >/dev/null'
-check 'ghostty-custom shows config' sh -c '/usr/local/bin/ghostty-custom +show-config >/dev/null'
-check 'ghostty terminfo installed' test -f /usr/share/terminfo/x/xterm-ghostty
-check 'ghostty build dependencies removed' sh -c '! apk info -e .home-ghostty-build'
-check 'foot not installed' sh -c '! apk info -e foot && ! apk info -e foot-extra-terminfo'
-for cmd in ghostty-custom bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done
-check 'Hack font installed' sh -c 'fc-list | grep -q Hack'
+check 'curl installed' command -v curl
 for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_least 23 "$tool"; done
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)
 check 'clang defaults match config/clang.cfg, root 0644' managed config/clang.cfg "$clang_dir/clang.cfg" 644
 check 'clang++ defaults match config/clang.cfg, root 0644' managed config/clang.cfg "$clang_dir/clang++.cfg" 644
 check 'clang builds and runs C with lld and compiler-rt' sh -c 't=$(mktemp) && printf "int main(void){return 0;}\n" | clang -x c - -o "$t" && "$t"; s=$?; rm -f "$t"; exit $s'
 check 'clang++ builds and runs C++' sh -c 't=$(mktemp) && printf "#include <cstdio>\nint main(){std::puts(\"\");}\n" | clang++ -x c++ - -o "$t" && "$t" >/dev/null; s=$?; rm -f "$t"; exit $s'
-check 'linux-lts not installed' sh -c '! apk info -e linux-lts'
-check 'running linux-stable' sh -c 'uname -r | grep -q -- -stable$'
-
-check 'udev manages devices' in_runlevel udev sysinit
-check 'mdev disabled' sh -c '! rc-update show sysinit | grep -qw mdev'
-for service in seatd home-runtime; do
-	check "$service enabled" in_runlevel "$service" default
-	check "$service started" rc-service "$service" status
-done
-check "$user in seat" sh -c "id -Gn '$user' | tr ' ' '\n' | grep -qx seat"
-check "/run/user/$uid private to $user" test "$(stat -c %U:%a "/run/user/$uid" 2>/dev/null)" = "$user:700"
-
 check "$user has a password" sh -c "awk -F: '\$1 == \"$user\" { exit !(\$2 ~ /^\\$/) }' /etc/shadow"
 check 'no getty autologin' no_match -- '--autologin|[[:space:]]-a[[:space:]]' /etc/inittab
 check 'no passwordless doas' sh -c '! cat /etc/doas.conf /etc/doas.d/*.conf 2>/dev/null | sed "s/#.*//" | grep -qw nopass'
-
 check "ish installed for $user" test -x "$home/.local/bin/ish"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
+
+if [ "$mode" = desktop ]; then
+	check 'home-session matches config/home-session, root 0755' managed config/home-session /usr/local/bin/home-session 755
+	check 'home-runtime service matches services/home-runtime, root 0755' managed services/home-runtime /etc/init.d/home-runtime 755
+	check 'tty1 hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
+	check "home-runtime configured for $user" grep -qx "home_user=\"$user\"" /etc/conf.d/home-runtime
+	check 'dwl build matches build/dwl.sh and config/dwl.h' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
+	check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'
+	check 'dwl build dependencies removed' sh -c '! apk info -e .home-dwl-build'
+	check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f][0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'
+	check 'ghostty-custom installed, root 0755' sh -c '[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] && [ -x /usr/local/bin/ghostty-custom ] && [ "$(stat -c %u:%g:%a /usr/local/bin/ghostty-custom)" = 0:0:755 ]'
+	check 'ghostty-custom shared libraries resolve' sh -c '! ldd /usr/local/bin/ghostty-custom 2>&1 | grep -q "not found"'
+	check 'ghostty-custom reports version' sh -c '/usr/local/bin/ghostty-custom --version >/dev/null'
+	check 'ghostty-custom shows config' sh -c '/usr/local/bin/ghostty-custom +show-config >/dev/null'
+	check 'ghostty terminfo installed' test -f /usr/share/terminfo/x/xterm-ghostty
+	check 'ghostty build dependencies removed' sh -c '! apk info -e .home-ghostty-build'
+	check 'foot not installed' sh -c '! apk info -e foot && ! apk info -e foot-extra-terminfo'
+	for cmd in ghostty-custom bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done
+	check 'Hack font installed' sh -c 'fc-list | grep -q Hack'
+	check 'linux-lts not installed' sh -c '! apk info -e linux-lts'
+	check 'running linux-stable' sh -c 'uname -r | grep -q -- -stable$'
+
+	check 'udev manages devices' in_runlevel udev sysinit
+	check 'mdev disabled' sh -c '! rc-update show sysinit | grep -qw mdev'
+	for service in seatd home-runtime; do
+		check "$service enabled" in_runlevel "$service" default
+		check "$service started" rc-service "$service" status
+	done
+	check "$user in seat" sh -c "id -Gn '$user' | tr ' ' '\n' | grep -qx seat"
+	check "/run/user/$uid private to $user" test "$(stat -c %U:%a "/run/user/$uid" 2>/dev/null)" = "$user:700"
+fi
 
 if [ "$failures" -ne 0 ]; then
 	echo "verify: $failures check(s) failed"
 	exit 1
 fi
-echo 'verify: all checks passed (graphical session and hardware not exercised)'
+if [ "$mode" = desktop ]; then
+	echo 'verify: all checks passed (graphical session and hardware not exercised)'
+else
+	echo 'verify: all server checks passed'
+fi

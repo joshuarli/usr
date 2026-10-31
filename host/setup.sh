@@ -56,12 +56,9 @@ setup_alpine() {
         fi
     fi
 
-    say 'provisioning the Alpine desktop'
-    if [ -n "${USER_NAME:-}" ]; then
-        as_root env "USER_NAME=$USER_NAME" sh "$dest/host/alpine/install.sh" </dev/null
-    else
-        as_root sh "$dest/host/alpine/install.sh" </dev/null
-    fi
+    say 'provisioning Alpine'
+    as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" \
+        sh "$dest/host/alpine/install.sh" </dev/null
 }
 
 case $os_id in

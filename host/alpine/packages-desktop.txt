@@ -1,0 +1,13 @@
+seatd
+seatd-openrc
+wlroots0.20
+mesa-dri-gallium
+mesa-egl
+wayland-libs-client
+libxkbcommon
+xkeyboard-config
+font-hack
+bemenu
+grim
+slurp
+wl-clipboard

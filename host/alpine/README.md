@@ -1,7 +1,9 @@
 # home
 
-Post-install provisioner that turns a stock Alpine Linux edge install with
-`linux-stable` into a minimal dwl + ghostty-custom desktop with LLVM/clang 23 or newer. It is not an installer, image, or distribution.
+Post-install provisioner for a stock Alpine Linux edge install with
+`linux-stable`. It installs a headless server base and, layered on top, a
+minimal dwl + ghostty-custom desktop with LLVM/clang 23 or newer. It is not an
+installer, image, or distribution.
 It lives at `host/alpine/` in the [usr](https://github.com/joshuarli/usr) checkout; clone that one repository to get it.
 The target is a Dell XPS 13 9343 (x86_64); aarch64 is supported for VM testing.
 
@@ -20,8 +22,9 @@ Choose:
 - a disk for the `sys` install (diskless and data modes are rejected),
 - networking, which this project never touches,
 - an admin user with a password (`setup-user -a`), which configures doas for `wheel`.
-- no getty on `tty0` in `/etc/inittab` (installs booted with a VT `console=`,
-  such as the virt ISO, add one, and it splits tty1 keystrokes with the login).
+- no getty on `tty0` in `/etc/inittab` for a desktop install (installs booted
+  with a VT `console=`, such as the virt ISO, add one, and it splits tty1
+  keystrokes with the login).
 
 Reboot into the installed system and log in as that user.
 
@@ -34,10 +37,28 @@ wget -O - https://17166969.xyz/setup.sh | sh
 `setup.sh` detects Alpine and refuses anywhere else. It installs `git`
 if missing, clones this repository to `~/usr` (or reuses that checkout),
 then runs `install.sh` as root through `doas` or `sudo`.
+
+`install.sh` first asks for the install type:
+
+- `server` installs the headless base: `packages.txt` (and
+  `packages-x86_64.txt` on x86_64) with the clang toolchain, the dotfile links,
+  and ish. It installs no Wayland, graphics, or seatd packages.
+- `desktop` runs the server install first, then layers `packages-desktop.txt`,
+  udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it.
+
+Answer the prompt, or skip it with `INSTALL_MODE=server` or
+`INSTALL_MODE=desktop`, for example:
+
+```sh
+wget -O - https://17166969.xyz/setup.sh | INSTALL_MODE=server sh
+```
+
 Without the bootstrap, do it by hand instead:
 
 ```sh
-doas apk add git && git clone https://github.com/joshuarli/usr && doas sh usr/host/alpine/install.sh
+doas apk add git && git clone https://github.com/joshuarli/usr
+doas env INSTALL_MODE=server sh usr/host/alpine/install.sh
+doas env INSTALL_MODE=desktop sh usr/host/alpine/install.sh
 ```
 
 Provisioning defaults to user `josh` (`USER_NAME`); override with
@@ -46,23 +67,28 @@ for the bootstrap, or
 `doas env USER_NAME=other sh usr/host/alpine/install.sh` by hand, if needed.
 
 `install.sh` checks the system before changing anything and stops with an
-explanation if a check fails. It then:
+explanation if a check fails. The server install then:
 
 - installs the packages in `packages.txt` (and `packages-x86_64.txt` on x86_64),
-- switches the device manager to udev with `setup-devd udev`,
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by
   default through `/etc/clang<major>/clang.cfg` and `clang++.cfg`, so no gcc or
   binutils is needed (there is no `cc`; use `CC=clang`),
+- links the enclosing checkout's dotfiles and installs ish with
+  `sh sync links` and `sh sync tools ish` as the user. It does not run the
+  rest of `dl` or `host/setup-linux`.
+
+The desktop layer runs its own preflight checks before the first change, then:
+
+- installs the packages in `packages-desktop.txt` and removes `foot` if an
+  older install left it behind,
+- switches the device manager to udev with `setup-devd udev`,
 - builds the pinned dwl 0.9 with clang and lld using `config/dwl.h`, then removes
   the build-only headers,
 - downloads the newest `release-*` ghostty-custom Wayland binary for the
   machine architecture with `build/ghostty.sh`, verifies its SHA256SUMS and
   installs it to `/usr/local/bin/ghostty-custom` with its terminfo,
 - installs `home-session`, the `home-runtime` service, and a tty1 login hook,
-- adds the user to the `seat` group and starts `seatd` and `home-runtime`,
-- links the enclosing checkout's dotfiles and installs ish with
-  `sh sync links` and `sh sync tools ish` as the user. It does not run the
-  rest of `dl` or `host/setup-linux`.
+- adds the user to the `seat` group and starts `seatd` and `home-runtime`.
 
 Log out, then log in on tty1. dwl starts with a ghostty-custom terminal running ish.
 The login shell stays `/bin/ash`: ish has no `-c` command mode and reads no
@@ -84,8 +110,13 @@ profile, so it cannot serve ssh commands or start the desktop.
 ## 3. Verify
 
 ```sh
+doas sh usr/host/alpine/verify.sh server
 doas sh usr/host/alpine/verify.sh
 ```
+
+The second command checks the desktop; it is the default. A server install can
+be verified before adding the desktop layer, and a desktop install includes
+every server check.
 
 ## 4. Recover
 
@@ -96,7 +127,9 @@ a `seat` member, so `doas delgroup "$USER" seat` disables it.
 
 ## 5. Reapply
 
-Pull or edit the `usr` checkout and run `doas sh usr/host/alpine/install.sh` again.
+Pull or edit the `usr` checkout and run `doas env INSTALL_MODE=desktop sh usr/host/alpine/install.sh`
+again, or answer `desktop` at the prompt. Use `INSTALL_MODE=server` to reapply
+only the headless base.
 Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
 `config/dwl.h` changes, ghostty-custom is updated only when a newer
 `release-*` prerelease appears, and ish is installed only if missing (update it with
@@ -114,14 +147,17 @@ it when a new Linux build is published.
 Disks, partitions, filesystems, encryption, bootloader, kernel, initramfs, EFI,
 Secure Boot, networking, DNS, passwords, doas policy, root account, audio,
 power management and lid handling. The kernel flavor is chosen at install
-time; home refuses to run while `linux-lts` is installed.
+time; the desktop layer refuses to run while `linux-lts` is installed, while a
+server install accepts it.
 
 ## Development
 
 `sh tests/static.sh` runs syntax, shellcheck and package-name checks. `sh tests/vm.sh`
 installs Alpine edge with `linux-stable` on aarch64 from the virt ISO in QEMU,
-provisions it twice, reboots, logs in on tty1 and checks the desktop. It needs `qemu` and `nc`, and provisions
-the committed `HEAD` of the `usr` checkout. Run both from `host/alpine/`.
+provisions the server base, verifies it, then provisions the desktop on top,
+provisions it twice, reboots, logs in on tty1 and checks the desktop. It needs
+`qemu` and `nc`, and provisions the committed `HEAD` of the `usr` checkout. Run
+both from `host/alpine/`.
 
 ## Hardware checklist (XPS 13 9343)
 

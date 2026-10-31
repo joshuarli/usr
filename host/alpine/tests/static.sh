@@ -39,7 +39,7 @@ for arch in x86_64 aarch64; do
 		curl -fsS "https://dl-cdn.alpinelinux.org/alpine/edge/$repo/$arch/APKINDEX.tar.gz" | tar -xzOf - APKINDEX
 		echo
 	done > "$index/$arch"
-	missing=$(cat packages.txt "packages-$arch.txt" 2>/dev/null | sed -e 's/#.*//' -e '/^[[:space:]]*$/d' |
+	missing=$(cat packages.txt packages-desktop.txt "packages-$arch.txt" 2>/dev/null | sed -e 's/#.*//' -e '/^[[:space:]]*$/d' |
 		while read -r package; do
 			name=${package%%>=*}
 			min=
