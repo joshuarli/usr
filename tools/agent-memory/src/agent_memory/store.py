@@ -1313,6 +1313,12 @@ class Store:
 
     @_guarded
     def forget_session(self, session, now):
+        local_origin = archive_module.origin_for(self.db)
+        text = str(session)
+        if "@" in text:
+            base, _separator, suffix = text.rpartition("@")
+            if suffix == local_origin:
+                session = base
         row = self.db.execute(
             "SELECT harness, source_path, native_id, origin_host FROM sessions WHERE id = ?", (str(session),)).fetchone()
         harness = row["harness"] if row is not None else str(session).partition(":")[0]
@@ -1321,7 +1327,7 @@ class Store:
             raise StoreError("session id does not name a supported harness: " + str(session))
         if row is not None:
             self._purge_archive(row["harness"], row["source_path"], row["native_id"])
-        origin = (row["origin_host"] if row is not None else None) or archive_module.origin_for(self.db)
+        origin = (row["origin_host"] if row is not None else None) or local_origin
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)", (str(session), float(now)))

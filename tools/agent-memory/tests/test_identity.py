@@ -70,6 +70,19 @@ class IdentityTests(unittest.TestCase):
                 self.assertIsNone(store._mapped_project("foreign", "/somewhere/else"))
                 self.assertIsNone(store._mapped_project("foreign", ""))
 
+    def test_a_central_qualified_id_forgets_the_local_session(self):
+        with Store(self.state) as store:
+            origin = ARCHIVE.origin_for(store.db)
+            with store.db:
+                store.db.execute(
+                    "INSERT INTO sessions (id, project, cwd, harness, source_path, updated, file_size, file_mtime_ns, "
+                    "file_ctime_ns, file_dev, file_ino, indexed_bytes, header_digest, coverage, native_id, ancestry, origin_host) "
+                    "VALUES ('cmd:local', NULL, '/w', 'cmd', 'generation:1', 1, 0, 0, 0, 0, 0, 0, '', 'complete', 'local', 'known', ?)",
+                    (origin,))
+            store.forget_session("cmd:local@" + origin, 1000.0)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+            self.assertEqual(store.db.execute("SELECT native_id FROM tombstone").fetchone()[0], "local")
+
     def test_bare_identifier_is_not_silently_matched_on_a_central_store(self):
         for origin in ("a" * 32, "b" * 32):
             with Store(self.state) as store:

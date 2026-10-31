@@ -362,9 +362,9 @@ def ssh_sender(store, remote, host, command, origin, label, timeout=120):
         assert process.stdout is not None and process.stdin is not None
         sender = Sender(store, remote, process.stdout, process.stdin, origin, label)
         return sender.run()
-    except (OSError, ValueError) as exc:
-        detail = sink[0].decode("utf-8", "replace").strip()[:400]
-        raise TransferError("ssh transport failed: %s%s" % (exc, (" (" + detail + ")") if detail else "")) from exc
+    except (OSError, ValueError, TransferError) as exc:
+        detail = sink[0].decode("utf-8", "replace").strip()[-600:]
+        raise TransferError("ssh transport failed: %s%s" % (exc, ("; remote stderr: " + detail) if detail else "")) from exc
     finally:
         watchdog.cancel()
         stdin = process.stdin
@@ -473,14 +473,23 @@ def query(store, op, args):
 
 def query_over_ssh(host, command, op, args, origin, label, timeout=120):
     import subprocess
+    import threading
 
     process = subprocess.Popen(["ssh", "-o", "BatchMode=yes", host, "--", command],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    sink = [b""]
+    detail = process.stderr
+    assert detail is not None
+    threading.Thread(target=_drain, args=(detail, sink), daemon=True).start()
     try:
         instream, outstream = process.stdout, process.stdin
         assert instream is not None and outstream is not None
         write_message(outstream, {"type": "hello", "protocol": PROTOCOL, "origin": origin, "label": label})
-        ready = read_message(instream)
+        try:
+            ready = read_message(instream)
+        except (OSError, TransferError) as exc:
+            text = sink[0].decode("utf-8", "replace").strip()[-400:]
+            raise TransferError("central store unreachable: %s%s" % (exc, ("; " + text) if text else "")) from exc
         if ready.get("type") != "ready":
             raise TransferError(str(ready.get("message") or "central store refused the query"))
         write_message(outstream, {"type": "query", "op": op, "args": args})

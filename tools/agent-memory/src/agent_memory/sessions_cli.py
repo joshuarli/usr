@@ -170,7 +170,9 @@ def central_rows(args, op, payload) -> list[dict[str, Any]]:
     command = settings.get("command")
     if not host or not command:
         raise StoreError("ssh central settings need host and command")
-    return transfer_module.query_over_ssh(host, command, op, payload, "query", "agent-sessions")
+    with Store(_state_dir(args)) as local:
+        origin = archive_module.origin_for(local.db)
+    return transfer_module.query_over_ssh(host, command, op, payload, origin, "agent-sessions")
 
 
 def _print_central_row(row, query=None, regex=False):
@@ -206,7 +208,7 @@ def _memory(args):
             print("  authority=" + str(row["authority"]))
         print("records=%d scope=central" % len(rows))
         return 0
-    except (OSError, StoreError) as exc:
+    except (OSError, StoreError, transfer_module.TransferError) as exc:
         print("agent-sessions memory: " + str(exc), file=sys.stderr)
         return 1
 
@@ -370,7 +372,7 @@ def _search(args):
                 _print_central_row(row, args.query, args.regex)
             print("matches=%d scope=central" % len(rows))
             return 0
-        except (OSError, StoreError) as exc:
+        except (OSError, StoreError, transfer_module.TransferError) as exc:
             print("agent-sessions search: " + str(exc), file=sys.stderr)
             return 1
     try:
@@ -422,7 +424,7 @@ def _recent(args):
                 _print_central_row(row)
             print("sessions=%d scope=central" % len(rows))
             return 0
-        except (OSError, StoreError) as exc:
+        except (OSError, StoreError, transfer_module.TransferError) as exc:
             print("agent-sessions recent: " + str(exc), file=sys.stderr)
             return 1
     try:
@@ -451,7 +453,7 @@ def _show(args):
             for row in rows:
                 _print_central_row(row)
             return 0
-        except (OSError, StoreError) as exc:
+        except (OSError, StoreError, transfer_module.TransferError) as exc:
             print("agent-sessions show: " + str(exc), file=sys.stderr)
             return 1
     try:
