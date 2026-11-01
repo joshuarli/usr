@@ -212,6 +212,9 @@ async function putObject(
   if (principal.kind !== "collector") return refuse(403, "forbidden", "collector token required", timing);
   const existing = await readObjectByCiphertext(env.DB, principal.origin_host, ciphertext);
   if (existing !== null) {
+    if (existing.plaintext_digest !== plaintext || existing.plaintext_size !== size || existing.encoding !== encoding) {
+      return refuse(409, "conflict", "ciphertext is already bound to another object", timing);
+    }
     const head = await env.BUCKET.head(`v1/o/${ciphertext}`);
     if (head !== null) {
       return json(200, { stored: false, object: mapping(existing) }, false, {
@@ -247,15 +250,12 @@ async function putObject(
     created_at: Date.now() / 1000,
   });
   const stored = await readObjectByPlaintext(env.DB, principal.origin_host, plaintext);
+  if (stored === null) {
+    return refuse(409, "conflict", "ciphertext is already bound to another plaintext", timing);
+  }
   return json(200, {
-    stored: stored?.ciphertext_digest === ciphertext,
-    object: stored === null ? {
-      plaintext_digest: plaintext,
-      plaintext_size: size,
-      encoding,
-      ciphertext_digest: ciphertext,
-      ciphertext_size: declared,
-    } : mapping(stored),
+    stored: stored.ciphertext_digest === ciphertext,
+    object: mapping(stored),
   }, false, { "Server-Timing": serverTiming(timing) });
 }
 

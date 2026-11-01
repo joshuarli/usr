@@ -25,7 +25,7 @@ SCHEMA_VERSION = 1
 QUERY = "retentionmarker"
 sys.path.insert(0, str(SRC_DIR))
 
-from agent_memory import learning, learning_sync  # noqa: E402
+from agent_memory import learning, learning_sync, mirror_crypto  # noqa: E402
 from agent_memory.store import Store, project_identity  # noqa: E402
 
 DEFERRED = {
@@ -33,7 +33,6 @@ DEFERRED = {
     "search": "P3.3",
     "inspect": "P3.3",
     "learning-delta": "P3.1",
-    "mirror-initial": "P2.2",
     "mirror-noop": "P2.3",
     "mirror-append": "P2.3",
     "recovery": "P2.4",
@@ -41,7 +40,7 @@ DEFERRED = {
     "mirror-concurrent": "P5.2",
     "worker-status": "P1.4",
 }
-LOCAL_SCENARIOS = ("capture", "learning-import")
+LOCAL_SCENARIOS = ("capture", "learning-import", "mirror-initial")
 
 
 def _line(value):
@@ -337,6 +336,71 @@ def _learning_import(scenario, args, root):
     return dataset, samples, ("export",)
 
 
+def _mirror_initial(scenario, args, root):
+    try:
+        mirror_crypto.binary()
+    except mirror_crypto.CryptoError as exc:
+        raise RuntimeError(str(exc)) from exc
+    identity = root / "collector.key"
+    recipient = mirror_crypto.keygen(identity)
+    recipients = [recipient]
+    per_class = max(1, args.objects)
+    size = 64 * 1024
+    lines = [("synthetic transcript message %d with varying identifiers and prose for the mirror\n" % index).encode()
+             for index in range(512)]
+    corpus = b"".join(lines)
+    text = (corpus * (size // len(corpus) + 1))[:size]
+    classes = {"chunk": text, "artifact": os.urandom(size)}
+    samples = []
+    for repeat in range(args.repeats):
+        def prepare():
+            counters = {
+                "objects": 0, "bytes_plaintext": 0, "bytes_compressed": 0,
+                "zlib_objects": 0, "classes": {},
+            }
+            timings = {"bytes_ciphertext": 0, "compress_cpu_ms": 0.0, "encrypt_cpu_ms": 0.0, "classes": {}}
+            for kind, data in classes.items():
+                entry = counters["classes"].setdefault(kind, {
+                    "objects": 0, "bytes_plaintext": 0, "bytes_compressed": 0, "zlib_objects": 0,
+                })
+                timings["classes"].setdefault(kind, {
+                    "bytes_ciphertext": 0, "compress_cpu_ms": 0.0, "encrypt_cpu_ms": 0.0,
+                })
+                for _index in range(per_class):
+                    prepared = mirror_crypto.prepare_object(data, recipients)
+                    counters["objects"] += 1
+                    counters["bytes_plaintext"] += prepared.plaintext_size
+                    counters["bytes_compressed"] += prepared.compressed_size
+                    timings["bytes_ciphertext"] += prepared.ciphertext_size
+                    counters["zlib_objects"] += 1 if prepared.encoding == "zlib" else 0
+                    entry["objects"] += 1
+                    entry["bytes_plaintext"] += prepared.plaintext_size
+                    entry["bytes_compressed"] += prepared.compressed_size
+                    timings["classes"][kind]["bytes_ciphertext"] += prepared.ciphertext_size
+                    entry["zlib_objects"] += 1 if prepared.encoding == "zlib" else 0
+                    timings["compress_cpu_ms"] += prepared.compress_cpu_ms
+                    timings["encrypt_cpu_ms"] += prepared.encrypt_cpu_ms
+                    timings["classes"][kind]["compress_cpu_ms"] += prepared.compress_cpu_ms
+                    timings["classes"][kind]["encrypt_cpu_ms"] += prepared.encrypt_cpu_ms
+            counters["compression_ratio"] = round(
+                counters["bytes_compressed"] / counters["bytes_plaintext"], 6
+            ) if counters["bytes_plaintext"] else 1.0
+            for entry in counters["classes"].values():
+                entry["compression_ratio"] = round(
+                    entry["bytes_compressed"] / entry["bytes_plaintext"], 6
+                ) if entry["bytes_plaintext"] else 1.0
+            counters["_timings"] = timings
+            return counters
+        sample = _timed(prepare, repeat, _gate)
+        sample["operation"] = "prepare"
+        samples.append(sample)
+    dataset = {
+        "objects_per_class": per_class, "classes": sorted(classes), "object_bytes": size,
+        "zlib_class": "chunk", "identity_class": "artifact",
+    }
+    return dataset, samples, ("prepare",)
+
+
 def _document(environment, scenario, dataset, samples, operations, runtime=None):
     moment = _now()
     counters = {}
@@ -583,7 +647,7 @@ def _dispatch(environment, args):
         return 2
     if args.repeats < 1:
         raise ValueError("repeats must be positive")
-    if args.records < 1 or args.sessions < 1 or args.messages < 1 or args.projects < 1:
+    if args.records < 1 or args.sessions < 1 or args.messages < 1 or args.projects < 1 or args.objects < 1:
         raise ValueError("records, sessions, messages, and projects must be positive")
     out = Path(args.out)
     if not out.is_absolute():
@@ -592,8 +656,10 @@ def _dispatch(environment, args):
         root = Path(temporary)
         if scenario == "capture":
             dataset, samples, operations = _capture(scenario, args, root)
-        else:
+        elif scenario == "learning-import":
             dataset, samples, operations = _learning_import(scenario, args, root)
+        else:
+            dataset, samples, operations = _mirror_initial(scenario, args, root)
     document = _document("local", scenario, dataset, samples, operations)
     _write(document, out)
     print(json.dumps(document, indent=2, sort_keys=True))
@@ -613,6 +679,7 @@ def main(argv=None):
         command.add_argument("--scenario")
         command.add_argument("--repeats", type=int, default=5)
         command.add_argument("--records", type=int, default=1000)
+        command.add_argument("--objects", type=int, default=200)
         command.add_argument("--sessions", type=int, default=200)
         command.add_argument("--messages", type=int, default=10)
         command.add_argument("--projects", type=int, default=10)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Cloudflare mirror protocol: validators, configuration, and a pooled HTTPS client."""
 import base64
+import concurrent.futures
 import http.client
 import json
 import re
@@ -8,8 +9,11 @@ import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
+
+from agent_memory import archive as archive_module
+from agent_memory import mirror_crypto
 
 PROTOCOL = 1
 MAX_JSON_BYTES = 8 * 1024 * 1024
@@ -30,6 +34,7 @@ ERROR_CODES = frozenset({
     "invalid_request",
     "unsupported_version",
     "payload_too_large",
+    "conflict",
 })
 CONFIG_KEYS = frozenset({
     "transport",
@@ -40,6 +45,7 @@ CONFIG_KEYS = frozenset({
     "learning_projection",
 })
 ENCODINGS = frozenset({"identity", "zlib"})
+OBJECT_CLASSES = frozenset({"chunk", "artifact", "manifest", "snapshot"})
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 ORIGIN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 BASE64URL = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -309,6 +315,16 @@ def decode_missing_response(value):
     return {"protocol": PROTOCOL, "origin": origin, "missing": decoded_missing, "known": decoded_known}
 
 
+def decode_put_response(value):
+    if not _exact_keys(value, ("stored", "object")):
+        return None
+    stored = value.get("stored")
+    object_row = _decode_remote_object(value.get("object"))
+    if not isinstance(stored, bool) or object_row is None:
+        return None
+    return {"stored": stored, "object": object_row}
+
+
 def decode_error_response(value):
     if not _record(value) or not _exact_keys(value, ("error",)):
         return None
@@ -381,7 +397,7 @@ class MirrorClient:
             return min(60, max(1, int(retry_after)))
         return min(60, 2 ** attempt)
 
-    def _request(self, method, path, body, headers):
+    def _request(self, method, path, body, headers) -> bytes:
         for attempt in range(self.attempts):
             try:
                 connection = self.pool.get()
@@ -406,7 +422,7 @@ class MirrorClient:
                         self._sleep(self._retry_delay(attempt, response_headers))
                         continue
                     raise error
-                return payload
+                return cast(bytes, payload)
             except MirrorError:
                 raise
             except (OSError, http.client.HTTPException) as exc:
@@ -430,13 +446,13 @@ class MirrorClient:
             raise MirrorError("invalid_response", "mirror response is not an object")
         return decoded
 
-    def status(self):
+    def status(self) -> dict[str, Any]:
         value = self._json("GET", "/api/v1/status")
         if decode_protocol(value.get("protocol")) is None:
             raise MirrorError("unsupported_version", "mirror status protocol is not supported")
         return value
 
-    def hello(self, origin):
+    def hello(self, origin) -> dict[str, Any]:
         request = {"protocol": PROTOCOL, "origin": origin}
         if decode_hello(request) is None:
             raise MirrorError("invalid_request", "hello request is invalid")
@@ -446,7 +462,7 @@ class MirrorClient:
             raise MirrorError("invalid_response", "hello response is invalid")
         return decoded
 
-    def missing(self, origin, objects):
+    def missing(self, origin, objects) -> dict[str, Any]:
         request = {
             "protocol": PROTOCOL,
             "origin": origin,
@@ -459,6 +475,159 @@ class MirrorClient:
         if decoded is None:
             raise MirrorError("invalid_response", "missing-objects response is invalid")
         return decoded
+
+    def get_object(self, ciphertext) -> bytes:
+        if decode_digest(ciphertext) is None:
+            raise MirrorError("invalid_request", "object digest is invalid")
+        headers = self._auth_headers()
+        headers["Accept"] = "application/octet-stream"
+        return self._request("GET", "/api/v1/sync/objects/" + ciphertext, None, headers)
+
+    def put_object(self, prepared) -> dict[str, Any]:
+        headers = self._auth_headers()
+        headers.update({
+            "Content-Type": "application/octet-stream",
+            "X-Plaintext-Digest": prepared.plaintext_digest,
+            "X-Plaintext-Size": str(prepared.plaintext_size),
+            "X-Encoding": prepared.encoding,
+        })
+        payload = self._request(
+            "PUT", "/api/v1/sync/objects/" + prepared.ciphertext_digest, prepared.ciphertext, headers)
+        decoded = decode_put_response(_loads(payload))
+        if decoded is None:
+            raise MirrorError("invalid_response", "object upload response is invalid")
+        return decoded
+
+
+@dataclass(frozen=True)
+class UploadObject:
+    plaintext_digest: str
+    size: int
+    kind: str = "chunk"
+
+
+def _upload_refs(objects) -> list[UploadObject]:
+    refs = []
+    seen = set()
+    for item in objects:
+        if isinstance(item, UploadObject):
+            ref = item
+        else:
+            values = tuple(item)
+            if len(values) == 2:
+                ref = UploadObject(values[0], values[1])
+            elif len(values) == 3:
+                ref = UploadObject(values[0], values[1], values[2])
+            else:
+                raise MirrorError("invalid_request", "upload object must carry digest, size, and optional kind")
+        if (decode_digest(ref.plaintext_digest) is None or isinstance(ref.size, bool)
+                or not isinstance(ref.size, int) or not 0 <= ref.size <= MAX_OBJECT_BYTES):
+            raise MirrorError("invalid_request", "upload object is invalid")
+        if ref.kind not in OBJECT_CLASSES:
+            raise MirrorError("invalid_request", "upload object kind is invalid")
+        if ref.plaintext_digest in seen:
+            continue
+        seen.add(ref.plaintext_digest)
+        refs.append(ref)
+    return refs
+
+
+def _empty_class():
+    return {
+        "objects": 0, "plaintext_bytes": 0, "compressed_bytes": 0, "ciphertext_bytes": 0,
+        "zlib_objects": 0, "compress_cpu_ms": 0.0, "encrypt_cpu_ms": 0.0,
+    }
+
+
+def _upload_group(client, refs, archive_dir, recipients, prepare):
+    counters = {"stored": 0, "already_stored": 0, "classes": {}}
+    for ref in refs:
+        data = archive_module.read_object(archive_dir, ref.plaintext_digest)
+        if len(data) != ref.size:
+            raise MirrorError("invalid_request", "archived object size does not match the request")
+        prepared = prepare(data, recipients)
+        if prepared.plaintext_digest != ref.plaintext_digest:
+            raise MirrorError("invalid_request", "prepared object digest does not match the archive")
+        if prepared.ciphertext_size > MAX_OBJECT_BYTES:
+            raise MirrorError("invalid_request", "ciphertext exceeds the upload limit")
+        result = client.put_object(prepared)
+        object_row = result["object"]
+        if object_row["plaintext_digest"] != prepared.plaintext_digest:
+            raise MirrorError("invalid_response", "object upload response names a different plaintext")
+        if result["stored"] and object_row["ciphertext_digest"] != prepared.ciphertext_digest:
+            raise MirrorError("invalid_response", "object upload response names a different ciphertext")
+        if result["stored"]:
+            counters["stored"] += 1
+        else:
+            counters["already_stored"] += 1
+        entry = counters["classes"].setdefault(ref.kind, _empty_class())
+        entry["objects"] += 1
+        entry["plaintext_bytes"] += prepared.plaintext_size
+        entry["compressed_bytes"] += prepared.compressed_size
+        entry["ciphertext_bytes"] += prepared.ciphertext_size
+        entry["zlib_objects"] += 1 if prepared.encoding == "zlib" else 0
+        entry["compress_cpu_ms"] += prepared.compress_cpu_ms
+        entry["encrypt_cpu_ms"] += prepared.encrypt_cpu_ms
+    return counters
+
+
+def upload_objects(config, origin, archive_dir, objects, recipients=None, *, concurrency=4,
+                   client_factory=None, prepare=None):
+    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+        raise ValueError("concurrency must be a positive integer")
+    refs = _upload_refs(objects)
+    counters = {
+        "objects_requested": len(refs), "objects_known": 0, "objects_missing": 0,
+        "objects_stored": 0, "objects_already_stored": 0,
+        "bytes_plaintext": 0, "bytes_compressed": 0, "bytes_ciphertext": 0,
+        "compress_cpu_ms": 0.0, "encrypt_cpu_ms": 0.0, "classes": {},
+    }
+    if not refs:
+        return counters
+    if recipients is None:
+        recipients = mirror_crypto.load_recipients(config.age_recipients_file)
+    prepare = prepare or mirror_crypto.prepare_object
+    factory = client_factory or (lambda: MirrorClient(config))
+
+    primary = factory()
+    try:
+        answer = primary.missing(origin, [(ref.plaintext_digest, ref.size) for ref in refs])
+    finally:
+        primary.close()
+    known = {row["plaintext_digest"] for row in answer["known"]}
+    missing = [ref for ref in refs if ref.plaintext_digest not in known]
+    counters["objects_known"] = len(known)
+    counters["objects_missing"] = len(missing)
+    if not missing:
+        return counters
+
+    workers = min(concurrency, len(missing))
+    groups = [missing[index::workers] for index in range(workers)]
+    clients = [factory() for _ in range(workers)]
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_upload_group, client, group, archive_dir, recipients, prepare)
+                for client, group in zip(clients, groups)
+            ]
+            for future in futures:
+                result = future.result()
+                counters["objects_stored"] += result["stored"]
+                counters["objects_already_stored"] += result["already_stored"]
+                for kind, entry in result["classes"].items():
+                    total = counters["classes"].setdefault(kind, _empty_class())
+                    for key in total:
+                        total[key] += entry[key]
+    finally:
+        for client in clients:
+            client.close()
+    for entry in counters["classes"].values():
+        counters["bytes_plaintext"] += entry["plaintext_bytes"]
+        counters["bytes_compressed"] += entry["compressed_bytes"]
+        counters["bytes_ciphertext"] += entry["ciphertext_bytes"]
+        counters["compress_cpu_ms"] += entry["compress_cpu_ms"]
+        counters["encrypt_cpu_ms"] += entry["encrypt_cpu_ms"]
+    return counters
 
 
 def _loads(payload):

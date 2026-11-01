@@ -4,6 +4,7 @@ SHELL := /bin/sh
 REPEATS ?= 5
 SCENARIO ?=
 RECORDS ?= 1000
+OBJECTS ?= 200
 OUT ?= .work/perf
 LOCAL ?=
 CF ?= cf
@@ -61,13 +62,13 @@ observe: ## Assert the observability config and name the serving deployment
 	@cd $(WORKER_DIR) && $(CF) workers deployments list --worker usr-memories
 
 perf-local: ## Collector benchmarks, no network
-	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" local
+	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" OBJECTS="$(OBJECTS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" local
 
 perf-worker: worker-bundle ## Benchmark the Miniflare bundle over HTTP
-	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" worker
+	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" OBJECTS="$(OBJECTS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" worker
 
 perf-deployed: ## Benchmark the production origin with synthetic data
-	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" deployed
+	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" OBJECTS="$(OBJECTS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" deployed
 
 perf-report: ## Compare benchmark runs under OUT
 	@TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) tools/agent-memory/eval/bench_mirror.py report --dir "$(OUT)"

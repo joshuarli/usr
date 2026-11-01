@@ -20,11 +20,13 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   `Server-Timing`), `P1.4` (Miniflare bench harness and the status baseline), `P1.5`
   (deploy gate, bundle-once deploy, smoke probe, and collector authentication), and
   `P1.6` (R2 and D1 `usr-memories`, Worker-level Access, collector token, first deploy
-  at `memories.17166969.xyz`, and the live smoke probe), and `P2.1` (protocol v1
-  validators, hello/missing/object routes, and the pooled HTTPS client).
+  at `memories.17166969.xyz`, and the live smoke probe), `P2.1` (protocol v1
+  validators, hello/missing/object routes, and the pooled HTTPS client), and `P2.2`
+  (compression before encryption, bounded concurrent upload, known-object skipping, and
+  the `mirror-initial` cost baseline).
 - **In flight:** none.
-- **Next slice:** `P2.2` (compressed encrypted upload); the first command re-checks the
-  baseline: `make test`.
+- **Next slice:** `P2.3` (generation commit and revision fencing); the first command
+  re-checks the baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.
@@ -121,6 +123,7 @@ names what would reverse it.
 | CF28 | Deployment mirrors `stuff`'s Makefile: one `cf build --mode production` bundle, the tests run on that bundle, `cf deploy --prebuilt` ships exactly the tested bundle, and `make deploy` gates on `cf auth whoami`, rejects pending D1 migrations, then runs test → deploy → read-only smoke. A root `Makefile` is the entry point; `make help` lists targets. | The owner asked for the same machinery, and testing a different bundle than the one deployed was a defect class `stuff` already removed. | A different deployment tool supersedes `cf`. |
 | CF29 | `provision.sh` creates the Worker-level app with only the owner policy, then updates it with the collector `non_identity` policy; a re-run skips the update when the same token is already bound. `collector.service_token_id` stores the Access Client ID (`<id>.access`), not the token UUID used by the policy. | The Access API rejects a create that includes a `non_identity` policy with `[12130]`, and rejects repeating the same update on an already-updated app; the API identifies a service-token session by its Client ID. | Access accepts the combined create or in-place policy updates. |
 | CF30 | Protocol v1 is one closed schema shared by TS and Python: unknown object fields are rejected, digests are lowercase 64-hex, origins are `[A-Za-z0-9._-]{1,128}`, JSON and object bodies are capped at 8 MiB, a missing-object request carries at most 20,000 unique digests, and cursors are base64url JSON arrays of 1–4 strings. Both implementations run `tests/fixtures/mirror_protocol.json`; `make worker-test` refuses a Worker that disagrees with it. | The brief asks for one fixture corpus instead of validation copied into a second language. Closed validators make a typo a 400, not a silent default. | A protocol version bump. |
+| CF31 | Upload asks for the missing set once, prepares only those objects (zlib when it saves at least 5%, then age), and uploads four at a time over independent keep-alive connections. A known plaintext digest is never re-encrypted or re-uploaded. Plaintext and compressed bytes gate deterministically; ciphertext bytes and CPU are recorded per object class as measurements because randomized age output can differ by a few bytes. | Re-uploading known objects is the dominant avoidable cost on a retry or a second sync, and per-class bytes show where compression pays. A deterministic ciphertext size is not available from a randomized container. | A deterministic padding scheme that fixes ciphertext length. |
 
 **Delegated** — the executor decides inside the bound and records it in the commit body.
 

@@ -117,12 +117,16 @@ Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFI
 
 `make perf-local` measures the collector paths with no network and writes one JSON document
 per run under `.work/perf/`; `make perf-report` compares the oldest and newest run of each
-scenario. `REPEATS` (default 5), `SCENARIO`, `RECORDS`, and `OUT` override the defaults.
-`SCENARIO=learning-import` seeds 1k synthetic learning records by default and measures
-snapshot export and serialization. `perf-worker` boots the built bundle with real Miniflare
-D1 and R2 and measures it over loopback HTTP; build it once with `cf build --mode production`
-in `tools/agent-memory/cloudflare` after `npm ci`. `perf-deployed` lands with the first
-deploy.
+scenario. `REPEATS` (default 5), `SCENARIO`, `RECORDS`, `OBJECTS`, and `OUT` override the
+defaults. `SCENARIO=learning-import` seeds 1k synthetic learning records by default and
+measures snapshot export and serialization. `SCENARIO=mirror-initial OBJECTS=200` prepares
+64 KiB synthetic transcript and artifact objects through compression and `rage`, and records
+plaintext, compressed, and ciphertext bytes plus CPU per class; set `AGE_BIN` when `rage` is
+not on `PATH`. Ciphertext bytes live in the sample's `timings` because randomized age
+ciphertext length can vary by a few bytes, so they are measured, not used as a deterministic
+gate. `perf-worker` boots the built bundle with real Miniflare D1 and R2 and measures it over
+loopback HTTP; build it once with `cf build --mode production` in
+`tools/agent-memory/cloudflare` after `npm ci`. `perf-deployed` lands with the first deploy.
 
 The capture baseline (200 sessions × 10 messages × 10 projects, 2,600 events) on
 2026-10-31:
@@ -132,6 +136,19 @@ The capture baseline (200 sessions × 10 messages × 10 projects, 2,600 events) 
 | fresh index | 979,580 | 400 | 600 | 10 | 24,181 |
 | one-line append | 3,015 | 3 | 203 | 1 | 11 |
 | unchanged refresh | 0 | 0 | 200 | 0 | 0 |
+
+The mirror baseline (`SCENARIO=mirror-initial OBJECTS=10 REPEATS=2`, 20 objects of 64 KiB,
+`rage 0.12.1`) on 2026-11-01:
+
+| Class | Plaintext | Compressed | Ratio | zlib objects | Compress CPU | Encrypt CPU |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| transcript chunk (synthetic) | 655,360 | 22,390 | 3.4% | 10 | 1.4 ms | 11.5 ms |
+| random artifact | 655,360 | 655,360 | 100% | 0 | 7.0 ms | 13.9 ms |
+
+The artifact is incompressible by construction; the transcript payload is repetitive
+synthetic text, so it bounds the best case rather than a real transcript. The 20 objects
+produced about 683,700 ciphertext bytes. Wall p50 was 269.8 ms (p95 276.8 ms) and CPU
+median 39.3 ms, including one `rage` process per object.
 
 Time-based samples are recorded only when `perf-gate-ready` passes before and after the
 sample; a busy host leaves `perf_gate: deferred`, and the deterministic counters still gate

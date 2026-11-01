@@ -121,6 +121,64 @@ class MirrorCryptoTests(unittest.TestCase):
         with self.assertRaises(crypto.CryptoError):
             self.encrypt(["-r"])
 
+    def test_compression_is_chosen_only_when_it_saves_five_percent(self):
+        recipients = self.identities("collector", "recovery")
+        text = b"synthetic transcript line\n" * 4096
+        prepared = crypto.prepare_object(text, recipients)
+        self.assertEqual(prepared.encoding, "zlib")
+        self.assertLessEqual(prepared.compressed_size * 100, prepared.plaintext_size * 95)
+        self.assertGreater(prepared.ciphertext_size, 0)
+        self.assertGreaterEqual(prepared.compress_cpu_ms, 0)
+        self.assertGreaterEqual(prepared.encrypt_cpu_ms, 0)
+        self.assertLessEqual(prepared.compression_ratio, 0.95)
+        self.assertEqual(
+            crypto.decode_object(prepared.ciphertext, self.root / "collector.key", prepared.encoding,
+                                 prepared.plaintext_digest, prepared.plaintext_size),
+            text,
+        )
+
+    def test_incompressible_data_carries_no_compression_claim(self):
+        recipients = self.identities("collector", "recovery")
+        data = os.urandom(64 * 1024)
+        prepared = crypto.prepare_object(data, recipients)
+        self.assertEqual(prepared.encoding, "identity")
+        self.assertEqual(prepared.compressed_size, len(data))
+        self.assertEqual(prepared.compression_ratio, 1.0)
+        self.assertEqual(
+            crypto.decode_object(prepared.ciphertext, self.root / "collector.key", prepared.encoding,
+                                 prepared.plaintext_digest, prepared.plaintext_size),
+            data,
+        )
+
+    def test_decode_refuses_a_wrong_identity_an_over_large_inflate_or_a_bad_digest(self):
+        collector, recovery, wrong = self.identities("collector", "recovery", "wrong")
+        text = b"highly compressible synthetic payload\n" * 2048
+        prepared = crypto.prepare_object(text, [collector, recovery])
+        self.assertEqual(prepared.encoding, "zlib")
+        identity = self.root / "collector.key"
+        for args in [
+            (prepared.ciphertext, self.root / "wrong.key", prepared.encoding,
+             prepared.plaintext_digest, prepared.plaintext_size),
+            (prepared.ciphertext, identity, prepared.encoding, prepared.plaintext_digest, 1024),
+            (prepared.ciphertext, identity, prepared.encoding, "0" * 64, prepared.plaintext_size),
+            (prepared.ciphertext, identity, "gzip", prepared.plaintext_digest, prepared.plaintext_size),
+            (prepared.ciphertext[:-8], identity, prepared.encoding,
+             prepared.plaintext_digest, prepared.plaintext_size),
+        ]:
+            with self.assertRaises(crypto.CryptoError):
+                crypto.decode_object(*args)
+
+    def test_recipients_file_skips_comments_and_requires_a_recipient(self):
+        recipient = self.identities("collector")[0]
+        path = self.root / "recipients.txt"
+        path.write_text("# recovery keys\n\n" + recipient + "\n")
+        self.assertEqual(crypto.load_recipients(path), [recipient])
+        path.write_text("# none\n")
+        with self.assertRaises(crypto.CryptoError):
+            crypto.load_recipients(path)
+        with self.assertRaises(crypto.CryptoError):
+            crypto.prepare_object(b"x", [])
+
 
 if __name__ == "__main__":
     unittest.main()

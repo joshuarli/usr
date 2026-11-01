@@ -210,6 +210,13 @@ test("object upload is idempotent, checksum-verified, and origin-scoped", async 
   const corrupt = await worker.fetch(objectRequest(digest("different"), ciphertext), env, collector());
   assert.equal(corrupt.status, 400);
   assert.equal((await db.prepare("SELECT count(*) AS count FROM remote_object").first()).count, 1);
+
+  const conflict = await worker.fetch(objectRequest(ciphertextDigest, ciphertext, {
+    "X-Plaintext-Digest": digest("another plaintext"),
+  }), env, collector());
+  assert.equal(conflict.status, 409);
+  assert.equal((await conflict.json()).error.code, "conflict");
+  assert.equal((await db.prepare("SELECT count(*) AS count FROM remote_object").first()).count, 1);
 });
 
 test("object uploads stream without a content length and refuse an oversized body", async (t) => {

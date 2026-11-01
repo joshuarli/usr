@@ -14,6 +14,7 @@ export const ERROR_CODES = [
   "invalid_request",
   "unsupported_version",
   "payload_too_large",
+  "conflict",
 ] as const;
 
 const DIGEST = /^[0-9a-f]{64}$/;

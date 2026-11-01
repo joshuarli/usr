@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Mirror protocol parity, configuration, and pooled-client behavior."""
+import hashlib
 import http.client
 import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from typing import cast
@@ -15,12 +18,96 @@ WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / "tools" / "agent-memory" / "src"))
 
+from agent_memory import archive as archive_module  # noqa: E402
 from agent_memory import mirror  # noqa: E402
+from agent_memory import mirror_crypto  # noqa: E402
 
 FIXTURE = json.loads((ROOT / "tools" / "agent-memory" / "tests" / "fixtures" / "mirror_protocol.json").read_text())
 DIGEST = "a" * 64
 OTHER = "b" * 64
 CIPHER = "c" * 64
+
+
+def archive_object(root, data):
+    digest = hashlib.sha256(data).hexdigest()
+    path = archive_module.object_path(root, digest)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return digest, len(data)
+
+
+def prepared_for(data, encoding="identity", ciphertext=b"synthetic ciphertext", compress_cpu_ms=1.0,
+                 encrypt_cpu_ms=2.0):
+    digest = hashlib.sha256(data).hexdigest()
+    payload = data if encoding == "identity" else b"compressed"
+    return mirror_crypto.PreparedObject(
+        plaintext_digest=digest,
+        plaintext_size=len(data),
+        encoding=encoding,
+        compressed_size=len(payload),
+        ciphertext=ciphertext,
+        ciphertext_digest=hashlib.sha256(ciphertext).hexdigest(),
+        ciphertext_size=len(ciphertext),
+        compress_cpu_ms=compress_cpu_ms,
+        encrypt_cpu_ms=encrypt_cpu_ms,
+    )
+
+
+class FakeUploadClient:
+    def __init__(self, known=None, tracker=None):
+        self.known = list(known or [])
+        self.tracker = tracker
+        self.puts = []
+        self.closed = False
+
+    def missing(self, origin, objects):
+        requested = {digest for digest, _size in objects}
+        known = [row for row in self.known if row["plaintext_digest"] in requested]
+        present = {row["plaintext_digest"] for row in known}
+        return {
+            "protocol": 1, "origin": origin,
+            "missing": [{"plaintext_digest": digest, "size": size}
+                        for digest, size in objects if digest not in present],
+            "known": known,
+        }
+
+    def put_object(self, prepared):
+        if self.tracker is not None:
+            with self.tracker.lock:
+                self.tracker.active += 1
+                self.tracker.peak = max(self.tracker.peak, self.tracker.active)
+            time.sleep(0.03)
+            with self.tracker.lock:
+                self.tracker.active -= 1
+                self.tracker.puts.append(prepared)
+        else:
+            self.puts.append(prepared)
+        return {"stored": True, "object": {
+            "plaintext_digest": prepared.plaintext_digest,
+            "plaintext_size": prepared.plaintext_size,
+            "encoding": prepared.encoding,
+            "ciphertext_digest": prepared.ciphertext_digest,
+            "ciphertext_size": prepared.ciphertext_size,
+        }}
+
+    def close(self):
+        self.closed = True
+
+
+class SequenceFactory:
+    def __init__(self, *clients):
+        self.clients = list(clients)
+
+    def __call__(self):
+        return self.clients.pop(0)
+
+
+class Tracker:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.active = 0
+        self.peak = 0
+        self.puts = []
 
 
 class FakeResponse:
@@ -333,6 +420,46 @@ class ClientTests(unittest.TestCase):
                 runtime.status()
         self.assertEqual(raised.exception.code, "unsupported_version")
 
+    def test_put_object_sends_plaintext_metadata_and_ciphertext(self):
+        prepared = prepared_for(b"synthetic", encoding="zlib", ciphertext=b"ciphertext bytes")
+        body = {
+            "stored": True,
+            "object": {
+                "plaintext_digest": prepared.plaintext_digest,
+                "plaintext_size": prepared.plaintext_size,
+                "encoding": prepared.encoding,
+                "ciphertext_digest": prepared.ciphertext_digest,
+                "ciphertext_size": prepared.ciphertext_size,
+            },
+        }
+        connection = FakeConnection(response(body))
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            result = runtime.put_object(prepared)
+        self.assertTrue(result["stored"])
+        call = connection.calls[0]
+        self.assertEqual((call["method"], call["path"]),
+                         ("PUT", "/api/v1/sync/objects/" + prepared.ciphertext_digest))
+        self.assertEqual(call["body"], prepared.ciphertext)
+        self.assertEqual(call["headers"]["X-Plaintext-Digest"], prepared.plaintext_digest)
+        self.assertEqual(call["headers"]["X-Plaintext-Size"], str(prepared.plaintext_size))
+        self.assertEqual(call["headers"]["X-Encoding"], "zlib")
+        self.assertEqual(call["headers"]["Content-Type"], "application/octet-stream")
+
+    def test_get_object_reads_raw_ciphertext(self):
+        ciphertext = b"synthetic ciphertext"
+        digest = hashlib.sha256(ciphertext).hexdigest()
+        connection = FakeConnection(FakeResponse(200, ciphertext))
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            self.assertEqual(runtime.get_object(digest), ciphertext)
+        call = connection.calls[0]
+        self.assertEqual((call["method"], call["path"]), ("GET", "/api/v1/sync/objects/" + digest))
+        self.assertEqual(call["headers"]["Accept"], "application/octet-stream")
+        with runtime:
+            with self.assertRaises(mirror.MirrorError):
+                runtime.get_object("not-a-digest")
+
     def test_missing_request_and_response_are_validated(self):
         body = {
             "protocol": 1, "origin": "origin-a",
@@ -359,6 +486,96 @@ class ClientTests(unittest.TestCase):
                 runtime.missing("origin-a", [(DIGEST, 4), (DIGEST, 5)])
         self.assertEqual(raised.exception.code, "invalid_request")
         self.assertEqual(len(connection.calls), 1)
+
+
+class UploadTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.archive = self.root / "archive"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def refs(self, payloads, kind="chunk"):
+        return [(archive_object(self.archive, data)[0], len(data), kind) for data in payloads]
+
+    def test_duplicate_references_collapse_before_the_request(self):
+        refs = self.refs([b"same"])
+        primary = FakeUploadClient(known=[{"plaintext_digest": refs[0][0]}])
+        counters = mirror.upload_objects(
+            config(), "origin-a", self.archive, [refs[0], refs[0]], recipients=["age1synthetic"],
+            client_factory=SequenceFactory(primary), prepare=prepared_for,
+        )
+        self.assertEqual(counters["objects_requested"], 1)
+        self.assertEqual(counters["objects_known"], 1)
+        self.assertEqual(counters["objects_missing"], 0)
+
+    def test_known_objects_are_not_reuploaded(self):
+        refs = self.refs([b"one", b"two", b"three"])
+        known = [{"plaintext_digest": digest} for digest, _size, _kind in refs]
+        primary = FakeUploadClient(known=known)
+        factory = SequenceFactory(primary)
+        counters = mirror.upload_objects(
+            config(), "origin-a", self.archive, refs, recipients=["age1synthetic"],
+            client_factory=factory, prepare=prepared_for,
+        )
+        self.assertEqual(counters["objects_requested"], 3)
+        self.assertEqual(counters["objects_known"], 3)
+        self.assertEqual(counters["objects_missing"], 0)
+        self.assertEqual(counters["objects_stored"], 0)
+        self.assertEqual(primary.puts, [])
+        self.assertTrue(primary.closed)
+
+    def test_uploads_are_bounded_to_four_connections(self):
+        refs = self.refs([("object-%d" % index).encode() * 64 for index in range(8)], kind="artifact")
+        tracker = Tracker()
+        primary = FakeUploadClient()
+        workers = [FakeUploadClient(tracker=tracker) for _ in range(4)]
+        factory = SequenceFactory(primary, *workers)
+        counters = mirror.upload_objects(
+            config(), "origin-a", self.archive, refs, recipients=["age1synthetic"],
+            concurrency=4, client_factory=factory, prepare=prepared_for,
+        )
+        self.assertEqual(tracker.peak, 4)
+        self.assertEqual(len(tracker.puts), 8)
+        self.assertEqual(counters["objects_stored"], 8)
+        self.assertEqual(counters["objects_missing"], 8)
+        self.assertEqual(counters["bytes_plaintext"], sum(len(("object-%d" % index).encode() * 64) for index in range(8)))
+        self.assertEqual(counters["bytes_ciphertext"], 8 * len(b"synthetic ciphertext"))
+        classes = cast(dict[str, dict[str, float]], counters["classes"])
+        self.assertEqual(classes["artifact"]["objects"], 8)
+        self.assertEqual(classes["artifact"]["zlib_objects"], 0)
+        self.assertEqual(counters["compress_cpu_ms"], 8.0)
+        self.assertEqual(counters["encrypt_cpu_ms"], 16.0)
+        self.assertTrue(primary.closed)
+        self.assertTrue(all(worker.closed for worker in workers))
+
+    def test_a_changed_prepared_digest_or_oversized_ciphertext_is_refused(self):
+        refs = self.refs([b"synthetic payload"])
+        cases = [
+            lambda data, recipients: prepared_for(b"different data"),
+            lambda data, recipients: prepared_for(data, ciphertext=b"x" * (mirror.MAX_OBJECT_BYTES + 1)),
+        ]
+        for prepare in cases:
+            primary = FakeUploadClient()
+            workers = [FakeUploadClient()]
+            with self.assertRaises(mirror.MirrorError):
+                mirror.upload_objects(
+                    config(), "origin-a", self.archive, refs, recipients=["age1synthetic"],
+                    concurrency=1, client_factory=SequenceFactory(primary, *workers), prepare=prepare,
+                )
+            self.assertEqual(workers[0].puts, [])
+
+    def test_upload_arguments_are_closed(self):
+        refs = self.refs([b"synthetic payload"])
+        with self.assertRaises(mirror.MirrorError):
+            mirror.upload_objects(config(), "origin-a", self.archive,
+                                 [(refs[0][0], refs[0][1], "unknown")], recipients=["age1"],
+                                 client_factory=SequenceFactory(FakeUploadClient()))
+        with self.assertRaises(ValueError):
+            mirror.upload_objects(config(), "origin-a", self.archive, refs, recipients=["age1"],
+                                 concurrency=0, client_factory=SequenceFactory(FakeUploadClient()))
 
 
 if __name__ == "__main__":

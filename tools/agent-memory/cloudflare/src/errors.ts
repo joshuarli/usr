@@ -12,7 +12,8 @@ export type ErrorCode =
   | "unavailable"
   | "invalid_request"
   | "unsupported_version"
-  | "payload_too_large";
+  | "payload_too_large"
+  | "conflict";
 
 interface ErrorEnvelope {
   readonly error: {

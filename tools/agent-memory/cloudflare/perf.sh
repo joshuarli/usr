@@ -11,6 +11,7 @@ esac
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)
 repeats="${REPEATS:-5}"
 records="${RECORDS:-1000}"
+objects="${OBJECTS:-200}"
 out="${OUT:-$root/.work/perf}"
 tmp="${TMPDIR:-$root/.work/tmp}"
 mkdir -p "$tmp" "$out"
@@ -19,7 +20,7 @@ if [ -z "${GIT_TEMPLATE_DIR:-}" ] && [ -d /opt/homebrew/share/git-core/templates
 	export GIT_TEMPLATE_DIR
 fi
 
-set -- "$mode" --repeats "$repeats" --records "$records" --out "$out"
+set -- "$mode" --repeats "$repeats" --records "$records" --objects "$objects" --out "$out"
 if [ -n "${SCENARIO:-}" ]; then
 	set -- "$@" --scenario "$SCENARIO"
 fi
