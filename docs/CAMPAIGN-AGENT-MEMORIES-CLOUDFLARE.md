@@ -105,6 +105,7 @@ names what would reverse it.
 | CF24 | Runtime dependencies stay: Python stdlib, one external `age`/`rage` executable, and no npm runtime packages. Dev dependencies are pinned to `stuff`'s `wrangler ^4.156.0` and `miniflare 3.20250718.3`; the Worker bundle must stay under 200 KiB uncompressed and `cf build` time is recorded. | `age` provides audited cryptography; Workers and Miniflare are platform tooling. The brief forbids a dependency that moves build time, bundle size, or startup without justification. | A measured capability that the platform cannot provide. |
 | CF25 | `sync --to` gains the `cloudflare` transport, but `search --central`/`show --central` keep their existing local and SSH meaning. Remote search and inspection live in the authenticated web UI and `/api/v1/memories`. | A collector token is origin-scoped and should not become a general search credential; adding a second remote query stack duplicates the UI's query path. | The owner wants terminal search against the mirror. |
 | CF26 | The local `transfer_generation.remote` and `transfer_learning.remote` keys for the mirror are the remote's stable `store_id`, not its URL. A replacement store at the same URL therefore has no local acks, and `mirror adopt` is the only way to clear them explicitly. | This is the same rule the SSH transport already applies by recording the receiving store's identity, and it makes URL reuse harmless. | A durable remote id that is not exposed by the API. |
+| CF27 | Runtime placement is fixed: the collector stays Python stdlib plus the external `age`/`rage` binary; Cloudflare runs a TypeScript Worker. No Python is deployed to Cloudflare, so it cannot affect Worker CPU, bundle size, cold start, or platform cost. A Rust/Wasm Worker is rejected: it adds a Wasm/JSON boundary and cold-start cost for no measured CPU win. A Rust collector rewrite is out of scope unless P5.3 measures a named Python hotspot (not I/O, `rage`, or network) that materially affects the owner path; then a small helper is allowed, never a port. | Local paths are dominated by capture I/O, encryption subprocesses, and network. Cloudflare cost is dominated by R2/D1 operations and storage. A rewrite would risk the archive, tombstone, and authority semantics the campaign exists to preserve. | A measured hotspot with numbers, or a requirement to ship a static collector binary to many machines. |
 
 **Delegated** — the executor decides inside the bound and records it in the commit body.
 
@@ -122,7 +123,8 @@ names what would reverse it.
 ### Roles and data separation
 
 Local SQLite remains the operational source of truth: capture, indexing, recall, review,
-promotion, and `forget-session` work with no network. The mirror is asynchronous.
+promotion, and `forget-session` work with no network. The mirror is asynchronous. Python
+runs only on the collector; the deployed Worker is TypeScript (CF27).
 
 | Store | Holds | Never holds |
 | --- | --- | --- |
