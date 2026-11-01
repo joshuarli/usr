@@ -2,10 +2,12 @@
 """Measure the mirror's local hot paths and the Worker over real HTTP."""
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import platform
 import resource
+import select
 import shutil
 import statistics
 import subprocess
@@ -335,7 +337,7 @@ def _learning_import(scenario, args, root):
     return dataset, samples, ("export",)
 
 
-def _document(environment, scenario, dataset, samples, operations):
+def _document(environment, scenario, dataset, samples, operations, runtime=None):
     moment = _now()
     counters = {}
     variance = []
@@ -351,7 +353,7 @@ def _document(environment, scenario, dataset, samples, operations):
         "generated_at": _iso(moment),
         "environment": environment,
         "scenario": scenario,
-        "runtime": {**_runtime(), "dirty": bool(_git("status", "--porcelain", "--untracked-files=no"))},
+        "runtime": {**(runtime or _runtime()), "dirty": bool(_git("status", "--porcelain", "--untracked-files=no"))},
         "dataset": dataset,
         "perf_gate": "passed" if len(timed) == len(samples) else "deferred",
         "load": {"source": "perf-gate-ready", "cores": _cores(), "max_load1": max(
@@ -454,10 +456,123 @@ def _report(directory):
     return 0
 
 
+def _bench_http(port, method, path, headers=None):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+    try:
+        connection.request(method, path, headers=headers or {})
+        response = connection.getresponse()
+        body = response.read()
+        return response.status, dict(response.getheaders()), body
+    finally:
+        connection.close()
+
+
+def _bench_counters(port):
+    status, _headers, body = _bench_http(port, "GET", "/__bench/status")
+    if status != 200:
+        raise RuntimeError("worker bench counter request failed")
+    return json.loads(body)
+
+
+def _worker_server():
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError("node is required for worker benchmarks")
+    worker_dir = ROOT / "tools" / "agent-memory" / "cloudflare"
+    bundle = worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
+    if not bundle.is_file():
+        raise RuntimeError("missing worker bundle; run `cf build --mode production` in tools/agent-memory/cloudflare")
+    process = subprocess.Popen([node, "test/serve.mjs"], cwd=worker_dir, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    stdout = process.stdout
+    if stdout is None:
+        raise RuntimeError("worker bench server has no output stream")
+    ready, _, _ = select.select([stdout], [], [], 30)
+    if not ready:
+        process.kill()
+        _, stderr = process.communicate(timeout=10)
+        raise RuntimeError("worker bench server did not start: " + (stderr.strip() or "timeout"))
+    line = stdout.readline()
+    try:
+        port = int(json.loads(line)["port"])
+    except (ValueError, KeyError, TypeError):
+        process.kill()
+        _, stderr = process.communicate(timeout=10)
+        raise RuntimeError("worker bench server did not start: " + (stderr.strip() or line.strip())) from None
+    return process, port
+
+
+def _worker(args):
+    scenario = args.scenario or "status"
+    if scenario != "status":
+        owner = DEFERRED.get(scenario, "a later slice")
+        print("bench_mirror: worker scenario %s lands in %s" % (scenario, owner), file=sys.stderr)
+        return 2
+    if args.repeats < 1:
+        raise ValueError("repeats must be positive")
+    process, port = _worker_server()
+    try:
+        auth_status, _headers, _body = _bench_http(port, "GET", "/api/v1/status")
+        if auth_status != 403:
+            raise RuntimeError("unauthenticated worker request was not refused")
+        _bench_http(port, "POST", "/__bench/reset")
+        _bench_http(port, "GET", "/api/v1/status", {"x-bench-principal": "reader"})
+        _bench_http(port, "POST", "/__bench/reset")
+        samples = []
+        for repeat in range(args.repeats):
+            before = _bench_counters(port)
+            sample = _timed(lambda port=port: _worker_status(port), repeat, _gate)
+            sample["operation"] = "status"
+            after = _bench_counters(port)
+            delta = {}
+            for key in set(before["counters"]) | set(after["counters"]):
+                delta[key] = after["counters"].get(key, 0) - before["counters"].get(key, 0)
+            delta["requests"] = after["requests"] - before["requests"]
+            if delta["requests"] != 1:
+                raise RuntimeError("worker request counter disagrees with the harness")
+            raw_counters = sample.get("counters")
+            counters = raw_counters if isinstance(raw_counters, dict) else {}
+            raw_timings = sample.get("timings")
+            timings = raw_timings if isinstance(raw_timings, dict) else {}
+            timing = counters.pop("server_timing", None)
+            if timing is not None:
+                timings["server_timing"] = timing
+            counters.update(delta)
+            sample["counters"] = counters
+            sample["timings"] = timings
+            samples.append(sample)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+    dataset = {"requests": args.repeats, "auth_refusals": 1, "warmups": 1}
+    document = _document("miniflare", scenario, dataset, samples, ("status",),
+                         runtime={**_runtime(), "workerd": "2026-08-06", "miniflare": "4.20260730.0"})
+    _write(document, Path(args.out) if Path(args.out).is_absolute() else ROOT / args.out)
+    print(json.dumps(document, indent=2, sort_keys=True))
+    variance = document.get("counter_variance")
+    if isinstance(variance, list) and variance:
+        print("bench_mirror: deterministic counters varied across repeats: " + ", ".join(str(item) for item in variance),
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+def _worker_status(port):
+    status, headers, body = _bench_http(port, "GET", "/api/v1/status", {"x-bench-principal": "reader"})
+    if status != 200:
+        raise RuntimeError("worker status request failed with %d" % status)
+    if headers.get("cache-control") != "no-store":
+        raise RuntimeError("worker status response did not carry no-store")
+    return {"bytes": len(body), "server_timing": headers.get("server-timing")}
+
+
 def _dispatch(environment, args):
     if environment == "worker":
-        print("bench_mirror: worker benchmarks land in P1.4 with the Miniflare harness", file=sys.stderr)
-        return 2
+        return _worker(args)
     if environment == "deployed":
         print("bench_mirror: deployed benchmarks land in P1.6 after the first deploy", file=sys.stderr)
         return 2

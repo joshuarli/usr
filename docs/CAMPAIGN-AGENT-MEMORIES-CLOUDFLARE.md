@@ -16,10 +16,10 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
 - **Accepted:** `P0.1` (benchmark harness, root `Makefile`, and the deterministic capture
   baseline), `P0.2` (age adapter, dev `rage` build, and the crypto suite), `P1.1`
   (Worker scaffold, Access gate, status, and the runtime harness), `P1.2` (initial
-  D1 schema and store metadata), and `P1.3` (observability, span allowlist, and
-  `Server-Timing`).
+  D1 schema and store metadata), `P1.3` (observability, span allowlist, and
+  `Server-Timing`), and `P1.4` (Miniflare bench harness and the status baseline).
 - **In flight:** none.
-- **Next slice:** `P1.4` (Worker bench harness); the first command re-checks the baseline:
+- **Next slice:** `P1.5` (deployment machinery); the first command re-checks the baseline:
   `cd tools/agent-memory/cloudflare && npm test`.
 - **Known red:** none. All ten agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
@@ -522,6 +522,11 @@ These are the local hot paths the mirror must not slow. `make perf-local` record
 under one JSON schema with repeat statistics; the first quiet run becomes the timing
 baseline. Mirror upload scenarios record plaintext, compressed, and ciphertext bytes so
 CF22 compression savings are measured rather than assumed.
+
+`make perf-worker SCENARIO=status REPEATS=5` on 2026-10-31 (Miniflare 4.20260730.0,
+workerd 2026-08-06, real D1 and R2) reported p50 10.577 ms, p95 10.679 ms, median 10.577 ms,
+and MAD 0.077 ms, with 131 response bytes, one request, one D1 prepare, and one D1 first per
+sample. The harness refused an unauthenticated request with 403 before measuring.
 
 ## Performance contract
 

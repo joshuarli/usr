@@ -7,7 +7,7 @@ import { Miniflare } from "miniflare";
 import { BUNDLE_PATH } from "./harness.mjs";
 
 test("the built bundle boots and fails closed without Access", async (t) => {
-  assert.ok(existsSync(BUNDLE_PATH), "missing worker bundle; run `make worker-bundle` first");
+  assert.ok(existsSync(BUNDLE_PATH), "missing worker bundle; run `cf build --mode production` in tools/agent-memory/cloudflare");
   const miniflare = new Miniflare({
     modules: true,
     scriptPath: BUNDLE_PATH,

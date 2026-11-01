@@ -119,8 +119,10 @@ Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFI
 per run under `.work/perf/`; `make perf-report` compares the oldest and newest run of each
 scenario. `REPEATS` (default 5), `SCENARIO`, `RECORDS`, and `OUT` override the defaults.
 `SCENARIO=learning-import` seeds 1k synthetic learning records by default and measures
-snapshot export and serialization. `perf-worker` and `perf-deployed` land with the Worker
-harness and the first deploy; until then they exit with the slice that adds them.
+snapshot export and serialization. `perf-worker` boots the built bundle with real Miniflare
+D1 and R2 and measures it over loopback HTTP; build it once with `cf build --mode production`
+in `tools/agent-memory/cloudflare` after `npm ci`. `perf-deployed` lands with the first
+deploy.
 
 The capture baseline (200 sessions × 10 messages × 10 projects, 2,600 events) on
 2026-10-31:
