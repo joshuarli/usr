@@ -7,9 +7,9 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>@@HOME@@/.local/bin/agent-sessions</string>
+		<string>mirror</string>
 		<string>--state-dir</string>
 		<string>@@STATE_DIR@@</string>
-		<string>mirror</string>
 		<string>sync</string>
 		<string>--remote</string>
 		<string>@@REMOTE@@</string>
