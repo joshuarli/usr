@@ -25,7 +25,6 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Deferred work and RFCs | [TODO.md](TODO.md), [docs/rfc/](docs/rfc/) |
 | Agent archive campaign record | [docs/CAMPAIGN-AGENT-ARCHIVE.md](docs/CAMPAIGN-AGENT-ARCHIVE.md) |
 | Cloudflare memories campaign record | [docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md](docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md) |
-| Paused Cloudflare sync handoff | [docs/HANDOFF-AGENT-MEMORIES-CLOUDFLARE.md](docs/HANDOFF-AGENT-MEMORIES-CLOUDFLARE.md) |
 
 ## Background work
 

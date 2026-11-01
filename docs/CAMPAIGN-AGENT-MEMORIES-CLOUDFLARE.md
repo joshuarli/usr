@@ -1112,8 +1112,10 @@ fail only beyond the measured spread, and only on a quiet host.
 
 ## Needs you
 
-The first real sync is paused on the D1 free-tier row-write limit. Resume it
-with [the handoff](HANDOFF-AGENT-MEMORIES-CLOUDFLARE.md).
+The first real sync completed on 2026-11-01: every local generation, the
+searchable learning projection, and a recovery snapshot pinning 58,248
+objects reached `usr-memories`, and the mirror-sync LaunchAgent is
+installed. The rows below are the steps that still need the owner.
 
 | Step | Why the campaign cannot do it | Command the owner runs |
 | --- | --- | --- |
