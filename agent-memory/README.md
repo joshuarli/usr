@@ -126,7 +126,14 @@ not on `PATH`. Ciphertext bytes live in the sample's `timings` because randomize
 ciphertext length can vary by a few bytes, so they are measured, not used as a deterministic
 gate. `perf-worker` boots the built bundle with real Miniflare D1 and R2 and measures it over
 loopback HTTP; build it once with `npm run build` in
-`agent-memory/cloudflare` after `npm ci`. `perf-deployed` lands with the first deploy.
+`agent-memory/cloudflare` after `npm ci`. `perf-deployed` probes the production origin with
+the service token and records an observational run: it checks that an unauthenticated
+request is refused, reuses one keep-alive TLS connection after a warmup, and records wall
+time, client process CPU, response bytes, result counts, reconnects, and the Worker's
+`Server-Timing` D1/R2 durations. Production documents carry `environment: "production"`,
+`measurement: "observational"`, and `perf_gate: "observational"` because the host-load gate
+does not control network variance. A local run needs at least five timing samples per
+operation before it reports `perf_gate: "passed"`.
 
 `SCENARIO=learning-import RECORDS=n` on 2026-11-01 exported 1,000 records as 670,399
 bytes at 70,074 records/s (median 16.763 ms, p95 18.800 ms) and 10,000 records as
@@ -215,19 +222,23 @@ binds the collector origin through Access, fetches remote tombstones before capt
 local tombstones before generations, compresses each object with zlib when that saves at
 least 5%, encrypts it to the recipient set, uploads only missing plaintext, and marks a
 generation durable only after the Worker acknowledges its manifest digest. The first sync
-pins the Worker's `store_id`; a different store with existing acknowledgements is refused.
+pins the Worker's `store_id`; a different store with existing generation or learning
+acknowledgements is refused.
 `agent-sessions mirror status --remote cloudflare` prints the pinned identity, and
 `agent-sessions mirror adopt --remote cloudflare` clears the old pin's local
 acknowledgements before rebinding. An unchanged sync performs one `hello` and no object,
 generation, or tombstone writes.
 
-A sync that changes generations or tombstones also uploads a recovery snapshot: a
-sanitized SQLite copy in 1 MiB content-addressed chunks plus pins for every archive object
-the copy references. `agent-sessions mirror snapshots` lists them, and
-`agent-sessions mirror verify --objects` recomputes every manifest and snapshot and samples
-object bodies. `agent-sessions mirror restore --snapshot ID --to DIR` rebuilds a new store
-from one snapshot, replays later generations, applies current tombstones, and activates no
-project or review grant. `agent-sessions mirror gc` reports unreferenced objects without
+A sync that changes generations, tombstones, or the learning journal uploads a recovery
+snapshot: a sanitized SQLite copy in 1 MiB content-addressed chunks plus pins for every
+archive object the copy references. A failed snapshot is retried on the next sync.
+`agent-sessions mirror snapshots` lists them, and `agent-sessions mirror verify --objects`
+recomputes every manifest and snapshot and attests a snapshot only after every pinned
+archive object inside it has been downloaded; `--sample` below the pinned-object count
+reports evidence without attesting. `agent-sessions mirror restore --snapshot ID --to DIR`
+rebuilds a new store from one snapshot, applies current tombstones, and replays every live
+generation the snapshot does not already contain, including work committed by another
+collector; it activates no project or review grant. `agent-sessions mirror gc` reports unreferenced objects without
 deleting; `--apply` prunes snapshots outside the 7-daily/4-weekly retention and sweeps
 objects unreferenced for an hour. `agent-sessions mirror rotate --recipients FILE
 --identity NEWKEY` re-encrypts the origin to a new recipient set and leaves the old identity
@@ -254,15 +265,20 @@ agent-sessions mirror sync
 recipients file naming both; move the recovery identity offline and keep the token out of
 the repository. `configure` refuses a token file that is not regular mode 0600.
 `enable --searchable-learning` prints the projection disclosure and opts in to storing
-claim and applicability text in D1; without the flag the mirror still syncs, but no
-learning record is projected or indexed. `disable` turns scheduled sync off, and
-`disable --searchable-learning` also withdraws the projection opt-in.
+claim and applicability text in D1; it also requeues every live experience and approved
+memory and prints `requeued=N`, so records created while the journal was pruned are
+projected. Without the flag the mirror still syncs, but no learning record is projected or
+indexed. `disable` turns scheduled sync off, and `disable --searchable-learning` also
+withdraws the projection opt-in.
 
 `mirror status --json` reports the pinned store and revision, pending generations, objects,
-and bytes, the last error, the last sync time, and the last verified snapshot. `mirror
-sync --dry-run --json` reports the same backlog plus an estimated request count and never
-opens a connection. `mirror sync --reconcile` replaces the searchable projection with the
-local live record set in one staged epoch. `mirror doctor` checks the config, token mode,
+and bytes, the last error, the last sync time, and the last verified snapshot. Generation
+counts are live counts: a tombstoned generation is not reported even if an older row
+survives storage. `mirror sync --dry-run --json` reports the same backlog plus an estimated
+request count and never opens a connection. `mirror sync --reconcile` requires the
+searchable projection opt-in, applies remote tombstones first, and replaces the local live
+record set in one staged epoch; it leaves the journal for the next sync to snapshot before
+pruning. `mirror doctor` checks the config, token mode,
 identities, recipients, state, and remote reachability; `--offline` skips the remote check.
 
 Scheduling is explicit and never installed by sync. Render
