@@ -646,6 +646,29 @@ because those scenarios are implemented and measured. The remaining named scenar
 and performance evidence above covers their underlying paths, and they remain a
 documented gap rather than a claimed result.
 
+### Production deployment
+
+On 2026-11-01 `make migrate` applied `0004_snapshots.sql`, `0005_learning.sql`, and
+`0006_learning_reconcile.sql`; the next check listed none pending. `make deploy` ran the
+deploy gate, `worker-test` on the built bundle, the prebuilt upload, and the read-only
+smoke. The deployment record names code version
+`f6460ed4-cc55-4de0-a16c-9826fee3479f`; the serving version is
+`c7e374b2-c932-40c7-a171-af016f21f0fc`, which carries the same bundle plus the `READERS`
+secret written by Access provisioning. The synthetic origin `synthetic-p61` used the
+existing `usr-memories-collector` service token, and the token stayed in
+`.work/secrets/collector.token` with mode 0600.
+
+The production round trip uploaded a synthetic captured session, one deterministic
+learning experience, its manifest, and one encrypted recovery snapshot. `mirror sync`
+reported one committed generation, one learning change, one revision fence, and one
+snapshot; `mirror verify --objects` sampled the one object; `mirror restore` reassembled
+the snapshot with `replayed=0`. The service-token search
+`q=synthetic-p61-marker-4f9c2a` returned the retained experience, and the detail route
+returned its qualified source `codex:synthetic-p61-native@synthetic-p61`. The HTML page
+requires a reader identity, so a collector token receives 403
+`A reader identity is required to browse memories.`; HTML rendering is covered by the
+Miniflare render tests rather than an interactive production browser session.
+
 ## Performance contract
 
 **Harness.** `Makefile` targets call `cloudflare/perf.sh`, which drives
