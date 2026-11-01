@@ -1,6 +1,6 @@
 [environment]
 python-version = "3.15"
-extra-paths = ["dotfiles/base/.local/bin", "tools/agent-memory/src", "tools/mdtool/src"]
+extra-paths = ["dotfiles/base/.local/bin", "agent-memory/src", "tools/mdtool/src"]
 
 [analysis]
 return-type-inference = "always"

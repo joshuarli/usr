@@ -8,13 +8,13 @@ OBJECTS ?= 200
 OUT ?= .work/perf
 LOCAL ?=
 CF ?= cf
-WORKER_DIR ?= tools/agent-memory/cloudflare
+WORKER_DIR ?= agent-memory/cloudflare
 DATABASE_ID = $(shell node $(WORKER_DIR)/scripts/config.mjs database-id 2>/dev/null)
 MIGRATE_FLAGS := $(if $(filter 1,$(LOCAL)),--local --persist-to $(CURDIR)/.work/tmp/cf-state)
 PYTHON := uv run --no-project --python '>=3.15' python -I
-PERF := tools/agent-memory/cloudflare/perf.sh
+PERF := agent-memory/cloudflare/perf.sh
 SUITES := test_sessions test_archive test_transfer test_identity test_recovery test_learning_ops test_learning_review test_recall test_learning test_learning_promote test_mirror
-CAMPAIGN_PYTHON := tools/agent-memory/eval/bench_mirror.py tools/agent-memory/src/agent_memory/mirror.py tools/agent-memory/src/agent_memory/mirror_crypto.py tools/agent-memory/tests/test_mirror.py tools/agent-memory/tests/test_mirror_crypto.py
+CAMPAIGN_PYTHON := agent-memory/eval/bench_mirror.py agent-memory/src/agent_memory/mirror.py agent-memory/src/agent_memory/mirror_crypto.py agent-memory/tests/test_mirror.py agent-memory/tests/test_mirror_crypto.py
 GIT_TEMPLATE_DIR ?= $(wildcard /opt/homebrew/share/git-core/templates)
 ENV_GIT := $(if $(GIT_TEMPLATE_DIR),GIT_TEMPLATE_DIR=$(GIT_TEMPLATE_DIR))
 
@@ -71,16 +71,16 @@ perf-deployed: ## Benchmark the production origin with synthetic data
 	@$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" REPEATS="$(REPEATS)" RECORDS="$(RECORDS)" OBJECTS="$(OBJECTS)" SCENARIO="$(SCENARIO)" OUT="$(OUT)" sh "$(PERF)" deployed
 
 perf-report: ## Compare benchmark runs under OUT
-	@TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) tools/agent-memory/eval/bench_mirror.py report --dir "$(OUT)"
+	@TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) agent-memory/eval/bench_mirror.py report --dir "$(OUT)"
 
 test: worker-test ## Run the eleven agent-memory suites and the Worker suites
 	@set -e; for suite in $(SUITES); do \
 		printf '== %s\n' "$$suite"; \
-		$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) tools/agent-memory/tests/"$$suite".py; \
+		$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) agent-memory/tests/"$$suite".py; \
 	done
 
 test-all: test ## Run every local gate
 	cd $(WORKER_DIR) && npm test
 	uvx ruff check $(CAMPAIGN_PYTHON)
 	uvx ty check $(CAMPAIGN_PYTHON)
-	python3 -I tools/mdtool/src/mdtool.py check docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md docs/development.md tools/agent-memory/README.md
+	python3 -I tools/mdtool/src/mdtool.py check docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md docs/development.md agent-memory/README.md

@@ -9,7 +9,7 @@ if sys.version_info < (3, 15):
         ["uv", "run", "--no-project", "--python", ">=3.15", "python", str(Path(__file__).resolve()), *sys.argv[1:]],
     )
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools" / "agent-memory" / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "agent-memory" / "src"))
 from agent_memory.serve import main
 
 sys.exit(main())
