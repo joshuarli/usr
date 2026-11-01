@@ -1564,11 +1564,14 @@ def upload_objects(config, origin, archive_dir, objects, recipients=None, *, con
     factory = client_factory or (lambda: MirrorClient(config))
 
     primary = factory()
+    known: set[str] = set()
     try:
-        answer = primary.missing(origin, [(ref.plaintext_digest, ref.size) for ref in refs])
+        requested = [(ref.plaintext_digest, ref.size) for ref in refs]
+        for start in range(0, len(requested), MAX_MISSING_OBJECTS):
+            answer = primary.missing(origin, requested[start:start + MAX_MISSING_OBJECTS])
+            known.update(row["plaintext_digest"] for row in answer["known"])
     finally:
         primary.close()
-    known = {row["plaintext_digest"] for row in answer["known"]}
     missing = [ref for ref in refs if ref.plaintext_digest not in known]
     counters["objects_known"] = len(known)
     counters["objects_missing"] = len(missing)
@@ -2240,11 +2243,14 @@ def upload_snapshot(store, config, *, client, origin, revision, recipients=None,
 
         def publish(directory, metadata: dict[str, Any]) -> dict[str, Any]:
             database = Path(directory) / "sessions.sqlite3"
-            chunk_refs = [(chunk["digest"], chunk["size"]) for chunk in metadata["chunks"]]
-            answer = client.missing(origin, chunk_refs)
-            known: dict[str, dict[str, Any]] = {
-                row["plaintext_digest"]: row for row in answer["known"]
-            }
+            chunk_sizes: dict[str, int] = {}
+            for chunk in metadata["chunks"]:
+                chunk_sizes.setdefault(chunk["digest"], chunk["size"])
+            chunk_refs = list(chunk_sizes.items())
+            known: dict[str, dict[str, Any]] = {}
+            for start in range(0, len(chunk_refs), MAX_MISSING_OBJECTS):
+                answer = client.missing(origin, chunk_refs[start:start + MAX_MISSING_OBJECTS])
+                known.update({row["plaintext_digest"]: row for row in answer["known"]})
             chunks_uploaded: int = 0
             chunk_plaintext: int = 0
             chunk_ciphertext: int = 0

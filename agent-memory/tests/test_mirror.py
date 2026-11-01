@@ -73,9 +73,11 @@ class FakeUploadClient:
         self.known = list(known or [])
         self.tracker = tracker
         self.puts = []
+        self.missing_requests = []
         self.closed = False
 
     def missing(self, origin, objects):
+        self.missing_requests.append(len(objects))
         requested = {digest for digest, _size in objects}
         known = [row for row in self.known if row["plaintext_digest"] in requested]
         present = {row["plaintext_digest"] for row in known}
@@ -762,6 +764,18 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(counters["objects_stored"], 0)
         self.assertEqual(primary.puts, [])
         self.assertTrue(primary.closed)
+
+    def test_missing_requests_stay_within_the_protocol_limit(self):
+        refs = [("%064x" % index, 1) for index in range(mirror.MAX_MISSING_OBJECTS + 1)]
+        primary = FakeUploadClient(known=[{"plaintext_digest": digest} for digest, _size in refs])
+        counters = mirror.upload_objects(
+            config(), "origin-a", self.archive, refs, recipients=["age1synthetic"],
+            client_factory=SequenceFactory(primary), prepare=prepared_for,
+        )
+        self.assertEqual(counters["objects_requested"], len(refs))
+        self.assertEqual(counters["objects_known"], len(refs))
+        self.assertEqual(counters["objects_missing"], 0)
+        self.assertEqual(primary.missing_requests, [mirror.MAX_MISSING_OBJECTS, 1])
 
     def test_uploads_stay_within_the_connection_limit(self):
         refs = self.refs([("object-%d" % index).encode() * 64 for index in range(8)], kind="artifact")
