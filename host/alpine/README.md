@@ -28,6 +28,14 @@ Choose:
 
 Reboot into the installed system and log in as that user.
 
+If Alpine is already installed from a stable release, switch that install to
+edge instead: replace both repository lines in `/etc/apk/repositories` with
+`edge/main` and `edge/community`, then run `doas apk update` and
+`doas apk upgrade --available`. A desktop install must also use `linux-stable`
+instead of `linux-lts` (`doas apk add linux-stable && doas apk del linux-lts`),
+then reboot. The switch to edge is one-way, and packages follow the rolling
+branch.
+
 ## 2. Provision
 
 ```sh
