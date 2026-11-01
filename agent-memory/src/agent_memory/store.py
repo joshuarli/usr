@@ -1804,12 +1804,20 @@ class Store:
             "WHERE a.durable_at IS NULL AND t.origin_host = ? ORDER BY t.forgotten_at",
             (str(remote), str(origin_host)))]
 
-    def prune_learning_journal(self):
+    def learning_journal_head(self):
         from agent_memory import learning_sync
         if not learning_sync.has_learning(self.db):
             return 0
         learning_sync.ensure_journal(self.db)
-        return learning_sync.prune_journal(self.db, learning_sync.journal_head(self.db))
+        return learning_sync.journal_head(self.db)
+
+    def prune_learning_journal(self, through=None):
+        from agent_memory import learning_sync
+        if not learning_sync.has_learning(self.db):
+            return 0
+        learning_sync.ensure_journal(self.db)
+        head = learning_sync.journal_head(self.db) if through is None else int(through)
+        return learning_sync.prune_journal(self.db, head)
 
     def mirror_remote_state(self, remote):
         row = self.db.execute(

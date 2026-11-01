@@ -3,6 +3,7 @@ import { readStoreMeta, type StoreMeta } from "./db.js";
 import { failure, json, methodNotAllowed } from "./errors.js";
 import { serverTiming, trace } from "./observe.js";
 import { handleGenerations } from "./routes/generations.js";
+import { handleLearning } from "./routes/learning.js";
 import { handleSnapshots } from "./routes/snapshots.js";
 import { handleSync } from "./routes/sync.js";
 import { handleTombstones } from "./routes/tombstones.js";
@@ -82,6 +83,8 @@ export default {
       if (snapshots !== null) return snapshots;
       const tombstones = await handleTombstones(request, env, principal, pathname, url, timing);
       if (tombstones !== null) return tombstones;
+      const learning = await handleLearning(request, env, principal, pathname, url, timing);
+      if (learning !== null) return learning;
     } catch {
       return failure(503, "unavailable", "sync is unavailable", { "Server-Timing": serverTiming(timing) });
     }

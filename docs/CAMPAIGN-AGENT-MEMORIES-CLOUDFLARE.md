@@ -26,11 +26,12 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   the `mirror-initial` cost baseline), `P2.3` (generation commit, manifest upload,
   revision fences, tombstone-first delivery, store identity pinning, durable acks, and
   the no-op sync path), `P2.4` (content-addressed recovery snapshots, restore and
-  replay, verify, two-phase GC, and key rotation), and `P3.1` (the local learning change
-  journal, replayable deltas, project hashing, and the label map).
+  replay, verify, two-phase GC, and key rotation), `P3.1` (the local learning change
+  journal, replayable deltas, project hashing, and the label map), and `P3.2` (the D1
+  learning projection, revision-fenced delta apply, FTS rows, and tombstone cleanup).
 - **In flight:** none.
-- **Next slice:** `P3.2` (D1 learning projection and delta apply); the first command
-  re-checks the baseline: `make test`.
+- **Next slice:** `P3.3` (search and inspection queries); the first command re-checks
+  the baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.

@@ -21,6 +21,7 @@ from urllib.parse import urlencode, urlsplit
 from agent_memory import archive as archive_module
 from agent_memory import backup as backup_module
 from agent_memory import learning as learning_module
+from agent_memory import learning_sync
 from agent_memory import mirror_crypto
 from agent_memory.types import HARNESSES
 
@@ -81,6 +82,7 @@ class MirrorError(RuntimeError):
         self.code = code
         self.status = status
         self.retryable = retryable
+        self.state = None
 
 
 @dataclass(frozen=True)
@@ -288,6 +290,46 @@ def decode_hello_response(value):
         "protocol": PROTOCOL, "store_id": store, "origin": origin,
         "revision": revision, "tombstone_watermark": watermark, "learning": learning,
     }
+
+
+def _decode_learning_revision(value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def decode_learning_state_response(value):
+    if not _exact_keys(value, ("protocol", "origin", "revision", "epoch", "digest", "records")):
+        return None
+    origin = decode_origin(value.get("origin"))
+    revision = _decode_learning_revision(value.get("revision"))
+    epoch = _decode_learning_revision(value.get("epoch"))
+    records = _decode_learning_revision(value.get("records"))
+    digest = value.get("digest")
+    if decode_protocol(value.get("protocol")) is None or origin is None:
+        return None
+    if revision is None or epoch is None or records is None or epoch < 1:
+        return None
+    if digest is not None and decode_digest(digest) is None:
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "revision": revision, "epoch": epoch,
+            "digest": digest, "records": records}
+
+
+def decode_learning_delta_response(value):
+    if not _record(value):
+        return None
+    decoded = decode_learning_state_response(
+        {key: value.get(key) for key in ("protocol", "origin", "revision", "epoch", "digest", "records")})
+    if decoded is None or not _exact_keys(
+            value, ("protocol", "origin", "revision", "epoch", "digest", "records", "applied", "deleted", "replayed")):
+        return None
+    applied = _decode_learning_revision(value.get("applied"))
+    deleted = _decode_learning_revision(value.get("deleted"))
+    replayed = value.get("replayed")
+    if applied is None or deleted is None or not isinstance(replayed, bool):
+        return None
+    return dict(decoded, applied=applied, deleted=deleted, replayed=replayed)
 
 
 def _decode_remote_object(value):
@@ -950,7 +992,7 @@ def decode_tombstone_push_response(value):
 
 
 def decode_error_response(value):
-    if not _record(value) or not _exact_keys(value, ("error",)):
+    if not _record(value) or set(value) not in ({"error"}, {"error", "state"}):
         return None
     error = value.get("error")
     if not _exact_keys(error, ("code", "message")):
@@ -958,7 +1000,13 @@ def decode_error_response(value):
     code, message = error.get("code"), error.get("message")
     if code not in ERROR_CODES or not isinstance(message, str) or len(message) > 500:
         return None
-    return MirrorError(code, message)
+    decoded = MirrorError(code, message)
+    if "state" in value:
+        state = decode_learning_state_response(value["state"])
+        if state is None:
+            return None
+        decoded.state = state
+    return decoded
 
 
 class ConnectionPool:
@@ -1089,6 +1137,28 @@ class MirrorClient:
         decoded = decode_hello_response(value)
         if decoded is None or decoded["origin"] != origin:
             raise MirrorError("invalid_response", "hello response is invalid")
+        return decoded
+
+    def learning_state(self, origin) -> dict[str, Any]:
+        if decode_origin(origin) is None:
+            raise MirrorError("invalid_request", "learning state request is invalid")
+        decoded = decode_learning_state_response(
+            self._json("GET", "/api/v1/sync/learning/state?" + urlencode({"origin": origin})))
+        if decoded is None or decoded["origin"] != origin:
+            raise MirrorError("invalid_response", "learning state response is invalid")
+        return decoded
+
+    def learning_delta(self, origin, base_revision, digest, changes) -> dict[str, Any]:
+        request = {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision,
+                   "digest": digest, "changes": list(changes)}
+        try:
+            request = learning_sync.validate_mirror_delta(request)
+        except learning_sync.SnapshotError as exc:
+            raise MirrorError("invalid_request", "learning delta is invalid: " + str(exc)) from exc
+        decoded = decode_learning_delta_response(
+            self._json("POST", "/api/v1/sync/learning/deltas", request))
+        if decoded is None or decoded["origin"] != origin:
+            raise MirrorError("invalid_response", "learning delta response is invalid")
         return decoded
 
     def missing(self, origin, objects) -> dict[str, Any]:
@@ -1398,6 +1468,7 @@ def _empty_sync_counters() -> dict[str, Any]:
         "tombstones_fetched": 0, "tombstones_pushed": 0,
         "snapshots_created": 0, "snapshots_duplicate": 0, "snapshot_chunks_uploaded": 0,
         "snapshot_objects_uploaded": 0, "snapshot_bytes": 0,
+        "learning_batches": 0, "learning_changes": 0, "learning_deletes": 0,
     }
 
 
@@ -1422,6 +1493,9 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
     revision = 0
     watermark = 0
     pinned = None
+    learning_seq = 0
+    learning_digest = None
+    learning_revision = 0
     try:
         hello = runtime.hello(origin)
         counters["hello"] += 1
@@ -1437,6 +1511,10 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
             pinned = None
         if pinned is not None and pinned["store_id"] == store_id:
             watermark = pinned["tombstone_watermark"]
+        learning_seq = 0 if pinned is None else int(pinned.get("learning_seq") or 0)
+        learning_digest = None if pinned is None else pinned.get("learning_digest")
+        learning_revision = int(hello["learning"]["revision"])
+        learning_pending = False
         changed = pinned is None
 
         if hello["tombstone_watermark"] > watermark:
@@ -1541,10 +1619,41 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
                     store.record_attempt(row["id"], store_id, str(exc))
                     raise
 
+        if config.learning_projection and learning_sync.has_learning(store.db):
+            head = learning_sync.journal_head(store.db)
+            if head > learning_seq:
+                labels = learning_sync.project_labels(store.db)
+                exported = learning_sync.mirror_changes(store.db, learning_seq, labels, origin)["changes"]
+                for start in range(0, len(exported), learning_sync.MAX_LEARNING_CHANGES):
+                    batch = exported[start:start + learning_sync.MAX_LEARNING_CHANGES]
+                    digest = learning_sync.changes_digest(batch)
+                    try:
+                        acked = runtime.learning_delta(origin, learning_revision, digest, batch)
+                    except MirrorError as exc:
+                        if exc.code != "stale_revision":
+                            raise
+                        learning_revision = runtime.learning_state(origin)["revision"]
+                        acked = runtime.learning_delta(origin, learning_revision, digest, batch)
+                    learning_revision = acked["revision"]
+                    learning_digest = digest
+                    counters["learning_batches"] += 1
+                    counters["learning_changes"] += acked["applied"]
+                    counters["learning_deletes"] += acked["deleted"]
+                learning_seq = head
+                learning_sync.prune_journal(store.db, learning_seq)
+                learning_pending = False
+                changed = True
+            else:
+                learning_pending = False
+        elif not config.learning_projection:
+            learning_pending = store.learning_journal_head() > 0
+
         if changed or (pinned is not None and pinned.get("last_error") is not None):
-            store.write_mirror_remote(remote_name, store_id, revision, watermark)
+            store.write_mirror_remote(remote_name, store_id, revision, watermark,
+                                      learning_seq=learning_seq, learning_digest=learning_digest)
         if (counters["generations_committed"] > 0 or counters["generations_tombstoned"] > 0
-                or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0):
+                or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0
+                or learning_pending):
             try:
                 snapshot: dict[str, Any] = upload_snapshot(
                     store, config, client=runtime, origin=origin, revision=revision,
@@ -1561,17 +1670,22 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
             counters["snapshot_objects_uploaded"] += snapshot["objects_uploaded"]
             counters["snapshot_bytes"] += snapshot["db_size"]
             revision = max(revision, snapshot["revision"])
-            store.write_mirror_remote(remote_name, store_id, revision, watermark)
+            store.write_mirror_remote(remote_name, store_id, revision, watermark,
+                                      learning_seq=learning_seq, learning_digest=learning_digest)
             if not config.learning_projection:
                 store.prune_learning_journal()
         counters["store_id"] = store_id
         counters["revision"] = revision
         counters["tombstone_watermark"] = watermark
+        counters["learning_revision"] = learning_revision
+        counters["learning_seq"] = learning_seq
         counters["unchanged"] = not changed
         return counters
     except MirrorError as exc:
         if store_id is not None:
-            store.write_mirror_remote(remote_name, store_id, revision, watermark, error=str(exc)[:500])
+            store.write_mirror_remote(remote_name, store_id, revision, watermark,
+                                      learning_seq=learning_seq, learning_digest=learning_digest,
+                                      error=str(exc)[:500])
         raise
     finally:
         if owner:

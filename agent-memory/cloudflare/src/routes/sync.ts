@@ -12,6 +12,7 @@ import {
   type StoreMeta,
 } from "../db.js";
 import { json, methodNotAllowed } from "../errors.js";
+import { readLearningState, type LearningState } from "../learning.js";
 import { serverTiming } from "../observe.js";
 import {
   MAX_OBJECT_BYTES,
@@ -62,9 +63,11 @@ async function hello(request: Request, env: Env, principal: Principal, timing: S
   const started = performance.now();
   let store: StoreMeta | null;
   let state: OriginState;
+  let learning: LearningState;
   try {
     store = await readStoreMeta(env.DB);
     state = await readOriginState(env.DB, helloBody.origin);
+    learning = await readLearningState(env.DB, helloBody.origin);
   } finally {
     timing.d1 += performance.now() - started;
   }
@@ -75,7 +78,11 @@ async function hello(request: Request, env: Env, principal: Principal, timing: S
     origin: helloBody.origin,
     revision: state.revision,
     tombstone_watermark: state.tombstone_watermark,
-    learning: { revision: 0, digest: null, records: 0 },
+    learning: {
+      revision: learning.revision,
+      digest: learning.digest,
+      records: learning.records,
+    },
   }, false, { "Server-Timing": serverTiming(timing) });
 }
 

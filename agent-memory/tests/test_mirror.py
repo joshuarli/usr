@@ -24,12 +24,17 @@ WORK_TMP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / "agent-memory" / "src"))
 
 from agent_memory import archive as archive_module  # noqa: E402
+from agent_memory import experience as experience_module  # noqa: E402
+from agent_memory import learning as learning_module  # noqa: E402
+from agent_memory import learning_sync  # noqa: E402
 from agent_memory import mirror  # noqa: E402
 from agent_memory import mirror_crypto  # noqa: E402
 from agent_memory import types as types_module  # noqa: E402
 from agent_memory.store import Store  # noqa: E402
 
 FIXTURE = json.loads((ROOT / "agent-memory" / "tests" / "fixtures" / "mirror_protocol.json").read_text())
+LEARNING_FIXTURE = json.loads(
+    (ROOT / "agent-memory" / "tests" / "fixtures" / "learning_records.json").read_text())
 DIGEST = "a" * 64
 OTHER = "b" * 64
 CIPHER = "c" * 64
@@ -240,6 +245,44 @@ class FixtureParityTests(unittest.TestCase):
                         mirror.encode_cursor(item["parts"])
             else:
                 self.assertEqual(mirror.decode_cursor(item["value"]) is None, not item["ok"], item["name"])
+
+    def test_learning_record_fixture_agrees_with_the_worker_validator(self):
+        for item in LEARNING_FIXTURE["cases"]:
+            try:
+                decoded = learning_sync.validate_mirror_record(item["change"], LEARNING_FIXTURE["origin"])
+            except learning_sync.SnapshotError:
+                self.assertFalse(item["valid"], item["name"])
+                continue
+            self.assertTrue(item["valid"], item["name"])
+            self.assertEqual(decoded["record"], item["change"]["record"], item["name"])
+
+    def test_learning_delta_validator_rejects_unknown_fields_and_reordered_sources(self):
+        change = LEARNING_FIXTURE["cases"][0]["change"]
+        base = {"protocol": 1, "origin": LEARNING_FIXTURE["origin"], "base_revision": 0,
+                "digest": DIGEST, "changes": [change]}
+        self.assertIsNotNone(learning_sync.validate_mirror_delta(base))
+        for key, value in (("extra", 1), ("base_revision", -1), ("digest", "short")):
+            broken = dict(base, **{key: value})
+            with self.assertRaises(learning_sync.SnapshotError):
+                learning_sync.validate_mirror_delta(broken)
+        repeated = dict(base, changes=[change, change])
+        with self.assertRaises(learning_sync.SnapshotError):
+            learning_sync.validate_mirror_delta(repeated)
+        empty = dict(base, changes=[])
+        with self.assertRaises(learning_sync.SnapshotError):
+            learning_sync.validate_mirror_delta(empty)
+
+    def test_learning_state_and_delta_responses_are_strict(self):
+        state = {"protocol": 1, "origin": "origin-a", "revision": 1, "epoch": 1,
+                 "digest": DIGEST, "records": 2}
+        self.assertEqual(mirror.decode_learning_state_response(state), state)
+        self.assertIsNone(mirror.decode_learning_state_response(dict(state, extra=1)))
+        self.assertIsNone(mirror.decode_learning_state_response(dict(state, epoch=0)))
+        self.assertIsNone(mirror.decode_learning_state_response(dict(state, revision=True)))
+        delta = dict(state, applied=2, deleted=0, replayed=False)
+        self.assertEqual(mirror.decode_learning_delta_response(delta), delta)
+        self.assertIsNone(mirror.decode_learning_delta_response(dict(delta, replayed="no")))
+        self.assertIsNone(mirror.decode_learning_delta_response(dict(delta, deleted=True)))
 
     def test_missing_count_limit(self):
         objects = [{"plaintext_digest": "%064x" % index, "size": 0}
@@ -866,8 +909,12 @@ class SyncStore:
         self.calls.append(("state", remote))
         return self.pinned
 
-    def prune_learning_journal(self):
-        self.calls.append(("prune_journal",))
+    def learning_journal_head(self):
+        self.calls.append(("journal_head",))
+        return 0
+
+    def prune_learning_journal(self, through=None):
+        self.calls.append(("prune_journal", through))
         return 0
 
     def remote_ack_count(self, store_id):
@@ -905,12 +952,13 @@ class SyncStore:
         self.calls.append(("attempt", generation))
         self.attempts.append((generation, remote, error))
 
-    def write_mirror_remote(self, remote, store_id, revision, watermark, error=None):
+    def write_mirror_remote(self, remote, store_id, revision, watermark,
+                            learning_seq=0, learning_digest=None, error=None):
         self.calls.append(("write", remote, store_id, revision, watermark, error))
         self.writes.append((remote, store_id, revision, watermark, error))
         self.pinned = {"remote": remote, "store_id": store_id, "revision": revision,
-                       "tombstone_watermark": watermark, "learning_seq": 0,
-                       "learning_digest": None, "last_sync_at": 1.0, "last_error": error}
+                       "tombstone_watermark": watermark, "learning_seq": learning_seq,
+                       "learning_digest": learning_digest, "last_sync_at": 1.0, "last_error": error}
 
 
 class SyncClient:
@@ -1388,6 +1436,78 @@ class MirrorIntegrationTests(unittest.TestCase):
             self.assertEqual(cast(dict[str, Any], pinned)["store_id"], "usr-memories")
         finally:
             restored.close()
+
+    def test_learning_delta_round_trips_and_rejects_a_stale_revision(self):
+        change = json.loads(json.dumps(LEARNING_FIXTURE["cases"][0]["change"]))
+        digest = learning_sync.changes_digest([change])
+        client = self.client()
+        try:
+            first = client.learning_delta("origin-a", 0, digest, [change])
+            self.assertEqual((first["revision"], first["records"], first["applied"]), (1, 1, 1))
+            self.assertFalse(first["replayed"])
+            state = client.learning_state("origin-a")
+            self.assertEqual((state["revision"], state["epoch"], state["digest"], state["records"]),
+                             (1, 1, digest, 1))
+            self.assertEqual(client.hello("origin-a")["learning"],
+                             {"revision": 1, "digest": digest, "records": 1})
+            replay = client.learning_delta("origin-a", 0, digest, [change])
+            self.assertTrue(replay["replayed"])
+            self.assertEqual(replay["revision"], 1)
+            other = learning_sync.changes_digest([LEARNING_FIXTURE["cases"][1]["change"]])
+            with self.assertRaises(mirror.MirrorError) as raised:
+                client.learning_delta("origin-a", 0, other, [LEARNING_FIXTURE["cases"][1]["change"]])
+            self.assertEqual(raised.exception.code, "stale_revision")
+            self.assertEqual(raised.exception.status, 409)
+            self.assertEqual(cast(dict[str, Any], raised.exception.state)["revision"], 1)
+            self.assertEqual(client.learning_state("origin-a")["records"], 1)
+        finally:
+            client.close()
+
+    def test_projection_sync_sends_one_delta_and_prunes_the_journal(self):
+        state = self.root / "projection"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            learning_module.initialize(store.db)
+            draft = experience_module.Draft(
+                kind="method", claim="Use the synthetic driver for projection tests.",
+                applies_when="Running the synthetic projection test.", detector="synthetic",
+                subject="projection", observed_at=100.0,
+                sources=[{"session": "codex:native-projection", "position": 0,
+                          "digest": "a" * 64, "role": "trigger"}])
+            with store.db:
+                status, _ = experience_module.add_experience(
+                    store.db, "git:" + str(self.root), draft, "codex:native-projection", 100.0)
+            self.assertIn(status, ("created", "merged"))
+            head = learning_sync.journal_head(store.db)
+            self.assertGreater(head, 0)
+            config = replace(self.config, learning_projection=True)
+            client = self.client(config)
+            try:
+                first = mirror.sync(store, config, "cloudflare", client=client,
+                                    upload_client_factory=self.client, recipients=self.recipients,
+                                    concurrency=1)
+                self.assertEqual(first["learning_batches"], 1)
+                self.assertEqual(first["learning_changes"], 1)
+                self.assertEqual(client.learning_state("origin-a")["records"], 1)
+                self.assertEqual(client.hello("origin-a")["learning"]["records"], 1)
+            finally:
+                client.close()
+            self.assertEqual(learning_sync.journal_head(store.db), 0)
+            pinned = cast(dict[str, Any], store.mirror_remote_state("cloudflare"))
+            self.assertEqual(pinned["learning_seq"], head)
+            self.assertIsNotNone(pinned["learning_digest"])
+            client = self.client(config)
+            try:
+                second = mirror.sync(store, config, "cloudflare", client=client,
+                                     upload_client_factory=self.client, recipients=self.recipients,
+                                     concurrency=1)
+                self.assertEqual(second["learning_batches"], 0)
+                self.assertTrue(second["unchanged"])
+            finally:
+                client.close()
+        finally:
+            store.close()
 
     def test_a_restore_applies_tombstones_newer_than_the_snapshot(self):
         state = self.root / "source"

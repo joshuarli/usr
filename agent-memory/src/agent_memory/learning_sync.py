@@ -10,6 +10,7 @@ replicated; only validated records cross the wire.
 """
 import hashlib
 import json
+import re
 import time
 from typing import Any
 
@@ -368,6 +369,116 @@ def validate_record(record) -> dict[str, Any]:
         clean["created_at"] = _number(record, "created_at")
         clean["links"] = []
     return clean
+
+
+PROJECT_KEY = re.compile(r"^[0-9a-f]{16}$")
+MAX_LEARNING_CHANGES = 200
+MIRROR_EXPERIENCE_KEYS = frozenset({
+    "record", "id", "project_key", "kind", "claim", "applies_when", "identifiers", "fingerprint",
+    "basis", "detector", "revision", "worktree", "observed_at", "captured_at", "validity", "tags",
+    "state", "state_reason", "state_at", "sources", "links",
+})
+MIRROR_MEMORY_KEYS = frozenset({
+    "record", "id", "project_key", "action", "applicability", "revision", "validity",
+    "state", "created_at", "sources", "links",
+})
+MIRROR_LABEL = "project_label"
+SOURCE_KEYS = frozenset({"session", "position", "digest", "role"})
+LINK_KEYS = frozenset({"older", "relation"})
+
+
+def _mirror_keys(record, required, label):
+    keys = set(record)
+    if label is not None and MIRROR_LABEL in keys:
+        keys = keys - {MIRROR_LABEL}
+    return keys == set(required)
+
+
+def _mirror_label(value):
+    if not isinstance(value, str) or not 1 <= len(value) <= 128 or any(ord(character) < 32 for character in value):
+        raise SnapshotError("learning project label must be 1..128 printable characters")
+    return value
+
+
+def _mirror_session(value, origin):
+    if not isinstance(value, str) or len(value) > MAX_TEXT:
+        raise SnapshotError("learning source session is not bounded text")
+    local, separator, suffix = value.rpartition("@")
+    if not separator or not local or suffix != origin or "@" in local:
+        raise SnapshotError("learning source session is not qualified with the origin")
+    harness, colon, native = local.partition(":")
+    if not colon or harness not in HARNESSES or not native:
+        raise SnapshotError("learning source session is not a harness session")
+    return value
+
+
+def validate_mirror_record(record, origin) -> dict[str, Any]:
+    """Validate the wire form of a learning record, including its project hash and origin."""
+    if not isinstance(record, dict):
+        raise SnapshotError("learning record is not an object")
+    kind = record.get("record")
+    if set(record) == {"record", "id", "deleted"}:
+        if record.get("deleted") is not True or kind not in ("experience", "memory"):
+            raise SnapshotError("learning deletion is malformed")
+        return {"record": kind, "id": _integer(record.get("id"), "id"), "deleted": True}
+    required = MIRROR_EXPERIENCE_KEYS if kind == "experience" else MIRROR_MEMORY_KEYS if kind == "memory" else None
+    if required is None:
+        raise SnapshotError("unsupported learning record kind: %r" % (kind,))
+    if not _mirror_keys(record, required, MIRROR_LABEL):
+        raise SnapshotError("learning record has unrecognised or missing fields")
+    key = record.get("project_key")
+    if not isinstance(key, str) or not PROJECT_KEY.match(key):
+        raise SnapshotError("learning project key is not 16 lowercase hex characters")
+    label = record.get("project_label")
+    if label is not None:
+        _mirror_label(label)
+    sources = record.get("sources")
+    if isinstance(sources, list):
+        for source in sources:
+            if not isinstance(source, dict) or set(source) != SOURCE_KEYS:
+                raise SnapshotError("learning source is malformed")
+            _mirror_session(source.get("session"), origin)
+    links = record.get("links")
+    if isinstance(links, list):
+        for link in links:
+            if not isinstance(link, dict) or set(link) != LINK_KEYS:
+                raise SnapshotError("learning link is malformed")
+    local = {field: value for field, value in record.items() if field not in ("project_key", MIRROR_LABEL)}
+    local["project"] = key
+    clean = validate_record(local)
+    clean["project_key"] = clean.pop("project")
+    if label is not None:
+        clean[MIRROR_LABEL] = label
+    return clean
+
+
+def validate_mirror_delta(delta) -> dict[str, Any]:
+    if not isinstance(delta, dict) or set(delta) != {"protocol", "origin", "base_revision", "digest", "changes"}:
+        raise SnapshotError("learning delta is malformed")
+    if delta.get("protocol") != 1:
+        raise SnapshotError("learning delta protocol is not supported")
+    origin = delta.get("origin")
+    if not isinstance(origin, str) or not re.match(r"^[A-Za-z0-9._-]{1,128}$", origin):
+        raise SnapshotError("learning delta origin is invalid")
+    base = delta.get("base_revision")
+    if isinstance(base, bool) or not isinstance(base, int) or base < 0:
+        raise SnapshotError("learning delta base revision is invalid")
+    digest = delta.get("digest")
+    if not isinstance(digest, str) or not re.match(r"^[0-9a-f]{64}$", digest):
+        raise SnapshotError("learning delta digest is invalid")
+    changes = delta.get("changes")
+    if not isinstance(changes, list) or not 1 <= len(changes) <= MAX_LEARNING_CHANGES:
+        raise SnapshotError("learning delta is not a bounded change list")
+    seen = set()
+    clean = []
+    for change in changes:
+        validated = validate_mirror_record(change, origin)
+        key = (validated["record"], validated["id"])
+        if key in seen:
+            raise SnapshotError("learning delta repeats a record")
+        seen.add(key)
+        clean.append(validated)
+    return {"protocol": 1, "origin": origin, "base_revision": base, "digest": digest, "changes": clean}
 
 
 def _session_identity(session):

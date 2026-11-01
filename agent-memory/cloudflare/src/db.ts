@@ -1,3 +1,5 @@
+import { projectionDeletionStatements } from "./learning.js";
+
 export interface StoreMeta {
   readonly id: string;
   readonly created_at: number;
@@ -401,6 +403,14 @@ export async function pushTombstones(
          WHERE excluded.forgotten_at > tombstone.forgotten_at`,
       ).bind(origin, tombstone.harness, tombstone.native_id, tombstone.scope, tombstone.forgotten_at, revision),
     );
+  }
+  const learning = await db.prepare("SELECT epoch FROM learning_state WHERE origin_host = ?")
+    .bind(origin).first<{ readonly epoch: number }>();
+  if (learning !== null) {
+    statements.push(...projectionDeletionStatements(
+      db, origin, learning.epoch,
+      tombstones.map((tombstone) => `${tombstone.harness}:${tombstone.native_id}@${origin}`),
+    ));
   }
   statements.push(
     db.prepare("UPDATE origin_sync SET revision = revision + 1, last_change_at = ? WHERE origin_host = ?")
