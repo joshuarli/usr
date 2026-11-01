@@ -62,6 +62,13 @@ if [ "$mode" = desktop ]; then
 	check 'ghostty-custom shows config' sh -c '/usr/local/bin/ghostty-custom +show-config >/dev/null'
 	check 'ghostty terminfo installed' test -f /usr/share/terminfo/x/xterm-ghostty
 	check 'ghostty build dependencies removed' sh -c '! apk info -e .home-ghostty-build'
+	if [ "$(apk --print-arch)" = x86_64 ]; then
+		check 'helium tag recorded' grep -Eqx 'helium-[0-9].*' /usr/local/share/home/helium.tag
+		check 'helium launcher installed' test -x /usr/local/bin/helium
+		check 'helium launcher points at the current release' sh -c '[ -L /usr/local/bin/helium ] && [ "$(readlink /usr/local/bin/helium)" = /usr/local/lib/helium/current/helium-wrapper ]'
+		check 'helium shared libraries resolve' sh -c '! LD_LIBRARY_PATH=/usr/local/lib/helium/current/lib ldd /usr/local/lib/helium/current/helium 2>&1 | grep -q "not found"'
+		check 'helium reports version' su -s /bin/sh "$user" -c '/usr/local/bin/helium --version'
+	fi
 	check 'foot not installed' sh -c '! apk info -e foot && ! apk info -e foot-extra-terminfo'
 	for cmd in ghostty-custom bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done
 	check 'Hack font installed' sh -c 'fc-list | grep -q Hack'

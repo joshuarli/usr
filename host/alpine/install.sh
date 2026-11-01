@@ -83,7 +83,7 @@ printf '%s\n' "$repos" | grep -Eqv '/edge/(main|community)/*$' &&
 printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 
-for script in install.sh verify.sh build/dwl.sh build/ghostty.sh config/home-session config/profile.sh services/home-runtime; do
+for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
 done
 
@@ -133,6 +133,14 @@ if [ "$mode" = desktop ]; then
 		[ -f /usr/local/share/home/ghostty-custom.tag ] ||
 			die '/usr/local/bin/ghostty-custom was not installed by home; move it aside'
 	fi
+	if [ -e /usr/local/bin/helium ]; then
+		[ -L /usr/local/bin/helium ] &&
+			[ "$(readlink /usr/local/bin/helium)" = /usr/local/lib/helium/current/helium-wrapper ] ||
+			die '/usr/local/bin/helium exists and is not a home-managed symlink; move it aside'
+	fi
+	if [ -e /usr/local/lib/helium/current ] && [ ! -L /usr/local/lib/helium/current ]; then
+		die '/usr/local/lib/helium/current exists and is not a home-managed symlink; move it aside'
+	fi
 fi
 
 say 'checking network and repositories'
@@ -179,6 +187,7 @@ if [ "$mode" = desktop ]; then
 
 	sh build/dwl.sh
 	sh build/ghostty.sh
+	USER_NAME="$user" sh build/helium.sh
 	install_managed config/home-session /usr/local/bin/home-session 0755
 	install_managed services/home-runtime /etc/init.d/home-runtime 0755
 	install_managed "$conf" /etc/conf.d/home-runtime 0644

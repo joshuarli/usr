@@ -89,6 +89,9 @@ The desktop layer runs its own preflight checks before the first change, then:
 - downloads the newest `release-*` ghostty-custom Wayland binary for the
   machine architecture with `build/ghostty.sh`, verifies its SHA256SUMS and
   installs it to `/usr/local/bin/ghostty-custom` with its terminfo,
+- downloads the newest `helium-*` prerelease for x86_64 with
+  `build/helium.sh`, verifies its SHA-256 and acceptance sidecar, and installs
+  it under `/usr/local/lib/helium` with `/usr/local/bin/helium`,
 - installs `home-session`, the `home-runtime` service, and a tty1 login hook,
 - adds the user to the `seat` group and starts `seatd` and `home-runtime`.
 
@@ -133,8 +136,8 @@ Pull or edit the `usr` checkout and run `doas env INSTALL_MODE=desktop sh usr/ho
 again, or answer `desktop` at the prompt. Use `INSTALL_MODE=server` to reapply
 only the headless base.
 Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
-`config/dwl.h` changes, ghostty-custom is updated only when a newer
-`release-*` prerelease appears, and each default tool is installed only if
+`config/dwl.h` changes, ghostty-custom and helium are updated only when a newer
+matching prerelease appears, and each default tool is installed only if
 missing (update it with `usr`'s own `dl`). A managed path holding something home
 did not install stops the run; move it aside or merge it, then rerun.
 
@@ -142,7 +145,9 @@ home recognizes files it installed by comparing them with every committed
 version of their source, so it needs a full clone; a shallow clone is refused.
 Packages follow the edge repositories, so reruns can upgrade them.
 Ghostty-custom tracks the newest `release-*` prerelease, so reruns can upgrade
-it when a new Linux build is published.
+it when a new Linux build is published. Helium is x86_64-only and also tracks
+the newest `helium-*` prerelease; it is not installed by a server-only
+provision.
 
 ## Not managed
 
