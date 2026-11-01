@@ -2,7 +2,7 @@
 
 ## Run checks
 
-Run the narrowest check that covers the change. `sh sync check-parallel` runs the Python files in parallel across `dotfiles` and `host/macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`). The table lists the per-file runner for each area.
+Run the narrowest check that covers the change. `sh sync check-parallel` runs the Python files in parallel across `tools`, `dotfiles`, and `host/macos` via pytest and joshuarli-pytest-parallel (see `pytest.ini`). The table lists the per-file runner for each area.
 
 | Changed | Run |
 | --- | --- |

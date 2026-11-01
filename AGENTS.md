@@ -2,11 +2,28 @@
 
 This repository is the source of truth for my home configuration and machine setup. Edit this tree, never `~`.
 
-Use the [README](README.md) to install. See [sync](docs/sync.md), [development checks](docs/development.md), [agent learning](docs/agent-learning.md), [macOS preferences](docs/macos-preferences.md), [agent setup](docs/agent-setup.md), the [skills guide](SKILLS.md), the [mdtool reference](docs/mdtool.md), the [agent archive campaign](docs/CAMPAIGN-AGENT-ARCHIVE.md), [deferred work](TODO.md), and [RFCs](docs/rfc/).
+Use the [README](README.md) to install.
 
 `sh sync plan` previews home sync. Do not run `sh sync`, `host/macos/*`, `host/setup-*`, or reset scripts unless asked; they can alter the host or remove agent state. Run `sym` only with `-t <tmpdir>` and `dl` only with `HOME` set to a scratch directory under `.work/`. For checks, use the narrow commands in [development checks](docs/development.md). Keep scripts POSIX `sh` and use only the Python standard library. Fix a `sym` bug with a failing numbered case in `dotfiles/sym-test.sh` first.
 
 Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or `rg` binaries in `~/.local/bin`; use `git ls-files dotfiles/*/.local/bin` to list repository scripts.
+
+## Where things are
+
+| Topic | Doc |
+| --- | --- |
+| Home sync, layers, tools, doctor, uninstall | [docs/sync.md](docs/sync.md) |
+| Development checks and conventions | [docs/development.md](docs/development.md) |
+| Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
+| Agent learning, session search, and archive | [tools/agent-memory/README.md](tools/agent-memory/README.md) |
+| Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
+| macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
+| Pi profile | [docs/pi.md](docs/pi.md) |
+| macOS preference management | [docs/macos-preferences.md](docs/macos-preferences.md) |
+| Alpine provisioner | [host/alpine/README.md](host/alpine/README.md) |
+| Skills guide | [SKILLS.md](SKILLS.md) |
+| Deferred work and RFCs | [TODO.md](TODO.md), [docs/rfc/](docs/rfc/) |
+| Agent archive campaign record | [docs/CAMPAIGN-AGENT-ARCHIVE.md](docs/CAMPAIGN-AGENT-ARCHIVE.md) |
 
 ## Background work
 

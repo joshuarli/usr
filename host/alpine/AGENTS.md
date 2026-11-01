@@ -12,4 +12,4 @@ It lives at `host/alpine/` in the `usr` checkout.
 - User dotfiles come from the enclosing `usr` checkout via `sh sync links`; the default `dl` tool set except `agy` comes from `sh sync tools` (never `setup-linux`). The login shell stays ash.
 - Check everything before the first change; the dotfile plan and every mode's managed-path checks must pass before provisioning. A managed path whose content is not a committed version of its source (following renames) is a conflict.
 - Reruns must not rewrite unchanged files; dwl rebuilds only when its build id changes, and ghostty-custom updates only when a newer release appears.
-- Verify with `sh tests/static.sh`; run `sh tests/vm.sh` for behavior changes. Hardware testing is separate from the VM test.
+- Verify with `sh tests/static.sh`; run `sh tests/vm.sh` for behavior changes. Hardware testing is separate from the VM test. `static.sh` runs syntax, shellcheck and package-name checks. `vm.sh` needs `qemu` and `nc`, provisions the committed `HEAD` in QEMU (Alpine edge, `linux-stable`, aarch64), checks the server base and desktop across a rerun and reboot, and runs from `host/alpine/`.

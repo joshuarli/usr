@@ -4,9 +4,14 @@ set -eu
 usage() {
     printf '%s\n' \
         'usage: pk [-9] query...' \
-        '  Type to filter; Down selects a row, Space marks/unmarks, Enter kills.' \
-        '  Without marks, Enter kills the focused row. Esc cancels.' \
-        '  -9  send SIGKILL rather than SIGTERM'
+        '  Fuzzy-filter your own processes. Down focuses the list, Space marks' \
+        '  or unmarks, Enter kills marked rows (or the focused row), Esc cancels.' \
+        '  -9, --force  send SIGKILL instead of SIGTERM' \
+        '  -h, --help   show this help' \
+        '' \
+        '  pk never escalates, never signals every query match without a' \
+        '  selection, and rechecks each process record before signaling.' \
+        '  Requires fz with --multi; sh dl fz installs it in ~/usr.'
 }
 
 signal=TERM

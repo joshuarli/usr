@@ -10,7 +10,7 @@ Run `sh sync plan` to preview links. Resolve each `CONFLICT` before syncing. `sh
 
 `cf` is installed by default from a pinned npm package under the managed Node.js runtime. `stuff` is installed by default from its latest GitHub pre-release; `sh dl stuff` updates or reinstalls it.
 
-`make` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID and macOS DNS setup are manual. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
+`sh sync` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID and macOS DNS setup are manual. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
 
 On macOS, `sh dl ghostty` downloads the pinned official universal Ghostty release ZIP directly (no Homebrew), verifies the signed app with macOS Gatekeeper, and installs it at `/Applications/Ghostty.app` with a `~/.local/bin/ghostty` symlink. After installing, run `ghostty-fda-check` inside Ghostty to confirm Full Disk Access; it opens System Settings at the Full Disk Access pane when the grant is missing. Set `GHOSTTY_APPLICATIONS_DIR="$HOME/Applications"` if `/Applications` is not writable. It will not overwrite an existing unmanaged app or launcher; `sh sync uninstall` removes a dl-managed installation. Ghostty auto-updates are disabled by the linked config; change `GHOSTTY_VERSION` in `dl` to upgrade.
 
@@ -18,6 +18,6 @@ On macOS, `sh dl ghostty` downloads the pinned official universal Ghostty releas
 
 `sh dl fx` is an optional pinned native install; no-argument `dl` does not install fx. The `~/.fx/AGENTS.md` and `~/.fx/settings.json` files are dotfiles-managed links; fx credentials, sessions, and all other mutable state stay local. fx auto-updates are disabled in the tracked profile. Change `FX_VERSION` and its checksums in `dl` to upgrade.
 
-The `host/macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. See [agent learning](agent-learning.md).
+The `host/macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. See [agent learning](../tools/agent-memory/README.md).
 
 Sync prunes a recorded link that points into a layer whose source is gone; `sh sync plan` lists these as `PRUNE`. A link copied from a layer symlink points elsewhere, so it stays, as do links `sh sync` did not create. Remove those yourself, or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.

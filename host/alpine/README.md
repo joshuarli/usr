@@ -152,15 +152,6 @@ audio, power management and lid handling. The kernel flavor is chosen at install
 time; the desktop layer refuses to run while `linux-lts` is installed, while a
 server install accepts it.
 
-## Development
-
-`sh tests/static.sh` runs syntax, shellcheck and package-name checks. `sh tests/vm.sh`
-installs Alpine edge with `linux-stable` on aarch64 from the virt ISO in QEMU,
-provisions and verifies the server base, layers the desktop over it, provisions
-it twice, reboots, logs in on tty1 and checks the desktop. It needs `qemu` and
-`nc`, and provisions the committed `HEAD` of the `usr` checkout. Run both from
-`host/alpine/`.
-
 ## Hardware checklist (XPS 13 9343)
 
 The VM test does not cover these. Check them after provisioning the laptop.
