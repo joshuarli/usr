@@ -128,6 +128,15 @@ gate. `perf-worker` boots the built bundle with real Miniflare D1 and R2 and mea
 loopback HTTP; build it once with `npm run build` in
 `agent-memory/cloudflare` after `npm ci`. `perf-deployed` lands with the first deploy.
 
+`SCENARIO=learning-import RECORDS=n` on 2026-11-01 exported 1,000 records as 670,399
+bytes at 70,074 records/s (median 16.763 ms, p95 18.800 ms) and 10,000 records as
+6,753,139 bytes at 103,951 records/s (median 136.472 ms, p95 181.534 ms). The
+100,000-record run exported 68,023,339 bytes with stable deterministic counters; its
+timing gate was deferred because the host was busy. The 1k/10k/100k FTS search baselines
+are in the campaign record: a 20-result page issues two D1 queries and stays near 31–36 ms
+median under Miniflare. `make perf-report` compares the oldest and newest run of each
+scenario.
+
 The capture baseline (200 sessions × 10 messages × 10 projects, 2,600 events) on
 2026-10-31:
 

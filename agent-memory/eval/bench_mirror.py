@@ -30,7 +30,6 @@ from agent_memory.store import Store, project_identity  # noqa: E402
 
 DEFERRED = {
     "recall": "P5.3",
-    "search": "P3.3",
     "inspect": "P3.3",
     "learning-delta": "P3.1",
     "mirror-noop": "P2.3",
@@ -38,7 +37,6 @@ DEFERRED = {
     "recovery": "P2.4",
     "html": "P4.1",
     "mirror-concurrent": "P5.2",
-    "worker-status": "P1.4",
 }
 LOCAL_SCENARIOS = ("capture", "learning-import", "mirror-initial")
 

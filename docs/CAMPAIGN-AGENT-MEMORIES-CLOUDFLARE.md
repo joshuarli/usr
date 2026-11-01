@@ -214,7 +214,7 @@ runs; range 0.24–0.35 s). The P2.4 dry-run upload is 97.28 KiB total, 16.49 Ki
 against the 200 KiB gate.
 
 `make deploy` stops before the build when `cf auth whoami` fails or a migration file is
-unapplied. A bundle that expects `0002_learning.sql` against a `0001` database would
+unapplied. A bundle that expects `0005_learning.sql` against a `0004` database would
 otherwise fail mid-sync after a partial upload; the gate moves that failure to the start.
 The gate also fails when `cloudflare.config.ts` is missing or lacks the worker name, any
 configured domain, any binding, or the observability block, because the build copies that
@@ -610,6 +610,42 @@ every thirteenth request; across 259 requests and 19 faults it recorded p50 7,57
 and p95 7,620.8 ms per collector sync, delivered three generations for each collector,
 and an unchanged second round added no rows or duplicates.
 
+### Close-out
+
+On 2026-11-01 the full tree was re-checked: `make test` ran all eleven Python suites
+green, `npm test` passed 110 Worker tests including the 24 adversarial cases, Ruff and
+`ty` passed on the campaign Python files, and `mdtool check` reported no errors on the
+three touched documents (five notes). `backup create`, `backup restore`, `archive verify`,
+and `archive reindex` on a scratch state reported one generation and one object, one
+restored generation, zero verification failures, and one reindexed session. No `restic`
+reference remains outside the campaign records, and `git log -S restic` shows
+`335fe09 delete restic` as the code removal.
+
+`learning-import` now has 1k/10k/100k baselines. The export is linear in records and the
+JSON bytes grow with record text:
+
+| records | bytes | records/s (export) | median wall ms | p95 wall ms |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 670,399 | 70,074 | 16.763 | 18.800 |
+| 10,000 | 6,753,139 | 103,951 | 136.472 | 181.534 |
+| 100,000 | 68,023,339 | deferred | deferred | deferred |
+
+The 100,000-record run and the close-out capture/status/search reruns recorded
+deterministic counters but no wall or CPU statistics because `perf-gate-ready` returned
+75 (load 16.44 on 18 cores). The capture counters match the 2026-10-31 baseline exactly.
+The status response now carries 320 bytes with three D1 prepares, two first calls, and one
+all call because `P4.2` made it complete; the earlier 131-byte, one-prepare status timing
+is superseded and is not compared. The search counters still show one request, two
+prepares, two binds, and two all calls per page, matching the `P3.3` timing baseline. No
+new timing claim is made from a deferred run.
+
+The benchmark's `DEFERRED` map no longer names `search`, `status`, or `worker-status`
+because those scenarios are implemented and measured. The remaining named scenarios
+(`recall`, `inspect`, `learning-delta`, `mirror-noop`, `mirror-append`, `recovery`,
+`html`, `mirror-concurrent`) are not implemented in this harness; the suite, adversarial,
+and performance evidence above covers their underlying paths, and they remain a
+documented gap rather than a claimed result.
+
 ## Performance contract
 
 **Harness.** `Makefile` targets call `cloudflare/perf.sh`, which drives
@@ -714,7 +750,7 @@ writer.
 | ID | Slice | Owns | Prereq | Acceptance |
 | --- | --- | --- | --- | --- |
 | `P2.1` | Protocol module: constants, closed validators, error codes, cursor codec, request limits; client `mirror.py` with connection pooling (`http.client`, keep-alive), retry policy, and config parsing. Routes `status`, `hello`, `objects/missing`, `objects/{digest}`. | `cloudflare/src/protocol.ts`, `cloudflare/src/routes/sync.ts`, `src/agent_memory/mirror.py`, `tests/test_mirror.py` | `P1.2` | Case 22 passes; version mismatch is refused before writes; unsupported method 405; oversized JSON 413; a hello for an unbound origin 403; client and Worker agree on every fixture in the shared protocol JSON. |
-| `P2.2` | Compression and encryption on upload: plaintext read from the local archive, zlib when it shrinks ≥5%, `rage` to the recipient set, ciphertext digest/size, `PUT` with R2 `sha256`, D1 mapping, bounded concurrency, no re-upload of known plaintext digests. | `mirror_crypto.py`, `mirror.py`, `cloudflare/src/routes/objects.ts`, `tests/test_mirror.py` | `P2.1`, `P0.2` | Cases 4, 20, and 23 pass; a retried upload of the same plaintext uploads zero bytes the second time; a corrupted ciphertext is rejected by R2 and recorded nowhere; a bounded-inflate refusal rejects an over-large payload; 4 concurrent uploads stay bounded; wrong identity restore fails safely; compression ratio and CPU are recorded per object class. |
+| `P2.2` | Compression and encryption on upload: plaintext read from the local archive, zlib when it shrinks ≥5%, `rage` to the recipient set, ciphertext digest/size, `PUT` with R2 `sha256`, D1 mapping, bounded concurrency, no re-upload of known plaintext digests. | `mirror_crypto.py`, `mirror.py`, `cloudflare/src/routes/sync.ts`, `tests/test_mirror.py` | `P2.1`, `P0.2` | Cases 4, 20, and 23 pass; a retried upload of the same plaintext uploads zero bytes the second time; a corrupted ciphertext is rejected by R2 and recorded nowhere; a bounded-inflate refusal rejects an over-large payload; 4 concurrent uploads stay bounded; wrong identity restore fails safely; compression ratio and CPU are recorded per object class. |
 | `P2.3` | Generation commit, manifest upload, durable ack, store identity pinning, duplicate ack, revision fencing, tombstone-first ordering, no-op path. | `cloudflare/src/routes/generations.ts`, `cloudflare/src/routes/tombstones.ts`, `cloudflare/migrations/0002_generations.sql`, `cloudflare/migrations/0003_origin_objects.sql`, `mirror.py`, `sessions_cli.py`, `store.py` (schema v10 `mirror_remote(remote PK, store_id, revision, tombstone_watermark, learning_seq, learning_digest, last_sync_at, last_error)`), `tests/test_mirror.py` | `P2.2` | Cases 1–6, 8, 12, 13 pass; a changed remote `store_id` refuses to inherit local acks; unchanged sync does one hello, zero uploads, zero D1 writes; a stale revision commits nothing. |
 | `P2.4` | Content-addressed recovery snapshots, `backup.snapshot` (consistent DB copy without object copying), restore into a new directory including replay of generations committed after the snapshot, tombstone merge, grant deactivation, index rebuild, `mirror verify` (manifests and snapshots always; object bodies on `--objects`, default a 100-object or 5% sample), `mirror snapshots`, `mirror gc`, `mirror rotate`. | `cloudflare/src/routes/snapshots.ts`, `store.py`, `mirror.py`, `backup.py`, `tests/test_mirror.py` | `P2.3` | Cases 1, 9, 10, 11, 21 pass; restore from a deleted local state verifies every chunk and every archive object, and replays a generation committed after the snapshot; an unchanged database creates no snapshot and uploads zero chunks; a snapshot that predates a tombstone cannot expose it; GC never removes the newest verified snapshot or a referenced object; rotation re-encrypts a small origin and restores with the new identity only; the restored store has no enabled project, no grant, and no scheduler; a corrupted object is named by digest. |
 
@@ -723,7 +759,7 @@ writer.
 | ID | Slice | Owns | Prereq | Acceptance |
 | --- | --- | --- | --- | --- |
 | `P3.1` | Local change journal: `learning_change` table, triggers on `learning_experiences`, `learning_experience_sources`, `learning_experience_links`, `learning_memories`, `learning_incidents`; prune after a durable ack, or after a recovery snapshot when the projection is off; `export_record` shared by snapshot and delta; project hashing and the explicit `mirror label` mapping. | `learning.py`, `learning_sync.py`, `experience.py`, `store.py`, `tests/test_learning.py`, `tests/test_learning_ops.py` | `P2.3` | Every real mutation path (observe, promote, retire, supersede, withdraw, forget, forget-session) leaves the journal head moved; applying all journal rows from empty equals `export_snapshot()` of the final database; `rebuild_index` preserves the journal and triggers. |
-| `P3.2` | D1 projection schema and delta apply: epoch, pending, revision fence, tombstones, FTS rows, deletes; sources rewritten to the qualified `harness:native_id@origin` form; forgetting a session removes every record citing it; TS record validator ported from `validate_record` with a shared fixture parity test. | `cloudflare/migrations/0002_learning.sql`, `cloudflare/src/learning.ts`, `cloudflare/src/routes/learning.ts`, `tests/test_mirror.py`, `tests/fixtures/learning_records.json` | `P3.1`, `P2.1` | Cases 5, 6, 8, 17, 19 pass; a delta stream and a reconciled full projection of the same database are identical; an unrecognised field or a bad closed-set value is rejected by both validators; a stale delta changes nothing; a tombstone deletes the citing records and leaves no FTS hit. |
+| `P3.2` | D1 projection schema and delta apply: epoch, pending, revision fence, tombstones, FTS rows, deletes; sources rewritten to the qualified `harness:native_id@origin` form; forgetting a session removes every record citing it; TS record validator ported from `validate_record` with a shared fixture parity test. | `cloudflare/migrations/0005_learning.sql`, `cloudflare/src/learning.ts`, `cloudflare/src/routes/learning.ts`, `tests/test_mirror.py`, `tests/fixtures/learning_records.json` | `P3.1`, `P2.1` | Cases 5, 6, 8, 17, 19 pass; a delta stream and a reconciled full projection of the same database are identical; an unrecognised field or a bad closed-set value is rejected by both validators; a stale delta changes nothing; a tombstone deletes the citing records and leaves no FTS hit. |
 | `P3.3` | Search and inspection queries: FTS5, filters, keyset pagination, batched source fetch, detail; query-plan assertions. | `cloudflare/src/memories.ts`, `cloudflare/src/routes/memories.ts`, `cloudflare/test/search.test.mjs` | `P3.2` | `EXPLAIN QUERY PLAN` shows the FTS index and composite index, no full scans for filtered pages; a 20-result page issues ≤3 D1 queries; deep pages scan O(page); 1k/10k/100k benchmarks recorded. |
 | `P3.4` | Reconciliation: paginated key/digest index, diff, reconcile begin/commit, interrupted staging invisibility, retry idempotency. | `cloudflare/src/routes/learning.ts`, `mirror.py`, `tests/test_mirror.py` | `P3.2` | Case 7, 8, 17 pass; an interrupted reconciliation shows the old epoch until commit; a repeated identical reconciliation performs zero D1 writes; a concurrent delta during staging gets 409 and retries. |
 
