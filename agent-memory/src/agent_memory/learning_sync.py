@@ -55,6 +55,68 @@ CREATE TABLE IF NOT EXISTS learning_import_state(
 CREATE TABLE IF NOT EXISTS transfer_learning(
     remote TEXT PRIMARY KEY, digest TEXT NOT NULL, durable_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS mirror_project_label(
+    project_key TEXT PRIMARY KEY, label TEXT NOT NULL, updated_at REAL NOT NULL
+);
+"""
+
+JOURNAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS learning_change(
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    record TEXT NOT NULL CHECK(record IN ('experience','memory')),
+    remote_id INTEGER NOT NULL,
+    deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
+    changed_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS learning_change_record ON learning_change(record, remote_id);
+CREATE TRIGGER IF NOT EXISTS learning_change_experience_ai AFTER INSERT ON learning_experiences
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', new.id, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_experience_au AFTER UPDATE ON learning_experiences
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', new.id, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_experience_ad AFTER DELETE ON learning_experiences
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', old.id, 1, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_source_ai AFTER INSERT ON learning_experience_sources
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', new.experience, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_source_au AFTER UPDATE ON learning_experience_sources
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', new.experience, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_source_ad AFTER DELETE ON learning_experience_sources
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', old.experience, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_link_ai AFTER INSERT ON learning_experience_links
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', new.newer, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_link_au AFTER UPDATE ON learning_experience_links
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', new.newer, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_link_ad AFTER DELETE ON learning_experience_links
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('experience', old.newer, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_memory_ai AFTER INSERT ON learning_memories
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('memory', new.finding, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_memory_au AFTER UPDATE ON learning_memories
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('memory', new.finding, 0, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_memory_ad AFTER DELETE ON learning_memories
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      VALUES('memory', old.finding, 1, CAST(strftime('%s','now') AS REAL)); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_incident_ai AFTER INSERT ON learning_incidents
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      SELECT 'memory', new.finding, 0, CAST(strftime('%s','now') AS REAL)
+      WHERE EXISTS(SELECT 1 FROM learning_memories WHERE finding = new.finding); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_incident_au AFTER UPDATE ON learning_incidents
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      SELECT 'memory', new.finding, 0, CAST(strftime('%s','now') AS REAL)
+      WHERE EXISTS(SELECT 1 FROM learning_memories WHERE finding = new.finding); END;
+CREATE TRIGGER IF NOT EXISTS learning_change_incident_ad AFTER DELETE ON learning_incidents
+BEGIN INSERT INTO learning_change(record, remote_id, deleted, changed_at)
+      SELECT 'memory', old.finding, 0, CAST(strftime('%s','now') AS REAL)
+      WHERE EXISTS(SELECT 1 FROM learning_memories WHERE finding = old.finding); END;
 """
 
 
@@ -70,39 +132,155 @@ def has_learning(db):
     return db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'learning_schema'").fetchone() is not None
 
 
-def export_snapshot(db) -> list[dict[str, Any]]:
-    """Describe every experience and memory whose evidence is entirely local to this host."""
-    records: list[dict[str, Any]] = []
-    for row in db.execute("SELECT * FROM learning_experiences ORDER BY id"):
+def ensure_journal(db):
+    created = db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'learning_change'").fetchone() is None
+    db.executescript(JOURNAL_SCHEMA)
+    if created:
+        with db:
+            db.execute("INSERT INTO learning_change(record, remote_id, deleted, changed_at) "
+                       "SELECT 'experience', id, 0, CAST(strftime('%s','now') AS REAL) FROM learning_experiences")
+            db.execute("INSERT INTO learning_change(record, remote_id, deleted, changed_at) "
+                       "SELECT 'memory', finding, 0, CAST(strftime('%s','now') AS REAL) FROM learning_memories")
+
+
+def project_key(identity):
+    return hashlib.sha256(("agent-memory-project:" + str(identity)).encode("utf-8")).hexdigest()[:16]
+
+
+def project_labels(db) -> dict[str, str]:
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mirror_project_label'").fetchone() is None:
+        return {}
+    return {row[0]: row[1] for row in db.execute("SELECT project_key, label FROM mirror_project_label ORDER BY project_key")}
+
+
+def set_project_label(db, key, label, now=None):
+    if not isinstance(key, str) or len(key) != 16 or any(character not in "0123456789abcdef" for character in key):
+        raise SnapshotError("project key must be 16 lowercase hex characters")
+    if not isinstance(label, str) or not 1 <= len(label) <= 128 or any(ord(character) < 32 for character in label):
+        raise SnapshotError("project label must be 1..128 printable characters")
+    with db:
+        db.execute("INSERT INTO mirror_project_label(project_key, label, updated_at) VALUES(?, ?, ?) "
+                   "ON CONFLICT(project_key) DO UPDATE SET label=excluded.label, updated_at=excluded.updated_at",
+                   (key, label, time.time() if now is None else float(now)))
+    return key
+
+
+def journal_head(db) -> int:
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'learning_change'").fetchone() is None:
+        return 0
+    row = db.execute("SELECT coalesce(max(seq), 0) FROM learning_change").fetchone()
+    return int(row[0])
+
+
+def journal_changes(db, after=0) -> list[dict[str, Any]]:
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'learning_change'").fetchone() is None:
+        return []
+    return [dict(row) for row in db.execute(
+        "SELECT seq, record, remote_id, deleted FROM learning_change WHERE seq > ? ORDER BY seq", (int(after),))]
+
+
+def export_record(db, kind, remote_id) -> dict[str, Any] | None:
+    """Describe one local experience or memory, or None when its evidence is not local."""
+    if kind == "experience":
+        row = db.execute("SELECT * FROM learning_experiences WHERE id = ?", (int(remote_id),)).fetchone()
+        if row is None:
+            return None
         sources = [dict(item) for item in db.execute(
             "SELECT session, position, digest, role FROM learning_experience_sources WHERE experience = ? "
             "ORDER BY session, position, role", (row["id"],))]
         if any("@" in source["session"] for source in sources):
-            continue
+            return None
         links = [dict(item) for item in db.execute(
             "SELECT older, relation FROM learning_experience_links WHERE newer = ? ORDER BY older, relation", (row["id"],))]
-        records.append({
+        return {
             "record": "experience", "id": row["id"], "project": row["project"], "kind": row["kind"], "claim": row["claim"],
             "applies_when": row["applies_when"], "identifiers": row["identifiers"], "fingerprint": row["fingerprint"],
             "basis": row["basis"], "detector": row["detector"], "revision": row["revision"], "worktree": row["worktree"],
             "observed_at": row["observed_at"], "captured_at": row["captured_at"], "validity": row["validity"],
             "tags": row["tags"], "state": row["state"], "state_reason": row["state_reason"], "state_at": row["state_at"],
             "sources": sources, "links": links,
-        })
-    for row in db.execute("SELECT * FROM learning_memories ORDER BY finding"):
+        }
+    if kind == "memory":
+        row = db.execute("SELECT * FROM learning_memories WHERE finding = ?", (int(remote_id),)).fetchone()
+        if row is None:
+            return None
         sources = [
             {"session": item["session"], "position": item["position"], "digest": item["digest"], "role": item["signal"]}
             for item in db.execute(
                 "SELECT session, position, digest, signal FROM learning_incidents WHERE finding = ? "
                 "ORDER BY observed_at DESC, id LIMIT ?", (row["finding"], MAX_SOURCES))]
         if any("@" in source["session"] for source in sources):
-            continue
-        records.append({
+            return None
+        return {
             "record": "memory", "id": row["finding"], "project": row["project"], "action": row["action"],
             "applicability": row["applicability"], "revision": row["revision"], "validity": row["validity"],
             "state": row["state"], "created_at": row["created_at"], "sources": sources, "links": [],
-        })
+        }
+    return None
+
+
+def export_snapshot(db) -> list[dict[str, Any]]:
+    """Describe every experience and memory whose evidence is entirely local to this host."""
+    records: list[dict[str, Any]] = []
+    for (remote_id,) in db.execute("SELECT id FROM learning_experiences ORDER BY id"):
+        record = export_record(db, "experience", remote_id)
+        if record is not None:
+            records.append(record)
+    for (remote_id,) in db.execute("SELECT finding FROM learning_memories ORDER BY finding"):
+        record = export_record(db, "memory", remote_id)
+        if record is not None:
+            records.append(record)
     return records
+
+
+def export_changes(db, after=0) -> dict[str, Any]:
+    """Return the current payload for every record changed after ``after``, with deletions explicit."""
+    head = journal_head(db)
+    last = {}
+    for row in journal_changes(db, after):
+        last[(row["record"], int(row["remote_id"]))] = row
+    changes = []
+    for (kind, remote_id), change in sorted(last.items(), key=lambda item: item[1]["seq"]):
+        record = None if change["deleted"] else export_record(db, kind, remote_id)
+        if record is None:
+            changes.append({"record": kind, "id": remote_id, "deleted": True})
+        else:
+            changes.append(record)
+    return {"head": head, "changes": changes}
+
+
+def prune_journal(db, through):
+    through = int(through)
+    with db:
+        return db.execute("DELETE FROM learning_change WHERE seq <= ?", (through,)).rowcount
+
+
+def changes_digest(changes):
+    body = json.dumps(changes, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def mirror_record(record, labels, origin_host):
+    """Replace a local project identity with its hash and qualify source sessions with the origin."""
+    if record.get("deleted"):
+        return dict(record)
+    clean = {key: value for key, value in record.items() if key != "project"}
+    key = project_key(record["project"])
+    clean["project_key"] = key
+    label = labels.get(key)
+    if label is not None:
+        clean["project_label"] = label
+    clean["sources"] = [
+        dict(source, session=source["session"] if "@" in source["session"] else source["session"] + "@" + origin_host)
+        for source in record["sources"]
+    ]
+    return clean
+
+
+def mirror_changes(db, after, labels, origin_host) -> dict[str, Any]:
+    result = export_changes(db, after)
+    return {"head": result["head"], "changes": [mirror_record(record, labels, origin_host) for record in result["changes"]]}
 
 
 def snapshot_digest(records):

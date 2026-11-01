@@ -147,6 +147,7 @@ def initialize(db):
     """)
     db.executescript(EXPERIENCE_SCHEMA)
     learning_sync.ensure_schema(db)
+    learning_sync.ensure_journal(db)
     for statement in recall_schema():
         db.execute(statement)
     if row is None:

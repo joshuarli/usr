@@ -11,12 +11,15 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "agent-memory" / "src"
 sys.path.insert(0, str(SRC))
 from agent_memory import learning  # noqa: E402
+from agent_memory import experience as experience_module  # noqa: E402
 from agent_memory import learning_review as review_module  # noqa: E402
+from agent_memory import learning_sync  # noqa: E402
 from agent_memory import store as store_module  # noqa: E402
 Store, project_identity = store_module.Store, store_module.project_identity
 
@@ -1061,6 +1064,123 @@ class LearningTest(unittest.TestCase):
         self.assertFalse(any(row["kind"] == "tool-call" for row in missed))
         self.assertTrue(any(row["kind"] == "tool-call" and "root-cause" in row["text"] for row in ignored))
         self.assertIn("discovery", {kind for _, kind, _ in learning.signals(ignored)})
+
+
+    def journal_replay(self) -> list[dict[str, Any]]:
+        state: dict[tuple[str, int], dict[str, Any]] = {}
+        for change in learning_sync.export_changes(self.store.db, 0)["changes"]:
+            key = (change["record"], change["id"])
+            if change.get("deleted"):
+                state.pop(key, None)
+            else:
+                state[key] = change
+        order = sorted(state, key=lambda key: (0 if key[0] == "experience" else 1, key[1]))
+        return [state[key] for key in order]
+
+    def assert_journal_replays(self):
+        self.assertEqual(self.journal_replay(), learning_sync.export_snapshot(self.store.db))
+
+    def add_synthetic_experience(self, name, claim=None, applies_when="Synthetic mutation path.", kind="method",
+                                 role="trigger") -> int:
+        claim = claim or ("Synthetic experience %s keeps unique token zz%s." % (name, name))
+        draft = experience_module.Draft(
+            kind=kind, claim=claim, applies_when=applies_when, detector="synthetic", subject=name,
+            observed_at=self.now, sources=[{"session": "codex:" + name, "position": 0,
+                                            "digest": (name[0] * 64), "role": role}])
+        with self.store.db:
+            status, experience_id = experience_module.add_experience(
+                self.store.db, project_identity(self.repo), draft, "codex:" + name, self.now)
+        self.assertIn(status, ("created", "merged"))
+        return int(cast(int, experience_id))
+
+    def test_change_journal_covers_every_mutation_path(self):
+        self.assertEqual(learning_sync.journal_head(self.store.db), 0)
+        observe_head = learning_sync.journal_head(self.store.db)
+        self.add_synthetic_experience("observe")
+        self.assertGreater(learning_sync.journal_head(self.store.db), observe_head)
+        self.assert_journal_replays()
+
+        promote_head = learning_sync.journal_head(self.store.db)
+        self.establish_driver_memory()
+        self.assertGreater(learning_sync.journal_head(self.store.db), promote_head)
+        self.assert_journal_replays()
+
+        self.add_synthetic_experience("retire", claim="Retirement candidate keeps unique token zzretire.")
+        retire_head = learning_sync.journal_head(self.store.db)
+        self.assertGreater(experience_module.retire_stale(self.store.db, self.now + 1, days=0), 0)
+        self.assertGreater(learning_sync.journal_head(self.store.db), retire_head)
+        self.assert_journal_replays()
+
+        older = self.add_synthetic_experience(
+            "older", claim="Never use the synthetic zzdriver because it hides diagnostics.",
+            applies_when="Synthetic zzdriver checks.", kind="gotcha")
+        supersede_head = learning_sync.journal_head(self.store.db)
+        newer = self.add_synthetic_experience(
+            "newer", claim="Use the synthetic zzdriver when reproducing failures.",
+            applies_when="Synthetic zzdriver checks.", kind="gotcha")
+        self.assertGreater(learning_sync.journal_head(self.store.db), supersede_head)
+        self.assertGreater(learning_sync.journal_head(self.store.db), older)
+        self.assertGreater(newer, older)
+        self.assert_journal_replays()
+
+        withdraw_head = learning_sync.journal_head(self.store.db)
+        self.learn.withdraw("experience:%d" % older, self.now)
+        self.assertGreater(learning_sync.journal_head(self.store.db), withdraw_head)
+        self.assert_journal_replays()
+
+        forget_head = learning_sync.journal_head(self.store.db)
+        self.learn.forget("experience:%d" % older, self.now)
+        self.assertGreater(learning_sync.journal_head(self.store.db), forget_head)
+        self.assert_journal_replays()
+
+        self.add_synthetic_experience("forget-session")
+        forget_session_head = learning_sync.journal_head(self.store.db)
+        self.learn.forget_session("codex:forget-session", self.now)
+        self.assertGreater(learning_sync.journal_head(self.store.db), forget_session_head)
+        self.assert_journal_replays()
+
+    def test_rebuild_index_preserves_the_journal_and_its_triggers(self):
+        self.add_synthetic_experience("rebuild")
+        head = learning_sync.journal_head(self.store.db)
+        self.assertGreater(head, 0)
+        self.store.close()
+        store_module.rebuild_index(self.state)
+        self.store = Store(self.state)
+        self.addCleanup(self.store.db.close)
+        self.assertEqual(learning_sync.journal_head(self.store.db), head)
+        with self.store.db:
+            self.store.db.execute(
+                "UPDATE learning_experiences SET state='retired' WHERE id=(SELECT min(id) FROM learning_experiences)")
+        self.assertGreater(learning_sync.journal_head(self.store.db), head)
+        self.assert_journal_replays()
+
+    def test_mirror_records_hash_projects_and_qualify_sources(self):
+        self.add_synthetic_experience("hash")
+        identity = project_identity(self.repo)
+        key = learning_sync.project_key(identity)
+        self.assertEqual(len(key), 16)
+        self.assertNotIn(identity, key)
+        learning_sync.set_project_label(self.store.db, key, "usr")
+        changes = learning_sync.mirror_changes(
+            self.store.db, 0, learning_sync.project_labels(self.store.db), "origin-a")["changes"]
+        experience = next(change for change in changes if change["record"] == "experience")
+        self.assertNotIn("project", experience)
+        self.assertEqual(experience["project_key"], key)
+        self.assertEqual(experience["project_label"], "usr")
+        self.assertTrue(all(source["session"].endswith("@origin-a") for source in experience["sources"]))
+        with self.assertRaises(learning_sync.SnapshotError):
+            learning_sync.set_project_label(self.store.db, "not-a-key", "usr")
+        with self.assertRaises(learning_sync.SnapshotError):
+            learning_sync.set_project_label(self.store.db, key, "bad\nlabel")
+
+    def test_change_journal_prunes_only_through_the_durable_sequence(self):
+        self.add_synthetic_experience("prune")
+        head = learning_sync.journal_head(self.store.db)
+        self.assertGreater(head, 1)
+        self.assertEqual(learning_sync.prune_journal(self.store.db, head - 1), head - 1)
+        self.assertEqual(learning_sync.journal_head(self.store.db), head)
+        self.assertEqual(learning_sync.prune_journal(self.store.db, head), 1)
+        self.assertEqual(learning_sync.export_changes(self.store.db, 0)["changes"], [])
 
 
 if __name__ == "__main__":

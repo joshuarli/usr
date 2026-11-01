@@ -866,6 +866,10 @@ class SyncStore:
         self.calls.append(("state", remote))
         return self.pinned
 
+    def prune_learning_journal(self):
+        self.calls.append(("prune_journal",))
+        return 0
+
     def remote_ack_count(self, store_id):
         self.calls.append(("ack_count", store_id))
         return self.ack_count

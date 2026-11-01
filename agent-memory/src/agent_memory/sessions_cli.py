@@ -13,6 +13,7 @@ from typing import Any
 
 from agent_memory import archive as archive_module
 from agent_memory import backup as backup_module
+from agent_memory import learning_sync
 from agent_memory import mirror as mirror_module
 from agent_memory import transfer as transfer_module
 from agent_memory.store import Store, StoreError, default_state_dir, project_identity, rebuild_index, redact
@@ -338,6 +339,15 @@ def _mirror(args):
     try:
         if args.action in ("status", "adopt"):
             return _mirror_local(args)
+        if args.action == "label":
+            if len(args.label_args) != 2:
+                print("agent-sessions mirror: label needs PROJECT_KEY NAME", file=sys.stderr)
+                return 2
+            with Store(_state_dir(args)) as store:
+                learning_sync.ensure_schema(store.db)
+                learning_sync.set_project_label(store.db, args.label_args[0], args.label_args[1])
+            print("project=%s label=%s" % (args.label_args[0], args.label_args[1]))
+            return 0
         config = mirror_module.load_config(config_path())
         with mirror_module.MirrorClient(config) as client:
             if args.action == "snapshots":
@@ -762,7 +772,8 @@ def parser():
 
     mirror = commands.add_parser("mirror", help="inspect, verify, restore, or maintain the Cloudflare mirror")
     mirror.add_argument("action", choices=(
-        "status", "adopt", "snapshots", "verify", "gc", "restore", "rotate"))
+        "status", "adopt", "snapshots", "verify", "gc", "restore", "rotate", "label"))
+    mirror.add_argument("label_args", nargs="*", help="PROJECT_KEY NAME for label")
     mirror.add_argument("--state-dir")
     mirror.add_argument("--remote", default="central", help="configured remote name (default %(default)s)")
     mirror.add_argument("--limit", type=int, default=100, help="snapshot rows to list (default %(default)s)")

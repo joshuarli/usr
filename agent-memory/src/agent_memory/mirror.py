@@ -1562,6 +1562,8 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
             counters["snapshot_bytes"] += snapshot["db_size"]
             revision = max(revision, snapshot["revision"])
             store.write_mirror_remote(remote_name, store_id, revision, watermark)
+            if not config.learning_projection:
+                store.prune_learning_journal()
         counters["store_id"] = store_id
         counters["revision"] = revision
         counters["tombstone_watermark"] = watermark
