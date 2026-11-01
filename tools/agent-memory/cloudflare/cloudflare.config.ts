@@ -7,6 +7,18 @@ export default defineConfig({
 		entrypoint: "src/index.ts",
 		workersDev: false,
 		previewUrls: false,
+		observability: {
+			enabled: true,
+			logs: {
+				enabled: true,
+				invocationLogs: true,
+				headSamplingRate: 0.25,
+			},
+			traces: {
+				enabled: true,
+				headSamplingRate: 0.1,
+			},
+		},
 		domains: [
 			"memories.17166969.xyz",
 		],

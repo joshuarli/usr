@@ -30,6 +30,6 @@ export function failure(status: number, code: ErrorCode, message: string, extra:
   return json(status, body, false, extra);
 }
 
-export function methodNotAllowed(allow: readonly string[]): Response {
-  return failure(405, "method_not_allowed", "method not allowed", { Allow: allow.join(", ") });
+export function methodNotAllowed(allow: readonly string[], extra: Readonly<Record<string, string>> = {}): Response {
+  return failure(405, "method_not_allowed", "method not allowed", { Allow: allow.join(", "), ...extra });
 }

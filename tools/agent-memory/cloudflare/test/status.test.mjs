@@ -12,6 +12,7 @@ function assertSecurityHeaders(response) {
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(response.headers.get("referrer-policy"), "no-referrer");
   assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.match(response.headers.get("server-timing"), /^d1;dur=\d+\.\d, r2;dur=\d+\.\d$/);
 }
 
 test("an Access identity is required before routing", async () => {
