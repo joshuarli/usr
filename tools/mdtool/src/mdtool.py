@@ -2674,6 +2674,79 @@ class MdtoolTests(unittest.TestCase):
         found=sorted((f.code,f.severity,f.file) for f in ref_findings(list(content),content,list(content)))
         self.assertEqual(found,[("R001","note","docs/guide/deploy.md"),("R001","note","guide.md"),("R001","warn","docs/README.md"),
                                 ("R004","note","site/page.mdx")])
+    def test_comment_scanner_reads_each_comment_syntax(self):
+        cases=[
+            ("a.html","<!-- one docs/a.md -->\n<!-- multi\nline docs/b.md -->\n",[(1," one docs/a.md "),(2," multi\nline docs/b.md ")]),
+            ("a.ts",'const a = "/* not */"; /* yes\n// still docs/a.md */\n// real docs/b.md\n',[(1," yes\n// still docs/a.md "),(3," real docs/b.md")]),
+            ("a.js",'const s = "a \\" // b"; // real\n',[(1," real")]),
+            ("a.js","const t = `// no`; const u = \"\"\"a\"\"\"; // real\n",[(1," real")]),
+            ("a.sh","echo 'a # b' # real\n",[(1," real")]),
+            ("a.sh","echo don't # real\n",[(1," real")]),
+            ("a.toml",'k = "# not" # real\n',[(1," real")]),
+            ("a.kdl",'node "x // y" // real\n',[(1," real")]),
+            ("a.rs","let q = '\"'; // real\n",[(1," real")]),
+            ("a.rs",'let s = r#"// no"#; // yes\n',[(1," yes")]),
+            ("a.c","/* open\nmore\n",[(1," open\nmore\n")]),
+        ]
+        for file,text,wanted in cases:
+            self.assertEqual(source_comments(file,text),wanted,file)
+    def test_comment_scanner_reads_module_class_and_function_docstrings(self):
+        source=('"""module"""\nx = """not a docstring"""\ndef f():\n    """function"""\n    return 1\n'
+                'class C:\n    """class"""\n    if x:\n        """block"""\n')
+        self.assertEqual([(n,text) for n,text in source_comments("a.py",source)],
+                         [(1,"module"),(4,"function"),(7,"class"),(9,"block")])
+    def test_pointer_findings_read_docstrings_that_can_match(self):
+        content={"docs/guide.md":"","src/a.py":'"""See docs/guide.md section 2.1."""\n',"src/b.py":'"""Nothing to report."""\n'}
+        self.assertEqual(sorted((f.code,f.target) for f in pointer_findings(list(content),content)),
+                         [("P001","docs/guide.md"),("P002","section 2.1")])
+        content["src/c.py"]='"""CUSTOM marker."""\n'
+        self.assertEqual(sorted((f.code,f.target) for f in pointer_findings(list(content),content,["CUSTOM"])),
+                         [("P001","docs/guide.md"),("P002","section 2.1"),("P003","CUSTOM")])
+    def test_safe_read_enforces_size_and_binary_bounds(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            (root/"big.md").write_text("x"*MAX_BYTES+"\n")
+            (root/"binary.md").write_text("text\n\0data\n")
+            (root/"late.md").write_text("x"*9000+"\0data\n")
+            (root/"ok.md").write_text("# ok\n")
+            self.assertIsNone(safe_read(root,"big.md"))
+            self.assertIsNone(safe_read(root,"binary.md"))
+            self.assertIsNotNone(safe_read(root,"late.md"))
+            self.assertEqual(safe_read(root,"ok.md"),"# ok\n")
+            with self.assertRaises(OSError): safe_read(root,"missing.md")
+            with self.assertRaises(OSError): safe_read(root,".")
+    def test_outside_git_walks_the_tree_and_skips_work_dirs(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/".hidden").mkdir()
+            for name in ("docs/a.md",".hidden/b.md","node_modules/c.md","target/d.md"):
+                (root/name).parent.mkdir(exist_ok=True); (root/name).write_text("[x](gone.md)\n")
+            with mock.patch.object(sys.modules[__name__],"in_git",return_value=False):
+                rc,found=self.run_json(root,"links")
+            self.assertEqual(rc,1)
+            self.assertEqual([f["file"] for f in found],["docs/a.md"])
+    def test_ignore_drops_a_code_and_changes_exit_status(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"a.md").write_text("[bad](missing.md)\n")
+            self.commit_repo(root,{"a.md":"[bad](missing.md)\n"})
+            rc,found=self.run_json(root,"links")
+            self.assertEqual((rc,[f["code"] for f in found]),(1,["L001"]))
+            rc,found=self.run_json(root,"links","--ignore","L001")
+            self.assertEqual((rc,found),(0,[]))
+    def test_directory_fragment_and_rst_line_reference(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir()
+            (root/"docs/page.md").write_text("# Page\n")
+            (root/"a.md").write_text("[x](docs/#page)\n")
+            (root/"b.rst").write_text("See ``docs/page.md:9-12``.\n")
+            found=sorted((f.code,f.file,f.target) for f in link_findings(root,["a.md","b.rst"],{"a.md":(root/"a.md").read_text(),"b.rst":(root/"b.rst").read_text(),"docs/page.md":"# Page\n"}))
+            self.assertEqual(found,[("L002","a.md","docs/#page"),("L004","b.rst","docs/page.md:9-12")])
+    def test_sphinx_conf_accumulates_extensions(self):
+        conf=('root_doc = "index"\nextensions = []\nextensions += ["myst_parser"]\n'
+              'extensions.append("sphinx.ext.intersphinx")\n')
+        content={"docs/conf.py":conf,"docs/index.md":"# Index\n\n{ref}`nowhere`\n"}
+        found=[(f.code,f.severity,f.target) for f in sphinx_findings(["docs/index.md"],content)]
+        self.assertEqual(found,[("L007","note","nowhere")])
     def test_source_python39_grammar(self):
         source=Path(__file__).read_text()
         ast.parse(source,feature_version=(3,9))
