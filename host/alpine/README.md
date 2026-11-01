@@ -28,13 +28,13 @@ Choose:
 
 Reboot into the installed system and log in as that user.
 
-If Alpine is already installed from a stable release, switch that install to
-edge instead: replace both repository lines in `/etc/apk/repositories` with
-`edge/main` and `edge/community`, then run `doas apk update` and
-`doas apk upgrade --available`. A desktop install must also use `linux-stable`
-instead of `linux-lts` (`doas apk add linux-stable && doas apk del linux-lts`),
-then reboot. The switch to edge is one-way, and packages follow the rolling
-branch.
+If Alpine is already installed from a stable release, `setup.sh` converts it
+to edge before provisioning. When running `install.sh` by hand, make the same
+change first: replace both repository lines in `/etc/apk/repositories` with
+`edge/main` and `edge/community`, run `doas apk update` and
+`doas apk upgrade --available`, and use `linux-stable` instead of `linux-lts`
+(`doas apk add linux-stable && doas apk del linux-lts`). The switch to edge is
+one-way, and packages follow the rolling branch.
 
 ## 2. Provision
 
@@ -42,9 +42,12 @@ branch.
 wget -O - https://17166969.xyz/setup.sh | sh
 ```
 
-`setup.sh` detects Alpine and refuses anywhere else. It installs `git`
-if missing, clones this repository to `~/usr` (or reuses that checkout),
-then runs `install.sh` as root through `doas` or `sudo`.
+`setup.sh` detects Alpine and refuses anywhere else. On a stable release it
+switches the repositories to edge, upgrades the system, and replaces
+`linux-lts` with `linux-stable` where needed; then it installs `git` if
+missing, clones this repository to `~/usr` (or reuses that checkout), and runs
+`install.sh` as root through `doas` or `sudo`. Reboot after provisioning to
+boot the upgraded kernel.
 
 `install.sh` first asks for the install type:
 
@@ -163,9 +166,10 @@ provision.
 
 Disks, partitions, filesystems, encryption, bootloader, kernel, initramfs, EFI,
 Secure Boot, networking, DNS, passwords, doas policy, root account, SSH keys,
-audio, power management and lid handling. The kernel flavor is chosen at install
-time; the desktop layer refuses to run while `linux-lts` is installed, while a
-server install accepts it.
+audio, power management and lid handling. `setup.sh` switches a stable install
+to edge and replaces `linux-lts` with `linux-stable`; the provisioner itself
+does not manage repositories or the kernel. The desktop layer refuses to run
+while `linux-lts` is installed, while a server install accepts it.
 
 ## Hardware checklist (XPS 13 9343)
 

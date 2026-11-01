@@ -7,7 +7,7 @@ It lives at `host/alpine/` in the `usr` checkout.
 - Server mode installs only `packages.txt`, `packages-$arch.txt`, dotfile links and the default `dl` tool set except `agy`. Never install Wayland, graphics, seatd, udev or ghostty packages there.
 - The default tools are part of the provisioner contract: `install.sh` installs them with `sh sync tools`, and `verify.sh` checks their launchers.
 - Keep POSIX sh, apk, OpenRC, seatd, udev, dwl and ghostty-custom. No display manager, XWayland, D-Bus or session daemons. No `make` orchestration: `install.sh`, `verify.sh` and `tests/` are plain POSIX sh; dotfiles come from `sh sync` in the enclosing checkout.
-- Never manage disks, bootloaders, kernels, initramfs, repositories, passwords, doas policy or networking; check them instead (edge only, and no linux-lts for a desktop).
+- Never manage disks, bootloaders, kernels, initramfs, repositories, passwords, doas policy or networking; check them instead (edge only, and no linux-lts for a desktop). The `host/setup.sh` bootstrap performs the one-time stable-to-edge conversion before this provisioner runs.
 - No autologin or passwordless privilege escalation; seat access comes from seatd's `seat` group only.
 - User dotfiles come from the enclosing `usr` checkout via `sh sync links`; the default `dl` tool set except `agy` comes from `sh sync tools` (never `setup-linux`). The login shell stays ash.
 - Check everything before the first change; the dotfile plan and every mode's managed-path checks must pass before provisioning. A managed path whose content is not a committed version of its source (following renames) is a conflict.

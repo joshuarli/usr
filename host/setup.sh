@@ -11,8 +11,10 @@ export PATH
 
 os=$(uname -s)
 os_id=unknown
+os_version=
 if [ -r /etc/os-release ]; then
     os_id=$(awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release)
+    os_version=$(awk -F= '$1 == "VERSION_ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release)
 fi
 [ -n "$os_id" ] || os_id=unknown
 
@@ -33,7 +35,33 @@ as_root() {
     fi
 }
 
+converted=false
+
+ensure_edge() {
+    case ${os_version:-} in
+        *_alpha* | *_git*) return 0 ;;
+    esac
+    [ -n "${os_version:-}" ] || die 'cannot read VERSION_ID from /etc/os-release'
+    say "converting Alpine $os_version to edge; this upgrades every package"
+    as_root sh -ec '
+        printf "%s\n" \
+            https://dl-cdn.alpinelinux.org/alpine/edge/main \
+            https://dl-cdn.alpinelinux.org/alpine/edge/community \
+            >/etc/apk/repositories
+        apk update --quiet
+        apk upgrade --available --interactive=no
+        if apk info -e linux-lts >/dev/null 2>&1; then
+            apk add --interactive=no linux-stable
+            apk del --interactive=no linux-lts
+        fi
+    '
+    converted=true
+    say 'converted to edge'
+}
+
 setup_alpine() {
+    ensure_edge
+
     command -v git >/dev/null 2>&1 || {
         say 'installing git'
         as_root apk add --interactive=no git
@@ -59,6 +87,7 @@ setup_alpine() {
     say 'provisioning Alpine'
     as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" \
         sh "$dest/host/alpine/install.sh" </dev/null
+    [ "$converted" = false ] || say 'reboot to finish the edge upgrade'
 }
 
 case $os_id in
