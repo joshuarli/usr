@@ -650,7 +650,7 @@ def _mirror(args):
                 return 0
             if args.action == "verify":
                 result = mirror_module.verify(
-                    config, client=client, objects=args.objects, sample=args.sample)
+                    config, objects=args.objects, sample=args.sample)
                 print("generations=%d snapshots=%d objects=%d chunks=%d sampled=%d attested=%d bytes=%d" % (
                     result["generations"], result["snapshots"], result["objects"], result["chunks"],
                     result["sampled"], result["attested"], result["bytes"]))
