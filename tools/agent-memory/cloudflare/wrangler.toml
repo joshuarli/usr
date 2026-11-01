@@ -1,0 +1,24 @@
+name = "usr-memories"
+compatibility_date = "2026-10-30"
+main = "src/index.ts"
+workers_dev = false
+preview_urls = false
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "usr-memories"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "usr-memories"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[routes]]
+pattern = "memories.17166969.xyz"
+custom_domain = true
+
+[exports.default]
+type = "worker"
+
+  [exports.default.cache]
+  enabled = false
