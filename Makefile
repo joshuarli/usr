@@ -18,15 +18,18 @@ CAMPAIGN_PYTHON := agent-memory/eval/bench_mirror.py agent-memory/src/agent_memo
 GIT_TEMPLATE_DIR ?= $(wildcard /opt/homebrew/share/git-core/templates)
 ENV_GIT := $(if $(GIT_TEMPLATE_DIR),GIT_TEMPLATE_DIR=$(GIT_TEMPLATE_DIR))
 
-.PHONY: help deploy worker-bundle worker-test worker-check worker-deploy smoke-deployed migrate provision provision-access observe perf-local perf-worker perf-deployed perf-report test test-all
+.PHONY: help deploy deploy-setup.sh worker-bundle worker-test worker-check worker-deploy smoke-deployed migrate provision provision-access observe perf-local perf-worker perf-deployed perf-report test test-all
 
 help: ## List targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z0-9-]*:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
+	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z0-9.-]*:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
 
 deploy: ## Gate, test, deploy, and smoke the Worker
 	CF_BIN="$(CF)" sh $(WORKER_DIR)/scripts/deploy-gate.sh
 	$(MAKE) worker-test worker-deploy
 	$(MAKE) smoke-deployed
+
+deploy-setup.sh: ## Deploy the Alpine bootstrap Worker
+	sh host/setup-deploy
 
 worker-bundle: ## Build the Worker bundle once for test and deploy
 	cd $(WORKER_DIR) && npm run build
