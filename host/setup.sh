@@ -35,6 +35,10 @@ as_root() {
     fi
 }
 
+bootstrap_git() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"
+}
+
 converted=false
 
 ensure_edge() {
@@ -79,11 +83,11 @@ setup_alpine() {
             die "$HOME/usr exists but is not a usr checkout; move it aside"
         else
             say "cloning $usr_url to $HOME/usr"
-            git clone "$usr_url" "$HOME/usr"
+            bootstrap_git clone "$usr_url" "$HOME/usr"
             dest=$HOME/usr
         fi
     fi
-    git -C "$dest" pull --ff-only || die "could not update $dest; pull it by hand"
+    bootstrap_git -C "$dest" pull --ff-only || die "could not update $dest; pull it by hand"
 
     say 'provisioning Alpine'
     as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" \

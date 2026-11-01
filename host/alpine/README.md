@@ -45,9 +45,9 @@ wget -O - https://17166969.xyz/setup.sh | sh
 `setup.sh` detects Alpine and refuses anywhere else. On a stable release it
 switches the repositories to edge, upgrades the system, and replaces
 `linux-lts` with `linux-stable` where needed; then it installs `git` if
-missing, clones this repository to `~/usr` (or updates and reuses that
-checkout), and runs `install.sh` as root through `doas` or `sudo`. Reboot after
-provisioning to boot the upgraded kernel.
+missing, clones this repository over HTTPS to `~/usr` (or updates and reuses
+that checkout), and runs `install.sh` as root through `doas` or `sudo`. Reboot
+after provisioning to boot the upgraded kernel.
 
 `install.sh` first asks for the install type:
 
