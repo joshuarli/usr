@@ -176,7 +176,7 @@ export function decodeSearchFilters(url: URL): MemoryFilters | null {
     if (after === null) return null;
   }
   return {
-    q: q === null ? null : ftsExpression(q), project, origin, type: type as RecordType,
+    q, project, origin, type: type as RecordType,
     kind, state: state as StateFilter,
     since, until, after, limit,
   };
@@ -262,6 +262,7 @@ export function searchStatement(filters: MemoryFilters): {
   readonly sql: string;
   readonly params: (string | number)[];
 } {
+  const expression = filters.q === null ? null : ftsExpression(filters.q);
   const branches: { readonly sql: string; readonly params: (string | number)[] }[] = [];
   if (filters.type !== "memory") {
     const experience = branch("experience", filters);
@@ -272,11 +273,11 @@ export function searchStatement(filters: MemoryFilters): {
     if (memory !== null) branches.push(memory);
   }
   const params: (string | number)[] = [];
-  if (filters.q !== null) params.push(filters.q);
+  if (expression !== null) params.push(expression);
   for (const item of branches) params.push(...item.params);
   params.push(filters.limit + 1);
   const body = branches.map((item) => `SELECT * FROM (${item.sql})`).join(" UNION ALL ");
-  const matches = filters.q === null
+  const matches = expression === null
     ? ""
     : `WITH matches AS (
          SELECT s.origin_host, s.epoch, s.record, s.remote_id

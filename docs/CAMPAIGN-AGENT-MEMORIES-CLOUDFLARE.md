@@ -30,9 +30,10 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   journal, replayable deltas, project hashing, and the label map), `P3.2` (the D1
   learning projection, revision-fenced delta apply, FTS rows, and tombstone cleanup), and
   `P3.3` (FTS search, filters, keyset pagination, batched provenance, and detail), and
-  `P3.4` (the digest key index and epoch-staged reconciliation).
+  `P3.4` (the digest key index and epoch-staged reconciliation), and `P4.1` (the
+  server-rendered landing, search, detail, and status pages).
 - **In flight:** none.
-- **Next slice:** `P4.1` (server-rendered HTML); the first command re-checks the
+- **Next slice:** `P4.2` (status completeness); the first command re-checks the
   baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
