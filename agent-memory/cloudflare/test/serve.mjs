@@ -90,6 +90,73 @@ function send(response, status, body) {
   response.end(JSON.stringify(body));
 }
 
+const PROJECT_KEYS = Array.from({ length: 100 }, (_, index) => index.toString(16).padStart(16, "0"));
+
+async function seedLearning(offset, count, total) {
+  const digest = "a".repeat(64);
+  const state = db.prepare(
+    "INSERT INTO learning_state(origin_host, revision, epoch, digest, records, updated_at) VALUES(?, ?, ?, ?, ?, ?) "
+    + "ON CONFLICT(origin_host) DO UPDATE SET records = excluded.records",
+  );
+  await state.bind("origin-a", 1, 1, null, total, 0).run();
+  const EXPERIENCE_ROWS = 4;
+  const SOURCE_ROWS = 12;
+  const SEARCH_ROWS = 19;
+  for (let start = 0; start < count; start += SEARCH_ROWS) {
+    const statements = [];
+    const experiences = [];
+    for (let id = offset + start + 1; id <= offset + Math.min(start + SEARCH_ROWS, count); id += 1) {
+      experiences.push({
+        id,
+        project: PROJECT_KEYS[id % PROJECT_KEYS.length],
+        claim: `${id % 100 === 0 ? "retentionmarker " : ""}synthetic projection record ${id}.`,
+        applies: `Synthetic applicability for projection record ${id}.`,
+        observed: 1_700_000_000 - id,
+      });
+    }
+    for (let offset = 0; offset < experiences.length; offset += EXPERIENCE_ROWS) {
+      const chunk = experiences.slice(offset, offset + EXPERIENCE_ROWS);
+      const values = chunk.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(",");
+      const params = [];
+      for (const record of chunk) {
+        params.push(
+          "origin-a", 1, record.id, record.project, "bench", "method", record.claim, record.applies,
+          `token-${record.id}`, `fingerprint-${record.id}`, "deterministic", "synthetic",
+          null, null, record.observed, record.observed, "[]", "", "retained", null, null, 1, 0,
+        );
+      }
+      statements.push(db.prepare(
+        `INSERT INTO learning_experience(origin_host, epoch, remote_id, project_key, project_label, kind, claim,
+           applies_when, identifiers, fingerprint, basis, detector, revision, worktree, observed_at, captured_at,
+           validity, tags, state, state_reason, state_at, sync_revision, pending) VALUES ${values}`,
+      ).bind(...params));
+    }
+    for (let offset = 0; offset < experiences.length; offset += SOURCE_ROWS) {
+      const chunk = experiences.slice(offset, offset + SOURCE_ROWS);
+      const values = chunk.map(() => "(?,?,?,?,?,?,?,?)").join(",");
+      const params = [];
+      for (const record of chunk) {
+        params.push("origin-a", 1, "experience", record.id, `codex:bench-${record.id}@origin-a`, 0, digest, "trigger");
+      }
+      statements.push(db.prepare(
+        "INSERT INTO learning_source(origin_host, epoch, record, remote_id, session, position, digest, role) "
+        + `VALUES ${values}`,
+      ).bind(...params));
+    }
+    const searchValues = experiences.map(() => "(?,?,?,?,?)").join(",");
+    const searchParams = [];
+    for (const record of experiences) {
+      searchParams.push("origin-a", 1, "experience", record.id, `${record.claim}
+${record.applies}`);
+    }
+    statements.push(db.prepare(
+      "INSERT INTO learning_search(origin_host, epoch, record, remote_id, text) "
+      + `VALUES ${searchValues}`,
+    ).bind(...searchParams));
+    await db.batch(statements);
+  }
+}
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -101,6 +168,20 @@ const server = createServer(async (request, response) => {
       counters.clear();
       requests = 0;
       send(response, 200, { requests, counters: {} });
+      return;
+    }
+    if (url.pathname === "/__bench/seed-learning") {
+      const payload = JSON.parse((await readBody(request)).toString("utf8") || "{}");
+      const count = Number(payload.records);
+      const offset = Number(payload.offset ?? 0);
+      const total = Number(payload.total ?? count);
+      if (!Number.isSafeInteger(count) || count < 1 || !Number.isSafeInteger(offset) || offset < 0
+          || !Number.isSafeInteger(total) || total < offset + count) {
+        send(response, 400, { error: "records is invalid" });
+        return;
+      }
+      await seedLearning(offset, count, total);
+      send(response, 200, { records: count, offset, total });
       return;
     }
     const body = await readBody(request);

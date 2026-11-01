@@ -100,7 +100,7 @@ test("wrong methods and unknown routes return the JSON envelope", async () => {
   assert.equal(wrong.status, 405);
   assert.equal(wrong.headers.get("allow"), "GET, HEAD");
   assert.equal((await wrong.json()).error.code, "method_not_allowed");
-  const missing = await worker.fetch(request("/api/v1/memories"), env, reader);
+  const missing = await worker.fetch(request("/api/v1/unknown"), env, reader);
   assert.equal(missing.status, 404);
   assertSecurityHeaders(missing);
   assert.equal((await missing.json()).error.code, "not_found");

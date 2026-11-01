@@ -27,11 +27,12 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   revision fences, tombstone-first delivery, store identity pinning, durable acks, and
   the no-op sync path), `P2.4` (content-addressed recovery snapshots, restore and
   replay, verify, two-phase GC, and key rotation), `P3.1` (the local learning change
-  journal, replayable deltas, project hashing, and the label map), and `P3.2` (the D1
-  learning projection, revision-fenced delta apply, FTS rows, and tombstone cleanup).
+  journal, replayable deltas, project hashing, and the label map), `P3.2` (the D1
+  learning projection, revision-fenced delta apply, FTS rows, and tombstone cleanup), and
+  `P3.3` (FTS search, filters, keyset pagination, batched provenance, and detail).
 - **In flight:** none.
-- **Next slice:** `P3.3` (search and inspection queries); the first command re-checks
-  the baseline: `make test`.
+- **Next slice:** `P3.4` (projection reconciliation); the first command re-checks the
+  baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.
@@ -377,6 +378,7 @@ snapshot_chunk(snapshot, ordinal, plaintext_digest, size, ciphertext_digest,
                PK(snapshot, ordinal))
 snapshot_object(snapshot, plaintext_digest, size, PK(snapshot, plaintext_digest))
 learning_state(origin_host PK, revision, epoch, digest, records, updated_at)
+learning_fence(singleton PK CHECK(singleton=1), changed)
 learning_experience(origin_host, epoch, remote_id, project_key, project_label, kind,
                     claim, applies_when, identifiers, fingerprint, basis, detector,
                     revision, worktree, observed_at, captured_at, validity, tags,
@@ -396,9 +398,15 @@ memory_fts USING fts5(text, content='learning_search', content_rowid='rowid',
 
 Indexes: `generation(origin_host, committed_at DESC)`, `generation(origin_host, revision)`,
 `remote_object(origin_host, ciphertext_digest)`,
-`learning_experience(project_key, state, observed_at DESC)`,
-`learning_experience(origin_host, state, observed_at DESC)`,
-`learning_experience(kind, observed_at DESC)`, `learning_memory(project_key, state, created_at DESC)`,
+`learning_experience(project_key, state, observed_at DESC, remote_id DESC)`,
+`learning_experience(origin_host, state, observed_at DESC, remote_id DESC)`,
+`learning_experience(kind, observed_at DESC, remote_id DESC)`,
+`learning_experience(state, observed_at DESC, remote_id DESC)`,
+`learning_experience(observed_at DESC, remote_id DESC)`,
+`learning_memory(project_key, state, created_at DESC, remote_id DESC)`,
+`learning_memory(origin_host, state, created_at DESC, remote_id DESC)`,
+`learning_memory(state, created_at DESC, remote_id DESC)`,
+`learning_memory(created_at DESC, remote_id DESC)`,
 `learning_source(origin_host, record, remote_id)`, `tombstone(origin_host, harness, native_id)`,
 unique `learning_search(origin_host, epoch, record, remote_id)`. `memory_fts` uses external
 content with insert/update/delete triggers, the same pattern as `store.py:728`'s `events_fts`.
@@ -558,6 +566,29 @@ CF22 compression savings are measured rather than assumed.
 workerd 2026-08-06, real D1 and R2) reported p50 10.577 ms, p95 10.679 ms, median 10.577 ms,
 and MAD 0.077 ms, with 131 response bytes, one request, one D1 prepare, and one D1 first per
 sample. The harness refused an unauthenticated request with 403 before measuring.
+
+`make perf-worker SCENARIO=search RECORDS=<n> REPEATS=5` on 2026-11-01 seeded
+`n` retained experiences across 100 project keys, each with one source and one search row,
+then measured a 20-result live page (`search-page`) and a 20-result FTS page for the term
+`retentionmarker` carried by one record in 100 (`search-fts`). Every sample performed
+exactly one request, two D1 `prepare` calls, two `bind` calls, and two `all` calls, with
+7,460 bytes for a page and 3,939–7,903 bytes for the FTS page. Times are dominated by the
+Miniflare HTTP and D1 access floor near 30 ms, not by corpus size:
+
+| records | operation | median ms | p95 ms | p99 ms | MAD ms |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1,000 | search-page | 33.443 | 39.759 | 40.939 | 0.418 |
+| 1,000 | search-fts | 32.705 | 33.383 | 33.457 | 0.682 |
+| 10,000 | search-page | 31.051 | 32.170 | 32.285 | 0.272 |
+| 10,000 | search-fts | 32.330 | 32.724 | 32.796 | 0.068 |
+| 100,000 | search-page | 34.073 | 41.850 | 43.305 | 0.895 |
+| 100,000 | search-fts | 35.571 | 37.138 | 37.280 | 0.854 |
+
+`EXPLAIN QUERY PLAN` shows `SEARCH ... USING INDEX learning_experience_origin` (or
+`_project`/`_state_observed`) for filtered pages, `SEARCH ... USING INDEX
+learning_experience_observed ((observed_at,remote_id)<(?,?))` for a deep page, and
+`SCAN memory_fts VIRTUAL TABLE INDEX` plus `SEARCH ... USING INTEGER PRIMARY KEY` for an
+FTS page. The gate passed before and after every sample.
 
 ## Performance contract
 

@@ -520,13 +520,13 @@ def _report(directory):
     return 0
 
 
-def _bench_http(port, method, path, headers=None):
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+def _bench_http(port, method, path, headers=None, body=None):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=120)
     try:
-        connection.request(method, path, headers=headers or {})
+        connection.request(method, path, headers=headers or {}, body=body)
         response = connection.getresponse()
-        body = response.read()
-        return response.status, dict(response.getheaders()), body
+        payload = response.read()
+        return response.status, dict(response.getheaders()), payload
     finally:
         connection.close()
 
@@ -568,7 +568,7 @@ def _worker_server():
 
 def _worker(args):
     scenario = args.scenario or "status"
-    if scenario != "status":
+    if scenario not in ("status", "search"):
         owner = DEFERRED.get(scenario, "a later slice")
         print("bench_mirror: worker scenario %s lands in %s" % (scenario, owner), file=sys.stderr)
         return 2
@@ -580,31 +580,47 @@ def _worker(args):
         if auth_status != 403:
             raise RuntimeError("unauthenticated worker request was not refused")
         _bench_http(port, "POST", "/__bench/reset")
-        _bench_http(port, "GET", "/api/v1/status", {"x-bench-principal": "reader"})
+        if scenario == "search":
+            for offset in range(0, args.records, 10000):
+                count = min(10000, args.records - offset)
+                seeded, _headers, body = _bench_http(
+                    port, "POST", "/__bench/seed-learning", {"content-type": "application/json"},
+                    json.dumps({"records": count, "offset": offset, "total": args.records}).encode())
+                if seeded != 200:
+                    raise RuntimeError("could not seed the learning projection: " + body.decode("utf-8", "replace"))
+            operations = (
+                ("search-page", "/api/v1/memories?limit=20&state=retained"),
+                ("search-fts", "/api/v1/memories?limit=20&state=retained&q=" + QUERY),
+            )
+        else:
+            operations = (("status", "/api/v1/status"),)
+        for _name, path in operations:
+            _bench_http(port, "GET", path, {"x-bench-principal": "reader"})
         _bench_http(port, "POST", "/__bench/reset")
         samples = []
         for repeat in range(args.repeats):
-            before = _bench_counters(port)
-            sample = _timed(lambda port=port: _worker_status(port), repeat, _gate)
-            sample["operation"] = "status"
-            after = _bench_counters(port)
-            delta = {}
-            for key in set(before["counters"]) | set(after["counters"]):
-                delta[key] = after["counters"].get(key, 0) - before["counters"].get(key, 0)
-            delta["requests"] = after["requests"] - before["requests"]
-            if delta["requests"] != 1:
-                raise RuntimeError("worker request counter disagrees with the harness")
-            raw_counters = sample.get("counters")
-            counters = raw_counters if isinstance(raw_counters, dict) else {}
-            raw_timings = sample.get("timings")
-            timings = raw_timings if isinstance(raw_timings, dict) else {}
-            timing = counters.pop("server_timing", None)
-            if timing is not None:
-                timings["server_timing"] = timing
-            counters.update(delta)
-            sample["counters"] = counters
-            sample["timings"] = timings
-            samples.append(sample)
+            for operation, path in operations:
+                before = _bench_counters(port)
+                sample = _timed(lambda port=port, path=path: _worker_get(port, path), repeat, _gate)
+                sample["operation"] = operation
+                after = _bench_counters(port)
+                delta = {}
+                for key in set(before["counters"]) | set(after["counters"]):
+                    delta[key] = after["counters"].get(key, 0) - before["counters"].get(key, 0)
+                delta["requests"] = after["requests"] - before["requests"]
+                if delta["requests"] != 1:
+                    raise RuntimeError("worker request counter disagrees with the harness")
+                raw_counters = sample.get("counters")
+                counters = raw_counters if isinstance(raw_counters, dict) else {}
+                raw_timings = sample.get("timings")
+                timings = raw_timings if isinstance(raw_timings, dict) else {}
+                timing = counters.pop("server_timing", None)
+                if timing is not None:
+                    timings["server_timing"] = timing
+                counters.update(delta)
+                sample["counters"] = counters
+                sample["timings"] = timings
+                samples.append(sample)
     finally:
         process.terminate()
         try:
@@ -612,8 +628,10 @@ def _worker(args):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
-    dataset = {"requests": args.repeats, "auth_refusals": 1, "warmups": 1}
-    document = _document("miniflare", scenario, dataset, samples, ("status",),
+    dataset = {"requests": args.repeats * len(operations), "auth_refusals": 1, "warmups": len(operations)}
+    if scenario == "search":
+        dataset.update({"records": args.records, "projects": 100, "sources": args.records})
+    document = _document("miniflare", scenario, dataset, samples, tuple(name for name, _path in operations),
                          runtime={**_runtime(), "workerd": "2026-08-06", "miniflare": "4.20260730.0"})
     _write(document, Path(args.out) if Path(args.out).is_absolute() else ROOT / args.out)
     print(json.dumps(document, indent=2, sort_keys=True))
@@ -625,12 +643,12 @@ def _worker(args):
     return 0
 
 
-def _worker_status(port):
-    status, headers, body = _bench_http(port, "GET", "/api/v1/status", {"x-bench-principal": "reader"})
+def _worker_get(port, path):
+    status, headers, body = _bench_http(port, "GET", path, {"x-bench-principal": "reader"})
     if status != 200:
-        raise RuntimeError("worker status request failed with %d" % status)
+        raise RuntimeError("worker request %s failed with %d" % (path, status))
     if headers.get("cache-control") != "no-store":
-        raise RuntimeError("worker status response did not carry no-store")
+        raise RuntimeError("worker response did not carry no-store")
     return {"bytes": len(body), "server_timing": headers.get("server-timing")}
 
 

@@ -7,9 +7,29 @@ CREATE TABLE IF NOT EXISTS learning_state(
     updated_at REAL
 );
 
+CREATE TABLE IF NOT EXISTS learning_fence(
+    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+    changed INTEGER NOT NULL CHECK(changed IN (0, 1))
+);
+
+CREATE TRIGGER IF NOT EXISTS learning_fence_insert
+BEFORE INSERT ON learning_fence
+WHEN NEW.changed = 0
+BEGIN
+    SELECT RAISE(ABORT, 'stale_revision');
+END;
+
+CREATE TRIGGER IF NOT EXISTS learning_fence_update
+BEFORE UPDATE ON learning_fence
+WHEN NEW.changed = 0
+BEGIN
+    SELECT RAISE(ABORT, 'stale_revision');
+END;
+
 CREATE TRIGGER IF NOT EXISTS learning_state_revision_fence_insert
 BEFORE INSERT ON learning_state
-WHEN NEW.revision != COALESCE((SELECT revision FROM learning_state WHERE origin_host = NEW.origin_host), 0) + 1
+WHEN NOT EXISTS (SELECT 1 FROM learning_state WHERE origin_host = NEW.origin_host)
+  AND NEW.revision != 1
 BEGIN
     SELECT RAISE(ABORT, 'stale_revision');
 END;
@@ -47,9 +67,11 @@ CREATE TABLE IF NOT EXISTS learning_experience(
     pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1)),
     PRIMARY KEY(origin_host, epoch, remote_id)
 );
-CREATE INDEX IF NOT EXISTS learning_experience_project ON learning_experience(project_key, state, observed_at DESC);
-CREATE INDEX IF NOT EXISTS learning_experience_origin ON learning_experience(origin_host, state, observed_at DESC);
-CREATE INDEX IF NOT EXISTS learning_experience_kind ON learning_experience(kind, observed_at DESC);
+CREATE INDEX IF NOT EXISTS learning_experience_project ON learning_experience(project_key, state, observed_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_experience_origin ON learning_experience(origin_host, state, observed_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_experience_kind ON learning_experience(kind, observed_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_experience_state_observed ON learning_experience(state, observed_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_experience_observed ON learning_experience(observed_at DESC, remote_id DESC);
 
 CREATE TABLE IF NOT EXISTS learning_memory(
     origin_host TEXT NOT NULL,
@@ -67,8 +89,10 @@ CREATE TABLE IF NOT EXISTS learning_memory(
     pending INTEGER NOT NULL DEFAULT 0 CHECK(pending IN (0,1)),
     PRIMARY KEY(origin_host, epoch, remote_id)
 );
-CREATE INDEX IF NOT EXISTS learning_memory_project ON learning_memory(project_key, state, created_at DESC);
-CREATE INDEX IF NOT EXISTS learning_memory_origin ON learning_memory(origin_host, state, created_at DESC);
+CREATE INDEX IF NOT EXISTS learning_memory_project ON learning_memory(project_key, state, created_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_memory_origin ON learning_memory(origin_host, state, created_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_memory_state_created ON learning_memory(state, created_at DESC, remote_id DESC);
+CREATE INDEX IF NOT EXISTS learning_memory_created ON learning_memory(created_at DESC, remote_id DESC);
 
 CREATE TABLE IF NOT EXISTS learning_source(
     origin_host TEXT NOT NULL,

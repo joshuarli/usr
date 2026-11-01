@@ -334,7 +334,7 @@ export async function readLearningState(db: D1Database, origin: string): Promise
 const QUERY_CHUNK = 90;
 const EXPERIENCE_ROWS = 4;
 const MEMORY_ROWS = 7;
-const SOURCE_ROWS = 14;
+const SOURCE_ROWS = 12;
 const LINK_ROWS = 16;
 const SEARCH_ROWS = 19;
 
@@ -613,8 +613,13 @@ export async function applyLearningDelta(
        VALUES(?, ?, ?, ?, ?, ?)
        ON CONFLICT(origin_host) DO UPDATE SET
          revision = excluded.revision, digest = excluded.digest,
-         records = excluded.records, updated_at = excluded.updated_at`,
-    ).bind(delta.origin, revision, epoch, delta.digest, records, Date.now() / 1000),
+         records = excluded.records, updated_at = excluded.updated_at
+       WHERE learning_state.revision = ?`,
+    ).bind(delta.origin, revision, epoch, delta.digest, records, Date.now() / 1000, delta.base_revision),
+    db.prepare(
+      `INSERT INTO learning_fence(singleton, changed) VALUES(1, changes())
+       ON CONFLICT(singleton) DO UPDATE SET changed = excluded.changed`,
+    ),
   ];
   statements.push(...recordDeletes(db, delta.origin, epoch, "experience", deletedExperiences));
   statements.push(...recordDeletes(db, delta.origin, epoch, "memory", deletedMemories));

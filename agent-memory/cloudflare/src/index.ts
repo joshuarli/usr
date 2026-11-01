@@ -4,6 +4,7 @@ import { failure, json, methodNotAllowed } from "./errors.js";
 import { serverTiming, trace } from "./observe.js";
 import { handleGenerations } from "./routes/generations.js";
 import { handleLearning } from "./routes/learning.js";
+import { handleMemories } from "./routes/memories.js";
 import { handleSnapshots } from "./routes/snapshots.js";
 import { handleSync } from "./routes/sync.js";
 import { handleTombstones } from "./routes/tombstones.js";
@@ -85,6 +86,8 @@ export default {
       if (tombstones !== null) return tombstones;
       const learning = await handleLearning(request, env, principal, pathname, url, timing);
       if (learning !== null) return learning;
+      const memories = await handleMemories(request, env, principal, pathname, url, timing);
+      if (memories !== null) return memories;
     } catch {
       return failure(503, "unavailable", "sync is unavailable", { "Server-Timing": serverTiming(timing) });
     }
