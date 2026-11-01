@@ -39,7 +39,8 @@ run_dl() {
         XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
         GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION \
-        GHOSTTY_CUSTOM_TEST_BAD_SUMS GHOSTTY_CUSTOM_TEST_BUNDLE_ID
+        GHOSTTY_CUSTOM_TEST_BAD_SUMS GHOSTTY_CUSTOM_TEST_BUNDLE_ID \
+        PLAYER_APPLICATIONS_DIR PLAYER_TEST_BAD_SUMS
     return $_run_dl_status
 }
 
@@ -293,6 +294,44 @@ FEED
             printf '%s\n' '8da6066dfe57453cb8e98d9e5fa376252d60aa001e0b71ec33af5828c463ce21  Ghostty-Custom-aarch64-apple-darwin.dmg' > "$output"
         fi
         ;;
+    https://github.com/joshuarli/play/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-11-01T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/play/releases/tag/v0.41.0"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/joshuarli/play/releases/download/v0.41.0/SHA256SUMS)
+        [ -n "$output" ] || exit 1
+        if [ "${PLAYER_TEST_BAD_SUMS:-false}" = true ]; then
+            printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' Player-aarch64-apple-darwin.zip > "$output"
+            printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' player-x86_64-linux-musl.tar.gz >> "$output"
+        else
+            printf '%s  %s\n' "$PLAYER_ZIP_SHA256" Player-aarch64-apple-darwin.zip > "$output"
+            printf '%s  %s\n' "$PLAYER_TAR_SHA256" player-x86_64-linux-musl.tar.gz >> "$output"
+        fi
+        ;;
+    https://github.com/joshuarli/play/releases/download/v0.41.0/Player-aarch64-apple-darwin.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: player-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'player-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/joshuarli/play/releases/download/v0.41.0/player-x86_64-linux-musl.tar.gz)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: player-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$PLAYER_TAR" "$output"
+        else
+            exit 1
+        fi
+        ;;
     https://github.com/laputa-systems/git-build/releases.atom)
         if [ "${GIT_FEED_OLD:-false}" = true ]; then
             cat <<'FEED'
@@ -525,6 +564,15 @@ set -eu
 if [ "$1" = -x ] && [ "$2" = -k ]; then
     [ -f "$3" ] || exit 1
     dest=$4
+    case "$(cat "$3")" in
+        player-test-zip)
+            mkdir -p "$dest/Player.app/Contents/MacOS"
+            printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/Player.app/Contents/MacOS/player"
+            chmod +x "$dest/Player.app/Contents/MacOS/player"
+            printf '%s\n' 'mock plist' > "$dest/Player.app/Contents/Info.plist"
+            exit 0
+            ;;
+    esac
     mkdir -p "$dest/Ghostty.app/Contents/MacOS"
     printf '%s\n' '#!/bin/sh' 'exit 0' > "$dest/Ghostty.app/Contents/MacOS/ghostty"
     chmod +x "$dest/Ghostty.app/Contents/MacOS/ghostty"
@@ -635,6 +683,24 @@ if command -v sha256sum >/dev/null 2>&1; then
 else
     CODEX_SHA256=$(shasum -a 256 "$test_root/codex.tar.gz" | awk '{print $1}')
 fi
+
+printf '%s' 'player-test-zip' > "$test_root/player.zip"
+if command -v sha256sum >/dev/null 2>&1; then
+    PLAYER_ZIP_SHA256=$(sha256sum "$test_root/player.zip" | awk '{print $1}')
+else
+    PLAYER_ZIP_SHA256=$(shasum -a 256 "$test_root/player.zip" | awk '{print $1}')
+fi
+mkdir -p "$test_root/player-package"
+printf '%s\n' '#!/bin/sh' 'printf player-test' > "$test_root/player-package/player"
+chmod +x "$test_root/player-package/player"
+tar -czf "$test_root/player.tar.gz" -C "$test_root/player-package" player
+if command -v sha256sum >/dev/null 2>&1; then
+    PLAYER_TAR_SHA256=$(sha256sum "$test_root/player.tar.gz" | awk '{print $1}')
+else
+    PLAYER_TAR_SHA256=$(shasum -a 256 "$test_root/player.tar.gz" | awk '{print $1}')
+fi
+PLAYER_TAR="$test_root/player.tar.gz"
+export PLAYER_TAR PLAYER_ZIP_SHA256 PLAYER_TAR_SHA256
 
 git_tag=release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 git_triple=x86_64-unknown-linux-musl
@@ -2331,6 +2397,153 @@ case "$output" in
 esac
 [ "$(readlink "$git_drift_home/.local/bin/git-shell")" = "$git_drift_current/git-shell" ]
 [ "$(readlink "$git_drift_current")" = "$git_drift_release" ]
+)
+end_case
+
+begin_case "player macOS install and current check"
+( set -e
+player_home="$test_root/player-home"
+player_apps="$player_home/Applications"
+if output=$(HOME="$player_home" PLAYER_APPLICATIONS_DIR="$player_apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$player_apps/Player.app/Contents/MacOS/player" ]
+[ "$(readlink "$player_home/.local/bin/player")" \
+    = "$player_apps/Player.app/Contents/MacOS/player" ]
+[ "$(cat "$player_home/.local/state/dl/player")" = v0.41.0:player-test-etag ]
+case "$output" in
+    *"Installed $player_apps/Player.app (v0.41.0)"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if output=$(HOME="$player_home" PLAYER_APPLICATIONS_DIR="$player_apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'player is current (v0.41.0)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "player macOS refuses an unmanaged app or launcher"
+( set -e
+player_home="$test_root/player-collision-home"
+player_apps="$player_home/Applications"
+mkdir -p "$player_apps/Player.app" "$player_home/.local/bin"
+printf '%s\n' sentinel > "$player_apps/Player.app/keep"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$player_home/.local/bin/player"
+chmod +x "$player_home/.local/bin/player"
+if HOME="$player_home" PLAYER_APPLICATIONS_DIR="$player_apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player >/dev/null 2>&1; then
+    printf '%s\n' 'player replaced an unmanaged install' >&2
+    exit 1
+fi
+[ "$(cat "$player_apps/Player.app/keep")" = sentinel ]
+[ -f "$player_home/.local/bin/player" ]
+[ ! -L "$player_home/.local/bin/player" ]
+[ ! -e "$player_home/.local/state/dl/player" ]
+)
+end_case
+
+begin_case "player rejects a checksum mismatch"
+( set -e
+player_home="$test_root/player-bad-home"
+player_apps="$player_home/Applications"
+if HOME="$player_home" PLAYER_APPLICATIONS_DIR="$player_apps" \
+    PLAYER_TEST_BAD_SUMS=true DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 \
+    TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player >/dev/null 2>&1; then
+    printf '%s\n' 'player accepted a checksum mismatch' >&2
+    exit 1
+fi
+[ ! -e "$player_apps/Player.app" ]
+[ ! -e "$player_home/.local/bin/player" ]
+[ ! -e "$player_home/.local/state/dl/player" ]
+)
+end_case
+
+begin_case "player records ownership"
+( set -e
+player_home="$test_root/player-own-home"
+player_apps="$player_home/Applications"
+if HOME="$player_home" PLAYER_APPLICATIONS_DIR="$player_apps" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player >/dev/null 2>&1; then
+    :
+else
+    exit 1
+fi
+owned="$player_home/.local/state/sync/dl-owned"
+mkdir -p "$(dirname "$owned")"
+HOME="$player_home" PLAYER_APPLICATIONS_DIR="$player_apps" \
+    DL_RECORD_OWNED=true DL_OWNED_FILE="$owned" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player
+awk -F '\t' -v path="$player_apps/Player.app" \
+    '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$owned"
+for owned_file in "$player_home/.local/bin/player" \
+    "$player_home/.local/state/dl/player"; do
+    awk -F '\t' -v path="$owned_file" \
+        '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$owned"
+done
+)
+end_case
+
+begin_case "player Linux install and current check"
+( set -e
+player_home="$test_root/player-linux-home"
+if output=$(HOME="$player_home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ -x "$player_home/.local/bin/player" ]
+[ "$(HOME="$player_home" "$player_home/.local/bin/player")" = player-test ]
+[ "$(cat "$player_home/.local/state/dl/player")" = v0.41.0:player-test-etag ]
+case "$output" in
+    *"Installed $player_home/.local/bin/player"*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+if output=$(HOME="$player_home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'player is current (v0.41.0)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "player skips an unsupported platform"
+( set -e
+player_home="$test_root/player-arch-home"
+if HOME="$player_home" DL_TEST_OS=Linux DL_TEST_ARCH=aarch64 \
+    TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" player >/dev/null 2>&1; then
+    printf '%s\n' 'player installed on an unsupported platform' >&2
+    exit 1
+fi
+[ ! -e "$player_home/.local/bin/player" ]
+[ ! -e "$player_home/.local/state/dl/player" ]
 )
 end_case
 
