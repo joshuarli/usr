@@ -59,6 +59,7 @@ ERROR_CODES = frozenset({
     "tombstoned",
 })
 CONFIG_KEYS = frozenset({
+    "enabled",
     "transport",
     "url",
     "service_token_file",
@@ -92,6 +93,7 @@ class MirrorConfig:
     age_recipients_file: Path
     age_identity_file: Path
     learning_projection: bool
+    enabled: bool = True
 
 
 def _record(value):
@@ -212,12 +214,16 @@ def decode_config(value):
     projection = value.get("learning_projection", False)
     if not isinstance(projection, bool):
         raise MirrorError("invalid_config", "learning_projection must be a boolean")
+    enabled = value.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise MirrorError("invalid_config", "enabled must be a boolean")
     return MirrorConfig(
         url=normalized,
         service_token_file=_decode_path(value.get("service_token_file"), "service_token_file"),
         age_recipients_file=_decode_path(value.get("age_recipients_file"), "age_recipients_file"),
         age_identity_file=_decode_path(value.get("age_identity_file"), "age_identity_file"),
         learning_projection=projection,
+        enabled=enabled,
     )
 
 
@@ -1611,6 +1617,38 @@ def _wire_manifest(manifest, manifest_object):
     return wire
 
 
+def pending_report(store, remote_name):
+    """Estimate the local backlog without a network request."""
+    origin = archive_module.origin_for(store.db)
+    state = store.mirror_remote_state(remote_name)
+    pinned = state is not None and state.get("store_id") is not None
+    remote = state["store_id"] if pinned else remote_name
+    rows = store.pending_generations(remote, origin, limit=100_000)
+    objects: dict[str, int] = {}
+    for row in rows:
+        manifest = archive_module.generation_manifest(store.db, row["id"])
+        for item in list(manifest["chunks"]) + list(manifest["artifacts"]):
+            objects.setdefault(item["digest"], item["size"])
+    tombstones = store.pending_tombstones(remote, origin)
+    learning = 0
+    if learning_sync.has_learning(store.db):
+        learning = max(0, learning_sync.journal_head(store.db) - int((state or {}).get("learning_seq") or 0))
+    batches = (learning + learning_sync.MAX_LEARNING_CHANGES - 1) // learning_sync.MAX_LEARNING_CHANGES
+    requests = 1 + (1 if rows else 0) + len(objects) + len(rows) + (1 if batches else 0) + (1 if tombstones else 0)
+    return {
+        "origin": origin, "remote": remote_name, "pinned": pinned,
+        "store_id": state["store_id"] if pinned else None,
+        "revision": state["revision"] if pinned else None,
+        "watermark": state["tombstone_watermark"] if pinned else None,
+        "learning_seq": state["learning_seq"] if pinned else None,
+        "last_sync_at": None if state is None else state["last_sync_at"],
+        "last_error": None if state is None else state["last_error"],
+        "generations": len(rows), "objects": len(objects), "bytes": sum(objects.values()),
+        "tombstones": len(tombstones), "learning_changes": learning, "learning_batches": batches,
+        "requests": requests,
+    }
+
+
 def sync(store, config, remote_name, *, refresh=None, client=None, upload_client_factory=None,
          recipients=None, concurrency=4, prepare=None, progress=None):
     """Deliver the local archive to one Cloudflare mirror and pin its identity."""
@@ -1620,7 +1658,7 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
     counters = _empty_sync_counters()
     factory = upload_client_factory
     owner = client is None
-    runtime = client or MirrorClient(config)
+    runtime = client
     store_id = None
     revision = 0
     watermark = 0
@@ -1629,6 +1667,8 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
     learning_digest = None
     learning_revision = 0
     try:
+        if runtime is None:
+            runtime = MirrorClient(config)
         hello = runtime.hello(origin)
         counters["hello"] += 1
         store_id = hello["store_id"]
@@ -1818,9 +1858,11 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
             store.write_mirror_remote(remote_name, store_id, revision, watermark,
                                       learning_seq=learning_seq, learning_digest=learning_digest,
                                       error=str(exc)[:500])
+        else:
+            store.record_mirror_error(remote_name, str(exc))
         raise
     finally:
-        if owner:
+        if owner and runtime is not None:
             runtime.close()
 
 
@@ -1854,8 +1896,9 @@ def reconcile(store, config, remote_name, *, client=None, progress=None,
             learning = runtime.learning_state(origin)
             revision = learning["revision"]
             head = learning_sync.journal_head(store.db) if learning_sync.has_learning(store.db) else 0
-            labels = learning_sync.project_labels(store.db)
-            records = learning_sync.mirror_snapshot(store.db, labels, origin)
+            labels = learning_sync.project_labels(store.db) if learning_sync.has_learning(store.db) else {}
+            records = learning_sync.mirror_snapshot(store.db, labels, origin) \
+                if learning_sync.has_learning(store.db) else []
             local = {(record["record"], record["id"]): record["digest"] for record in records}
             remote = {}
             cursor = None
@@ -2232,6 +2275,7 @@ def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]
             for index, snapshot in enumerate(snapshot_rows):
                 detail = runtime.snapshot(origin, snapshot["id"])
                 _reassemble_snapshot(runtime, config.age_identity_file, detail, Path(temporary) / ("%d.sqlite3" % index))
+                runtime.verify_snapshot(origin, snapshot["id"])
                 chunks += len(detail["chunks"])
                 for item in detail["objects"]:
                     known_size = snapshot_objects.setdefault(item["plaintext_digest"], item["size"])

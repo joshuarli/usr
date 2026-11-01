@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Mirror protocol parity, configuration, and pooled-client behavior."""
+import fcntl
 import hashlib
 import http.client
 import json
 import os
+import re
 import select
 import shutil
 import sqlite3
@@ -381,7 +383,9 @@ class ConfigTests(unittest.TestCase):
         parsed = mirror.decode_config(self.mapping())
         self.assertEqual(parsed.url, "https://memories.17166969.xyz")
         self.assertFalse(parsed.learning_projection)
+        self.assertTrue(parsed.enabled)
         self.assertTrue(mirror.decode_config(self.mapping(learning_projection=True)).learning_projection)
+        self.assertFalse(mirror.decode_config(self.mapping(enabled=False)).enabled)
         without = self.mapping()
         del without["learning_projection"]
         self.assertFalse(mirror.decode_config(without).learning_projection)
@@ -396,6 +400,7 @@ class ConfigTests(unittest.TestCase):
             self.mapping(url="https://memories.17166969.xyz#fragment"),
             self.mapping(url="https://user:pass@memories.17166969.xyz"),
             self.mapping(learning_projection="yes"),
+            self.mapping(enabled="yes"),
             self.mapping(service_token_file=1),
             {"transport": "cloudflare"},
         ]:
@@ -1272,6 +1277,29 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result["generations_tombstoned"], 1)
         self.assertEqual(store.attempts, [])
 
+    def test_a_sync_never_spawns_cf(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(commit=commit)
+        launched = []
+        real_popen = subprocess.Popen
+
+        def record(*args, **kwargs):
+            argv = args[0] if args else kwargs.get("args")
+            launched.append(argv)
+            if argv and Path(str(argv[0])).name == "cf":
+                raise AssertionError("routine sync launched cf")
+            return real_popen(*args, **kwargs)
+
+        with mock.patch("subprocess.Popen", side_effect=record), \
+                mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), \
+                self.patch_snapshot():
+            mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                        prepare=self.prepared)
+        for argv in launched:
+            self.assertNotEqual(Path(str(argv[0])).name if argv else "", "cf")
+
     def test_a_stale_revision_records_the_attempt_and_stops(self):
         store = SyncStore(pending_generations=[self.generation()])
         runtime = SyncClient(error=mirror.MirrorError("stale_revision", "stale", status=409))
@@ -1282,6 +1310,57 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "stale_revision")
         self.assertEqual(len(store.attempts), 1)
         self.assertEqual(store.durable, [])
+
+
+def ensure_age():
+    try:
+        mirror_crypto.binary()
+        return
+    except mirror_crypto.CryptoError:
+        result = subprocess.run(
+            ["sh", str(ROOT / "agent-memory" / "cloudflare" / "dev-age.sh")],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise AssertionError("cannot build rage: " + result.stderr.strip()) from None
+        os.environ["AGE_BIN"] = result.stdout.strip()
+
+
+def start_integration_server(node, worker_dir, collectors, tls=None):
+    env = dict(os.environ)
+    env["COLLECTORS"] = json.dumps(collectors)
+    if tls is not None:
+        env["TLS_KEY"], env["TLS_CERT"] = str(tls[0]), str(tls[1])
+    process = subprocess.Popen(
+        [node, "test/integration-server.mjs"], cwd=str(worker_dir),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    stdout = process.stdout
+    if stdout is None:
+        raise AssertionError("mirror integration server has no output stream")
+    ready, _, _ = select.select([stdout], [], [], 30)
+    if not ready:
+        process.kill()
+        _, stderr = process.communicate(timeout=10)
+        raise AssertionError("mirror integration server did not start: " + (stderr.strip() or "timeout"))
+    line = stdout.readline()
+    try:
+        return process, int(json.loads(line)["port"])
+    except (ValueError, KeyError, TypeError):
+        process.kill()
+        _, stderr = process.communicate(timeout=10)
+        raise AssertionError("mirror integration server did not start: " + (stderr.strip() or line.strip())) from None
+
+
+def stop_integration_server(process):
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=10)
+    if process.stdout is not None:
+        process.stdout.close()
+    if process.stderr is not None:
+        process.stderr.close()
 
 
 class MirrorIntegrationTests(unittest.TestCase):
@@ -1295,15 +1374,7 @@ class MirrorIntegrationTests(unittest.TestCase):
         cls.bundle = cls.worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
         if not cls.bundle.is_file():
             raise AssertionError("missing worker bundle; run `npm run build` in agent-memory/cloudflare")
-        try:
-            mirror_crypto.binary()
-        except mirror_crypto.CryptoError:
-            result = subprocess.run(
-                ["sh", str(cls.worker_dir / "dev-age.sh")],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if result.returncode != 0:
-                raise AssertionError("cannot build rage: " + result.stderr.strip()) from None
-            os.environ["AGE_BIN"] = result.stdout.strip()
+        ensure_age()
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
@@ -1328,38 +1399,14 @@ class MirrorIntegrationTests(unittest.TestCase):
 
     def tearDown(self):
         if self.process is not None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=10)
-            if self.process.stdout is not None:
-                self.process.stdout.close()
-            if self.process.stderr is not None:
-                self.process.stderr.close()
+            stop_integration_server(self.process)
         self.temporary.cleanup()
 
     def start_server(self):
-        env = dict(os.environ)
-        env["COLLECTORS"] = json.dumps([{"client_id": "collector-client.access", "origin": "origin-a"}])
-        self.process = subprocess.Popen(
-            [self.node, "test/integration-server.mjs"], cwd=str(self.worker_dir),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
-        stdout = self.process.stdout
-        assert stdout is not None
-        ready, _, _ = select.select([stdout], [], [], 30)
-        if not ready:
-            self.process.kill()
-            _, stderr = self.process.communicate(timeout=10)
-            raise AssertionError("mirror integration server did not start: " + (stderr.strip() or "timeout"))
-        line = stdout.readline()
-        try:
-            return int(json.loads(line)["port"])
-        except (ValueError, KeyError, TypeError):
-            self.process.kill()
-            _, stderr = self.process.communicate(timeout=10)
-            raise AssertionError("mirror integration server did not start: " + (stderr.strip() or line.strip())) from None
+        self.process, port = start_integration_server(
+            self.node, self.worker_dir,
+            [{"client_id": "collector-client.access", "origin": "origin-a"}])
+        return port
 
     def client(self, config=None):
         return mirror.MirrorClient(
@@ -1431,6 +1478,7 @@ class MirrorIntegrationTests(unittest.TestCase):
             self.assertEqual(verified["generations"], 2)
             self.assertEqual(verified["snapshots"], 1)
             self.assertGreater(verified["sampled"], 0)
+            self.assertIsNotNone(self.snapshots()[0]["verified_at"])
             collected = mirror.gc(self.config, client=client)
             self.assertEqual(collected["apply"], False)
             self.assertEqual(collected["snapshots_retained"], 1)
@@ -1715,6 +1763,312 @@ class MirrorIntegrationTests(unittest.TestCase):
                     client=client, identity_path=self.identity)
         finally:
             client.close()
+
+
+class MirrorCliTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        ensure_age()
+        node = shutil.which("node")
+        if node is None:
+            raise AssertionError("node is required for mirror CLI tests")
+        cls.node: str = node
+        cls.worker_dir = ROOT / "agent-memory" / "cloudflare"
+        cls.bundle = cls.worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
+        if not cls.bundle.is_file():
+            raise AssertionError("missing worker bundle; run `npm run build` in agent-memory/cloudflare")
+        openssl = shutil.which("openssl")
+        if openssl is None:
+            raise AssertionError("openssl is required for the mirror CLI tests")
+        cls.certificates = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        cls.tls_key = Path(cls.certificates.name) / "key.pem"
+        cls.tls_cert = Path(cls.certificates.name) / "cert.pem"
+        result = subprocess.run(
+            [openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+             "-keyout", str(cls.tls_key), "-out", str(cls.tls_cert), "-days", "1",
+             "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            raise AssertionError("cannot generate a test certificate: " + result.stderr.strip())
+        cls.process, cls.port = start_integration_server(
+            cls.node, cls.worker_dir,
+            [{"client_id": "collector-client.access", "origin": "origin-a"}],
+            tls=(cls.tls_key, cls.tls_cert))
+        cls.url = "https://127.0.0.1:%d" % cls.port
+
+    @classmethod
+    def tearDownClass(cls):
+        stop_integration_server(cls.process)
+        cls.certificates.cleanup()
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.home = self.root / "home"
+        (self.home / ".agent-sessions").mkdir(parents=True, mode=0o700)
+        self.config_file = self.home / ".agent-sessions" / "config.json"
+        self.config_file.write_text("{}\n")
+        os.chmod(self.config_file, 0o600)
+        self.state = self.root / "state"
+        self.identity = self.root / "age.key"
+        self.recovery = self.root / "recovery.key"
+        self.recipients = self.root / "recipients.txt"
+        self.token = self.root / "token.json"
+        self.token.write_text(json.dumps({"client_id": "collector-client.access", "client_secret": "synthetic"}))
+        os.chmod(self.token, 0o600)
+        keys = ("PATH", "LANG", "LC_ALL", "TMPDIR", "GIT_TEMPLATE_DIR", "AGE_BIN")
+        self.env = {key: os.environ[key] for key in keys if key in os.environ}
+        self.env["HOME"] = str(self.home)
+        self.env["SSL_CERT_FILE"] = str(self.tls_cert)
+        self.empty_root = self.root / "empty"
+        self.empty_root.mkdir()
+        self.cli = ROOT / "dotfiles" / "base" / ".local" / "bin" / "agent-sessions"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def run_cli(self, *arguments):
+        return subprocess.run(
+            [sys.executable, "-I", str(self.cli), *arguments],
+            cwd=str(self.root), env=self.env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def keygen(self):
+        result = self.run_cli(
+            "mirror", "keygen", "--identity", str(self.identity),
+            "--recovery", str(self.recovery), "--recipients", str(self.recipients))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def configure(self, url):
+        return self.run_cli(
+            "mirror", "configure", "--url", url,
+            "--token-file", str(self.token), "--recipients", str(self.recipients),
+            "--identity", str(self.identity))
+
+    def enable(self, *extra):
+        return self.run_cli("mirror", "enable", *extra)
+
+    def status(self, *extra):
+        result = self.run_cli(
+            "mirror", "status", "--state-dir", str(self.state), "--json", *extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout.strip().splitlines()[-1])
+
+    def sync(self, *extra):
+        return self.run_cli(
+            "mirror", "sync", "--state-dir", str(self.state),
+            "--root", str(self.empty_root), "--json", *extra)
+
+    def capture(self, native="native-1", text="needle synthetic replay"):
+        with Store(self.state) as store:
+            with store.db:
+                store.db.execute(
+                    "INSERT OR REPLACE INTO collector_identity(singleton, id, origin_host, display_label, created_at) "
+                    "VALUES(1, 'synthetic', 'origin-a', 'synthetic', 0)")
+            source = self.root / (native + ".jsonl")
+            source.write_text(json.dumps({
+                "type": "message", "id": "m-" + native, "parentId": None,
+                "timestamp": "2026-10-30T00:00:00Z",
+                "message": {"role": "user", "content": [{"type": "text", "text": text}],
+                            "meta": {"messageId": "m-" + native}},
+            }, separators=(",", ":")) + "\n")
+            return archive_module.capture(store.db, store.archive_dir, "codex", native, source)
+
+    def config_document(self):
+        return json.loads(self.config_file.read_text())
+
+    def test_keygen_configure_toggles_and_token_mode(self):
+        result = self.run_cli(
+            "mirror", "keygen", "--identity", str(self.root / "plain.key"),
+            "--recovery", str(self.root / "plain-recovery.key"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "plain.key.recipients").is_file())
+        self.assertEqual(oct(os.stat(self.root / "plain.key").st_mode & 0o777), "0o600")
+
+        self.keygen()
+        self.assertEqual(oct(os.stat(self.identity).st_mode & 0o777), "0o600")
+        self.assertEqual(oct(os.stat(self.recovery).st_mode & 0o777), "0o600")
+        self.assertEqual(len(self.recipients.read_text().splitlines()), 2)
+
+        os.chmod(self.token, 0o644)
+        refused = self.configure("https://127.0.0.1:9")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("0600", refused.stderr)
+        self.assertEqual(self.config_document(), {})
+        os.chmod(self.token, 0o600)
+        configured = self.configure("https://127.0.0.1:9")
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        document = self.config_document()
+        self.assertEqual(document["central"]["transport"], "cloudflare")
+        self.assertEqual(oct(os.stat(self.config_file).st_mode & 0o777), "0o600")
+
+        doctor = self.run_cli("mirror", "doctor", "--state-dir", str(self.state), "--offline")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        for field in ("config=ok", "age=ok", "token=ok:0600", "identity=ok", "recipients=ok:2", "state=ok", "ok=1"):
+            self.assertIn(field, doctor.stdout)
+
+        enabled = self.enable("--searchable-learning")
+        self.assertEqual(enabled.returncode, 0, enabled.stderr)
+        self.assertIn("disclosure=", enabled.stdout)
+        self.assertTrue(self.config_document()["central"]["learning_projection"])
+        self.assertTrue(self.config_document()["central"]["enabled"])
+        self.assertTrue(self.status("--offline")["enabled"])
+
+        disabled = self.run_cli("mirror", "disable")
+        self.assertEqual(disabled.returncode, 0, disabled.stderr)
+        self.assertFalse(self.config_document()["central"]["enabled"])
+        self.assertTrue(self.config_document()["central"]["learning_projection"])
+        self.assertFalse(self.status("--offline")["enabled"])
+        withdrawn = self.run_cli("mirror", "disable", "--searchable-learning")
+        self.assertEqual(withdrawn.returncode, 0, withdrawn.stderr)
+        self.assertFalse(self.config_document()["central"]["learning_projection"])
+        self.assertEqual(self.enable().returncode, 0)
+
+        os.chmod(self.token, 0o644)
+        bad = self.run_cli("mirror", "doctor", "--state-dir", str(self.state), "--offline")
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("token=fail:0644", bad.stdout)
+
+    def test_dry_run_and_offline_sync_keep_the_backlog(self):
+        self.keygen()
+        self.assertEqual(self.configure("https://127.0.0.1:9").returncode, 0)
+        self.assertEqual(self.enable().returncode, 0)
+        self.capture()
+
+        dry = self.sync("--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        estimate = json.loads(dry.stdout.strip())
+        self.assertTrue(estimate["dry_run"])
+        self.assertGreaterEqual(estimate["generations"], 1)
+        self.assertGreater(estimate["objects"], 0)
+        self.assertGreater(estimate["bytes"], 0)
+        self.assertGreaterEqual(estimate["requests"], 3)
+        self.assertIsNone(estimate["last_error"])
+
+        failed = self.sync()
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertEqual(failed.stdout.strip(), "")
+        self.assertIn("agent-sessions mirror:", failed.stderr)
+        offline = self.status("--offline")
+        self.assertGreaterEqual(offline["generations"], 1)
+        self.assertGreater(offline["objects"], 0)
+        self.assertGreater(offline["bytes"], 0)
+        self.assertIsNotNone(offline["last_error"])
+        self.assertIsNone(offline["revision"])
+        self.assertIsNone(offline["last_verified_snapshot"])
+        self.assertFalse(offline["remote_ok"])
+
+        recall = self.run_cli("search", "needle", "--state-dir", str(self.state))
+        self.assertEqual(recall.returncode, 0, recall.stderr)
+        self.assertIn("matches=", recall.stdout)
+
+    def test_live_sync_and_maintenance_commands(self):
+        self.keygen()
+        configured = self.configure(self.url)
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        self.assertEqual(self.enable("--searchable-learning").returncode, 0)
+        self.capture()
+
+        first = self.sync()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        committed = json.loads(first.stdout.strip())
+        self.assertEqual(committed["generations_committed"], 1)
+        self.assertEqual(committed["store_id"], "usr-memories")
+        self.assertGreaterEqual(committed["revision"], 1)
+        self.assertEqual(committed["snapshots_created"], 1)
+
+        current = self.status()
+        self.assertTrue(current["remote_ok"])
+        self.assertEqual(current["revision"], committed["revision"])
+        self.assertEqual(current["generations"], 0)
+        self.assertEqual(current["objects"], 0)
+        self.assertIsNone(current["last_error"])
+        self.assertIsNone(current["last_verified_snapshot"])
+
+        again = self.sync()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertTrue(json.loads(again.stdout.strip())["unchanged"])
+
+        reconciled = self.sync("--reconcile")
+        self.assertEqual(reconciled.returncode, 0, reconciled.stderr)
+        self.assertTrue(json.loads(reconciled.stdout.strip())["current"])
+
+        listed = self.run_cli("mirror", "snapshots", "--state-dir", str(self.state))
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        match = re.search(r"snapshot=([0-9a-f]{64})", listed.stdout)
+        if match is None:
+            self.fail("snapshot listing has no id: " + listed.stdout)
+        snapshot_id = match.group(1)
+
+        verified = self.run_cli("mirror", "verify", "--state-dir", str(self.state))
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+        self.assertIn("generations=1", verified.stdout)
+        checked = self.status()
+        self.assertIsNotNone(checked["last_verified_snapshot"])
+        swept = self.run_cli("mirror", "gc", "--state-dir", str(self.state))
+        self.assertEqual(swept.returncode, 0, swept.stderr)
+        restored = self.run_cli(
+            "mirror", "restore", "--state-dir", str(self.state), "--snapshot", snapshot_id,
+            "--to", str(self.root / "restored"))
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertIn("snapshot=" + snapshot_id, restored.stdout)
+
+        new_identity = self.root / "new.key"
+        new_recipients = self.root / "new.recipients"
+        rotated_keys = self.run_cli(
+            "mirror", "keygen", "--identity", str(new_identity), "--recipients", str(new_recipients))
+        self.assertEqual(rotated_keys.returncode, 0, rotated_keys.stderr)
+        rotated = self.run_cli(
+            "mirror", "rotate", "--state-dir", str(self.state),
+            "--recipients", str(new_recipients), "--identity", str(new_identity))
+        self.assertEqual(rotated.returncode, 0, rotated.stderr)
+        self.assertIn("rotated=", rotated.stdout)
+
+        labelled = self.run_cli(
+            "mirror", "label", "--state-dir", str(self.state), "0123456789abcdef", "usr")
+        self.assertEqual(labelled.returncode, 0, labelled.stderr)
+        self.assertIn("project=0123456789abcdef label=usr", labelled.stdout)
+
+        adopted = self.run_cli("mirror", "adopt", "--state-dir", str(self.state))
+        self.assertEqual(adopted.returncode, 0, adopted.stderr)
+        self.assertIn("cleared_acks=", adopted.stdout)
+        doctor = self.run_cli("mirror", "doctor", "--state-dir", str(self.state))
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertIn("remote=ok", doctor.stdout)
+        self.assertIn("ok=1", doctor.stdout)
+
+        self.assertEqual(self.run_cli("mirror", "disable").returncode, 0)
+        skipped = self.sync()
+        self.assertEqual(skipped.returncode, 0, skipped.stderr)
+        self.assertEqual(json.loads(skipped.stdout.strip()), {"enabled": False, "skipped": True})
+
+    def test_an_overlapping_sync_exits_zero(self):
+        self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with open(self.state / "sync.lock", "a+") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.sync()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout.strip()), {"overlapped": True, "pending": "skipped"})
+
+    def test_launch_agent_template_lints(self):
+        plutil = shutil.which("plutil")
+        if plutil is None:
+            self.skipTest("plutil is required for the LaunchAgent lint")
+        template = (ROOT / "dotfiles" / "launchd" / "com.josh.agent-sessions-mirror.plist.in").read_text()
+        rendered = (template
+                    .replace("@@HOME@@", str(self.home))
+                    .replace("@@STATE_DIR@@", str(self.state))
+                    .replace("@@REMOTE@@", "cloudflare"))
+        path = self.root / "com.josh.agent-sessions-mirror.plist"
+        path.write_text(rendered)
+        linted = subprocess.run(
+            [plutil, "-lint", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(linted.returncode, 0, linted.stderr)
+        self.assertIn("OK", linted.stdout)
+        self.assertIn("<string>mirror</string>", rendered)
+        self.assertIn("<string>sync</string>", rendered)
+        self.assertIn("<integer>900</integer>", rendered)
 
 
 if __name__ == "__main__":

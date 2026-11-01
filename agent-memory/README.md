@@ -224,6 +224,47 @@ objects unreferenced for an hour. `agent-sessions mirror rotate --recipients FIL
 --identity NEWKEY` re-encrypts the origin to a new recipient set and leaves the old identity
 unable to read the new ciphertext.
 
+### Configure and schedule
+
+```sh
+agent-sessions mirror keygen --identity ~/.agent-sessions/age.key \
+  --recovery ~/.agent-sessions/age-recovery.key \
+  --recipients ~/.agent-sessions/age.recipients
+agent-sessions mirror configure --url https://memories.17166969.xyz \
+  --token-file ~/.agent-sessions/cloudflare-token.json \
+  --recipients ~/.agent-sessions/age.recipients \
+  --identity ~/.agent-sessions/age.key
+agent-sessions mirror enable --searchable-learning
+agent-sessions mirror status --json
+agent-sessions mirror doctor
+agent-sessions mirror sync --dry-run --json
+agent-sessions mirror sync
+```
+
+`keygen` writes the collector identity and the recovery identity with mode 0600 and a
+recipients file naming both; move the recovery identity offline and keep the token out of
+the repository. `configure` refuses a token file that is not regular mode 0600.
+`enable --searchable-learning` prints the projection disclosure and opts in to storing
+claim and applicability text in D1; without the flag the mirror still syncs, but no
+learning record is projected or indexed. `disable` turns scheduled sync off, and
+`disable --searchable-learning` also withdraws the projection opt-in.
+
+`mirror status --json` reports the pinned store and revision, pending generations, objects,
+and bytes, the last error, the last sync time, and the last verified snapshot. `mirror
+sync --dry-run --json` reports the same backlog plus an estimated request count and never
+opens a connection. `mirror sync --reconcile` replaces the searchable projection with the
+local live record set in one staged epoch. `mirror doctor` checks the config, token mode,
+identities, recipients, state, and remote reachability; `--offline` skips the remote check.
+
+Scheduling is explicit and never installed by sync. Render
+`dotfiles/launchd/com.josh.agent-sessions-mirror.plist.in`, replacing `@@HOME@@`,
+`@@STATE_DIR@@`, and `@@REMOTE@@`, lint it with `plutil -lint`, and load it with
+`launchctl bootstrap gui/$(id -u) PLIST`. The portable equivalent is
+`*/15 * * * * agent-sessions mirror sync`. An overlapping run exits 0 with
+`overlapped=1`, a disabled mirror exits 0 with `enabled=0`, and an unreachable mirror exits
+non-zero with the backlog intact for the next run. Routine sync uses HTTPS only and never
+invokes `cf`.
+
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
 - Object frames are zlib-compressed when both ends offer it, which every build of this tool does. The manifest already declares each object's size, so the receiver inflates to at most that size, refuses anything larger, and verifies the digest afterwards; an object that does not shrink travels uncompressed. Measured on 40 of the largest local objects, 2.6 MB became 1.1 MB.

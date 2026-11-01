@@ -6,6 +6,7 @@ import os
 import json
 import re
 import sqlite3
+import stat
 import sys
 import time
 from pathlib import Path
@@ -335,10 +336,288 @@ def _sync(args):
         lock.close()
 
 
+def _write_config(document):
+    path = config_path()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    payload = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(payload)
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def _mirror_configure(args):
+    if not args.url or not args.token_file or not args.recipients or not args.identity:
+        print("agent-sessions mirror: configure needs --url, --token-file, --recipients, and --identity",
+              file=sys.stderr)
+        return 2
+    document = load_config()
+    central = document.get("central")
+    previous = central if isinstance(central, dict) else {}
+    block = {
+        "transport": "cloudflare", "url": args.url,
+        "service_token_file": str(Path(args.token_file).expanduser().resolve()),
+        "age_recipients_file": str(Path(args.recipients).expanduser().resolve()),
+        "age_identity_file": str(Path(args.identity).expanduser().resolve()),
+        "learning_projection": bool(previous.get("learning_projection", False)),
+        "enabled": bool(previous.get("enabled", True)),
+    }
+    try:
+        config = mirror_module.decode_config(block)
+        mirror_module.load_service_token(config.service_token_file)
+        mirror_module.mirror_crypto.load_recipients(config.age_recipients_file)
+        mirror_module.mirror_crypto.recipient(config.age_identity_file)
+    except (mirror_module.MirrorError, mirror_module.mirror_crypto.CryptoError, OSError) as exc:
+        print("agent-sessions mirror: " + str(exc), file=sys.stderr)
+        return 1
+    document["central"] = block
+    _write_config(document)
+    print("configured=1 url=%s token=%s recipients=%s identity=%s projection=%d" % (
+        config.url, config.service_token_file, config.age_recipients_file,
+        config.age_identity_file, int(config.learning_projection)))
+    return 0
+
+
+def _mirror_keygen(args):
+    if not args.identity:
+        print("agent-sessions mirror: keygen needs --identity", file=sys.stderr)
+        return 2
+    identity = Path(args.identity).expanduser()
+    recipients = Path(args.recipients).expanduser() if args.recipients \
+        else identity.with_name(identity.name + ".recipients")
+    generated = [(identity, mirror_module.mirror_crypto.keygen(identity))]
+    if args.recovery:
+        recovery = Path(args.recovery).expanduser()
+        generated.append((recovery, mirror_module.mirror_crypto.keygen(recovery)))
+    recipients.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = recipients.with_name(recipients.name + ".tmp")
+    temporary.write_text("".join(recipient + "\n" for _path, recipient in generated))
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, recipients)
+    print("recipients=%s" % recipients)
+    for path, recipient in generated:
+        print("identity=%s recipient=%s" % (path, recipient))
+    return 0
+
+
+def _mirror_toggle(args, enabled):
+    document = load_config()
+    block = document.get("central")
+    if not isinstance(block, dict):
+        print("agent-sessions mirror: configure the mirror first", file=sys.stderr)
+        return 1
+    block = dict(block)
+    block["enabled"] = enabled
+    if args.searchable_learning:
+        block["learning_projection"] = enabled
+        if enabled:
+            print("searchable-learning=1 disclosure=claims and applicability text will be stored in D1 and indexed by FTS5; "
+                  "records still travel inside the encrypted recovery snapshot when this is off")
+    try:
+        mirror_module.decode_config(block)
+    except mirror_module.MirrorError as exc:
+        print("agent-sessions mirror: " + str(exc), file=sys.stderr)
+        return 1
+    document["central"] = block
+    _write_config(document)
+    print("enabled=%d searchable_learning=%d" % (int(enabled), int(bool(block.get("learning_projection")))))
+    return 0
+
+
+def _mirror_status(args, store):
+    report = mirror_module.pending_report(store, args.remote)
+    document = dict(report)
+    document.update({"config": False, "enabled": False, "token_mode": None, "remote_ok": False,
+                     "remote_error": None, "last_verified_snapshot": None, "learning_revision": None,
+                     "remote_revision": None})
+    config = None
+    try:
+        config = mirror_module.load_config(config_path())
+    except (mirror_module.MirrorError, StoreError) as exc:
+        document["remote_error"] = str(exc)
+    if config is not None:
+        document["config"] = True
+        document["enabled"] = config.enabled
+        try:
+            info = Path(config.service_token_file).stat()
+            document["token_mode"] = "%04o" % stat.S_IMODE(info.st_mode)
+        except OSError:
+            pass
+        if not args.offline:
+            try:
+                with mirror_module.MirrorClient(config) as client:
+                    hello = client.hello(report["origin"])
+                    document["learning_revision"] = hello["learning"]["revision"]
+                    document["remote_revision"] = hello["revision"]
+                    rows = mirror_module.snapshots(config, client=client, limit=100)
+                verified = [row["verified_at"] for row in rows if row["verified_at"] is not None]
+                document["last_verified_snapshot"] = max(verified) if verified else None
+                document["remote_ok"] = True
+            except (mirror_module.MirrorError, mirror_module.mirror_crypto.CryptoError) as exc:
+                document["remote_error"] = str(exc)
+    if args.json:
+        print(json.dumps(document, sort_keys=True))
+        return 0
+    for key in ("remote", "enabled", "pinned", "origin", "store_id", "revision", "watermark", "learning_seq",
+                "learning_revision", "remote_revision", "last_verified_snapshot", "last_sync_at", "last_error",
+                "generations", "objects", "bytes", "tombstones", "learning_changes", "requests",
+                "token_mode", "remote_ok", "remote_error"):
+        print("%s=%s" % (key, document.get(key)))
+    return 0
+
+
+def _mirror_sync(args, store):
+    import fcntl
+    state = _state_dir(args)
+    try:
+        state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        lock = open(state / "sync.lock", "a+")
+    except OSError as exc:
+        print("agent-sessions mirror: " + str(exc), file=sys.stderr)
+        return 1
+    try:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            if args.json:
+                print(json.dumps({"overlapped": True, "pending": "skipped"}, sort_keys=True))
+            else:
+                print("overlapped=1 pending=skipped")
+            return 0
+        if args.dry_run:
+            report = mirror_module.pending_report(store, args.remote)
+            report["dry_run"] = True
+            if args.json:
+                print(json.dumps(report, sort_keys=True))
+            else:
+                print("dry_run=1 remote=%s pending_generations=%d pending_objects=%d pending_bytes=%d "
+                      "learning_changes=%d tombstones=%d estimated_requests=%d" % (
+                          args.remote, report["generations"], report["objects"], report["bytes"],
+                          report["learning_changes"], report["tombstones"], report["requests"]))
+            return 0
+        config = mirror_module.load_config(config_path())
+        if not config.enabled:
+            if args.json:
+                print(json.dumps({"enabled": False, "skipped": True}, sort_keys=True))
+            else:
+                print("enabled=0 skipped=1")
+            return 0
+        if args.json:
+            def progress(count):
+                return None
+        else:
+            def progress(count):
+                if count % 25 == 0:
+                    print("delivered=%d" % count, file=sys.stderr, flush=True)
+        if args.reconcile:
+            result = mirror_module.reconcile(store, config, args.remote, progress=progress)
+            if args.json:
+                print(json.dumps(result, sort_keys=True))
+            else:
+                print("reconciled=1 current=%d records=%d missing=%d extra=%d changed=%d chunks=%d "
+                      "applied=%d revision=%d epoch=%d" % (
+                          int(result["current"]), result["records"], result["missing"], result["extra"],
+                          result["changed"], result["chunks"], result["applied"], result["revision"],
+                          result["epoch"]))
+            return 0
+        def refresh():
+            store.refresh(roots=_roots(args), project=None)
+        result = mirror_module.sync(
+            store, config, args.remote, refresh=refresh, progress=progress)
+        if args.json:
+            print(json.dumps(result, sort_keys=True))
+        else:
+            print("committed=%d duplicate=%d tombstoned=%d objects_stored=%d manifests=%d "
+                  "bytes_plaintext=%d bytes_compressed=%d bytes_ciphertext=%d tombstones_fetched=%d "
+                  "tombstones_pushed=%d learning_changes=%d learning_deletes=%d "
+                  "snapshots_created=%d unchanged=%d endpoint=%s store=%s revision=%d" % (
+                      result["generations_committed"], result["generations_duplicate"],
+                      result["generations_tombstoned"], result["objects_stored"], result["manifests_uploaded"],
+                      result["bytes_plaintext"], result["bytes_compressed"], result["bytes_ciphertext"],
+                      result["tombstones_fetched"], result["tombstones_pushed"],
+                      result["learning_changes"], result["learning_deletes"],
+                      result["snapshots_created"], int(result["unchanged"]),
+                      config.url, result["store_id"], result["revision"]))
+        return 0
+    finally:
+        lock.close()
+
+
+def _mirror_doctor(args):
+    ok = True
+
+    def report(name, passed, detail=""):
+        nonlocal ok
+        ok = ok and passed
+        print("%s=%s%s" % (name, "ok" if passed else "fail", (":" + detail) if detail else ""))
+
+    config = None
+    try:
+        config = mirror_module.load_config(config_path())
+        report("config", True)
+    except (mirror_module.MirrorError, StoreError) as exc:
+        report("config", False, str(exc))
+    if config is not None:
+        report("enabled", True, "%d" % int(config.enabled))
+        try:
+            mirror_module.mirror_crypto.binary()
+            report("age", True)
+        except mirror_module.mirror_crypto.CryptoError as exc:
+            report("age", False, str(exc))
+        try:
+            info = Path(config.service_token_file).stat()
+            mode = stat.S_IMODE(info.st_mode)
+            report("token", stat.S_ISREG(info.st_mode) and not mode & 0o077, "%04o" % mode)
+        except OSError as exc:
+            report("token", False, str(exc))
+        try:
+            mirror_module.mirror_crypto.recipient(config.age_identity_file)
+            report("identity", True)
+        except (mirror_module.mirror_crypto.CryptoError, OSError) as exc:
+            report("identity", False, str(exc))
+        try:
+            recipients = mirror_module.mirror_crypto.load_recipients(config.age_recipients_file)
+            report("recipients", len(recipients) > 0, "%d" % len(recipients))
+        except (mirror_module.mirror_crypto.CryptoError, OSError) as exc:
+            report("recipients", False, str(exc))
+    try:
+        with Store(_state_dir(args)) as store:
+            report("state", True)
+            pending = mirror_module.pending_report(store, args.remote)
+            print("origin=%s" % pending["origin"])
+            print("pinned=%s store_id=%s revision=%s" % (
+                pending["pinned"], pending["store_id"], pending["revision"]))
+            print("pending_generations=%d pending_objects=%d pending_bytes=%d learning_changes=%d tombstones=%d" % (
+                pending["generations"], pending["objects"], pending["bytes"],
+                pending["learning_changes"], pending["tombstones"]))
+            print("last_error=%s" % pending["last_error"])
+            if config is not None and not args.offline:
+                try:
+                    with mirror_module.MirrorClient(config) as client:
+                        client.hello(pending["origin"])
+                    report("remote", True)
+                except (mirror_module.MirrorError, mirror_module.mirror_crypto.CryptoError) as exc:
+                    report("remote", False, str(exc))
+    except (OSError, StoreError, sqlite3.DatabaseError) as exc:
+        report("state", False, str(exc))
+    print("ok=%d" % int(ok))
+    return 0 if ok else 1
+
+
 def _mirror(args):
     try:
         if args.action in ("status", "adopt"):
             return _mirror_local(args)
+        if args.action == "configure":
+            return _mirror_configure(args)
+        if args.action == "keygen":
+            return _mirror_keygen(args)
+        if args.action == "enable":
+            return _mirror_toggle(args, True)
+        if args.action == "disable":
+            return _mirror_toggle(args, False)
+        if args.action == "doctor":
+            return _mirror_doctor(args)
         if args.action == "label":
             if len(args.label_args) != 2:
                 print("agent-sessions mirror: label needs PROJECT_KEY NAME", file=sys.stderr)
@@ -348,6 +627,9 @@ def _mirror(args):
                 learning_sync.set_project_label(store.db, args.label_args[0], args.label_args[1])
             print("project=%s label=%s" % (args.label_args[0], args.label_args[1]))
             return 0
+        if args.action == "sync":
+            with Store(_state_dir(args)) as store:
+                return _mirror_sync(args, store)
         config = mirror_module.load_config(config_path())
         with mirror_module.MirrorClient(config) as client:
             if args.action == "snapshots":
@@ -406,14 +688,7 @@ def _mirror(args):
 def _mirror_local(args):
     with Store(_state_dir(args)) as store:
         if args.action == "status":
-            state = store.mirror_remote_state(args.remote)
-            if state is None:
-                print("remote=%s pinned=0" % args.remote)
-            else:
-                print("remote=%s store=%s revision=%d watermark=%d last_sync_at=%s last_error=%s" % (
-                    state["remote"], state["store_id"], state["revision"],
-                    state["tombstone_watermark"], state["last_sync_at"], state["last_error"]))
-            return 0
+            return _mirror_status(args, store)
         config = mirror_module.load_config(config_path())
         origin = archive_module.origin_for(store.db)
         with mirror_module.MirrorClient(config) as client:
@@ -772,10 +1047,11 @@ def parser():
 
     mirror = commands.add_parser("mirror", help="inspect, verify, restore, or maintain the Cloudflare mirror")
     mirror.add_argument("action", choices=(
-        "status", "adopt", "snapshots", "verify", "gc", "restore", "rotate", "label"))
+        "configure", "enable", "disable", "keygen", "status", "adopt", "sync", "verify",
+        "restore", "snapshots", "gc", "rotate", "label", "doctor"))
     mirror.add_argument("label_args", nargs="*", help="PROJECT_KEY NAME for label")
     mirror.add_argument("--state-dir")
-    mirror.add_argument("--remote", default="central", help="configured remote name (default %(default)s)")
+    mirror.add_argument("--remote", default="cloudflare", help="configured remote name (default %(default)s)")
     mirror.add_argument("--limit", type=int, default=100, help="snapshot rows to list (default %(default)s)")
     mirror.add_argument("--snapshot", help="snapshot id for restore")
     mirror.add_argument("--to", help="destination state directory for restore")
@@ -783,8 +1059,19 @@ def parser():
     mirror.add_argument("--sample", type=int, help="objects to sample with --objects (default 5%% or 100)")
     mirror.add_argument("--apply", action="store_true", help="apply snapshot pruning and object sweep")
     mirror.add_argument("--recipients", help="age recipients file for rotate")
-    mirror.add_argument("--identity", help="new age identity file for rotate or restore")
+    mirror.add_argument("--identity", help="new age identity file for keygen, rotate, or restore")
+    mirror.add_argument("--recovery", help="offline recovery age identity file for keygen")
     mirror.add_argument("--old-identity", help="old age identity file for rotate")
+    mirror.add_argument("--url", help="cloudflare worker origin for configure")
+    mirror.add_argument("--token-file", help="service token JSON file for configure")
+    mirror.add_argument("--searchable-learning", action="store_true",
+                        help="opt in to the searchable D1 projection (prints the disclosure)")
+    mirror.add_argument("--json", action="store_true", help="print JSON for status, sync, or dry-run")
+    mirror.add_argument("--offline", action="store_true", help="skip remote checks in status or doctor")
+    mirror.add_argument("--dry-run", action="store_true", help="report the backlog without a network write")
+    mirror.add_argument("--reconcile", action="store_true", help="replace the projection with the local live set")
+    mirror.add_argument("--root", action="append", metavar="[HARNESS=]PATH",
+                        help="capture sessions from this root during sync")
     mirror.set_defaults(run=_mirror)
 
     archive = commands.add_parser("archive", help="verify, reindex, or report the local archive")

@@ -1838,6 +1838,15 @@ class Store:
                 (str(remote), str(store_id), int(revision), int(tombstone_watermark), int(learning_seq),
                  learning_digest, time.time(), error))
 
+    def record_mirror_error(self, remote, error):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO mirror_remote(remote, store_id, revision, tombstone_watermark, learning_seq, "
+                "learning_digest, last_sync_at, last_error) VALUES (?, NULL, 0, 0, 0, NULL, ?, ?) "
+                "ON CONFLICT(remote) DO UPDATE SET last_sync_at = excluded.last_sync_at, "
+                "last_error = excluded.last_error",
+                (str(remote), time.time(), str(error)[:500]))
+
     def forget_mirror_remote(self, remote):
         with self.db:
             self.db.execute("DELETE FROM mirror_remote WHERE remote = ?", (str(remote),))

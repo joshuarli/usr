@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 
 import { Miniflare } from "miniflare";
 
@@ -46,7 +48,7 @@ async function readBody(request) {
   return Buffer.concat(chunks);
 }
 
-const server = createServer(async (request, response) => {
+const handler = async (request, response) => {
   try {
     const body = await readBody(request);
     const method = request.method ?? "GET";
@@ -64,7 +66,12 @@ const server = createServer(async (request, response) => {
     response.writeHead(500, { "content-type": "application/json" });
     response.end(JSON.stringify({ error: String(error) }));
   }
-});
+};
+
+const tls = process.env.TLS_KEY && process.env.TLS_CERT
+  ? { key: readFileSync(process.env.TLS_KEY), cert: readFileSync(process.env.TLS_CERT) }
+  : null;
+const server = tls ? createHttpsServer(tls, handler) : createHttpServer(handler);
 
 server.listen(0, "127.0.0.1", () => {
   console.log(JSON.stringify({ port: server.address().port }));
