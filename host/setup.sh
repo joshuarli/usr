@@ -83,6 +83,7 @@ setup_alpine() {
             dest=$HOME/usr
         fi
     fi
+    git -C "$dest" pull --ff-only || die "could not update $dest; pull it by hand"
 
     say 'provisioning Alpine'
     as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" \
