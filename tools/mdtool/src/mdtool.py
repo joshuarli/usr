@@ -28,6 +28,7 @@ Command = Literal["links", "anchors", "refs", "consumers", "pointers", "dups", "
 COMMANDS: Final[tuple[Command, ...]] = ("links", "anchors", "refs", "consumers", "pointers", "dups", "router", "check")
 CHECKS: Final[tuple[Command, ...]] = ("links", "refs", "consumers", "pointers", "dups", "router")
 README_NAMES = {"readme.md", "readme.mdx", "readme.markdown", "readme.rst"}
+LLMS_NAMES = {"llms.txt", "llms-full.txt"}
 MD_EXTS = {".md", ".markdown", ".mdx"}
 RST_EXTS = {".rst"}
 EXTS = MD_EXTS | RST_EXTS
@@ -166,7 +167,7 @@ def safe_read(root, rel, dirs=None):
 
 def markdown(path):
 
-    return Path(path).suffix.lower() in EXTS
+    return Path(path).suffix.lower() in EXTS or Path(path).name.lower() in LLMS_NAMES
 
 
 def rst(path):
@@ -2205,6 +2206,19 @@ class MdtoolTests(unittest.TestCase):
                 rc=main(["links","--root",td])
             self.assertEqual(rc,1)
             self.assertIn("#installation",out.getvalue())
+
+    def test_llms_txt_is_audited_as_markdown(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir(); (root/"docs"/"guide.md").write_text("# Guide\n")
+            (root/"public").mkdir()
+            (root/"public"/"llms.txt").write_text("# Site\n\n- [Guide](../docs/guide.md): ok\n- [Gone](../docs/gone.md): missing\n")
+            git(root,["init","-q"])
+            out=io.StringIO()
+            with contextlib.redirect_stdout(out): rc=main(["links","--untracked","--verbose","--root",td])
+            self.assertEqual(rc,1)
+            self.assertIn("public/llms.txt:4",out.getvalue())
+            self.assertIn("../docs/gone.md",out.getvalue())
+            self.assertNotIn("../docs/guide.md",out.getvalue())
 
     def test_slug_suffix_and_setext(self):
         h,_=slug_headings("# Same\n# Same\nSetext\n---\n```\n# Fake\n```")
