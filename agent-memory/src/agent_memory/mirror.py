@@ -2106,32 +2106,41 @@ def _object_row(item) -> dict[str, Any]:
     }
 
 
+def _check_snapshot_image(destination, snapshot) -> Path:
+    digest = hashlib.sha256()
+    size = 0
+    with open(destination, "rb") as stream:
+        while True:
+            block = stream.read(1 << 20)
+            if not block:
+                break
+            digest.update(block)
+            size += len(block)
+    if size != snapshot["db_size"] or digest.hexdigest() != snapshot["db_digest"]:
+        raise MirrorError("corrupt_object", "snapshot database failed verification: " + snapshot["id"])
+    try:
+        with contextlib.closing(
+                sqlite3.connect("file:%s?mode=ro" % Path(destination).as_posix(), uri=True)) as connection:
+            if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise MirrorError("corrupt_object", "snapshot database failed integrity_check: " + snapshot["id"])
+    except sqlite3.DatabaseError as exc:
+        raise MirrorError("corrupt_object", "snapshot database is not readable: " + snapshot["id"]) from exc
+    return Path(destination)
+
+
 def _reassemble_snapshot(client, identity_path, detail, destination) -> Path:
     snapshot = detail["snapshot"]
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256()
-    size = 0
     with open(destination, "wb") as stream:
         for chunk in detail["chunks"]:
             data = _download_object(client, identity_path, _chunk_row(chunk))
             if len(data) != chunk["size"]:
                 raise MirrorError("corrupt_object", "object failed verification: " + chunk["plaintext_digest"])
             stream.write(data)
-            digest.update(data)
-            size += len(data)
         stream.flush()
         os.fsync(stream.fileno())
-    if size != snapshot["db_size"] or digest.hexdigest() != snapshot["db_digest"]:
-        raise MirrorError("corrupt_object", "snapshot database failed verification: " + snapshot["id"])
-    try:
-        with contextlib.closing(
-                sqlite3.connect("file:%s?mode=ro" % destination.as_posix(), uri=True)) as connection:
-            if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise MirrorError("corrupt_object", "snapshot database failed integrity_check: " + snapshot["id"])
-    except sqlite3.DatabaseError as exc:
-        raise MirrorError("corrupt_object", "snapshot database is not readable: " + snapshot["id"]) from exc
-    return destination
+    return _check_snapshot_image(destination, snapshot)
 
 
 def _snapshot_backup_dir(client, identity_path, detail, directory) -> dict[str, Any]:
@@ -2203,10 +2212,11 @@ def _download_manifest(client, identities, ciphertext) -> tuple[dict[str, Any], 
     raise MirrorError("corrupt_object", "object failed verification: " + row["plaintext_digest"]) from last
 
 
-def _load_manifests(client, origin, rows, identities) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+def _load_manifests(client, origin, rows, identities, pairs=None) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    if pairs is None:
+        pairs = [_download_manifest(client, identities, row["manifest_object"]) for row in rows]
     result = []
-    for row in rows:
-        manifest_row, data = _download_manifest(client, identities, row["manifest_object"])
+    for row, (manifest_row, data) in zip(rows, pairs):
         try:
             manifest = json.loads(data.decode("utf-8"))
             clean = archive_module.validate_manifest(manifest)
@@ -2334,11 +2344,6 @@ def gc(config, *, apply=False, client=None) -> dict[str, Any]:
             runtime.close()
 
 
-def _download_group(client, identity_path, rows):
-    for row in rows:
-        _download_object(client, identity_path, row)
-
-
 def verify(config, *, client=None, objects=False, sample=None, concurrency=12,
            client_factory=None) -> dict[str, Any]:
     owner = client is None
@@ -2346,36 +2351,70 @@ def verify(config, *, client=None, objects=False, sample=None, concurrency=12,
     identity = config.age_identity_file
     verified: set[str] = set()
 
-    def fetch(rows) -> None:
-        if not rows:
-            return
-        workers = min(concurrency, len(rows))
+    def parallel(items, work):
+        if not items:
+            return []
+        workers = min(concurrency, len(items))
         if workers < 2 or (client_factory is None and not owner):
-            for row in rows:
-                _download_object(runtime, identity, row)
-            return
+            return [work(runtime, item) for item in items]
         make = client_factory or (lambda: MirrorClient(config))
         clients = [make() for _ in range(workers)]
+        results: list[Any] = [None] * len(items)
         try:
-            groups = [rows[index::workers] for index in range(workers)]
+            def run(worker, group):
+                for index, item in group:
+                    results[index] = work(worker, item)
+            indexed = list(enumerate(items))
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(_download_group, item, identity, group)
-                           for item, group in zip(clients, groups)]
+                futures = [
+                    pool.submit(run, worker, indexed[index::workers])
+                    for index, worker in enumerate(clients)
+                ]
                 for future in futures:
                     future.result()
         finally:
             for item in clients:
                 item.close()
+        return results
 
     def download(rows) -> None:
         pending = [row for row in rows if row["plaintext_digest"] not in verified]
-        fetch(pending)
+        parallel(pending, lambda worker, row: _download_object(worker, identity, row))
         verified.update(row["plaintext_digest"] for row in pending)
+
+    def reassemble(detail, destination) -> Path:
+        snapshot = detail["snapshot"]
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        cursor = 0
+        placed = []
+        for chunk in detail["chunks"]:
+            placed.append((chunk, cursor))
+            cursor += chunk["size"]
+        with open(destination, "wb") as stream:
+            stream.truncate(snapshot["db_size"])
+        descriptor = os.open(destination, os.O_WRONLY)
+
+        def write(worker, item):
+            chunk, offset = item
+            data = _download_object(worker, identity, _chunk_row(chunk))
+            if len(data) != chunk["size"]:
+                raise MirrorError("corrupt_object", "object failed verification: " + chunk["plaintext_digest"])
+            os.pwrite(descriptor, data, offset)
+
+        try:
+            parallel(placed, write)
+        finally:
+            os.close(descriptor)
+        return _check_snapshot_image(destination, snapshot)
 
     try:
         origin = _collector_origin(runtime)
         generations = _generation_pages(runtime, origin)
-        manifests = _load_manifests(runtime, origin, generations, [config.age_identity_file])
+        identities = [config.age_identity_file]
+        pairs = parallel(generations,
+                         lambda worker, row: _download_manifest(worker, identities, row["manifest_object"]))
+        manifests = _load_manifests(runtime, origin, generations, identities, pairs=pairs)
         referenced: dict[str, int] = {}
         for _row, manifest, _manifest_row in manifests:
             for item in [*manifest["chunks"], *manifest["artifacts"]]:
@@ -2390,7 +2429,7 @@ def verify(config, *, client=None, objects=False, sample=None, concurrency=12,
         with tempfile.TemporaryDirectory(prefix="mirror-verify-") as temporary:
             for index, snapshot in enumerate(snapshot_rows):
                 detail = runtime.snapshot(origin, snapshot["id"])
-                _reassemble_snapshot(runtime, config.age_identity_file, detail, Path(temporary) / ("%d.sqlite3" % index))
+                reassemble(detail, Path(temporary) / ("%d.sqlite3" % index))
                 chunks += len(detail["chunks"])
                 sampled_all = objects and (sample is None or sample >= len(detail["objects"]))
                 if sampled_all:
@@ -2412,7 +2451,8 @@ def verify(config, *, client=None, objects=False, sample=None, concurrency=12,
             count = sample if sample is not None else max(100, (len(all_objects) * 5 + 99) // 100)
             count = min(count, len(all_objects))
             digests = sorted(all_objects)[:count]
-            fetch([known[digest] for digest in digests])
+            parallel([known[digest] for digest in digests],
+                     lambda worker, row: _download_object(worker, identity, row))
             sampled = len(digests)
         return {
             "generations": len(generations), "snapshots": len(snapshot_rows),
