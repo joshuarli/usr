@@ -113,6 +113,9 @@ export async function handleStatus(
     return json(503, { error: { code: "unavailable", message: "store is not provisioned" } },
       false, { "Server-Timing": serverTiming(timing) });
   }
+  const origins = principal.kind === "collector"
+    ? status.origins.filter((origin) => origin.origin === principal.origin_host)
+    : status.origins;
   return json(200, {
     protocol: PROTOCOL,
     store_id: status.store_id,
@@ -122,16 +125,14 @@ export async function handleStatus(
       experiences: status.counts.experiences,
       memories: status.counts.memories,
       projects: status.counts.projects,
-      origins: status.counts.origins,
+      origins: principal.kind === "collector" ? origins.length : status.counts.origins,
       tombstones: status.counts.tombstones,
       generations: status.counts.generations,
       snapshots: status.counts.snapshots,
       objects: status.counts.objects,
       object_bytes: status.counts.object_bytes,
     },
-    origins: principal.kind === "collector"
-      ? status.origins.filter((origin) => origin.origin === principal.origin_host)
-      : status.origins,
+    origins,
     last_change: status.last_change,
     last_verified_snapshot: status.last_verified_snapshot,
   }, request.method === "HEAD", { "Server-Timing": serverTiming(timing) });

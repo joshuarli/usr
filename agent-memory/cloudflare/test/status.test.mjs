@@ -164,6 +164,7 @@ test("status reports twenty origins with bounded queries and no private content"
   const ownBody = await own.json();
   assert.equal(own.status, 200);
   assert.deepEqual(ownBody.origins.map((origin) => origin.origin), ["origin-00"]);
+  assert.equal(ownBody.counts.origins, 1);
 });
 
 test("status counts only live generations and its D1 timing includes the query", async (t) => {
