@@ -5,7 +5,7 @@ yt_dlp="${0%/*}/yt-dlp"
 [ -x "$yt_dlp" ] || yt_dlp=yt-dlp
 exec "$yt_dlp" --ignore-config \
     --remote-components 'ejs:github' \
-    --js-runtimes node:/opt/homebrew/bin/node \
+    --js-runtimes node:node \
     -f 'ba' \
     --add-metadata \
     -o '%(title)s [%(id)s].%(ext)s' "$@"
