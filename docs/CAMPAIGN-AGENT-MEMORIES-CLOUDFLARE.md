@@ -13,11 +13,14 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   encrypted Cloudflare mirror incrementally; the owner can browse and search the
   projection privately; a lost collector restores from R2; a forgotten session never
   returns; meaningfully wasteful work on the no-op path is a failing gate.
-- **Accepted:** nothing. This document is preflighted but not executed.
+- **Accepted:** `P0.1` (benchmark harness, root `Makefile`, and the deterministic capture
+  baseline).
 - **In flight:** none.
-- **Next slice:** `P0.1` (harness + baseline); the first command re-checks the baseline:
+- **Next slice:** `P0.2` (age adapter); the first command re-checks the baseline:
   `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_archive.py`.
 - **Known red:** none. All ten agent-memory suites are green on the baseline commit.
+- **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
+  near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.
 - **Launch prompt:** `Execute docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md from P0.1.`
 
 ## Charter
@@ -497,17 +500,25 @@ clean). Measured 2026-10-31 on this host. `perf-gate-ready` exited 0, but an unr
 `GIT_TEMPLATE_DIR=/opt/homebrew/share/git-core/templates` on this host (the same
 environment defect the archive campaign recorded); the other suites do not.
 
-`eval/bench_sessions.py --sessions 200 --messages 10 --projects 10`
-(2,600 events, 472,590 source bytes):
+`make perf-local REPEATS=5` on 2026-10-31 (200 sessions × 10 messages × 10 projects,
+2,600 events, 472,790 source bytes). Each repeat builds a fresh corpus, so all five repeats
+produced identical work counters. `perf-gate-ready` returned 75 for every sample, so no
+wall or CPU time is accepted as a baseline; the run records `perf_gate: deferred`.
 
-| Operation | bytes read | content opens | stat ops | SQLite changes |
-| --- | --- | --- | --- | --- |
-| fresh index | 978,980 | 400 | 600 | 24,181 |
-| one-line append | 3,013 | 3 | 203 | 11 |
-| unchanged refresh | 0 | 0 | 200 | 0 |
+| Operation | bytes read | content opens | stat ops | git processes | SQLite changes |
+| --- | --- | --- | --- | --- | --- |
+| fresh index | 979,580 | 400 | 600 | 10 | 24,181 |
+| one-line append | 3,015 | 3 | 203 | 1 | 11 |
+| unchanged refresh | 0 | 0 | 200 | 0 | 0 |
+
+`SCENARIO=learning-import` measures snapshot export and serialization; at 200 synthetic
+records it exported 133,647 bytes with a stable digest. The 1k/10k/100k dataset baselines
+land with `P3.2`, when the projection applies those records.
 
 These are the local hot paths the mirror must not slow. `make perf-local` records them
-under one JSON schema with repeat statistics.
+under one JSON schema with repeat statistics; the first quiet run becomes the timing
+baseline. Mirror upload scenarios record plaintext, compressed, and ciphertext bytes so
+CF22 compression savings are measured rather than assumed.
 
 ## Performance contract
 

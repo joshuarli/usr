@@ -113,6 +113,29 @@ A Codex session keeps its bare ID. Other harnesses use `harness:ID`, so identica
 
 Default roots are `$CODEX_HOME/sessions` and `archived_sessions`, `$CLAUDE_CONFIG_DIR/projects`, `$XDG_DATA_HOME/muse/sessions`, `$GROK_HOME/sessions`, `$XDG_DATA_HOME/opencode`, Pi's session directory (`$PI_CODING_AGENT_SESSION_DIR`, else `$PI_CODING_AGENT_DIR/sessions`, else `~/.pi/agent/sessions`), Command Code's `$COMMANDCODE_HOME/projects`, and Antigravity's `$ANTIGRAVITY_HOME/brain`, each falling back to its usual home directory. Pass `--root [HARNESS=]PATH` to override. Indexing never follows symlinks. Pi sessions are the `<timestamp>_<id>.jsonl` files, so pi-subagents artifacts such as `events.jsonl` are not mistaken for sessions. Pi stores one tool call or result per entry; several calls from one assistant entry become one event whose call ID lists them all. A session whose header names a `parentSession` links to that session and is labeled `child`: Pi writes the same field for a user fork and for a delegated subagent. Every entry of a branched session is indexed and searchable, but experience detectors and review read only the active branch: the chain from the newest entry back through `parentId`, so a failure on an abandoned branch is never paired with a success on another. OpenCode 2 keeps sessions in a SQLite database (`opencode.db`), not transcript files: the indexer opens it read-only, reads only the `session_v2` and `session_message` tables (never the account or credential tables), reindexes a session whenever its message count or update time changes, and takes shell exit codes from the recorded tool metadata. A hit's byte offset is `message sequence × 1000 + block`, and `show` verifies the row's digest. Search matches whole tokens, so a Chinese or Japanese query matches only a whole unsegmented run.
 
+## Benchmarks
+
+`make perf-local` measures the collector paths with no network and writes one JSON document
+per run under `.work/perf/`; `make perf-report` compares the oldest and newest run of each
+scenario. `REPEATS` (default 5), `SCENARIO`, `RECORDS`, and `OUT` override the defaults.
+`SCENARIO=learning-import` seeds 1k synthetic learning records by default and measures
+snapshot export and serialization. `perf-worker` and `perf-deployed` land with the Worker
+harness and the first deploy; until then they exit with the slice that adds them.
+
+The capture baseline (200 sessions × 10 messages × 10 projects, 2,600 events) on
+2026-10-31:
+
+| Operation | bytes read | content opens | stat ops | git processes | SQLite changes |
+| --- | --- | --- | --- | --- | --- |
+| fresh index | 979,580 | 400 | 600 | 10 | 24,181 |
+| one-line append | 3,015 | 3 | 203 | 1 | 11 |
+| unchanged refresh | 0 | 0 | 200 | 0 | 0 |
+
+Time-based samples are recorded only when `perf-gate-ready` passes before and after the
+sample; a busy host leaves `perf_gate: deferred`, and the deterministic counters still gate
+the change. Mirror upload scenarios record plaintext, compressed, and ciphertext bytes so
+compression savings are measured rather than assumed.
+
 ## Retention
 
 Every refresh captures each transcript into `~/.agent-sessions/archive`, a `0700` tree of immutable objects named by their SHA-256 digest plus one versioned generation per capture. A generation records the chunk order, offsets, source size, the source signature that produced it, its companion artifacts, and the native session metadata (parent, source, branch tip, workspaces, step count) the harness reported at capture. A generation is immutable: a change to any of those creates a new generation and leaves the earlier one untouched. Search, `show`, `agent-learn recall`, and evidence verification keep working after a harness deletes or expires the file (Claude Code removes old transcripts after `cleanupPeriodDays`), and after the whole source machine is gone once the generation is acknowledged centrally.
