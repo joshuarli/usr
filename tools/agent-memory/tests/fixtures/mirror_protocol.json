@@ -1,0 +1,290 @@
+{
+  "protocol": 1,
+  "limits": {
+    "json_bytes": 8388608,
+    "object_bytes": 8388608,
+    "missing_objects": 20000,
+    "cursor_chars": 512
+  },
+  "error_codes": [
+    "forbidden",
+    "not_found",
+    "method_not_allowed",
+    "unavailable",
+    "invalid_request",
+    "unsupported_version",
+    "payload_too_large"
+  ],
+  "digests": [
+    {
+      "name": "lowercase sha256",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": true
+    },
+    {
+      "name": "mixed case rejected",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "ok": false
+    },
+    {
+      "name": "short rejected",
+      "value": "aaaaaaaa",
+      "ok": false
+    },
+    {
+      "name": "non-hex rejected",
+      "value": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+      "ok": false
+    },
+    {
+      "name": "number rejected",
+      "value": 1,
+      "ok": false
+    }
+  ],
+  "origins": [
+    {
+      "name": "dotted label",
+      "value": "synthetic-bench",
+      "ok": true
+    },
+    {
+      "name": "uuid label",
+      "value": "0f3d2c1b-4a59-4e6d-8f70-112233445566",
+      "ok": true
+    },
+    {
+      "name": "empty rejected",
+      "value": "",
+      "ok": false
+    },
+    {
+      "name": "path rejected",
+      "value": "../origin",
+      "ok": false
+    },
+    {
+      "name": "space rejected",
+      "value": "origin a",
+      "ok": false
+    },
+    {
+      "name": "too long rejected",
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ok": false
+    }
+  ],
+  "hello": [
+    {
+      "name": "valid",
+      "value": {
+        "protocol": 1,
+        "origin": "synthetic-bench"
+      },
+      "ok": true
+    },
+    {
+      "name": "wrong version",
+      "value": {
+        "protocol": 2,
+        "origin": "synthetic-bench"
+      },
+      "ok": false
+    },
+    {
+      "name": "missing version",
+      "value": {
+        "origin": "synthetic-bench"
+      },
+      "ok": false
+    },
+    {
+      "name": "extra field",
+      "value": {
+        "protocol": 1,
+        "origin": "synthetic-bench",
+        "path": "/private"
+      },
+      "ok": false
+    },
+    {
+      "name": "origin required",
+      "value": {
+        "protocol": 1
+      },
+      "ok": false
+    },
+    {
+      "name": "origin traversal",
+      "value": {
+        "protocol": 1,
+        "origin": "../other"
+      },
+      "ok": false
+    }
+  ],
+  "missing": [
+    {
+      "name": "valid",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          },
+          {
+            "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size": 0
+          }
+        ]
+      },
+      "ok": true
+    },
+    {
+      "name": "empty list",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": []
+      },
+      "ok": true
+    },
+    {
+      "name": "duplicate digest",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          },
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 11
+          }
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "negative size",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": -1
+          }
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "size over limit",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 8388609
+          }
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "extra object field",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10,
+            "path": "/private"
+          }
+        ]
+      },
+      "ok": false
+    },
+    {
+      "name": "objects must be a list",
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "objects": {}
+      },
+      "ok": false
+    }
+  ],
+  "cursors": [
+    {
+      "name": "round trip",
+      "parts": [
+        "2026-11-01T00:00:00Z",
+        "origin-a",
+        "42"
+      ],
+      "ok": true,
+      "encoded": "WyIyMDI2LTExLTAxVDAwOjAwOjAwWiIsIm9yaWdpbi1hIiwiNDIiXQ"
+    },
+    {
+      "name": "single part",
+      "parts": [
+        "0"
+      ],
+      "ok": true
+    },
+    {
+      "name": "empty array rejected",
+      "value": "W10",
+      "ok": false
+    },
+    {
+      "name": "invalid base64 rejected",
+      "value": "!!!!",
+      "ok": false
+    },
+    {
+      "name": "non-array rejected",
+      "value": "e30",
+      "ok": false
+    },
+    {
+      "name": "non-string part rejected",
+      "value": "WzFd",
+      "ok": false
+    },
+    {
+      "name": "too many parts rejected",
+      "parts": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "ok": false
+    },
+    {
+      "name": "empty part rejected",
+      "parts": [
+        "a",
+        ""
+      ],
+      "ok": false
+    },
+    {
+      "name": "too long rejected",
+      "parts": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "ok": false
+    }
+  ]
+}

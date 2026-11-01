@@ -12,8 +12,8 @@ DATABASE_ID := $(shell jaq --from toml -r '.d1_databases[0].database_id' $(WORKE
 MIGRATE_FLAGS := $(if $(filter 1,$(LOCAL)),--local --persist-to $(CURDIR)/.work/tmp/cf-state)
 PYTHON := uv run --no-project --python '>=3.15' python -I
 PERF := tools/agent-memory/cloudflare/perf.sh
-SUITES := test_sessions test_archive test_transfer test_identity test_recovery test_learning_ops test_learning_review test_recall test_learning test_learning_promote
-CAMPAIGN_PYTHON := tools/agent-memory/eval/bench_mirror.py tools/agent-memory/src/agent_memory/mirror_crypto.py tools/agent-memory/tests/test_mirror_crypto.py
+SUITES := test_sessions test_archive test_transfer test_identity test_recovery test_learning_ops test_learning_review test_recall test_learning test_learning_promote test_mirror
+CAMPAIGN_PYTHON := tools/agent-memory/eval/bench_mirror.py tools/agent-memory/src/agent_memory/mirror.py tools/agent-memory/src/agent_memory/mirror_crypto.py tools/agent-memory/tests/test_mirror.py tools/agent-memory/tests/test_mirror_crypto.py
 GIT_TEMPLATE_DIR ?= $(wildcard /opt/homebrew/share/git-core/templates)
 ENV_GIT := $(if $(GIT_TEMPLATE_DIR),GIT_TEMPLATE_DIR=$(GIT_TEMPLATE_DIR))
 
@@ -30,8 +30,8 @@ deploy: ## Gate, test, deploy, and smoke the Worker
 worker-bundle: ## Build the Worker bundle once for test and deploy
 	cd $(WORKER_DIR) && $(CF) build --mode production
 
-worker-test: worker-bundle ## Exercise the built bundle under workerd
-	cd $(WORKER_DIR) && npm run test:runtime
+worker-test: worker-bundle ## Exercise the built bundle and protocol parity
+	cd $(WORKER_DIR) && npm run test:runtime && npm run test:protocol
 
 worker-check: ## Validate the Worker deploy plan without uploading
 	cd $(WORKER_DIR) && $(CF) deploy --dry-run
@@ -72,7 +72,7 @@ perf-deployed: ## Benchmark the production origin with synthetic data
 perf-report: ## Compare benchmark runs under OUT
 	@TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) tools/agent-memory/eval/bench_mirror.py report --dir "$(OUT)"
 
-test: worker-test ## Run the ten agent-memory suites and the Worker runtime
+test: worker-test ## Run the eleven agent-memory suites and the Worker runtime
 	@set -e; for suite in $(SUITES); do \
 		printf '== %s\n' "$$suite"; \
 		$(ENV_GIT) TMPDIR="$(CURDIR)/.work/tmp" $(PYTHON) tools/agent-memory/tests/"$$suite".py; \

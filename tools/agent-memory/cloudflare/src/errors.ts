@@ -5,7 +5,14 @@ export const SECURITY_HEADERS = {
   "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 } as const;
 
-export type ErrorCode = "forbidden" | "not_found" | "method_not_allowed" | "unavailable";
+export type ErrorCode =
+  | "forbidden"
+  | "not_found"
+  | "method_not_allowed"
+  | "unavailable"
+  | "invalid_request"
+  | "unsupported_version"
+  | "payload_too_large";
 
 interface ErrorEnvelope {
   readonly error: {

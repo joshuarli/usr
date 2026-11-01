@@ -2,6 +2,7 @@ import { authorize, identityOf, parseReaders, type AccessIdentity, type Principa
 import { readStoreMeta, type StoreMeta } from "./db";
 import { failure, json, methodNotAllowed } from "./errors";
 import { serverTiming, trace } from "./observe";
+import { handleSync } from "./routes/sync";
 
 export interface Env {
   readonly READERS?: string;
@@ -67,6 +68,12 @@ export default {
         ready: true,
         counts: {},
       }, request.method === "HEAD", { "Server-Timing": serverTiming(timing) });
+    }
+    try {
+      const sync = await handleSync(request, env, principal, pathname, timing);
+      if (sync !== null) return sync;
+    } catch {
+      return failure(503, "unavailable", "sync is unavailable", { "Server-Timing": serverTiming(timing) });
     }
     return failure(404, "not_found", "route not found", { "Server-Timing": serverTiming(timing) });
   },

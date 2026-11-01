@@ -20,11 +20,12 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   `Server-Timing`), `P1.4` (Miniflare bench harness and the status baseline), `P1.5`
   (deploy gate, bundle-once deploy, smoke probe, and collector authentication), and
   `P1.6` (R2 and D1 `usr-memories`, Worker-level Access, collector token, first deploy
-  at `memories.17166969.xyz`, and the live smoke probe).
+  at `memories.17166969.xyz`, and the live smoke probe), and `P2.1` (protocol v1
+  validators, hello/missing/object routes, and the pooled HTTPS client).
 - **In flight:** none.
-- **Next slice:** `P2.1` (mirror client and protocol); the first command re-checks the
+- **Next slice:** `P2.2` (compressed encrypted upload); the first command re-checks the
   baseline: `make test`.
-- **Known red:** none. All ten agent-memory suites are green on the baseline commit.
+- **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.
 - **Launch prompt:** `Execute docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md from P0.1.`
@@ -119,6 +120,7 @@ names what would reverse it.
 | CF27 | Runtime placement is fixed: the collector stays Python stdlib plus the external `age`/`rage` binary; Cloudflare runs a TypeScript Worker. No Python is deployed to Cloudflare, so it cannot affect Worker CPU, bundle size, cold start, or platform cost. A Rust/Wasm Worker is rejected: it adds a Wasm/JSON boundary and cold-start cost for no measured CPU win. A Rust collector rewrite is out of scope unless P5.3 measures a named Python hotspot (not I/O, `rage`, or network) that materially affects the owner path; then a small helper is allowed, never a port. | Local paths are dominated by capture I/O, encryption subprocesses, and network. Cloudflare cost is dominated by R2/D1 operations and storage. A rewrite would risk the archive, tombstone, and authority semantics the campaign exists to preserve. | A measured hotspot with numbers, or a requirement to ship a static collector binary to many machines. |
 | CF28 | Deployment mirrors `stuff`'s Makefile: one `cf build --mode production` bundle, the tests run on that bundle, `cf deploy --prebuilt` ships exactly the tested bundle, and `make deploy` gates on `cf auth whoami`, rejects pending D1 migrations, then runs test → deploy → read-only smoke. A root `Makefile` is the entry point; `make help` lists targets. | The owner asked for the same machinery, and testing a different bundle than the one deployed was a defect class `stuff` already removed. | A different deployment tool supersedes `cf`. |
 | CF29 | `provision.sh` creates the Worker-level app with only the owner policy, then updates it with the collector `non_identity` policy; a re-run skips the update when the same token is already bound. `collector.service_token_id` stores the Access Client ID (`<id>.access`), not the token UUID used by the policy. | The Access API rejects a create that includes a `non_identity` policy with `[12130]`, and rejects repeating the same update on an already-updated app; the API identifies a service-token session by its Client ID. | Access accepts the combined create or in-place policy updates. |
+| CF30 | Protocol v1 is one closed schema shared by TS and Python: unknown object fields are rejected, digests are lowercase 64-hex, origins are `[A-Za-z0-9._-]{1,128}`, JSON and object bodies are capped at 8 MiB, a missing-object request carries at most 20,000 unique digests, and cursors are base64url JSON arrays of 1–4 strings. Both implementations run `tests/fixtures/mirror_protocol.json`; `make worker-test` refuses a Worker that disagrees with it. | The brief asks for one fixture corpus instead of validation copied into a second language. Closed validators make a typo a 400, not a silent default. | A protocol version bump. |
 
 **Delegated** — the executor decides inside the bound and records it in the commit body.
 
@@ -183,7 +185,7 @@ tooling: no runtime path calls it, and routine collector sync never needs it (CF
 | `perf-worker` | `eval/bench_mirror.py worker` over the Miniflare bundle |
 | `perf-deployed` | `eval/bench_mirror.py deployed` against the live origin with the synthetic token; exits with a message until `P1.6` deploys |
 | `perf-report` | `eval/bench_mirror.py report --dir .work/perf` |
-| `test` | The ten existing Python suites; `worker-test` joins it at `P1.5` |
+| `test` | The eleven Python suites; `worker-test` joins it at `P1.5` |
 | `test-all` | `test`, `worker-test`, the adversarial suite, Ruff, `ty`, and `mdtool` |
 | `doctor` | `agent-sessions mirror doctor` against a scratch state dir, plus the auth and migration checks |
 
