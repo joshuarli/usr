@@ -1336,32 +1336,37 @@ def consumer_findings(files, content):
     for doc in docs:
         by_name.setdefault(Path(doc).name, []).append(doc)
     for file, text in content.items():
-        if markdown(file): continue
+        if markdown(file) or (".md" not in text and ".rst" not in text): continue
         here = PurePosixPath(file).parent
-        for n, line in enumerate(text.splitlines(), 1):
-            for m in DOC_LITERAL.finditer(line):
-                literal = m.group(1)
+        beside_root = str(here) == "."
+        config = Path(file).suffix.lower() in CONFIG_EXTS
+        line, scanned = 1, 0
+        for m in DOC_LITERAL.finditer(text):
+            start = m.start(1)
+            line += text.count("\n", scanned, start); scanned = start
+            line_start = text.rfind("\n", 0, start) + 1
+            literal = m.group(1)
 
-                candidates = [os.path.normpath(str(here / literal)).replace("\\", "/")]
+            candidates = [os.path.normpath(str(here / literal)).replace("\\", "/")]
 
-                if "/" in literal or str(here) == "." or Path(file).suffix.lower() in CONFIG_EXTS:
-                    candidates.append(literal.removeprefix("./"))
-                resolved = next((c for c in candidates if c in docs), None)
-                left = line[max(0, m.start()-80):m.start()]
-                kind = "C001" if re.search(EMBED, left) else "C002" if re.search(r"\b(?:read|open|load|parse)\w*\s*\([^)]*$", left) else "C003"
-                if resolved:
-                    if resolved not in targets: continue
-                    target_text = resolved
-                else:
+            if "/" in literal or beside_root or config:
+                candidates.append(literal.removeprefix("./"))
+            resolved = next((c for c in candidates if c in docs), None)
+            left = text[max(line_start, start-80):start]
+            kind = "C001" if re.search(EMBED, left) else "C002" if re.search(r"\b(?:read|open|load|parse)\w*\s*\([^)]*$", left) else "C003"
+            if resolved:
+                if resolved not in targets: continue
+                target_text = resolved
+            else:
 
-                    same = by_name.get(literal, []) if "/" not in literal else []
-                    if kind == "C003" or len(same) != 1 or same[0] not in targets: continue
-                    target_text = f"{same[0]} (name only)"
-                message = {"C001":"embedded documentation can affect built output", "C002":"read documentation can affect a check", "C003":"literal consumer may affect generated data"}[kind]
+                same = by_name.get(literal, []) if "/" not in literal else []
+                if kind == "C003" or len(same) != 1 or same[0] not in targets: continue
+                target_text = f"{same[0]} (name only)"
+            message = {"C001":"embedded documentation can affect built output", "C002":"read documentation can affect a check", "C003":"literal consumer may affect generated data"}[kind]
 
-                if kind == "C003" and (file, target_text) in seen: continue
-                seen.add((file, target_text))
-                add(out, kind, "note" if kind == "C003" else "warn", file, n, m.start(1)+1, message, target_text)
+            if kind == "C003" and (file, target_text) in seen: continue
+            seen.add((file, target_text))
+            add(out, kind, "note" if kind == "C003" else "warn", file, line, start-line_start+1, message, target_text)
     return out
 
 
@@ -1373,7 +1378,10 @@ RUST_RAW = re.compile(r'r(#*)"')
 RUST_CHAR = re.compile(r"'(?:\\(?:u\{[0-9a-fA-F]+\}|x[0-9a-fA-F]{2}|.)|[^\\'\n])'")
 
 
-def source_comments(file, text):
+CONTAINER_FIELDS = frozenset({"body","orelse","finalbody","handlers","cases"})
+
+
+def source_comments(file, text, docstrings=True):
     ext=Path(file).suffix.lower()
     line_comments={".py":"#",".sh":"#",".bash":"#",".toml":"#",".yaml":"#",".yml":"#",".mk":"#",".rb":"#",".sql":"--",".lua":"--"}
     marker="<!--" if ext==".html" else line_comments.get(ext,"//")
@@ -1382,7 +1390,11 @@ def source_comments(file, text):
     newlines=[m.start() for m in re.finditer("\n",text)]
     def line_at(pos): return bisect_right(newlines,pos-1)+1
     result=[]; i=0; n=len(text)
+    starters=re.compile("["+re.escape("\"'`"+marker[0]+("/" if block_comments else "")+("r" if ext==".rs" else ""))+"]")
     while i<n:
+        found=starters.search(text,i)
+        if not found: break
+        i=found.start()
         c=text[i]
         if block_comments and text.startswith("/*",i):
             end=text.find("*/",i+2); end=n if end<0 else end
@@ -1416,13 +1428,20 @@ def source_comments(file, text):
                 i+=1
             continue
         i+=1
-    if ext==".py":
+    if ext==".py" and docstrings:
         try:
             tree=ast.parse(text)
-            for node in ast.walk(tree):
+            queue=[tree]; pending=0
+            while pending<len(queue):
+                node=queue[pending]; pending+=1
                 body=getattr(node,"body",None)
                 if isinstance(body,list) and body and isinstance(body[0],ast.Expr) and isinstance(body[0].value,ast.Constant) and isinstance(body[0].value.value,str):
                     result.append((body[0].lineno,body[0].value.value))
+                for field in node._fields:
+                    if field not in CONTAINER_FIELDS: continue
+                    value=getattr(node,field,None)
+                    if isinstance(value,list):
+                        queue.extend(child for child in value if isinstance(child,ast.AST))
         except (SyntaxError, ValueError, RecursionError, MemoryError): pass
     return result
 
@@ -1444,10 +1463,10 @@ def sentence_around(text, start, end, reach=400):
     return text[left + 1:right]
 
 
-def comment_blocks(file, text):
+def comment_blocks(file, text, docstrings=True):
 
     blocks: list[list[Any]] = []
-    for n, comment in source_comments(file, text):
+    for n, comment in source_comments(file, text, docstrings):
         if blocks and n == blocks[-1][1] and "\n" not in comment:
             blocks[-1][2].append(comment); blocks[-1][1] += 1
         else:
@@ -1463,12 +1482,16 @@ def pointer_findings(files, content, labels=()):
     for p in tracked:
         by_name.setdefault(Path(p).name, []).append(p)
     custom_re = re.compile(r"\b(?:" + "|".join(labels) + r")\b", re.I) if labels else None
+    def docstrings_matter(text):
+        return bool(DOC_POINTER.search(text) or SECTION_POINTER.search(text) or PLAN_LABEL.search(text)
+                    or (custom_re is not None and custom_re.search(text)))
     for file, text in content.items():
         ext = Path(file).suffix.lower()
 
         if ext not in COMMENT_EXTS or VENDORED.search(file): continue
         here = PurePosixPath(file).parent
-        for n, comment in comment_blocks(file, text):
+        docstrings = docstrings_matter(text) if ext == ".py" else True
+        for n, comment in comment_blocks(file, text, docstrings):
             breaks = [i for i, c in enumerate(comment) if c == "\n"] if "\n" in comment else []
             def line_at_offset(pos, start_line=n, line_breaks=breaks):
                 return start_line + bisect_right(line_breaks, pos - 1)
@@ -1531,20 +1554,15 @@ def dup_findings(files, content, code=False):
             if len(w) >= 40 or len(rows) >= 3:
                 shingles = set(tuple(w[i:i+8]) for i in range(len(w)-7))
                 blocks.append((file, start, end, shingles, len(w), chunk, set(rows)))
-    postings = {}
-    for index, block in enumerate(blocks):
-        for shingle in block[3]:
-            postings.setdefault((0, shingle), []).append(index)
-        for row in block[6]:
-            postings.setdefault((1, row), []).append(index)
     out = []
     pairs = []
+    shingle_postings, row_postings = {}, {}
     for i, a in enumerate(blocks):
         candidates = set()
         for shingle in a[3]:
-            candidates.update(j for j in postings[(0, shingle)] if j > i)
+            candidates.update(shingle_postings.get(shingle, ()))
         for row in a[6]:
-            candidates.update(j for j in postings[(1, row)] if j > i)
+            candidates.update(row_postings.get(row, ()))
         for j in sorted(candidates):
             b = blocks[j]
             shared = len(a[3] & b[3])
@@ -1554,7 +1572,11 @@ def dup_findings(files, content, code=False):
             row_union_size = len(a[6]) + len(b[6]) - shared_rows
             row_similarity = shared_rows / row_union_size if row_union_size else 0
             if sim >= .8 and a[4] >= 40 and b[4] >= 40 or row_similarity >= .8 and len(a[6]) >= 3 and len(b[6]) >= 3:
-                pairs.append((i, j))
+                pairs.append((j, i))
+        for shingle in a[3]:
+            shingle_postings.setdefault(shingle, []).append(i)
+        for row in a[6]:
+            row_postings.setdefault(row, []).append(i)
 
     parent = list(range(len(blocks)))
     def find(x):
@@ -1566,7 +1588,7 @@ def dup_findings(files, content, code=False):
     groups = {}
     for i, j in pairs:
         groups.setdefault(find(i), set()).update((i, j))
-    for members in groups.values():
+    for members in sorted(groups.values(), key=min):
 
         first, *rest = sorted(members)
         a = blocks[first]
