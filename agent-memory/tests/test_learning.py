@@ -1173,6 +1173,30 @@ class LearningTest(unittest.TestCase):
         with self.assertRaises(learning_sync.SnapshotError):
             learning_sync.set_project_label(self.store.db, key, "bad\nlabel")
 
+    def test_a_legacy_unqualified_source_is_qualified_from_the_archive(self):
+        experience = self.add_synthetic_experience("legacy")
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO archive_generation(origin_host, harness, native_id, source_path, source_digest,"
+                " source_size, captured_at, manifest_digest) VALUES(?,?,?,?,?,?,?,?)",
+                ("origin-a", "codex", "legacy-native", "/tmp/session", "0" * 64, 1, self.now, "1" * 64))
+            self.store.db.execute(
+                "UPDATE learning_experience_sources SET session = 'legacy-native' WHERE experience = ?",
+                (experience,))
+        changes = learning_sync.mirror_changes(self.store.db, 0, {}, "origin-a")["changes"]
+        record = next(change for change in changes
+                      if change["record"] == "experience" and change["id"] == experience)
+        self.assertEqual(record["sources"][0]["session"], "codex:legacy-native@origin-a")
+
+        with self.store.db:
+            self.store.db.execute(
+                "UPDATE learning_experience_sources SET session = 'unknown-native' WHERE experience = ?",
+                (experience,))
+        changes = learning_sync.mirror_changes(self.store.db, 0, {}, "origin-a")["changes"]
+        withdrawn = next(change for change in changes
+                         if change["record"] == "experience" and change["id"] == experience)
+        self.assertTrue(withdrawn["deleted"])
+
     def test_change_journal_prunes_only_through_the_durable_sequence(self):
         self.add_synthetic_experience("prune")
         head = learning_sync.journal_head(self.store.db)

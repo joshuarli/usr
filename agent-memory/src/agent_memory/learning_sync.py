@@ -202,17 +202,33 @@ def journal_changes(db, after=0) -> list[dict[str, Any]]:
         "SELECT seq, record, remote_id, deleted FROM learning_change WHERE seq > ? ORDER BY seq", (int(after),))]
 
 
+def _local_session(db, session) -> str | None:
+    prefix = session.partition("@")[0]
+    if ":" in prefix:
+        return None if "@" in session else session
+    rows = db.execute(
+        "SELECT DISTINCT harness FROM archive_generation WHERE native_id = ? LIMIT 2", (session,)).fetchall()
+    if len(rows) != 1:
+        return None
+    return str(rows[0]["harness"]) + ":" + session
+
+
 def export_record(db, kind, remote_id) -> dict[str, Any] | None:
     """Describe one local experience or memory, or None when its evidence is not local."""
     if kind == "experience":
         row = db.execute("SELECT * FROM learning_experiences WHERE id = ?", (int(remote_id),)).fetchone()
         if row is None:
             return None
-        sources = [dict(item) for item in db.execute(
-            "SELECT session, position, digest, role FROM learning_experience_sources WHERE experience = ? "
-            "ORDER BY session, position, role", (row["id"],))]
-        if any("@" in source["session"] for source in sources):
-            return None
+        sources = []
+        for item in db.execute(
+                "SELECT session, position, digest, role FROM learning_experience_sources WHERE experience = ? "
+                "ORDER BY session, position, role", (row["id"],)):
+            session = _local_session(db, item["session"])
+            if session is None:
+                return None
+            source = dict(item)
+            source["session"] = session
+            sources.append(source)
         links = [dict(item) for item in db.execute(
             "SELECT older, relation FROM learning_experience_links WHERE newer = ? ORDER BY older, relation", (row["id"],))]
         return {
@@ -227,13 +243,15 @@ def export_record(db, kind, remote_id) -> dict[str, Any] | None:
         row = db.execute("SELECT * FROM learning_memories WHERE finding = ?", (int(remote_id),)).fetchone()
         if row is None:
             return None
-        sources = [
-            {"session": item["session"], "position": item["position"], "digest": item["digest"], "role": item["signal"]}
-            for item in db.execute(
+        sources = []
+        for item in db.execute(
                 "SELECT session, position, digest, signal FROM learning_incidents WHERE finding = ? "
-                "ORDER BY observed_at DESC, id LIMIT ?", (row["finding"], MAX_SOURCES))]
-        if any("@" in source["session"] for source in sources):
-            return None
+                "ORDER BY observed_at DESC, id LIMIT ?", (row["finding"], MAX_SOURCES)):
+            session = _local_session(db, item["session"])
+            if session is None:
+                return None
+            sources.append({"session": session, "position": item["position"],
+                            "digest": item["digest"], "role": item["signal"]})
         return {
             "record": "memory", "id": row["finding"], "project": row["project"], "action": row["action"],
             "applicability": row["applicability"], "revision": row["revision"], "validity": row["validity"],
