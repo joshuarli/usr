@@ -9,6 +9,8 @@ import platform
 import resource
 import select
 import shutil
+import ssl
+import stat
 import statistics
 import subprocess
 import sys
@@ -16,6 +18,8 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
+from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = ROOT / "agent-memory" / "src"
@@ -641,6 +645,172 @@ def _worker(args):
     return 0
 
 
+def _deployed_token(path):
+    if not path.is_file():
+        raise RuntimeError("deployed benchmark token file is missing: " + str(path))
+    if stat.S_IMODE(path.stat().st_mode) != 0o600:
+        raise RuntimeError("deployed benchmark token file must have mode 0600")
+    value = json.loads(path.read_text())
+    client_id, client_secret = value.get("client_id"), value.get("client_secret")
+    if not isinstance(client_id, str) or not isinstance(client_secret, str):
+        raise RuntimeError("deployed benchmark token file has no client id and secret")
+    return client_id, client_secret
+
+
+_TLS_CONTEXT = None
+
+
+def _tls_context():
+    global _TLS_CONTEXT
+    if _TLS_CONTEXT is None:
+        _TLS_CONTEXT = ssl.create_default_context()
+    return _TLS_CONTEXT
+
+
+def _deployed_connection(base):
+    parts = urlsplit(base)
+    if parts.scheme != "https" or not parts.hostname:
+        raise RuntimeError("deployed benchmark base must be an https origin")
+    connection = http.client.HTTPSConnection(
+        parts.hostname, parts.port or 443, timeout=120, context=_tls_context())
+    started = time.perf_counter()
+    connection.connect()
+    connected = time.perf_counter()
+    return connection, round((connected - started) * 1000, 3)
+
+
+def _deployed_request(connection, path, token=None) -> dict[str, Any]:
+    headers = {"Accept": "application/json"}
+    if token is not None:
+        headers["CF-Access-Client-Id"], headers["CF-Access-Client-Secret"] = token
+    started = time.perf_counter()
+    connection.request("GET", path, headers=headers)
+    response = connection.getresponse()
+    headers_done = time.perf_counter()
+    payload = response.read()
+    done = time.perf_counter()
+    return {
+        "status": response.status, "headers": {key.lower(): value for key, value in response.getheaders()},
+        "bytes": len(payload), "timings": {
+            "headers_ms": round((headers_done - started) * 1000, 3),
+            "body_ms": round((done - headers_done) * 1000, 3),
+        },
+    }
+
+
+def _server_timing(value) -> dict[str, Any]:
+    parsed = {}
+    for item in (value or "").split(","):
+        parts = [entry.strip() for entry in item.split(";")]
+        if not parts or not parts[0]:
+            continue
+        metric = {"dur": None}
+        for entry in parts[1:]:
+            name, _separator, raw = entry.partition("=")
+            if name == "dur":
+                try:
+                    metric["dur"] = float(raw)
+                except ValueError:
+                    metric["dur"] = None
+        parsed[parts[0]] = metric
+    return parsed
+
+
+def _deployed(args):
+    scenario = args.scenario or "status"
+    if scenario not in ("status", "search"):
+        owner = DEFERRED.get(scenario, "a later slice")
+        print("bench_mirror: deployed scenario %s lands in %s" % (scenario, owner), file=sys.stderr)
+        return 2
+    if args.repeats < 1:
+        raise ValueError("repeats must be positive")
+    base = os.environ.get("MEMORIES_BASE", "https://memories.17166969.xyz").rstrip("/")
+    token_path = Path(os.environ.get("MEMORIES_TOKEN_FILE", ROOT / ".work" / "secrets" / "collector.token"))
+    token = _deployed_token(token_path)
+    refused_connection, _connect_ms = _deployed_connection(base)
+    try:
+        refused = _deployed_request(refused_connection, "/api/v1/status")
+    finally:
+        refused_connection.close()
+    if refused["status"] not in (302, 403):
+        raise RuntimeError("deployed benchmark unauthenticated request was not refused")
+    probe_connection, _connect_ms = _deployed_connection(base)
+    try:
+        probe = _deployed_request(probe_connection, "/api/v1/status", token)
+    finally:
+        probe_connection.close()
+    if probe["status"] != 200:
+        raise RuntimeError("deployed benchmark authenticated status failed with %d" % probe["status"])
+    if probe["headers"].get("cache-control") != "no-store":
+        raise RuntimeError("deployed benchmark status response did not carry no-store")
+    if "d1" not in probe["headers"].get("server-timing", ""):
+        raise RuntimeError("deployed benchmark status response carried no d1 timing")
+    if scenario == "search":
+        query = os.environ.get("MEMORIES_QUERY", QUERY)
+        operations = (
+            ("search-page", "/api/v1/memories?limit=20&state=all"),
+            ("search-fts", "/api/v1/memories?limit=20&state=all&q=" + quote(query, safe="")),
+        )
+    else:
+        operations = (("status", "/api/v1/status"),)
+
+    connections = {}
+    connect_times = {}
+    samples_seen = {}
+    for name, _path in operations:
+        connections[name], connect_times[name] = _deployed_connection(base)
+        samples_seen[name] = 0
+
+    def action(name, path):
+        def run():
+            try:
+                result = _deployed_request(connections[name], path, token)
+            except (http.client.HTTPException, OSError):
+                connections[name].close()
+                connections[name], connect_times[name] = _deployed_connection(base)
+                result = _deployed_request(connections[name], path, token)
+            if result["status"] != 200:
+                raise RuntimeError("deployed benchmark request %s failed with %d" % (path, result["status"]))
+            timing = _server_timing(result["headers"].get("server-timing"))
+            timings = {**result["timings"],
+                       "connect_ms": connect_times[name] if samples_seen[name] == 0 else 0.0,
+                       "d1_ms": (timing.get("d1") or {}).get("dur"),
+                       "r2_ms": (timing.get("r2") or {}).get("dur")}
+            samples_seen[name] += 1
+            return {
+                "requests": 1, "bytes": result["bytes"], "status": result["status"],
+                "_timings": timings,
+            }
+        return run
+
+    try:
+        for name, path in operations:
+            _timed(action(name, path), -1, _gate)
+        samples = []
+        for repeat in range(args.repeats):
+            for name, path in operations:
+                sample = _timed(action(name, path), repeat, _gate)
+                sample["operation"] = name
+                samples.append(sample)
+    finally:
+        for connection in connections.values():
+            connection.close()
+    dataset = {"requests": args.repeats * len(operations), "auth_refusals": 1, "warmups": len(operations)}
+    if scenario == "search":
+        dataset.update({"query": os.environ.get("MEMORIES_QUERY", QUERY), "limit": 20})
+    document = _document(
+        "deployed", scenario, dataset, samples, tuple(name for name, _path in operations),
+        runtime={**_runtime(), "endpoint": base, "token": "service-token"})
+    _write(document, Path(args.out) if Path(args.out).is_absolute() else ROOT / args.out)
+    print(json.dumps(document, indent=2, sort_keys=True))
+    variance = document.get("counter_variance")
+    if isinstance(variance, list) and variance:
+        print("bench_mirror: deterministic counters varied across repeats: " + ", ".join(str(item) for item in variance),
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 def _worker_get(port, path):
     status, headers, body = _bench_http(port, "GET", path, {"x-bench-principal": "reader"})
     if status != 200:
@@ -654,8 +824,7 @@ def _dispatch(environment, args):
     if environment == "worker":
         return _worker(args)
     if environment == "deployed":
-        print("bench_mirror: deployed benchmarks land in P1.6 after the first deploy", file=sys.stderr)
-        return 2
+        return _deployed(args)
     scenario = args.scenario or "capture"
     if scenario not in LOCAL_SCENARIOS:
         owner = DEFERRED.get(scenario, "a later slice")
