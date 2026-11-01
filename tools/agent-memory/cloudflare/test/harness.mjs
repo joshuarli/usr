@@ -81,7 +81,14 @@ export function environment(overrides = {}, options = {}) {
   const db = fakeD1(storeMeta, options.dbFailure, options.collectors ?? {});
   const bucket = countingR2();
   return {
-    env: { READERS: "reader@example.test", DB: db.binding, BUCKET: bucket.binding, ...overrides },
+    env: {
+      READERS: "reader@example.test",
+      ACCESS_TEAM_DOMAIN: "team.example.test",
+      ACCESS_AUD: "test-audience",
+      DB: db.binding,
+      BUCKET: bucket.binding,
+      ...overrides,
+    },
     calls: { db: db.calls, bucket: bucket.calls },
   };
 }

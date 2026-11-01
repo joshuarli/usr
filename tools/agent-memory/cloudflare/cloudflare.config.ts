@@ -23,9 +23,11 @@ export default defineConfig({
 			"memories.17166969.xyz",
 		],
 		env: {
+			ACCESS_TEAM_DOMAIN: bindings.text("joshuarli.cloudflareaccess.com"),
+			ACCESS_AUD: bindings.text("5a104e8f635a9b4d424e56de441221c443d3293ddd26c751da7e2393713bdfa6"),
 			DB: bindings.d1({
 				name: "usr-memories",
-				id: "00000000-0000-0000-0000-000000000000",
+				id: "9870c4da-3758-4f0c-ab6d-2372eb34009b",
 			}),
 			BUCKET: bindings.r2({
 				name: "usr-memories",

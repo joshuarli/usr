@@ -40,6 +40,8 @@ check () {
 
 check 'name: "usr-memories"' 'the worker name'
 check 'memories.17166969.xyz' 'the custom domain'
+check 'ACCESS_TEAM_DOMAIN: bindings.text' 'the Access team domain'
+check 'ACCESS_AUD: bindings.text' 'the Access audience'
 check 'DB: bindings.d1' 'the D1 binding'
 check 'BUCKET: bindings.r2' 'the R2 binding'
 check 'headSamplingRate: 0.25' 'logs at 0.25'

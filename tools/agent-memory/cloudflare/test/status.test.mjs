@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync, sign as nodeSign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -121,4 +122,84 @@ test("a missing or failing store reports unavailable", async () => {
 test("the deployed bundle carries no test hook", async () => {
   const source = readFileSync(BUNDLE_PATH, "utf8");
   assert.doesNotMatch(source, /x-test-access|__TEST_ACCESS__/);
+});
+
+function encode(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
+}
+
+function accessToken(privateKey, claims, header = { alg: "RS256", kid: "key-1", typ: "JWT" }) {
+  const signingInput = `${encode(header)}.${encode(claims)}`;
+  const signature = nodeSign("RSA-SHA256", Buffer.from(signingInput), privateKey).toString("base64url");
+  return `${signingInput}.${signature}`;
+}
+
+function serviceClaims(domain, audience, overrides = {}) {
+  return {
+    type: "app",
+    aud: [audience],
+    exp: Math.floor(Date.now() / 1000) + 600,
+    iat: Math.floor(Date.now() / 1000) - 10,
+    iss: `https://${domain}`,
+    sub: "",
+    common_name: "integration-client.access",
+    ...overrides,
+  };
+}
+
+async function withKeyset(jwk, kid, action) {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (input) => {
+    calls.push(String(input));
+    return Response.json({ keys: [{ ...jwk, kid, alg: "RS256" }] });
+  };
+  try {
+    return { result: await action(), calls };
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+test("a verified Access assertion authenticates a collector by its client id", async () => {
+  const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: "jwk" });
+  const domain = "team-integration.example.test";
+  const audience = "integration-audience";
+  const clientId = "integration-client.access";
+  const assertion = accessToken(privateKey, serviceClaims(domain, audience));
+  const { env, calls } = environment(
+    { ACCESS_TEAM_DOMAIN: domain, ACCESS_AUD: audience },
+    { collectors: { [clientId]: { origin_host: "origin-a" } } },
+  );
+  const exchange = await withKeyset(jwk, "key-1", () => worker.fetch(
+    request("/api/v1/status", { headers: { "Cf-Access-Jwt-Assertion": assertion } }),
+    env,
+    {},
+  ));
+  assert.equal(exchange.result.status, 200);
+  assert.deepEqual((await exchange.result.json()).principal, { kind: "collector", origin_host: "origin-a" });
+  assert.deepEqual(exchange.calls, [`https://${domain}/cdn-cgi/access/certs`]);
+  assert.deepEqual(calls.db, { prepare: 2, first: 2, batch: 0, exec: 0, dump: 0, withSession: 0 });
+});
+
+test("a forged or mis-scoped Access assertion is refused before D1", async () => {
+  const real = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const attacker = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = real.publicKey.export({ format: "jwk" });
+  const cases = [
+    { domain: "forged-team.example.test", token: accessToken(attacker.privateKey, serviceClaims("forged-team.example.test", "aud")) },
+    { domain: "scope-team.example.test", token: accessToken(real.privateKey, serviceClaims("scope-team.example.test", "other-audience")) },
+  ];
+  for (const item of cases) {
+    const { env, calls } = environment({ ACCESS_TEAM_DOMAIN: item.domain, ACCESS_AUD: "aud" });
+    const response = await withKeyset(jwk, "key-1", () => worker.fetch(
+      request("/api/v1/status", { headers: { "Cf-Access-Jwt-Assertion": item.token } }),
+      env,
+      {},
+    )).then((exchange) => exchange.result);
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, "forbidden");
+    assert.deepEqual(calls.db, { prepare: 0, first: 0, batch: 0, exec: 0, dump: 0, withSession: 0 });
+  }
 });

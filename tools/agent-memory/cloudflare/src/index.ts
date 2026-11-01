@@ -1,10 +1,12 @@
-import { authorize, identityOf, parseReaders } from "./auth";
+import { authorize, identityOf, parseReaders, type AccessIdentity, type Principal } from "./auth";
 import { readStoreMeta, type StoreMeta } from "./db";
 import { failure, json, methodNotAllowed } from "./errors";
 import { serverTiming, trace } from "./observe";
 
 export interface Env {
   readonly READERS?: string;
+  readonly ACCESS_TEAM_DOMAIN: string;
+  readonly ACCESS_AUD: string;
   readonly DB: D1Database;
   readonly BUCKET: R2Bucket;
 }
@@ -15,10 +17,14 @@ const READ_METHODS = ["GET", "HEAD"] as const;
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     const timing = { d1: 0, r2: 0 };
-    const identity = await identityOf(context);
     const authStarted = performance.now();
-    let principal;
+    let identity: AccessIdentity | null;
+    let principal: Principal | null;
     try {
+      identity = await identityOf(context, request, {
+        teamDomain: env.ACCESS_TEAM_DOMAIN,
+        audience: env.ACCESS_AUD,
+      });
       principal = await trace(context, "auth", {}, async () =>
         authorize(env.DB, identity, parseReaders(env.READERS)));
     } catch {

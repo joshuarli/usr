@@ -11,11 +11,15 @@ bucket_name = "usr-memories"
 [[d1_databases]]
 binding = "DB"
 database_name = "usr-memories"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "9870c4da-3758-4f0c-ab6d-2372eb34009b"
 
 [[routes]]
 pattern = "memories.17166969.xyz"
 custom_domain = true
+
+[vars]
+ACCESS_TEAM_DOMAIN = "joshuarli.cloudflareaccess.com"
+ACCESS_AUD = "5a104e8f635a9b4d424e56de441221c443d3293ddd26c751da7e2393713bdfa6"
 
 [observability]
 enabled = true

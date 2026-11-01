@@ -48,11 +48,19 @@ ok 'cache-control no-store'
 rg -qi '^server-timing:.*d1;dur=' "$headers" || fail 'token response lacks Server-Timing'
 ok 'server-timing reports d1'
 
+jaq -e '.store_id == "usr-memories" and .ready == true and .principal.kind == "collector"' "$body" >/dev/null \
+	|| fail 'token response is not a bound collector status'
+ok 'collector principal is bound'
+
 code=$(curl --silent --show-error --max-time 30 --output /dev/null --dump-header "$headers" \
 	--write-out '%{http_code}' "$base/api/v1/status") || fail 'unauthenticated request failed'
 case "$code" in
 	403)
 		ok 'unauthenticated request refused by the Worker'
+		;;
+	401)
+		rg -qi '^www-authenticate:.*Cloudflare-Access' "$headers" || fail 'unauthenticated 401 did not come from Access'
+		ok 'unauthenticated request refused by Access'
 		;;
 	301|302|303|307|308)
 		rg -qi '^location:.*cloudflareaccess\.com' "$headers" || fail "unauthenticated redirect went to an unexpected location"

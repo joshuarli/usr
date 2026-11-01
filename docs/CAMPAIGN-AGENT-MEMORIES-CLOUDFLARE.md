@@ -17,11 +17,13 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   baseline), `P0.2` (age adapter, dev `rage` build, and the crypto suite), `P1.1`
   (Worker scaffold, Access gate, status, and the runtime harness), `P1.2` (initial
   D1 schema and store metadata), `P1.3` (observability, span allowlist, and
-  `Server-Timing`), `P1.4` (Miniflare bench harness and the status baseline), and `P1.5`
-  (deploy gate, bundle-once deploy, smoke probe, and collector authentication).
+  `Server-Timing`), `P1.4` (Miniflare bench harness and the status baseline), `P1.5`
+  (deploy gate, bundle-once deploy, smoke probe, and collector authentication), and
+  `P1.6` (R2 and D1 `usr-memories`, Worker-level Access, collector token, first deploy
+  at `memories.17166969.xyz`, and the live smoke probe).
 - **In flight:** none.
-- **Next slice:** `P1.6` (provision and first deploy); the first command re-checks the baseline:
-  `cd tools/agent-memory/cloudflare && npm test`.
+- **Next slice:** `P2.1` (mirror client and protocol); the first command re-checks the
+  baseline: `make test`.
 - **Known red:** none. All ten agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.
@@ -77,9 +79,11 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
 
 ## Decisions
 
-**Owner-decided:** none. The brief already grants deployment, provisioning, and production
-verification; every remaining choice is settled below or delegated. The owner's manual
-steps are in **Needs you**, not blocking questions.
+**Owner-decided:** on 2026-11-01 the owner authorized replacing the pre-existing Access
+application `Memories` (an MCP/ChatGPT connector) at `memories.17166969.xyz`. It occupied the
+campaign's hostname, and a hostname application takes precedence over Worker-level Access, so
+the Worker could not be protected by the campaign's app while it existed. The old application
+was deleted; its connector is gone.
 
 **Prescribed** — settled from the code, the brief, or a proof run on 2026-10-31. Each row
 names what would reverse it.
@@ -87,9 +91,9 @@ names what would reverse it.
 | ID | Decision | Reason | Reversal |
 | --- | --- | --- | --- |
 | CF1 | The Worker is TypeScript under `tools/agent-memory/cloudflare/` with `compatibility_date = "2026-10-30"` (the date `stuff` deploys with and `ctx.access` is documented for), built and deployed with `cf`; `wrangler.toml` is the source of truth and `cf migrate` regenerates `cloudflare.config.ts`. No Rust/Wasm, no frontend framework, no bundler beyond what `cf deploy` runs. | D1, R2, `ctx.access`, and HTML are native Worker APIs; a Wasm boundary would add a build and serialization cost with no measured benefit. `stuff` proves the `wrangler.toml` → `cf migrate` → `cf deploy` path. | A measured CPU or correctness need that TS cannot meet. |
-| CF2 | `ctx.access` is the authentication source. The Worker requires it on every route and fails closed when it is absent. No hand-rolled JWT parsing. | Cloudflare documents that Access runs before the Worker when the Worker is protected by a Worker-level Access application, and `ctx.access.getIdentity()` exposes the authenticated identity including `service_token_id`. Parsing the JWT again adds a network dependency for no security gain. | `ctx.access` regression on the deployed compatibility date, a route outside Access coverage, or a deployed identity that omits `service_token_id` for service tokens; in that last case verify the `Cf-Access-Jwt-Assertion` `common_name` against the team JWKS before P2.1 ships. |
+| CF2 | `ctx.access` is the primary authentication source for browser identities, and the Worker fails closed when no identity is available. Service-token sessions are authenticated by verifying `Cf-Access-Jwt-Assertion` against the team JWKS, pinned to the team issuer and application audience, and bound by its `common_name` (the token's Client ID). No unverified claim and no caller-supplied origin is trusted. | Observed on 2026-11-01: Worker-level Access accepts the service token and forwards the assertion, but `ctx.access.getIdentity()` is null for a non-identity session. The signed assertion is then the only identity carrier, and verifying it keeps the platform's authentication result. | A runtime release that returns `service_token_id` from `ctx.access` for service-token sessions; then the assertion path is deleted. |
 | CF3 | Access protection is deployed as a **Worker-level** application (`destination: worker`) plus `workers_dev = false` and `preview_urls = false` in `wrangler.toml`. Hostname-only protection is not sufficient. | Worker-level Access covers custom domains, `workers.dev`, and previews; the manifest flags remove the alternate hostnames entirely. | Cloudflare removes Worker-level Access destinations. |
-| CF4 | Two principals: browser readers (owner email, read-only) and collector service tokens (`client_id` bound to exactly one `origin_host` in D1). A collector token may read and write only its bound origin; a browser identity may read all origins and write nothing. The Access policy names the owner email and each specific service-token id; `any_valid_service_token` is not used. Collector tokens are created with a one-year duration and rotated by enrolling a new token before the old one expires. | The brief forbids trusting a caller-supplied origin. The binding is data, not a header. | A second human reader, added to `READERS`. |
+| CF4 | Two principals: browser readers (owner email, read-only) and collector service tokens (the Access Client ID, reported as `common_name`, stored in `collector.service_token_id` and bound to exactly one `origin_host` in D1). A collector token may read and write only its bound origin; a browser identity may read all origins and write nothing. The Access policy names the owner email and each specific service-token UUID; `any_valid_service_token` is not used. Collector tokens are created with a one-year duration and rotated by enrolling a new token before the old one expires. | The brief forbids trusting a caller-supplied origin. The binding is data, not a header. Access reports the Client ID, not the token UUID, in the verified assertion. | A second human reader, added to `READERS`. |
 | CF5 | All responses are `Cache-Control: no-store`; Workers Cache is never made eligible (no `max-age`, no `s-maxage`, no public directive). No cache API calls. | Workers Cache can bypass Worker execution and its default key is not hostname-isolated; a private, mutable, authenticated service must not enter it. `no-store` is the documented opt-out. | A future immutable public asset on a separate Worker and route. |
 | CF6 | Protocol v1 is resource-oriented under `/api/v1/`, JSON for control and metadata, raw ciphertext for object bodies. The SSH frame protocol is untouched. | A stream protocol over chunked POSTs hides stalls and duplicates error semantics; a small resource API matches Workers and gives idempotent retries. | A protocol version bump. |
 | CF7 | Per-origin fencing is a monotonic D1 `origin_sync.revision`; every publication (generation, tombstone, learning delta) carries `base_revision` and is applied in one `db.batch()` (a SQL transaction) whose first insert is guarded by a trigger that raises `stale_revision` on mismatch. Wall-clock time is never the fence. | D1 serializes a database; `batch()` rolls back the whole sequence on failure. A stale writer therefore cannot publish anything. | A D1 change that removes transactional batches. |
@@ -114,6 +118,7 @@ names what would reverse it.
 | CF26 | The local `transfer_generation.remote` and `transfer_learning.remote` keys for the mirror are the remote's stable `store_id`, not its URL. A replacement store at the same URL therefore has no local acks, and `mirror adopt` is the only way to clear them explicitly. | This is the same rule the SSH transport already applies by recording the receiving store's identity, and it makes URL reuse harmless. | A durable remote id that is not exposed by the API. |
 | CF27 | Runtime placement is fixed: the collector stays Python stdlib plus the external `age`/`rage` binary; Cloudflare runs a TypeScript Worker. No Python is deployed to Cloudflare, so it cannot affect Worker CPU, bundle size, cold start, or platform cost. A Rust/Wasm Worker is rejected: it adds a Wasm/JSON boundary and cold-start cost for no measured CPU win. A Rust collector rewrite is out of scope unless P5.3 measures a named Python hotspot (not I/O, `rage`, or network) that materially affects the owner path; then a small helper is allowed, never a port. | Local paths are dominated by capture I/O, encryption subprocesses, and network. Cloudflare cost is dominated by R2/D1 operations and storage. A rewrite would risk the archive, tombstone, and authority semantics the campaign exists to preserve. | A measured hotspot with numbers, or a requirement to ship a static collector binary to many machines. |
 | CF28 | Deployment mirrors `stuff`'s Makefile: one `cf build --mode production` bundle, the tests run on that bundle, `cf deploy --prebuilt` ships exactly the tested bundle, and `make deploy` gates on `cf auth whoami`, rejects pending D1 migrations, then runs test → deploy → read-only smoke. A root `Makefile` is the entry point; `make help` lists targets. | The owner asked for the same machinery, and testing a different bundle than the one deployed was a defect class `stuff` already removed. | A different deployment tool supersedes `cf`. |
+| CF29 | `provision.sh` creates the Worker-level app with only the owner policy, then updates it with the collector `non_identity` policy; a re-run skips the update when the same token is already bound. `collector.service_token_id` stores the Access Client ID (`<id>.access`), not the token UUID used by the policy. | The Access API rejects a create that includes a `non_identity` policy with `[12130]`, and rejects repeating the same update on an already-updated app; the API identifies a service-token session by its Client ID. | Access accepts the combined create or in-place policy updates. |
 
 **Delegated** — the executor decides inside the bound and records it in the commit body.
 
@@ -380,6 +385,8 @@ Indexes: `generation(origin_host, committed_at DESC)`, `remote_object(ciphertext
 `learning_source(origin_host, record, remote_id)`, `tombstone(origin_host, harness, native_id)`,
 unique `learning_search(origin_host, epoch, record, remote_id)`. `memory_fts` uses external
 content with insert/update/delete triggers, the same pattern as `store.py:728`'s `events_fts`.
+`collector.service_token_id` holds the Access Client ID that a verified service-token
+assertion reports as `common_name`; the Access policy names the token's UUID instead.
 Migrations live in `cloudflare/migrations/` and are applied with
 `cf d1 migrations apply <database-id>`; `cf` targets the real database by default and
 `--local` selects its simulation.
