@@ -1014,6 +1014,27 @@ esac
 )
 end_case
 
+begin_case "npm installers are dispatched in the npm wave"
+( set -e
+npm_installers=$(awk '
+    /^install_[a-z_]+\(\) \{/ { fn = $1; sub(/\(\)/, "", fn); body = ""; active = 1 }
+    active { body = body $0 "\n" }
+    active && /^}$/ { if (body ~ /command -v npm/) print fn; active = 0 }
+' "$repo_root/dl")
+[ -n "$npm_installers" ]
+npm_wave=$(sed -n 's/^[[:space:]]*//; s/)[[:space:]]*npm_tools=.*//p' "$repo_root/dl")
+for fn in $npm_installers; do
+    [ "$fn" = install_nodejs ] && continue
+    tool=${fn#install_}
+    tool=$(printf '%s\n' "$tool" | tr '_' '-')
+    case "|$npm_wave|" in
+        *"|$tool|"*) ;;
+        *) printf '%s requires npm but is not in the npm wave (%s)\n' "$tool" "$npm_wave" >&2; exit 1 ;;
+    esac
+done
+)
+end_case
+
 begin_case "dsh rejects existing root without dl install records"
 ( set -e
 unowned_dsh_home="$test_root/unowned-dsh-home"

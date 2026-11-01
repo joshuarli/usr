@@ -3441,7 +3441,7 @@ run_parallel() {
             *" $prog "*) continue ;;
         esac
         case "$prog" in
-            cmd|dsh|pi|cf) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
+            agent-browser|cmd|dsh|pi|cf) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
             *) binary_tools="${binary_tools}${binary_tools:+ }${prog}" ;;
         esac
     done

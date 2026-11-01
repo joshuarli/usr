@@ -43,6 +43,8 @@ for tool in $default_tools; do
 	case $tool in nodejs) launcher=node ;; *) launcher=$tool ;; esac
 	check "$tool installed for $user" test -x "$home/.local/bin/$launcher"
 done
+check 'node runs for $user' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
+check 'npm runs for $user' su -s /bin/sh "$user" -c "$home/.local/bin/npm --version"
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"

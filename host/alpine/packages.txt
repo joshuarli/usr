@@ -5,6 +5,9 @@ jq
 unzip
 openssh-client
 uv
+libgcc
+libstdc++
+libatomic
 clang>=23
 llvm>=23
 lld>=23
