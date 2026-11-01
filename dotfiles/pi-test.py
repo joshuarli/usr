@@ -10,8 +10,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "google/gemini-3.8-flash"
-TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "high", "god": "high"}
+MODEL = "inferx/deepseek-v4.1-flash-1017-basic"
+TIERS = {"scout": "off", "mechanic": "off", "worker": "off", "expert": "off", "god": "off"}
 
 
 class PiTests(unittest.TestCase):
@@ -146,12 +146,34 @@ else:
         settings = json.loads((PROFILE / "settings.json").read_text())
         self.assertEqual(settings["defaultProvider"] + "/" + settings["defaultModel"], MODEL)
         self.assertEqual(settings["enabledModels"], [MODEL])
+        self.assertEqual(settings["defaultThinkingLevel"], "off")
+        self.assertEqual(settings["defaultProvider"], "inferx")
         self.assertEqual(settings["packages"], ["npm:pi-subagents@0.82.0"])
         self.assertEqual(settings["skills"], ["~/.agents/skills"])
         subagents = settings["subagents"]
         self.assertEqual(subagents["defaultModel"], MODEL)
-        self.assertEqual(subagents["maxThinking"], "high")
+        self.assertEqual(subagents["defaultProvider"], "inferx")
+        self.assertEqual(subagents["defaultThinking"], "off")
+        self.assertEqual(subagents["maxThinking"], "off")
         self.assertEqual(subagents["modelScope"], {"enforce": True, "strict": True, "allow": [MODEL]})
+        model_config = json.loads((PROFILE / "models.json").read_text())
+        self.assertEqual(list(model_config["providers"]), ["inferx"])
+        provider = model_config["providers"]["inferx"]
+        self.assertEqual(provider["baseUrl"], "https://model.inferx.net/endpoints/v1")
+        self.assertEqual(provider["api"], "openai-completions")
+        self.assertEqual(provider["apiKey"], "$INFERX_API_KEY")
+        self.assertTrue(provider["authHeader"])
+        self.assertEqual(provider["compat"]["supportsDeveloperRole"], False)
+        self.assertEqual(provider["compat"]["supportsReasoningEffort"], False)
+        self.assertEqual(provider["compat"]["maxTokensField"], "max_tokens")
+        self.assertEqual(len(provider["models"]), 1)
+        endpoint = provider["models"][0]
+        self.assertEqual("inferx/" + endpoint["id"], MODEL)
+        self.assertEqual(endpoint["contextWindow"], 262144)
+        self.assertEqual(endpoint["cost"], dict.fromkeys(("input", "output", "cacheRead", "cacheWrite"), 0))
+        self.assertFalse(endpoint["reasoning"])
+        self.assertEqual(endpoint["input"], ["text"])
+        self.assertNotIn("google/gemini-3.8-flash", (PROFILE / "settings.json").read_text())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")
         self.assertFalse((PROFILE / ".sym-dir").exists())
         routing = (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text()
@@ -164,6 +186,8 @@ else:
             if name == "scout":
                 self.assertEqual(fields["tools"], "read, grep, find, ls")
             self.assertIn(f"`{MODEL}`, `{name}`, `{thinking}`", routing)
+        pi_section = routing.split("### Pi\n", 1)[1].split("### Muse Code\n", 1)[0]
+        self.assertNotIn("google/gemini-3.8-flash", pi_section)
         default_line = next(line for line in (ROOT / "dl").read_text().splitlines() if line.startswith("    set -- fd rg"))
         self.assertIn("pi", default_line.split())
 

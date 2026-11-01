@@ -1,8 +1,8 @@
 ---
 name: god
 description: Fresh adversarial review of the hardest problems or consequential designs.
-model: google/gemini-3.8-flash
-thinking: high
+model: inferx/deepseek-v4.1-flash-1017-basic
+thinking: off
 tools: read, bash, edit, write, grep, find, ls
 ---
 

@@ -1,8 +1,8 @@
 ---
 name: mechanic
 description: Mechanical edits and routine implementation with crisp acceptance criteria.
-model: google/gemini-3.8-flash
-thinking: medium
+model: inferx/deepseek-v4.1-flash-1017-basic
+thinking: off
 tools: read, bash, edit, write, grep, find, ls
 ---
 

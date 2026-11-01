@@ -1,8 +1,8 @@
 ---
 name: scout
 description: Read-only scouting, searches, inventories, documentation lookup, and log triage.
-model: google/gemini-3.8-flash
-thinking: low
+model: inferx/deepseek-v4.1-flash-1017-basic
+thinking: off
 tools: read, grep, find, ls
 ---
 

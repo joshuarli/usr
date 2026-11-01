@@ -1,6 +1,6 @@
 # Pi
 
-Pi uses the Google Gemini API, not Gemini CLI OAuth or OpenRouter. The parent and every orchestration tier select `google/gemini-3.8-flash`.
+Pi uses InferX's OpenAI-compatible DeepSeek V4.1 Flash 1017 **Basic** endpoint, not Google AI Studio, OpenRouter, or InferX's paid DeepSeek endpoint. The parent and every orchestration tier default to `inferx/deepseek-v4.1-flash-1017-basic`. The Basic endpoint is currently listed at $0 per million input and output tokens; its free-tier rate limits and future availability are not guaranteed.
 
 ## Install and authenticate
 
@@ -12,11 +12,11 @@ The settings declare Nico Bailon's `pi-subagents` 0.82.0, the latest release che
 pi update --extensions --no-approve
 pi --version
 pi list
-vault set GEMINI_API_KEY
-vault GEMINI_API_KEY -- pi
+vault set INFERX_API_KEY
+vault INFERX_API_KEY -- pi
 ```
 
-`GEMINI_API_KEY` must be a Google AI Studio API key. An exported environment variable also works. The installer does not authenticate, make inference requests, or change `~/.pi/agent/auth.json`. Use an API project with the intended billing/quota policy: pinning a model does not itself guarantee free usage.
+Create an inference API key in the [InferX console](https://model.inferx.net/catalog/endpoints/deepseek-v4.1-flash-1017-basic?tenant=public) (Admin → API Keys). `INFERX_API_KEY` must be available in Pi's environment; an exported variable also works. The tracked `~/.pi/agent/models.json` supplies the exact shared API base URL (`https://model.inferx.net/endpoints/v1`), Bearer authentication, and the Basic model ID. Do not commit the actual key. The installer does not authenticate, make inference requests, or change `~/.pi/agent/auth.json`. Verify InferX's pricing before use; the zero-dollar catalog listing is not a contractual free-tier guarantee.
 
 Use `sh dl pi` for CLI upgrades; the subagents version remains explicitly pinned in `dotfiles/base/.pi/agent/settings.json` until reviewed and updated there. Pi can write its own settings, so inspect tracked changes after using its configuration commands.
 
@@ -26,21 +26,21 @@ Use `sh dl pi` for CLI upgrades; the subagents version remains explicitly pinned
 
 | Tier | Model | Thinking |
 | --- | --- | --- |
-| scout | `google/gemini-3.8-flash` | low |
-| mechanic | `google/gemini-3.8-flash` | medium |
-| worker | `google/gemini-3.8-flash` | high |
-| expert | `google/gemini-3.8-flash` | high |
-| god | `google/gemini-3.8-flash` | high |
+| scout | `inferx/deepseek-v4.1-flash-1017-basic` | off |
+| mechanic | `inferx/deepseek-v4.1-flash-1017-basic` | off |
+| worker | `inferx/deepseek-v4.1-flash-1017-basic` | off |
+| expert | `inferx/deepseek-v4.1-flash-1017-basic` | off |
+| god | `inferx/deepseek-v4.1-flash-1017-basic` | off |
 
-`subagents.defaultModel` also covers unpinned built-in roles. The strict enforced `subagents.modelScope` rejects any other resolved provider/model, including per-run model overrides; `maxThinking` rejects efforts above high. There is no fallback to paid models or other providers. Expert and god are different assignments, not stronger models; god gets a fresh adversarial brief.
+`subagents.defaultModel` also covers unpinned built-in roles. The strict enforced `subagents.modelScope` rejects any other resolved provider/model, including per-run model overrides; `maxThinking: off` rejects requested reasoning levels until InferX documents and validates an effort-control protocol for this endpoint. There is no fallback to paid models or other providers. Expert and god are different assignments, not stronger models; god gets a fresh adversarial brief.
 
-Scout has only `read`, `grep`, `find`, and `ls`. The other tiers additionally have `bash`, `edit`, and `write`. These explicit tool lists omit delegation tools; the parent owns all delegation and worktree lifecycle. Keep concurrency low when sharing a free API quota and report quota failures instead of starting retry storms.
+Scout has only `read`, `grep`, `find`, and `ls`. The other tiers additionally have `bash`, `edit`, and `write`. These explicit tool lists omit delegation tools; the parent owns all delegation and worktree lifecycle. Keep concurrency low on the free endpoint and report quota failures instead of starting retry storms.
 
 `/subagents-models` displays the loaded role mapping. Reload Pi after changing definitions or settings. The user profile is not an immutable sandbox: trusted project settings and an operator's explicit model/config changes can override it. Do not add project overrides that weaken this profile. `enabledModels` narrows normal parent model selection; the strict enforcement described above applies to subagents.
 
 ## Restored history and state
 
-The starting point was `dotfiles/base/.pi/agent/settings.json` at `0c9534f60c88b28210cbb3a6fbbdd2333b591b6c`. The dark theme, high-thinking default, quiet startup, hidden thinking, cache notices, disabled install telemetry, and always-trust preference are retained. The old OpenRouter default, generated changelog marker, and custom goal/cache extensions are not restored.
+The starting point was `dotfiles/base/.pi/agent/settings.json` at `0c9534f60c88b28210cbb3a6fbbdd2333b591b6c`. The dark theme, quiet startup, hidden thinking, cache notices, disabled install telemetry, and always-trust preference are retained. The former high-thinking default is intentionally set to `off` until the Basic endpoint's thinking protocol is verified. The old OpenRouter default, generated changelog marker, and custom goal/cache extensions are not restored.
 
 Unlike that historical configuration, `.pi/agent` is not a whole-directory `.sym-dir` link. Only tracked configuration and agent definitions are linked. Credentials, sessions, downloaded packages, and runtime state remain under the real home directory, outside the repository. `sh sync uninstall` records the isolated CLI installation, not the entire `.pi` state directory. If an old whole-directory link still exists, preserve its state and resolve the conflict shown by `sh sync plan` before syncing; the installer does not migrate or delete it.
 
@@ -52,8 +52,10 @@ The shared profile syncs `~/.pi/agent/extensions/git-execution-guard.js`. For Pi
 
 ## Checks and upstream references
 
-Run `python3 -I dotfiles/pi-test.py` for offline installer and profile checks (also included in `sh sync check`). These use a scratch home under `.work/` and mock npm; they do not prove live provider access or run a real Pi/subagents session.
+Run `python3 -I dotfiles/pi-test.py` for offline installer and profile checks (also included in `sh sync check`). These use a scratch home under `.work/` and mock npm; they validate the static provider/model/routing contract but do not prove live provider access or run a real Pi/subagents session. After authentication, smoke-test a short prompt that uses `read` and `bash`, then a two-turn tool cycle. If the endpoint rejects tool calls or streaming, treat the integration as blocked, not permission to fall back.
 
+- [InferX Basic endpoint](https://model.inferx.net/catalog/endpoints/deepseek-v4.1-flash-1017-basic?tenant=public)
+- [Pi custom models configuration](https://pi.dev/docs/latest/models-configuration)
 - [Pi installation](https://github.com/earendil-works/pi/tree/v1.4.0/packages/coding-agent)
 - [Pi package configuration](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/packages.md)
 - [pi-subagents 0.82.0](https://github.com/nicobailon/pi-subagents/releases/tag/v0.82.0)
