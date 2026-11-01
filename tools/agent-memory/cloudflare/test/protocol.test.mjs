@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   ERROR_CODES,
+  GC_GRACE_SECONDS,
   HARNESSES,
   MAX_CURSOR_CHARS,
   MAX_GENERATION_ARTIFACTS,
@@ -12,14 +13,21 @@ import {
   MAX_MISSING_OBJECTS,
   MAX_OBJECT_BYTES,
   MAX_PAGE,
+  MAX_SNAPSHOT_BYTES,
+  MAX_SNAPSHOT_CHUNKS,
+  MAX_SNAPSHOT_OBJECTS,
+  MAX_SOURCE_BYTES,
   MAX_TOMBSTONES,
   PROTOCOL,
   decodeCursor,
   decodeDigest,
+  decodeGcRequest,
   decodeGenerationManifest,
   decodeHello,
   decodeMissingRequest,
+  decodeObjectReplaceRequest,
   decodeOrigin,
+  decodeSnapshotCommit,
   decodeTombstoneRequest,
   encodeCursor,
 } from "../src/protocol.ts";
@@ -107,10 +115,37 @@ test("the tombstone validator agrees with every fixture", () => {
   }
 });
 
+test("the snapshot validators agree with every fixture", () => {
+  for (const item of FIXTURE.snapshots) {
+    const decoded = decodeSnapshotCommit(item.value);
+    assert.equal(decoded === null, !item.ok, item.name);
+    if (decoded !== null) {
+      assert.equal(decoded.snapshot.id, item.value.snapshot.db_digest, item.name);
+      assert.equal(decoded.snapshot.chunks.length, item.value.snapshot.chunks.length, item.name);
+      assert.equal(decoded.snapshot.objects.length, item.value.snapshot.objects.length, item.name);
+    }
+  }
+  for (const item of FIXTURE.gc_requests) {
+    const decoded = decodeGcRequest(item.value);
+    assert.equal(decoded === null, !item.ok, item.name);
+    if (decoded !== null) assert.equal(decoded.apply, item.value.apply, item.name);
+  }
+  for (const item of FIXTURE.replace_requests) {
+    const decoded = decodeObjectReplaceRequest(item.value);
+    assert.equal(decoded === null, !item.ok, item.name);
+    if (decoded !== null) assert.equal(decoded.ciphertext_digest, item.value.ciphertext_digest, item.name);
+  }
+});
+
 test("harnesses and generation limits match the shared fixture", () => {
   assert.deepEqual([...HARNESSES], FIXTURE.harnesses);
   assert.equal(MAX_GENERATION_OBJECTS, FIXTURE.limits.generation_objects);
   assert.equal(MAX_GENERATION_ARTIFACTS, FIXTURE.limits.generation_artifacts);
   assert.equal(MAX_TOMBSTONES, FIXTURE.limits.tombstones);
   assert.equal(MAX_PAGE, FIXTURE.limits.page);
+  assert.equal(MAX_SNAPSHOT_BYTES, FIXTURE.limits.snapshot_bytes);
+  assert.equal(MAX_SOURCE_BYTES, FIXTURE.limits.source_bytes);
+  assert.equal(MAX_SNAPSHOT_CHUNKS, FIXTURE.limits.snapshot_chunks);
+  assert.equal(MAX_SNAPSHOT_OBJECTS, FIXTURE.limits.snapshot_objects);
+  assert.equal(GC_GRACE_SECONDS, FIXTURE.limits.gc_grace_seconds);
 });

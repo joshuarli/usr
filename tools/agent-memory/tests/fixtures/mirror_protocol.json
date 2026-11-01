@@ -8,7 +8,12 @@
     "generation_objects": 20000,
     "generation_artifacts": 1000,
     "tombstones": 900,
-    "page": 200
+    "page": 200,
+    "snapshot_bytes": 1099511627776,
+    "snapshot_chunks": 4096,
+    "snapshot_objects": 20000,
+    "gc_grace_seconds": 3600,
+    "source_bytes": 1125899906842624
   },
   "error_codes": [
     "forbidden",
@@ -980,5 +985,225 @@
     "pi",
     "cmd",
     "agy"
+  ],
+  "snapshots": [
+    {
+      "name": "valid",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 15,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 10,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            },
+            {
+              "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "size": 5,
+              "ciphertext_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+          ],
+          "objects": [
+            {
+              "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "size": 4
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "id must equal the database digest",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 15,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 15,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          ],
+          "objects": []
+        }
+      }
+    },
+    {
+      "name": "chunk sizes must sum to the database size",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 16,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 15,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          ],
+          "objects": []
+        }
+      }
+    },
+    {
+      "name": "duplicate pinned object rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 15,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 15,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          ],
+          "objects": [
+            {
+              "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "size": 4
+            },
+            {
+              "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "size": 4
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unknown snapshot key rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 15,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 15,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            }
+          ],
+          "objects": [],
+          "note": "extra"
+        }
+      }
+    }
+  ],
+  "gc_requests": [
+    {
+      "name": "apply",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "apply": true
+      }
+    },
+    {
+      "name": "dry run",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "apply": false
+      }
+    },
+    {
+      "name": "apply must be boolean",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "apply": "yes"
+      }
+    },
+    {
+      "name": "apply is required",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a"
+      }
+    }
+  ],
+  "replace_requests": [
+    {
+      "name": "valid",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "plaintext_size": 15,
+        "encoding": "zlib",
+        "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "ciphertext_size": 12
+      }
+    },
+    {
+      "name": "unknown encoding rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "plaintext_size": 15,
+        "encoding": "gzip",
+        "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "ciphertext_size": 12
+      }
+    },
+    {
+      "name": "bad ciphertext digest rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "plaintext_size": 15,
+        "encoding": "identity",
+        "ciphertext_digest": "nope",
+        "ciphertext_size": 12
+      }
+    }
   ]
 }

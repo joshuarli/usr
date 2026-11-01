@@ -212,6 +212,18 @@ pins the Worker's `store_id`; a different store with existing acknowledgements i
 acknowledgements before rebinding. An unchanged sync performs one `hello` and no object,
 generation, or tombstone writes.
 
+A sync that changes generations or tombstones also uploads a recovery snapshot: a
+sanitized SQLite copy in 1 MiB content-addressed chunks plus pins for every archive object
+the copy references. `agent-sessions mirror snapshots` lists them, and
+`agent-sessions mirror verify --objects` recomputes every manifest and snapshot and samples
+object bodies. `agent-sessions mirror restore --snapshot ID --to DIR` rebuilds a new store
+from one snapshot, replays later generations, applies current tombstones, and activates no
+project or review grant. `agent-sessions mirror gc` reports unreferenced objects without
+deleting; `--apply` prunes snapshots outside the 7-daily/4-weekly retention and sweeps
+objects unreferenced for an hour. `agent-sessions mirror rotate --recipients FILE
+--identity NEWKEY` re-encrypts the origin to a new recipient set and leaves the old identity
+unable to read the new ciphertext.
+
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
 - Object frames are zlib-compressed when both ends offer it, which every build of this tool does. The manifest already declares each object's size, so the receiver inflates to at most that size, refuses anything larger, and verifies the digest afterwards; an object that does not shrink travels uncompressed. Measured on 40 of the largest local objects, 2.6 MB became 1.1 MB.

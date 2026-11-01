@@ -5,7 +5,11 @@ export const MAX_MISSING_OBJECTS = 20_000;
 export const MAX_GENERATION_OBJECTS = 20_000;
 export const MAX_GENERATION_ARTIFACTS = 1_000;
 export const MAX_TOMBSTONES = 900;
-export const MAX_SOURCE_BYTES = 1 << 50;
+export const MAX_SNAPSHOT_BYTES = 2 ** 40;
+export const MAX_SNAPSHOT_CHUNKS = 4_096;
+export const MAX_SNAPSHOT_OBJECTS = 20_000;
+export const GC_GRACE_SECONDS = 3_600;
+export const MAX_SOURCE_BYTES = 2 ** 50;
 export const MAX_PAGE = 200;
 export const MAX_CURSOR_CHARS = 512;
 export const MAX_CURSOR_PARTS = 4;
@@ -293,6 +297,157 @@ export function decodeTombstoneRequest(value: unknown): TombstoneRequest | null 
     tombstones.push(tombstone);
   }
   return { protocol: PROTOCOL, origin, base_revision: baseRevision, tombstones };
+}
+
+export interface SnapshotChunkRef {
+  readonly plaintext_digest: string;
+  readonly size: number;
+  readonly ciphertext_digest: string;
+}
+
+export interface SnapshotObjectRef {
+  readonly plaintext_digest: string;
+  readonly size: number;
+}
+
+export interface SnapshotInput {
+  readonly id: string;
+  readonly created_at: number;
+  readonly schema_version: number;
+  readonly db_digest: string;
+  readonly db_size: number;
+  readonly chunks: readonly SnapshotChunkRef[];
+  readonly objects: readonly SnapshotObjectRef[];
+}
+
+export interface SnapshotCommit {
+  readonly protocol: 1;
+  readonly origin: string;
+  readonly base_revision: number;
+  readonly snapshot: SnapshotInput;
+}
+
+export interface SnapshotVerifyRequest {
+  readonly protocol: 1;
+  readonly origin: string;
+}
+
+export interface GcRequest {
+  readonly protocol: 1;
+  readonly origin: string;
+  readonly apply: boolean;
+}
+
+export interface ObjectReplaceRequest {
+  readonly protocol: 1;
+  readonly origin: string;
+  readonly plaintext_digest: string;
+  readonly plaintext_size: number;
+  readonly encoding: "identity" | "zlib";
+  readonly ciphertext_digest: string;
+  readonly ciphertext_size: number;
+}
+
+function decodeSnapshotChunk(value: unknown): SnapshotChunkRef | null {
+  if (!isRecord(value) || !exactKeys(value, ["plaintext_digest", "size", "ciphertext_digest"])) return null;
+  const plaintext = decodeDigest(value.plaintext_digest);
+  const ciphertext = decodeDigest(value.ciphertext_digest);
+  const size = decodeSize(value.size);
+  if (plaintext === null || ciphertext === null || size === null || size === 0) return null;
+  return { plaintext_digest: plaintext, size, ciphertext_digest: ciphertext };
+}
+
+function decodeSnapshotObject(value: unknown): SnapshotObjectRef | null {
+  if (!isRecord(value) || !exactKeys(value, ["plaintext_digest", "size"])) return null;
+  const digest = decodeDigest(value.plaintext_digest);
+  const size = decodeSize(value.size);
+  return digest === null || size === null ? null : { plaintext_digest: digest, size };
+}
+
+export function decodeSnapshotCommit(value: unknown): SnapshotCommit | null {
+  if (!isRecord(value) || !exactKeys(value, ["protocol", "origin", "base_revision", "snapshot"])) return null;
+  if (decodeProtocol(value.protocol) === null) return null;
+  const origin = decodeOrigin(value.origin);
+  const baseRevision = decodeRevision(value.base_revision);
+  const snapshot = value.snapshot;
+  if (origin === null || baseRevision === null) return null;
+  if (!isRecord(snapshot) || !exactKeys(snapshot, [
+    "id", "created_at", "schema_version", "db_digest", "db_size", "chunks", "objects",
+  ])) return null;
+  const id = decodeDigest(snapshot.id);
+  const dbDigest = decodeDigest(snapshot.db_digest);
+  const createdAt = decodeTimestamp(snapshot.created_at);
+  const schemaVersion = decodeRevision(snapshot.schema_version);
+  const dbSize = typeof snapshot.db_size === "number"
+    && Number.isSafeInteger(snapshot.db_size) && snapshot.db_size >= 0 && snapshot.db_size <= MAX_SNAPSHOT_BYTES
+    ? snapshot.db_size
+    : null;
+  if (id === null || dbDigest === null || id !== dbDigest) return null;
+  if (createdAt === null || schemaVersion === null || schemaVersion > 1_000 || dbSize === null) return null;
+  if (!Array.isArray(snapshot.chunks) || snapshot.chunks.length === 0 || snapshot.chunks.length > MAX_SNAPSHOT_CHUNKS) {
+    return null;
+  }
+  if (!Array.isArray(snapshot.objects) || snapshot.objects.length > MAX_SNAPSHOT_OBJECTS) return null;
+  const chunks: SnapshotChunkRef[] = [];
+  let cursor = 0;
+  for (const entry of snapshot.chunks) {
+    const chunk = decodeSnapshotChunk(entry);
+    if (chunk === null) return null;
+    cursor += chunk.size;
+    if (cursor > MAX_SNAPSHOT_BYTES) return null;
+    chunks.push(chunk);
+  }
+  if (cursor !== dbSize) return null;
+  const objects: SnapshotObjectRef[] = [];
+  const digests = new Set<string>();
+  for (const entry of snapshot.objects) {
+    const object = decodeSnapshotObject(entry);
+    if (object === null || digests.has(object.plaintext_digest)) return null;
+    digests.add(object.plaintext_digest);
+    objects.push(object);
+  }
+  return {
+    protocol: PROTOCOL,
+    origin,
+    base_revision: baseRevision,
+    snapshot: {
+      id, created_at: createdAt, schema_version: schemaVersion, db_digest: dbDigest, db_size: dbSize, chunks, objects,
+    },
+  };
+}
+
+export function decodeSnapshotVerifyRequest(value: unknown): SnapshotVerifyRequest | null {
+  if (!isRecord(value) || !exactKeys(value, ["protocol", "origin"])) return null;
+  if (decodeProtocol(value.protocol) === null) return null;
+  const origin = decodeOrigin(value.origin);
+  return origin === null ? null : { protocol: PROTOCOL, origin };
+}
+
+export function decodeGcRequest(value: unknown): GcRequest | null {
+  if (!isRecord(value) || !exactKeys(value, ["protocol", "origin", "apply"])) return null;
+  if (decodeProtocol(value.protocol) === null) return null;
+  const origin = decodeOrigin(value.origin);
+  if (origin === null || typeof value.apply !== "boolean") return null;
+  return { protocol: PROTOCOL, origin, apply: value.apply };
+}
+
+export function decodeObjectReplaceRequest(value: unknown): ObjectReplaceRequest | null {
+  if (!isRecord(value) || !exactKeys(value, [
+    "protocol", "origin", "plaintext_digest", "plaintext_size", "encoding", "ciphertext_digest", "ciphertext_size",
+  ])) return null;
+  if (decodeProtocol(value.protocol) === null) return null;
+  const origin = decodeOrigin(value.origin);
+  const plaintext = decodeDigest(value.plaintext_digest);
+  const ciphertext = decodeDigest(value.ciphertext_digest);
+  const plaintextSize = decodeSize(value.plaintext_size);
+  const ciphertextSize = decodeSize(value.ciphertext_size);
+  const encoding = value.encoding === "identity" || value.encoding === "zlib" ? value.encoding : null;
+  if (origin === null || plaintext === null || ciphertext === null) return null;
+  if (plaintextSize === null || ciphertextSize === null || encoding === null) return null;
+  return {
+    protocol: PROTOCOL, origin, plaintext_digest: plaintext, plaintext_size: plaintextSize,
+    encoding, ciphertext_digest: ciphertext, ciphertext_size: ciphertextSize,
+  };
 }
 
 function encodeBase64Url(bytes: Uint8Array): string {

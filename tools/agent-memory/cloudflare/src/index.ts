@@ -3,6 +3,7 @@ import { readStoreMeta, type StoreMeta } from "./db.js";
 import { failure, json, methodNotAllowed } from "./errors.js";
 import { serverTiming, trace } from "./observe.js";
 import { handleGenerations } from "./routes/generations.js";
+import { handleSnapshots } from "./routes/snapshots.js";
 import { handleSync } from "./routes/sync.js";
 import { handleTombstones } from "./routes/tombstones.js";
 
@@ -77,6 +78,8 @@ export default {
       if (sync !== null) return sync;
       const generations = await handleGenerations(request, env, principal, pathname, url, timing);
       if (generations !== null) return generations;
+      const snapshots = await handleSnapshots(request, env, principal, pathname, url, timing);
+      if (snapshots !== null) return snapshots;
       const tombstones = await handleTombstones(request, env, principal, pathname, url, timing);
       if (tombstones !== null) return tombstones;
     } catch {

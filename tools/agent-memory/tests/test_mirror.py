@@ -4,12 +4,16 @@ import hashlib
 import http.client
 import json
 import os
+import select
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from unittest import mock
@@ -196,8 +200,12 @@ class FixtureParityTests(unittest.TestCase):
         self.assertEqual(mirror.MAX_OBJECT_BYTES, FIXTURE["limits"]["object_bytes"])
         self.assertEqual(mirror.MAX_MISSING_OBJECTS, FIXTURE["limits"]["missing_objects"])
         self.assertEqual(mirror.MAX_CURSOR_CHARS, FIXTURE["limits"]["cursor_chars"])
+        self.assertEqual(mirror.MAX_SNAPSHOT_BYTES, FIXTURE["limits"]["snapshot_bytes"])
+        self.assertEqual(mirror.MAX_SNAPSHOT_CHUNKS, FIXTURE["limits"]["snapshot_chunks"])
+        self.assertEqual(mirror.MAX_SNAPSHOT_OBJECTS, FIXTURE["limits"]["snapshot_objects"])
+        self.assertEqual(mirror.MAX_SOURCE_BYTES, FIXTURE["limits"]["source_bytes"])
+        self.assertEqual(mirror.GC_GRACE_SECONDS, FIXTURE["limits"]["gc_grace_seconds"])
         self.assertEqual(mirror.ERROR_CODES, frozenset(FIXTURE["error_codes"]))
-
     def test_digest_and_origin_validators_agree(self):
         for item in FIXTURE["digests"]:
             self.assertEqual(mirror.decode_digest(item["value"]) is None, not item["ok"], item["name"])
@@ -262,6 +270,25 @@ class FixtureParityTests(unittest.TestCase):
         self.assertEqual(mirror.MAX_GENERATION_ARTIFACTS, FIXTURE["limits"]["generation_artifacts"])
         self.assertEqual(mirror.MAX_TOMBSTONES, FIXTURE["limits"]["tombstones"])
         self.assertEqual(mirror.MAX_PAGE, FIXTURE["limits"]["page"])
+
+    def test_snapshot_and_maintenance_validators_agree_with_every_fixture(self):
+        for item in FIXTURE["snapshots"]:
+            decoded = mirror.decode_snapshot_commit(item["value"])
+            self.assertEqual(decoded is None, not item["ok"], item["name"])
+            if decoded is not None:
+                self.assertEqual(decoded["snapshot"]["id"], item["value"]["snapshot"]["db_digest"])
+                self.assertEqual(len(decoded["snapshot"]["chunks"]), len(item["value"]["snapshot"]["chunks"]))
+                self.assertEqual(len(decoded["snapshot"]["objects"]), len(item["value"]["snapshot"]["objects"]))
+        for item in FIXTURE["gc_requests"]:
+            decoded = mirror.decode_gc_request(item["value"])
+            self.assertEqual(decoded is None, not item["ok"], item["name"])
+            if decoded is not None:
+                self.assertEqual(decoded["apply"], item["value"]["apply"])
+        for item in FIXTURE["replace_requests"]:
+            decoded = mirror.decode_object_replace_request(item["value"])
+            self.assertEqual(decoded is None, not item["ok"], item["name"])
+            if decoded is not None:
+                self.assertEqual(decoded["ciphertext_digest"], item["value"]["ciphertext_digest"])
 
 
 class ConfigTests(unittest.TestCase):
@@ -708,6 +735,26 @@ class UploadTests(unittest.TestCase):
                                  concurrency=0, client_factory=SequenceFactory(FakeUploadClient()))
 
 
+class DownloadTests(unittest.TestCase):
+    def test_a_corrupted_object_is_named_by_digest(self):
+        row = {
+            "plaintext_digest": DIGEST,
+            "plaintext_size": 8,
+            "encoding": "identity",
+            "ciphertext_digest": CIPHER,
+            "ciphertext_size": 11,
+        }
+        client = mock.Mock()
+        client.get_object.return_value = b"wrong bytes"
+        with mock.patch.object(
+                mirror.mirror_crypto, "decode_object",
+                side_effect=mirror_crypto.CryptoError("object failed to decode")):
+            with self.assertRaises(mirror.MirrorError) as raised:
+                mirror._download_object(client, Path("identity.key"), row)
+        self.assertEqual(raised.exception.code, "corrupt_object")
+        self.assertIn(DIGEST, str(raised.exception))
+
+
 class StoreMirrorTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
@@ -924,6 +971,12 @@ def upload_counters():
             "bytes_plaintext": 10, "bytes_compressed": 10, "bytes_ciphertext": 20}
 
 
+def snapshot_counters(revision):
+    return {"id": "d" * 64, "revision": revision, "duplicate": False, "db_size": 4096,
+            "chunks": 4, "chunks_uploaded": 0, "objects": 3, "objects_uploaded": 0,
+            "object_bytes": 30, "bytes_plaintext": 0, "bytes_ciphertext": 0}
+
+
 class SyncTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
@@ -943,6 +996,11 @@ class SyncTests(unittest.TestCase):
     def prepared(self, data, _recipients):
         return prepared_for(data, ciphertext=b"manifest ciphertext")
 
+    def patch_snapshot(self):
+        return mock.patch.object(
+            mirror, "upload_snapshot",
+            side_effect=lambda *args, **kwargs: snapshot_counters(kwargs["revision"]))
+
     def generation(self, identifier=5):
         return {"id": identifier, "manifest_digest": self.manifest["manifest_digest"],
                 "harness": self.manifest["harness"], "native_id": self.manifest["native_id"]}
@@ -958,7 +1016,11 @@ class SyncTests(unittest.TestCase):
 
         second_store = SyncStore(pinned=store.pinned)
         second_runtime = SyncClient()
-        second = mirror.sync(second_store, config(), "cloudflare", client=second_runtime, recipients=["age1"])
+        with mock.patch.object(mirror, "upload_snapshot") as snapshot:
+            second = mirror.sync(second_store, config(), "cloudflare", client=second_runtime, recipients=["age1"])
+        snapshot.assert_not_called()
+        self.assertEqual(second["snapshots_created"], 0)
+        self.assertEqual(second["snapshot_chunks_uploaded"], 0)
         self.assertEqual(second["hello"], 1)
         self.assertTrue(second["unchanged"])
         self.assertEqual(second_store.writes, [])
@@ -969,7 +1031,7 @@ class SyncTests(unittest.TestCase):
                   "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
         store = SyncStore(pending_generations=[self.generation()])
         runtime = SyncClient(commit=commit)
-        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()) as upload:
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()) as upload, self.patch_snapshot():
             result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
                                  prepare=self.prepared)
         from_call = upload.call_args
@@ -985,6 +1047,20 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result["generations_committed"], 1)
         self.assertEqual(result["objects_stored"], 1)
         self.assertEqual(store.writes[-1][1:4], ("usr-memories", 3, 0))
+
+    def test_a_changed_sync_creates_a_snapshot_and_persists_its_revision(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(commit=commit)
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), mock.patch.object(
+                mirror, "upload_snapshot",
+                side_effect=lambda *args, **kwargs: snapshot_counters(kwargs["revision"] + 1)) as snapshot:
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        self.assertEqual(snapshot.call_args.kwargs["revision"], 3)
+        self.assertEqual(result["snapshots_created"], 1)
+        self.assertEqual(store.writes[-1][1:4], ("usr-memories", 4, 0))
 
     def test_a_duplicate_generation_ack_skips_objects_and_refreshes_the_revision(self):
         duplicate = generation_row(self.manifest)
@@ -1042,7 +1118,7 @@ class SyncTests(unittest.TestCase):
 
         cast(Any, runtime).push_tombstones = push
         cast(Any, runtime).commit_generation = committed
-        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()):
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), self.patch_snapshot():
             result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
                                  prepare=self.prepared)
         self.assertEqual(order, ["push", "commit"])
@@ -1084,8 +1160,9 @@ class SyncTests(unittest.TestCase):
             order.append("refresh")
 
         cast(Any, store).apply_remote_tombstone = apply
-        result = mirror.sync(store, config(), "cloudflare", client=runtime, refresh=refresh,
-                             recipients=["age1"])
+        with self.patch_snapshot():
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, refresh=refresh,
+                                 recipients=["age1"])
         self.assertEqual(order, ["apply", "refresh"])
         self.assertEqual(result["tombstones_fetched"], 1)
         self.assertEqual(store.writes[-1][3], 2)
@@ -1106,7 +1183,7 @@ class SyncTests(unittest.TestCase):
     def test_a_tombstoned_generation_is_acked_and_skipped(self):
         store = SyncStore(pending_generations=[self.generation()])
         runtime = SyncClient(error=mirror.MirrorError("tombstoned", "gone"))
-        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()):
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), self.patch_snapshot():
             result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
                                  prepare=self.prepared)
         self.assertEqual(store.durable, [(5, "usr-memories", 0)])
@@ -1123,6 +1200,256 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "stale_revision")
         self.assertEqual(len(store.attempts), 1)
         self.assertEqual(store.durable, [])
+
+
+class MirrorIntegrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        node = shutil.which("node")
+        if node is None:
+            raise AssertionError("node is required for mirror integration tests")
+        cls.node: str = node
+        cls.worker_dir = ROOT / "tools" / "agent-memory" / "cloudflare"
+        cls.bundle = cls.worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
+        if not cls.bundle.is_file():
+            raise AssertionError("missing worker bundle; run `npm run build` in tools/agent-memory/cloudflare")
+        try:
+            mirror_crypto.binary()
+        except mirror_crypto.CryptoError:
+            result = subprocess.run(
+                ["sh", str(cls.worker_dir / "dev-age.sh")],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if result.returncode != 0:
+                raise AssertionError("cannot build rage: " + result.stderr.strip()) from None
+            os.environ["AGE_BIN"] = result.stdout.strip()
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.identity = self.root / "identity.key"
+        self.recipient = mirror_crypto.keygen(self.identity)
+        self.recipients_file = self.root / "recipients.txt"
+        self.recipients_file.write_text(self.recipient + "\n")
+        self.token_file = self.root / "token.json"
+        self.token_file.write_text('{"client_id":"collector-client.access","client_secret":"synthetic"}')
+        os.chmod(self.token_file, 0o600)
+        self.process: subprocess.Popen[str] | None = None
+        self.port = self.start_server()
+        self.config = mirror.MirrorConfig(
+            url="http://127.0.0.1:%d" % self.port,
+            service_token_file=self.token_file,
+            age_recipients_file=self.recipients_file,
+            age_identity_file=self.identity,
+            learning_projection=False,
+        )
+        self.recipients = mirror_crypto.load_recipients(self.recipients_file)
+
+    def tearDown(self):
+        if self.process is not None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=10)
+            if self.process.stdout is not None:
+                self.process.stdout.close()
+            if self.process.stderr is not None:
+                self.process.stderr.close()
+        self.temporary.cleanup()
+
+    def start_server(self):
+        env = dict(os.environ)
+        env["COLLECTORS"] = json.dumps([{"client_id": "collector-client.access", "origin": "origin-a"}])
+        self.process = subprocess.Popen(
+            [self.node, "test/integration-server.mjs"], cwd=str(self.worker_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        stdout = self.process.stdout
+        assert stdout is not None
+        ready, _, _ = select.select([stdout], [], [], 30)
+        if not ready:
+            self.process.kill()
+            _, stderr = self.process.communicate(timeout=10)
+            raise AssertionError("mirror integration server did not start: " + (stderr.strip() or "timeout"))
+        line = stdout.readline()
+        try:
+            return int(json.loads(line)["port"])
+        except (ValueError, KeyError, TypeError):
+            self.process.kill()
+            _, stderr = self.process.communicate(timeout=10)
+            raise AssertionError("mirror integration server did not start: " + (stderr.strip() or line.strip())) from None
+
+    def client(self, config=None):
+        return mirror.MirrorClient(
+            config or self.config,
+            factory=lambda: http.client.HTTPConnection("127.0.0.1", self.port, timeout=30))
+
+    def set_origin(self, store):
+        with store.db:
+            store.db.execute(
+                "INSERT OR REPLACE INTO collector_identity(singleton, id, origin_host, display_label, created_at) "
+                "VALUES(1, 'synthetic', 'origin-a', 'synthetic', 0)")
+
+    def capture(self, store, native, text):
+        source = self.root / (native + ".jsonl")
+        source.write_text(json.dumps({
+            "type": "message", "id": "m-" + native, "parentId": None,
+            "timestamp": "2026-10-30T00:00:00Z",
+            "message": {"role": "user", "content": [{"type": "text", "text": text}],
+                        "meta": {"messageId": "m-" + native}},
+        }, separators=(",", ":")) + "\n")
+        return archive_module.capture(store.db, store.archive_dir, "codex", native, source)
+
+    def sync(self, store):
+        client = self.client()
+        try:
+            return mirror.sync(
+                store, self.config, "cloudflare", client=client, upload_client_factory=self.client,
+                recipients=self.recipients, concurrency=1)
+        finally:
+            client.close()
+
+    def snapshots(self):
+        client = self.client()
+        try:
+            return mirror.snapshots(self.config, client=client)
+        finally:
+            client.close()
+
+    @staticmethod
+    def skip_snapshot(*_args, **kwargs):
+        return {"id": "d" * 64, "revision": kwargs["revision"], "duplicate": True, "db_size": 0,
+                "chunks": 0, "chunks_uploaded": 0, "objects": 0, "objects_uploaded": 0,
+                "object_bytes": 0, "bytes_plaintext": 0, "bytes_ciphertext": 0}
+
+    def test_snapshot_restore_replays_a_generation_committed_after_the_snapshot(self):
+        state = self.root / "source"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            self.capture(store, "native-1", "first")
+            first = self.sync(store)
+            self.assertEqual(first["generations_committed"], 1)
+            self.assertEqual(first["snapshots_created"], 1)
+            snapshots = self.snapshots()
+            self.assertEqual(len(snapshots), 1)
+            snapshot_id = snapshots[0]["id"]
+
+            self.capture(store, "native-2", "second")
+            with mock.patch.object(mirror, "upload_snapshot", side_effect=self.skip_snapshot):
+                second = self.sync(store)
+            self.assertEqual(second["generations_committed"], 1)
+            self.assertEqual(len(self.snapshots()), 1)
+        finally:
+            store.close()
+
+        client = self.client()
+        try:
+            verified = mirror.verify(self.config, client=client, objects=True)
+            self.assertEqual(verified["generations"], 2)
+            self.assertEqual(verified["snapshots"], 1)
+            self.assertGreater(verified["sampled"], 0)
+            collected = mirror.gc(self.config, client=client)
+            self.assertEqual(collected["apply"], False)
+            self.assertEqual(collected["snapshots_retained"], 1)
+        finally:
+            client.close()
+
+        shutil.rmtree(state)
+        client = self.client()
+        try:
+            report = mirror.restore(
+                self.config, "cloudflare", snapshot_id, self.root / "restored",
+                client=client, identity_path=self.identity)
+        finally:
+            client.close()
+        self.assertEqual(report["replayed"], 1)
+
+        restored = Store(self.root / "restored")
+        try:
+            generations = restored.db.execute("SELECT id FROM archive_generation ORDER BY id").fetchall()
+            self.assertEqual(len(generations), 2)
+            for row in generations:
+                archive_module.verify_generation(restored.db, restored.archive_dir, row["id"])
+            tables = {row[0] for row in restored.db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+            if "learning_projects" in tables:
+                self.assertEqual(restored.db.execute(
+                    "SELECT count(*) FROM learning_projects WHERE enabled = 1").fetchone()[0], 0)
+            if "learning_global_grant" in tables:
+                self.assertEqual(restored.db.execute(
+                    "SELECT count(*) FROM learning_global_grant").fetchone()[0], 0)
+            pinned = cast(dict[str, Any] | None, restored.mirror_remote_state("cloudflare"))
+            self.assertIsNotNone(pinned)
+            self.assertEqual(cast(dict[str, Any], pinned)["store_id"], "usr-memories")
+        finally:
+            restored.close()
+
+    def test_a_restore_applies_tombstones_newer_than_the_snapshot(self):
+        state = self.root / "source"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            self.capture(store, "native-1", "forget me")
+            self.sync(store)
+            snapshot_id = self.snapshots()[0]["id"]
+            store.forget_session("codex:native-1", time.time())
+            with mock.patch.object(mirror, "upload_snapshot", side_effect=self.skip_snapshot):
+                self.sync(store)
+        finally:
+            store.close()
+
+        shutil.rmtree(state)
+        client = self.client()
+        try:
+            report = mirror.restore(
+                self.config, "cloudflare", snapshot_id, self.root / "restored",
+                client=client, identity_path=self.identity)
+        finally:
+            client.close()
+        self.assertEqual(report["tombstones"], 1)
+        restored = Store(self.root / "restored")
+        try:
+            self.assertEqual(restored.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 0)
+            self.assertEqual(restored.db.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
+            self.assertEqual(restored.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
+        finally:
+            restored.close()
+
+    def test_rotation_reencrypts_objects_and_only_the_new_identity_restores(self):
+        state = self.root / "source"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            self.capture(store, "native-1", "rotate me")
+            self.sync(store)
+        finally:
+            store.close()
+
+        new_identity = self.root / "new.key"
+        new_recipient = mirror_crypto.keygen(new_identity)
+        new_recipients_file = self.root / "new-recipients.txt"
+        new_recipients_file.write_text(new_recipient + "\n")
+        client = self.client()
+        try:
+            rotated = mirror.rotate(
+                self.config, recipients_file=new_recipients_file, identity_file=new_identity,
+                old_identity_file=self.identity, client=client)
+            self.assertGreaterEqual(rotated["rotated"], 1)
+            new_config = replace(
+                self.config, age_identity_file=new_identity, age_recipients_file=new_recipients_file)
+            verified = mirror.verify(new_config, client=client, objects=True)
+            self.assertGreater(verified["sampled"], 0)
+            restored = mirror.restore(
+                new_config, "cloudflare", self.snapshots()[0]["id"], self.root / "restored",
+                client=client, identity_path=new_identity)
+            self.assertEqual(restored["replayed"], 0)
+            with self.assertRaises(mirror.MirrorError):
+                mirror.restore(
+                    self.config, "cloudflare", self.snapshots()[0]["id"], self.root / "old-restored",
+                    client=client, identity_path=self.identity)
+        finally:
+            client.close()
 
 
 if __name__ == "__main__":

@@ -2,12 +2,16 @@
 """Cloudflare mirror protocol: validators, configuration, and a pooled HTTPS client."""
 import base64
 import concurrent.futures
+import contextlib
 import hashlib
 import http.client
 import json
 import math
+import os
 import re
+import sqlite3
 import stat
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +19,8 @@ from typing import Any, cast
 from urllib.parse import urlencode, urlsplit
 
 from agent_memory import archive as archive_module
+from agent_memory import backup as backup_module
+from agent_memory import learning as learning_module
 from agent_memory import mirror_crypto
 from agent_memory.types import HARNESSES
 
@@ -25,6 +31,10 @@ MAX_MISSING_OBJECTS = 20000
 MAX_GENERATION_OBJECTS = 20000
 MAX_GENERATION_ARTIFACTS = 1000
 MAX_TOMBSTONES = 900
+MAX_SNAPSHOT_BYTES = 1 << 40
+MAX_SNAPSHOT_CHUNKS = 4096
+MAX_SNAPSHOT_OBJECTS = 20000
+GC_GRACE_SECONDS = 3600
 MAX_SOURCE_BYTES = 1 << 50
 MAX_PAGE = 200
 MAX_CURSOR_CHARS = 512
@@ -483,6 +493,325 @@ def decode_tombstone_request(value):
     return {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision, "tombstones": clean}
 
 
+def _decode_snapshot_chunk(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("plaintext_digest", "size", "ciphertext_digest")):
+        return None
+    plaintext = decode_digest(value.get("plaintext_digest"))
+    ciphertext = decode_digest(value.get("ciphertext_digest"))
+    size = _decode_size(value.get("size"))
+    if plaintext is None or ciphertext is None or size is None or size == 0:
+        return None
+    return {"plaintext_digest": plaintext, "size": size, "ciphertext_digest": ciphertext}
+
+
+def _decode_snapshot_object(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("plaintext_digest", "size")):
+        return None
+    digest = decode_digest(value.get("plaintext_digest"))
+    size = _decode_size(value.get("size"))
+    return None if digest is None or size is None else {"plaintext_digest": digest, "size": size}
+
+
+def decode_snapshot_commit(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "base_revision", "snapshot")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    base_revision = _decode_revision(value.get("base_revision"))
+    snapshot = value.get("snapshot")
+    if origin is None or base_revision is None or not _record(snapshot):
+        return None
+    if not _exact_keys(snapshot, ("id", "created_at", "schema_version", "db_digest", "db_size", "chunks", "objects")):
+        return None
+    identifier = decode_digest(snapshot.get("id"))
+    db_digest = decode_digest(snapshot.get("db_digest"))
+    created_at = _decode_timestamp(snapshot.get("created_at"))
+    schema_version = _decode_revision(snapshot.get("schema_version"))
+    db_size = snapshot.get("db_size")
+    if identifier is None or db_digest is None or identifier != db_digest:
+        return None
+    if created_at is None or schema_version is None or schema_version > 1000:
+        return None
+    if isinstance(db_size, bool) or not isinstance(db_size, int) or not 0 <= db_size <= MAX_SNAPSHOT_BYTES:
+        return None
+    chunks = snapshot.get("chunks")
+    objects = snapshot.get("objects")
+    if not isinstance(chunks, list) or not 0 < len(chunks) <= MAX_SNAPSHOT_CHUNKS:
+        return None
+    if not isinstance(objects, list) or len(objects) > MAX_SNAPSHOT_OBJECTS:
+        return None
+    clean_chunks = []
+    cursor = 0
+    for item in chunks:
+        chunk = _decode_snapshot_chunk(item)
+        if chunk is None:
+            return None
+        cursor += chunk["size"]
+        if cursor > MAX_SNAPSHOT_BYTES:
+            return None
+        clean_chunks.append(chunk)
+    if cursor != db_size:
+        return None
+    clean_objects = []
+    digests = set()
+    for item in objects:
+        obj = _decode_snapshot_object(item)
+        if obj is None or obj["plaintext_digest"] in digests:
+            return None
+        digests.add(obj["plaintext_digest"])
+        clean_objects.append(obj)
+    return {
+        "protocol": PROTOCOL, "origin": origin, "base_revision": base_revision,
+        "snapshot": {
+            "id": identifier, "created_at": created_at, "schema_version": schema_version,
+            "db_digest": db_digest, "db_size": db_size, "chunks": clean_chunks, "objects": clean_objects,
+        },
+    }
+
+
+def decode_snapshot_verify_request(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    return None if origin is None else {"protocol": PROTOCOL, "origin": origin}
+
+
+def decode_gc_request(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "apply")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    if origin is None or not isinstance(value.get("apply"), bool):
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "apply": value["apply"]}
+
+
+def decode_object_replace_request(value) -> dict[str, Any] | None:
+    keys = ("protocol", "origin", "plaintext_digest", "plaintext_size", "encoding",
+            "ciphertext_digest", "ciphertext_size")
+    if not _exact_keys(value, keys):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    plaintext = decode_digest(value.get("plaintext_digest"))
+    ciphertext = decode_digest(value.get("ciphertext_digest"))
+    plaintext_size = _decode_size(value.get("plaintext_size"))
+    ciphertext_size = _decode_size(value.get("ciphertext_size"))
+    encoding = value.get("encoding") if value.get("encoding") in ENCODINGS else None
+    if None in (origin, plaintext, ciphertext, plaintext_size, ciphertext_size, encoding):
+        return None
+    return {
+        "protocol": PROTOCOL, "origin": origin, "plaintext_digest": plaintext,
+        "plaintext_size": plaintext_size, "encoding": encoding,
+        "ciphertext_digest": ciphertext, "ciphertext_size": ciphertext_size,
+    }
+
+
+def _decode_snapshot_row(value) -> dict[str, Any] | None:
+    keys = ("id", "origin_host", "created_at", "schema_version", "db_digest", "db_size",
+            "objects", "object_bytes", "verified_at", "revision")
+    if not _exact_keys(value, keys):
+        return None
+    identifier = decode_digest(value.get("id"))
+    origin = decode_origin(value.get("origin_host"))
+    created_at = _decode_timestamp(value.get("created_at"))
+    schema_version = _decode_revision(value.get("schema_version"))
+    db_digest = decode_digest(value.get("db_digest"))
+    db_size = value.get("db_size")
+    objects = value.get("objects")
+    object_bytes = value.get("object_bytes")
+    verified_at = value.get("verified_at")
+    revision = _decode_revision(value.get("revision"))
+    if None in (identifier, origin, created_at, schema_version, db_digest, revision):
+        return None
+    if identifier != db_digest:
+        return None
+    for number in (db_size, objects, object_bytes):
+        if isinstance(number, bool) or not isinstance(number, int) or number < 0:
+            return None
+    if verified_at is not None:
+        verified_at = _decode_timestamp(verified_at)
+        if verified_at is None:
+            return None
+    return {
+        "id": identifier, "origin_host": origin, "created_at": created_at,
+        "schema_version": schema_version, "db_digest": db_digest, "db_size": db_size,
+        "objects": objects, "object_bytes": object_bytes, "verified_at": verified_at, "revision": revision,
+    }
+
+
+def _decode_snapshot_chunk_row(value) -> dict[str, Any] | None:
+    keys = ("ordinal", "plaintext_digest", "size", "ciphertext_digest", "encoding", "ciphertext_size")
+    if not _exact_keys(value, keys):
+        return None
+    ordinal = _decode_revision(value.get("ordinal"))
+    plaintext = decode_digest(value.get("plaintext_digest"))
+    ciphertext = decode_digest(value.get("ciphertext_digest"))
+    size = _decode_size(value.get("size"))
+    ciphertext_size = _decode_size(value.get("ciphertext_size"))
+    encoding = value.get("encoding") if value.get("encoding") in ENCODINGS else None
+    if None in (ordinal, plaintext, ciphertext, size, ciphertext_size, encoding):
+        return None
+    return {
+        "ordinal": ordinal, "plaintext_digest": plaintext, "size": size,
+        "ciphertext_digest": ciphertext, "encoding": encoding, "ciphertext_size": ciphertext_size,
+    }
+
+
+def _decode_snapshot_object_row(value) -> dict[str, Any] | None:
+    keys = ("plaintext_digest", "size", "ciphertext_digest", "encoding", "ciphertext_size")
+    if not _exact_keys(value, keys):
+        return None
+    plaintext = decode_digest(value.get("plaintext_digest"))
+    ciphertext = decode_digest(value.get("ciphertext_digest"))
+    size = _decode_size(value.get("size"))
+    ciphertext_size = _decode_size(value.get("ciphertext_size"))
+    encoding = value.get("encoding") if value.get("encoding") in ENCODINGS else None
+    if None in (plaintext, ciphertext, size, ciphertext_size, encoding):
+        return None
+    return {
+        "plaintext_digest": plaintext, "size": size,
+        "ciphertext_digest": ciphertext, "encoding": encoding, "ciphertext_size": ciphertext_size,
+    }
+
+
+def decode_snapshot_list_response(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "snapshots")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    rows = value.get("snapshots")
+    if origin is None or not isinstance(rows, list):
+        return None
+    clean = []
+    for item in rows:
+        row = _decode_snapshot_row(item)
+        if row is None or row["origin_host"] != origin:
+            return None
+        clean.append(row)
+    return {"protocol": PROTOCOL, "origin": origin, "snapshots": clean}
+
+
+def decode_snapshot_detail_response(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "snapshot", "chunks", "objects")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    row = _decode_snapshot_row(value.get("snapshot"))
+    chunks, objects = value.get("chunks"), value.get("objects")
+    if origin is None or row is None or row["origin_host"] != origin:
+        return None
+    if not isinstance(chunks, list) or not isinstance(objects, list):
+        return None
+    clean_chunks: list[dict[str, Any]] = []
+    cursor: int = 0
+    for item in chunks:
+        chunk = _decode_snapshot_chunk_row(item)
+        if chunk is None or chunk["ordinal"] != len(clean_chunks):
+            return None
+        cursor += int(chunk["size"])
+        clean_chunks.append(chunk)
+    if cursor != row["db_size"]:
+        return None
+    clean_objects: list[dict[str, Any]] = []
+    digests: set[str] = set()
+    for item in objects:
+        obj = _decode_snapshot_object_row(item)
+        if obj is None or obj["plaintext_digest"] in digests:
+            return None
+        digests.add(obj["plaintext_digest"])
+        clean_objects.append(obj)
+    if len(clean_objects) != row["objects"] or sum(item["size"] for item in clean_objects) != row["object_bytes"]:
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "snapshot": row, "chunks": clean_chunks, "objects": clean_objects}
+
+
+def decode_snapshot_commit_response(value) -> dict[str, Any] | None:
+    keys = ("protocol", "origin", "snapshot", "revision", "duplicate", "chunks", "objects", "object_bytes")
+    if not _exact_keys(value, keys):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    identifier = decode_digest(value.get("snapshot"))
+    revision = _decode_revision(value.get("revision"))
+    duplicate = value.get("duplicate")
+    chunks = value.get("chunks")
+    objects = value.get("objects")
+    object_bytes = value.get("object_bytes")
+    if origin is None or identifier is None or revision is None or not isinstance(duplicate, bool):
+        return None
+    if chunks is not None and (isinstance(chunks, bool) or not isinstance(chunks, int) or chunks < 0):
+        return None
+    if isinstance(objects, bool) or not isinstance(objects, int) or objects < 0:
+        return None
+    if isinstance(object_bytes, bool) or not isinstance(object_bytes, int) or object_bytes < 0:
+        return None
+    return {
+        "protocol": PROTOCOL, "origin": origin, "snapshot": identifier, "revision": revision,
+        "duplicate": duplicate, "chunks": chunks, "objects": objects, "object_bytes": object_bytes,
+    }
+
+
+def decode_snapshot_verify_response(value) -> dict[str, Any] | None:
+    keys = ("protocol", "origin", "snapshot", "verified_at", "duplicate")
+    if not _exact_keys(value, keys):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    identifier = decode_digest(value.get("snapshot"))
+    verified_at = _decode_timestamp(value.get("verified_at"))
+    duplicate = value.get("duplicate")
+    if origin is None or identifier is None or verified_at is None or not isinstance(duplicate, bool):
+        return None
+    return {
+        "protocol": PROTOCOL, "origin": origin, "snapshot": identifier,
+        "verified_at": verified_at, "duplicate": duplicate,
+    }
+
+
+def decode_gc_response(value) -> dict[str, Any] | None:
+    keys = ("protocol", "origin", "apply", "snapshots_retained", "snapshots_pruned",
+            "objects_marked", "bytes_marked", "objects_swept", "bytes_swept")
+    if not _exact_keys(value, keys):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    apply_value = value.get("apply")
+    if origin is None or not isinstance(apply_value, bool):
+        return None
+    clean = {"protocol": PROTOCOL, "origin": origin, "apply": apply_value}
+    for key in ("snapshots_retained", "snapshots_pruned", "objects_marked",
+                "bytes_marked", "objects_swept", "bytes_swept"):
+        number = value.get(key)
+        if isinstance(number, bool) or not isinstance(number, int) or number < 0:
+            return None
+        clean[key] = number
+    return clean
+
+
+def decode_object_replace_response(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "object", "replaced")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    row = _decode_remote_object(value.get("object"))
+    replaced = value.get("replaced")
+    if origin is None or row is None or not isinstance(replaced, bool):
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "object": row, "replaced": replaced}
+
+
 def _decode_generation_row(value):
     keys = ("id", "origin_host", "harness", "native_id", "manifest_digest", "source_digest",
             "source_size", "captured_at", "committed_at", "revision", "manifest_object")
@@ -693,13 +1022,18 @@ class MirrorClient:
         return min(60, 2 ** attempt)
 
     def _request(self, method, path, body, headers) -> bytes:
+        payload, _response_headers = self._request_with_headers(method, path, body, headers)
+        return payload
+
+    def _request_with_headers(self, method, path, body, headers) -> tuple[bytes, dict[str, str]]:
         for attempt in range(self.attempts):
             try:
                 connection = self.pool.get()
                 connection.request(method, path, body=body, headers=headers)
                 response = connection.getresponse()
                 payload = response.read(MAX_RESPONSE_BYTES + 1)
-                response_headers = {key.lower(): item for key, item in response.getheaders()}
+                response_headers: dict[str, str] = {
+                    str(key).lower(): str(item) for key, item in response.getheaders()}
                 if len(payload) > MAX_RESPONSE_BYTES:
                     self.pool.discard()
                     raise MirrorError("invalid_response", "mirror response exceeds the limit")
@@ -717,7 +1051,7 @@ class MirrorClient:
                         self._sleep(self._retry_delay(attempt, response_headers))
                         continue
                     raise error
-                return cast(bytes, payload)
+                return cast(bytes, payload), response_headers
             except MirrorError:
                 raise
             except (OSError, http.client.HTTPException) as exc:
@@ -831,6 +1165,13 @@ class MirrorClient:
         headers["Accept"] = "application/octet-stream"
         return self._request("GET", "/api/v1/sync/objects/" + ciphertext, None, headers)
 
+    def get_object_with_metadata(self, ciphertext) -> tuple[bytes, dict[str, str]]:
+        if decode_digest(ciphertext) is None:
+            raise MirrorError("invalid_request", "object digest is invalid")
+        headers = self._auth_headers()
+        headers["Accept"] = "application/octet-stream"
+        return self._request_with_headers("GET", "/api/v1/sync/objects/" + ciphertext, None, headers)
+
     def put_object(self, prepared) -> dict[str, Any]:
         headers = self._auth_headers()
         headers.update({
@@ -844,6 +1185,73 @@ class MirrorClient:
         decoded = decode_put_response(_loads(payload))
         if decoded is None:
             raise MirrorError("invalid_response", "object upload response is invalid")
+        return decoded
+
+    def snapshots(self, origin, limit=100):
+        if decode_origin(origin) is None or not 1 <= limit <= MAX_PAGE:
+            raise MirrorError("invalid_request", "snapshot list request is invalid")
+        query = urlencode({"origin": origin, "limit": limit})
+        decoded = decode_snapshot_list_response(self._json("GET", "/api/v1/sync/snapshots?" + query))
+        if decoded is None:
+            raise MirrorError("invalid_response", "snapshot list response is invalid")
+        return decoded
+
+    def snapshot(self, origin, identifier):
+        if decode_origin(origin) is None or decode_digest(identifier) is None:
+            raise MirrorError("invalid_request", "snapshot detail request is invalid")
+        query = urlencode({"origin": origin})
+        decoded = decode_snapshot_detail_response(
+            self._json("GET", "/api/v1/sync/snapshots/" + identifier + "?" + query))
+        if decoded is None or decoded["snapshot"]["id"] != identifier:
+            raise MirrorError("invalid_response", "snapshot detail response is invalid")
+        return decoded
+
+    def commit_snapshot(self, origin, base_revision, snapshot):
+        request = {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision, "snapshot": snapshot}
+        if decode_snapshot_commit(request) is None:
+            raise MirrorError("invalid_request", "snapshot commit request is invalid")
+        decoded = decode_snapshot_commit_response(self._json("POST", "/api/v1/sync/snapshots", request))
+        if decoded is None:
+            raise MirrorError("invalid_response", "snapshot commit response is invalid")
+        if decoded["origin"] != origin or decoded["snapshot"] != snapshot["id"]:
+            raise MirrorError("invalid_response", "snapshot commit response names a different snapshot")
+        return decoded
+
+    def verify_snapshot(self, origin, identifier):
+        request = {"protocol": PROTOCOL, "origin": origin}
+        if decode_snapshot_verify_request(request) is None:
+            raise MirrorError("invalid_request", "snapshot verification request is invalid")
+        decoded = decode_snapshot_verify_response(
+            self._json("POST", "/api/v1/sync/snapshots/" + identifier + "/verify", request))
+        if decoded is None or decoded["snapshot"] != identifier:
+            raise MirrorError("invalid_response", "snapshot verification response is invalid")
+        return decoded
+
+    def gc(self, origin, apply):
+        request = {"protocol": PROTOCOL, "origin": origin, "apply": apply}
+        if decode_gc_request(request) is None:
+            raise MirrorError("invalid_request", "gc request is invalid")
+        decoded = decode_gc_response(self._json("POST", "/api/v1/sync/gc", request))
+        if decoded is None or decoded["origin"] != origin:
+            raise MirrorError("invalid_response", "gc response is invalid")
+        return decoded
+
+    def replace_object(self, origin, object_row):
+        request = {
+            "protocol": PROTOCOL,
+            "origin": origin,
+            "plaintext_digest": object_row["plaintext_digest"],
+            "plaintext_size": object_row["plaintext_size"],
+            "encoding": object_row["encoding"],
+            "ciphertext_digest": object_row["ciphertext_digest"],
+            "ciphertext_size": object_row["ciphertext_size"],
+        }
+        if decode_object_replace_request(request) is None:
+            raise MirrorError("invalid_request", "object replacement request is invalid")
+        decoded = decode_object_replace_response(self._json(
+            "POST", "/api/v1/sync/objects/" + object_row["plaintext_digest"] + "/replace", request))
+        if decoded is None or decoded["object"]["ciphertext_digest"] != object_row["ciphertext_digest"]:
+            raise MirrorError("invalid_response", "object replacement response is invalid")
         return decoded
 
 
@@ -978,7 +1386,7 @@ def upload_objects(config, origin, archive_dir, objects, recipients=None, *, con
     return counters
 
 
-def _empty_sync_counters():
+def _empty_sync_counters() -> dict[str, Any]:
     return {
         "hello": 0, "generations_checked": 0, "generations_committed": 0,
         "generations_duplicate": 0, "generations_tombstoned": 0,
@@ -988,6 +1396,8 @@ def _empty_sync_counters():
         "manifest_plaintext_bytes": 0, "manifest_compressed_bytes": 0,
         "manifest_ciphertext_bytes": 0,
         "tombstones_fetched": 0, "tombstones_pushed": 0,
+        "snapshots_created": 0, "snapshots_duplicate": 0, "snapshot_chunks_uploaded": 0,
+        "snapshot_objects_uploaded": 0, "snapshot_bytes": 0,
     }
 
 
@@ -1133,6 +1543,25 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
 
         if changed or (pinned is not None and pinned.get("last_error") is not None):
             store.write_mirror_remote(remote_name, store_id, revision, watermark)
+        if (counters["generations_committed"] > 0 or counters["generations_tombstoned"] > 0
+                or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0):
+            try:
+                snapshot: dict[str, Any] = upload_snapshot(
+                    store, config, client=runtime, origin=origin, revision=revision,
+                    recipients=recipients, concurrency=concurrency, prepare=prepare,
+                    client_factory=factory)
+            except (OSError, sqlite3.DatabaseError, backup_module.BackupError,
+                    archive_module.ArchiveError) as exc:
+                raise MirrorError("snapshot_failed", "snapshot failed: " + str(exc)) from exc
+            if snapshot["duplicate"]:
+                counters["snapshots_duplicate"] += 1
+            else:
+                counters["snapshots_created"] += 1
+            counters["snapshot_chunks_uploaded"] += snapshot["chunks_uploaded"]
+            counters["snapshot_objects_uploaded"] += snapshot["objects_uploaded"]
+            counters["snapshot_bytes"] += snapshot["db_size"]
+            revision = max(revision, snapshot["revision"])
+            store.write_mirror_remote(remote_name, store_id, revision, watermark)
         counters["store_id"] = store_id
         counters["revision"] = revision
         counters["tombstone_watermark"] = watermark
@@ -1142,6 +1571,445 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
         if store_id is not None:
             store.write_mirror_remote(remote_name, store_id, revision, watermark, error=str(exc)[:500])
         raise
+    finally:
+        if owner:
+            runtime.close()
+
+
+def _collector_origin(client) -> str:
+    value = client.status()
+    principal = value.get("principal")
+    if not isinstance(principal, dict) or principal.get("kind") != "collector":
+        raise MirrorError("invalid_response", "mirror status did not report a collector principal")
+    origin = decode_origin(principal.get("origin_host"))
+    if origin is None:
+        raise MirrorError("invalid_response", "mirror status has no collector origin")
+    return origin
+
+
+def _resolve_known(client, origin, refs) -> dict[str, dict[str, Any]]:
+    wanted: dict[str, int | None] = {}
+    for digest, size in refs:
+        if decode_digest(digest) is None:
+            raise MirrorError("invalid_request", "object digest is invalid")
+        if size is not None:
+            if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= MAX_OBJECT_BYTES:
+                raise MirrorError("invalid_request", "object size is invalid")
+        known_size = wanted.get(digest)
+        if known_size is not None and size is not None and known_size != size:
+            raise MirrorError("invalid_request", "object sizes conflict")
+        wanted[digest] = size if size is not None else known_size
+    items = list(wanted.items())
+    known: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(items), 5000):
+        batch = items[start:start + 5000]
+        answer: dict[str, Any] = client.missing(origin, [(digest, 0 if size is None else size) for digest, size in batch])
+        if answer["origin"] != origin:
+            raise MirrorError("invalid_response", "missing-objects response names a different origin")
+        for row in answer["known"]:
+            digest = row["plaintext_digest"]
+            if digest not in wanted:
+                raise MirrorError("invalid_response", "missing-objects response carries an unrequested object")
+            expected = wanted[digest]
+            if expected is not None and row["plaintext_size"] != expected:
+                raise MirrorError("invalid_response", "object size does not match the request")
+            known[digest] = row
+    missing = [digest for digest in wanted if digest not in known]
+    if missing:
+        raise MirrorError("missing_object", "object is not stored: " + missing[0])
+    return known
+
+
+def _download_object(client, identity_path, row) -> bytes:
+    digest = row["plaintext_digest"]
+    try:
+        ciphertext = client.get_object(row["ciphertext_digest"])
+        if len(ciphertext) != row["ciphertext_size"]:
+            raise MirrorError("corrupt_object", "object failed verification: " + digest)
+        return mirror_crypto.decode_object(
+            ciphertext, identity_path, row["encoding"], digest, row["plaintext_size"])
+    except mirror_crypto.CryptoError as exc:
+        raise MirrorError("corrupt_object", "object failed verification: " + digest) from exc
+
+
+def _chunk_row(chunk) -> dict[str, Any]:
+    return {
+        "plaintext_digest": chunk["plaintext_digest"],
+        "plaintext_size": chunk["size"],
+        "ciphertext_digest": chunk["ciphertext_digest"],
+        "ciphertext_size": chunk["ciphertext_size"],
+        "encoding": chunk["encoding"],
+    }
+
+
+def _object_row(item) -> dict[str, Any]:
+    return {
+        "plaintext_digest": item["plaintext_digest"],
+        "plaintext_size": item["size"],
+        "ciphertext_digest": item["ciphertext_digest"],
+        "ciphertext_size": item["ciphertext_size"],
+        "encoding": item["encoding"],
+    }
+
+
+def _reassemble_snapshot(client, identity_path, detail, destination) -> Path:
+    snapshot = detail["snapshot"]
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    size = 0
+    with open(destination, "wb") as stream:
+        for chunk in detail["chunks"]:
+            data = _download_object(client, identity_path, _chunk_row(chunk))
+            if len(data) != chunk["size"]:
+                raise MirrorError("corrupt_object", "object failed verification: " + chunk["plaintext_digest"])
+            stream.write(data)
+            digest.update(data)
+            size += len(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    if size != snapshot["db_size"] or digest.hexdigest() != snapshot["db_digest"]:
+        raise MirrorError("corrupt_object", "snapshot database failed verification: " + snapshot["id"])
+    try:
+        with contextlib.closing(
+                sqlite3.connect("file:%s?mode=ro" % destination.as_posix(), uri=True)) as connection:
+            if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise MirrorError("corrupt_object", "snapshot database failed integrity_check: " + snapshot["id"])
+    except sqlite3.DatabaseError as exc:
+        raise MirrorError("corrupt_object", "snapshot database is not readable: " + snapshot["id"]) from exc
+    return destination
+
+
+def _snapshot_backup_dir(client, identity_path, detail, directory) -> dict[str, Any]:
+    directory = Path(directory)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _reassemble_snapshot(client, identity_path, detail, directory / "sessions.sqlite3")
+    objects = []
+    for item in detail["objects"]:
+        data = _download_object(client, identity_path, _object_row(item))
+        archive_module._write_object(directory, data)
+        objects.append({"digest": item["plaintext_digest"], "size": item["size"]})
+    manifest = {
+        "protocol": PROTOCOL,
+        "created_at": detail["snapshot"]["created_at"],
+        "schema_version": detail["snapshot"]["schema_version"],
+        "objects": objects,
+        "generations": 0,
+        "tombstones": 0,
+    }
+    path = directory / backup_module.MANIFEST
+    path.write_text(json.dumps(manifest, indent=1, sort_keys=True))
+    return manifest
+
+
+def _generation_pages(client, origin) -> list[dict[str, Any]]:
+    rows = []
+    after = 0
+    while True:
+        page = client.generations(origin, after=after, limit=MAX_PAGE)
+        rows.extend(page["generations"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return rows
+        after = int(cursor)
+
+
+def _object_row_from_response(ciphertext, response_headers) -> dict[str, Any]:
+    plaintext = decode_digest(response_headers.get("x-plaintext-digest"))
+    encoding = response_headers.get("x-encoding")
+    plaintext_size = response_headers.get("x-plaintext-size")
+    ciphertext_size = response_headers.get("content-length")
+    if plaintext is None or encoding not in ENCODINGS:
+        raise MirrorError("invalid_response", "object response metadata is invalid")
+    if plaintext_size is None or not plaintext_size.isdigit() or not 0 <= int(plaintext_size) <= MAX_OBJECT_BYTES:
+        raise MirrorError("invalid_response", "object response metadata is invalid")
+    if ciphertext_size is None or not ciphertext_size.isdigit() or int(ciphertext_size) > MAX_OBJECT_BYTES:
+        raise MirrorError("invalid_response", "object response metadata is invalid")
+    return {
+        "plaintext_digest": plaintext,
+        "plaintext_size": int(plaintext_size),
+        "encoding": encoding,
+        "ciphertext_digest": ciphertext,
+        "ciphertext_size": int(ciphertext_size),
+    }
+
+
+def _download_manifest(client, identities, ciphertext) -> tuple[dict[str, Any], bytes]:
+    payload, response_headers = client.get_object_with_metadata(ciphertext)
+    row = _object_row_from_response(ciphertext, response_headers)
+    if len(payload) != row["ciphertext_size"]:
+        raise MirrorError("corrupt_object", "object failed verification: " + row["plaintext_digest"])
+    last = None
+    for identity in identities:
+        try:
+            return row, mirror_crypto.decode_object(
+                payload, identity, row["encoding"], row["plaintext_digest"], row["plaintext_size"])
+        except mirror_crypto.CryptoError as exc:
+            last = exc
+    raise MirrorError("corrupt_object", "object failed verification: " + row["plaintext_digest"]) from last
+
+
+def _load_manifests(client, origin, rows, identities) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]:
+    result = []
+    for row in rows:
+        manifest_row, data = _download_manifest(client, identities, row["manifest_object"])
+        try:
+            manifest = json.loads(data.decode("utf-8"))
+            clean = archive_module.validate_manifest(manifest)
+        except (UnicodeDecodeError, ValueError, archive_module.ArchiveError) as exc:
+            raise MirrorError("corrupt_object", "manifest failed verification: " + row["manifest_digest"]) from exc
+        if clean.manifest_digest != row["manifest_digest"] or clean.origin_host != origin:
+            raise MirrorError("corrupt_object", "manifest failed verification: " + row["manifest_digest"])
+        result.append((row, manifest, manifest_row))
+    return result
+
+
+def _download_with_identities(client, identities, row) -> bytes:
+    last = None
+    for identity in identities:
+        try:
+            return _download_object(client, identity, row)
+        except MirrorError as exc:
+            if exc.code != "corrupt_object":
+                raise
+            last = exc
+    if last is not None:
+        raise last
+    raise MirrorError("invalid_config", "an age identity is required to decode the mirror")
+
+
+def upload_snapshot(store, config, *, client, origin, revision, recipients=None, concurrency=4,
+                    prepare=None, client_factory=None) -> dict[str, Any]:
+    if recipients is None:
+        recipients = mirror_crypto.load_recipients(config.age_recipients_file)
+    prepare = prepare or mirror_crypto.prepare_object
+    factory = client_factory or (lambda: MirrorClient(config))
+    with tempfile.TemporaryDirectory(prefix="mirror-snapshot-") as temporary:
+        destination = Path(temporary) / "snapshot"
+
+        def publish(directory, metadata: dict[str, Any]) -> dict[str, Any]:
+            database = Path(directory) / "sessions.sqlite3"
+            chunk_refs = [(chunk["digest"], chunk["size"]) for chunk in metadata["chunks"]]
+            answer = client.missing(origin, chunk_refs)
+            known: dict[str, dict[str, Any]] = {
+                row["plaintext_digest"]: row for row in answer["known"]
+            }
+            chunks_uploaded: int = 0
+            chunk_plaintext: int = 0
+            chunk_ciphertext: int = 0
+            with open(database, "rb") as stream:
+                for chunk in metadata["chunks"]:
+                    row = known.get(chunk["digest"])
+                    if row is not None:
+                        if row["plaintext_size"] != chunk["size"]:
+                            raise MirrorError("invalid_response", "known snapshot chunk has the wrong size")
+                        continue
+                    stream.seek(chunk["offset"])
+                    data = stream.read(chunk["size"])
+                    if archive_module.sha256(data) != chunk["digest"]:
+                        raise MirrorError("corrupt_object", "snapshot chunk failed verification: " + chunk["digest"])
+                    prepared = prepare(data, recipients)
+                    result = client.put_object(prepared)
+                    stored = result["object"]
+                    if stored["plaintext_digest"] != chunk["digest"] or stored["plaintext_size"] != chunk["size"]:
+                        raise MirrorError("invalid_response", "snapshot chunk upload names a different object")
+                    known[chunk["digest"]] = stored
+                    chunks_uploaded += 1
+                    chunk_plaintext += int(prepared.plaintext_size)
+                    chunk_ciphertext += int(prepared.ciphertext_size)
+            object_refs = [(item["digest"], item["size"], "chunk") for item in metadata["objects"]]
+            upload: dict[str, Any] = upload_objects(
+                config, origin, store.archive_dir, object_refs, recipients,
+                concurrency=concurrency, client_factory=factory, prepare=prepare)
+            final: dict[str, dict[str, Any]] = _resolve_known(
+                client, origin, chunk_refs + [(item["digest"], item["size"]) for item in metadata["objects"]])
+            wire: dict[str, Any] = {
+                "id": metadata["db_digest"],
+                "created_at": metadata["created_at"],
+                "schema_version": metadata["schema_version"],
+                "db_digest": metadata["db_digest"],
+                "db_size": metadata["db_size"],
+                "chunks": [
+                    {"plaintext_digest": chunk["digest"], "size": chunk["size"],
+                     "ciphertext_digest": final[chunk["digest"]]["ciphertext_digest"]}
+                    for chunk in metadata["chunks"]
+                ],
+                "objects": [{"plaintext_digest": item["digest"], "size": item["size"]} for item in metadata["objects"]],
+            }
+            committed: dict[str, Any] = client.commit_snapshot(origin, revision, wire)
+            return {
+                "id": metadata["db_digest"], "revision": committed["revision"],
+                "duplicate": committed["duplicate"], "db_size": metadata["db_size"],
+                "chunks": len(metadata["chunks"]), "chunks_uploaded": chunks_uploaded,
+                "objects": len(metadata["objects"]), "objects_uploaded": upload["objects_stored"],
+                "object_bytes": metadata["object_bytes"],
+                "bytes_plaintext": upload["bytes_plaintext"] + chunk_plaintext,
+                "bytes_ciphertext": upload["bytes_ciphertext"] + chunk_ciphertext,
+            }
+
+        return backup_module.snapshot(store, destination, publish)
+
+
+def snapshots(config, *, client=None, limit=100) -> list[dict[str, Any]]:
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    try:
+        origin = _collector_origin(runtime)
+        return runtime.snapshots(origin, limit)["snapshots"]
+    finally:
+        if owner:
+            runtime.close()
+
+
+def gc(config, *, apply=False, client=None) -> dict[str, Any]:
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    try:
+        origin = _collector_origin(runtime)
+        return runtime.gc(origin, apply)
+    finally:
+        if owner:
+            runtime.close()
+
+
+def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]:
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    try:
+        origin = _collector_origin(runtime)
+        generations = _generation_pages(runtime, origin)
+        manifests = _load_manifests(runtime, origin, generations, [config.age_identity_file])
+        referenced: dict[str, int] = {}
+        for _row, manifest, _manifest_row in manifests:
+            for item in [*manifest["chunks"], *manifest["artifacts"]]:
+                known_size = referenced.setdefault(item["digest"], item["size"])
+                if known_size != item["size"]:
+                    raise MirrorError("corrupt_object", "object size conflicts: " + item["digest"])
+        _resolve_known(runtime, origin, list(referenced.items()))
+        snapshot_rows: list[dict[str, Any]] = runtime.snapshots(origin, MAX_PAGE)["snapshots"]
+        snapshot_objects: dict[str, int] = {}
+        chunks: int = 0
+        with tempfile.TemporaryDirectory(prefix="mirror-verify-") as temporary:
+            for index, snapshot in enumerate(snapshot_rows):
+                detail = runtime.snapshot(origin, snapshot["id"])
+                _reassemble_snapshot(runtime, config.age_identity_file, detail, Path(temporary) / ("%d.sqlite3" % index))
+                chunks += len(detail["chunks"])
+                for item in detail["objects"]:
+                    known_size = snapshot_objects.setdefault(item["plaintext_digest"], item["size"])
+                    if known_size != item["size"]:
+                        raise MirrorError("corrupt_object", "object size conflicts: " + item["plaintext_digest"])
+        all_objects: dict[str, int] = dict(referenced)
+        for digest, size in snapshot_objects.items():
+            known_size = all_objects.setdefault(digest, size)
+            if known_size != size:
+                raise MirrorError("corrupt_object", "object size conflicts: " + digest)
+        known: dict[str, dict[str, Any]] = _resolve_known(runtime, origin, list(all_objects.items()))
+        sampled = 0
+        if objects:
+            count = sample if sample is not None else max(100, (len(all_objects) * 5 + 99) // 100)
+            count = min(count, len(all_objects))
+            for digest in sorted(all_objects)[:count]:
+                _download_object(runtime, config.age_identity_file, known[digest])
+                sampled += 1
+        return {
+            "generations": len(generations), "snapshots": len(snapshot_rows),
+            "objects": len(all_objects), "chunks": chunks, "sampled": sampled,
+            "bytes": sum(all_objects.values()),
+        }
+    finally:
+        if owner:
+            runtime.close()
+
+
+def restore(config, remote_name, snapshot_id, destination, *, client=None, identity_path=None) -> dict[str, Any]:
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    identity = Path(identity_path or config.age_identity_file)
+    try:
+        origin = _collector_origin(runtime)
+        detail: dict[str, Any] = runtime.snapshot(origin, snapshot_id)
+        with tempfile.TemporaryDirectory(prefix="mirror-restore-") as temporary:
+            backup_dir = Path(temporary) / "backup"
+            _snapshot_backup_dir(runtime, identity, detail, backup_dir)
+            backup_module.restore(backup_dir, destination)
+        from agent_memory.store import Store
+        replayed = 0
+        with Store(destination) as store:
+            rows: list[dict[str, Any]] = [row for row in _generation_pages(runtime, origin)
+                                          if row["revision"] > detail["snapshot"]["revision"]]
+            manifests = _load_manifests(runtime, origin, rows, [identity])
+            for _row, manifest, _manifest_row in manifests:
+                refs = [(item["digest"], item["size"]) for item in [*manifest["chunks"], *manifest["artifacts"]]]
+                known: dict[str, dict[str, Any]] = _resolve_known(runtime, origin, refs)
+                received: dict[str, bytes] = {}
+                for digest, size in refs:
+                    if store.object_intact(digest, size):
+                        continue
+                    received[digest] = _download_object(runtime, identity, known[digest])
+                store.commit_generation(manifest, received)
+                replayed += 1
+            cursor = None
+            applied = 0
+            while True:
+                page: dict[str, Any] = runtime.tombstones(origin, cursor)
+                for row in page["tombstones"]:
+                    learning_module.apply_remote_forget(
+                        store, origin, row["harness"], row["native_id"], row["scope"], row["forgotten_at"])
+                    applied += 1
+                cursor = page["next_cursor"]
+                if cursor is None:
+                    break
+            hello: dict[str, Any] = runtime.hello(origin)
+            store.write_mirror_remote(
+                remote_name, hello["store_id"], hello["revision"], hello["tombstone_watermark"])
+        return {
+            "snapshot": detail["snapshot"]["id"], "db_size": detail["snapshot"]["db_size"],
+            "chunks": len(detail["chunks"]), "objects": len(detail["objects"]),
+            "replayed": replayed, "tombstones": applied,
+        }
+    finally:
+        if owner:
+            runtime.close()
+
+
+def rotate(config, *, recipients_file, identity_file, old_identity_file=None, client=None) -> dict[str, Any]:
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    old_identity = Path(old_identity_file or config.age_identity_file)
+    new_identity = Path(identity_file)
+    recipients = mirror_crypto.load_recipients(recipients_file)
+    try:
+        origin = _collector_origin(runtime)
+        generations = _generation_pages(runtime, origin)
+        manifests = _load_manifests(runtime, origin, generations, [old_identity, new_identity])
+        objects: dict[str, dict[str, Any]] = {}
+        for _row, manifest, manifest_row in manifests:
+            objects[manifest_row["plaintext_digest"]] = dict(manifest_row)
+            refs = [(item["digest"], item["size"]) for item in [*manifest["chunks"], *manifest["artifacts"]]]
+            known: dict[str, dict[str, Any]] = _resolve_known(runtime, origin, refs)
+            for digest, item in known.items():
+                objects[digest] = dict(item)
+        for snapshot in runtime.snapshots(origin, MAX_PAGE)["snapshots"]:
+            detail: dict[str, Any] = runtime.snapshot(origin, snapshot["id"])
+            for chunk in detail["chunks"]:
+                objects[chunk["plaintext_digest"]] = _chunk_row(chunk)
+            for item in detail["objects"]:
+                objects[item["plaintext_digest"]] = _object_row(item)
+        rotated = 0
+        for digest in sorted(objects):
+            row: dict[str, Any] = objects[digest]
+            data = _download_with_identities(runtime, [old_identity, new_identity], row)
+            prepared = mirror_crypto.prepare_object(data, recipients)
+            runtime.put_object(prepared)
+            runtime.replace_object(origin, {
+                "plaintext_digest": prepared.plaintext_digest,
+                "plaintext_size": prepared.plaintext_size,
+                "encoding": prepared.encoding,
+                "ciphertext_digest": prepared.ciphertext_digest,
+                "ciphertext_size": prepared.ciphertext_size,
+            })
+            rotated += 1
+        return {"objects": len(objects), "rotated": rotated}
     finally:
         if owner:
             runtime.close()

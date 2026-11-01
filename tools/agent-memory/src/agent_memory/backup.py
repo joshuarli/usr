@@ -7,6 +7,7 @@ verifies the manifest, restores the catalog, rebuilds derived indexes from
 the captured bytes, and never activates a service or a review grant.
 """
 import contextlib
+import hashlib
 import json
 import os
 import secrets
@@ -19,6 +20,7 @@ from agent_memory import archive as archive_module
 from agent_memory.learning import apply_remote_forget
 
 MANIFEST = "manifest.json"
+SNAPSHOT_CHUNK_BYTES = 1 << 20
 
 
 class BackupError(RuntimeError):
@@ -95,6 +97,83 @@ def _populate(store, staging, protocol):
     return manifest
 
 
+def snapshot(store, destination, publish=None):
+    """Write a sanitized consistent database copy and optionally publish it under the object lock.
+
+    The copy keeps the archive's shared object lock until ``publish`` returns, so a
+    concurrent forget cannot unlink an object the snapshot pins. Archive objects are
+    not copied; they are already content-addressed in the mirror.
+    """
+    destination = Path(destination)
+    if destination.exists() and any(destination.iterdir()):
+        raise BackupError("snapshot destination must be new or empty: " + str(destination))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = destination.with_name(destination.name + ".partial-" + secrets.token_hex(4))
+    staging.mkdir(mode=0o700)
+    try:
+        database = staging / "sessions.sqlite3"
+        with archive_module.object_lock(store.archive_dir):
+            with contextlib.closing(sqlite3.connect(str(database))) as target:
+                store.db.backup(target)
+            os.chmod(database, 0o600)
+            _fsync(database)
+            metadata = _snapshot_metadata(database)
+            result = metadata if publish is None else publish(staging, metadata)
+        if destination.exists():
+            destination.rmdir()
+        os.rename(staging, destination)
+        _fsync(destination.parent)
+        return result
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _snapshot_metadata(database):
+    with contextlib.closing(sqlite3.connect(str(database))) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"archive_generation", "archive_generation_object", "archive_artifact"} <= tables:
+            raise BackupError("snapshot database has no archive schema")
+        with connection:
+            if "learning_projects" in tables:
+                connection.execute("UPDATE learning_projects SET enabled = 0, grant_source = 'project'")
+            if "learning_global_grant" in tables:
+                connection.execute("DELETE FROM learning_global_grant")
+        if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise BackupError("snapshot database failed integrity_check")
+        schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        objects = {}
+        for digest, size in connection.execute(
+                "SELECT digest, size FROM archive_generation_object "
+                "UNION SELECT digest, size FROM archive_artifact ORDER BY digest"):
+            known = objects.setdefault(str(digest), int(size))
+            if known != int(size):
+                raise BackupError("snapshot object has conflicting sizes: " + str(digest))
+    digest = hashlib.sha256()
+    size = 0
+    chunks = []
+    with open(database, "rb") as stream:
+        while True:
+            data = stream.read(SNAPSHOT_CHUNK_BYTES)
+            if not data:
+                break
+            chunks.append({"offset": size, "size": len(data), "digest": archive_module.sha256(data)})
+            digest.update(data)
+            size += len(data)
+    if not chunks:
+        raise BackupError("snapshot database is empty")
+    return {
+        "created_at": time.time(),
+        "schema_version": schema_version,
+        "db_digest": digest.hexdigest(),
+        "db_size": size,
+        "chunks": chunks,
+        "objects": [{"digest": key, "size": value} for key, value in sorted(objects.items())],
+        "objects_count": len(objects),
+        "object_bytes": sum(objects.values()),
+    }
+
+
 def verify(destination):
     destination = Path(destination)
     manifest_path = destination / MANIFEST
@@ -112,7 +191,8 @@ def verify(destination):
     database = destination / "sessions.sqlite3"
     if not database.is_file():
         raise BackupError("backup database is missing")
-    with sqlite3.connect("file:%s?mode=ro" % database.as_posix(), uri=True) as connection:
+    with contextlib.closing(
+            sqlite3.connect("file:%s?mode=ro" % database.as_posix(), uri=True)) as connection:
         if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise BackupError("backup database failed integrity_check")
     return manifest
@@ -135,8 +215,9 @@ def restore(backup_dir, new_state_dir, tombstones_from=None):
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         shutil.copyfile(archive_module.object_path(backup_dir, item["digest"]), target)
     database = state / "sessions.sqlite3"
-    with sqlite3.connect("file:%s?mode=ro" % (backup_dir / "sessions.sqlite3").as_posix(), uri=True) as source:
-        with sqlite3.connect(str(database)) as target:
+    with contextlib.closing(
+            sqlite3.connect("file:%s?mode=ro" % (backup_dir / "sessions.sqlite3").as_posix(), uri=True)) as source:
+        with contextlib.closing(sqlite3.connect(str(database))) as target:
             source.backup(target)
     os.chmod(database, 0o600)
     try:
@@ -152,7 +233,8 @@ def restore(backup_dir, new_state_dir, tombstones_from=None):
                 store.db.execute("DELETE FROM learning_global_grant")
         store.reindex_generations()
         if tombstones_from is not None:
-            with sqlite3.connect("file:%s?mode=ro" % (Path(tombstones_from) / "sessions.sqlite3").as_posix(), uri=True) as current:
+            with contextlib.closing(sqlite3.connect(
+                    "file:%s?mode=ro" % (Path(tombstones_from) / "sessions.sqlite3").as_posix(), uri=True)) as current:
                 current.row_factory = sqlite3.Row
                 for row in current.execute("SELECT origin_host, harness, native_id, scope, forgotten_at FROM tombstone"):
                     apply_remote_forget(store, row["origin_host"], row["harness"], row["native_id"],

@@ -23,12 +23,13 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   at `memories.17166969.xyz`, and the live smoke probe), `P2.1` (protocol v1
   validators, hello/missing/object routes, and the pooled HTTPS client), `P2.2`
   (compression before encryption, bounded concurrent upload, known-object skipping, and
-  the `mirror-initial` cost baseline), and `P2.3` (generation commit, manifest upload,
+  the `mirror-initial` cost baseline), `P2.3` (generation commit, manifest upload,
   revision fences, tombstone-first delivery, store identity pinning, durable acks, and
-  the no-op sync path).
+  the no-op sync path), and `P2.4` (content-addressed recovery snapshots, restore and
+  replay, verify, two-phase GC, and key rotation).
 - **In flight:** none.
-- **Next slice:** `P2.4` (recovery snapshots, restore, verify, and GC); the first command
-  re-checks the baseline: `make test`.
+- **Next slice:** `P3.1` (local learning change journal); the first command re-checks the
+  baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.

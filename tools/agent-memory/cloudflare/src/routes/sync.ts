@@ -6,6 +6,7 @@ import {
   readObjectByPlaintext,
   readOriginState,
   readStoreMeta,
+  replaceRemoteObject,
   type OriginState,
   type RemoteObjectRow,
   type StoreMeta,
@@ -18,6 +19,7 @@ import {
   decodeDigest,
   decodeHello,
   decodeMissingRequest,
+  decodeObjectReplaceRequest,
 } from "../protocol.js";
 import type { Env } from "../index.js";
 import {
@@ -34,6 +36,7 @@ import {
 const HELLO_PATH = "/api/v1/sync/hello";
 const MISSING_PATH = "/api/v1/sync/objects/missing";
 const OBJECT_PREFIX = "/api/v1/sync/objects/";
+const REPLACE_SUFFIX = "/replace";
 const ENCODINGS = new Set(["identity", "zlib"]);
 
 function mapping(row: RemoteObjectRow): Record<string, unknown> {
@@ -176,6 +179,84 @@ async function putObject(
   }, false, { "Server-Timing": serverTiming(timing) });
 }
 
+async function replaceObject(
+  request: Request,
+  env: Env,
+  principal: Principal,
+  plaintext: string,
+  timing: SyncTiming,
+): Promise<Response> {
+  if (request.method !== "POST") return methodNotAllowed(["POST"], { "Server-Timing": serverTiming(timing) });
+  if (principal.kind !== "collector") return refuse(403, "forbidden", "collector token required", timing);
+  const body = await readJson(request, timing);
+  if (!body.ok) return body.response;
+  const version = versionOrError(body.value, timing);
+  if (version !== null) return version;
+  const replaceBody = decodeObjectReplaceRequest(body.value);
+  if (replaceBody === null || replaceBody.plaintext_digest !== plaintext) {
+    return refuse(400, "invalid_request", "invalid object replacement", timing);
+  }
+  const mismatch = boundOrigin(principal, replaceBody.origin, timing);
+  if (mismatch !== null) return mismatch;
+  const started = performance.now();
+  try {
+    const existing = await readObjectByPlaintext(env.DB, principal.origin_host, plaintext);
+    if (existing === null) return refuse(404, "not_found", "object not found", timing);
+    if (existing.ciphertext_digest === replaceBody.ciphertext_digest) {
+      if (existing.plaintext_size !== replaceBody.plaintext_size
+          || existing.encoding !== replaceBody.encoding
+          || existing.ciphertext_size !== replaceBody.ciphertext_size) {
+        return refuse(409, "conflict", "ciphertext is already bound to another object", timing);
+      }
+      return json(200, {
+        protocol: PROTOCOL,
+        origin: principal.origin_host,
+        object: mapping(existing),
+        replaced: false,
+      }, false, { "Server-Timing": serverTiming(timing) });
+    }
+    const other = await readObjectByCiphertext(env.DB, principal.origin_host, replaceBody.ciphertext_digest);
+    if (other !== null && other.plaintext_digest !== plaintext) {
+      return refuse(409, "conflict", "ciphertext is bound to another plaintext", timing);
+    }
+    const r2Started = performance.now();
+    let stored: R2Object | null;
+    try {
+      stored = await env.BUCKET.head(`v1/o/${replaceBody.ciphertext_digest}`);
+    } finally {
+      timing.r2 += performance.now() - r2Started;
+    }
+    if (stored === null) return refuse(409, "missing_object", "replacement ciphertext is not stored", timing);
+    await replaceRemoteObject(env.DB, {
+      plaintext_digest: plaintext,
+      plaintext_size: replaceBody.plaintext_size,
+      encoding: replaceBody.encoding,
+      ciphertext_digest: replaceBody.ciphertext_digest,
+      ciphertext_size: replaceBody.ciphertext_size,
+      origin_host: principal.origin_host,
+      created_at: Date.now() / 1000,
+    }, existing.ciphertext_digest);
+    const replaced = await readObjectByPlaintext(env.DB, principal.origin_host, plaintext);
+    if (replaced === null || replaced.ciphertext_digest !== replaceBody.ciphertext_digest) {
+      return refuse(409, "conflict", "object replacement did not take", timing);
+    }
+    return json(200, {
+      protocol: PROTOCOL,
+      origin: principal.origin_host,
+      object: mapping(replaced),
+      replaced: true,
+    }, false, { "Server-Timing": serverTiming(timing) });
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("UNIQUE constraint failed") || message.includes("FOREIGN KEY constraint failed")) {
+      return refuse(409, "conflict", "object replacement conflicts with existing state", timing);
+    }
+    return refuse(503, "unavailable", "object replacement failed", timing);
+  } finally {
+    timing.d1 += performance.now() - started;
+  }
+}
+
 async function readObject(
   env: Env,
   principal: Principal,
@@ -221,7 +302,14 @@ export async function handleSync(
     return await missing(request, env, principal, timing);
   }
   if (!pathname.startsWith(OBJECT_PREFIX)) return null;
-  const ciphertext = decodeDigest(pathname.slice(OBJECT_PREFIX.length));
+  const rest = pathname.slice(OBJECT_PREFIX.length);
+  if (rest.endsWith(REPLACE_SUFFIX)) {
+    const plaintext = decodeDigest(rest.slice(0, -REPLACE_SUFFIX.length));
+    if (plaintext === null) return refuse(404, "not_found", "route not found", timing);
+    if (principal.kind !== "collector") return refuse(403, "forbidden", "collector token required", timing);
+    return await replaceObject(request, env, principal, plaintext, timing);
+  }
+  const ciphertext = decodeDigest(rest);
   if (ciphertext === null) return refuse(404, "not_found", "route not found", timing);
   if (principal.kind !== "collector") return refuse(403, "forbidden", "collector token required", timing);
   if (request.method === "PUT") return await putObject(request, env, principal, ciphertext, timing);

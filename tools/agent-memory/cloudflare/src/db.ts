@@ -67,6 +67,62 @@ export interface RemoteObjectRow {
   readonly ciphertext_size: number;
 }
 
+export interface SnapshotRow {
+  readonly id: string;
+  readonly origin_host: string;
+  readonly created_at: number;
+  readonly schema_version: number;
+  readonly db_digest: string;
+  readonly db_size: number;
+  readonly objects: number;
+  readonly object_bytes: number;
+  readonly verified_at: number | null;
+  readonly revision: number;
+}
+
+export interface SnapshotChunkRow {
+  readonly ordinal: number;
+  readonly plaintext_digest: string;
+  readonly size: number;
+  readonly ciphertext_digest: string;
+  readonly encoding: string | null;
+  readonly ciphertext_size: number | null;
+}
+
+export interface SnapshotObjectRow {
+  readonly plaintext_digest: string;
+  readonly size: number;
+  readonly ciphertext_digest: string | null;
+  readonly encoding: string | null;
+  readonly ciphertext_size: number | null;
+}
+
+export interface NewSnapshot {
+  readonly origin_host: string;
+  readonly id: string;
+  readonly created_at: number;
+  readonly schema_version: number;
+  readonly db_digest: string;
+  readonly db_size: number;
+  readonly chunks: readonly {
+    readonly plaintext_digest: string;
+    readonly size: number;
+    readonly ciphertext_digest: string;
+  }[];
+  readonly objects: readonly {
+    readonly plaintext_digest: string;
+    readonly size: number;
+  }[];
+}
+
+export interface GcObjectRow {
+  readonly plaintext_digest: string;
+  readonly plaintext_size: number;
+  readonly ciphertext_digest: string;
+  readonly ciphertext_size: number;
+  readonly gc_pending_at: number | null;
+}
+
 export interface NewRemoteObject {
   readonly plaintext_digest: string;
   readonly plaintext_size: number;
@@ -228,6 +284,17 @@ export async function commitGeneration(
       ).bind(...params),
     );
   }
+  const referenced = [...new Set([generation.manifest_digest, ...generation.objects.map((object) => object.digest)])];
+  for (let start = 0; start < referenced.length; start += ROWS_PER_STATEMENT) {
+    const chunk = referenced.slice(start, start + ROWS_PER_STATEMENT);
+    const placeholders = chunk.map(() => "?").join(",");
+    statements.push(
+      db.prepare(
+        `UPDATE remote_object SET last_referenced_at = ?, gc_pending_at = NULL
+         WHERE origin_host = ? AND plaintext_digest IN (${placeholders})`,
+      ).bind(generation.committed_at, generation.origin_host, ...chunk),
+    );
+  }
   statements.push(
     db.prepare("UPDATE origin_sync SET revision = revision + 1, last_change_at = ? WHERE origin_host = ?")
       .bind(generation.committed_at, generation.origin_host),
@@ -341,4 +408,293 @@ export async function pushTombstones(
   );
   await db.batch(statements);
   return revision;
+}
+
+const SNAPSHOT_COLUMNS =
+  "id, origin_host, created_at, schema_version, db_digest, db_size, objects, object_bytes, verified_at, revision";
+
+export async function readSnapshots(
+  db: D1Database,
+  origin: string,
+  limit: number,
+): Promise<readonly SnapshotRow[]> {
+  const result = await db.prepare(
+    `SELECT ${SNAPSHOT_COLUMNS} FROM snapshot WHERE origin_host = ?
+     ORDER BY created_at DESC, id LIMIT ?`,
+  ).bind(origin, limit).all<SnapshotRow>();
+  return result.results;
+}
+
+export async function readSnapshot(
+  db: D1Database,
+  origin: string,
+  id: string,
+): Promise<SnapshotRow | null> {
+  return await db.prepare(
+    `SELECT ${SNAPSHOT_COLUMNS} FROM snapshot WHERE origin_host = ? AND id = ?`,
+  ).bind(origin, id).first<SnapshotRow>();
+}
+
+export async function readSnapshotChunks(
+  db: D1Database,
+  origin: string,
+  id: string,
+): Promise<readonly SnapshotChunkRow[]> {
+  const result = await db.prepare(
+    `SELECT sc.ordinal, sc.plaintext_digest, sc.size, sc.ciphertext_digest,
+            ro.encoding, ro.ciphertext_size
+     FROM snapshot_chunk sc
+     LEFT JOIN remote_object ro
+       ON ro.origin_host = ? AND ro.ciphertext_digest = sc.ciphertext_digest
+     WHERE sc.snapshot = ? ORDER BY sc.ordinal`,
+  ).bind(origin, id).all<SnapshotChunkRow>();
+  return result.results;
+}
+
+export async function readSnapshotObjects(
+  db: D1Database,
+  origin: string,
+  id: string,
+): Promise<readonly SnapshotObjectRow[]> {
+  const result = await db.prepare(
+    `SELECT so.plaintext_digest, so.size, ro.ciphertext_digest, ro.encoding, ro.ciphertext_size
+     FROM snapshot_object so
+     LEFT JOIN remote_object ro
+       ON ro.origin_host = ? AND ro.plaintext_digest = so.plaintext_digest
+     WHERE so.snapshot = ? ORDER BY so.plaintext_digest`,
+  ).bind(origin, id).all<SnapshotObjectRow>();
+  return result.results;
+}
+
+export async function commitSnapshot(
+  db: D1Database,
+  snapshot: NewSnapshot,
+  baseRevision: number,
+): Promise<{ readonly revision: number }> {
+  const revision = baseRevision + 1;
+  const now = Date.now() / 1000;
+  const objectBytes = snapshot.objects.reduce((total, object) => total + object.size, 0);
+  const statements: D1PreparedStatement[] = [
+    db.prepare("INSERT OR IGNORE INTO origin_sync(origin_host, revision, last_change_at) VALUES(?, 0, NULL)")
+      .bind(snapshot.origin_host),
+    db.prepare(
+      `INSERT INTO snapshot(
+         id, origin_host, created_at, schema_version, db_digest, db_size, objects, object_bytes, verified_at, revision
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).bind(
+      snapshot.id,
+      snapshot.origin_host,
+      snapshot.created_at,
+      snapshot.schema_version,
+      snapshot.db_digest,
+      snapshot.db_size,
+      snapshot.objects.length,
+      objectBytes,
+      revision,
+    ),
+  ];
+  const CHUNKS_PER_STATEMENT = 20;
+  for (let start = 0; start < snapshot.chunks.length; start += CHUNKS_PER_STATEMENT) {
+    const chunk = snapshot.chunks.slice(start, start + CHUNKS_PER_STATEMENT);
+    const values = chunk.map(() => "(?, ?, ?, ?, ?)").join(",");
+    const params: (string | number)[] = [];
+    chunk.forEach((item, index) => {
+      params.push(snapshot.id, start + index, item.plaintext_digest, item.size, item.ciphertext_digest);
+    });
+    statements.push(
+      db.prepare(
+        `INSERT INTO snapshot_chunk(snapshot, ordinal, plaintext_digest, size, ciphertext_digest)
+         VALUES ${values}`,
+      ).bind(...params),
+    );
+  }
+  const ROWS_PER_STATEMENT = 32;
+  for (let start = 0; start < snapshot.objects.length; start += ROWS_PER_STATEMENT) {
+    const chunk = snapshot.objects.slice(start, start + ROWS_PER_STATEMENT);
+    const values = chunk.map(() => "(?, ?, ?)").join(",");
+    const params: (string | number)[] = [snapshot.id];
+    for (const item of chunk) params.push(item.plaintext_digest, item.size);
+    statements.push(
+      db.prepare(
+        `INSERT INTO snapshot_object(snapshot, plaintext_digest, size) VALUES ${values}`,
+      ).bind(...params),
+    );
+  }
+  const referenced = [...new Set([
+    ...snapshot.chunks.map((chunk) => chunk.plaintext_digest),
+    ...snapshot.objects.map((object) => object.plaintext_digest),
+  ])];
+  for (let start = 0; start < referenced.length; start += ROWS_PER_STATEMENT) {
+    const chunk = referenced.slice(start, start + ROWS_PER_STATEMENT);
+    const placeholders = chunk.map(() => "?").join(",");
+    statements.push(
+      db.prepare(
+        `UPDATE remote_object SET last_referenced_at = ?, gc_pending_at = NULL
+         WHERE origin_host = ? AND plaintext_digest IN (${placeholders})`,
+      ).bind(now, snapshot.origin_host, ...chunk),
+    );
+  }
+  statements.push(
+    db.prepare("UPDATE origin_sync SET revision = revision + 1, last_change_at = ? WHERE origin_host = ?")
+      .bind(now, snapshot.origin_host),
+  );
+  await db.batch(statements);
+  return { revision };
+}
+
+export async function markSnapshotVerified(
+  db: D1Database,
+  origin: string,
+  id: string,
+  verifiedAt: number,
+): Promise<number | null> {
+  const existing = await readSnapshot(db, origin, id);
+  if (existing === null) return null;
+  if (existing.verified_at !== null) return existing.verified_at;
+  await db.prepare(
+    "UPDATE snapshot SET verified_at = ? WHERE origin_host = ? AND id = ?",
+  ).bind(verifiedAt, origin, id).run();
+  return verifiedAt;
+}
+
+export async function deleteSnapshots(
+  db: D1Database,
+  ids: readonly string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  const statements: D1PreparedStatement[] = [];
+  const GROUP = 50;
+  for (let start = 0; start < ids.length; start += GROUP) {
+    const chunk = ids.slice(start, start + GROUP);
+    const placeholders = chunk.map(() => "?").join(",");
+    statements.push(db.prepare(`DELETE FROM snapshot_chunk WHERE snapshot IN (${placeholders})`).bind(...chunk));
+    statements.push(db.prepare(`DELETE FROM snapshot_object WHERE snapshot IN (${placeholders})`).bind(...chunk));
+    statements.push(db.prepare(`DELETE FROM snapshot WHERE id IN (${placeholders})`).bind(...chunk));
+  }
+  await db.batch(statements);
+}
+
+function liveObjectsCte(excludedSnapshots: readonly string[]): { readonly sql: string; readonly params: string[] } {
+  const exclusion = excludedSnapshots.length === 0
+    ? ""
+    : ` WHERE s.id NOT IN (${excludedSnapshots.map(() => "?").join(",")})`;
+  return {
+    sql: `WITH live_generation AS (
+            SELECT g.id, g.origin_host, g.harness, g.native_id, g.manifest_object
+            FROM generation g
+            WHERE NOT EXISTS (
+              SELECT 1 FROM tombstone t
+              WHERE t.origin_host = g.origin_host AND t.harness = g.harness AND t.native_id = g.native_id
+            )
+          ),
+          live_snapshot AS (
+            SELECT s.id, s.origin_host FROM snapshot s${exclusion}
+          )`,
+    params: [...excludedSnapshots],
+  };
+}
+
+function unreferencedSql(): string {
+  return `NOT EXISTS (
+            SELECT 1 FROM live_generation g
+            WHERE g.origin_host = ro.origin_host AND g.manifest_object = ro.ciphertext_digest
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM generation_object go JOIN live_generation g ON g.id = go.generation
+            WHERE g.origin_host = ro.origin_host AND go.plaintext_digest = ro.plaintext_digest
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM snapshot_chunk sc JOIN live_snapshot s ON s.id = sc.snapshot
+            WHERE s.origin_host = ro.origin_host AND sc.ciphertext_digest = ro.ciphertext_digest
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM snapshot_object so JOIN live_snapshot s ON s.id = so.snapshot
+            WHERE s.origin_host = ro.origin_host AND so.plaintext_digest = ro.plaintext_digest
+          )`;
+}
+
+export async function readUnreferencedObjects(
+  db: D1Database,
+  origin: string,
+  excludedSnapshots: readonly string[] = [],
+  pendingBefore: number | null = null,
+): Promise<readonly GcObjectRow[]> {
+  const cte = liveObjectsCte(excludedSnapshots);
+  const pending = pendingBefore === null
+    ? ""
+    : " AND ro.gc_pending_at IS NOT NULL AND ro.gc_pending_at <= ?";
+  const params: (string | number)[] = [...cte.params];
+  params.push(origin);
+  if (pendingBefore !== null) params.push(pendingBefore);
+  const result = await db.prepare(
+    `${cte.sql}
+     SELECT ro.plaintext_digest, ro.plaintext_size, ro.ciphertext_digest, ro.ciphertext_size, ro.gc_pending_at
+     FROM remote_object ro
+     WHERE ro.origin_host = ?${pending} AND ${unreferencedSql()}
+     ORDER BY ro.plaintext_digest`,
+  ).bind(...params).all<GcObjectRow>();
+  return result.results;
+}
+
+export async function markUnreferencedObjects(
+  db: D1Database,
+  origin: string,
+  now: number,
+  excludedSnapshots: readonly string[] = [],
+): Promise<void> {
+  const cte = liveObjectsCte(excludedSnapshots);
+  await db.prepare(
+    `${cte.sql}
+     UPDATE remote_object AS ro SET gc_pending_at = ?
+     WHERE ro.origin_host = ? AND ro.gc_pending_at IS NULL AND ${unreferencedSql()}`,
+  ).bind(...cte.params, now, origin).run();
+}
+
+export async function deleteObjectIfGcEligible(
+  db: D1Database,
+  origin: string,
+  plaintext: string,
+  cutoff: number,
+  excludedSnapshots: readonly string[] = [],
+): Promise<boolean> {
+  const cte = liveObjectsCte(excludedSnapshots);
+  const result = await db.prepare(
+    `${cte.sql}
+     DELETE FROM remote_object AS ro
+     WHERE ro.origin_host = ? AND ro.plaintext_digest = ?
+       AND ro.gc_pending_at IS NOT NULL AND ro.gc_pending_at <= ?
+       AND ${unreferencedSql()}`,
+  ).bind(...cte.params, origin, plaintext, cutoff).run();
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function replaceRemoteObject(
+  db: D1Database,
+  object: NewRemoteObject,
+  oldCiphertext: string,
+): Promise<void> {
+  await db.batch([
+    db.prepare("PRAGMA defer_foreign_keys = ON"),
+    db.prepare(
+      "UPDATE generation SET manifest_object = ? WHERE origin_host = ? AND manifest_object = ?",
+    ).bind(object.ciphertext_digest, object.origin_host, oldCiphertext),
+    db.prepare(
+      `UPDATE snapshot_chunk SET ciphertext_digest = ?
+       WHERE ciphertext_digest = ?
+         AND snapshot IN (SELECT id FROM snapshot WHERE origin_host = ?)`,
+    ).bind(object.ciphertext_digest, oldCiphertext, object.origin_host),
+    db.prepare(
+      `UPDATE remote_object
+       SET encoding = ?, ciphertext_digest = ?, ciphertext_size = ?,
+           last_referenced_at = ?, gc_pending_at = NULL
+       WHERE origin_host = ? AND plaintext_digest = ?`,
+    ).bind(
+      object.encoding,
+      object.ciphertext_digest,
+      object.ciphertext_size,
+      object.created_at,
+      object.origin_host,
+      object.plaintext_digest,
+    ),
+  ]);
 }

@@ -336,33 +336,88 @@ def _sync(args):
 
 def _mirror(args):
     try:
-        with Store(_state_dir(args)) as store:
-            if args.action == "status":
-                state = store.mirror_remote_state(args.remote)
-                if state is None:
-                    print("remote=%s pinned=0" % args.remote)
-                else:
-                    print("remote=%s store=%s revision=%d watermark=%d last_sync_at=%s last_error=%s" % (
-                        state["remote"], state["store_id"], state["revision"],
-                        state["tombstone_watermark"], state["last_sync_at"], state["last_error"]))
+        if args.action in ("status", "adopt"):
+            return _mirror_local(args)
+        config = mirror_module.load_config(config_path())
+        with mirror_module.MirrorClient(config) as client:
+            if args.action == "snapshots":
+                rows = mirror_module.snapshots(config, client=client, limit=args.limit)
+                for row in rows:
+                    print("snapshot=%s created_at=%.0f db_size=%d objects=%d object_bytes=%d verified_at=%s revision=%d" % (
+                        row["id"], row["created_at"], row["db_size"], row["objects"], row["object_bytes"],
+                        row["verified_at"], row["revision"]))
+                if not rows:
+                    print("snapshots=0")
                 return 0
-            config = mirror_module.load_config(config_path())
-            origin = archive_module.origin_for(store.db)
-            with mirror_module.MirrorClient(config) as client:
-                hello = client.hello(origin)
-            previous = store.mirror_remote_state(args.remote)
-            cleared = 0
-            if previous is not None and previous["store_id"]:
-                cleared = store.remote_ack_count(previous["store_id"])
-                store.clear_remote_acks(previous["store_id"])
-            store.forget_mirror_remote(args.remote)
-            store.write_mirror_remote(args.remote, hello["store_id"], hello["revision"], 0)
-            print("adopted remote=%s store=%s revision=%d cleared_acks=%d" % (
-                args.remote, hello["store_id"], hello["revision"], cleared))
-        return 0
-    except (OSError, StoreError, mirror_module.MirrorError) as exc:
+            if args.action == "verify":
+                result = mirror_module.verify(
+                    config, client=client, objects=args.objects, sample=args.sample)
+                print("generations=%d snapshots=%d objects=%d chunks=%d sampled=%d bytes=%d" % (
+                    result["generations"], result["snapshots"], result["objects"], result["chunks"],
+                    result["sampled"], result["bytes"]))
+                return 0
+            if args.action == "gc":
+                result = mirror_module.gc(config, client=client, apply=args.apply)
+                print("apply=%d snapshots_retained=%d snapshots_pruned=%d objects_marked=%d "
+                      "bytes_marked=%d objects_swept=%d bytes_swept=%d" % (
+                          int(result["apply"]), result["snapshots_retained"], result["snapshots_pruned"],
+                          result["objects_marked"], result["bytes_marked"], result["objects_swept"],
+                          result["bytes_swept"]))
+                return 0
+            if args.action == "restore":
+                if not args.snapshot or not args.to:
+                    print("agent-sessions mirror: restore needs --snapshot and --to", file=sys.stderr)
+                    return 2
+                result = mirror_module.restore(
+                    config, args.remote, args.snapshot, args.to, client=client,
+                    identity_path=args.identity)
+                print("snapshot=%s db_size=%d chunks=%d objects=%d replayed=%d tombstones=%d" % (
+                    result["snapshot"], result["db_size"], result["chunks"], result["objects"],
+                    result["replayed"], result["tombstones"]))
+                return 0
+            if args.action == "rotate":
+                if not args.recipients or not args.identity:
+                    print("agent-sessions mirror: rotate needs --recipients and --identity", file=sys.stderr)
+                    return 2
+                result = mirror_module.rotate(
+                    config, recipients_file=args.recipients, identity_file=args.identity,
+                    old_identity_file=args.old_identity, client=client)
+                print("objects=%d rotated=%d" % (result["objects"], result["rotated"]))
+                return 0
+        print("agent-sessions mirror: unknown action " + args.action, file=sys.stderr)
+        return 2
+    except (OSError, sqlite3.DatabaseError, StoreError, mirror_module.MirrorError,
+            mirror_module.mirror_crypto.CryptoError, archive_module.ArchiveError,
+            backup_module.BackupError) as exc:
         print("agent-sessions mirror: " + str(exc), file=sys.stderr)
         return 1
+
+
+def _mirror_local(args):
+    with Store(_state_dir(args)) as store:
+        if args.action == "status":
+            state = store.mirror_remote_state(args.remote)
+            if state is None:
+                print("remote=%s pinned=0" % args.remote)
+            else:
+                print("remote=%s store=%s revision=%d watermark=%d last_sync_at=%s last_error=%s" % (
+                    state["remote"], state["store_id"], state["revision"],
+                    state["tombstone_watermark"], state["last_sync_at"], state["last_error"]))
+            return 0
+        config = mirror_module.load_config(config_path())
+        origin = archive_module.origin_for(store.db)
+        with mirror_module.MirrorClient(config) as client:
+            hello = client.hello(origin)
+        previous = store.mirror_remote_state(args.remote)
+        cleared = 0
+        if previous is not None and previous["store_id"]:
+            cleared = store.remote_ack_count(previous["store_id"])
+            store.clear_remote_acks(previous["store_id"])
+        store.forget_mirror_remote(args.remote)
+        store.write_mirror_remote(args.remote, hello["store_id"], hello["revision"], 0)
+        print("adopted remote=%s store=%s revision=%d cleared_acks=%d" % (
+            args.remote, hello["store_id"], hello["revision"], cleared))
+    return 0
 
 
 def _archive(args):
@@ -705,10 +760,20 @@ def parser():
     sync.add_argument("--root", action="append", metavar="[HARNESS=]PATH")
     sync.set_defaults(run=_sync)
 
-    mirror = commands.add_parser("mirror", help="inspect or adopt the Cloudflare mirror identity")
-    mirror.add_argument("action", choices=("status", "adopt"))
+    mirror = commands.add_parser("mirror", help="inspect, verify, restore, or maintain the Cloudflare mirror")
+    mirror.add_argument("action", choices=(
+        "status", "adopt", "snapshots", "verify", "gc", "restore", "rotate"))
     mirror.add_argument("--state-dir")
     mirror.add_argument("--remote", default="central", help="configured remote name (default %(default)s)")
+    mirror.add_argument("--limit", type=int, default=100, help="snapshot rows to list (default %(default)s)")
+    mirror.add_argument("--snapshot", help="snapshot id for restore")
+    mirror.add_argument("--to", help="destination state directory for restore")
+    mirror.add_argument("--objects", action="store_true", help="download and verify sampled objects")
+    mirror.add_argument("--sample", type=int, help="objects to sample with --objects (default 5%% or 100)")
+    mirror.add_argument("--apply", action="store_true", help="apply snapshot pruning and object sweep")
+    mirror.add_argument("--recipients", help="age recipients file for rotate")
+    mirror.add_argument("--identity", help="new age identity file for rotate or restore")
+    mirror.add_argument("--old-identity", help="old age identity file for rotate")
     mirror.set_defaults(run=_mirror)
 
     archive = commands.add_parser("archive", help="verify, reindex, or report the local archive")
