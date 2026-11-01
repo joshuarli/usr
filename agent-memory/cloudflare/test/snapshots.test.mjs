@@ -103,8 +103,8 @@ async function commitSnapshot(env, snapshot, baseRevision, client = COLLECTOR) {
   return { response, body: await response.json() };
 }
 
-async function listSnapshots(env, client = COLLECTOR) {
-  const response = await worker.fetch(request(`/api/v1/sync/snapshots?origin=${ORIGIN}`), env, collector(client));
+async function listSnapshots(env, query = "", client = COLLECTOR) {
+  const response = await worker.fetch(request(`/api/v1/sync/snapshots?origin=${ORIGIN}${query}`), env, collector(client));
   return { response, body: await response.json() };
 }
 
@@ -175,6 +175,25 @@ test("a snapshot commits with its chunks and pinned objects and re-acks", async 
   assert.equal(stale.response.status, 409);
   assert.equal(stale.body.error.code, "stale_revision");
   assert.equal((await count(db, "snapshot")).count, 1);
+});
+
+test("snapshot listings paginate with an opaque cursor", async (t) => {
+  const { env } = await runtime(t);
+  const now = Date.now() / 1000;
+  for (let index = 0; index < 3; index += 1) {
+    const chunk = await storeObject(env, Buffer.from(`paginated snapshot ${index}`));
+    const snapshot = snapshotFor([chunk], [], { idSeed: `paginated-${index}`, createdAt: now + index });
+    assert.equal((await commitSnapshot(env, snapshot, index)).response.status, 200);
+  }
+  const first = await listSnapshots(env, "&limit=2");
+  assert.equal(first.response.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.snapshots.length, 2);
+  assert.ok(first.body.next_cursor);
+  const second = await listSnapshots(env, `&limit=2&before=${encodeURIComponent(first.body.next_cursor)}`);
+  assert.equal(second.response.status, 200, JSON.stringify(second.body));
+  assert.equal(second.body.snapshots.length, 1);
+  assert.equal(second.body.next_cursor, null);
+  assert.notEqual(first.body.snapshots[0].id, second.body.snapshots[0].id);
 });
 
 test("snapshot references must be stored and mapped", async (t) => {
@@ -287,6 +306,65 @@ test("gc keeps the newest verified snapshot and sweeps only old unreferenced obj
   assert.notEqual(await bucket.get(`v1/o/${newestChunk.ciphertext}`), null);
 });
 
+test("gc retains daily snapshots even when none are verified", async (t) => {
+  const { db, env } = await runtime(t);
+  const now = Date.now() / 1000;
+  const chunks = [];
+  for (const [index, age] of [[0, 3], [1, 2], [2, 0]]) {
+    const chunk = await storeObject(env, Buffer.from(`unverified snapshot ${index}`));
+    chunks.push(chunk);
+    const snapshot = snapshotFor([chunk], [], { idSeed: `unverified-${index}`, createdAt: now - age * 86_400 });
+    assert.equal((await commitSnapshot(env, snapshot, index)).response.status, 200);
+  }
+  const report = await gc(env, false);
+  assert.equal(report.response.status, 200, JSON.stringify(report.body));
+  assert.equal(report.body.snapshots_retained, 3);
+  assert.equal(report.body.snapshots_pruned, 0);
+  assert.equal((await count(db, "snapshot")).count, 3);
+  for (const chunk of chunks) {
+    assert.notEqual(await env.BUCKET.get(`v1/o/${chunk.ciphertext}`), null);
+  }
+});
+
+test("a tombstone deletes its generation rows and lets gc sweep the manifest", async (t) => {
+  const { db, bucket, env } = await runtime(t);
+  const chunk = await storeObject(env, Buffer.from("tombstoned generation chunk"));
+  const manifest = await storeObject(env, Buffer.from("tombstoned generation manifest"));
+  const now = Date.now() / 1000;
+  const inserted = await db.prepare(
+    `INSERT INTO generation(origin_host, harness, native_id, manifest_digest, source_digest,
+       source_size, captured_at, committed_at, revision, manifest_object)
+     VALUES(?, 'codex', 'native-gc', ?, ?, ?, ?, ?, 1, ?)`,
+  ).bind(ORIGIN, digest("native-gc-manifest"), chunk.plaintext, chunk.size, now, now, manifest.ciphertext).run();
+  const generationId = inserted.meta.last_row_id;
+  await db.prepare(
+    "INSERT INTO generation_object(generation, ordinal, plaintext_digest, size) VALUES(?, 0, ?, ?)",
+  ).bind(generationId, chunk.plaintext, chunk.size).run();
+  await db.prepare("INSERT OR IGNORE INTO origin_sync(origin_host, revision, last_change_at) VALUES(?, 1, NULL)")
+    .bind(ORIGIN).run();
+  await db.prepare("UPDATE origin_sync SET revision = 1 WHERE origin_host = ?").bind(ORIGIN).run();
+
+  const pushed = await worker.fetch(postJson("/api/v1/sync/tombstones", {
+    protocol: 1, origin: ORIGIN, base_revision: 1,
+    tombstones: [{ harness: "codex", native_id: "native-gc", scope: "global", forgotten_at: now }],
+  }), env, collector());
+  assert.equal(pushed.status, 200, await pushed.text());
+  assert.equal((await count(db, "generation")).count, 0);
+  assert.equal((await count(db, "generation_object")).count, 0);
+
+  const marked = await gc(env, true);
+  assert.equal(marked.response.status, 200, JSON.stringify(marked.body));
+  assert.equal(marked.body.objects_marked, 2);
+  const expire = db.prepare("UPDATE remote_object SET gc_pending_at = ? WHERE plaintext_digest = ?");
+  await expire.bind(now - 3_601, chunk.plaintext).run();
+  await expire.bind(now - 3_601, manifest.plaintext).run();
+  const swept = await gc(env, true);
+  assert.equal(swept.response.status, 200, JSON.stringify(swept.body));
+  assert.equal(swept.body.objects_swept, 2);
+  assert.equal(await bucket.get(`v1/o/${manifest.ciphertext}`), null);
+  assert.equal(await bucket.get(`v1/o/${chunk.ciphertext}`), null);
+});
+
 test("an object replacement swaps ciphertext mappings under the foreign key", async (t) => {
   const { db, bucket, env } = await runtime(t);
   const manifestData = Buffer.from('{"manifest":"synthetic"}');
@@ -368,7 +446,7 @@ test("snapshot routes are scoped to the collector origin", async (t) => {
   const snapshot = snapshotFor([chunk], []);
   assert.equal((await commitSnapshot(env, snapshot, 0)).response.status, 200);
 
-  const foreignList = await listSnapshots(env, OTHER_COLLECTOR);
+  const foreignList = await listSnapshots(env, "", OTHER_COLLECTOR);
   assert.equal(foreignList.response.status, 403);
   const foreignDetail = await detail(env, snapshot.id, OTHER_COLLECTOR);
   assert.equal(foreignDetail.response.status, 404);

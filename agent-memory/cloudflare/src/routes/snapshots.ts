@@ -21,10 +21,12 @@ import {
   GC_GRACE_SECONDS,
   MAX_PAGE,
   PROTOCOL,
+  decodeCursor,
   decodeDigest,
   decodeGcRequest,
   decodeSnapshotCommit,
   decodeSnapshotVerifyRequest,
+  encodeCursor,
 } from "../protocol.js";
 import type { Env } from "../index.js";
 import {
@@ -92,12 +94,11 @@ function retainedSnapshotIds(rows: readonly SnapshotRow[], now: number): Set<str
   const newest = sorted[0];
   if (newest !== undefined) keep.add(newest.id);
   const verified = sorted.filter((row) => row.verified_at !== null);
-  if (verified.length === 0) return keep;
   const newestVerified = verified[0];
   if (newestVerified !== undefined) keep.add(newestVerified.id);
   const days = new Map<number, SnapshotRow>();
   const weeks = new Map<number, SnapshotRow>();
-  for (const row of verified) {
+  for (const row of sorted) {
     const day = Math.floor(row.created_at / DAY_SECONDS);
     const week = Math.floor(row.created_at / WEEK_SECONDS);
     if (!days.has(day)) days.set(day, row);
@@ -217,13 +218,29 @@ async function list(
   if (mismatch !== null) return mismatch;
   const limit = limitParameter(url.searchParams.get("limit"));
   if (limit === null) return refuse(400, "invalid_request", "limit is invalid", timing);
+  const beforeValue = url.searchParams.get("before");
+  let before: { readonly createdAt: number; readonly id: string } | null = null;
+  if (beforeValue !== null) {
+    const parts = decodeCursor(beforeValue);
+    const createdAt = parts === null || parts.length !== 2 ? null : Number(parts[0]);
+    const id = parts === null || parts.length !== 2 ? null : decodeDigest(parts[1]);
+    if (createdAt === null || !Number.isFinite(createdAt) || id === null) {
+      return refuse(400, "invalid_request", "before is invalid", timing);
+    }
+    before = { createdAt, id };
+  }
   const started = performance.now();
   try {
-    const rows = await readSnapshots(env.DB, origin, limit);
+    const rows = await readSnapshots(env.DB, origin, limit + 1, before);
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
     return json(200, {
       protocol: PROTOCOL,
       origin,
-      snapshots: rows.map(snapshotJson),
+      snapshots: page.map(snapshotJson),
+      next_cursor: rows.length > limit && last !== undefined
+        ? encodeCursor([String(last.created_at), last.id])
+        : null,
     }, false, { "Server-Timing": serverTiming(timing) });
   } finally {
     timing.d1 += performance.now() - started;

@@ -1,6 +1,7 @@
 export const PROTOCOL = 1;
 export const MAX_JSON_BYTES = 8 * 1024 * 1024;
 export const MAX_OBJECT_BYTES = 8 * 1024 * 1024;
+export const MAX_CIPHERTEXT_BYTES = MAX_OBJECT_BYTES + 64 * 1024;
 export const MAX_MISSING_OBJECTS = 20_000;
 export const MAX_GENERATION_OBJECTS = 20_000;
 export const MAX_GENERATION_ARTIFACTS = 1_000;
@@ -13,7 +14,7 @@ export const MAX_SOURCE_BYTES = 2 ** 50;
 export const MAX_PAGE = 200;
 export const MAX_CURSOR_CHARS = 512;
 export const MAX_CURSOR_PARTS = 4;
-export const MAX_CURSOR_PART_CHARS = 256;
+export const MAX_CURSOR_PART_CHARS = 512;
 
 export const HARNESSES = ["codex", "claude", "muse", "grok", "opencode", "pi", "cmd", "agy"] as const;
 
@@ -77,6 +78,12 @@ export function decodeProtocol(value: unknown): 1 | null {
 
 function decodeSize(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= MAX_OBJECT_BYTES
+    ? value
+    : null;
+}
+
+function decodeCiphertextSize(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= MAX_CIPHERTEXT_BYTES
     ? value
     : null;
 }
@@ -440,7 +447,7 @@ export function decodeObjectReplaceRequest(value: unknown): ObjectReplaceRequest
   const plaintext = decodeDigest(value.plaintext_digest);
   const ciphertext = decodeDigest(value.ciphertext_digest);
   const plaintextSize = decodeSize(value.plaintext_size);
-  const ciphertextSize = decodeSize(value.ciphertext_size);
+  const ciphertextSize = decodeCiphertextSize(value.ciphertext_size);
   const encoding = value.encoding === "identity" || value.encoding === "zlib" ? value.encoding : null;
   if (origin === null || plaintext === null || ciphertext === null) return null;
   if (plaintextSize === null || ciphertextSize === null || encoding === null) return null;

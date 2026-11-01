@@ -31,9 +31,18 @@ export async function readCounts(db: D1Database): Promise<StatusCounts> {
           SELECT m.project_key FROM learning_memory m
           JOIN learning_state ls ON ls.origin_host = m.origin_host AND ls.epoch = m.epoch
         )) AS projects,
-       (SELECT count(*) FROM learning_state WHERE records > 0) AS origins,
+       (SELECT count(*) FROM (
+          SELECT origin_host FROM origin_sync
+          UNION SELECT origin_host FROM learning_state
+          UNION SELECT origin_host FROM collector
+          LIMIT 201
+        )) AS origins,
        (SELECT count(*) FROM tombstone) AS tombstones,
-       (SELECT count(*) FROM generation) AS generations,
+       (SELECT count(*) FROM generation g
+        WHERE NOT EXISTS (
+          SELECT 1 FROM tombstone t
+          WHERE t.origin_host = g.origin_host AND t.harness = g.harness AND t.native_id = g.native_id
+        )) AS generations,
        (SELECT count(*) FROM snapshot) AS snapshots,
        (SELECT count(*) FROM remote_object) AS objects,
        (SELECT COALESCE(SUM(ciphertext_size), 0) FROM remote_object) AS object_bytes,
@@ -56,7 +65,12 @@ async function readOrigins(db: D1Database): Promise<readonly OriginStatus[]> {
        (SELECT os.last_change_at FROM origin_sync os WHERE os.origin_host = k.origin_host) AS last_change_at,
        COALESCE((SELECT ls.revision FROM learning_state ls WHERE ls.origin_host = k.origin_host), 0) AS learning_revision,
        COALESCE((SELECT ls.records FROM learning_state ls WHERE ls.origin_host = k.origin_host), 0) AS learning_records,
-       (SELECT count(*) FROM generation g WHERE g.origin_host = k.origin_host) AS generations,
+       (SELECT count(*) FROM generation g
+        WHERE g.origin_host = k.origin_host
+          AND NOT EXISTS (
+            SELECT 1 FROM tombstone t
+            WHERE t.origin_host = g.origin_host AND t.harness = g.harness AND t.native_id = g.native_id
+          )) AS generations,
        (SELECT max(s.verified_at) FROM snapshot s WHERE s.origin_host = k.origin_host) AS last_verified
      FROM known k ORDER BY k.origin_host LIMIT 201`,
   ).all<OriginStatus>();
@@ -89,33 +103,36 @@ export async function handleStatus(
     return methodNotAllowed(["GET", "HEAD"], { "Server-Timing": serverTiming(timing) });
   }
   const started = performance.now();
+  let status: Awaited<ReturnType<typeof readStatus>>;
   try {
-    const status = await readStatus(env.DB);
-    if (status === null) {
-      return json(503, { error: { code: "unavailable", message: "store is not provisioned" } },
-        false, { "Server-Timing": serverTiming(timing) });
-    }
-    return json(200, {
-      protocol: PROTOCOL,
-      store_id: status.store_id,
-      principal,
-      ready: true,
-      counts: {
-        experiences: status.counts.experiences,
-        memories: status.counts.memories,
-        projects: status.counts.projects,
-        origins: status.counts.origins,
-        tombstones: status.counts.tombstones,
-        generations: status.counts.generations,
-        snapshots: status.counts.snapshots,
-        objects: status.counts.objects,
-        object_bytes: status.counts.object_bytes,
-      },
-      origins: status.origins,
-      last_change: status.last_change,
-      last_verified_snapshot: status.last_verified_snapshot,
-    }, request.method === "HEAD", { "Server-Timing": serverTiming(timing) });
+    status = await readStatus(env.DB);
   } finally {
     timing.d1 += performance.now() - started;
   }
+  if (status === null) {
+    return json(503, { error: { code: "unavailable", message: "store is not provisioned" } },
+      false, { "Server-Timing": serverTiming(timing) });
+  }
+  return json(200, {
+    protocol: PROTOCOL,
+    store_id: status.store_id,
+    principal,
+    ready: true,
+    counts: {
+      experiences: status.counts.experiences,
+      memories: status.counts.memories,
+      projects: status.counts.projects,
+      origins: status.counts.origins,
+      tombstones: status.counts.tombstones,
+      generations: status.counts.generations,
+      snapshots: status.counts.snapshots,
+      objects: status.counts.objects,
+      object_bytes: status.counts.object_bytes,
+    },
+    origins: principal.kind === "collector"
+      ? status.origins.filter((origin) => origin.origin === principal.origin_host)
+      : status.origins,
+    last_change: status.last_change,
+    last_verified_snapshot: status.last_verified_snapshot,
+  }, request.method === "HEAD", { "Server-Timing": serverTiming(timing) });
 }

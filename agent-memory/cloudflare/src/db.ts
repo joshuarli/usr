@@ -402,6 +402,13 @@ export async function pushTombstones(
            scope = excluded.scope, forgotten_at = excluded.forgotten_at, revision = excluded.revision
          WHERE excluded.forgotten_at > tombstone.forgotten_at`,
       ).bind(origin, tombstone.harness, tombstone.native_id, tombstone.scope, tombstone.forgotten_at, revision),
+      db.prepare(
+        `DELETE FROM generation_object WHERE generation IN (
+           SELECT id FROM generation WHERE origin_host = ? AND harness = ? AND native_id = ?)`,
+      ).bind(origin, tombstone.harness, tombstone.native_id),
+      db.prepare(
+        "DELETE FROM generation WHERE origin_host = ? AND harness = ? AND native_id = ?",
+      ).bind(origin, tombstone.harness, tombstone.native_id),
     );
   }
   const learning = await db.prepare("SELECT epoch FROM learning_state WHERE origin_host = ?")
@@ -428,11 +435,16 @@ export async function readSnapshots(
   db: D1Database,
   origin: string,
   limit: number,
+  before: { readonly createdAt: number; readonly id: string } | null = null,
 ): Promise<readonly SnapshotRow[]> {
+  const filter = before === null ? "" : " AND (created_at < ? OR (created_at = ? AND id < ?))";
+  const params: (string | number)[] = before === null
+    ? [origin, limit]
+    : [origin, before.createdAt, before.createdAt, before.id, limit];
   const result = await db.prepare(
-    `SELECT ${SNAPSHOT_COLUMNS} FROM snapshot WHERE origin_host = ?
-     ORDER BY created_at DESC, id LIMIT ?`,
-  ).bind(origin, limit).all<SnapshotRow>();
+    `SELECT ${SNAPSHOT_COLUMNS} FROM snapshot WHERE origin_host = ?${filter}
+     ORDER BY created_at DESC, id DESC LIMIT ?`,
+  ).bind(...params).all<SnapshotRow>();
   return result.results;
 }
 
@@ -588,7 +600,7 @@ export async function deleteSnapshots(
 function liveObjectsCte(excludedSnapshots: readonly string[]): { readonly sql: string; readonly params: string[] } {
   const exclusion = excludedSnapshots.length === 0
     ? ""
-    : ` WHERE s.id NOT IN (${excludedSnapshots.map(() => "?").join(",")})`;
+    : " WHERE s.id NOT IN (SELECT value FROM json_each(?))";
   return {
     sql: `WITH live_generation AS (
             SELECT g.id, g.origin_host, g.harness, g.native_id, g.manifest_object
@@ -601,7 +613,7 @@ function liveObjectsCte(excludedSnapshots: readonly string[]): { readonly sql: s
           live_snapshot AS (
             SELECT s.id, s.origin_host FROM snapshot s${exclusion}
           )`,
-    params: [...excludedSnapshots],
+    params: excludedSnapshots.length === 0 ? [] : [JSON.stringify(excludedSnapshots)],
   };
 }
 

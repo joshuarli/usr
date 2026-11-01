@@ -14,6 +14,7 @@ WORK_TMP = ROOT / ".work" / "tmp"
 WORK_TMP.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(ROOT / "agent-memory" / "src"))
 
+from agent_memory import mirror as mirror_module  # noqa: E402
 from agent_memory import mirror_crypto as crypto  # noqa: E402
 
 DEV_AGE = ROOT / "agent-memory" / "cloudflare" / "dev-age.sh"
@@ -167,6 +168,15 @@ class MirrorCryptoTests(unittest.TestCase):
         ]:
             with self.assertRaises(crypto.CryptoError):
                 crypto.decode_object(*args)
+
+    def test_an_eight_mebibyte_artifact_encrypts_within_the_ciphertext_cap(self):
+        recipient = self.identities("collector")[0]
+        data = os.urandom(8 * 1024 * 1024)
+        prepared = crypto.prepare_object(data, [recipient])
+        self.assertEqual(prepared.plaintext_size, len(data))
+        self.assertGreater(prepared.ciphertext_size, mirror_module.MAX_OBJECT_BYTES)
+        self.assertLessEqual(prepared.ciphertext_size, mirror_module.MAX_CIPHERTEXT_BYTES)
+        self.assertEqual(prepared.encoding, "identity")
 
     def test_recipients_file_skips_comments_and_requires_a_recipient(self):
         recipient = self.identities("collector")[0]

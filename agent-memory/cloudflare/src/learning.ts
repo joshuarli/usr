@@ -489,6 +489,9 @@ function childDeletes(
         db.prepare(
           `DELETE FROM learning_link WHERE origin_host = ? AND epoch = ? AND newer IN (${list})`,
         ).bind(origin, epoch, ...chunk),
+        db.prepare(
+          `DELETE FROM learning_link WHERE origin_host = ? AND epoch = ? AND older IN (${list})`,
+        ).bind(origin, epoch, ...chunk),
       );
     }
   }
@@ -669,6 +672,20 @@ function searchUpserts(
   return statements;
 }
 
+async function tombstoneKeys(db: D1Database, origin: string): Promise<Set<string>> {
+  const result = await db.prepare(
+    "SELECT harness, native_id FROM tombstone WHERE origin_host = ?",
+  ).bind(origin).all<{ readonly harness: string; readonly native_id: string }>();
+  return new Set(result.results.map((row) => `${row.harness}:${row.native_id}`));
+}
+
+function citesTombstone(record: LearningRecord, keys: ReadonlySet<string>): boolean {
+  return record.sources.some((source) => {
+    const at = source.session.lastIndexOf("@");
+    return at > 0 && keys.has(source.session.slice(0, at));
+  });
+}
+
 export async function applyLearningDelta(
   db: D1Database,
   delta: LearningDelta,
@@ -686,19 +703,26 @@ export async function applyLearningDelta(
     if ("deleted" in change) removed.push(change);
     else live.push(change);
   }
-  const liveExperiences = live.filter((record): record is LearningExperience => record.record === "experience");
-  const liveMemories = live.filter((record): record is LearningMemory => record.record === "memory");
+  const blocked = await tombstoneKeys(db, delta.origin);
+  const rejected = live.filter((record) => citesTombstone(record, blocked));
+  const accepted = live.filter((record) => !citesTombstone(record, blocked));
+  const liveExperiences = accepted.filter((record): record is LearningExperience => record.record === "experience");
+  const liveMemories = accepted.filter((record): record is LearningMemory => record.record === "memory");
+  const rejectedExperiences = rejected.filter((record) => record.record === "experience").map((record) => record.id);
+  const rejectedMemories = rejected.filter((record) => record.record === "memory").map((record) => record.id);
   const deletedExperiences = removed.filter((change) => change.record === "experience").map((change) => change.id);
   const deletedMemories = removed.filter((change) => change.record === "memory").map((change) => change.id);
   const existingExperiences = await readExistingIds(db, delta.origin, epoch, "experience", [
-    ...liveExperiences.map((record) => record.id), ...deletedExperiences,
+    ...liveExperiences.map((record) => record.id), ...rejectedExperiences, ...deletedExperiences,
   ]);
   const existingMemories = await readExistingIds(db, delta.origin, epoch, "memory", [
-    ...liveMemories.map((record) => record.id), ...deletedMemories,
+    ...liveMemories.map((record) => record.id), ...rejectedMemories, ...deletedMemories,
   ]);
   let records = state.records;
   for (const id of deletedExperiences) if (existingExperiences.has(id)) records -= 1;
   for (const id of deletedMemories) if (existingMemories.has(id)) records -= 1;
+  for (const id of rejectedExperiences) if (existingExperiences.has(id)) records -= 1;
+  for (const id of rejectedMemories) if (existingMemories.has(id)) records -= 1;
   for (const record of liveExperiences) if (!existingExperiences.has(record.id)) records += 1;
   for (const record of liveMemories) if (!existingMemories.has(record.id)) records += 1;
   if (records < 0) records = 0;
@@ -716,16 +740,16 @@ export async function applyLearningDelta(
        ON CONFLICT(singleton) DO UPDATE SET changed = excluded.changed`,
     ),
   ];
-  statements.push(...recordDeletes(db, delta.origin, epoch, "experience", deletedExperiences));
-  statements.push(...recordDeletes(db, delta.origin, epoch, "memory", deletedMemories));
-  statements.push(...childDeletes(db, delta.origin, epoch, "experience", deletedExperiences));
-  statements.push(...childDeletes(db, delta.origin, epoch, "memory", deletedMemories));
-  statements.push(...projectionWrites(db, delta.origin, epoch, revision, 0, live));
+  statements.push(...recordDeletes(db, delta.origin, epoch, "experience", [...deletedExperiences, ...rejectedExperiences]));
+  statements.push(...recordDeletes(db, delta.origin, epoch, "memory", [...deletedMemories, ...rejectedMemories]));
+  statements.push(...childDeletes(db, delta.origin, epoch, "experience", [...deletedExperiences, ...rejectedExperiences]));
+  statements.push(...childDeletes(db, delta.origin, epoch, "memory", [...deletedMemories, ...rejectedMemories]));
+  statements.push(...projectionWrites(db, delta.origin, epoch, revision, 0, accepted));
   await db.batch(statements);
   return {
     state: { revision, epoch, digest: delta.digest, records },
-    applied: live.length,
-    deleted: removed.length,
+    applied: accepted.length,
+    deleted: removed.length + rejected.length,
     replayed: false,
   };
 }
@@ -893,6 +917,10 @@ export async function applyReconcile(
   if (stage === null || stage.epoch !== epoch) {
     throw new ReconcileMismatch("reconciliation is not staged at this epoch");
   }
+  const blocked = await tombstoneKeys(db, origin);
+  if (changes.some((record) => citesTombstone(record, blocked))) {
+    throw new ReconcileMismatch("reconciliation includes a tombstoned source");
+  }
   const state = await readLearningState(db, origin);
   await db.batch(projectionWrites(db, origin, epoch, state.revision + 1, 1, changes));
   return await countEpoch(db, origin, epoch);
@@ -1000,6 +1028,10 @@ export function projectionDeletionStatements(
       `DELETE FROM learning_link
        WHERE origin_host = ? AND epoch = ? AND ${sourceless("experience", "learning_link", "newer")}`,
     ).bind(origin, epoch, origin, epoch),
+    db.prepare(
+      `DELETE FROM learning_link
+       WHERE origin_host = ? AND epoch = ? AND ${sourceless("experience", "learning_link", "older")}`,
+    ).bind(origin, epoch, origin, epoch),
   );
   statements.push(
     db.prepare(
@@ -1010,8 +1042,7 @@ export function projectionDeletionStatements(
   statements.push(
     db.prepare(
       `UPDATE learning_state
-       SET digest = NULL,
-           records = (SELECT count(*) FROM learning_experience e
+       SET records = (SELECT count(*) FROM learning_experience e
                       WHERE e.origin_host = learning_state.origin_host AND e.epoch = learning_state.epoch)
                    + (SELECT count(*) FROM learning_memory m
                       WHERE m.origin_host = learning_state.origin_host AND m.epoch = learning_state.epoch),

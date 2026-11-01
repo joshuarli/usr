@@ -1742,6 +1742,12 @@ class Store:
                             (session_id, float(forgotten_at)))
         self._purge_generations(origin_host, harness, native_id)
 
+    def tombstone_forgotten_at(self, origin_host, harness, native_id):
+        row = self.db.execute(
+            "SELECT forgotten_at FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",
+            (str(origin_host), str(harness), str(native_id))).fetchone()
+        return None if row is None else float(row["forgotten_at"])
+
     def is_tombstoned(self, origin_host, harness, native_id):
         return self.db.execute(
             "SELECT 1 FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",

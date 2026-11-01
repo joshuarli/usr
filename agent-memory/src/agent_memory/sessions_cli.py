@@ -420,7 +420,14 @@ def _mirror_toggle(args, enabled):
         return 1
     document["central"] = block
     _write_config(document)
-    print("enabled=%d searchable_learning=%d" % (int(enabled), int(bool(block.get("learning_projection")))))
+    queued = 0
+    if enabled and args.searchable_learning:
+        state = _state_dir(args)
+        if (state / "sessions.sqlite3").is_file():
+            with Store(state) as store:
+                queued = learning_sync.requeue(store.db)
+    print("enabled=%d searchable_learning=%d requeued=%d" % (
+        int(enabled), int(bool(block.get("learning_projection"))), queued))
     return 0
 
 
@@ -644,9 +651,9 @@ def _mirror(args):
             if args.action == "verify":
                 result = mirror_module.verify(
                     config, client=client, objects=args.objects, sample=args.sample)
-                print("generations=%d snapshots=%d objects=%d chunks=%d sampled=%d bytes=%d" % (
+                print("generations=%d snapshots=%d objects=%d chunks=%d sampled=%d attested=%d bytes=%d" % (
                     result["generations"], result["snapshots"], result["objects"], result["chunks"],
-                    result["sampled"], result["bytes"]))
+                    result["sampled"], result["attested"], result["bytes"]))
                 return 0
             if args.action == "gc":
                 result = mirror_module.gc(config, client=client, apply=args.apply)

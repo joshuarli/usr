@@ -15,6 +15,7 @@ import { json, methodNotAllowed } from "../errors.js";
 import { readLearningState, type LearningState } from "../learning.js";
 import { serverTiming } from "../observe.js";
 import {
+  MAX_CIPHERTEXT_BYTES,
   MAX_OBJECT_BYTES,
   PROTOCOL,
   decodeDigest,
@@ -127,7 +128,7 @@ async function putObject(
   timing: SyncTiming,
 ): Promise<Response> {
   const declared = contentLength(request);
-  if (declared !== null && declared > MAX_OBJECT_BYTES) {
+  if (declared !== null && declared > MAX_CIPHERTEXT_BYTES) {
     return refuse(413, "payload_too_large", "object body exceeds the limit", timing);
   }
   const plaintext = decodeDigest(request.headers.get("X-Plaintext-Digest"));
@@ -149,7 +150,7 @@ async function putObject(
       });
     }
   }
-  const body = await readBounded(request, MAX_OBJECT_BYTES);
+  const body = await readBounded(request, MAX_CIPHERTEXT_BYTES);
   if (!body.ok) {
     return body.tooLarge
       ? refuse(413, "payload_too_large", "object body exceeds the limit", timing)
@@ -243,6 +244,17 @@ async function replaceObject(
       origin_host: principal.origin_host,
       created_at: Date.now() / 1000,
     }, existing.ciphertext_digest);
+    const shared = await env.DB.prepare(
+      "SELECT 1 FROM remote_object WHERE ciphertext_digest = ? LIMIT 1",
+    ).bind(existing.ciphertext_digest).first();
+    if (shared === null) {
+      const retiredStarted = performance.now();
+      try {
+        await env.BUCKET.delete(`v1/o/${existing.ciphertext_digest}`);
+      } finally {
+        timing.r2 += performance.now() - retiredStarted;
+      }
+    }
     const replaced = await readObjectByPlaintext(env.DB, principal.origin_host, plaintext);
     if (replaced === null || replaced.ciphertext_digest !== replaceBody.ciphertext_digest) {
       return refuse(409, "conflict", "object replacement did not take", timing);

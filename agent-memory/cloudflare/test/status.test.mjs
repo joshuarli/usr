@@ -160,6 +160,37 @@ test("status reports twenty origins with bounded queries and no private content"
   assert.equal(serialized.includes("zzprivateclaim"), false);
   assert.equal(/[0-9a-f]{64}/.test(serialized), false);
   assert.equal(serialized.includes("codex:"), false);
+  const own = await worker.fetch(request("/api/v1/status"), env, context({ service_token_id: "token-0" }));
+  const ownBody = await own.json();
+  assert.equal(own.status, 200);
+  assert.deepEqual(ownBody.origins.map((origin) => origin.origin), ["origin-00"]);
+});
+
+test("status counts only live generations and its D1 timing includes the query", async (t) => {
+  const { db, env } = await database(t);
+  await db.prepare("INSERT INTO origin_sync(origin_host, revision, last_change_at) VALUES(?, ?, ?)")
+    .bind("origin-live", 0, 100).run();
+  await db.prepare(
+    `INSERT INTO remote_object(plaintext_digest, plaintext_size, encoding, ciphertext_digest,
+       ciphertext_size, origin_host, created_at)
+     VALUES(?, ?, 'identity', ?, ?, ?, ?)`,
+  ).bind("a".repeat(64), 10, "b".repeat(64), 10, "origin-live", 100).run();
+  await db.prepare(
+    `INSERT INTO generation(origin_host, harness, native_id, manifest_digest, source_digest,
+       source_size, captured_at, committed_at, revision, manifest_object)
+     VALUES(?, 'codex', 'native-live', ?, ?, 10, 100, 100, 1, ?)`,
+  ).bind("origin-live", "c".repeat(64), "d".repeat(64), "b".repeat(64)).run();
+  await db.prepare("UPDATE origin_sync SET revision = 1 WHERE origin_host = ?").bind("origin-live").run();
+  await db.prepare(
+    "INSERT INTO tombstone(origin_host, harness, native_id, scope, forgotten_at, revision) VALUES(?, ?, ?, ?, ?, ?)",
+  ).bind("origin-live", "codex", "native-live", "global", 200, 2).run();
+  const response = await worker.fetch(request("/api/v1/status"), env, context({ email: "reader@example.test" }));
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.counts.generations, 0);
+  assert.equal(body.origins[0].generations, 0);
+  assert.equal(body.counts.origins, body.origins.length);
+  assert.match(response.headers.get("server-timing"), /d1;dur=(?!0\.0)/);
 });
 
 test("an unknown or disabled collector token is refused", async () => {

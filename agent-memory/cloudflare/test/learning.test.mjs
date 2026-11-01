@@ -227,7 +227,7 @@ test("a tombstone removes every citing projection record and its FTS row", async
   };
   const survives = {
     ...changeFor("experience"), id: 22, claim: "zzsurvives claim.",
-    applies_when: "zzsurvives applies when.", sources: [
+    applies_when: "zzsurvives applies when.", links: [{ older: 21, relation: "supersedes" }], sources: [
       { session: "codex:native-1@origin-a", position: 1, digest: "e".repeat(64), role: "trigger" },
       { session: "codex:native-2@origin-a", position: 2, digest: "f".repeat(64), role: "outcome" },
     ],
@@ -269,8 +269,55 @@ test("a tombstone removes every citing projection record and its FTS row", async
   assert.equal(await ftsCount(db, "zztombstoneonly"), 0);
   assert.equal(await ftsCount(db, "zzmemorygone"), 0);
   assert.equal(await ftsCount(db, "zzsurvives"), 1);
-  assert.equal((await stateOf(db, ORIGIN)).digest, null);
+  assert.equal(await db.prepare(
+    "SELECT count(*) AS count FROM learning_link WHERE origin_host = ?",
+  ).bind(ORIGIN).first().then((row) => row.count), 0);
+  assert.equal((await stateOf(db, ORIGIN)).digest, digest("tombstone:0"));
   assert.equal((await stateOf(db, ORIGIN)).records, 1);
+});
+
+test("a tombstoned source cannot be projected again by a delta or reconciliation", async (t) => {
+  const { db, env } = await runtime(t);
+  const record = {
+    ...changeFor("experience"), id: 24, claim: "zzresurrect claim.",
+    applies_when: "zzresurrect applies.", sources: [{
+      session: "codex:native-9@origin-a", position: 0, digest: "9".repeat(64), role: "trigger",
+    }],
+  };
+  assert.equal((await postJson(env, "/api/v1/sync/learning/deltas",
+    delta(ORIGIN, 0, "before-forget", [record]))).status, 200);
+  const pushed = await postJson(env, "/api/v1/sync/tombstones", {
+    protocol: 1, origin: ORIGIN, base_revision: 0,
+    tombstones: [{ harness: "codex", native_id: "native-9", scope: "global", forgotten_at: 100 }],
+  });
+  assert.equal(pushed.status, 200, await pushed.text());
+  assert.equal(await ftsCount(db, "zzresurrect"), 0);
+
+  const retry = await postJson(env, "/api/v1/sync/learning/deltas",
+    delta(ORIGIN, 0, "before-forget", [record]));
+  assert.equal(retry.status, 200, await retry.clone().text());
+  assert.equal((await retry.json()).replayed, true);
+  const fresh = await postJson(env, "/api/v1/sync/learning/deltas",
+    delta(ORIGIN, 1, "after-forget", [record]));
+  assert.equal(fresh.status, 200, await fresh.clone().text());
+  assert.equal((await fresh.json()).applied, 0);
+  assert.equal(await ftsCount(db, "zzresurrect"), 0);
+  assert.equal(await db.prepare(
+    "SELECT count(*) AS count FROM learning_experience WHERE origin_host = ? AND remote_id = 24",
+  ).bind(ORIGIN).first().then((row) => row.count), 0);
+
+  const begun = await postJson(env, "/api/v1/sync/learning/reconcile", {
+    protocol: 1, origin: ORIGIN, action: "begin", base_revision: 2,
+    digest: digest("resurrect-reconcile"), records: 1,
+  });
+  assert.equal(begun.status, 200, await begun.clone().text());
+  const epoch = (await begun.json()).epoch;
+  const applied = await postJson(env, "/api/v1/sync/learning/reconcile", {
+    protocol: 1, origin: ORIGIN, action: "apply", epoch, changes: [record],
+  });
+  assert.equal(applied.status, 409, await applied.clone().text());
+  assert.equal((await applied.json()).error.code, "conflict");
+  assert.equal(await ftsCount(db, "zzresurrect"), 0);
 });
 
 test("the same native id at two origins never shares a projection row", async (t) => {

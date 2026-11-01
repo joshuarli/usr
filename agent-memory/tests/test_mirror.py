@@ -791,7 +791,7 @@ class UploadTests(unittest.TestCase):
         refs = self.refs([b"synthetic payload"])
         cases = [
             lambda data, recipients: prepared_for(b"different data"),
-            lambda data, recipients: prepared_for(data, ciphertext=b"x" * (mirror.MAX_OBJECT_BYTES + 1)),
+            lambda data, recipients: prepared_for(data, ciphertext=b"x" * (mirror.MAX_CIPHERTEXT_BYTES + 1)),
         ]
         for prepare in cases:
             primary = FakeUploadClient()
@@ -879,6 +879,89 @@ class StoreMirrorTests(unittest.TestCase):
         self.assertIsNotNone(self.store.mirror_remote_state("cloudflare"))
         self.store.forget_mirror_remote("cloudflare")
         self.assertIsNone(self.store.mirror_remote_state("cloudflare"))
+
+    def test_a_remote_tombstone_withdraws_local_learning(self):
+        learning_module.initialize(self.store.db)
+        learning_sync.ensure_schema(self.store.db)
+        learning_sync.ensure_journal(self.store.db)
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT OR REPLACE INTO collector_identity(singleton, id, origin_host, display_label, created_at) "
+                "VALUES(1, 'synthetic', 'origin-a', 'synthetic', 0)")
+        origin = archive_module.origin_for(self.store.db)
+        draft = experience_module.Draft(
+            kind="method", claim="Remote forget removes this claim.",
+            applies_when="Running the remote forget test.", detector="synthetic",
+            subject="remote-forget", observed_at=100.0,
+            sources=[{"session": "codex:native-remote", "position": 0,
+                      "digest": "a" * 64, "role": "trigger"}])
+        with self.store.db:
+            status, _ = experience_module.add_experience(
+                self.store.db, "synthetic", draft, "codex:native-remote", 100.0)
+        self.assertEqual(status, "created")
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_experiences").fetchone()[0], 1)
+
+        class Tombstones:
+            @staticmethod
+            def tombstones(_origin, _after=None):
+                return {"protocol": 1, "origin": origin, "watermark": 1,
+                        "next_cursor": None, "tombstones": [{
+                            "harness": "codex", "native_id": "native-remote", "scope": "global",
+                            "forgotten_at": 200.0, "revision": 1}]}
+
+        watermark, applied = mirror._apply_remote_tombstones(
+            self.store, Tombstones(), origin, "usr-memories", 0)
+        self.assertEqual((watermark, applied), (1, 1))
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_experiences").fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM learning_experience_sources").fetchone()[0], 0)
+        self.assertEqual(self.store.tombstone_forgotten_at(origin, "codex", "native-remote"), 200.0)
+        self.assertEqual(self.store.pending_tombstones("usr-memories", origin), [])
+        self.assertEqual(learning_sync.mirror_snapshot(self.store.db, {}, origin), [])
+
+    def test_requeue_projects_every_live_record_after_a_pruned_journal(self):
+        learning_module.initialize(self.store.db)
+        learning_sync.ensure_schema(self.store.db)
+        learning_sync.ensure_journal(self.store.db)
+        draft = experience_module.Draft(
+            kind="method", claim="Requeued claim survives a pruned journal.",
+            applies_when="Running the requeue test.", detector="synthetic",
+            subject="requeue", observed_at=100.0,
+            sources=[{"session": "codex:native-requeue", "position": 0,
+                      "digest": "b" * 64, "role": "trigger"}])
+        with self.store.db:
+            experience_module.add_experience(
+                self.store.db, "synthetic", draft, "codex:native-requeue", 100.0)
+        head = learning_sync.journal_head(self.store.db)
+        self.assertGreater(head, 0)
+        learning_sync.prune_journal(self.store.db, head)
+        self.assertEqual(learning_sync.journal_head(self.store.db), 0)
+        self.assertEqual(learning_sync.requeue(self.store.db), 1)
+        self.assertGreater(learning_sync.journal_head(self.store.db), 0)
+        changes = learning_sync.export_changes(self.store.db)["changes"]
+        self.assertEqual([(change["record"], change["id"]) for change in changes], [("experience", 1)])
+
+    def test_reconcile_requires_the_learning_projection_opt_in(self):
+        with self.assertRaises(mirror.MirrorError) as raised:
+            mirror.reconcile(self.store, config(), "cloudflare", client=object())
+        self.assertEqual(raised.exception.code, "invalid_config")
+
+    def test_reconcile_refuses_a_changed_store_with_a_learning_ack(self):
+        self.store.write_mirror_remote("cloudflare", "old-store", 1, 0, learning_seq=4,
+                                       learning_digest="a" * 64)
+
+        class ChangedStore:
+            @staticmethod
+            def hello(_origin):
+                return {"store_id": "usr-memories", "revision": 9, "tombstone_watermark": 0,
+                        "learning": {"revision": 0, "digest": None, "records": 0}}
+
+        with self.assertRaises(mirror.MirrorError) as raised:
+            mirror.reconcile(self.store, replace(config(), learning_projection=True),
+                             "cloudflare", client=ChangedStore())
+        self.assertEqual(raised.exception.code, "remote_identity_changed")
+        pinned = cast(dict[str, Any], self.store.mirror_remote_state("cloudflare"))
+        self.assertEqual(pinned["store_id"], "old-store")
+        self.assertEqual(pinned["learning_seq"], 4)
 
     def test_a_v9_schema_gains_mirror_remote_without_losing_tombstones(self):
         with self.store.db:
@@ -970,6 +1053,9 @@ class SyncStore:
 
     def pending_tombstones(self, remote, origin):
         return list(self._tombstone_pending)
+
+    def tombstone_forgotten_at(self, origin, harness, native):
+        return None
 
     def mark_tombstone_durable(self, origin, harness, native, remote):
         self.calls.append(("tomb_durable", harness, native))
@@ -1183,7 +1269,16 @@ class SyncTests(unittest.TestCase):
             mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
         self.assertEqual(raised.exception.code, "remote_identity_changed")
         self.assertFalse([call for call in store.calls if call[0] == "durable"])
-        self.assertIsNotNone(store.writes[-1][4])
+        self.assertEqual(store.writes, [])
+        self.assertEqual(store.pinned, {"store_id": "old-store", "revision": 1, "tombstone_watermark": 0})
+
+    def test_a_learning_only_ack_still_refuses_a_changed_store(self):
+        store = SyncStore(pinned={"store_id": "old-store", "revision": 1,
+                                  "tombstone_watermark": 0, "learning_seq": 3},
+                          ack_count=0)
+        with self.assertRaises(mirror.MirrorError) as raised:
+            mirror.sync(store, config(), "cloudflare", client=SyncClient(), recipients=["age1"])
+        self.assertEqual(raised.exception.code, "remote_identity_changed")
 
     def test_tombstones_are_pushed_before_any_generation(self):
         commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
@@ -1300,6 +1395,19 @@ class SyncTests(unittest.TestCase):
                         prepare=self.prepared)
         for argv in launched:
             self.assertNotEqual(Path(str(argv[0])).name if argv else "", "cf")
+
+    def test_a_previous_snapshot_failure_is_retried_without_new_changes(self):
+        store = SyncStore(pinned={"store_id": "usr-memories", "revision": 2,
+                                  "tombstone_watermark": 0, "learning_seq": 0,
+                                  "last_error": "snapshot_failed: synthetic"})
+        runtime = SyncClient()
+        with mock.patch.object(mirror, "upload_snapshot",
+                               return_value=snapshot_counters(2)) as upload:
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+        self.assertEqual(upload.call_count, 1)
+        self.assertEqual(result["snapshots_created"], 1)
+        self.assertFalse(result["unchanged"])
+        self.assertEqual(store.writes[-1][4], None)
 
     def test_a_stale_revision_records_the_attempt_and_stops(self):
         store = SyncStore(pending_generations=[self.generation()])
@@ -1518,6 +1626,64 @@ class MirrorIntegrationTests(unittest.TestCase):
         finally:
             restored.close()
 
+    def test_verify_attests_only_after_every_pinned_object_is_downloaded(self):
+        state = self.root / "attest"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            self.capture(store, "native-attest", "attestation")
+            self.assertEqual(self.sync(store)["snapshots_created"], 1)
+        finally:
+            store.close()
+        client = self.client()
+        try:
+            plain = mirror.verify(self.config, client=client)
+            self.assertEqual(plain["attested"], 0)
+            self.assertIsNone(self.snapshots()[0]["verified_at"])
+            sampled_zero = mirror.verify(self.config, client=client, objects=True, sample=0)
+            self.assertEqual(sampled_zero["attested"], 0)
+            self.assertIsNone(self.snapshots()[0]["verified_at"])
+            full = mirror.verify(self.config, client=client, objects=True)
+            self.assertEqual(full["attested"], 1)
+            verified = self.snapshots()[0]["verified_at"]
+            self.assertIsNotNone(verified)
+            again = mirror.verify(self.config, client=client, objects=True)
+            self.assertEqual(again["attested"], 1)
+            self.assertEqual(self.snapshots()[0]["verified_at"], verified)
+        finally:
+            client.close()
+
+    def test_restore_from_one_collector_keeps_another_collectors_generations(self):
+        first_state = self.root / "collector-a"
+        second_state = self.root / "collector-b"
+        first = Store(first_state)
+        second = Store(second_state)
+        try:
+            self.set_origin(first)
+            self.set_origin(second)
+            self.capture(first, "native-a", "first collector")
+            self.assertEqual(self.sync(first)["generations_committed"], 1)
+            self.capture(second, "native-b", "second collector")
+            self.assertEqual(self.sync(second)["generations_committed"], 1)
+            snapshot = self.snapshots()[0]["id"]
+        finally:
+            first.close()
+            second.close()
+        client = self.client()
+        try:
+            report = mirror.restore(
+                self.config, "cloudflare", snapshot, self.root / "collector-restored",
+                client=client, identity_path=self.identity)
+        finally:
+            client.close()
+        self.assertEqual(report["replayed"], 1)
+        restored = Store(self.root / "collector-restored")
+        try:
+            natives = {row[0] for row in restored.db.execute("SELECT native_id FROM archive_generation")}
+            self.assertEqual(natives, {"native-a", "native-b"})
+        finally:
+            restored.close()
+
     def test_learning_delta_round_trips_and_rejects_a_stale_revision(self):
         change = json.loads(json.dumps(LEARNING_FIXTURE["cases"][0]["change"]))
         digest = learning_sync.changes_digest([change])
@@ -1570,6 +1736,7 @@ class MirrorIntegrationTests(unittest.TestCase):
                                     concurrency=1)
                 self.assertEqual(first["learning_batches"], 1)
                 self.assertEqual(first["learning_changes"], 1)
+                self.assertEqual(first["snapshots_created"], 1)
                 self.assertEqual(client.learning_state("origin-a")["records"], 1)
                 self.assertEqual(client.hello("origin-a")["learning"]["records"], 1)
             finally:
@@ -1611,7 +1778,8 @@ class MirrorIntegrationTests(unittest.TestCase):
             head = learning_sync.journal_head(store.db)
             client = self.client()
             try:
-                first = mirror.reconcile(store, self.config, "cloudflare", client=client)
+                first = mirror.reconcile(store, replace(self.config, learning_projection=True),
+                                         "cloudflare", client=client)
                 self.assertFalse(first["current"])
                 self.assertEqual((first["records"], first["chunks"], first["applied"]), (2, 1, 2))
                 state_before = client.learning_state("origin-a")
@@ -1620,7 +1788,8 @@ class MirrorIntegrationTests(unittest.TestCase):
                 self.assertEqual(len(keys["keys"]), 2)
                 self.assertTrue(all(len(key["digest"]) == 64 for key in keys["keys"]))
 
-                second = mirror.reconcile(store, self.config, "cloudflare", client=client)
+                second = mirror.reconcile(store, replace(self.config, learning_projection=True),
+                                          "cloudflare", client=client)
                 self.assertTrue(second["current"])
                 self.assertEqual(second["chunks"], 0)
                 self.assertEqual(second["revision"], state_before["revision"])
@@ -1628,11 +1797,12 @@ class MirrorIntegrationTests(unittest.TestCase):
 
                 with store.db:
                     store.db.execute("UPDATE learning_experiences SET state = 'retired' WHERE id = 1")
-                third = mirror.reconcile(store, self.config, "cloudflare", client=client)
+                third = mirror.reconcile(store, replace(self.config, learning_projection=True),
+                                         "cloudflare", client=client)
                 self.assertFalse(third["current"])
                 self.assertEqual(third["changed"], 1)
                 self.assertEqual(third["revision"], state_before["revision"] + 1)
-                self.assertEqual(learning_sync.journal_head(store.db), 0)
+                self.assertGreater(learning_sync.journal_head(store.db), 0)
             finally:
                 client.close()
             self.assertGreater(head, 0)
@@ -1644,6 +1814,10 @@ class MirrorIntegrationTests(unittest.TestCase):
             def __init__(self):
                 self.calls = []
                 self.attempts = 0
+
+            def hello(self, origin):
+                return {"store_id": "usr-memories", "revision": 1, "tombstone_watermark": 0,
+                        "learning": {"revision": 1, "digest": None, "records": 0}}
 
             def learning_state(self, origin):
                 return {"revision": 1, "epoch": 1, "digest": None, "records": 0}
@@ -1694,7 +1868,8 @@ class MirrorIntegrationTests(unittest.TestCase):
                 experience_module.add_experience(store.db, "git:" + str(self.root), draft,
                                                  "codex:native-retry", 100.0)
             client = ReconcileClient()
-            result = mirror.reconcile(store, self.config, "cloudflare", client=client)
+            result = mirror.reconcile(store, replace(self.config, learning_projection=True),
+                                      "cloudflare", client=client)
             self.assertEqual((result["revision"], result["chunks"], result["applied"]), (2, 2, 1))
             self.assertEqual([call for call in client.calls if call[0] == "begin"], [("begin", 1), ("begin", 2)])
             self.assertIn(("abort", 2), client.calls)
@@ -1850,7 +2025,7 @@ class MirrorCliTests(unittest.TestCase):
             "--identity", str(self.identity))
 
     def enable(self, *extra):
-        return self.run_cli("mirror", "enable", *extra)
+        return self.run_cli("mirror", "enable", "--state-dir", str(self.state), *extra)
 
     def status(self, *extra):
         result = self.run_cli(
@@ -1918,12 +2093,13 @@ class MirrorCliTests(unittest.TestCase):
         self.assertTrue(self.config_document()["central"]["enabled"])
         self.assertTrue(self.status("--offline")["enabled"])
 
-        disabled = self.run_cli("mirror", "disable")
+        disabled = self.run_cli("mirror", "disable", "--state-dir", str(self.state))
         self.assertEqual(disabled.returncode, 0, disabled.stderr)
         self.assertFalse(self.config_document()["central"]["enabled"])
         self.assertTrue(self.config_document()["central"]["learning_projection"])
         self.assertFalse(self.status("--offline")["enabled"])
-        withdrawn = self.run_cli("mirror", "disable", "--searchable-learning")
+        withdrawn = self.run_cli(
+            "mirror", "disable", "--state-dir", str(self.state), "--searchable-learning")
         self.assertEqual(withdrawn.returncode, 0, withdrawn.stderr)
         self.assertFalse(self.config_document()["central"]["learning_projection"])
         self.assertEqual(self.enable().returncode, 0)
@@ -1932,6 +2108,33 @@ class MirrorCliTests(unittest.TestCase):
         bad = self.run_cli("mirror", "doctor", "--state-dir", str(self.state), "--offline")
         self.assertNotEqual(bad.returncode, 0)
         self.assertIn("token=fail:0644", bad.stdout)
+
+    def test_enabling_searchable_learning_requeues_a_pruned_journal(self):
+        self.keygen()
+        self.assertEqual(self.configure("https://127.0.0.1:9").returncode, 0)
+        with Store(self.state) as store:
+            learning_module.initialize(store.db)
+            learning_sync.ensure_schema(store.db)
+            learning_sync.ensure_journal(store.db)
+            draft = experience_module.Draft(
+                kind="method", claim="Enabling the projection requeues this claim.",
+                applies_when="Running the enable requeue test.", detector="synthetic",
+                subject="enable", observed_at=100.0,
+                sources=[{"session": "codex:native-enable", "position": 0,
+                          "digest": "c" * 64, "role": "trigger"}])
+            with store.db:
+                experience_module.add_experience(
+                    store.db, "synthetic", draft, "codex:native-enable", 100.0)
+            head = learning_sync.journal_head(store.db)
+            learning_sync.prune_journal(store.db, head)
+            self.assertEqual(learning_sync.journal_head(store.db), 0)
+        enabled = self.enable("--searchable-learning")
+        self.assertEqual(enabled.returncode, 0, enabled.stderr)
+        self.assertIn("requeued=1", enabled.stdout)
+        with Store(self.state) as store:
+            self.assertGreater(learning_sync.journal_head(store.db), 0)
+            changes = learning_sync.export_changes(store.db)["changes"]
+            self.assertEqual([(change["record"], change["id"]) for change in changes], [("experience", 1)])
 
     def test_dry_run_and_offline_sync_keep_the_backlog(self):
         self.keygen()
@@ -2004,7 +2207,7 @@ class MirrorCliTests(unittest.TestCase):
             self.fail("snapshot listing has no id: " + listed.stdout)
         snapshot_id = match.group(1)
 
-        verified = self.run_cli("mirror", "verify", "--state-dir", str(self.state))
+        verified = self.run_cli("mirror", "verify", "--state-dir", str(self.state), "--objects")
         self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertIn("generations=1", verified.stdout)
         checked = self.status()
@@ -2041,7 +2244,7 @@ class MirrorCliTests(unittest.TestCase):
         self.assertIn("remote=ok", doctor.stdout)
         self.assertIn("ok=1", doctor.stdout)
 
-        self.assertEqual(self.run_cli("mirror", "disable").returncode, 0)
+        self.assertEqual(self.run_cli("mirror", "disable", "--state-dir", str(self.state)).returncode, 0)
         skipped = self.sync()
         self.assertEqual(skipped.returncode, 0, skipped.stderr)
         self.assertEqual(json.loads(skipped.stdout.strip()), {"enabled": False, "skipped": True})

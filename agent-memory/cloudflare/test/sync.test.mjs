@@ -6,7 +6,7 @@ import { Miniflare } from "miniflare";
 
 import { seedDatabase } from "../bench/seed.mjs";
 import { loadWorker, request } from "./harness.mjs";
-import { MAX_JSON_BYTES, MAX_OBJECT_BYTES } from "../src/protocol.ts";
+import { MAX_CIPHERTEXT_BYTES, MAX_JSON_BYTES, MAX_OBJECT_BYTES } from "../src/protocol.ts";
 
 const worker = await loadWorker();
 const COLLECTOR = "collector-client.access";
@@ -246,7 +246,7 @@ test("object uploads stream without a content length and refuse an oversized bod
   const oversizedDigest = digest("oversized ciphertext");
   const oversizedStream = new ReadableStream({
     start(controller) {
-      controller.enqueue(new Uint8Array(MAX_OBJECT_BYTES + 1));
+      controller.enqueue(new Uint8Array(MAX_CIPHERTEXT_BYTES + 1));
       controller.close();
     },
   });

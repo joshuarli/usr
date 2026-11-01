@@ -244,6 +244,31 @@ test("detail returns provenance and both link directions", async (t) => {
   assert.equal((await get(env, "/api/v1/memories/origin-a/insight/1")).status, 404);
 });
 
+test("a page above the D1 parameter limit still returns every source", async (t) => {
+  const { env } = await runtime(t);
+  const changes = Array.from({ length: 40 }, (_value, index) => experience(100 + index, {
+    claim: `Synthetic full page ${index}.`,
+    applies_when: `Synthetic full page applies ${index}.`,
+  }));
+  const seeded = await worker.fetch(request("/api/v1/sync/learning/deltas", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      protocol: 1, origin: ORIGIN, base_revision: 0, digest: digest("full-page"), changes,
+    }),
+  }), env, collector());
+  assert.equal(seeded.status, 200, await seeded.text());
+  for (const limit of [34, 40, 100]) {
+    const response = await get(env, `/api/v1/memories?state=all&limit=${limit}`);
+    const body = await response.json();
+    assert.equal(response.status, 200, `limit=${limit}: ${JSON.stringify(body)}`);
+    assert.equal(body.memories.length, Math.min(limit, 40));
+    assert.ok(body.memories.every((memory) => memory.source_count === 1));
+  }
+  const html = await get(env, "/search?state=all&limit=40", reader());
+  assert.equal(html.status, 200);
+});
+
 test("invalid search filters are refused before a query", async (t) => {
   const { env, calls } = await runtime(t);
   await seed(env);

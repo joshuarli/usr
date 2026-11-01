@@ -28,6 +28,7 @@ from agent_memory.types import HARNESSES
 PROTOCOL = 1
 MAX_JSON_BYTES = 8 * 1024 * 1024
 MAX_OBJECT_BYTES = 8 * 1024 * 1024
+MAX_CIPHERTEXT_BYTES = MAX_OBJECT_BYTES + 64 * 1024
 MAX_MISSING_OBJECTS = 20000
 MAX_GENERATION_OBJECTS = 20000
 MAX_GENERATION_ARTIFACTS = 1000
@@ -40,7 +41,7 @@ MAX_SOURCE_BYTES = 1 << 50
 MAX_PAGE = 200
 MAX_CURSOR_CHARS = 512
 MAX_CURSOR_PARTS = 4
-MAX_CURSOR_PART_CHARS = 256
+MAX_CURSOR_PART_CHARS = 512
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 REQUEST_TIMEOUT = 30
 ATTEMPTS = 5
@@ -438,7 +439,7 @@ def _decode_remote_object(value):
         return None
     if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= MAX_OBJECT_BYTES:
         return None
-    if isinstance(ciphertext_size, bool) or not isinstance(ciphertext_size, int) or not 0 <= ciphertext_size <= MAX_OBJECT_BYTES:
+    if isinstance(ciphertext_size, bool) or not isinstance(ciphertext_size, int) or not 0 <= ciphertext_size <= MAX_CIPHERTEXT_BYTES:
         return None
     return {
         "plaintext_digest": plaintext, "plaintext_size": size, "encoding": encoding,
@@ -817,7 +818,7 @@ def _decode_snapshot_object_row(value) -> dict[str, Any] | None:
 
 
 def decode_snapshot_list_response(value) -> dict[str, Any] | None:
-    if not _exact_keys(value, ("protocol", "origin", "snapshots")):
+    if not _exact_keys(value, ("protocol", "origin", "snapshots", "next_cursor")):
         return None
     if decode_protocol(value.get("protocol")) is None:
         return None
@@ -831,7 +832,12 @@ def decode_snapshot_list_response(value) -> dict[str, Any] | None:
         if row is None or row["origin_host"] != origin:
             return None
         clean.append(row)
-    return {"protocol": PROTOCOL, "origin": origin, "snapshots": clean}
+    cursor = value.get("next_cursor")
+    if cursor is not None:
+        parts = decode_cursor(cursor)
+        if parts is None or len(parts) != 2 or not parts[0].isdigit():
+            return None
+    return {"protocol": PROTOCOL, "origin": origin, "snapshots": clean, "next_cursor": cursor}
 
 
 def decode_snapshot_detail_response(value) -> dict[str, Any] | None:
@@ -1395,11 +1401,15 @@ class MirrorClient:
             raise MirrorError("invalid_response", "object upload response is invalid")
         return decoded
 
-    def snapshots(self, origin, limit=100):
+    def snapshots(self, origin, limit=100, before=None):
         if decode_origin(origin) is None or not 1 <= limit <= MAX_PAGE:
             raise MirrorError("invalid_request", "snapshot list request is invalid")
-        query = urlencode({"origin": origin, "limit": limit})
-        decoded = decode_snapshot_list_response(self._json("GET", "/api/v1/sync/snapshots?" + query))
+        if before is not None and (not isinstance(before, str) or decode_cursor(before) is None):
+            raise MirrorError("invalid_request", "snapshot list request is invalid")
+        query = {"origin": origin, "limit": limit}
+        if before is not None:
+            query["before"] = before
+        decoded = decode_snapshot_list_response(self._json("GET", "/api/v1/sync/snapshots?" + urlencode(query)))
         if decoded is None:
             raise MirrorError("invalid_response", "snapshot list response is invalid")
         return decoded
@@ -1512,7 +1522,7 @@ def _upload_group(client, refs, archive_dir, recipients, prepare):
         prepared = prepare(data, recipients)
         if prepared.plaintext_digest != ref.plaintext_digest:
             raise MirrorError("invalid_request", "prepared object digest does not match the archive")
-        if prepared.ciphertext_size > MAX_OBJECT_BYTES:
+        if prepared.ciphertext_size > MAX_CIPHERTEXT_BYTES:
             raise MirrorError("invalid_request", "ciphertext exceeds the upload limit")
         result = client.put_object(prepared)
         object_row = result["object"]
@@ -1649,6 +1659,33 @@ def pending_report(store, remote_name):
     }
 
 
+def _apply_remote_tombstones(store, runtime, origin, store_id, watermark):
+    """Apply newer remote forget decisions with local learning withdrawal."""
+    applied = 0
+    if watermark is None:
+        watermark = 0
+    cursor = None
+    while True:
+        page = runtime.tombstones(origin, cursor)
+        for row in page["tombstones"]:
+            existing = store.tombstone_forgotten_at(origin, row["harness"], row["native_id"])
+            if existing is not None and existing >= float(row["forgotten_at"]):
+                continue
+            database = getattr(store, "db", None)
+            if database is not None and hasattr(database, "execute") and learning_sync.has_learning(database):
+                learning_module.apply_remote_forget(
+                    store, origin, row["harness"], row["native_id"], row["scope"], row["forgotten_at"])
+                store.mark_tombstone_durable(origin, row["harness"], row["native_id"], store_id)
+            else:
+                store.apply_remote_tombstone(
+                    origin, row["harness"], row["native_id"], row["scope"], row["forgotten_at"], store_id)
+            applied += 1
+        watermark = max(watermark, page["watermark"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return watermark, applied
+
+
 def sync(store, config, remote_name, *, refresh=None, client=None, upload_client_factory=None,
          recipients=None, concurrency=4, prepare=None, progress=None):
     """Deliver the local archive to one Cloudflare mirror and pin its identity."""
@@ -1675,7 +1712,7 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
         revision = hello["revision"]
         pinned = store.mirror_remote_state(remote_name)
         if pinned is not None and pinned["store_id"] != store_id:
-            if store.remote_ack_count(pinned["store_id"]):
+            if store.remote_ack_count(pinned["store_id"]) or int(pinned.get("learning_seq") or 0) > 0:
                 raise MirrorError(
                     "remote_identity_changed",
                     "remote store identity changed; run `agent-sessions mirror adopt --remote %s`" % remote_name)
@@ -1688,20 +1725,13 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
         learning_revision = int(hello["learning"]["revision"])
         learning_pending = False
         changed = pinned is None
+        journal_before = int(store.learning_journal_head())
 
         if hello["tombstone_watermark"] > watermark:
-            cursor = None
-            while True:
-                page = runtime.tombstones(origin, cursor)
-                for row in page["tombstones"]:
-                    store.apply_remote_tombstone(
-                        origin, row["harness"], row["native_id"], row["scope"], row["forgotten_at"], store_id)
-                    counters["tombstones_fetched"] += 1
-                    changed = True
-                watermark = max(watermark, page["watermark"])
-                cursor = page["next_cursor"]
-                if cursor is None:
-                    break
+            watermark, applied = _apply_remote_tombstones(store, runtime, origin, store_id, watermark)
+            counters["tombstones_fetched"] += applied
+            if applied:
+                changed = True
 
         if refresh is not None:
             refresh()
@@ -1812,20 +1842,20 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
                     counters["learning_changes"] += acked["applied"]
                     counters["learning_deletes"] += acked["deleted"]
                 learning_seq = head
-                learning_sync.prune_journal(store.db, learning_seq)
-                learning_pending = False
+                learning_pending = True
                 changed = True
             else:
                 learning_pending = False
         elif not config.learning_projection:
-            learning_pending = store.learning_journal_head() > 0
+            learning_pending = journal_before > 0
 
         if changed or (pinned is not None and pinned.get("last_error") is not None):
             store.write_mirror_remote(remote_name, store_id, revision, watermark,
                                       learning_seq=learning_seq, learning_digest=learning_digest)
         if (counters["generations_committed"] > 0 or counters["generations_tombstoned"] > 0
                 or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0
-                or learning_pending):
+                or learning_pending or journal_before > 0
+                or (pinned is not None and pinned.get("last_error") is not None)):
             try:
                 snapshot: dict[str, Any] = upload_snapshot(
                     store, config, client=runtime, origin=origin, revision=revision,
@@ -1844,21 +1874,22 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
             revision = max(revision, snapshot["revision"])
             store.write_mirror_remote(remote_name, store_id, revision, watermark,
                                       learning_seq=learning_seq, learning_digest=learning_digest)
-            if not config.learning_projection:
-                store.prune_learning_journal()
+            if journal_before > 0:
+                store.prune_learning_journal(through=journal_before)
         counters["store_id"] = store_id
         counters["revision"] = revision
         counters["tombstone_watermark"] = watermark
         counters["learning_revision"] = learning_revision
         counters["learning_seq"] = learning_seq
-        counters["unchanged"] = not changed
+        counters["unchanged"] = (not changed and counters["snapshots_created"] == 0
+                                 and counters["snapshots_duplicate"] == 0)
         return counters
     except MirrorError as exc:
-        if store_id is not None:
+        if store_id is not None and exc.code != "remote_identity_changed":
             store.write_mirror_remote(remote_name, store_id, revision, watermark,
                                       learning_seq=learning_seq, learning_digest=learning_digest,
                                       error=str(exc)[:500])
-        else:
+        elif store_id is None:
             store.record_mirror_error(remote_name, str(exc))
         raise
     finally:
@@ -1886,12 +1917,32 @@ def reconcile(store, config, remote_name, *, client=None, progress=None,
     """Replace one origin's searchable projection with the local live record set."""
     if not isinstance(remote_name, str) or not remote_name:
         raise MirrorError("invalid_config", "remote name is required")
+    if not config.learning_projection:
+        raise MirrorError(
+            "invalid_config",
+            "searchable learning is disabled; run `agent-sessions mirror enable --searchable-learning`")
     origin = archive_module.origin_for(store.db)
     counters = {"current": False, "records": 0, "missing": 0, "extra": 0, "changed": 0,
-                "chunks": 0, "applied": 0, "revision": 0, "epoch": 1}
+                "chunks": 0, "applied": 0, "revision": 0, "epoch": 1,
+                "tombstones_fetched": 0}
     owner = client is None
     runtime = client or MirrorClient(config)
     try:
+        hello = runtime.hello(origin)
+        store_id = hello["store_id"]
+        pinned = store.mirror_remote_state(remote_name)
+        if pinned is not None and pinned["store_id"] != store_id:
+            if store.remote_ack_count(pinned["store_id"]) or int(pinned.get("learning_seq") or 0) > 0:
+                raise MirrorError(
+                    "remote_identity_changed",
+                    "remote store identity changed; run `agent-sessions mirror adopt --remote %s`" % remote_name)
+            store.forget_mirror_remote(remote_name)
+            pinned = None
+        watermark = 0 if pinned is None else int(pinned["tombstone_watermark"])
+        if hello["tombstone_watermark"] > watermark:
+            watermark, applied = _apply_remote_tombstones(
+                store, runtime, origin, store_id, watermark)
+            counters["tombstones_fetched"] = applied
         for attempt in range(2):
             learning = runtime.learning_state(origin)
             revision = learning["revision"]
@@ -1917,6 +1968,10 @@ def reconcile(store, config, remote_name, *, client=None, progress=None,
             counters["changed"] = len([key for key in local if key in remote and remote[key] != local[key]])
             if not (counters["missing"] or counters["extra"] or counters["changed"]):
                 counters["current"] = True
+                if pinned is not None:
+                    store.write_mirror_remote(
+                        remote_name, store_id, hello["revision"], watermark,
+                        learning_seq=head, learning_digest=learning["digest"])
                 return counters
             digest = learning_sync.changes_digest(records)
             begun = runtime.reconcile_begin(origin, revision, digest, len(records))
@@ -1925,6 +1980,10 @@ def reconcile(store, config, remote_name, *, client=None, progress=None,
             if begun["current"]:
                 counters["current"] = True
                 counters["revision"] = begun["revision"]
+                if pinned is not None:
+                    store.write_mirror_remote(
+                        remote_name, store_id, hello["revision"], watermark,
+                        learning_seq=head, learning_digest=digest)
                 return counters
             try:
                 for batch in _reconcile_batches(records, chunk_records, chunk_bytes):
@@ -1944,18 +2003,25 @@ def reconcile(store, config, remote_name, *, client=None, progress=None,
                 continue
             counters.update(applied=committed["applied"], revision=committed["revision"],
                             epoch=committed["epoch"], current=committed["replayed"])
-            if head:
-                learning_sync.prune_journal(store.db, head)
-            pinned = store.mirror_remote_state(remote_name)
-            if pinned is not None:
-                store.write_mirror_remote(
-                    remote_name, pinned["store_id"], pinned["revision"], pinned["tombstone_watermark"],
-                    learning_seq=head, learning_digest=digest)
+            store.write_mirror_remote(
+                remote_name, store_id, hello["revision"], watermark,
+                learning_seq=head, learning_digest=digest)
             return counters
         raise MirrorError("stale_revision", "reconciliation did not settle after a retry")
     finally:
         if owner:
             runtime.close()
+
+
+def _snapshot_pages(runtime, origin) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    cursor = None
+    while True:
+        page = runtime.snapshots(origin, MAX_PAGE, before=cursor)
+        rows.extend(page["snapshots"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            return rows
 
 
 def _collector_origin(client) -> str:
@@ -2105,7 +2171,7 @@ def _object_row_from_response(ciphertext, response_headers) -> dict[str, Any]:
         raise MirrorError("invalid_response", "object response metadata is invalid")
     if plaintext_size is None or not plaintext_size.isdigit() or not 0 <= int(plaintext_size) <= MAX_OBJECT_BYTES:
         raise MirrorError("invalid_response", "object response metadata is invalid")
-    if ciphertext_size is None or not ciphertext_size.isdigit() or int(ciphertext_size) > MAX_OBJECT_BYTES:
+    if ciphertext_size is None or not ciphertext_size.isdigit() or int(ciphertext_size) > MAX_CIPHERTEXT_BYTES:
         raise MirrorError("invalid_response", "object response metadata is invalid")
     return {
         "plaintext_digest": plaintext,
@@ -2268,15 +2334,21 @@ def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]
                 if known_size != item["size"]:
                     raise MirrorError("corrupt_object", "object size conflicts: " + item["digest"])
         _resolve_known(runtime, origin, list(referenced.items()))
-        snapshot_rows: list[dict[str, Any]] = runtime.snapshots(origin, MAX_PAGE)["snapshots"]
+        snapshot_rows: list[dict[str, Any]] = _snapshot_pages(runtime, origin)
         snapshot_objects: dict[str, int] = {}
         chunks: int = 0
+        attested: int = 0
         with tempfile.TemporaryDirectory(prefix="mirror-verify-") as temporary:
             for index, snapshot in enumerate(snapshot_rows):
                 detail = runtime.snapshot(origin, snapshot["id"])
                 _reassemble_snapshot(runtime, config.age_identity_file, detail, Path(temporary) / ("%d.sqlite3" % index))
-                runtime.verify_snapshot(origin, snapshot["id"])
                 chunks += len(detail["chunks"])
+                sampled_all = objects and (sample is None or sample >= len(detail["objects"]))
+                if sampled_all:
+                    for item in detail["objects"]:
+                        _download_object(runtime, config.age_identity_file, _object_row(item))
+                    runtime.verify_snapshot(origin, snapshot["id"])
+                    attested += 1
                 for item in detail["objects"]:
                     known_size = snapshot_objects.setdefault(item["plaintext_digest"], item["size"])
                     if known_size != item["size"]:
@@ -2297,7 +2369,7 @@ def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]
         return {
             "generations": len(generations), "snapshots": len(snapshot_rows),
             "objects": len(all_objects), "chunks": chunks, "sampled": sampled,
-            "bytes": sum(all_objects.values()),
+            "attested": attested, "bytes": sum(all_objects.values()),
         }
     finally:
         if owner:
@@ -2314,23 +2386,11 @@ def restore(config, remote_name, snapshot_id, destination, *, client=None, ident
         with tempfile.TemporaryDirectory(prefix="mirror-restore-") as temporary:
             backup_dir = Path(temporary) / "backup"
             _snapshot_backup_dir(runtime, identity, detail, backup_dir)
+            runtime.verify_snapshot(origin, snapshot_id)
             backup_module.restore(backup_dir, destination)
         from agent_memory.store import Store
         replayed = 0
         with Store(destination) as store:
-            rows: list[dict[str, Any]] = [row for row in _generation_pages(runtime, origin)
-                                          if row["revision"] > detail["snapshot"]["revision"]]
-            manifests = _load_manifests(runtime, origin, rows, [identity])
-            for _row, manifest, _manifest_row in manifests:
-                refs = [(item["digest"], item["size"]) for item in [*manifest["chunks"], *manifest["artifacts"]]]
-                known: dict[str, dict[str, Any]] = _resolve_known(runtime, origin, refs)
-                received: dict[str, bytes] = {}
-                for digest, size in refs:
-                    if store.object_intact(digest, size):
-                        continue
-                    received[digest] = _download_object(runtime, identity, known[digest])
-                store.commit_generation(manifest, received)
-                replayed += 1
             cursor = None
             applied = 0
             while True:
@@ -2342,6 +2402,24 @@ def restore(config, remote_name, snapshot_id, destination, *, client=None, ident
                 cursor = page["next_cursor"]
                 if cursor is None:
                     break
+            rows: list[dict[str, Any]] = _generation_pages(runtime, origin)
+            manifests = _load_manifests(runtime, origin, rows, [identity])
+            for _row, manifest, _manifest_row in manifests:
+                if store.db.execute(
+                        "SELECT 1 FROM archive_generation WHERE manifest_digest = ?",
+                        (manifest["manifest_digest"],)).fetchone() is not None:
+                    continue
+                if store.is_tombstoned(origin, manifest["harness"], manifest["native_id"]):
+                    continue
+                refs = [(item["digest"], item["size"]) for item in [*manifest["chunks"], *manifest["artifacts"]]]
+                known: dict[str, dict[str, Any]] = _resolve_known(runtime, origin, refs)
+                received: dict[str, bytes] = {}
+                for digest, size in refs:
+                    if store.object_intact(digest, size):
+                        continue
+                    received[digest] = _download_object(runtime, identity, known[digest])
+                store.commit_generation(manifest, received)
+                replayed += 1
             hello: dict[str, Any] = runtime.hello(origin)
             store.write_mirror_remote(
                 remote_name, hello["store_id"], hello["revision"], hello["tombstone_watermark"])
@@ -2372,7 +2450,7 @@ def rotate(config, *, recipients_file, identity_file, old_identity_file=None, cl
             known: dict[str, dict[str, Any]] = _resolve_known(runtime, origin, refs)
             for digest, item in known.items():
                 objects[digest] = dict(item)
-        for snapshot in runtime.snapshots(origin, MAX_PAGE)["snapshots"]:
+        for snapshot in _snapshot_pages(runtime, origin):
             detail: dict[str, Any] = runtime.snapshot(origin, snapshot["id"])
             for chunk in detail["chunks"]:
                 objects[chunk["plaintext_digest"]] = _chunk_row(chunk)

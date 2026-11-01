@@ -55,13 +55,15 @@ function formValues(filters: MemoryFilters): SearchFormValues {
 
 async function landing(env: Env, timing: SyncTiming, head: boolean): Promise<Response> {
   const started = performance.now();
+  let counts: Awaited<ReturnType<typeof readCounts>>;
+  let recent: Awaited<ReturnType<typeof searchMemories>>;
   try {
-    const counts = await readCounts(env.DB);
-    const recent = await searchMemories(env.DB, recentFilters(10));
-    return html(renderLanding(counts, recent.memories), 200, timing, head);
+    counts = await readCounts(env.DB);
+    recent = await searchMemories(env.DB, recentFilters(10));
   } finally {
     timing.d1 += performance.now() - started;
   }
+  return html(renderLanding(counts, recent.memories), 200, timing, head);
 }
 
 async function search(url: URL, env: Env, timing: SyncTiming, head: boolean): Promise<Response> {
@@ -79,12 +81,13 @@ async function search(url: URL, env: Env, timing: SyncTiming, head: boolean): Pr
     }, [], null), 400, timing, head);
   }
   const started = performance.now();
+  let page: Awaited<ReturnType<typeof searchMemories>>;
   try {
-    const page = await searchMemories(env.DB, filters);
-    return html(renderSearch(formValues(filters), page.memories, page.next_cursor), 200, timing, head);
+    page = await searchMemories(env.DB, filters);
   } finally {
     timing.d1 += performance.now() - started;
   }
+  return html(renderSearch(formValues(filters), page.memories, page.next_cursor), 200, timing, head);
 }
 
 async function detail(
@@ -118,14 +121,15 @@ async function detail(
 
 async function status(env: Env, principal: Principal, timing: SyncTiming, head: boolean): Promise<Response> {
   const started = performance.now();
+  let data: Awaited<ReturnType<typeof readStatus>>;
   try {
-    const data = await readStatus(env.DB);
-    if (data === null) return html("Status unavailable", 503, timing, head);
-    const name = principal.kind === "reader" ? principal.email : principal.origin_host;
-    return html(renderStatus(name, data), 200, timing, head);
+    data = await readStatus(env.DB);
   } finally {
     timing.d1 += performance.now() - started;
   }
+  if (data === null) return html("Status unavailable", 503, timing, head);
+  const name = principal.kind === "reader" ? principal.email : principal.origin_host;
+  return html(renderStatus(name, data), 200, timing, head);
 }
 
 export async function handleHtml(

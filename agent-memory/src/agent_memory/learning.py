@@ -1457,8 +1457,15 @@ class Learner:
 
     def apply_remote_forget(self, origin_host, harness, native_id, scope, forgotten_at):
         session = self.store.central_session_id(origin_host, harness, native_id)
-        return self._forget_session(
-            session, forgotten_at, lambda: self.store.apply_tombstone(origin_host, harness, native_id, scope, forgotten_at))
+        aliases = [session]
+        if harness == "codex" and not session.startswith("codex:"):
+            aliases.append("codex:" + session)
+        result = None
+        for alias in aliases:
+            result = self._forget_session(
+                alias, forgotten_at,
+                lambda: self.store.apply_tombstone(origin_host, harness, native_id, scope, forgotten_at))
+        return result
 
     def _forget_session(self, session, now, purge_evidence):
         findings = {row[0] for row in self.db.execute("SELECT DISTINCT finding FROM learning_incidents WHERE session=?", (session,))}

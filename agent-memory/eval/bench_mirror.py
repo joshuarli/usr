@@ -421,7 +421,10 @@ def _document(environment, scenario, dataset, samples, operations, runtime=None)
         "scenario": scenario,
         "runtime": {**(runtime or _runtime()), "dirty": bool(_git("status", "--porcelain", "--untracked-files=no"))},
         "dataset": dataset,
-        "perf_gate": "passed" if len(timed) == len(samples) else "deferred",
+        "perf_gate": "passed" if len(timed) == len(samples) and all(
+            summary.get("runs", 0) >= 5 for summary in
+            [_summary([sample for sample in samples if sample["operation"] == operation]) for operation in operations]
+        ) else "deferred",
         "load": {"source": "perf-gate-ready", "cores": _cores(), "max_load1": max(
             (sample["gate"]["load1"][0] or 0) for sample in samples) if samples else 0},
         "samples": samples,
@@ -689,9 +692,15 @@ def _deployed_request(connection, path, token=None) -> dict[str, Any]:
     headers_done = time.perf_counter()
     payload = response.read()
     done = time.perf_counter()
+    results = None
+    if b'"memories"' in payload:
+        try:
+            results = len(json.loads(payload)["memories"])
+        except (ValueError, KeyError, TypeError):
+            results = None
     return {
         "status": response.status, "headers": {key.lower(): value for key, value in response.getheaders()},
-        "bytes": len(payload), "timings": {
+        "bytes": len(payload), "results": results, "timings": {
             "headers_ms": round((headers_done - started) * 1000, 3),
             "body_ms": round((done - headers_done) * 1000, 3),
         },
@@ -732,6 +741,8 @@ def _deployed(args):
         refused = _deployed_request(refused_connection, "/api/v1/status")
     finally:
         refused_connection.close()
+    if refused["status"] == 302 and "cloudflareaccess.com" not in refused["headers"].get("location", ""):
+        raise RuntimeError("deployed benchmark unauthenticated request did not redirect to Access")
     if refused["status"] not in (302, 403):
         raise RuntimeError("deployed benchmark unauthenticated request was not refused")
     probe_connection, _connect_ms = _deployed_connection(base)
@@ -757,6 +768,7 @@ def _deployed(args):
     connections = {}
     connect_times = {}
     samples_seen = {}
+    reconnects = {name: 0 for name, _path in operations}
     for name, _path in operations:
         connections[name], connect_times[name] = _deployed_connection(base)
         samples_seen[name] = 0
@@ -768,19 +780,24 @@ def _deployed(args):
             except (http.client.HTTPException, OSError):
                 connections[name].close()
                 connections[name], connect_times[name] = _deployed_connection(base)
+                reconnects[name] += 1
                 result = _deployed_request(connections[name], path, token)
             if result["status"] != 200:
                 raise RuntimeError("deployed benchmark request %s failed with %d" % (path, result["status"]))
             timing = _server_timing(result["headers"].get("server-timing"))
+            if (timing.get("d1") or {}).get("dur") is None or (timing.get("r2") or {}).get("dur") is None:
+                raise RuntimeError("deployed benchmark response has no valid Server-Timing")
             timings = {**result["timings"],
                        "connect_ms": connect_times[name] if samples_seen[name] == 0 else 0.0,
                        "d1_ms": (timing.get("d1") or {}).get("dur"),
-                       "r2_ms": (timing.get("r2") or {}).get("dur")}
+                       "r2_ms": (timing.get("r2") or {}).get("dur"),
+                       "reconnected": samples_seen[name] > 0 and reconnects[name] > 0}
             samples_seen[name] += 1
-            return {
-                "requests": 1, "bytes": result["bytes"], "status": result["status"],
-                "_timings": timings,
-            }
+            counters = {"requests": 1, "bytes": result["bytes"], "status": result["status"],
+                        "reconnects": reconnects[name]}
+            if result["results"] is not None:
+                counters["results"] = result["results"]
+            return {**counters, "_timings": timings}
         return run
 
     try:
@@ -799,8 +816,11 @@ def _deployed(args):
     if scenario == "search":
         dataset.update({"query": os.environ.get("MEMORIES_QUERY", QUERY), "limit": 20})
     document = _document(
-        "deployed", scenario, dataset, samples, tuple(name for name, _path in operations),
+        "production", scenario, dataset, samples, tuple(name for name, _path in operations),
         runtime={**_runtime(), "endpoint": base, "token": "service-token"})
+    document["measurement"] = "observational"
+    document["perf_gate"] = "observational"
+    document["host_gate"] = "passed" if all(sample["wall_ms"] is not None for sample in samples) else "deferred"
     _write(document, Path(args.out) if Path(args.out).is_absolute() else ROOT / args.out)
     print(json.dumps(document, indent=2, sort_keys=True))
     variance = document.get("counter_variance")

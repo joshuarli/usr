@@ -145,6 +145,27 @@ def ensure_journal(db):
                        "SELECT 'memory', finding, 0, CAST(strftime('%s','now') AS REAL) FROM learning_memories")
 
 
+def requeue(db):
+    """Queue every current record for projection without duplicating pending changes."""
+    if not has_learning(db):
+        return 0
+    ensure_journal(db)
+    now = time.time()
+    with db:
+        inserted = 0
+        for record, table, column in (
+                ("experience", "learning_experiences", "id"),
+                ("memory", "learning_memories", "finding")):
+            cursor = db.execute(
+                "INSERT INTO learning_change(record, remote_id, deleted, changed_at) "
+                "SELECT ?, %s, 0, ? FROM %s AS source WHERE NOT EXISTS ("
+                " SELECT 1 FROM learning_change c WHERE c.record = ? AND c.remote_id = source.%s)"
+                % (column, table, column),
+                (record, now, record))
+            inserted += cursor.rowcount
+        return inserted
+
+
 def project_key(identity):
     return hashlib.sha256(("agent-memory-project:" + str(identity)).encode("utf-8")).hexdigest()[:16]
 

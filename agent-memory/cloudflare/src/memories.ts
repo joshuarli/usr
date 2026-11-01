@@ -310,20 +310,24 @@ async function pageSources(
 ): Promise<Map<string, LearningSourceRow[]>> {
   const provided = new Map<string, LearningSourceRow[]>();
   if (rows.length === 0) return provided;
-  const params: (string | number)[] = [];
-  for (const row of rows) params.push(row.origin, row.record, row.id);
-  const result = await db.prepare(
-    `SELECT s.record, s.remote_id, s.session, s.position, s.digest, s.role
-     FROM learning_source s
-     JOIN learning_state ls ON ls.origin_host = s.origin_host AND ls.epoch = s.epoch
-     WHERE (s.origin_host, s.record, s.remote_id) IN (${rows.map(() => "(?, ?, ?)").join(",")})
-     ORDER BY s.record, s.remote_id, s.session, s.position, s.role`,
-  ).bind(...params).all<LearningSourceRow>();
-  for (const source of result.results) {
-    const key = `${source.record}:${source.remote_id}`;
-    const list = provided.get(key) ?? [];
-    list.push(source);
-    provided.set(key, list);
+  const GROUP = 33;
+  for (let start = 0; start < rows.length; start += GROUP) {
+    const chunk = rows.slice(start, start + GROUP);
+    const params: (string | number)[] = [];
+    for (const row of chunk) params.push(row.origin, row.record, row.id);
+    const result = await db.prepare(
+      `SELECT s.record, s.remote_id, s.session, s.position, s.digest, s.role
+       FROM learning_source s
+       JOIN learning_state ls ON ls.origin_host = s.origin_host AND ls.epoch = s.epoch
+       WHERE (s.origin_host, s.record, s.remote_id) IN (${chunk.map(() => "(?, ?, ?)").join(",")})
+       ORDER BY s.record, s.remote_id, s.session, s.position, s.role`,
+    ).bind(...params).all<LearningSourceRow>();
+    for (const source of result.results) {
+      const key = `${source.record}:${source.remote_id}`;
+      const list = provided.get(key) ?? [];
+      list.push(source);
+      provided.set(key, list);
+    }
   }
   return provided;
 }
