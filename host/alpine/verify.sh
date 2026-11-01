@@ -68,6 +68,10 @@ if [ "$mode" = desktop ]; then
 		check 'helium launcher points at the current release' sh -c '[ -L /usr/local/bin/helium ] && [ "$(readlink /usr/local/bin/helium)" = /usr/local/lib/helium/current/helium-wrapper ]'
 		check 'helium shared libraries resolve' sh -c '! LD_LIBRARY_PATH=/usr/local/lib/helium/current/lib ldd /usr/local/lib/helium/current/helium 2>&1 | grep -q "not found"'
 		check 'helium reports version' su -s /bin/sh "$user" -c '/usr/local/bin/helium --version'
+		check 'VA-API Intel driver installed' test -f /usr/lib/dri/i965_drv_video.so
+		if [ -e /dev/dri/renderD128 ]; then
+			check 'VA-API H.264 decode available to user' su -s /bin/sh "$user" -c 'vainfo 2>/dev/null | grep -q VAProfileH264'
+		fi
 	fi
 	check 'foot not installed' sh -c '! apk info -e foot && ! apk info -e foot-extra-terminfo'
 	for cmd in ghostty-custom bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done

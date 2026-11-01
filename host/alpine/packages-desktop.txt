@@ -3,6 +3,8 @@ seatd-openrc
 wlroots0.20
 mesa-dri-gallium
 mesa-egl
+libva
+libva-utils
 wayland-libs-client
 libxkbcommon
 xkeyboard-config

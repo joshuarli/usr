@@ -91,7 +91,9 @@ The desktop layer runs its own preflight checks before the first change, then:
   installs it to `/usr/local/bin/ghostty-custom` with its terminfo,
 - downloads the newest `helium-*` prerelease for x86_64 with
   `build/helium.sh`, verifies its SHA-256 and acceptance sidecar, and installs
-  it under `/usr/local/lib/helium` with `/usr/local/bin/helium`,
+  it under `/usr/local/lib/helium` with `/usr/local/bin/helium`; the same step
+  installs the Intel i965 VA-API driver for hardware H.264 and VP8 decode on
+  Broadwell-class graphics, while VP9 and HEVC stay on software,
 - installs `home-session`, the `home-runtime` service, and a tty1 login hook,
 - adds the user to the `seat` group and starts `seatd` and `home-runtime`.
 
@@ -168,6 +170,8 @@ The VM test does not cover these. Check them after provisioning the laptop.
 - [ ] i915 drives the panel; dwl starts on tty1 without errors in `dwl.log`.
 - [ ] Keyboard, including Super bindings, and touchpad tap and two-finger scroll.
 - [ ] dwl renders with GLES on i915 (the VM test forces the pixman renderer).
+- [ ] `vainfo` reports `VAProfileH264` and Helium uses `VaapiVideoDecoder` for
+      H.264 or VP8; VP9 and HEVC stay on software.
 - [ ] Ctrl+Alt+F2 reaches a login and Ctrl+Alt+F1 returns to dwl.
 - [ ] Super+p screenshot lands in the clipboard.
 - [ ] Brightness, suspend and resume (not managed; note what is missing).
