@@ -43,18 +43,20 @@ for tool in $default_tools; do
 	case $tool in nodejs) launcher=node ;; *) launcher=$tool ;; esac
 	check "$tool installed for $user" test -x "$home/.local/bin/$launcher"
 done
-check 'node runs for $user' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
-check 'npm runs for $user' su -s /bin/sh "$user" -c "$home/.local/bin/npm --version"
+check 'node runs' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
+check 'npm runs' su -s /bin/sh "$user" -c "$home/.local/bin/npm --version"
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
 
 if [ "$mode" = desktop ]; then
+	check 'volume helper matches config/volume, root 0755' managed config/volume /usr/local/bin/volume 755
+	check 'amixer installed' command -v amixer
 	check 'home-session matches config/home-session, root 0755' managed config/home-session /usr/local/bin/home-session 755
 	check 'home-runtime service matches services/home-runtime, root 0755' managed services/home-runtime /etc/init.d/home-runtime 755
 	check 'tty1 hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
 	check "home-runtime configured for $user" grep -qx "home_user=\"$user\"" /etc/conf.d/home-runtime
-	check 'dwl build matches build/dwl.sh and config/dwl.h' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
+	check 'dwl build matches build/dwl.sh, config/dwl.h, and config/dwl-relative-tags.patch' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
 	check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'
 	check 'dwl build dependencies removed' sh -c '! apk info -e .home-dwl-build'
 	check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f][0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'

@@ -5,6 +5,7 @@ mesa-dri-gallium
 mesa-egl
 libva
 libva-utils
+alsa-utils
 wayland-libs-client
 libxkbcommon
 xkeyboard-config

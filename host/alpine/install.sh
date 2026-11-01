@@ -83,7 +83,7 @@ printf '%s\n' "$repos" | grep -Eqv '/edge/(main|community)/*$' &&
 printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 
-for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/home-session config/profile.sh services/home-runtime; do
+for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
 done
 
@@ -115,6 +115,7 @@ if [ "$mode" = desktop ]; then
 	conf=$(mktemp)
 	trap 'rm -f "$conf"' EXIT HUP INT TERM
 	printf 'home_user="%s"\n' "$user" > "$conf"
+	check_managed config/volume /usr/local/bin/volume
 	check_managed config/home-session /usr/local/bin/home-session
 	check_managed services/home-runtime /etc/init.d/home-runtime
 	check_managed config/profile.sh /etc/profile.d/home-session.sh
@@ -188,6 +189,7 @@ if [ "$mode" = desktop ]; then
 	sh build/dwl.sh
 	sh build/ghostty.sh
 	USER_NAME="$user" sh build/helium.sh
+	install_managed config/volume /usr/local/bin/volume 0755
 	install_managed config/home-session /usr/local/bin/home-session 0755
 	install_managed services/home-runtime /etc/init.d/home-runtime 0755
 	install_managed "$conf" /etc/conf.d/home-runtime 0644

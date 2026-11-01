@@ -1,0 +1,57 @@
+--- a/dwl.c
++++ b/dwl.c
+@@ -366,6 +366,8 @@
+ static void updatetitle(struct wl_listener *listener, void *data);
+ static void urgent(struct wl_listener *listener, void *data);
+ static void view(const Arg *arg);
++static void viewrelative(const Arg *arg);
++static void tagrelative(const Arg *arg);
+ static void virtualkeyboard(struct wl_listener *listener, void *data);
+ static void virtualpointer(struct wl_listener *listener, void *data);
+ static Monitor *xytomon(double x, double y);
+@@ -3176,9 +3178,45 @@
+ 	focusclient(focustop(selmon), 1);
+ 	arrange(selmon);
+ 	printstatus();
++}
++
++void
++viewrelative(const Arg *arg)
++{
++	uint32_t tags;
++	int i;
++
++	if (!selmon)
++		return;
++	tags = selmon->tagset[selmon->seltags] & TAGMASK;
++	for (i = 0; i < TAGCOUNT; i++)
++		if (tags & (1u << i))
++			break;
++	if (i == TAGCOUNT)
++		return;
++	i = ((i + arg->i) % TAGCOUNT + TAGCOUNT) % TAGCOUNT;
++	view(&(Arg){.ui = 1u << i});
+ }
+ 
+ void
++tagrelative(const Arg *arg)
++{
++	uint32_t tags;
++	int i;
++
++	if (!selmon)
++		return;
++	tags = selmon->tagset[selmon->seltags] & TAGMASK;
++	for (i = 0; i < TAGCOUNT; i++)
++		if (tags & (1u << i))
++			break;
++	if (i == TAGCOUNT)
++		return;
++	i = ((i + arg->i) % TAGCOUNT + TAGCOUNT) % TAGCOUNT;
++	tag(&(Arg){.ui = 1u << i});
++}
++
++void
+ virtualkeyboard(struct wl_listener *listener, void *data)
+ {
+ 	struct wlr_virtual_keyboard_v1 *kb = data;

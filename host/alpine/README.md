@@ -122,7 +122,15 @@ profile, so it cannot serve ssh commands or start the desktop.
 | Super+f | toggle floating |
 | Super+e | toggle previous layout |
 | Super+j | focus next window |
+| Super+h, Super+l | shrink, grow the master area |
+| Super+i, Super+d | add, remove a master window |
+| Super+Left, Super+Right | view the previous, next tag |
+| Super+Shift+Left, Super+Shift+Right | move the window to the previous, next tag |
+| Super+Tab | view the previous tag |
+| Super+0, Super+Shift+0 | view all tags, move the window to all tags |
 | Super+1..5, Super+Shift+1..5 | view tag, move window to tag |
+| XF86AudioMute | toggle mute |
+| XF86AudioLowerVolume, XF86AudioRaiseVolume | volume down, up |
 | Super+Escape | quit dwl |
 
 ## 3. Verify
@@ -166,9 +174,11 @@ provision.
 
 Disks, partitions, filesystems, encryption, bootloader, kernel, initramfs, EFI,
 Secure Boot, networking, DNS, passwords, doas policy, root account, SSH keys,
-audio, power management and lid handling. `setup.sh` switches a stable install
-to edge and replaces `linux-lts` with `linux-stable`; the provisioner itself
-does not manage repositories or the kernel. The desktop layer refuses to run
+audio routing and mixer state, power management and lid handling. `setup.sh`
+switches a stable install to edge and replaces `linux-lts` with `linux-stable`;
+the provisioner itself does not manage repositories or the kernel. The desktop
+layer installs `alsa-utils` and a `volume` helper for the media keys, but it
+does not choose cards or persist mixer state. The desktop layer refuses to run
 while `linux-lts` is installed, while a server install accepts it.
 
 ## Hardware checklist (XPS 13 9343)

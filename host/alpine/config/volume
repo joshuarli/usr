@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+control=${ALSA_CONTROL:-Master}
+case ${1:-} in
+	up) amixer -q sset "$control" 5%+ unmute ;;
+	down) amixer -q sset "$control" 5%- unmute ;;
+	mute) amixer -q sset "$control" toggle ;;
+	*) printf 'usage: volume up|down|mute\n' >&2; exit 2 ;;
+esac
