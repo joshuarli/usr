@@ -15,8 +15,21 @@ const READ_METHODS = ["GET", "HEAD"] as const;
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
     const timing = { d1: 0, r2: 0 };
-    const principal = await trace(context, "auth", {}, async () =>
-      authorize(await identityOf(context), parseReaders(env.READERS)));
+    const identity = await identityOf(context);
+    const authStarted = performance.now();
+    let principal;
+    try {
+      principal = await trace(context, "auth", {}, async () =>
+        authorize(env.DB, identity, parseReaders(env.READERS)));
+    } catch {
+      timing.d1 += performance.now() - authStarted;
+      return failure(503, "unavailable", "authentication is unavailable", {
+        "Server-Timing": serverTiming(timing),
+      });
+    }
+    if (identity?.service_token_id !== undefined) {
+      timing.d1 += performance.now() - authStarted;
+    }
     if (principal === null) {
       return failure(403, "forbidden", "an authorized Access identity is required", {
         "Server-Timing": serverTiming(timing),
@@ -32,10 +45,10 @@ export default {
       try {
         store = await trace(context, "status.d1", { count: 1 }, () => readStoreMeta(env.DB));
       } catch {
-        timing.d1 = performance.now() - started;
+        timing.d1 += performance.now() - started;
         return failure(503, "unavailable", "store is unavailable", { "Server-Timing": serverTiming(timing) });
       }
-      timing.d1 = performance.now() - started;
+      timing.d1 += performance.now() - started;
       if (store === null) {
         return failure(503, "unavailable", "store is not provisioned", {
           "Server-Timing": serverTiming(timing),

@@ -13,27 +13,36 @@ export async function loadWorker() {
   return module.default;
 }
 
-function fakeD1(storeMeta, failure) {
+function fakeD1(storeMeta, failure, collectors) {
   const calls = { prepare: 0, first: 0, batch: 0, exec: 0, dump: 0, withSession: 0 };
-  const statement = {
-    first: async () => {
-      calls.first += 1;
-      if (failure === "query") throw new Error("d1 query failed");
-      return storeMeta;
-    },
-    all: async () => ({ results: [] }),
-    run: async () => ({ success: true, meta: {} }),
-    bind() {
-      return this;
-    },
-  };
+  function statement(query) {
+    let bound;
+    return {
+      first: async () => {
+        calls.first += 1;
+        if (failure === "query") throw new Error("d1 query failed");
+        if (query.includes("FROM collector")) {
+          const row = collectors[bound];
+          return row === undefined || row.disabled ? null : { origin_host: row.origin_host };
+        }
+        if (query.includes("FROM store_meta")) return storeMeta;
+        return null;
+      },
+      all: async () => ({ results: [] }),
+      run: async () => ({ success: true, meta: {} }),
+      bind(value) {
+        bound = value;
+        return this;
+      },
+    };
+  }
   return {
     calls,
     binding: {
-      prepare() {
+      prepare(query) {
         calls.prepare += 1;
         if (failure === "prepare") throw new Error("d1 prepare failed");
-        return statement;
+        return statement(query);
       },
       async batch() {
         calls.batch += 1;
@@ -69,7 +78,7 @@ function countingR2() {
 
 export function environment(overrides = {}, options = {}) {
   const storeMeta = options.storeMeta === undefined ? { id: "usr-memories", created_at: 0 } : options.storeMeta;
-  const db = fakeD1(storeMeta, options.dbFailure);
+  const db = fakeD1(storeMeta, options.dbFailure, options.collectors ?? {});
   const bucket = countingR2();
   return {
     env: { READERS: "reader@example.test", DB: db.binding, BUCKET: bucket.binding, ...overrides },

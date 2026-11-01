@@ -3,10 +3,9 @@ export interface AccessIdentity {
   readonly service_token_id: string | undefined;
 }
 
-export type Principal = {
-  readonly kind: "reader";
-  readonly email: string;
-};
+export type Principal =
+  | { readonly kind: "reader"; readonly email: string }
+  | { readonly kind: "collector"; readonly origin_host: string };
 
 function normalize(email: string): string {
   return email.trim().toLowerCase();
@@ -38,9 +37,18 @@ export async function identityOf(context: ExecutionContext): Promise<AccessIdent
   }
 }
 
-export function authorize(identity: AccessIdentity | null, readers: ReadonlySet<string>): Principal | null {
+export async function authorize(
+  db: D1Database,
+  identity: AccessIdentity | null,
+  readers: ReadonlySet<string>,
+): Promise<Principal | null> {
   if (identity === null) return null;
-  if (identity.service_token_id !== undefined) return null;
+  if (identity.service_token_id !== undefined) {
+    const row = await db.prepare("SELECT origin_host FROM collector WHERE service_token_id = ? AND disabled = 0")
+      .bind(identity.service_token_id)
+      .first<{ origin_host: string }>();
+    return row === null ? null : { kind: "collector", origin_host: row.origin_host };
+  }
   const email = identity.email;
   if (email === undefined) return null;
   const normalized = normalize(email);

@@ -60,6 +60,24 @@ test("a configured reader reads status from D1 without touching R2", async () =>
   assert.deepEqual(calls.bucket, { head: 0, get: 0, put: 0, delete: 0, list: 0, createMultipartUpload: 0 });
 });
 
+test("a bound collector token reads status for its origin", async () => {
+  const { env, calls } = environment({}, { collectors: { "token-id": { origin_host: "origin-a" } } });
+  const response = await worker.fetch(request("/api/v1/status"), env, context({ service_token_id: "token-id" }));
+  assert.equal(response.status, 200);
+  assertSecurityHeaders(response);
+  const body = await response.json();
+  assert.deepEqual(body.principal, { kind: "collector", origin_host: "origin-a" });
+  assert.deepEqual(calls.db, { prepare: 2, first: 2, batch: 0, exec: 0, dump: 0, withSession: 0 });
+});
+
+test("an unknown or disabled collector token is refused", async () => {
+  const { env } = environment({}, { collectors: { "disabled-id": { origin_host: "origin-a", disabled: true } } });
+  for (const token of ["missing-id", "disabled-id"]) {
+    const response = await worker.fetch(request("/api/v1/status"), env, context({ service_token_id: token }));
+    assert.equal(response.status, 403);
+  }
+});
+
 test("HEAD returns the status headers without a body", async () => {
   const { env } = environment();
   const response = await worker.fetch(request("/api/v1/status", { method: "HEAD" }), env, reader);
@@ -94,6 +112,10 @@ test("a missing or failing store reports unavailable", async () => {
     assertSecurityHeaders(response);
     assert.equal((await response.json()).error.code, "unavailable");
   }
+  const { env } = environment({}, { dbFailure: "query", collectors: { "token-id": { origin_host: "origin-a" } } });
+  const response = await worker.fetch(request("/api/v1/status"), env, context({ service_token_id: "token-id" }));
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, "unavailable");
 });
 
 test("the deployed bundle carries no test hook", async () => {

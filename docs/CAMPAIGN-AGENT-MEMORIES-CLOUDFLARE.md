@@ -17,9 +17,10 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   baseline), `P0.2` (age adapter, dev `rage` build, and the crypto suite), `P1.1`
   (Worker scaffold, Access gate, status, and the runtime harness), `P1.2` (initial
   D1 schema and store metadata), `P1.3` (observability, span allowlist, and
-  `Server-Timing`), and `P1.4` (Miniflare bench harness and the status baseline).
+  `Server-Timing`), `P1.4` (Miniflare bench harness and the status baseline), and `P1.5`
+  (deploy gate, bundle-once deploy, smoke probe, and collector authentication).
 - **In flight:** none.
-- **Next slice:** `P1.5` (deployment machinery); the first command re-checks the baseline:
+- **Next slice:** `P1.6` (provision and first deploy); the first command re-checks the baseline:
   `cd tools/agent-memory/cloudflare && npm test`.
 - **Known red:** none. All ten agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
