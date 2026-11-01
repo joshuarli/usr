@@ -21,7 +21,7 @@ from agent_memory.transcripts import opencode_database, opencode_events, opencod
 from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 ARCHIVE_DIRNAME = "archive"
 ARCHIVE_OBJECTS = "objects"
 ARCHIVE_COMPANIONS = {"grok": ("summary.json", "events.jsonl")}
@@ -423,7 +423,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -464,6 +464,11 @@ class Store:
                 if not self._schema_ready(8):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v8()
+                version = 9
+            if version == 9:
+                if not self._schema_ready(9):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v9()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -514,6 +519,7 @@ class Store:
                  and {"archive_generation", "archive_object", "tombstone", "collector_identity", "project_map"} <= existing))
             and (expected_version < 8 or {"capture_failure", "transfer_tombstone"} <= existing)
             and (expected_version < 9 or {"manifest_digest", "session_metadata"} <= generation_columns)
+            and (expected_version < 10 or "mirror_remote" in existing)
         )
 
     def _migrate_v1(self):
@@ -699,6 +705,20 @@ class Store:
         finally:
             self.db.execute("PRAGMA foreign_keys = ON")
 
+    def _migrate_v9(self):
+        try:
+            self.db.executescript(
+                "BEGIN IMMEDIATE;"
+                "CREATE TABLE IF NOT EXISTS mirror_remote ("
+                "remote TEXT PRIMARY KEY, store_id TEXT, revision INTEGER NOT NULL DEFAULT 0, "
+                "tombstone_watermark INTEGER NOT NULL DEFAULT 0, learning_seq INTEGER NOT NULL DEFAULT 0, "
+                "learning_digest TEXT, last_sync_at REAL, last_error TEXT);"
+                "PRAGMA user_version = 10;COMMIT;"
+            )
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
     def _create_schema(self):
         self.db.executescript(
             "BEGIN IMMEDIATE;"
@@ -776,6 +796,10 @@ class Store:
             "origin_host TEXT NOT NULL, harness TEXT NOT NULL, native_id TEXT NOT NULL, "
             "scope TEXT NOT NULL CHECK(scope IN ('local','global')), forgotten_at REAL NOT NULL, "
             "PRIMARY KEY(origin_host, harness, native_id));"
+            "CREATE TABLE IF NOT EXISTS mirror_remote ("
+            "remote TEXT PRIMARY KEY, store_id TEXT, revision INTEGER NOT NULL DEFAULT 0, "
+            "tombstone_watermark INTEGER NOT NULL DEFAULT 0, learning_seq INTEGER NOT NULL DEFAULT 0, "
+            "learning_digest TEXT, last_sync_at REAL, last_error TEXT);"
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
@@ -1761,6 +1785,86 @@ class Store:
         return self.db.execute(
             "SELECT count(*) FROM archive_generation g LEFT JOIN transfer_generation t "
             "ON t.generation = g.id AND t.remote = ? WHERE t.durable_at IS NULL", (str(remote),)).fetchone()[0]
+
+    def pending_generations(self, remote, origin_host, limit=1000):
+        limit = int(limit)
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        return [dict(row) for row in self.db.execute(
+            "SELECT g.id, g.manifest_digest, g.harness, g.native_id FROM archive_generation g "
+            "LEFT JOIN transfer_generation t ON t.generation = g.id AND t.remote = ? "
+            "WHERE t.durable_at IS NULL AND g.origin_host = ? AND g.tombstoned = 0 "
+            "ORDER BY g.id LIMIT ?", (str(remote), str(origin_host), limit))]
+
+    def pending_tombstones(self, remote, origin_host):
+        return [dict(row) for row in self.db.execute(
+            "SELECT t.origin_host, t.harness, t.native_id, t.scope, t.forgotten_at "
+            "FROM tombstone t LEFT JOIN transfer_tombstone a ON a.origin_host = t.origin_host "
+            "AND a.harness = t.harness AND a.native_id = t.native_id AND a.remote = ? "
+            "WHERE a.durable_at IS NULL AND t.origin_host = ? ORDER BY t.forgotten_at",
+            (str(remote), str(origin_host)))]
+
+    def mirror_remote_state(self, remote):
+        row = self.db.execute(
+            "SELECT remote, store_id, revision, tombstone_watermark, learning_seq, learning_digest, "
+            "last_sync_at, last_error FROM mirror_remote WHERE remote = ?", (str(remote),)).fetchone()
+        return dict(row) if row is not None else None
+
+    def write_mirror_remote(self, remote, store_id, revision, tombstone_watermark,
+                            learning_seq=0, learning_digest=None, error=None):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO mirror_remote(remote, store_id, revision, tombstone_watermark, learning_seq, "
+                "learning_digest, last_sync_at, last_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(remote) DO UPDATE SET store_id = excluded.store_id, revision = excluded.revision, "
+                "tombstone_watermark = excluded.tombstone_watermark, learning_seq = excluded.learning_seq, "
+                "learning_digest = excluded.learning_digest, last_sync_at = excluded.last_sync_at, "
+                "last_error = excluded.last_error",
+                (str(remote), str(store_id), int(revision), int(tombstone_watermark), int(learning_seq),
+                 learning_digest, time.time(), error))
+
+    def forget_mirror_remote(self, remote):
+        with self.db:
+            self.db.execute("DELETE FROM mirror_remote WHERE remote = ?", (str(remote),))
+
+    def remote_ack_count(self, store_id):
+        count = self.db.execute(
+            "SELECT (SELECT count(*) FROM transfer_generation WHERE remote = ? AND durable_at IS NOT NULL) + "
+            "(SELECT count(*) FROM transfer_tombstone WHERE remote = ?)",
+            (str(store_id), str(store_id))).fetchone()[0]
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transfer_learning'").fetchone():
+            count += self.db.execute(
+                "SELECT count(*) FROM transfer_learning WHERE remote = ?", (str(store_id),)).fetchone()[0]
+        return int(count)
+
+    def clear_remote_acks(self, store_id):
+        with self.db:
+            self.db.execute("DELETE FROM transfer_generation WHERE remote = ?", (str(store_id),))
+            self.db.execute("DELETE FROM transfer_tombstone WHERE remote = ?", (str(store_id),))
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transfer_learning'").fetchone():
+                self.db.execute("DELETE FROM transfer_learning WHERE remote = ?", (str(store_id),))
+
+    @_guarded
+    def apply_remote_tombstone(self, origin_host, harness, native_id, scope, forgotten_at, remote):
+        existing = self.db.execute(
+            "SELECT forgotten_at FROM tombstone WHERE origin_host = ? AND harness = ? AND native_id = ?",
+            (str(origin_host), str(harness), str(native_id))).fetchone()
+        if existing is not None and float(existing["forgotten_at"]) > float(forgotten_at):
+            return False
+        with self.db:
+            self.db.execute(
+                "INSERT INTO tombstone(origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(origin_host, harness, native_id) DO UPDATE SET scope = excluded.scope, "
+                "forgotten_at = excluded.forgotten_at WHERE excluded.forgotten_at > tombstone.forgotten_at",
+                (str(origin_host), str(harness), str(native_id), str(scope), float(forgotten_at)))
+            self.db.execute("DELETE FROM sessions WHERE harness = ? AND native_id = ? AND origin_host = ?",
+                            (str(harness), str(native_id), str(origin_host)))
+            self.db.execute(
+                "INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)",
+                (self.central_session_id(str(origin_host), harness, str(native_id)), float(forgotten_at)))
+        self._purge_generations(str(origin_host), str(harness), str(native_id))
+        self.mark_tombstone_durable(origin_host, harness, native_id, remote)
+        return True
 
     @_guarded
     def coverage(self):

@@ -3,7 +3,6 @@
 import argparse
 import datetime
 import os
-import shutil
 import json
 import re
 import sqlite3
@@ -14,6 +13,7 @@ from typing import Any
 
 from agent_memory import archive as archive_module
 from agent_memory import backup as backup_module
+from agent_memory import mirror as mirror_module
 from agent_memory import transfer as transfer_module
 from agent_memory.store import Store, StoreError, default_state_dir, project_identity, rebuild_index, redact
 from agent_memory.transcripts import canonical_harness
@@ -278,9 +278,16 @@ def _sync(args):
                 settings.update({"transport": "local", "state_dir": args.central_state})
             if not settings:
                 raise StoreError("no central store is configured; set ~/.agent-sessions/config.json or pass --central-state")
-            store.refresh(roots=_roots(args), project=None, harnesses=_harnesses(args))
+            transport = settings.get("transport", "local")
+            if transport != "cloudflare":
+                store.refresh(roots=_roots(args), project=None, harnesses=_harnesses(args))
             origin = archive_module.origin_for(store.db)
-            pending = store.pending_transfers(args.to)
+            ack_remote = args.to
+            if transport == "cloudflare":
+                pinned = store.mirror_remote_state(args.to)
+                if pinned is not None and pinned["store_id"]:
+                    ack_remote = pinned["store_id"]
+            pending = store.pending_transfers(ack_remote)
             if args.dry_run:
                 print("pending=%d origin=%s remote=%s" % (pending, origin, args.to))
                 return 0
@@ -288,10 +295,26 @@ def _sync(args):
                 if count % 25 == 0:
                     print("delivered=%d" % count, file=sys.stderr, flush=True)
 
-            if settings.get("transport", "local") == "local":
+            if transport == "local":
                 result = transfer_module.local_sync(
                     store, Path(os.path.expanduser(str(settings["state_dir"]))), args.to, origin,
                     args.label or "collector", progress=progress)
+            elif transport == "cloudflare":
+                config = mirror_module.decode_config(settings)
+                result = mirror_module.sync(
+                    store, config, args.to,
+                    refresh=lambda: store.refresh(roots=_roots(args), project=None, harnesses=_harnesses(args)),
+                    progress=progress)
+                print("committed=%d duplicate=%d tombstoned=%d objects_stored=%d manifests=%d "
+                      "bytes_plaintext=%d bytes_compressed=%d tombstones_fetched=%d "
+                      "tombstones_pushed=%d endpoint=%s store=%s revision=%d" % (
+                          result["generations_committed"], result["generations_duplicate"],
+                          result["generations_tombstoned"], result["objects_stored"],
+                          result["manifests_uploaded"],
+                          result["bytes_plaintext"], result["bytes_compressed"],
+                          result["tombstones_fetched"], result["tombstones_pushed"],
+                          config.url, result["store_id"], result["revision"]))
+                return 0
             else:
                 host = settings.get("host")
                 command = settings.get("command")
@@ -303,11 +326,43 @@ def _sync(args):
                 len(result["delivered"]), store.pending_transfers(result["endpoint"]),
                 result["sent_bytes"], result["raw_bytes"], result["compression"] or "none", result["endpoint"]))
         return 0
-    except (OSError, StoreError, transfer_module.TransferError) as exc:
+    except (OSError, StoreError, transfer_module.TransferError, mirror_module.MirrorError,
+            mirror_module.mirror_crypto.CryptoError, archive_module.ArchiveError) as exc:
         print("agent-sessions sync: " + str(exc), file=sys.stderr)
         return 1
     finally:
         lock.close()
+
+
+def _mirror(args):
+    try:
+        with Store(_state_dir(args)) as store:
+            if args.action == "status":
+                state = store.mirror_remote_state(args.remote)
+                if state is None:
+                    print("remote=%s pinned=0" % args.remote)
+                else:
+                    print("remote=%s store=%s revision=%d watermark=%d last_sync_at=%s last_error=%s" % (
+                        state["remote"], state["store_id"], state["revision"],
+                        state["tombstone_watermark"], state["last_sync_at"], state["last_error"]))
+                return 0
+            config = mirror_module.load_config(config_path())
+            origin = archive_module.origin_for(store.db)
+            with mirror_module.MirrorClient(config) as client:
+                hello = client.hello(origin)
+            previous = store.mirror_remote_state(args.remote)
+            cleared = 0
+            if previous is not None and previous["store_id"]:
+                cleared = store.remote_ack_count(previous["store_id"])
+                store.clear_remote_acks(previous["store_id"])
+            store.forget_mirror_remote(args.remote)
+            store.write_mirror_remote(args.remote, hello["store_id"], hello["revision"], 0)
+            print("adopted remote=%s store=%s revision=%d cleared_acks=%d" % (
+                args.remote, hello["store_id"], hello["revision"], cleared))
+        return 0
+    except (OSError, StoreError, mirror_module.MirrorError) as exc:
+        print("agent-sessions mirror: " + str(exc), file=sys.stderr)
+        return 1
 
 
 def _archive(args):
@@ -649,6 +704,12 @@ def parser():
     sync.add_argument("--dry-run", action="store_true", help="report pending work without transferring")
     sync.add_argument("--root", action="append", metavar="[HARNESS=]PATH")
     sync.set_defaults(run=_sync)
+
+    mirror = commands.add_parser("mirror", help="inspect or adopt the Cloudflare mirror identity")
+    mirror.add_argument("action", choices=("status", "adopt"))
+    mirror.add_argument("--state-dir")
+    mirror.add_argument("--remote", default="central", help="configured remote name (default %(default)s)")
+    mirror.set_defaults(run=_mirror)
 
     archive = commands.add_parser("archive", help="verify, reindex, or report the local archive")
     archive.add_argument("action", choices=("status", "verify", "reindex"))

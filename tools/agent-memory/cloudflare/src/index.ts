@@ -2,7 +2,9 @@ import { authorize, identityOf, parseReaders, type AccessIdentity, type Principa
 import { readStoreMeta, type StoreMeta } from "./db";
 import { failure, json, methodNotAllowed } from "./errors";
 import { serverTiming, trace } from "./observe";
+import { handleGenerations } from "./routes/generations";
 import { handleSync } from "./routes/sync";
+import { handleTombstones } from "./routes/tombstones";
 
 export interface Env {
   readonly READERS?: string;
@@ -42,7 +44,8 @@ export default {
         "Server-Timing": serverTiming(timing),
       });
     }
-    const { pathname } = new URL(request.url);
+    const url = new URL(request.url);
+    const { pathname } = url;
     if (pathname === "/api/v1/status") {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return methodNotAllowed(READ_METHODS, { "Server-Timing": serverTiming(timing) });
@@ -72,6 +75,10 @@ export default {
     try {
       const sync = await handleSync(request, env, principal, pathname, timing);
       if (sync !== null) return sync;
+      const generations = await handleGenerations(request, env, principal, pathname, url, timing);
+      if (generations !== null) return generations;
+      const tombstones = await handleTombstones(request, env, principal, pathname, url, timing);
+      if (tombstones !== null) return tombstones;
     } catch {
       return failure(503, "unavailable", "sync is unavailable", { "Server-Timing": serverTiming(timing) });
     }

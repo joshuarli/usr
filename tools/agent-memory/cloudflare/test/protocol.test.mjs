@@ -4,16 +4,23 @@ import test from "node:test";
 
 import {
   ERROR_CODES,
+  HARNESSES,
   MAX_CURSOR_CHARS,
+  MAX_GENERATION_ARTIFACTS,
+  MAX_GENERATION_OBJECTS,
   MAX_JSON_BYTES,
   MAX_MISSING_OBJECTS,
   MAX_OBJECT_BYTES,
+  MAX_PAGE,
+  MAX_TOMBSTONES,
   PROTOCOL,
   decodeCursor,
   decodeDigest,
+  decodeGenerationManifest,
   decodeHello,
   decodeMissingRequest,
   decodeOrigin,
+  decodeTombstoneRequest,
   encodeCursor,
 } from "../src/protocol.ts";
 
@@ -78,4 +85,32 @@ test("a missing-object request over the count limit is refused", () => {
     size: 0,
   }));
   assert.equal(decodeMissingRequest({ protocol: 1, origin: "origin-a", objects }), null);
+});
+
+test("the manifest validator agrees with every fixture", async () => {
+  for (const item of FIXTURE.manifests) {
+    const decoded = await decodeGenerationManifest(item.value);
+    assert.equal(decoded === null, !item.ok, item.name);
+    if (decoded !== null) {
+      assert.equal(decoded.source_digest, item.value.source_digest, item.name);
+      assert.equal(decoded.chunks.length, item.value.chunks.length, item.name);
+      assert.equal(decoded.manifest_object, item.value.manifest_object, item.name);
+    }
+  }
+});
+
+test("the tombstone validator agrees with every fixture", () => {
+  for (const item of FIXTURE.tombstone_pushes) {
+    const decoded = decodeTombstoneRequest(item.value);
+    assert.equal(decoded === null, !item.ok, item.name);
+    if (decoded !== null) assert.equal(decoded.tombstones.length, item.value.tombstones.length, item.name);
+  }
+});
+
+test("harnesses and generation limits match the shared fixture", () => {
+  assert.deepEqual([...HARNESSES], FIXTURE.harnesses);
+  assert.equal(MAX_GENERATION_OBJECTS, FIXTURE.limits.generation_objects);
+  assert.equal(MAX_GENERATION_ARTIFACTS, FIXTURE.limits.generation_artifacts);
+  assert.equal(MAX_TOMBSTONES, FIXTURE.limits.tombstones);
+  assert.equal(MAX_PAGE, FIXTURE.limits.page);
 });

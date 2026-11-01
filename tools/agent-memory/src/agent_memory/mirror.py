@@ -2,23 +2,31 @@
 """Cloudflare mirror protocol: validators, configuration, and a pooled HTTPS client."""
 import base64
 import concurrent.futures
+import hashlib
 import http.client
 import json
+import math
 import re
 import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from agent_memory import archive as archive_module
 from agent_memory import mirror_crypto
+from agent_memory.types import HARNESSES
 
 PROTOCOL = 1
 MAX_JSON_BYTES = 8 * 1024 * 1024
 MAX_OBJECT_BYTES = 8 * 1024 * 1024
 MAX_MISSING_OBJECTS = 20000
+MAX_GENERATION_OBJECTS = 20000
+MAX_GENERATION_ARTIFACTS = 1000
+MAX_TOMBSTONES = 900
+MAX_SOURCE_BYTES = 1 << 50
+MAX_PAGE = 200
 MAX_CURSOR_CHARS = 512
 MAX_CURSOR_PARTS = 4
 MAX_CURSOR_PART_CHARS = 256
@@ -35,6 +43,9 @@ ERROR_CODES = frozenset({
     "unsupported_version",
     "payload_too_large",
     "conflict",
+    "stale_revision",
+    "missing_object",
+    "tombstoned",
 })
 CONFIG_KEYS = frozenset({
     "transport",
@@ -46,10 +57,12 @@ CONFIG_KEYS = frozenset({
 })
 ENCODINGS = frozenset({"identity", "zlib"})
 OBJECT_CLASSES = frozenset({"chunk", "artifact", "manifest", "snapshot"})
+SCOPES = frozenset({"local", "global"})
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 ORIGIN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 BASE64URL = re.compile(r"^[A-Za-z0-9_-]+$")
 TOKEN_PART = re.compile(r"^[A-Za-z0-9._-]{1,256}$")
+ARTIFACT = re.compile(r"^[A-Za-z0-9._-]{1,256}$")
 
 
 class MirrorError(RuntimeError):
@@ -325,6 +338,288 @@ def decode_put_response(value):
     return {"stored": stored, "object": object_row}
 
 
+def _decode_revision(value):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2 ** 53 - 1:
+        return None
+    return value
+
+
+def _decode_timestamp(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or not 0 <= value <= 2 ** 53 - 1:
+        return None
+    return float(value)
+
+
+def _decode_text(value, maximum):
+    return value if isinstance(value, str) and 0 < len(value) <= maximum and "\u0000" not in value else None
+
+
+def _decode_manifest_chunk(value):
+    if not _exact_keys(value, ("offset", "size", "digest")):
+        return None
+    offset = _decode_revision(value.get("offset"))
+    size = _decode_size(value.get("size"))
+    digest = decode_digest(value.get("digest"))
+    if offset is None or size is None or digest is None or size == 0:
+        return None
+    return {"offset": offset, "size": size, "digest": digest}
+
+
+def _decode_manifest_artifact(value):
+    if not _exact_keys(value, ("name", "digest", "size")):
+        return None
+    name = value.get("name")
+    if not isinstance(name, str) or not ARTIFACT.match(name):
+        return None
+    digest = decode_digest(value.get("digest"))
+    size = _decode_size(value.get("size"))
+    return None if digest is None or size is None else {"name": name, "digest": digest, "size": size}
+
+
+def decode_generation_manifest(value):
+    keys = ("origin_host", "harness", "native_id", "source_path", "source_digest", "source_size",
+            "captured_at", "chunks", "artifacts", "session_metadata", "manifest_digest", "manifest_object")
+    if not _exact_keys(value, keys):
+        return None
+    origin = decode_origin(value.get("origin_host"))
+    harness = value.get("harness") if value.get("harness") in HARNESSES else None
+    native = _decode_text(value.get("native_id"), 512)
+    source_path = _decode_text(value.get("source_path"), 4096)
+    source_digest = decode_digest(value.get("source_digest"))
+    source_size = value.get("source_size")
+    if isinstance(source_size, bool) or not isinstance(source_size, int) or not 0 <= source_size <= MAX_SOURCE_BYTES:
+        return None
+    captured_at = _decode_timestamp(value.get("captured_at"))
+    manifest_digest = decode_digest(value.get("manifest_digest"))
+    manifest_object = decode_digest(value.get("manifest_object"))
+    if None in (origin, harness, native, source_path, source_digest, captured_at, manifest_digest, manifest_object):
+        return None
+    metadata = value.get("session_metadata")
+    if metadata is not None and not isinstance(metadata, (dict, list)):
+        return None
+    chunks = value.get("chunks")
+    artifacts = value.get("artifacts")
+    if not isinstance(chunks, list) or len(chunks) > MAX_GENERATION_OBJECTS:
+        return None
+    if not isinstance(artifacts, list) or len(artifacts) > MAX_GENERATION_ARTIFACTS:
+        return None
+    clean_chunks = []
+    cursor = 0
+    for item in chunks:
+        chunk = _decode_manifest_chunk(item)
+        if chunk is None or chunk["offset"] != cursor:
+            return None
+        cursor += chunk["size"]
+        if cursor > MAX_SOURCE_BYTES:
+            return None
+        clean_chunks.append(chunk)
+    if cursor != source_size:
+        return None
+    clean_artifacts = []
+    names = set()
+    for item in artifacts:
+        artifact = _decode_manifest_artifact(item)
+        if artifact is None or artifact["name"] in names:
+            return None
+        names.add(artifact["name"])
+        clean_artifacts.append(artifact)
+    sizes = {}
+    for obj in [*clean_chunks, *clean_artifacts]:
+        if sizes.setdefault(obj["digest"], obj["size"]) != obj["size"]:
+            return None
+    if hashlib.sha256("".join(chunk["digest"] for chunk in clean_chunks).encode("ascii")).hexdigest() != source_digest:
+        return None
+    return {
+        "origin_host": origin, "harness": harness, "native_id": native, "source_path": source_path,
+        "source_digest": source_digest, "source_size": source_size, "captured_at": captured_at,
+        "chunks": clean_chunks, "artifacts": clean_artifacts, "session_metadata": metadata,
+        "manifest_digest": manifest_digest, "manifest_object": manifest_object,
+    }
+
+
+def decode_generation_commit(value):
+    if not _exact_keys(value, ("protocol", "origin", "base_revision", "manifest")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    base_revision = _decode_revision(value.get("base_revision"))
+    manifest = decode_generation_manifest(value.get("manifest"))
+    if origin is None or base_revision is None or manifest is None or manifest["origin_host"] != origin:
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision, "manifest": manifest}
+
+
+def decode_tombstone_request(value):
+    if not _exact_keys(value, ("protocol", "origin", "base_revision", "tombstones")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    base_revision = _decode_revision(value.get("base_revision"))
+    tombstones = value.get("tombstones")
+    if origin is None or base_revision is None or not isinstance(tombstones, list):
+        return None
+    if len(tombstones) > MAX_TOMBSTONES:
+        return None
+    clean = []
+    keys = set()
+    for item in tombstones:
+        if not _exact_keys(item, ("harness", "native_id", "scope", "forgotten_at")):
+            return None
+        harness = item.get("harness") if item.get("harness") in HARNESSES else None
+        native = _decode_text(item.get("native_id"), 512)
+        scope = item.get("scope") if item.get("scope") in SCOPES else None
+        forgotten_at = _decode_timestamp(item.get("forgotten_at"))
+        if harness is None or native is None or scope is None or forgotten_at is None:
+            return None
+        key = (harness, native)
+        if key in keys:
+            return None
+        keys.add(key)
+        clean.append({"harness": harness, "native_id": native, "scope": scope, "forgotten_at": forgotten_at})
+    return {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision, "tombstones": clean}
+
+
+def _decode_generation_row(value):
+    keys = ("id", "origin_host", "harness", "native_id", "manifest_digest", "source_digest",
+            "source_size", "captured_at", "committed_at", "revision", "manifest_object")
+    if not _exact_keys(value, keys):
+        return None
+    identifier = _decode_revision(value.get("id"))
+    origin = decode_origin(value.get("origin_host"))
+    harness = value.get("harness") if value.get("harness") in HARNESSES else None
+    native = _decode_text(value.get("native_id"), 512)
+    manifest_digest = decode_digest(value.get("manifest_digest"))
+    source_digest = decode_digest(value.get("source_digest"))
+    source_size = value.get("source_size")
+    if identifier is None or origin is None or harness is None or native is None:
+        return None
+    if manifest_digest is None or source_digest is None:
+        return None
+    if isinstance(source_size, bool) or not isinstance(source_size, int) or not 0 <= source_size <= MAX_SOURCE_BYTES:
+        return None
+    captured_at = _decode_timestamp(value.get("captured_at"))
+    committed_at = _decode_timestamp(value.get("committed_at"))
+    revision = _decode_revision(value.get("revision"))
+    manifest_object = decode_digest(value.get("manifest_object"))
+    if None in (captured_at, committed_at, revision, manifest_object):
+        return None
+    return {
+        "id": identifier, "origin_host": origin, "harness": harness, "native_id": native,
+        "manifest_digest": manifest_digest, "source_digest": source_digest, "source_size": source_size,
+        "captured_at": captured_at, "committed_at": committed_at, "revision": revision,
+        "manifest_object": manifest_object,
+    }
+
+
+def decode_generation_commit_response(value):
+    if not _exact_keys(value, ("protocol", "origin", "generation", "manifest_digest", "revision", "duplicate")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    generation = _decode_revision(value.get("generation"))
+    manifest_digest = decode_digest(value.get("manifest_digest"))
+    revision = _decode_revision(value.get("revision"))
+    duplicate = value.get("duplicate")
+    if origin is None or generation is None or manifest_digest is None or revision is None:
+        return None
+    if not isinstance(duplicate, bool):
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "generation": generation,
+            "manifest_digest": manifest_digest, "revision": revision, "duplicate": duplicate}
+
+
+def decode_generation_page(value):
+    if not _exact_keys(value, ("protocol", "origin", "generations", "next_cursor")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    rows = value.get("generations")
+    next_cursor = value.get("next_cursor")
+    if origin is None or not isinstance(rows, list) or len(rows) > MAX_PAGE:
+        return None
+    if next_cursor is not None and not isinstance(next_cursor, str):
+        return None
+    clean = []
+    for row in rows:
+        item = _decode_generation_row(row)
+        if item is None or item["origin_host"] != origin:
+            return None
+        clean.append(item)
+    return {"protocol": PROTOCOL, "origin": origin, "generations": clean, "next_cursor": next_cursor}
+
+
+def _decode_tombstone_row(value):
+    if not _exact_keys(value, ("harness", "native_id", "scope", "forgotten_at", "revision")):
+        return None
+    harness = value.get("harness") if value.get("harness") in HARNESSES else None
+    native = _decode_text(value.get("native_id"), 512)
+    scope = value.get("scope") if value.get("scope") in SCOPES else None
+    forgotten_at = _decode_timestamp(value.get("forgotten_at"))
+    revision = _decode_revision(value.get("revision"))
+    if None in (harness, native, scope, forgotten_at, revision):
+        return None
+    return {"harness": harness, "native_id": native, "scope": scope,
+            "forgotten_at": forgotten_at, "revision": revision}
+
+
+def decode_tombstone_page(value):
+    if not _exact_keys(value, ("protocol", "origin", "tombstones", "next_cursor", "watermark")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    rows = value.get("tombstones")
+    next_cursor = value.get("next_cursor")
+    watermark = _decode_revision(value.get("watermark"))
+    if origin is None or not isinstance(rows, list) or len(rows) > MAX_PAGE:
+        return None
+    if next_cursor is not None and not isinstance(next_cursor, str):
+        return None
+    if watermark is None:
+        return None
+    clean = []
+    for row in rows:
+        item = _decode_tombstone_row(row)
+        if item is None:
+            return None
+        clean.append(item)
+    return {"protocol": PROTOCOL, "origin": origin, "tombstones": clean,
+            "next_cursor": next_cursor, "watermark": watermark}
+
+
+def decode_tombstone_push_response(value):
+    if not _exact_keys(value, ("protocol", "origin", "revision", "applied", "ignored")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    revision = _decode_revision(value.get("revision"))
+    applied = value.get("applied")
+    ignored = value.get("ignored")
+    if origin is None or revision is None or not isinstance(applied, list) or not isinstance(ignored, list):
+        return None
+    clean = []
+    for group in (applied, ignored):
+        keys = []
+        for item in group:
+            if not _exact_keys(item, ("harness", "native_id")):
+                return None
+            harness = item.get("harness") if item.get("harness") in HARNESSES else None
+            native = _decode_text(item.get("native_id"), 512)
+            if harness is None or native is None:
+                return None
+            keys.append({"harness": harness, "native_id": native})
+        clean.append(keys)
+    return {"protocol": PROTOCOL, "origin": origin, "revision": revision,
+            "applied": clean[0], "ignored": clean[1]}
+
+
 def decode_error_response(value):
     if not _record(value) or not _exact_keys(value, ("error",)):
         return None
@@ -458,7 +753,7 @@ class MirrorClient:
             raise MirrorError("invalid_request", "hello request is invalid")
         value = self._json("POST", "/api/v1/sync/hello", request)
         decoded = decode_hello_response(value)
-        if decoded is None:
+        if decoded is None or decoded["origin"] != origin:
             raise MirrorError("invalid_response", "hello response is invalid")
         return decoded
 
@@ -474,6 +769,59 @@ class MirrorClient:
         decoded = decode_missing_response(value)
         if decoded is None:
             raise MirrorError("invalid_response", "missing-objects response is invalid")
+        return decoded
+
+    def generation_by_manifest(self, origin, manifest_digest):
+        if decode_origin(origin) is None or decode_digest(manifest_digest) is None:
+            raise MirrorError("invalid_request", "generation lookup is invalid")
+        query = urlencode({"origin": origin, "manifest": manifest_digest})
+        decoded = decode_generation_page(self._json("GET", "/api/v1/sync/generations?" + query))
+        if decoded is None:
+            raise MirrorError("invalid_response", "generation lookup response is invalid")
+        rows = cast(list[dict[str, Any]], decoded["generations"])
+        if len(rows) > 1:
+            raise MirrorError("invalid_response", "generation lookup returned several rows")
+        return rows[0] if rows else None
+
+    def generations(self, origin, after=0, limit=100) -> dict[str, Any]:
+        if decode_origin(origin) is None or after < 0 or not 1 <= limit <= MAX_PAGE:
+            raise MirrorError("invalid_request", "generation page request is invalid")
+        query = urlencode({"origin": origin, "after": after, "limit": limit})
+        decoded = decode_generation_page(self._json("GET", "/api/v1/sync/generations?" + query))
+        if decoded is None:
+            raise MirrorError("invalid_response", "generation page response is invalid")
+        return decoded
+
+    def commit_generation(self, origin, base_revision, manifest) -> dict[str, Any]:
+        request = {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision, "manifest": manifest}
+        if decode_generation_commit(request) is None:
+            raise MirrorError("invalid_request", "generation commit request is invalid")
+        decoded = decode_generation_commit_response(self._json("POST", "/api/v1/sync/generations", request))
+        if decoded is None:
+            raise MirrorError("invalid_response", "generation commit response is invalid")
+        if decoded["origin"] != origin or decoded["manifest_digest"] != manifest["manifest_digest"]:
+            raise MirrorError("invalid_response", "generation commit response names a different generation")
+        return decoded
+
+    def tombstones(self, origin, after=None, limit=100) -> dict[str, Any]:
+        if decode_origin(origin) is None or not 1 <= limit <= MAX_PAGE:
+            raise MirrorError("invalid_request", "tombstone page request is invalid")
+        query = {"origin": origin, "limit": limit}
+        if after is not None:
+            query["after"] = after
+        decoded = decode_tombstone_page(self._json("GET", "/api/v1/sync/tombstones?" + urlencode(query)))
+        if decoded is None:
+            raise MirrorError("invalid_response", "tombstone page response is invalid")
+        return decoded
+
+    def push_tombstones(self, origin, base_revision, tombstones) -> dict[str, Any]:
+        request = {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision,
+                   "tombstones": list(tombstones)}
+        if decode_tombstone_request(request) is None:
+            raise MirrorError("invalid_request", "tombstone push request is invalid")
+        decoded = decode_tombstone_push_response(self._json("POST", "/api/v1/sync/tombstones", request))
+        if decoded is None:
+            raise MirrorError("invalid_response", "tombstone push response is invalid")
         return decoded
 
     def get_object(self, ciphertext) -> bytes:
@@ -628,6 +976,175 @@ def upload_objects(config, origin, archive_dir, objects, recipients=None, *, con
         counters["compress_cpu_ms"] += entry["compress_cpu_ms"]
         counters["encrypt_cpu_ms"] += entry["encrypt_cpu_ms"]
     return counters
+
+
+def _empty_sync_counters():
+    return {
+        "hello": 0, "generations_checked": 0, "generations_committed": 0,
+        "generations_duplicate": 0, "generations_tombstoned": 0,
+        "objects_requested": 0, "objects_known": 0, "objects_missing": 0,
+        "objects_stored": 0, "manifests_uploaded": 0, "manifests_already_stored": 0,
+        "bytes_plaintext": 0, "bytes_compressed": 0, "bytes_ciphertext": 0,
+        "manifest_plaintext_bytes": 0, "manifest_compressed_bytes": 0,
+        "manifest_ciphertext_bytes": 0,
+        "tombstones_fetched": 0, "tombstones_pushed": 0,
+    }
+
+
+def _wire_manifest(manifest, manifest_object):
+    wire = dict(manifest)
+    wire["session_metadata"] = None
+    wire["manifest_object"] = manifest_object
+    return wire
+
+
+def sync(store, config, remote_name, *, refresh=None, client=None, upload_client_factory=None,
+         recipients=None, concurrency=4, prepare=None, progress=None):
+    """Deliver the local archive to one Cloudflare mirror and pin its identity."""
+    if not isinstance(remote_name, str) or not remote_name:
+        raise MirrorError("invalid_config", "remote name is required")
+    origin = archive_module.origin_for(store.db)
+    counters = _empty_sync_counters()
+    factory = upload_client_factory
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    store_id = None
+    revision = 0
+    watermark = 0
+    pinned = None
+    try:
+        hello = runtime.hello(origin)
+        counters["hello"] += 1
+        store_id = hello["store_id"]
+        revision = hello["revision"]
+        pinned = store.mirror_remote_state(remote_name)
+        if pinned is not None and pinned["store_id"] != store_id:
+            if store.remote_ack_count(pinned["store_id"]):
+                raise MirrorError(
+                    "remote_identity_changed",
+                    "remote store identity changed; run `agent-sessions mirror adopt --remote %s`" % remote_name)
+            store.forget_mirror_remote(remote_name)
+            pinned = None
+        if pinned is not None and pinned["store_id"] == store_id:
+            watermark = pinned["tombstone_watermark"]
+        changed = pinned is None
+
+        if hello["tombstone_watermark"] > watermark:
+            cursor = None
+            while True:
+                page = runtime.tombstones(origin, cursor)
+                for row in page["tombstones"]:
+                    store.apply_remote_tombstone(
+                        origin, row["harness"], row["native_id"], row["scope"], row["forgotten_at"], store_id)
+                    counters["tombstones_fetched"] += 1
+                    changed = True
+                watermark = max(watermark, page["watermark"])
+                cursor = page["next_cursor"]
+                if cursor is None:
+                    break
+
+        if refresh is not None:
+            refresh()
+
+        pending_tombstones = store.pending_tombstones(store_id, origin)
+        if pending_tombstones:
+            for start in range(0, len(pending_tombstones), MAX_TOMBSTONES):
+                batch = [
+                    {"harness": row["harness"], "native_id": row["native_id"],
+                     "scope": row["scope"], "forgotten_at": row["forgotten_at"]}
+                    for row in pending_tombstones[start:start + MAX_TOMBSTONES]
+                ]
+                pushed = runtime.push_tombstones(origin, revision, batch)
+                revision = pushed["revision"]
+                watermark = max(watermark, revision)
+                for item in pushed["applied"]:
+                    store.mark_tombstone_durable(origin, item["harness"], item["native_id"], store_id)
+                    counters["tombstones_pushed"] += 1
+                for item in pushed["ignored"]:
+                    store.mark_tombstone_durable(origin, item["harness"], item["native_id"], store_id)
+                changed = True
+
+        prepare = prepare or mirror_crypto.prepare_object
+        while True:
+            pending_generations = store.pending_generations(store_id, origin)
+            if not pending_generations:
+                break
+            for row in pending_generations:
+                counters["generations_checked"] += 1
+                manifest = archive_module.generation_manifest(store.db, row["id"])
+                archive_module.validate_manifest(manifest)
+                existing = runtime.generation_by_manifest(origin, manifest["manifest_digest"])
+                if existing is not None:
+                    if existing["manifest_digest"] != manifest["manifest_digest"]:
+                        raise MirrorError("invalid_response", "generation lookup names a different manifest")
+                    store.mark_durable(row["id"], store_id, existing["id"])
+                    counters["generations_duplicate"] += 1
+                    counters["hello"] += 1
+                    revision = runtime.hello(origin)["revision"]
+                    changed = True
+                    if progress is not None:
+                        progress(counters["generations_duplicate"] + counters["generations_committed"])
+                    continue
+                refs = [
+                    (chunk["digest"], chunk["size"], "chunk") for chunk in manifest["chunks"]
+                ] + [
+                    (artifact["digest"], artifact["size"], "artifact") for artifact in manifest["artifacts"]
+                ]
+                try:
+                    if recipients is None:
+                        recipients = mirror_crypto.load_recipients(config.age_recipients_file)
+                    upload = upload_objects(
+                        config, origin, store.archive_dir, refs, cast(list[str], recipients), concurrency=concurrency,
+                        client_factory=factory, prepare=prepare)
+                    for key in ("objects_requested", "objects_known", "objects_missing", "objects_stored",
+                                "bytes_plaintext", "bytes_compressed", "bytes_ciphertext"):
+                        counters[key] = int(counters[key]) + cast(int, upload[key])
+                    manifest_bytes = json.dumps(
+                        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                    prepared = prepare(manifest_bytes, recipients)
+                    uploaded = runtime.put_object(prepared)
+                    if uploaded["stored"]:
+                        counters["manifests_uploaded"] += 1
+                    else:
+                        counters["manifests_already_stored"] += 1
+                    counters["manifest_plaintext_bytes"] += prepared.plaintext_size
+                    counters["manifest_compressed_bytes"] += prepared.compressed_size
+                    counters["manifest_ciphertext_bytes"] += prepared.ciphertext_size
+                    wire = _wire_manifest(manifest, prepared.ciphertext_digest)
+                    committed = runtime.commit_generation(origin, revision, wire)
+                    if committed["manifest_digest"] != manifest["manifest_digest"]:
+                        raise MirrorError("invalid_response", "generation commit names a different manifest")
+                    store.mark_durable(row["id"], store_id, committed["generation"])
+                    counters["generations_committed"] += 1
+                    revision = committed["revision"]
+                    changed = True
+                    if progress is not None:
+                        progress(counters["generations_duplicate"] + counters["generations_committed"])
+                except MirrorError as exc:
+                    if exc.code == "tombstoned":
+                        store.mark_durable(row["id"], store_id, 0)
+                        counters["generations_tombstoned"] += 1
+                        changed = True
+                        counters["hello"] += 1
+                        revision = runtime.hello(origin)["revision"]
+                        continue
+                    store.record_attempt(row["id"], store_id, str(exc))
+                    raise
+
+        if changed or (pinned is not None and pinned.get("last_error") is not None):
+            store.write_mirror_remote(remote_name, store_id, revision, watermark)
+        counters["store_id"] = store_id
+        counters["revision"] = revision
+        counters["tombstone_watermark"] = watermark
+        counters["unchanged"] = not changed
+        return counters
+    except MirrorError as exc:
+        if store_id is not None:
+            store.write_mirror_remote(remote_name, store_id, revision, watermark, error=str(exc)[:500])
+        raise
+    finally:
+        if owner:
+            runtime.close()
 
 
 def _loads(payload):

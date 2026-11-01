@@ -4,7 +4,11 @@
     "json_bytes": 8388608,
     "object_bytes": 8388608,
     "missing_objects": 20000,
-    "cursor_chars": 512
+    "cursor_chars": 512,
+    "generation_objects": 20000,
+    "generation_artifacts": 1000,
+    "tombstones": 900,
+    "page": 200
   },
   "error_codes": [
     "forbidden",
@@ -14,7 +18,10 @@
     "invalid_request",
     "unsupported_version",
     "payload_too_large",
-    "conflict"
+    "conflict",
+    "stale_revision",
+    "missing_object",
+    "tombstoned"
   ],
   "digests": [
     {
@@ -286,6 +293,692 @@
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       ],
       "ok": false
+    },
+    {
+      "name": "tombstone round trip",
+      "parts": [
+        "7",
+        "codex",
+        "native-1"
+      ],
+      "ok": true
     }
+  ],
+  "manifests": [
+    {
+      "name": "valid",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": true
+    },
+    {
+      "name": "chunk gap",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 11,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "tiling short",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 16,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "a7c77e7d77ab636964b60ae3de02c421c71442d53b5fd64093fc5ffac3cf4186",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "source digest mismatch",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "b3c5f50eff764348f4521cef4e47f422da610c0eec8d9eaf6095330873a4dbfb",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "unknown harness",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "unknown",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "artifact path",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "../secret",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "b3fa96215daa12f8e23d338a0f4da86c3e4a3b63d184382bd63c0c40f398fc85",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "duplicate artifact name",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          },
+          {
+            "name": "summary.json",
+            "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "size": 1
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "381d2b209ef23edecf31112ee17fe21f8ddd0a98f43e62ba611a00acf9b8dfab",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "conflicting object sizes",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          },
+          {
+            "name": "other.json",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 11
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "cf61d1ffd9701a324c29d141ab1e20a2793d0f168b216bad50decf8befd85b77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "zero chunk",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 0,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "extra manifest field",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "/private"
+      },
+      "ok": false
+    },
+    {
+      "name": "origin mismatch shape",
+      "value": {
+        "origin_host": "../origin",
+        "harness": "codex",
+        "native_id": "native-1",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    },
+    {
+      "name": "empty native id",
+      "value": {
+        "origin_host": "origin-a",
+        "harness": "codex",
+        "native_id": "",
+        "source_path": "/synthetic/sessions/native-1.jsonl",
+        "source_digest": "fa0dafbf43f1f551e536353e9d1a942a8e86e41a0b58dfeaf264ef217f6b862a",
+        "source_size": 15,
+        "captured_at": 1762000000.5,
+        "chunks": [
+          {
+            "offset": 0,
+            "size": 10,
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "offset": 10,
+            "size": 5,
+            "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "artifacts": [
+          {
+            "name": "summary.json",
+            "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ],
+        "session_metadata": {
+          "cwd": "/synthetic",
+          "parent": null,
+          "source": "user",
+          "thread_source": "user",
+          "ancestry": "known",
+          "branch_tip": null,
+          "workspaces": null,
+          "step_count": null
+        },
+        "manifest_digest": "67cfd3541a997e47d8b55ad8772f2e441e0e17974ef93b5f0400519889ca7f77",
+        "manifest_object": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "ok": false
+    }
+  ],
+  "tombstone_pushes": [
+    {
+      "name": "valid",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 3,
+        "tombstones": [
+          {
+            "harness": "codex",
+            "native_id": "native-1",
+            "scope": "global",
+            "forgotten_at": 1762000000.5
+          },
+          {
+            "harness": "claude",
+            "native_id": "native-2",
+            "scope": "local",
+            "forgotten_at": 1762000001
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate key",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 0,
+        "tombstones": [
+          {
+            "harness": "codex",
+            "native_id": "native-1",
+            "scope": "global",
+            "forgotten_at": 1
+          },
+          {
+            "harness": "codex",
+            "native_id": "native-1",
+            "scope": "local",
+            "forgotten_at": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown scope",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 0,
+        "tombstones": [
+          {
+            "harness": "codex",
+            "native_id": "n",
+            "scope": "all",
+            "forgotten_at": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "negative time",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 0,
+        "tombstones": [
+          {
+            "harness": "codex",
+            "native_id": "n",
+            "scope": "global",
+            "forgotten_at": -1
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown harness",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 0,
+        "tombstones": [
+          {
+            "harness": "other",
+            "native_id": "n",
+            "scope": "global",
+            "forgotten_at": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "extra field",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 0,
+        "tombstones": [
+          {
+            "harness": "codex",
+            "native_id": "n",
+            "scope": "global",
+            "forgotten_at": 1,
+            "path": "/x"
+          }
+        ]
+      }
+    },
+    {
+      "name": "protocol missing",
+      "ok": false,
+      "value": {
+        "origin": "origin-a",
+        "base_revision": 0,
+        "tombstones": []
+      }
+    }
+  ],
+  "harnesses": [
+    "codex",
+    "claude",
+    "muse",
+    "grok",
+    "opencode",
+    "pi",
+    "cmd",
+    "agy"
   ]
 }

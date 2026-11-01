@@ -4,13 +4,14 @@ import hashlib
 import http.client
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -21,6 +22,8 @@ sys.path.insert(0, str(ROOT / "tools" / "agent-memory" / "src"))
 from agent_memory import archive as archive_module  # noqa: E402
 from agent_memory import mirror  # noqa: E402
 from agent_memory import mirror_crypto  # noqa: E402
+from agent_memory import types as types_module  # noqa: E402
+from agent_memory.store import Store  # noqa: E402
 
 FIXTURE = json.loads((ROOT / "tools" / "agent-memory" / "tests" / "fixtures" / "mirror_protocol.json").read_text())
 DIGEST = "a" * 64
@@ -236,6 +239,29 @@ class FixtureParityTests(unittest.TestCase):
         self.assertIsNone(mirror.decode_missing_request({
             "protocol": 1, "origin": "origin-a", "objects": objects,
         }))
+
+    def test_manifest_validator_agrees_with_every_fixture(self):
+        for item in FIXTURE["manifests"]:
+            decoded = mirror.decode_generation_manifest(item["value"])
+            self.assertEqual(decoded is None, not item["ok"], item["name"])
+            if decoded is not None:
+                self.assertEqual(decoded["source_digest"], item["value"]["source_digest"])
+                self.assertEqual(len(cast(list[Any], decoded["chunks"])), len(cast(list[Any], item["value"]["chunks"])))
+                self.assertEqual(decoded["manifest_object"], item["value"]["manifest_object"])
+
+    def test_tombstone_validator_agrees_with_every_fixture(self):
+        for item in FIXTURE["tombstone_pushes"]:
+            decoded = mirror.decode_tombstone_request(item["value"])
+            self.assertEqual(decoded is None, not item["ok"], item["name"])
+            if decoded is not None:
+                self.assertEqual(len(cast(list[Any], decoded["tombstones"])), len(cast(list[Any], item["value"]["tombstones"])))
+
+    def test_harnesses_and_generation_limits_match_the_shared_fixture(self):
+        self.assertEqual(list(types_module.HARNESSES), FIXTURE["harnesses"])
+        self.assertEqual(mirror.MAX_GENERATION_OBJECTS, FIXTURE["limits"]["generation_objects"])
+        self.assertEqual(mirror.MAX_GENERATION_ARTIFACTS, FIXTURE["limits"]["generation_artifacts"])
+        self.assertEqual(mirror.MAX_TOMBSTONES, FIXTURE["limits"]["tombstones"])
+        self.assertEqual(mirror.MAX_PAGE, FIXTURE["limits"]["page"])
 
 
 class ConfigTests(unittest.TestCase):
@@ -488,6 +514,110 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(connection.calls), 1)
 
 
+def generation_row(manifest, identifier=7, revision=3):
+    return {
+        "id": identifier,
+        "origin_host": manifest["origin_host"],
+        "harness": manifest["harness"],
+        "native_id": manifest["native_id"],
+        "manifest_digest": manifest["manifest_digest"],
+        "source_digest": manifest["source_digest"],
+        "source_size": manifest["source_size"],
+        "captured_at": manifest["captured_at"],
+        "committed_at": 1762000001.5,
+        "revision": revision,
+        "manifest_object": manifest["manifest_object"],
+    }
+
+
+class GenerationClientTests(unittest.TestCase):
+    def setUp(self):
+        self.manifest = json.loads(json.dumps(FIXTURE["manifests"][0]["value"]))
+
+    def test_commit_sends_the_validated_manifest(self):
+        body = {
+            "protocol": 1, "origin": "origin-a", "generation": 7,
+            "manifest_digest": self.manifest["manifest_digest"], "revision": 4, "duplicate": False,
+        }
+        connection = FakeConnection(response(body))
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            committed = runtime.commit_generation("origin-a", 3, self.manifest)
+        self.assertEqual(committed["revision"], 4)
+        self.assertFalse(committed["duplicate"])
+        call = connection.calls[0]
+        self.assertEqual((call["method"], call["path"]), ("POST", "/api/v1/sync/generations"))
+        sent = json.loads(call["body"])
+        self.assertEqual(sent["base_revision"], 3)
+        self.assertEqual(sent["manifest"]["manifest_digest"], self.manifest["manifest_digest"])
+
+    def test_commit_rejects_a_response_for_another_generation(self):
+        body = {
+            "protocol": 1, "origin": "origin-a", "generation": 7,
+            "manifest_digest": "f" * 64, "revision": 4, "duplicate": False,
+        }
+        runtime, _delays = client(Factory(FakeConnection(response(body))))
+        with runtime:
+            with self.assertRaises(mirror.MirrorError) as raised:
+                runtime.commit_generation("origin-a", 3, self.manifest)
+        self.assertEqual(raised.exception.code, "invalid_response")
+
+    def test_generation_lookup_and_page_carry_the_origin(self):
+        row = generation_row(self.manifest)
+        page = {"protocol": 1, "origin": "origin-a", "generations": [row], "next_cursor": None}
+        connection = FakeConnection(response(page), response(page))
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            found = runtime.generation_by_manifest("origin-a", self.manifest["manifest_digest"])
+            listed = runtime.generations("origin-a", after=0, limit=10)
+        self.assertIsNotNone(found)
+        self.assertEqual(cast(dict[str, Any], found)["id"], 7)
+        rows = cast(list[dict[str, Any]], listed["generations"])
+        self.assertEqual(rows[0]["native_id"], "native-1")
+        self.assertIn("manifest=" + self.manifest["manifest_digest"], connection.calls[0]["path"])
+        self.assertEqual(connection.calls[1]["path"], "/api/v1/sync/generations?origin=origin-a&after=0&limit=10")
+
+    def test_tombstone_page_and_push_round_trip(self):
+        page = {
+            "protocol": 1, "origin": "origin-a",
+            "tombstones": [{
+                "harness": "codex", "native_id": "native-1", "scope": "global",
+                "forgotten_at": 100.0, "revision": 2,
+            }],
+            "next_cursor": "cursor", "watermark": 2,
+        }
+        pushed = {
+            "protocol": 1, "origin": "origin-a", "revision": 4,
+            "applied": [{"harness": "codex", "native_id": "native-1"}],
+            "ignored": [],
+        }
+        connection = FakeConnection(response(page), response(pushed))
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            fetched = runtime.tombstones("origin-a", after="cursor", limit=10)
+            result = runtime.push_tombstones("origin-a", 3, [{
+                "harness": "codex", "native_id": "native-1", "scope": "global", "forgotten_at": 100.0,
+            }])
+        self.assertEqual(fetched["watermark"], 2)
+        self.assertEqual(fetched["next_cursor"], "cursor")
+        self.assertEqual(result["applied"], [{"harness": "codex", "native_id": "native-1"}])
+        self.assertIn("after=cursor", connection.calls[0]["path"])
+        self.assertEqual(json.loads(connection.calls[1]["body"])["base_revision"], 3)
+
+    def test_invalid_generation_requests_are_refused_before_the_network(self):
+        connection = FakeConnection()
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            for action in (
+                lambda: runtime.generation_by_manifest("origin-a", "not-a-digest"),
+                lambda: runtime.commit_generation("origin-a", -1, self.manifest),
+                lambda: runtime.tombstones("origin-a", limit=0),
+            ):
+                with self.assertRaises(mirror.MirrorError):
+                    action()
+        self.assertEqual(connection.calls, [])
+
+
 class UploadTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
@@ -576,6 +706,423 @@ class UploadTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             mirror.upload_objects(config(), "origin-a", self.archive, refs, recipients=["age1"],
                                  concurrency=0, client_factory=SequenceFactory(FakeUploadClient()))
+
+
+class StoreMirrorTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.store = Store(self.root)
+
+    def tearDown(self):
+        self.store.close()
+        self.temporary.cleanup()
+
+    def test_schema_v10_pins_a_remote_and_tracks_acks(self):
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 10)
+        self.assertEqual(self.store.mirror_remote_state("cloudflare"), None)
+        self.store.write_mirror_remote("cloudflare", "usr-memories", 4, 2)
+        state = self.store.mirror_remote_state("cloudflare")
+        self.assertIsNotNone(state)
+        state = cast(dict[str, Any], state)
+        self.assertEqual((state["store_id"], state["revision"], state["tombstone_watermark"]),
+                         ("usr-memories", 4, 2))
+        self.assertIsNotNone(state["last_sync_at"])
+
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO archive_generation(origin_host, harness, native_id, source_path, source_digest, "
+                "source_size, captured_at, manifest_digest, session_metadata) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("origin-a", "codex", "native-1", "/synthetic", "a" * 64, 10, 1.0, "b" * 64, None))
+            generation = self.store.db.execute("SELECT max(id) FROM archive_generation").fetchone()[0]
+        self.assertEqual(len(self.store.pending_generations("usr-memories", "origin-a")), 1)
+        self.store.mark_durable(generation, "usr-memories", 9)
+        self.assertEqual(self.store.pending_generations("usr-memories", "origin-a"), [])
+        self.assertEqual(self.store.remote_ack_count("usr-memories"), 1)
+
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO tombstone(origin_host, harness, native_id, scope, forgotten_at) "
+                "VALUES('origin-a', 'codex', 'native-1', 'global', 5.0)")
+        self.assertEqual(len(self.store.pending_tombstones("usr-memories", "origin-a")), 1)
+        self.store.mark_tombstone_durable("origin-a", "codex", "native-1", "usr-memories")
+        self.assertEqual(self.store.pending_tombstones("usr-memories", "origin-a"), [])
+
+        self.store.clear_remote_acks("usr-memories")
+        self.assertEqual(self.store.remote_ack_count("usr-memories"), 0)
+        self.assertIsNotNone(self.store.mirror_remote_state("cloudflare"))
+        self.store.forget_mirror_remote("cloudflare")
+        self.assertIsNone(self.store.mirror_remote_state("cloudflare"))
+
+    def test_a_v9_schema_gains_mirror_remote_without_losing_tombstones(self):
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO tombstone(origin_host, harness, native_id, scope, forgotten_at) "
+                "VALUES('origin-a', 'codex', 'native-1', 'global', 5.0)")
+        self.store.close()
+        with sqlite3.connect(self.store.path) as connection:
+            connection.execute("DROP TABLE mirror_remote")
+            connection.execute("PRAGMA user_version = 9")
+        self.store = Store(self.root)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 10)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
+        self.store.write_mirror_remote("cloudflare", "usr-memories", 1, 0)
+        state = self.store.mirror_remote_state("cloudflare")
+        self.assertIsNotNone(state)
+        self.assertEqual(cast(dict[str, Any], state)["revision"], 1)
+
+    def test_applying_a_remote_tombstone_is_durable_for_that_remote(self):
+        self.assertTrue(self.store.apply_remote_tombstone(
+            "origin-a", "codex", "native-1", "global", 100.0, "usr-memories"))
+        self.assertTrue(self.store.is_tombstoned("origin-a", "codex", "native-1"))
+        self.assertEqual(self.store.pending_tombstones("usr-memories", "origin-a"), [])
+        rows = self.store.tombstone_states("usr-memories")
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["acked_remote"])
+
+    def test_an_older_remote_tombstone_does_not_ack_a_newer_local_one(self):
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO tombstone(origin_host, harness, native_id, scope, forgotten_at) "
+                "VALUES('origin-a', 'codex', 'native-1', 'global', 200.0)")
+        self.assertFalse(self.store.apply_remote_tombstone(
+            "origin-a", "codex", "native-1", "global", 100.0, "usr-memories"))
+        self.assertEqual(len(self.store.pending_tombstones("usr-memories", "origin-a")), 1)
+        self.assertTrue(self.store.apply_remote_tombstone(
+            "origin-a", "codex", "native-1", "global", 300.0, "usr-memories"))
+        self.assertEqual(self.store.pending_tombstones("usr-memories", "origin-a"), [])
+        row = self.store.db.execute(
+            "SELECT forgotten_at FROM tombstone WHERE origin_host = 'origin-a' AND harness = 'codex' "
+            "AND native_id = 'native-1'").fetchone()
+        self.assertEqual(row["forgotten_at"], 300.0)
+
+
+class SyncStore:
+    def __init__(self, origin="origin-a", pinned=None, pending_generations=None, pending_tombstones=None,
+                 ack_count=0):
+        self.db = object()
+        self.archive_dir = Path("/nonexistent")
+        self.origin = origin
+        self.pinned = pinned
+        self._pending_generations = list(pending_generations or [])
+        self._pending_tombstones = list(pending_tombstones or [])
+        self.ack_count = ack_count
+        self.calls = []
+        self.durable = []
+        self.attempts = []
+        self.writes = []
+        self.applied = []
+        self._pending = []
+        self._tombstone_pending = list(self._pending_tombstones)
+
+    def mirror_remote_state(self, remote):
+        self.calls.append(("state", remote))
+        return self.pinned
+
+    def remote_ack_count(self, store_id):
+        self.calls.append(("ack_count", store_id))
+        return self.ack_count
+
+    def pending_transfers(self, store_id):
+        return 0
+
+    def forget_mirror_remote(self, remote):
+        self.calls.append(("forget", remote))
+        self.pinned = None
+
+    def apply_remote_tombstone(self, origin, harness, native, scope, forgotten_at, remote):
+        self.calls.append(("apply", harness, native))
+        self.applied.append((origin, harness, native, scope, forgotten_at, remote))
+
+    def pending_tombstones(self, remote, origin):
+        return list(self._tombstone_pending)
+
+    def mark_tombstone_durable(self, origin, harness, native, remote):
+        self.calls.append(("tomb_durable", harness, native))
+        self._tombstone_pending = [row for row in self._tombstone_pending
+                                   if (row["harness"], row["native_id"]) != (harness, native)]
+
+    def pending_generations(self, remote, origin):
+        return list(self._pending_generations)
+
+    def mark_durable(self, generation, remote, remote_generation):
+        self.calls.append(("durable", generation, remote, remote_generation))
+        self.durable.append((generation, remote, remote_generation))
+        self._pending_generations = [row for row in self._pending_generations if row["id"] != generation]
+
+    def record_attempt(self, generation, remote, error):
+        self.calls.append(("attempt", generation))
+        self.attempts.append((generation, remote, error))
+
+    def write_mirror_remote(self, remote, store_id, revision, watermark, error=None):
+        self.calls.append(("write", remote, store_id, revision, watermark, error))
+        self.writes.append((remote, store_id, revision, watermark, error))
+        self.pinned = {"remote": remote, "store_id": store_id, "revision": revision,
+                       "tombstone_watermark": watermark, "learning_seq": 0,
+                       "learning_digest": None, "last_sync_at": 1.0, "last_error": error}
+
+
+class SyncClient:
+    def __init__(self, hello=None, tombstone_pages=None, duplicate=None, commit=None, error=None):
+        self.hello_body = hello or {
+            "protocol": 1, "store_id": "usr-memories", "origin": "origin-a", "revision": 2,
+            "tombstone_watermark": 0, "learning": {"revision": 0, "digest": None, "records": 0},
+        }
+        self.hellos = 0
+        self.pages = list(tombstone_pages or [])
+        self.duplicate = duplicate
+        self.commit = commit
+        self.error = error
+        self.calls = []
+        self.puts = []
+
+    def hello(self, origin):
+        self.calls.append(("hello", origin))
+        self.hellos += 1
+        body = dict(self.hello_body)
+        body["revision"] = self.hello_body["revision"] + max(0, self.hellos - 1) if False else self.hello_body["revision"]
+        return body
+
+    def tombstones(self, origin, after=None, limit=100):
+        self.calls.append(("tombstones", after))
+        return self.pages.pop(0)
+
+    def push_tombstones(self, origin, base_revision, tombstones):
+        self.calls.append(("push", base_revision, len(tombstones)))
+        return {"protocol": 1, "origin": origin, "revision": base_revision + 1,
+                "applied": [{"harness": row["harness"], "native_id": row["native_id"]} for row in tombstones],
+                "ignored": []}
+
+    def generation_by_manifest(self, origin, digest):
+        self.calls.append(("lookup", digest))
+        return self.duplicate
+
+    def commit_generation(self, origin, base_revision, manifest):
+        self.calls.append(("commit", base_revision, manifest))
+        if self.error is not None:
+            raise self.error
+        assert self.commit is not None
+        return self.commit
+
+    def put_object(self, prepared):
+        self.calls.append(("put", prepared.ciphertext_digest))
+        self.puts.append(prepared)
+        return {"stored": True, "object": {
+            "plaintext_digest": prepared.plaintext_digest,
+            "plaintext_size": prepared.plaintext_size,
+            "encoding": prepared.encoding,
+            "ciphertext_digest": prepared.ciphertext_digest,
+            "ciphertext_size": prepared.ciphertext_size,
+        }}
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def upload_counters():
+    return {"objects_requested": 1, "objects_known": 0, "objects_missing": 1, "objects_stored": 1,
+            "bytes_plaintext": 10, "bytes_compressed": 10, "bytes_ciphertext": 20}
+
+
+class SyncTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.manifest = json.loads(json.dumps(FIXTURE["manifests"][0]["value"]))
+        self.origin_patch = mock.patch.object(mirror.archive_module, "origin_for", return_value="origin-a")
+        self.manifest_patch = mock.patch.object(
+            mirror.archive_module, "generation_manifest", lambda db, identifier: dict(self.manifest))
+        self.origin_patch.start()
+        self.manifest_patch.start()
+
+    def tearDown(self):
+        self.manifest_patch.stop()
+        self.origin_patch.stop()
+        self.temporary.cleanup()
+
+    def prepared(self, data, _recipients):
+        return prepared_for(data, ciphertext=b"manifest ciphertext")
+
+    def generation(self, identifier=5):
+        return {"id": identifier, "manifest_digest": self.manifest["manifest_digest"],
+                "harness": self.manifest["harness"], "native_id": self.manifest["native_id"]}
+
+    def test_noop_sync_pins_once_and_then_writes_nothing(self):
+        store = SyncStore()
+        runtime = SyncClient()
+        first = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+        self.assertEqual(first["hello"], 1)
+        self.assertFalse(first["unchanged"])
+        self.assertEqual(len(store.writes), 1)
+        self.assertEqual(store.writes[0][1:4], ("usr-memories", 2, 0))
+
+        second_store = SyncStore(pinned=store.pinned)
+        second_runtime = SyncClient()
+        second = mirror.sync(second_store, config(), "cloudflare", client=second_runtime, recipients=["age1"])
+        self.assertEqual(second["hello"], 1)
+        self.assertTrue(second["unchanged"])
+        self.assertEqual(second_store.writes, [])
+        self.assertEqual([call[0] for call in second_runtime.calls], ["hello"])
+
+    def test_a_generation_uploads_objects_and_the_manifest_then_acks(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(commit=commit)
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()) as upload:
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        from_call = upload.call_args
+        self.assertEqual(from_call.args[1], "origin-a")
+        self.assertEqual([ref[2] for ref in from_call.args[3]], ["chunk", "chunk", "artifact"])
+        self.assertEqual(len(runtime.puts), 1)
+        commit_call = [call for call in runtime.calls if call[0] == "commit"][0]
+        self.assertEqual(commit_call[1], 2)
+        self.assertEqual(commit_call[2]["manifest_object"], runtime.puts[0].ciphertext_digest)
+        self.assertIsNone(commit_call[2]["session_metadata"])
+        self.assertEqual(commit_call[2]["manifest_digest"], self.manifest["manifest_digest"])
+        self.assertEqual(store.durable, [(5, "usr-memories", 7)])
+        self.assertEqual(result["generations_committed"], 1)
+        self.assertEqual(result["objects_stored"], 1)
+        self.assertEqual(store.writes[-1][1:4], ("usr-memories", 3, 0))
+
+    def test_a_duplicate_generation_ack_skips_objects_and_refreshes_the_revision(self):
+        duplicate = generation_row(self.manifest)
+        runtime = SyncClient(duplicate=duplicate)
+        runtime.hello_body = {"protocol": 1, "store_id": "usr-memories", "origin": "origin-a", "revision": 5,
+                              "tombstone_watermark": 0, "learning": {"revision": 0, "digest": None, "records": 0}}
+        calls = []
+
+        def hello(origin):
+            calls.append(origin)
+            body = dict(runtime.hello_body)
+            body["revision"] = 6 if len(calls) > 1 else 5
+            return body
+
+        cast(Any, runtime).hello = hello
+        store = SyncStore(pending_generations=[self.generation()])
+        with mock.patch.object(mirror, "upload_objects") as upload:
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+        upload.assert_not_called()
+        self.assertEqual(runtime.puts, [])
+        self.assertFalse([call for call in runtime.calls if call[0] == "commit"])
+        self.assertEqual(store.durable, [(5, "usr-memories", 7)])
+        self.assertEqual(result["generations_duplicate"], 1)
+        self.assertEqual(result["revision"], 6)
+        self.assertEqual(store.writes[-1][1:4], ("usr-memories", 6, 0))
+
+    def test_a_changed_store_identity_refuses_inherited_acks(self):
+        store = SyncStore(pinned={"store_id": "old-store", "revision": 1, "tombstone_watermark": 0},
+                          ack_count=1)
+        runtime = SyncClient()
+        with self.assertRaises(mirror.MirrorError) as raised:
+            mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+        self.assertEqual(raised.exception.code, "remote_identity_changed")
+        self.assertFalse([call for call in store.calls if call[0] == "durable"])
+        self.assertIsNotNone(store.writes[-1][4])
+
+    def test_tombstones_are_pushed_before_any_generation(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 4, "duplicate": False}
+        tombstone = {"origin_host": "origin-a", "harness": "codex", "native_id": "gone",
+                     "scope": "global", "forgotten_at": 1.0}
+        store = SyncStore(pending_generations=[self.generation()], pending_tombstones=[tombstone])
+        runtime = SyncClient(commit=commit)
+        order = []
+        original_push = runtime.push_tombstones
+        original_commit = runtime.commit_generation
+
+        def push(*args):
+            order.append("push")
+            return original_push(*args)
+
+        def committed(*args):
+            order.append("commit")
+            return original_commit(*args)
+
+        cast(Any, runtime).push_tombstones = push
+        cast(Any, runtime).commit_generation = committed
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()):
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        self.assertEqual(order, ["push", "commit"])
+        self.assertEqual(result["tombstones_pushed"], 1)
+        self.assertEqual([call for call in runtime.calls if call[0] == "commit"][0][1], 3)
+
+    def test_a_remote_newer_tombstone_is_acked_without_repushing(self):
+        tombstone = {"origin_host": "origin-a", "harness": "codex", "native_id": "gone",
+                     "scope": "global", "forgotten_at": 1.0}
+        store = SyncStore(pending_tombstones=[tombstone])
+        runtime = SyncClient()
+
+        def push(origin, base_revision, tombstones):
+            return {"protocol": 1, "origin": origin, "revision": base_revision + 1, "applied": [],
+                    "ignored": [{"harness": row["harness"], "native_id": row["native_id"]} for row in tombstones]}
+
+        cast(Any, runtime).push_tombstones = push
+        result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+        self.assertEqual(result["tombstones_pushed"], 0)
+        self.assertIn(("tomb_durable", "codex", "gone"), store.calls)
+        self.assertEqual(store.pending_tombstones("usr-memories", "origin-a"), [])
+
+    def test_remote_tombstones_apply_before_capture(self):
+        page = {"protocol": 1, "origin": "origin-a", "watermark": 2, "next_cursor": None,
+                "tombstones": [{"harness": "codex", "native_id": "gone", "scope": "global",
+                                "forgotten_at": 100.0, "revision": 2}]}
+        runtime = SyncClient(hello={"protocol": 1, "store_id": "usr-memories", "origin": "origin-a",
+                                    "revision": 2, "tombstone_watermark": 2,
+                                    "learning": {"revision": 0, "digest": None, "records": 0}},
+                             tombstone_pages=[page])
+        store = SyncStore(pinned={"store_id": "usr-memories", "revision": 2, "tombstone_watermark": 0})
+        order = []
+        store.calls = []
+
+        def apply(*args):
+            order.append("apply")
+
+        def refresh():
+            order.append("refresh")
+
+        cast(Any, store).apply_remote_tombstone = apply
+        result = mirror.sync(store, config(), "cloudflare", client=runtime, refresh=refresh,
+                             recipients=["age1"])
+        self.assertEqual(order, ["apply", "refresh"])
+        self.assertEqual(result["tombstones_fetched"], 1)
+        self.assertEqual(store.writes[-1][3], 2)
+
+    def test_a_mismatched_generation_ack_is_refused(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": "f" * 64, "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(commit=commit)
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()):
+            with self.assertRaises(mirror.MirrorError) as raised:
+                mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                            prepare=self.prepared)
+        self.assertEqual(raised.exception.code, "invalid_response")
+        self.assertEqual(store.durable, [])
+        self.assertEqual(len(store.attempts), 1)
+
+    def test_a_tombstoned_generation_is_acked_and_skipped(self):
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(error=mirror.MirrorError("tombstoned", "gone"))
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()):
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        self.assertEqual(store.durable, [(5, "usr-memories", 0)])
+        self.assertEqual(result["generations_tombstoned"], 1)
+        self.assertEqual(store.attempts, [])
+
+    def test_a_stale_revision_records_the_attempt_and_stops(self):
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(error=mirror.MirrorError("stale_revision", "stale", status=409))
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()):
+            with self.assertRaises(mirror.MirrorError) as raised:
+                mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                            prepare=self.prepared)
+        self.assertEqual(raised.exception.code, "stale_revision")
+        self.assertEqual(len(store.attempts), 1)
+        self.assertEqual(store.durable, [])
 
 
 if __name__ == "__main__":

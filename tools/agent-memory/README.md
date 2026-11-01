@@ -198,6 +198,20 @@ agent-sessions show 'cmd:ID@ORIGIN' --central
 
 The central host needs the receiver package (`tools/agent-memory/src/agent_memory`) and a Python with stdlib `sqlite3`. It does not need the launchers, `uv`, or the learning extras: `python3 -m agent_memory.serve ingest --protocol 2 --origin ID STATE_DIR` is the whole server. Tested against Ubuntu 24.04 with Python 3.12.3; the launchers on a collector still require 3.15.
 
+The encrypted Cloudflare mirror is a second central transport. Its config block is
+`{"central": {"transport": "cloudflare", "url": "https://memories.17166969.xyz",
+"service_token_file": "...", "age_recipients_file": "...", "age_identity_file": "..."}}`.
+The service-token file must be mode 0600 and hold `client_id` and `client_secret`. `sync`
+binds the collector origin through Access, fetches remote tombstones before capture, pushes
+local tombstones before generations, compresses each object with zlib when that saves at
+least 5%, encrypts it to the recipient set, uploads only missing plaintext, and marks a
+generation durable only after the Worker acknowledges its manifest digest. The first sync
+pins the Worker's `store_id`; a different store with existing acknowledgements is refused.
+`agent-sessions mirror status --remote cloudflare` prints the pinned identity, and
+`agent-sessions mirror adopt --remote cloudflare` clears the old pin's local
+acknowledgements before rebinding. An unchanged sync performs one `hello` and no object,
+generation, or tombstone writes.
+
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
 - Object frames are zlib-compressed when both ends offer it, which every build of this tool does. The manifest already declares each object's size, so the receiver inflates to at most that size, refuses anything larger, and verifies the digest afterwards; an object that does not shrink travels uncompressed. Measured on 40 of the largest local objects, 2.6 MB became 1.1 MB.

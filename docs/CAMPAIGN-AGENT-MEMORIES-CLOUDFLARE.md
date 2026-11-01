@@ -21,11 +21,13 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   (deploy gate, bundle-once deploy, smoke probe, and collector authentication), and
   `P1.6` (R2 and D1 `usr-memories`, Worker-level Access, collector token, first deploy
   at `memories.17166969.xyz`, and the live smoke probe), `P2.1` (protocol v1
-  validators, hello/missing/object routes, and the pooled HTTPS client), and `P2.2`
+  validators, hello/missing/object routes, and the pooled HTTPS client), `P2.2`
   (compression before encryption, bounded concurrent upload, known-object skipping, and
-  the `mirror-initial` cost baseline).
+  the `mirror-initial` cost baseline), and `P2.3` (generation commit, manifest upload,
+  revision fences, tombstone-first delivery, store identity pinning, durable acks, and
+  the no-op sync path).
 - **In flight:** none.
-- **Next slice:** `P2.3` (generation commit and revision fencing); the first command
+- **Next slice:** `P2.4` (recovery snapshots, restore, verify, and GC); the first command
   re-checks the baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
@@ -124,6 +126,7 @@ names what would reverse it.
 | CF29 | `provision.sh` creates the Worker-level app with only the owner policy, then updates it with the collector `non_identity` policy; a re-run skips the update when the same token is already bound. `collector.service_token_id` stores the Access Client ID (`<id>.access`), not the token UUID used by the policy. | The Access API rejects a create that includes a `non_identity` policy with `[12130]`, and rejects repeating the same update on an already-updated app; the API identifies a service-token session by its Client ID. | Access accepts the combined create or in-place policy updates. |
 | CF30 | Protocol v1 is one closed schema shared by TS and Python: unknown object fields are rejected, digests are lowercase 64-hex, origins are `[A-Za-z0-9._-]{1,128}`, JSON and object bodies are capped at 8 MiB, a missing-object request carries at most 20,000 unique digests, and cursors are base64url JSON arrays of 1–4 strings. Both implementations run `tests/fixtures/mirror_protocol.json`; `make worker-test` refuses a Worker that disagrees with it. | The brief asks for one fixture corpus instead of validation copied into a second language. Closed validators make a typo a 400, not a silent default. | A protocol version bump. |
 | CF31 | Upload asks for the missing set once, prepares only those objects (zlib when it saves at least 5%, then age), and uploads four at a time over independent keep-alive connections. A known plaintext digest is never re-encrypted or re-uploaded. Plaintext and compressed bytes gate deterministically; ciphertext bytes and CPU are recorded per object class as measurements because randomized age output can differ by a few bytes. | Re-uploading known objects is the dominant avoidable cost on a retry or a second sync, and per-class bytes show where compression pays. A deterministic ciphertext size is not available from a randomized container. | A deterministic padding scheme that fixes ciphertext length. |
+| CF32 | `remote_object` is keyed by `(origin_host, plaintext_digest)` with `UNIQUE(origin_host, ciphertext_digest)`. Migration `0003_origin_objects.sql` rebuilds it and the child tables that referenced it; the child tables keep no foreign key to the object catalog and the Worker checks every reference before commit. | The initial schema keyed objects only by plaintext digest, so identical content uploaded by two origins collided and one origin could inherit the other's mapping. Case 17 requires object access to stay within the collector's bound origin. | Object sharing across origins becomes an explicit feature with a reference-counted owner. |
 
 **Delegated** — the executor decides inside the bound and records it in the commit body.
 
@@ -188,7 +191,7 @@ tooling: no runtime path calls it, and routine collector sync never needs it (CF
 | `perf-worker` | `eval/bench_mirror.py worker` over the Miniflare bundle |
 | `perf-deployed` | `eval/bench_mirror.py deployed` against the live origin with the synthetic token; exits with a message until `P1.6` deploys |
 | `perf-report` | `eval/bench_mirror.py report --dir .work/perf` |
-| `test` | The eleven Python suites; `worker-test` joins it at `P1.5` |
+| `test` | The eleven Python suites; `worker-test` runs every Worker suite |
 | `test-all` | `test`, `worker-test`, the adversarial suite, Ruff, `ty`, and `mdtool` |
 | `doctor` | `agent-sessions mirror doctor` against a scratch state dir, plus the auth and migration checks |
 
@@ -349,22 +352,22 @@ requests when the journal head equals the durable head, and zero D1 writes.
 store_meta(id, created_at)
 collector(service_token_id PK, origin_host, label, created_at, disabled)
 origin_sync(origin_host PK, revision, last_change_at)
-remote_object(plaintext_digest PK, plaintext_size, encoding, ciphertext_digest UNIQUE,
-              ciphertext_size, origin_host, created_at, last_referenced_at, gc_pending_at)
+remote_object(origin_host, plaintext_digest, plaintext_size, encoding, ciphertext_digest,
+              ciphertext_size, created_at, last_referenced_at, gc_pending_at,
+              PK(origin_host, plaintext_digest), UNIQUE(origin_host, ciphertext_digest))
 generation(id INTEGER PK, origin_host, harness, native_id, manifest_digest,
-           source_digest, source_size, captured_at, committed_at, revision,
-           manifest_object REFERENCES remote_object(ciphertext_digest),
-           UNIQUE(origin_host, manifest_digest))
-generation_object(generation, ordinal, plaintext_digest REFERENCES remote_object(plaintext_digest),
-                  size, PK(generation, ordinal))
+           source_digest, source_size, captured_at, committed_at, revision, manifest_object,
+           UNIQUE(origin_host, manifest_digest),
+           FOREIGN KEY(origin_host, manifest_object)
+               REFERENCES remote_object(origin_host, ciphertext_digest))
+generation_object(generation, ordinal, plaintext_digest, size, PK(generation, ordinal))
 tombstone(origin_host, harness, native_id, scope, forgotten_at, revision,
           PK(origin_host, harness, native_id))
 snapshot(id TEXT PK, origin_host, created_at, schema_version, db_digest, db_size,
          objects, object_bytes, verified_at, revision)
-snapshot_chunk(snapshot, ordinal, plaintext_digest, size,
-               ciphertext_digest REFERENCES remote_object(ciphertext_digest), PK(snapshot, ordinal))
-snapshot_object(snapshot, plaintext_digest REFERENCES remote_object(plaintext_digest), size,
-                PK(snapshot, plaintext_digest))
+snapshot_chunk(snapshot, ordinal, plaintext_digest, size, ciphertext_digest,
+               PK(snapshot, ordinal))
+snapshot_object(snapshot, plaintext_digest, size, PK(snapshot, plaintext_digest))
 learning_state(origin_host PK, revision, epoch, digest, records, updated_at)
 learning_experience(origin_host, epoch, remote_id, project_key, project_label, kind,
                     claim, applies_when, identifiers, fingerprint, basis, detector,
@@ -383,7 +386,8 @@ memory_fts USING fts5(text, content='learning_search', content_rowid='rowid',
            tokenize = "unicode61 remove_diacritics 2 tokenchars '-_./'")
 ```
 
-Indexes: `generation(origin_host, committed_at DESC)`, `remote_object(ciphertext_digest)`,
+Indexes: `generation(origin_host, committed_at DESC)`, `generation(origin_host, revision)`,
+`remote_object(origin_host, ciphertext_digest)`,
 `learning_experience(project_key, state, observed_at DESC)`,
 `learning_experience(origin_host, state, observed_at DESC)`,
 `learning_experience(kind, observed_at DESC)`, `learning_memory(project_key, state, created_at DESC)`,
@@ -392,6 +396,12 @@ unique `learning_search(origin_host, epoch, record, remote_id)`. `memory_fts` us
 content with insert/update/delete triggers, the same pattern as `store.py:728`'s `events_fts`.
 `collector.service_token_id` holds the Access Client ID that a verified service-token
 assertion reports as `common_name`; the Access policy names the token's UUID instead.
+Objects are origin-scoped: `remote_object` is keyed by `(origin_host, plaintext_digest)`, so
+the same transcript content at two origins is two independent rows and one collector cannot
+read another collector's ciphertext. The generation and snapshot child tables therefore
+carry no foreign key to `remote_object`; the Worker validates every reference at commit.
+`generation_object` holds every referenced archive object, with transcript chunks in offset
+order followed by artifacts; artifact names remain only in the encrypted manifest.
 Migrations live in `cloudflare/migrations/` and are applied with
 `cf d1 migrations apply <database-id>`; `cf` targets the real database by default and
 `--local` selects its simulation.
@@ -646,7 +656,7 @@ writer.
 | --- | --- | --- | --- | --- |
 | `P2.1` | Protocol module: constants, closed validators, error codes, cursor codec, request limits; client `mirror.py` with connection pooling (`http.client`, keep-alive), retry policy, and config parsing. Routes `status`, `hello`, `objects/missing`, `objects/{digest}`. | `cloudflare/src/protocol.ts`, `cloudflare/src/routes/sync.ts`, `src/agent_memory/mirror.py`, `tests/test_mirror.py` | `P1.2` | Case 22 passes; version mismatch is refused before writes; unsupported method 405; oversized JSON 413; a hello for an unbound origin 403; client and Worker agree on every fixture in the shared protocol JSON. |
 | `P2.2` | Compression and encryption on upload: plaintext read from the local archive, zlib when it shrinks ≥5%, `rage` to the recipient set, ciphertext digest/size, `PUT` with R2 `sha256`, D1 mapping, bounded concurrency, no re-upload of known plaintext digests. | `mirror_crypto.py`, `mirror.py`, `cloudflare/src/routes/objects.ts`, `tests/test_mirror.py` | `P2.1`, `P0.2` | Cases 4, 20, and 23 pass; a retried upload of the same plaintext uploads zero bytes the second time; a corrupted ciphertext is rejected by R2 and recorded nowhere; a bounded-inflate refusal rejects an over-large payload; 4 concurrent uploads stay bounded; wrong identity restore fails safely; compression ratio and CPU are recorded per object class. |
-| `P2.3` | Generation commit, manifest upload, durable ack, store identity pinning, duplicate ack, revision fencing, tombstone-first ordering, no-op path. | `cloudflare/src/routes/generations.ts`, `cloudflare/src/routes/tombstones.ts`, `mirror.py`, `sessions_cli.py`, `store.py` (schema v10 `mirror_remote(remote PK, store_id, revision, tombstone_watermark, learning_seq, learning_digest, last_sync_at, last_error)`), `tests/test_mirror.py` | `P2.2` | Cases 1–6, 8, 12, 13 pass; a changed remote `store_id` refuses to inherit local acks; unchanged sync does one hello, zero uploads, zero D1 writes; a stale revision commits nothing. |
+| `P2.3` | Generation commit, manifest upload, durable ack, store identity pinning, duplicate ack, revision fencing, tombstone-first ordering, no-op path. | `cloudflare/src/routes/generations.ts`, `cloudflare/src/routes/tombstones.ts`, `cloudflare/migrations/0002_generations.sql`, `cloudflare/migrations/0003_origin_objects.sql`, `mirror.py`, `sessions_cli.py`, `store.py` (schema v10 `mirror_remote(remote PK, store_id, revision, tombstone_watermark, learning_seq, learning_digest, last_sync_at, last_error)`), `tests/test_mirror.py` | `P2.2` | Cases 1–6, 8, 12, 13 pass; a changed remote `store_id` refuses to inherit local acks; unchanged sync does one hello, zero uploads, zero D1 writes; a stale revision commits nothing. |
 | `P2.4` | Content-addressed recovery snapshots, `backup.snapshot` (consistent DB copy without object copying), restore into a new directory including replay of generations committed after the snapshot, tombstone merge, grant deactivation, index rebuild, `mirror verify` (manifests and snapshots always; object bodies on `--objects`, default a 100-object or 5% sample), `mirror snapshots`, `mirror gc`, `mirror rotate`. | `cloudflare/src/routes/snapshots.ts`, `store.py`, `mirror.py`, `backup.py`, `tests/test_mirror.py` | `P2.3` | Cases 1, 9, 10, 11, 21 pass; restore from a deleted local state verifies every chunk and every archive object, and replays a generation committed after the snapshot; an unchanged database creates no snapshot and uploads zero chunks; a snapshot that predates a tombstone cannot expose it; GC never removes the newest verified snapshot or a referenced object; rotation re-encrypts a small origin and restores with the new identity only; the restored store has no enabled project, no grant, and no scheduler; a corrupted object is named by digest. |
 
 ### P3 — D1 learning projection
@@ -787,6 +797,9 @@ Deleting the bucket, database, Worker, or Access application, deleting R2 object
 6. The repo root gains a `Makefile` (`make help`, `make deploy`, `make test`, `make perf-*`)
    as the operator entry point. It changes no runtime, config, or wire format, and no
    collector path depends on `make`.
+7. D1 `remote_object` is keyed by `(origin_host, plaintext_digest)`, so identical content
+   at two origins remains isolated. Migration `0003_origin_objects.sql` rebuilds it and the
+   generation/snapshot child tables; the local archive schema is unchanged.
 
 **Non-goals:** a second memory model; syncing local grants, sandbox policy, or agent
 instructions; storing the raw event index in D1; a public UI; WebSockets; a daemon;

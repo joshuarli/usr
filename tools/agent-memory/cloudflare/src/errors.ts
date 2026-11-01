@@ -13,7 +13,10 @@ export type ErrorCode =
   | "invalid_request"
   | "unsupported_version"
   | "payload_too_large"
-  | "conflict";
+  | "conflict"
+  | "stale_revision"
+  | "missing_object"
+  | "tombstoned";
 
 interface ErrorEnvelope {
   readonly error: {
