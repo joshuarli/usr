@@ -1112,6 +1112,9 @@ fail only beyond the measured spread, and only on a quiet host.
 
 ## Needs you
 
+The first real sync is paused on the D1 free-tier row-write limit. Resume it
+with [the handoff](HANDOFF-AGENT-MEMORIES-CLOUDFLARE.md).
+
 | Step | Why the campaign cannot do it | Command the owner runs |
 | --- | --- | --- |
 | Install `age` or `rage` on each collector for real use | The campaign builds `rage` only under `.work/tools`; installing host packages is outside its grant | `brew install age` |
