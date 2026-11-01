@@ -56,7 +56,10 @@ case ${1:-} in
 	*) fail "usage: $0 [--version]" ;;
 esac
 
-apk add --quiet libva libva-intel-driver || fail 'could not install the Intel VA-API runtime'
+if [ ! -f /usr/lib/libva.so.2 ] || [ ! -f /usr/lib/dri/i965_drv_video.so ]; then
+	apk add --quiet libva libva-intel-driver ||
+		fail 'could not install the Intel VA-API runtime'
+fi
 
 tag=$(latest_tag)
 [ -n "$tag" ] || fail 'no helium release found'
