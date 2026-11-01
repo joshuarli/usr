@@ -35,7 +35,7 @@ MAX_GENERATION_ARTIFACTS = 1000
 MAX_TOMBSTONES = 900
 MAX_SNAPSHOT_BYTES = 1 << 40
 MAX_SNAPSHOT_CHUNKS = 4096
-MAX_SNAPSHOT_OBJECTS = 20000
+MAX_SNAPSHOT_OBJECTS = 50000
 GC_GRACE_SECONDS = 3600
 MAX_SOURCE_BYTES = 1 << 50
 MAX_PAGE = 200
@@ -2243,6 +2243,11 @@ def upload_snapshot(store, config, *, client, origin, revision, recipients=None,
 
         def publish(directory, metadata: dict[str, Any]) -> dict[str, Any]:
             database = Path(directory) / "sessions.sqlite3"
+            if len(metadata["objects"]) > MAX_SNAPSHOT_OBJECTS:
+                raise MirrorError(
+                    "snapshot_failed",
+                    "snapshot pins %d archive objects, above the %d the protocol allows"
+                    % (len(metadata["objects"]), MAX_SNAPSHOT_OBJECTS))
             chunk_sizes: dict[str, int] = {}
             for chunk in metadata["chunks"]:
                 chunk_sizes.setdefault(chunk["digest"], chunk["size"])
