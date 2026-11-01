@@ -1113,17 +1113,13 @@ fail only beyond the measured spread, and only on a quiet host.
 ## Needs you
 
 The first real sync completed on 2026-11-01: every local generation, the
-searchable learning projection, and a recovery snapshot pinning 58,248
+searchable learning projection, and a recovery snapshot pinning 58,412
 objects reached `usr-memories`, and the mirror-sync LaunchAgent is
-installed. The rows below are the steps that still need the owner.
+installed. Two steps remain, and both are the owner's.
 
 | Step | Why the campaign cannot do it | Command the owner runs |
 | --- | --- | --- |
-| Install `age` or `rage` on each collector for real use | The campaign builds `rage` only under `.work/tools`; installing host packages is outside its grant | `brew install age` |
-| Enroll the real collector, generate its keys, and store the recovery copy offline | The campaign provisions only a synthetic origin; the owner's origin id and token are theirs, and the agent must not write `~` | `agent-sessions identity show`; `cloudflare/scripts/provision.sh --access --origin <id> --label <host> --token-out <token path>` (run after the Worker exists); `agent-sessions mirror keygen --identity <identity path> --recovery <recovery path>`; copy the token and recovery identity to the password manager, keep both local files `0600`, then `agent-sessions mirror configure`. The synthetic token under `.work/secrets/` is discarded. |
-| First real sync | The campaign is forbidden from touching `~/.agent-sessions` or uploading real transcripts | `agent-sessions sync --to central` with the Cloudflare config installed |
-| Enable the searchable projection on the real store | It is opt-in and holds private text | `agent-sessions mirror enable --searchable-learning` |
-| Install the LaunchAgent | Host-altering | `cp` the rendered plist to `~/Library/LaunchAgents` and `launchctl load` it, or use the cron line in the README |
+| Keep the recovery identity and the collector token outside this machine | The agent must not write a password manager or an off-host store | Copy `~/.agent-sessions/age-recovery.key` and `~/.agent-sessions/cloudflare-token.json` into your password manager. The collector token is re-issuable with `cloudflare/scripts/provision.sh --access`; the recovery key decrypts every stored object and is not. |
 | Inspect captured traces and CPU profiles in the dashboard | No complete CLI surface for trace contents | `make observe` prints the URLs, then Cloudflare dashboard → Workers → `usr-memories` → Traces / Logs / Profiles |
 
 ## Execution boundary and non-goals
