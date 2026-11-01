@@ -1084,7 +1084,8 @@ class SyncStore:
 
 
 class SyncClient:
-    def __init__(self, hello=None, tombstone_pages=None, duplicate=None, commit=None, error=None):
+    def __init__(self, hello=None, tombstone_pages=None, duplicate=None, commit=None, error=None,
+                 stored_ciphertext=None):
         self.hello_body = hello or {
             "protocol": 1, "store_id": "usr-memories", "origin": "origin-a", "revision": 2,
             "tombstone_watermark": 0, "learning": {"revision": 0, "digest": None, "records": 0},
@@ -1094,6 +1095,7 @@ class SyncClient:
         self.duplicate = duplicate
         self.commit = commit
         self.error = error
+        self.stored_ciphertext = stored_ciphertext
         self.calls = []
         self.puts = []
 
@@ -1128,11 +1130,12 @@ class SyncClient:
     def put_object(self, prepared):
         self.calls.append(("put", prepared.ciphertext_digest))
         self.puts.append(prepared)
-        return {"stored": True, "object": {
+        ciphertext = self.stored_ciphertext or prepared.ciphertext_digest
+        return {"stored": ciphertext == prepared.ciphertext_digest, "object": {
             "plaintext_digest": prepared.plaintext_digest,
             "plaintext_size": prepared.plaintext_size,
             "encoding": prepared.encoding,
-            "ciphertext_digest": prepared.ciphertext_digest,
+            "ciphertext_digest": ciphertext,
             "ciphertext_size": prepared.ciphertext_size,
         }}
 
@@ -1221,6 +1224,20 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result["generations_committed"], 1)
         self.assertEqual(result["objects_stored"], 1)
         self.assertEqual(store.writes[-1][1:4], ("usr-memories", 3, 0))
+
+    def test_a_deduplicated_manifest_commits_the_stored_ciphertext(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        stored = "a" * 64
+        runtime = SyncClient(commit=commit, stored_ciphertext=stored)
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), self.patch_snapshot():
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        commit_call = [call for call in runtime.calls if call[0] == "commit"][0]
+        self.assertEqual(commit_call[2]["manifest_object"], stored)
+        self.assertEqual(result["manifests_uploaded"], 0)
+        self.assertEqual(result["manifests_already_stored"], 1)
 
     def test_a_changed_sync_creates_a_snapshot_and_persists_its_revision(self):
         commit = {"protocol": 1, "origin": "origin-a", "generation": 7,

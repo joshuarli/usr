@@ -1793,6 +1793,9 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
                         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
                     prepared = prepare(manifest_bytes, recipients)
                     uploaded = runtime.put_object(prepared)
+                    stored_manifest = uploaded["object"]
+                    if stored_manifest["plaintext_digest"] != prepared.plaintext_digest:
+                        raise MirrorError("invalid_response", "object upload names a different plaintext")
                     if uploaded["stored"]:
                         counters["manifests_uploaded"] += 1
                     else:
@@ -1800,7 +1803,7 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
                     counters["manifest_plaintext_bytes"] += prepared.plaintext_size
                     counters["manifest_compressed_bytes"] += prepared.compressed_size
                     counters["manifest_ciphertext_bytes"] += prepared.ciphertext_size
-                    wire = _wire_manifest(manifest, prepared.ciphertext_digest)
+                    wire = _wire_manifest(manifest, stored_manifest["ciphertext_digest"])
                     committed = runtime.commit_generation(origin, revision, wire)
                     if committed["manifest_digest"] != manifest["manifest_digest"]:
                         raise MirrorError("invalid_response", "generation commit names a different manifest")
