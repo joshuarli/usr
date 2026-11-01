@@ -1,5 +1,14 @@
 Prefix: USR
-Next: 21
+Next: 22
+
+### USR-21 · P2 · A snapshot commit ships every pinned object in one request
+
+- **Area:** Agent learning
+- **Where:** `agent-memory/src/agent_memory/mirror.py` (`upload_snapshot`), `agent-memory/cloudflare/src/routes/snapshots.ts`, `agent-memory/cloudflare/src/db.ts` (`commitSnapshot`)
+- **Problem:** A recovery snapshot commit carries one entry for every archive object its database references, plus the chunk list, so the request grows with the archive. This archive reached 58,134 objects against a 70,000 protocol cap and an 8 MiB JSON body bound, and the client refused the first snapshot three times before the limit was raised. Past the cap the sync fails with a named limit and commits no recovery point, and the Worker inserts roughly 3,800 statements in a single `db.batch()` for it.
+- **Recommendation:** Page the object list into a staging table, then commit with a final request that verifies the staged set is complete and unchanged, so request size, D1 statements per batch, and Worker memory stop scaling with the archive.
+- **Fix with:** none
+- **Effort:** M
 
 ### USR-5 · P2 · Push rules do not require user approval
 
