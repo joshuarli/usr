@@ -2334,9 +2334,44 @@ def gc(config, *, apply=False, client=None) -> dict[str, Any]:
             runtime.close()
 
 
-def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]:
+def _download_group(client, identity_path, rows):
+    for row in rows:
+        _download_object(client, identity_path, row)
+
+
+def verify(config, *, client=None, objects=False, sample=None, concurrency=12,
+           client_factory=None) -> dict[str, Any]:
     owner = client is None
     runtime = client or MirrorClient(config)
+    identity = config.age_identity_file
+    verified: set[str] = set()
+
+    def fetch(rows) -> None:
+        if not rows:
+            return
+        workers = min(concurrency, len(rows))
+        if workers < 2 or (client_factory is None and not owner):
+            for row in rows:
+                _download_object(runtime, identity, row)
+            return
+        make = client_factory or (lambda: MirrorClient(config))
+        clients = [make() for _ in range(workers)]
+        try:
+            groups = [rows[index::workers] for index in range(workers)]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(_download_group, item, identity, group)
+                           for item, group in zip(clients, groups)]
+                for future in futures:
+                    future.result()
+        finally:
+            for item in clients:
+                item.close()
+
+    def download(rows) -> None:
+        pending = [row for row in rows if row["plaintext_digest"] not in verified]
+        fetch(pending)
+        verified.update(row["plaintext_digest"] for row in pending)
+
     try:
         origin = _collector_origin(runtime)
         generations = _generation_pages(runtime, origin)
@@ -2359,8 +2394,7 @@ def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]
                 chunks += len(detail["chunks"])
                 sampled_all = objects and (sample is None or sample >= len(detail["objects"]))
                 if sampled_all:
-                    for item in detail["objects"]:
-                        _download_object(runtime, config.age_identity_file, _object_row(item))
+                    download([_object_row(item) for item in detail["objects"]])
                     runtime.verify_snapshot(origin, snapshot["id"])
                     attested += 1
                 for item in detail["objects"]:
@@ -2377,9 +2411,9 @@ def verify(config, *, client=None, objects=False, sample=None) -> dict[str, Any]
         if objects:
             count = sample if sample is not None else max(100, (len(all_objects) * 5 + 99) // 100)
             count = min(count, len(all_objects))
-            for digest in sorted(all_objects)[:count]:
-                _download_object(runtime, config.age_identity_file, known[digest])
-                sampled += 1
+            digests = sorted(all_objects)[:count]
+            fetch([known[digest] for digest in digests])
+            sampled = len(digests)
         return {
             "generations": len(generations), "snapshots": len(snapshot_rows),
             "objects": len(all_objects), "chunks": chunks, "sampled": sampled,
