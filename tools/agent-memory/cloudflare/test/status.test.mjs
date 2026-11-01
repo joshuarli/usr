@@ -42,7 +42,7 @@ test("a principal outside READERS is refused", async () => {
   }
 });
 
-test("a configured reader reads status without touching D1 or R2", async () => {
+test("a configured reader reads status from D1 without touching R2", async () => {
   const { env, calls } = environment({ READERS: " Reader@Example.test , other@example.test " });
   const response = await worker.fetch(request("/api/v1/status"), env, context({ email: "READER@example.test" }));
   assert.equal(response.status, 200);
@@ -55,7 +55,7 @@ test("a configured reader reads status without touching D1 or R2", async () => {
     ready: true,
     counts: {},
   });
-  assert.deepEqual(calls.db, { prepare: 0, batch: 0, exec: 0, dump: 0, withSession: 0 });
+  assert.deepEqual(calls.db, { prepare: 1, first: 1, batch: 0, exec: 0, dump: 0, withSession: 0 });
   assert.deepEqual(calls.bucket, { head: 0, get: 0, put: 0, delete: 0, list: 0, createMultipartUpload: 0 });
 });
 
@@ -83,6 +83,16 @@ test("wrong methods and unknown routes return the JSON envelope", async () => {
   assert.equal(missing.status, 404);
   assertSecurityHeaders(missing);
   assert.equal((await missing.json()).error.code, "not_found");
+});
+
+test("a missing or failing store reports unavailable", async () => {
+  for (const options of [{ storeMeta: null }, { dbFailure: "prepare" }, { dbFailure: "query" }]) {
+    const { env } = environment({}, options);
+    const response = await worker.fetch(request("/api/v1/status"), env, reader);
+    assert.equal(response.status, 503);
+    assertSecurityHeaders(response);
+    assert.equal((await response.json()).error.code, "unavailable");
+  }
 });
 
 test("the deployed bundle carries no test hook", async () => {

@@ -1,4 +1,5 @@
 import { authorize, identityOf, parseReaders } from "./auth";
+import { readStoreMeta, type StoreMeta } from "./db";
 import { failure, json, methodNotAllowed } from "./errors";
 
 export interface Env {
@@ -8,7 +9,6 @@ export interface Env {
 }
 
 const PROTOCOL = 1;
-const STORE_ID = "usr-memories";
 const READ_METHODS = ["GET", "HEAD"] as const;
 
 export default {
@@ -22,9 +22,18 @@ export default {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return methodNotAllowed(READ_METHODS);
       }
+      let store: StoreMeta | null;
+      try {
+        store = await readStoreMeta(env.DB);
+      } catch {
+        return failure(503, "unavailable", "store is unavailable");
+      }
+      if (store === null) {
+        return failure(503, "unavailable", "store is not provisioned");
+      }
       return json(200, {
         protocol: PROTOCOL,
-        store_id: STORE_ID,
+        store_id: store.id,
         principal,
         ready: true,
         counts: {},

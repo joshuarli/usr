@@ -14,10 +14,11 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   projection privately; a lost collector restores from R2; a forgotten session never
   returns; meaningfully wasteful work on the no-op path is a failing gate.
 - **Accepted:** `P0.1` (benchmark harness, root `Makefile`, and the deterministic capture
-  baseline), `P0.2` (age adapter, dev `rage` build, and the crypto suite), and `P1.1`
-  (Worker scaffold, Access gate, status, and the runtime harness).
+  baseline), `P0.2` (age adapter, dev `rage` build, and the crypto suite), `P1.1`
+  (Worker scaffold, Access gate, status, and the runtime harness), and `P1.2` (initial
+  D1 schema and store metadata).
 - **In flight:** none.
-- **Next slice:** `P1.2` (D1 migration); the first command re-checks the baseline:
+- **Next slice:** `P1.3` (observability); the first command re-checks the baseline:
   `cd tools/agent-memory/cloudflare && npm test`.
 - **Known red:** none. All ten agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load

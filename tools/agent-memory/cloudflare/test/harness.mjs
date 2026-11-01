@@ -13,22 +13,64 @@ export async function loadWorker() {
   return module.default;
 }
 
-export function countingBinding(name, methods) {
-  const calls = {};
+function fakeD1(storeMeta, failure) {
+  const calls = { prepare: 0, first: 0, batch: 0, exec: 0, dump: 0, withSession: 0 };
+  const statement = {
+    first: async () => {
+      calls.first += 1;
+      if (failure === "query") throw new Error("d1 query failed");
+      return storeMeta;
+    },
+    all: async () => ({ results: [] }),
+    run: async () => ({ success: true, meta: {} }),
+    bind() {
+      return this;
+    },
+  };
+  return {
+    calls,
+    binding: {
+      prepare() {
+        calls.prepare += 1;
+        if (failure === "prepare") throw new Error("d1 prepare failed");
+        return statement;
+      },
+      async batch() {
+        calls.batch += 1;
+        return [];
+      },
+      async exec() {
+        calls.exec += 1;
+        return { count: 0, duration: 0 };
+      },
+      async dump() {
+        calls.dump += 1;
+        return new ArrayBuffer(0);
+      },
+      withSession() {
+        calls.withSession += 1;
+        throw new Error("unexpected D1 session");
+      },
+    },
+  };
+}
+
+function countingR2() {
+  const calls = { head: 0, get: 0, put: 0, delete: 0, list: 0, createMultipartUpload: 0 };
   const binding = {};
-  for (const method of methods) {
-    calls[method] = 0;
+  for (const method of Object.keys(calls)) {
     binding[method] = async () => {
       calls[method] += 1;
-      throw new Error(`${name}.${method} is not expected in this test`);
+      throw new Error(`BUCKET.${method} is not expected in this test`);
     };
   }
   return { binding, calls };
 }
 
-export function environment(overrides = {}) {
-  const db = countingBinding("DB", ["prepare", "batch", "exec", "dump", "withSession"]);
-  const bucket = countingBinding("BUCKET", ["head", "get", "put", "delete", "list", "createMultipartUpload"]);
+export function environment(overrides = {}, options = {}) {
+  const storeMeta = options.storeMeta === undefined ? { id: "usr-memories", created_at: 0 } : options.storeMeta;
+  const db = fakeD1(storeMeta, options.dbFailure);
+  const bucket = countingR2();
   return {
     env: { READERS: "reader@example.test", DB: db.binding, BUCKET: bucket.binding, ...overrides },
     calls: { db: db.calls, bucket: bucket.calls },
