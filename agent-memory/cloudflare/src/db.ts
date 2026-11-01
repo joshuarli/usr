@@ -411,6 +411,7 @@ export async function pushTombstones(
       db, origin, learning.epoch,
       tombstones.map((tombstone) => `${tombstone.harness}:${tombstone.native_id}@${origin}`),
     ));
+    statements.push(db.prepare("DELETE FROM learning_reconcile WHERE origin_host = ?").bind(origin));
   }
   statements.push(
     db.prepare("UPDATE origin_sync SET revision = revision + 1, last_change_at = ? WHERE origin_host = ?")

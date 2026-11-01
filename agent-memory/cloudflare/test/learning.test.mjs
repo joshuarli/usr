@@ -199,6 +199,7 @@ test("an incremental delta stream and one full delta produce the same projection
   const experience = changeFor("experience");
   const memory = changeFor("memory");
   const updated = { ...experience, claim: "Updated claim for the same experience.", tags: "tests updated" };
+  updated.digest = digest("updated:" + updated.claim);
   const response = await postJson(env, "/api/v1/sync/learning/deltas",
     delta(ORIGIN, 0, "stream-1", [experience]));
   assert.equal(response.status, 200);

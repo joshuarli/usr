@@ -284,6 +284,36 @@ class FixtureParityTests(unittest.TestCase):
         self.assertIsNone(mirror.decode_learning_delta_response(dict(delta, replayed="no")))
         self.assertIsNone(mirror.decode_learning_delta_response(dict(delta, deleted=True)))
 
+    def test_learning_record_without_a_digest_is_refused(self):
+        change = json.loads(json.dumps(LEARNING_FIXTURE["cases"][0]["change"]))
+        del change["digest"]
+        with self.assertRaises(learning_sync.SnapshotError):
+            learning_sync.validate_mirror_record(change, LEARNING_FIXTURE["origin"])
+        change["digest"] = "not-a-digest"
+        with self.assertRaises(learning_sync.SnapshotError):
+            learning_sync.validate_mirror_record(change, LEARNING_FIXTURE["origin"])
+
+    def test_learning_key_and_reconcile_responses_are_strict(self):
+        page = {"protocol": 1, "origin": "origin-a", "revision": 2, "epoch": 1,
+                "keys": [{"record": "experience", "id": 1, "digest": DIGEST}], "next_cursor": None}
+        self.assertEqual(mirror.decode_learning_key_page(page), page)
+        self.assertIsNone(mirror.decode_learning_key_page(dict(page, extra=1)))
+        self.assertIsNone(mirror.decode_learning_key_page(dict(page, keys=[{"record": "memory", "id": 1}])))
+        self.assertIsNone(mirror.decode_learning_key_page(dict(page, epoch=0)))
+        begin = {"protocol": 1, "origin": "origin-a", "action": "begin", "revision": 1, "epoch": 2,
+                 "digest": None, "records": 0, "current": False, "resumed": False}
+        self.assertEqual(mirror.decode_reconcile_response(begin), begin)
+        self.assertIsNone(mirror.decode_reconcile_response(dict(begin, current="no")))
+        apply_body = {"protocol": 1, "origin": "origin-a", "action": "apply", "epoch": 2, "staged": 3}
+        self.assertEqual(mirror.decode_reconcile_response(apply_body), apply_body)
+        commit = {"protocol": 1, "origin": "origin-a", "action": "commit", "revision": 2, "epoch": 2,
+                  "digest": DIGEST, "records": 3, "applied": 3, "replayed": False}
+        self.assertEqual(mirror.decode_reconcile_response(commit), commit)
+        self.assertIsNone(mirror.decode_reconcile_response(dict(commit, digest=None)))
+        abort = {"protocol": 1, "origin": "origin-a", "action": "abort", "epoch": 2, "aborted": True}
+        self.assertEqual(mirror.decode_reconcile_response(abort), abort)
+        self.assertIsNone(mirror.decode_reconcile_response(dict(abort, action="unknown")))
+
     def test_missing_count_limit(self):
         objects = [{"plaintext_digest": "%064x" % index, "size": 0}
                    for index in range(mirror.MAX_MISSING_OBJECTS + 1)]
@@ -1506,6 +1536,117 @@ class MirrorIntegrationTests(unittest.TestCase):
                 self.assertTrue(second["unchanged"])
             finally:
                 client.close()
+        finally:
+            store.close()
+
+    def test_reconciliation_replaces_the_projection_and_replays_identically(self):
+        state = self.root / "reconcile"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            learning_module.initialize(store.db)
+            for number in (1, 2):
+                draft = experience_module.Draft(
+                    kind="method", claim="Synthetic reconcile claim %d." % number,
+                    applies_when="Running the synthetic reconciliation test.", detector="synthetic",
+                    subject="reconcile-%d" % number, observed_at=100.0 + number,
+                    sources=[{"session": "codex:native-reconcile-%d" % number, "position": 0,
+                              "digest": str(number) * 64, "role": "trigger"}])
+                with store.db:
+                    status, _ = experience_module.add_experience(
+                        store.db, "git:" + str(self.root), draft, "codex:native-reconcile-%d" % number,
+                        100.0 + number)
+                self.assertEqual(status, "created")
+            head = learning_sync.journal_head(store.db)
+            client = self.client()
+            try:
+                first = mirror.reconcile(store, self.config, "cloudflare", client=client)
+                self.assertFalse(first["current"])
+                self.assertEqual((first["records"], first["chunks"], first["applied"]), (2, 1, 2))
+                state_before = client.learning_state("origin-a")
+                self.assertEqual(state_before["records"], 2)
+                keys = client.learning_keys("origin-a")
+                self.assertEqual(len(keys["keys"]), 2)
+                self.assertTrue(all(len(key["digest"]) == 64 for key in keys["keys"]))
+
+                second = mirror.reconcile(store, self.config, "cloudflare", client=client)
+                self.assertTrue(second["current"])
+                self.assertEqual(second["chunks"], 0)
+                self.assertEqual(second["revision"], state_before["revision"])
+                self.assertEqual(client.learning_state("origin-a"), state_before)
+
+                with store.db:
+                    store.db.execute("UPDATE learning_experiences SET state = 'retired' WHERE id = 1")
+                third = mirror.reconcile(store, self.config, "cloudflare", client=client)
+                self.assertFalse(third["current"])
+                self.assertEqual(third["changed"], 1)
+                self.assertEqual(third["revision"], state_before["revision"] + 1)
+                self.assertEqual(learning_sync.journal_head(store.db), 0)
+            finally:
+                client.close()
+            self.assertGreater(head, 0)
+        finally:
+            store.close()
+
+    def test_reconciliation_retries_once_after_a_stale_commit(self):
+        class ReconcileClient:
+            def __init__(self):
+                self.calls = []
+                self.attempts = 0
+
+            def learning_state(self, origin):
+                return {"revision": 1, "epoch": 1, "digest": None, "records": 0}
+
+            def learning_keys(self, origin, after=None, limit=200):
+                return {"protocol": 1, "origin": origin, "revision": 1, "epoch": 1,
+                        "keys": [], "next_cursor": None}
+
+            def reconcile_begin(self, origin, base_revision, digest, records):
+                self.attempts += 1
+                self.calls.append(("begin", self.attempts))
+                return {"protocol": 1, "origin": origin, "action": "begin", "revision": base_revision,
+                        "epoch": 2, "digest": None, "records": records,
+                        "current": False, "resumed": False}
+
+            def reconcile_apply(self, origin, epoch, changes):
+                self.calls.append(("apply", len(changes)))
+                return {"protocol": 1, "origin": origin, "action": "apply", "epoch": epoch,
+                        "staged": len(changes)}
+
+            def reconcile_commit(self, origin, epoch, base_revision, digest, records):
+                self.calls.append(("commit", self.attempts))
+                if self.attempts == 1:
+                    raise mirror.MirrorError("stale_revision", "stale", status=409)
+                return {"protocol": 1, "origin": origin, "action": "commit", "revision": base_revision + 1,
+                        "epoch": epoch, "digest": digest, "records": records,
+                        "applied": records, "replayed": False}
+
+            def reconcile_abort(self, origin, epoch):
+                self.calls.append(("abort", epoch))
+                return {"protocol": 1, "origin": origin, "action": "abort", "epoch": epoch, "aborted": True}
+
+            def close(self):
+                pass
+
+        state = self.root / "retry"
+        store = Store(state)
+        try:
+            self.set_origin(store)
+            learning_module.initialize(store.db)
+            draft = experience_module.Draft(
+                kind="method", claim="Retry reconciliation claim.",
+                applies_when="Running the retry reconciliation test.", detector="synthetic",
+                subject="retry", observed_at=100.0,
+                sources=[{"session": "codex:native-retry", "position": 0,
+                          "digest": "a" * 64, "role": "trigger"}])
+            with store.db:
+                experience_module.add_experience(store.db, "git:" + str(self.root), draft,
+                                                 "codex:native-retry", 100.0)
+            client = ReconcileClient()
+            result = mirror.reconcile(store, self.config, "cloudflare", client=client)
+            self.assertEqual((result["revision"], result["chunks"], result["applied"]), (2, 2, 1))
+            self.assertEqual([call for call in client.calls if call[0] == "begin"], [("begin", 1), ("begin", 2)])
+            self.assertIn(("abort", 2), client.calls)
         finally:
             store.close()
 

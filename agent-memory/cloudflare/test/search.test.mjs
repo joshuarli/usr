@@ -27,7 +27,7 @@ function source(session, position = 0, role = "trigger") {
 
 function experience(id, overrides = {}) {
   return {
-    record: "experience", id, project_key: PROJECT, project_label: "usr",
+    record: "experience", id, digest: digest("experience:" + id), project_key: PROJECT, project_label: "usr",
     kind: "method", claim: `Synthetic experience ${id}.`,
     applies_when: `Synthetic applies ${id}.`, identifiers: `token-${id}`,
     fingerprint: `fingerprint-${id}`, basis: "deterministic", detector: "synthetic",
@@ -40,7 +40,7 @@ function experience(id, overrides = {}) {
 
 function memory(id, overrides = {}) {
   return {
-    record: "memory", id, project_key: PROJECT, project_label: "usr",
+    record: "memory", id, digest: digest("memory:" + id), project_key: PROJECT, project_label: "usr",
     action: `Synthetic memory ${id}.`, applicability: `Synthetic applicability ${id}.`,
     revision: null, validity: "[]", state: "approved", created_at: 1000 - id,
     sources: [source(`codex:native-${id}@origin-a`, 0, "signal")], links: [],

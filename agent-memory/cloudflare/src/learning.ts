@@ -1,4 +1,4 @@
-import { HARNESSES, isRecord } from "./protocol.js";
+import { HARNESSES, encodeCursor, isRecord } from "./protocol.js";
 
 export const MAX_LEARNING_CHANGES = 200;
 export const MAX_LEARNING_TEXT = 65_536;
@@ -29,6 +29,7 @@ export interface LearningLink {
 export interface LearningExperience {
   readonly record: "experience";
   readonly id: number;
+  readonly digest: string;
   readonly project_key: string;
   readonly project_label: string | null;
   readonly kind: "success" | "failure" | "decision" | "gotcha" | "method";
@@ -54,6 +55,7 @@ export interface LearningExperience {
 export interface LearningMemory {
   readonly record: "memory";
   readonly id: number;
+  readonly digest: string;
   readonly project_key: string;
   readonly project_label: string | null;
   readonly action: string;
@@ -136,6 +138,10 @@ function optionalNumber(value: Record<string, unknown>, key: string): Optional<n
   return number === null ? { ok: false } : { ok: true, value: number };
 }
 
+export function decodeDigestField(value: unknown): string | null {
+  return typeof value === "string" && DIGEST.test(value) ? value : null;
+}
+
 export function decodeProjectKey(value: unknown): string | null {
   return typeof value === "string" && PROJECT_KEY.test(value) ? value : null;
 }
@@ -196,14 +202,15 @@ function decodeLinks(value: unknown): LearningLink[] | null {
 
 function decodeExperience(value: Record<string, unknown>): LearningExperience | null {
   if (!keysMatch(value, [
-    "record", "id", "project_key", "kind", "claim", "applies_when", "identifiers", "fingerprint",
+    "record", "id", "digest", "project_key", "kind", "claim", "applies_when", "identifiers", "fingerprint",
     "basis", "detector", "revision", "worktree", "observed_at", "captured_at", "validity", "tags",
     "state", "state_reason", "state_at", "sources", "links",
   ], ["project_label"])) return null;
   const id = decodeCount(value.id);
+  const digest = decodeDigestField(value.digest);
   const projectKey = decodeProjectKey(value.project_key);
   const labelValue = optionalText(value, "project_label");
-  if (id === null || projectKey === null || !labelValue.ok) return null;
+  if (id === null || digest === null || projectKey === null || !labelValue.ok) return null;
   if (labelValue.value !== null && decodeProjectLabel(labelValue.value) === null) return null;
   const kind = typeof value.kind === "string" && EXPERIENCE_KINDS.has(value.kind) ? value.kind : null;
   const basis = typeof value.basis === "string" && EXPERIENCE_BASES.has(value.basis) ? value.basis : null;
@@ -230,7 +237,7 @@ function decodeExperience(value: Record<string, unknown>): LearningExperience | 
   const links = decodeLinks(value.links);
   if (sources === null || links === null) return null;
   return {
-    record: "experience", id, project_key: projectKey, project_label: labelValue.value,
+    record: "experience", id, digest, project_key: projectKey, project_label: labelValue.value,
     kind: kind as LearningExperience["kind"], claim, applies_when: appliesWhen, identifiers,
     fingerprint, basis: basis as LearningExperience["basis"], detector,
     revision: revision.value, worktree: worktree.value, observed_at: observedAt, captured_at: capturedAt,
@@ -241,13 +248,14 @@ function decodeExperience(value: Record<string, unknown>): LearningExperience | 
 
 function decodeMemory(value: Record<string, unknown>): LearningMemory | null {
   if (!keysMatch(value, [
-    "record", "id", "project_key", "action", "applicability", "revision", "validity",
+    "record", "id", "digest", "project_key", "action", "applicability", "revision", "validity",
     "state", "created_at", "sources", "links",
   ], ["project_label"])) return null;
   const id = decodeCount(value.id);
+  const digest = decodeDigestField(value.digest);
   const projectKey = decodeProjectKey(value.project_key);
   const labelValue = optionalText(value, "project_label");
-  if (id === null || projectKey === null || !labelValue.ok) return null;
+  if (id === null || digest === null || projectKey === null || !labelValue.ok) return null;
   if (labelValue.value !== null && decodeProjectLabel(labelValue.value) === null) return null;
   const action = decodeText(value.action);
   const applicability = decodeText(value.applicability);
@@ -262,7 +270,7 @@ function decodeMemory(value: Record<string, unknown>): LearningMemory | null {
   const links = decodeLinks(value.links);
   if (sources === null || links === null || links.length !== 0) return null;
   return {
-    record: "memory", id, project_key: projectKey, project_label: labelValue.value,
+    record: "memory", id, digest, project_key: projectKey, project_label: labelValue.value,
     action, applicability, revision: revision.value, validity,
     state: state as LearningMemory["state"], created_at: createdAt, sources, links: [],
   };
@@ -286,6 +294,31 @@ export function decodeLearningChange(value: unknown): LearningChange | null {
   return decodeLearningRecord(value);
 }
 
+export function decodeLearningChanges(
+  value: unknown,
+  origin: string,
+  allowDeletions: boolean,
+): LearningChange[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_LEARNING_CHANGES) return null;
+  const changes: LearningChange[] = [];
+  const keys = new Set<string>();
+  for (const entry of value) {
+    const change = decodeLearningChange(entry);
+    if (change === null) return null;
+    if (!allowDeletions && "deleted" in change) return null;
+    const key = `${change.record}:${change.id}`;
+    if (keys.has(key)) return null;
+    keys.add(key);
+    if (!("deleted" in change)) {
+      for (const source of change.sources) {
+        if (decodeMirrorSession(source.session, origin) === null) return null;
+      }
+    }
+    changes.push(change);
+  }
+  return changes;
+}
+
 export function decodeLearningDelta(value: unknown): LearningDelta | null {
   if (!isRecord(value) || !keysMatch(value, ["protocol", "origin", "base_revision", "digest", "changes"])) {
     return null;
@@ -297,25 +330,83 @@ export function decodeLearningDelta(value: unknown): LearningDelta | null {
   const baseRevision = decodeCount(value.base_revision);
   const digest = typeof value.digest === "string" && DIGEST.test(value.digest) ? value.digest : null;
   if (origin === null || baseRevision === null || digest === null) return null;
-  if (!Array.isArray(value.changes) || value.changes.length === 0 || value.changes.length > MAX_LEARNING_CHANGES) {
-    return null;
+  const changes = decodeLearningChanges(value.changes, origin, true);
+  return changes === null ? null : { protocol: 1, origin, base_revision: baseRevision, digest, changes };
+}
+
+export type ReconcileRequest =
+  | {
+    readonly action: "begin";
+    readonly protocol: 1;
+    readonly origin: string;
+    readonly base_revision: number;
+    readonly digest: string;
+    readonly records: number;
   }
-  const changes: LearningChange[] = [];
-  const keys = new Set<string>();
-  for (const entry of value.changes) {
-    const change = decodeLearningChange(entry);
-    if (change === null) return null;
-    const key = `${change.record}:${change.id}`;
-    if (keys.has(key)) return null;
-    keys.add(key);
-    if (!("deleted" in change)) {
-      for (const source of change.sources) {
-        if (decodeMirrorSession(source.session, origin) === null) return null;
-      }
+  | {
+    readonly action: "commit";
+    readonly protocol: 1;
+    readonly origin: string;
+    readonly epoch: number;
+    readonly base_revision: number;
+    readonly digest: string;
+    readonly records: number;
+  }
+  | {
+    readonly action: "apply";
+    readonly protocol: 1;
+    readonly origin: string;
+    readonly epoch: number;
+    readonly changes: readonly LearningRecord[];
+  }
+  | {
+    readonly action: "abort";
+    readonly protocol: 1;
+    readonly origin: string;
+    readonly epoch: number;
+  };
+
+export function decodeReconcileRequest(value: unknown): ReconcileRequest | null {
+  if (!isRecord(value) || value.protocol !== 1) return null;
+  const origin = typeof value.origin === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value.origin)
+    ? value.origin
+    : null;
+  if (origin === null) return null;
+  if (value.action === "begin") {
+    if (!keysMatch(value, ["protocol", "origin", "action", "base_revision", "digest", "records"])) return null;
+    const baseRevision = decodeCount(value.base_revision);
+    const records = decodeCount(value.records);
+    const digest = typeof value.digest === "string" && DIGEST.test(value.digest) ? value.digest : null;
+    if (baseRevision === null || records === null || digest === null) return null;
+    return { action: "begin", protocol: 1, origin, base_revision: baseRevision, digest, records };
+  }
+  if (value.action === "commit") {
+    if (!keysMatch(value, ["protocol", "origin", "action", "epoch", "base_revision", "digest", "records"])) {
+      return null;
     }
-    changes.push(change);
+    const baseRevision = decodeCount(value.base_revision);
+    const records = decodeCount(value.records);
+    const epoch = decodeCount(value.epoch);
+    const digest = typeof value.digest === "string" && DIGEST.test(value.digest) ? value.digest : null;
+    if (baseRevision === null || records === null || epoch === null || epoch < 1 || digest === null) return null;
+    return {
+      action: "commit", protocol: 1, origin, epoch,
+      base_revision: baseRevision, digest, records,
+    };
   }
-  return { protocol: 1, origin, base_revision: baseRevision, digest, changes };
+  if (value.action === "apply") {
+    if (!keysMatch(value, ["protocol", "origin", "action", "epoch", "changes"])) return null;
+    const epoch = decodeCount(value.epoch);
+    if (epoch === null || epoch < 1) return null;
+    const changes = decodeLearningChanges(value.changes, origin, false);
+    return changes === null ? null : { action: "apply", protocol: 1, origin, epoch, changes: changes as LearningRecord[] };
+  }
+  if (value.action === "abort") {
+    if (!keysMatch(value, ["protocol", "origin", "action", "epoch"])) return null;
+    const epoch = decodeCount(value.epoch);
+    return epoch === null || epoch < 1 ? null : { action: "abort", protocol: 1, origin, epoch };
+  }
+  return null;
 }
 
 export async function readLearningState(db: D1Database, origin: string): Promise<LearningState> {
@@ -428,28 +519,30 @@ function experienceUpserts(
   origin: string,
   epoch: number,
   revision: number,
+  pending: number,
   records: readonly LearningExperience[],
 ): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   for (const chunk of chunks(records, EXPERIENCE_ROWS)) {
-    const values = chunk.map(() => `(${placeholders(23)})`).join(",");
+    const values = chunk.map(() => `(${placeholders(24)})`).join(",");
     const params: (string | number | null)[] = [];
     for (const record of chunk) {
       params.push(
-        origin, epoch, record.id, record.project_key, record.project_label, record.kind, record.claim,
+        origin, epoch, record.id, record.digest, record.project_key, record.project_label, record.kind, record.claim,
         record.applies_when, record.identifiers, record.fingerprint, record.basis, record.detector,
         record.revision, record.worktree, record.observed_at, record.captured_at, record.validity,
-        record.tags, record.state, record.state_reason, record.state_at, revision, 0,
+        record.tags, record.state, record.state_reason, record.state_at, revision, pending,
       );
     }
     statements.push(
       db.prepare(
         `INSERT INTO learning_experience(
-           origin_host, epoch, remote_id, project_key, project_label, kind, claim, applies_when,
+           origin_host, epoch, remote_id, record_digest, project_key, project_label, kind, claim, applies_when,
            identifiers, fingerprint, basis, detector, revision, worktree, observed_at, captured_at,
            validity, tags, state, state_reason, state_at, sync_revision, pending
          ) VALUES ${values}
          ON CONFLICT(origin_host, epoch, remote_id) DO UPDATE SET
+           record_digest = excluded.record_digest,
            project_key = excluded.project_key, project_label = excluded.project_label,
            kind = excluded.kind, claim = excluded.claim, applies_when = excluded.applies_when,
            identifiers = excluded.identifiers, fingerprint = excluded.fingerprint,
@@ -469,25 +562,27 @@ function memoryUpserts(
   origin: string,
   epoch: number,
   revision: number,
+  pending: number,
   records: readonly LearningMemory[],
 ): D1PreparedStatement[] {
   const statements: D1PreparedStatement[] = [];
   for (const chunk of chunks(records, MEMORY_ROWS)) {
-    const values = chunk.map(() => `(${placeholders(13)})`).join(",");
+    const values = chunk.map(() => `(${placeholders(14)})`).join(",");
     const params: (string | number | null)[] = [];
     for (const record of chunk) {
       params.push(
-        origin, epoch, record.id, record.project_key, record.project_label, record.action,
-        record.applicability, record.revision, record.validity, record.state, record.created_at, revision, 0,
+        origin, epoch, record.id, record.digest, record.project_key, record.project_label, record.action,
+        record.applicability, record.revision, record.validity, record.state, record.created_at, revision, pending,
       );
     }
     statements.push(
       db.prepare(
         `INSERT INTO learning_memory(
-           origin_host, epoch, remote_id, project_key, project_label, action, applicability,
+           origin_host, epoch, remote_id, record_digest, project_key, project_label, action, applicability,
            revision, validity, state, created_at, sync_revision, pending
          ) VALUES ${values}
          ON CONFLICT(origin_host, epoch, remote_id) DO UPDATE SET
+           record_digest = excluded.record_digest,
            project_key = excluded.project_key, project_label = excluded.project_label,
            action = excluded.action, applicability = excluded.applicability,
            revision = excluded.revision, validity = excluded.validity, state = excluded.state,
@@ -625,13 +720,7 @@ export async function applyLearningDelta(
   statements.push(...recordDeletes(db, delta.origin, epoch, "memory", deletedMemories));
   statements.push(...childDeletes(db, delta.origin, epoch, "experience", deletedExperiences));
   statements.push(...childDeletes(db, delta.origin, epoch, "memory", deletedMemories));
-  statements.push(...childDeletes(db, delta.origin, epoch, "experience", liveExperiences.map((record) => record.id)));
-  statements.push(...childDeletes(db, delta.origin, epoch, "memory", liveMemories.map((record) => record.id)));
-  statements.push(...experienceUpserts(db, delta.origin, epoch, revision, liveExperiences));
-  statements.push(...memoryUpserts(db, delta.origin, epoch, revision, liveMemories));
-  statements.push(...sourceInserts(db, delta.origin, epoch, live));
-  statements.push(...linkInserts(db, delta.origin, epoch, liveExperiences));
-  statements.push(...searchUpserts(db, delta.origin, epoch, live));
+  statements.push(...projectionWrites(db, delta.origin, epoch, revision, 0, live));
   await db.batch(statements);
   return {
     state: { revision, epoch, digest: delta.digest, records },
@@ -639,6 +728,232 @@ export async function applyLearningDelta(
     deleted: removed.length,
     replayed: false,
   };
+}
+
+function projectionWrites(
+  db: D1Database,
+  origin: string,
+  epoch: number,
+  revision: number,
+  pending: number,
+  records: readonly LearningRecord[],
+): D1PreparedStatement[] {
+  const experiences = records.filter((record): record is LearningExperience => record.record === "experience");
+  const memories = records.filter((record): record is LearningMemory => record.record === "memory");
+  return [
+    ...childDeletes(db, origin, epoch, "experience", experiences.map((record) => record.id)),
+    ...childDeletes(db, origin, epoch, "memory", memories.map((record) => record.id)),
+    ...experienceUpserts(db, origin, epoch, revision, pending, experiences),
+    ...memoryUpserts(db, origin, epoch, revision, pending, memories),
+    ...sourceInserts(db, origin, epoch, records),
+    ...linkInserts(db, origin, epoch, experiences),
+    ...searchUpserts(db, origin, epoch, records),
+  ];
+}
+
+function epochDeletes(db: D1Database, origin: string, epoch: number): D1PreparedStatement[] {
+  return [
+    db.prepare("DELETE FROM learning_source WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+    db.prepare("DELETE FROM learning_search WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+    db.prepare("DELETE FROM learning_link WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+    db.prepare("DELETE FROM learning_experience WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+    db.prepare("DELETE FROM learning_memory WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+  ];
+}
+
+async function countEpoch(db: D1Database, origin: string, epoch: number): Promise<number> {
+  const row = await db.prepare(
+    `SELECT (SELECT count(*) FROM learning_experience WHERE origin_host = ? AND epoch = ?)
+          + (SELECT count(*) FROM learning_memory WHERE origin_host = ? AND epoch = ?) AS records`,
+  ).bind(origin, epoch, origin, epoch).first<{ readonly records: number }>();
+  return row?.records ?? 0;
+}
+
+export interface LearningKey {
+  readonly record: "experience" | "memory";
+  readonly id: number;
+  readonly digest: string;
+}
+
+export interface LearningKeyPage {
+  readonly keys: readonly LearningKey[];
+  readonly next_cursor: string | null;
+  readonly epoch: number;
+  readonly revision: number;
+}
+
+export interface ReconcileStage {
+  readonly epoch: number;
+  readonly digest: string;
+  readonly records: number;
+  readonly started_at: number;
+}
+
+export interface ReconcileBegin {
+  readonly epoch: number;
+  readonly current: boolean;
+  readonly resumed: boolean;
+  readonly state: LearningState;
+}
+
+export class ReconcileMismatch extends Error {}
+
+export async function readReconcileStage(db: D1Database, origin: string): Promise<ReconcileStage | null> {
+  return await db.prepare(
+    "SELECT epoch, digest, records, started_at FROM learning_reconcile WHERE origin_host = ?",
+  ).bind(origin).first<ReconcileStage>();
+}
+
+export async function readLearningKeys(
+  db: D1Database,
+  origin: string,
+  after: { readonly record: "experience" | "memory"; readonly id: number } | null,
+  limit: number,
+): Promise<LearningKeyPage> {
+  const state = await readLearningState(db, origin);
+  const keys: LearningKey[] = [];
+  if (after === null || after.record === "experience") {
+    const lower = after === null ? 0 : after.id;
+    const rows = await db.prepare(
+      `SELECT 'experience' AS record, remote_id AS id, record_digest AS digest
+       FROM learning_experience WHERE origin_host = ? AND epoch = ? AND remote_id > ?
+       ORDER BY remote_id LIMIT ?`,
+    ).bind(origin, state.epoch, lower, limit + 1).all<LearningKey>();
+    keys.push(...rows.results);
+  }
+  if (after === null || after.record === "memory") {
+    const lower = after === null ? 0 : after.id;
+    const rows = await db.prepare(
+      `SELECT 'memory' AS record, remote_id AS id, record_digest AS digest
+       FROM learning_memory WHERE origin_host = ? AND epoch = ? AND remote_id > ?
+       ORDER BY remote_id LIMIT ?`,
+    ).bind(origin, state.epoch, lower, limit + 1).all<LearningKey>();
+    keys.push(...rows.results);
+  } else if (after !== null && after.record === "experience") {
+    const rows = await db.prepare(
+      `SELECT 'memory' AS record, remote_id AS id, record_digest AS digest
+       FROM learning_memory WHERE origin_host = ? AND epoch = ?
+       ORDER BY remote_id LIMIT ?`,
+    ).bind(origin, state.epoch, limit + 1).all<LearningKey>();
+    keys.push(...rows.results);
+  }
+  keys.sort((left, right) => left.record === right.record
+    ? left.id - right.id
+    : left.record === "experience" ? -1 : 1);
+  const page = keys.slice(0, limit);
+  const last = page.at(-1);
+  return {
+    keys: page,
+    next_cursor: keys.length > limit && last !== undefined
+      ? encodeCursor([last.record, String(last.id)])
+      : null,
+    epoch: state.epoch,
+    revision: state.revision,
+  };
+}
+
+export async function beginReconcile(
+  db: D1Database,
+  origin: string,
+  baseRevision: number,
+  digest: string,
+  records: number,
+): Promise<ReconcileBegin> {
+  const state = await readLearningState(db, origin);
+  const stage = await readReconcileStage(db, origin);
+  if (state.digest !== null && state.digest === digest) {
+    if (stage !== null) await abortReconcile(db, origin, stage.epoch);
+    return { epoch: state.epoch, current: true, resumed: false, state };
+  }
+  if (baseRevision !== state.revision) throw new StaleLearningRevision("base revision is stale");
+  if (stage !== null && stage.digest === digest && stage.epoch === state.epoch + 1) {
+    return { epoch: stage.epoch, current: false, resumed: true, state };
+  }
+  const epoch = state.epoch + 1;
+  await db.batch([
+    ...epochDeletes(db, origin, epoch),
+    db.prepare(
+      `INSERT INTO learning_reconcile(origin_host, epoch, digest, records, started_at)
+       VALUES(?, ?, ?, ?, ?)
+       ON CONFLICT(origin_host) DO UPDATE SET
+         epoch = excluded.epoch, digest = excluded.digest,
+         records = excluded.records, started_at = excluded.started_at`,
+    ).bind(origin, epoch, digest, records, Date.now() / 1000),
+  ]);
+  return { epoch, current: false, resumed: false, state };
+}
+
+export async function applyReconcile(
+  db: D1Database,
+  origin: string,
+  epoch: number,
+  changes: readonly LearningRecord[],
+): Promise<number> {
+  const stage = await readReconcileStage(db, origin);
+  if (stage === null || stage.epoch !== epoch) {
+    throw new ReconcileMismatch("reconciliation is not staged at this epoch");
+  }
+  const state = await readLearningState(db, origin);
+  await db.batch(projectionWrites(db, origin, epoch, state.revision + 1, 1, changes));
+  return await countEpoch(db, origin, epoch);
+}
+
+export async function commitReconcile(
+  db: D1Database,
+  origin: string,
+  epoch: number,
+  baseRevision: number,
+  digest: string,
+  records: number,
+): Promise<LearningApply> {
+  const state = await readLearningState(db, origin);
+  const stage = await readReconcileStage(db, origin);
+  if (state.digest !== null && state.digest === digest && stage === null) {
+    return { state, applied: 0, deleted: 0, replayed: true };
+  }
+  if (stage === null || stage.epoch !== epoch) {
+    throw new ReconcileMismatch("reconciliation is not staged at this epoch");
+  }
+  if (baseRevision !== state.revision) throw new StaleLearningRevision("base revision is stale");
+  if (await countEpoch(db, origin, epoch) !== records) {
+    throw new ReconcileMismatch("staged record count does not match the reconciliation");
+  }
+  const revision = baseRevision + 1;
+  const old = state.epoch;
+  await db.batch([
+    db.prepare(
+      `INSERT INTO learning_state(origin_host, revision, epoch, digest, records, updated_at)
+       VALUES(?, ?, ?, ?, ?, ?)
+       ON CONFLICT(origin_host) DO UPDATE SET
+         revision = excluded.revision, epoch = excluded.epoch, digest = excluded.digest,
+         records = excluded.records, updated_at = excluded.updated_at
+       WHERE learning_state.revision = ?`,
+    ).bind(origin, revision, epoch, digest, records, Date.now() / 1000, baseRevision),
+    db.prepare(
+      `INSERT INTO learning_fence(singleton, changed) VALUES(1, changes())
+       ON CONFLICT(singleton) DO UPDATE SET changed = excluded.changed`,
+    ),
+    ...epochDeletes(db, origin, old),
+    db.prepare("UPDATE learning_experience SET pending = 0 WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+    db.prepare("UPDATE learning_memory SET pending = 0 WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+    db.prepare("DELETE FROM learning_reconcile WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+  ]);
+  return {
+    state: { revision, epoch, digest, records },
+    applied: records,
+    deleted: 0,
+    replayed: false,
+  };
+}
+
+export async function abortReconcile(db: D1Database, origin: string, epoch: number): Promise<boolean> {
+  const stage = await readReconcileStage(db, origin);
+  if (stage === null || stage.epoch !== epoch) return false;
+  await db.batch([
+    ...epochDeletes(db, origin, epoch),
+    db.prepare("DELETE FROM learning_reconcile WHERE origin_host = ? AND epoch = ?").bind(origin, epoch),
+  ]);
+  return true;
 }
 
 export function projectionDeletionStatements(

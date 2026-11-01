@@ -316,6 +316,94 @@ def decode_learning_state_response(value):
             "digest": digest, "records": records}
 
 
+def decode_learning_key_page(value):
+    if not _exact_keys(value, ("protocol", "origin", "revision", "epoch", "keys", "next_cursor")):
+        return None
+    state = decode_learning_state_response({
+        "protocol": value.get("protocol"), "origin": value.get("origin"),
+        "revision": value.get("revision"), "epoch": value.get("epoch"), "digest": None, "records": 0,
+    })
+    if state is None:
+        return None
+    keys = value.get("keys")
+    if not isinstance(keys, list) or len(keys) > MAX_PAGE:
+        return None
+    decoded = []
+    for item in keys:
+        if not _exact_keys(item, ("record", "id", "digest")):
+            return None
+        record, identifier, digest = item.get("record"), item.get("id"), item.get("digest")
+        if record not in ("experience", "memory"):
+            return None
+        if isinstance(identifier, bool) or not isinstance(identifier, int) or identifier < 0:
+            return None
+        if decode_digest(digest) is None:
+            return None
+        decoded.append({"record": record, "id": identifier, "digest": digest})
+    cursor = value.get("next_cursor")
+    if cursor is not None and decode_cursor(cursor) is None:
+        return None
+    return {"protocol": PROTOCOL, "origin": state["origin"], "revision": state["revision"],
+            "epoch": state["epoch"], "keys": decoded, "next_cursor": cursor}
+
+
+def decode_reconcile_response(value):
+    if not _record(value) or decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    action = value.get("action")
+    if origin is None or action not in ("begin", "apply", "commit", "abort"):
+        return None
+    if action == "begin":
+        if not _exact_keys(value, ("protocol", "origin", "action", "revision", "epoch", "digest", "records",
+                                   "current", "resumed")):
+            return None
+        revision = _decode_learning_revision(value.get("revision"))
+        epoch = _decode_learning_revision(value.get("epoch"))
+        records = _decode_learning_revision(value.get("records"))
+        digest = value.get("digest")
+        if revision is None or epoch is None or epoch < 1 or records is None:
+            return None
+        if digest is not None and decode_digest(digest) is None:
+            return None
+        if not isinstance(value.get("current"), bool) or not isinstance(value.get("resumed"), bool):
+            return None
+        return {"protocol": PROTOCOL, "origin": origin, "action": action, "revision": revision,
+                "epoch": epoch, "digest": digest, "records": records,
+                "current": value["current"], "resumed": value["resumed"]}
+    if action == "apply":
+        if not _exact_keys(value, ("protocol", "origin", "action", "epoch", "staged")):
+            return None
+        epoch = _decode_learning_revision(value.get("epoch"))
+        staged = _decode_learning_revision(value.get("staged"))
+        if epoch is None or epoch < 1 or staged is None:
+            return None
+        return {"protocol": PROTOCOL, "origin": origin, "action": action, "epoch": epoch, "staged": staged}
+    if action == "commit":
+        if not _exact_keys(value, ("protocol", "origin", "action", "revision", "epoch", "digest", "records",
+                                   "applied", "replayed")):
+            return None
+        revision = _decode_learning_revision(value.get("revision"))
+        epoch = _decode_learning_revision(value.get("epoch"))
+        records = _decode_learning_revision(value.get("records"))
+        applied = _decode_learning_revision(value.get("applied"))
+        digest = value.get("digest")
+        if revision is None or epoch is None or epoch < 1 or records is None or applied is None:
+            return None
+        if decode_digest(digest) is None or not isinstance(value.get("replayed"), bool):
+            return None
+        return {"protocol": PROTOCOL, "origin": origin, "action": action, "revision": revision,
+                "epoch": epoch, "digest": digest, "records": records, "applied": applied,
+                "replayed": value["replayed"]}
+    if not _exact_keys(value, ("protocol", "origin", "action", "epoch", "aborted")):
+        return None
+    epoch = _decode_learning_revision(value.get("epoch"))
+    if epoch is None or epoch < 1 or not isinstance(value.get("aborted"), bool):
+        return None
+    return {"protocol": PROTOCOL, "origin": origin, "action": action, "epoch": epoch,
+            "aborted": value["aborted"]}
+
+
 def decode_learning_delta_response(value):
     if not _record(value):
         return None
@@ -1161,6 +1249,50 @@ class MirrorClient:
             raise MirrorError("invalid_response", "learning delta response is invalid")
         return decoded
 
+    def learning_keys(self, origin, after=None, limit=MAX_PAGE) -> dict[str, Any]:
+        if decode_origin(origin) is None or not 1 <= limit <= MAX_PAGE:
+            raise MirrorError("invalid_request", "learning keys request is invalid")
+        query = {"origin": origin, "limit": limit}
+        if after is not None:
+            query["after"] = after
+        decoded = decode_learning_key_page(self._json("GET", "/api/v1/sync/learning/keys?" + urlencode(query)))
+        if decoded is None or decoded["origin"] != origin:
+            raise MirrorError("invalid_response", "learning keys response is invalid")
+        return decoded
+
+    def _reconcile(self, origin, value) -> dict[str, Any]:
+        request = {"protocol": PROTOCOL, "origin": origin, **value}
+        decoded = decode_reconcile_response(self._json("POST", "/api/v1/sync/learning/reconcile", request))
+        if decoded is None or decoded["origin"] != origin or decoded["action"] != value["action"]:
+            raise MirrorError("invalid_response", "reconciliation response is invalid")
+        return decoded
+
+    def reconcile_begin(self, origin, base_revision, digest, records) -> dict[str, Any]:
+        if decode_digest(digest) is None or records < 0:
+            raise MirrorError("invalid_request", "reconciliation begin is invalid")
+        return self._reconcile(origin, {"action": "begin", "base_revision": base_revision,
+                                        "digest": digest, "records": records})
+
+    def reconcile_apply(self, origin, epoch, changes) -> dict[str, Any]:
+        if not 1 <= epoch or not changes:
+            raise MirrorError("invalid_request", "reconciliation apply is invalid")
+        try:
+            clean = [learning_sync.validate_mirror_record(change, origin) for change in changes]
+        except learning_sync.SnapshotError as exc:
+            raise MirrorError("invalid_request", "reconciliation record is invalid: " + str(exc)) from exc
+        return self._reconcile(origin, {"action": "apply", "epoch": epoch, "changes": clean})
+
+    def reconcile_commit(self, origin, epoch, base_revision, digest, records) -> dict[str, Any]:
+        if decode_digest(digest) is None or records < 0 or epoch < 1:
+            raise MirrorError("invalid_request", "reconciliation commit is invalid")
+        return self._reconcile(origin, {"action": "commit", "epoch": epoch,
+                                        "base_revision": base_revision, "digest": digest, "records": records})
+
+    def reconcile_abort(self, origin, epoch) -> dict[str, Any]:
+        if epoch < 1:
+            raise MirrorError("invalid_request", "reconciliation abort is invalid")
+        return self._reconcile(origin, {"action": "abort", "epoch": epoch})
+
     def missing(self, origin, objects) -> dict[str, Any]:
         request = {
             "protocol": PROTOCOL,
@@ -1687,6 +1819,97 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
                                       learning_seq=learning_seq, learning_digest=learning_digest,
                                       error=str(exc)[:500])
         raise
+    finally:
+        if owner:
+            runtime.close()
+
+
+def _reconcile_batches(records, limit, max_bytes):
+    batch = []
+    size = 0
+    for record in records:
+        encoded = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if batch and (len(batch) >= limit or size + len(encoded) > max_bytes):
+            yield batch
+            batch = []
+            size = 0
+        batch.append(record)
+        size += len(encoded)
+    if batch:
+        yield batch
+
+
+def reconcile(store, config, remote_name, *, client=None, progress=None,
+              chunk_records=200, chunk_bytes=4 * 1024 * 1024):
+    """Replace one origin's searchable projection with the local live record set."""
+    if not isinstance(remote_name, str) or not remote_name:
+        raise MirrorError("invalid_config", "remote name is required")
+    origin = archive_module.origin_for(store.db)
+    counters = {"current": False, "records": 0, "missing": 0, "extra": 0, "changed": 0,
+                "chunks": 0, "applied": 0, "revision": 0, "epoch": 1}
+    owner = client is None
+    runtime = client or MirrorClient(config)
+    try:
+        for attempt in range(2):
+            learning = runtime.learning_state(origin)
+            revision = learning["revision"]
+            head = learning_sync.journal_head(store.db) if learning_sync.has_learning(store.db) else 0
+            labels = learning_sync.project_labels(store.db)
+            records = learning_sync.mirror_snapshot(store.db, labels, origin)
+            local = {(record["record"], record["id"]): record["digest"] for record in records}
+            remote = {}
+            cursor = None
+            epoch = learning["epoch"]
+            while True:
+                page = runtime.learning_keys(origin, cursor, MAX_PAGE)
+                epoch = page["epoch"]
+                for key in page["keys"]:
+                    remote[(key["record"], key["id"])] = key["digest"]
+                cursor = page["next_cursor"]
+                if cursor is None:
+                    break
+            counters.update(records=len(records), revision=revision, epoch=epoch)
+            counters["missing"] = len([key for key in local if key not in remote])
+            counters["extra"] = len([key for key in remote if key not in local])
+            counters["changed"] = len([key for key in local if key in remote and remote[key] != local[key]])
+            if not (counters["missing"] or counters["extra"] or counters["changed"]):
+                counters["current"] = True
+                return counters
+            digest = learning_sync.changes_digest(records)
+            begun = runtime.reconcile_begin(origin, revision, digest, len(records))
+            epoch = begun["epoch"]
+            counters["epoch"] = epoch
+            if begun["current"]:
+                counters["current"] = True
+                counters["revision"] = begun["revision"]
+                return counters
+            try:
+                for batch in _reconcile_batches(records, chunk_records, chunk_bytes):
+                    runtime.reconcile_apply(origin, epoch, batch)
+                    counters["chunks"] += 1
+                    if progress is not None:
+                        progress(counters["chunks"], len(records))
+                committed = runtime.reconcile_commit(origin, epoch, revision, digest, len(records))
+            except MirrorError as exc:
+                if exc.code not in ("stale_revision", "conflict") or attempt > 0:
+                    raise
+                try:
+                    runtime.reconcile_abort(origin, epoch)
+                except MirrorError as abort_error:
+                    if abort_error.code not in ("stale_revision", "conflict"):
+                        raise
+                continue
+            counters.update(applied=committed["applied"], revision=committed["revision"],
+                            epoch=committed["epoch"], current=committed["replayed"])
+            if head:
+                learning_sync.prune_journal(store.db, head)
+            pinned = store.mirror_remote_state(remote_name)
+            if pinned is not None:
+                store.write_mirror_remote(
+                    remote_name, pinned["store_id"], pinned["revision"], pinned["tombstone_watermark"],
+                    learning_seq=head, learning_digest=digest)
+            return counters
+        raise MirrorError("stale_revision", "reconciliation did not settle after a retry")
     finally:
         if owner:
             runtime.close()

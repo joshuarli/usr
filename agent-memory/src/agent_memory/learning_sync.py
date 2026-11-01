@@ -276,7 +276,12 @@ def mirror_record(record, labels, origin_host):
         dict(source, session=source["session"] if "@" in source["session"] else source["session"] + "@" + origin_host)
         for source in record["sources"]
     ]
+    clean["digest"] = changes_digest([clean])
     return clean
+
+
+def mirror_snapshot(db, labels, origin_host):
+    return [mirror_record(record, labels, origin_host) for record in export_snapshot(db)]
 
 
 def mirror_changes(db, after, labels, origin_host) -> dict[str, Any]:
@@ -374,12 +379,12 @@ def validate_record(record) -> dict[str, Any]:
 PROJECT_KEY = re.compile(r"^[0-9a-f]{16}$")
 MAX_LEARNING_CHANGES = 200
 MIRROR_EXPERIENCE_KEYS = frozenset({
-    "record", "id", "project_key", "kind", "claim", "applies_when", "identifiers", "fingerprint",
+    "record", "id", "digest", "project_key", "kind", "claim", "applies_when", "identifiers", "fingerprint",
     "basis", "detector", "revision", "worktree", "observed_at", "captured_at", "validity", "tags",
     "state", "state_reason", "state_at", "sources", "links",
 })
 MIRROR_MEMORY_KEYS = frozenset({
-    "record", "id", "project_key", "action", "applicability", "revision", "validity",
+    "record", "id", "digest", "project_key", "action", "applicability", "revision", "validity",
     "state", "created_at", "sources", "links",
 })
 MIRROR_LABEL = "project_label"
@@ -429,6 +434,9 @@ def validate_mirror_record(record, origin) -> dict[str, Any]:
     key = record.get("project_key")
     if not isinstance(key, str) or not PROJECT_KEY.match(key):
         raise SnapshotError("learning project key is not 16 lowercase hex characters")
+    digest = record.get("digest")
+    if not isinstance(digest, str) or not re.match(r"^[0-9a-f]{64}$", digest):
+        raise SnapshotError("learning record digest is not 64 lowercase hex characters")
     label = record.get("project_label")
     if label is not None:
         _mirror_label(label)
@@ -447,6 +455,7 @@ def validate_mirror_record(record, origin) -> dict[str, Any]:
     local["project"] = key
     clean = validate_record(local)
     clean["project_key"] = clean.pop("project")
+    clean["digest"] = digest
     if label is not None:
         clean[MIRROR_LABEL] = label
     return clean

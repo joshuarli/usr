@@ -29,9 +29,10 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   replay, verify, two-phase GC, and key rotation), `P3.1` (the local learning change
   journal, replayable deltas, project hashing, and the label map), `P3.2` (the D1
   learning projection, revision-fenced delta apply, FTS rows, and tombstone cleanup), and
-  `P3.3` (FTS search, filters, keyset pagination, batched provenance, and detail).
+  `P3.3` (FTS search, filters, keyset pagination, batched provenance, and detail), and
+  `P3.4` (the digest key index and epoch-staged reconciliation).
 - **In flight:** none.
-- **Next slice:** `P3.4` (projection reconciliation); the first command re-checks the
+- **Next slice:** `P4.1` (server-rendered HTML); the first command re-checks the
   baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
@@ -379,12 +380,12 @@ snapshot_chunk(snapshot, ordinal, plaintext_digest, size, ciphertext_digest,
 snapshot_object(snapshot, plaintext_digest, size, PK(snapshot, plaintext_digest))
 learning_state(origin_host PK, revision, epoch, digest, records, updated_at)
 learning_fence(singleton PK CHECK(singleton=1), changed)
-learning_experience(origin_host, epoch, remote_id, project_key, project_label, kind,
+learning_experience(origin_host, epoch, remote_id, record_digest, project_key, project_label, kind,
                     claim, applies_when, identifiers, fingerprint, basis, detector,
                     revision, worktree, observed_at, captured_at, validity, tags,
                     state, state_reason, state_at, sync_revision, pending,
                     PK(origin_host, epoch, remote_id))
-learning_memory(origin_host, epoch, remote_id, project_key, project_label, action,
+learning_memory(origin_host, epoch, remote_id, record_digest, project_key, project_label, action,
                 applicability, revision, validity, state, created_at, sync_revision, pending,
                 PK(origin_host, epoch, remote_id))
 learning_source(origin_host, epoch, record, remote_id, session, position, digest, role,
@@ -392,6 +393,7 @@ learning_source(origin_host, epoch, record, remote_id, session, position, digest
 learning_link(origin_host, epoch, newer, older, relation,
               PK(origin_host, epoch, newer, older, relation))
 learning_search(rowid INTEGER PK, origin_host, epoch, record, remote_id, text)
+learning_reconcile(origin_host PK, epoch, digest, records, started_at)
 memory_fts USING fts5(text, content='learning_search', content_rowid='rowid',
            tokenize = "unicode61 remove_diacritics 2 tokenchars '-_./'")
 ```
