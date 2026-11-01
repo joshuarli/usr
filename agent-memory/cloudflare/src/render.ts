@@ -97,6 +97,32 @@ export interface Counts {
   readonly last_verified: number | null;
 }
 
+export interface StatusCounts extends Counts {
+  readonly generations: number;
+  readonly snapshots: number;
+  readonly objects: number;
+  readonly object_bytes: number;
+}
+
+export interface OriginStatus {
+  readonly origin: string;
+  readonly label: string | null;
+  readonly revision: number;
+  readonly last_change_at: number | null;
+  readonly learning_revision: number;
+  readonly learning_records: number;
+  readonly generations: number;
+  readonly last_verified: number | null;
+}
+
+export interface StatusData {
+  readonly store_id: string;
+  readonly counts: StatusCounts;
+  readonly origins: readonly OriginStatus[];
+  readonly last_change: number | null;
+  readonly last_verified_snapshot: number | null;
+}
+
 function countCards(counts: Counts): string {
   return `<div class="grid">
 <div class="card"><b>${counts.experiences}</b> retained experiences</div>
@@ -205,15 +231,24 @@ ${links}`;
   return layout(title.slice(0, 120), body);
 }
 
-export function renderStatus(principal: string, counts: Counts, storeId: string): string {
+export function renderStatus(principal: string, status: StatusData): string {
+  const origins = status.origins.length === 0
+    ? `<p class="empty">No origin has synchronized a change yet.</p>`
+    : `<table><thead><tr><th>Origin</th><th>Label</th><th>Revision</th><th>Last change</th><th>Learning</th><th>Generations</th><th>Last verified</th></tr></thead><tbody>${status.origins.map((origin) => `<tr><td>${escapeHtml(origin.origin)}</td><td>${escapeHtml(origin.label ?? "")}</td><td>${origin.revision}</td><td>${escapeHtml(timestamp(origin.last_change_at))}</td><td>${origin.learning_records} records at r${origin.learning_revision}</td><td>${origin.generations}</td><td>${escapeHtml(timestamp(origin.last_verified))}</td></tr>`).join("")}</tbody></table>`;
   const body = `<h1>Status</h1>
-<p class="muted">Signed in as ${escapeHtml(principal)}. Store ${escapeHtml(storeId)}. Ready.</p>
-${countCards(counts)}
+<p class="muted">Signed in as ${escapeHtml(principal)}. Store ${escapeHtml(status.store_id)}. Ready.</p>
+${countCards(status.counts)}
 <table><tbody>
-<tr><th>Last durable change</th><td>${escapeHtml(timestamp(counts.last_change))}</td></tr>
-<tr><th>Last verified recovery point</th><td>${escapeHtml(timestamp(counts.last_verified))}</td></tr>
-<tr><th>Tombstones</th><td>${counts.tombstones}</td></tr>
+<tr><th>Last durable change</th><td>${escapeHtml(timestamp(status.counts.last_change))}</td></tr>
+<tr><th>Last verified recovery point</th><td>${escapeHtml(timestamp(status.counts.last_verified))}</td></tr>
+<tr><th>Generations</th><td>${status.counts.generations}</td></tr>
+<tr><th>Snapshots</th><td>${status.counts.snapshots}</td></tr>
+<tr><th>Stored objects</th><td>${status.counts.objects}</td></tr>
+<tr><th>Stored bytes</th><td>${status.counts.object_bytes}</td></tr>
+<tr><th>Tombstones</th><td>${status.counts.tombstones}</td></tr>
 </tbody></table>
-<p class="notice">This page reports counts and timestamps only. It never includes record text, keys, or credentials.</p>`;
+<h2>Origins</h2>
+${origins}
+<p class="notice">This page reports counts, identities, and timestamps only. It never includes record text, keys, or credentials.</p>`;
   return layout("Status", body);
 }

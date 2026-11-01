@@ -4,6 +4,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 
+import { Miniflare } from "miniflare";
+
+import { seedDatabase } from "../bench/seed.mjs";
 import { BUNDLE_PATH, context, environment, loadWorker, request } from "./harness.mjs";
 
 const worker = await loadWorker();
@@ -45,31 +48,118 @@ test("a principal outside READERS is refused", async () => {
   }
 });
 
-test("a configured reader reads status from D1 without touching R2", async () => {
+const ZERO_COUNTS = {
+  experiences: 0, memories: 0, projects: 0, origins: 0, tombstones: 0,
+  generations: 0, snapshots: 0, objects: 0, object_bytes: 0,
+};
+
+test("a configured reader reads zero-data status without touching R2", async () => {
   const { env, calls } = environment({ READERS: " Reader@Example.test , other@example.test " });
   const response = await worker.fetch(request("/api/v1/status"), env, context({ email: "READER@example.test" }));
   assert.equal(response.status, 200);
   assertSecurityHeaders(response);
   assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
-  assert.deepEqual(await response.json(), {
-    protocol: 1,
-    store_id: "usr-memories",
-    principal: { kind: "reader", email: "reader@example.test" },
-    ready: true,
-    counts: {},
-  });
-  assert.deepEqual(calls.db, { prepare: 1, first: 1, batch: 0, exec: 0, dump: 0, withSession: 0 });
+  const body = await response.json();
+  assert.equal(body.protocol, 1);
+  assert.equal(body.store_id, "usr-memories");
+  assert.deepEqual(body.principal, { kind: "reader", email: "reader@example.test" });
+  assert.equal(body.ready, true);
+  assert.deepEqual(body.counts, ZERO_COUNTS);
+  assert.deepEqual(body.origins, []);
+  assert.equal(body.last_change, null);
+  assert.equal(body.last_verified_snapshot, null);
   assert.deepEqual(calls.bucket, { head: 0, get: 0, put: 0, delete: 0, list: 0, createMultipartUpload: 0 });
 });
 
 test("a bound collector token reads status for its origin", async () => {
-  const { env, calls } = environment({}, { collectors: { "token-id": { origin_host: "origin-a" } } });
+  const { env } = environment({}, { collectors: { "token-id": { origin_host: "origin-a" } } });
   const response = await worker.fetch(request("/api/v1/status"), env, context({ service_token_id: "token-id" }));
   assert.equal(response.status, 200);
   assertSecurityHeaders(response);
   const body = await response.json();
   assert.deepEqual(body.principal, { kind: "collector", origin_host: "origin-a" });
-  assert.deepEqual(calls.db, { prepare: 2, first: 2, batch: 0, exec: 0, dump: 0, withSession: 0 });
+  assert.deepEqual(body.counts, ZERO_COUNTS);
+});
+
+async function database(t) {
+  const miniflare = new Miniflare({
+    modules: true,
+    script: "export default { fetch() { return new Response('ok'); } }",
+    compatibilityDate: "2026-08-06",
+    d1Databases: ["DB"],
+    r2Buckets: ["BUCKET"],
+  });
+  t.after(() => miniflare.dispose());
+  const db = await miniflare.getD1Database("DB");
+  await seedDatabase(db);
+  const calls = { prepare: 0 };
+  const binding = new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (...args) => {
+          calls.prepare += 1;
+          return target.prepare(...args);
+        };
+      }
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return {
+    db,
+    calls,
+    env: {
+      READERS: "reader@example.test",
+      ACCESS_TEAM_DOMAIN: "team.example.test",
+      ACCESS_AUD: "test-audience",
+      DB: binding,
+      BUCKET: await miniflare.getR2Bucket("BUCKET"),
+    },
+  };
+}
+
+test("status reports twenty origins with bounded queries and no private content", async (t) => {
+  const { db, calls, env } = await database(t);
+  const collector = db.prepare(
+    "INSERT INTO collector(service_token_id, origin_host, label, created_at, disabled) VALUES(?, ?, ?, ?, 0)",
+  );
+  const sync = db.prepare(
+    "INSERT INTO origin_sync(origin_host, revision, last_change_at) VALUES(?, ?, ?)",
+  );
+  const learning = db.prepare(
+    "INSERT INTO learning_state(origin_host, revision, epoch, digest, records, updated_at) VALUES(?, ?, 1, NULL, ?, ?)",
+  );
+  const experience = db.prepare(
+    `INSERT INTO learning_experience(origin_host, epoch, remote_id, record_digest, project_key, project_label,
+       kind, claim, applies_when, identifiers, fingerprint, basis, detector, observed_at, captured_at,
+       validity, tags, state, sync_revision, pending)
+     VALUES(?, 1, ?, ?, ?, ?, 'method', ?, 'applies', 'id', 'fingerprint', 'deterministic', 'synthetic',
+            100, 100, '[]', '', 'retained', ?, 0)`,
+  );
+  for (let index = 0; index < 20; index += 1) {
+    const origin = `origin-${String(index).padStart(2, "0")}`;
+    await collector.bind(`token-${index}`, origin, `label-${index}`, index).run();
+    await sync.bind(origin, 5 + index, 1000 + index).run();
+    await learning.bind(origin, 1, 1, 900 + index).run();
+    await experience.bind(
+      origin, 1, "a".repeat(64), "0123456789abcdef", "usr",
+      `zzprivateclaim ${index}`, 2,
+    ).run();
+  }
+  calls.prepare = 0;
+  const response = await worker.fetch(request("/api/v1/status"), env, context({ email: "reader@example.test" }));
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.origins.length, 20);
+  assert.equal(body.counts.origins, 20);
+  assert.equal(body.counts.experiences, 20);
+  assert.equal(body.counts.projects, 1);
+  assert.equal(body.origins[0].learning_records, 1);
+  assert.ok(calls.prepare <= 10, `status issued ${calls.prepare} prepares`);
+  const serialized = JSON.stringify(body);
+  assert.equal(serialized.includes("zzprivateclaim"), false);
+  assert.equal(/[0-9a-f]{64}/.test(serialized), false);
+  assert.equal(serialized.includes("codex:"), false);
 });
 
 test("an unknown or disabled collector token is refused", async () => {
@@ -190,7 +280,7 @@ test("a verified Access assertion authenticates a collector by its client id", a
   assert.equal(exchange.result.status, 200);
   assert.deepEqual((await exchange.result.json()).principal, { kind: "collector", origin_host: "origin-a" });
   assert.deepEqual(exchange.calls, [`https://${domain}/cdn-cgi/access/certs`]);
-  assert.deepEqual(calls.db, { prepare: 2, first: 2, batch: 0, exec: 0, dump: 0, withSession: 0 });
+  assert.ok(calls.db.prepare >= 2);
 });
 
 test("a forged or mis-scoped Access assertion is refused before D1", async () => {

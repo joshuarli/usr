@@ -1,5 +1,4 @@
 import type { Principal } from "../auth.js";
-import { readStoreMeta } from "../db.js";
 import {
   decodeSearchFilters,
   idFromPath,
@@ -14,9 +13,9 @@ import {
   renderLanding,
   renderSearch,
   renderStatus,
-  type Counts,
   type SearchFormValues,
 } from "../render.js";
+import { readCounts, readStatus } from "./status.js";
 import type { Env } from "../index.js";
 import { type SyncTiming } from "./shared.js";
 
@@ -34,32 +33,6 @@ function html(body: string, status: number, timing: SyncTiming, head = false): R
       "Server-Timing": serverTiming(timing),
     },
   });
-}
-
-export async function readCounts(db: D1Database): Promise<Counts> {
-  return await db.prepare(
-    `SELECT
-       (SELECT count(*) FROM learning_experience e
-        JOIN learning_state ls ON ls.origin_host = e.origin_host AND ls.epoch = e.epoch
-        WHERE e.state = 'retained') AS experiences,
-       (SELECT count(*) FROM learning_memory m
-        JOIN learning_state ls ON ls.origin_host = m.origin_host AND ls.epoch = m.epoch
-        WHERE m.state = 'approved') AS memories,
-       (SELECT count(*) FROM (
-          SELECT e.project_key FROM learning_experience e
-          JOIN learning_state ls ON ls.origin_host = e.origin_host AND ls.epoch = e.epoch
-          UNION
-          SELECT m.project_key FROM learning_memory m
-          JOIN learning_state ls ON ls.origin_host = m.origin_host AND ls.epoch = m.epoch
-        )) AS projects,
-       (SELECT count(*) FROM learning_state WHERE records > 0) AS origins,
-       (SELECT count(*) FROM tombstone) AS tombstones,
-       (SELECT max(last_change_at) FROM origin_sync) AS last_change,
-       (SELECT max(verified_at) FROM snapshot WHERE verified_at IS NOT NULL) AS last_verified`,
-  ).first<Counts>() ?? {
-    experiences: 0, memories: 0, projects: 0, origins: 0, tombstones: 0,
-    last_change: null, last_verified: null,
-  };
 }
 
 function recentFilters(limit: number): MemoryFilters {
@@ -146,11 +119,10 @@ async function detail(
 async function status(env: Env, principal: Principal, timing: SyncTiming, head: boolean): Promise<Response> {
   const started = performance.now();
   try {
-    const store = await readStoreMeta(env.DB);
-    const counts = await readCounts(env.DB);
-    if (store === null) return html("Status unavailable", 503, timing, head);
+    const data = await readStatus(env.DB);
+    if (data === null) return html("Status unavailable", 503, timing, head);
     const name = principal.kind === "reader" ? principal.email : principal.origin_host;
-    return html(renderStatus(name, counts, store.id), 200, timing, head);
+    return html(renderStatus(name, data), 200, timing, head);
   } finally {
     timing.d1 += performance.now() - started;
   }

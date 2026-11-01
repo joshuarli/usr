@@ -1,12 +1,12 @@
 import { authorize, identityOf, parseReaders, type AccessIdentity, type Principal } from "./auth.js";
-import { readStoreMeta, type StoreMeta } from "./db.js";
-import { failure, json, methodNotAllowed } from "./errors.js";
+import { failure } from "./errors.js";
 import { serverTiming, trace } from "./observe.js";
 import { handleGenerations } from "./routes/generations.js";
 import { handleHtml } from "./routes/html.js";
 import { handleLearning } from "./routes/learning.js";
 import { handleMemories } from "./routes/memories.js";
 import { handleSnapshots } from "./routes/snapshots.js";
+import { handleStatus } from "./routes/status.js";
 import { handleSync } from "./routes/sync.js";
 import { handleTombstones } from "./routes/tombstones.js";
 
@@ -17,9 +17,6 @@ export interface Env {
   readonly DB: D1Database;
   readonly BUCKET: R2Bucket;
 }
-
-const PROTOCOL = 1;
-const READ_METHODS = ["GET", "HEAD"] as const;
 
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
@@ -50,33 +47,9 @@ export default {
     }
     const url = new URL(request.url);
     const { pathname } = url;
-    if (pathname === "/api/v1/status") {
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        return methodNotAllowed(READ_METHODS, { "Server-Timing": serverTiming(timing) });
-      }
-      let store: StoreMeta | null;
-      const started = performance.now();
-      try {
-        store = await trace(context, "status.d1", { count: 1 }, () => readStoreMeta(env.DB));
-      } catch {
-        timing.d1 += performance.now() - started;
-        return failure(503, "unavailable", "store is unavailable", { "Server-Timing": serverTiming(timing) });
-      }
-      timing.d1 += performance.now() - started;
-      if (store === null) {
-        return failure(503, "unavailable", "store is not provisioned", {
-          "Server-Timing": serverTiming(timing),
-        });
-      }
-      return json(200, {
-        protocol: PROTOCOL,
-        store_id: store.id,
-        principal,
-        ready: true,
-        counts: {},
-      }, request.method === "HEAD", { "Server-Timing": serverTiming(timing) });
-    }
     try {
+      const status = await handleStatus(request, env, principal, pathname, timing);
+      if (status !== null) return status;
       const sync = await handleSync(request, env, principal, pathname, timing);
       if (sync !== null) return sync;
       const generations = await handleGenerations(request, env, principal, pathname, url, timing);
