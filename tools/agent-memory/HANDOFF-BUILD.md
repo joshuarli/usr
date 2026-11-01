@@ -177,6 +177,15 @@ and `cf migrate` regenerates `cloudflare.config.ts` ... no bundler beyond what
 update `docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md` and the README worker
 section together.
 
+**Recommendation: A, in the same pass as the build change.** Once the build
+leaves Wrangler, the TOML's only remaining job is regenerating a config that is
+already checked in and gated, so two files own the same bindings, domain, and
+vars. Keep the D1 id inline in `cloudflare.config.ts` (the config already has
+it): have `provision.sh` replace that one `id:` line and give `deploy-gate.sh`
+and `DATABASE_ID` a small Node helper that loads the config with
+`@cloudflare/config` and prints the parsed D1 binding. Option B is only a
+merge-timing fallback; don't make it permanent.
+
 ### 8. Optional Vite dev server
 
 Only if `cf dev` is wanted. Add `@cloudflare/vite-plugin@2.0.0-beta.v.8` and
