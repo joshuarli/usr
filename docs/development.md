@@ -21,6 +21,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
 | `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
+| `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |

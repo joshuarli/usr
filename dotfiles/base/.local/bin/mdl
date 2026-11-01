@@ -1,7 +1,9 @@
 #!/bin/sh
 case $1 in *playlist*) echo "Use mpdl for playlists." ;; esac
 
-exec uvx --refresh-package yt-dlp --from 'yt-dlp@git+https://github.com/yt-dlp/yt-dlp' yt-dlp --ignore-config \
+yt_dlp="${0%/*}/yt-dlp"
+[ -x "$yt_dlp" ] || yt_dlp=yt-dlp
+exec "$yt_dlp" --ignore-config \
     --remote-components 'ejs:github' \
     --js-runtimes node:/opt/homebrew/bin/node \
     -f 'ba' \

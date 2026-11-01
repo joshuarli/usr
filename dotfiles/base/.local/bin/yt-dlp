@@ -1,0 +1,134 @@
+#!/bin/sh
+set -eu
+
+name=yt-dlp
+asset=yt-dlp
+data="${XDG_DATA_HOME:-${HOME:-}/.local/share}/yt-dlp"
+state="${XDG_STATE_HOME:-${HOME:-}/.local/state}/yt-dlp"
+bin="${data}/${name}"
+version_file="${state}/version"
+checked_file="${state}/checked"
+check_interval_seconds=86400
+release_base=https://github.com/yt-dlp/yt-dlp-nightly-builds/releases
+tmpfile=
+
+notice() { printf '%s: %s\n' "$name" "$1" >&2; }
+
+cleanup() {
+    if [ -n "$tmpfile" ]; then
+        rm -f "$tmpfile" || :
+        tmpfile=
+    fi
+}
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+latest_version() {
+    latest_url=$(curl -fsSIL --connect-timeout 3 --max-time 8 \
+        -o /dev/null -w '%{url_effective}' "${release_base}/latest") || return 1
+    case "$latest_url" in
+        */releases/tag/*) latest=${latest_url##*/} ;;
+        *) return 1 ;;
+    esac
+    case "$latest" in
+        ''|*[!0-9.]*) return 1 ;;
+    esac
+    printf '%s\n' "$latest"
+}
+
+install_version() {
+    install_tag=$1
+    download_base="${release_base}/download/${install_tag}"
+    sums=$(curl -fsSL --connect-timeout 3 --max-time 30 "${download_base}/SHA2-256SUMS") || {
+        notice "could not download checksums for ${install_tag}"
+        return 1
+    }
+    expected=$(printf '%s\n' "$sums" \
+        | awk -v asset="$asset" '$2 == asset { print $1; exit }')
+    case "$expected" in
+        ''|*[!0-9a-f]*) notice "no checksum for ${asset} in ${install_tag}"; return 1 ;;
+    esac
+    if [ "${#expected}" -ne 64 ]; then
+        notice "invalid checksum for ${asset} in ${install_tag}"
+        return 1
+    fi
+    tmpfile=$(mktemp "${data}/.${name}.XXXXXX") || {
+        notice "cannot create a temporary file in ${data}"
+        return 1
+    }
+    if ! curl -fsSL --connect-timeout 3 --max-time 120 -o "$tmpfile" "${download_base}/${asset}"; then
+        cleanup
+        notice "could not download ${asset} ${install_tag}"
+        return 1
+    fi
+    if [ "$(sha256_file "$tmpfile")" != "$expected" ]; then
+        cleanup
+        notice "checksum mismatch for ${asset} ${install_tag}"
+        return 1
+    fi
+    if ! chmod +x "$tmpfile" || ! mv -f "$tmpfile" "$bin"; then
+        cleanup
+        notice "cannot install ${bin}"
+        return 1
+    fi
+    tmpfile=
+    if ! printf '%s\n' "$install_tag" > "${version_file}.tmp" \
+        || ! mv -f "${version_file}.tmp" "$version_file"; then
+        notice "cannot record the installed version in ${version_file}"
+    fi
+    notice "updated to ${install_tag}"
+}
+
+trap cleanup 0
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+command -v python3 >/dev/null 2>&1 || {
+    notice "python3 is required"
+    exit 1
+}
+
+need_check=true
+if [ -x "$bin" ]; then
+    checked=$(cat "$checked_file" 2>/dev/null || :)
+    case "$checked" in
+        ''|*[!0-9]*) checked=0 ;;
+    esac
+    now=$(date +%s)
+    if [ $((now - checked)) -lt "$check_interval_seconds" ]; then
+        need_check=false
+    fi
+fi
+
+if [ "$need_check" = true ]; then
+    mkdir -p "$data" "$state" || {
+        notice "cannot create ${data} and ${state}"
+        exit 1
+    }
+    date +%s > "$checked_file" || :
+    if latest=$(latest_version); then
+        current=$(cat "$version_file" 2>/dev/null || :)
+        if [ ! -x "$bin" ] || [ "$latest" != "$current" ]; then
+            install_version "$latest" || :
+        fi
+    elif [ -x "$bin" ]; then
+        notice "update check failed; using the installed version"
+    else
+        notice "update check failed and no version is installed"
+        exit 1
+    fi
+fi
+
+if [ ! -x "$bin" ]; then
+    notice "no installed version at ${bin}"
+    exit 1
+fi
+
+exec "$bin" "$@"
