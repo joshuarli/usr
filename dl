@@ -40,6 +40,8 @@ NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
 CF_VERSION=1.0.0-beta.26
 CF_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/cf"
+AGENT_BROWSER_VERSION=0.41.0
+AGENT_BROWSER_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-browser"
 FX_VERSION=v0.0.16
 GHOSTTY_VERSION=1.4.0
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
@@ -2063,6 +2065,74 @@ install_cf() {
     _dl_ok "Installed ${DEST}/cf (${version})"
 }
 
+install_agent_browser() {
+    command -v npm >/dev/null 2>&1 || { unchecked agent-browser "npm is required"; return; }
+    if ! node_meets_minimum; then
+        unchecked agent-browser "Node.js $NODE_MINIMUM or newer is required"
+        return
+    fi
+    version=$AGENT_BROWSER_VERSION
+    if [ -e "${DEST}/agent-browser" ] || [ -L "${DEST}/agent-browser" ]; then
+        if [ "$(readlink "${DEST}/agent-browser" 2>/dev/null || :)" != "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" ] \
+            || [ ! -s "${STATE}/agent-browser" ]; then
+            skip agent-browser "${DEST}/agent-browser already exists outside dl management"
+            return
+        fi
+    fi
+    if [ -e "$AGENT_BROWSER_INSTALL_ROOT" ] || [ -L "$AGENT_BROWSER_INSTALL_ROOT" ]; then
+        if [ ! -d "$AGENT_BROWSER_INSTALL_ROOT" ] || [ -L "$AGENT_BROWSER_INSTALL_ROOT" ] \
+            || [ ! -s "${STATE}/agent-browser" ]; then
+            skip agent-browser "$AGENT_BROWSER_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    fi
+    if [ "$(cat "${STATE}/agent-browser" 2>/dev/null)" = "$version" ] \
+        && [ -x "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" ] \
+        && [ "$(readlink "${DEST}/agent-browser" 2>/dev/null || :)" = "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" ]; then
+        own_dir "$AGENT_BROWSER_INSTALL_ROOT"
+        own_file "${DEST}/agent-browser"
+        own_file "${STATE}/agent-browser"
+        _dl_current "agent-browser is current (${version})"
+        return
+    fi
+    own_parent=${AGENT_BROWSER_INSTALL_ROOT%/*}
+    own_missing_dirs "$own_parent"
+    mkdir -p "$own_parent"
+    install_prefix=$AGENT_BROWSER_INSTALL_ROOT
+    if [ ! -d "$AGENT_BROWSER_INSTALL_ROOT" ]; then
+        tmpbundle=$(mktemp -d "${AGENT_BROWSER_INSTALL_ROOT}.XXXXXX")
+        install_prefix=$tmpbundle
+    fi
+    _dl_fetch "Installing agent-browser (${version}) ..."
+    if ! npm install --global --ignore-scripts --prefix "$install_prefix" "agent-browser@${version}"; then
+        skip agent-browser "npm install failed"
+        return
+    fi
+    if [ ! -x "${install_prefix}/bin/agent-browser" ]; then
+        skip agent-browser "npm did not install ${install_prefix}/bin/agent-browser"
+        return
+    fi
+    if [ "$install_prefix" != "$AGENT_BROWSER_INSTALL_ROOT" ]; then
+        if [ -e "$AGENT_BROWSER_INSTALL_ROOT" ] || [ -L "$AGENT_BROWSER_INSTALL_ROOT" ]; then
+            skip agent-browser "$AGENT_BROWSER_INSTALL_ROOT appeared during install"
+            return
+        fi
+        mv "$install_prefix" "$AGENT_BROWSER_INSTALL_ROOT"
+        tmpbundle=
+    fi
+    own_dir "$AGENT_BROWSER_INSTALL_ROOT"
+    tmpbinlink=$(mktemp "${DEST}/.agent-browser.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/agent-browser"
+    tmpbinlink=
+    printf '%s\n' "$version" > "${STATE}/agent-browser"
+    own_file "${DEST}/agent-browser"
+    own_file "${STATE}/agent-browser"
+    changed=true
+    _dl_ok "Installed ${DEST}/agent-browser (${version})"
+}
+
 install_pi() {
     command -v npm >/dev/null 2>&1 || { unchecked pi "npm is required"; return; }
     if ! node_meets_minimum; then
@@ -3284,6 +3354,15 @@ record_managed_installs() {
             own_file "${DEST}/pi"
         fi
     fi
+    if [ -s "${STATE}/agent-browser" ]; then
+        own_file "${STATE}/agent-browser"
+        if [ -d "$AGENT_BROWSER_INSTALL_ROOT" ] && [ ! -L "$AGENT_BROWSER_INSTALL_ROOT" ] \
+            && [ -x "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" ] \
+            && [ "$(readlink "${DEST}/agent-browser" 2>/dev/null || :)" = "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" ]; then
+            own_dir "$AGENT_BROWSER_INSTALL_ROOT"
+            own_file "${DEST}/agent-browser"
+        fi
+    fi
 
     record_managed_binary opencode2
     if [ -s "${STATE}/opencode2" ] && opencode2_dest_is_managed; then
@@ -3348,7 +3427,7 @@ if [ $# -eq 0 ]; then
         Linux:aarch64) ;;
         *) set -- "$@" jaq ;;
     esac
-    set -- "$@" codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 cf
+    set -- "$@" codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 cf agent-browser
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
@@ -3407,6 +3486,7 @@ for prog in "$@"; do
         dsh) install_dsh ;;
         cmd) install_cmd ;;
         cf) install_cf ;;
+        agent-browser) install_agent_browser ;;
         pi) install_pi ;;
         antigravity|agy) install_antigravity ;;
         muse) install_muse ;;

@@ -8,7 +8,7 @@ Run `sh sync plan` to preview links. Resolve each `CONFLICT` before syncing. `sh
 
 `sh sync uninstall` removes recorded layer links and installed tool paths. It leaves unrecorded pre-existing links and native launchers in place. Ownership records live under `${XDG_STATE_HOME:-$HOME/.local/state}/sync`. See [`dl`](../dl) for tool installation and update behavior.
 
-`cf` is installed by default from a pinned npm package under the managed Node.js runtime. `stuff` is installed by default from its latest GitHub pre-release; `sh dl stuff` updates or reinstalls it.
+`cf` is installed by default from a pinned npm package under the managed Node.js runtime. `agent-browser` is installed the same way into `${XDG_DATA_HOME:-$HOME/.local/share}/agent-browser`; change `AGENT_BROWSER_VERSION` in `dl` to upgrade. It drives the system Chrome/Chromium, so no browser download is needed; run `agent-browser install` only if you want a managed Chrome for Testing instead. `stuff` is installed by default from its latest GitHub pre-release; `sh dl stuff` updates or reinstalls it.
 
 The base layer also links a `yt-dlp` shim. It downloads the upstream nightly on first use and checks for a newer nightly at most once a day; `vdl`, `mdl`, and `mpdl` run through it. Remove `${XDG_DATA_HOME:-$HOME/.local/share}/yt-dlp` and `${XDG_STATE_HOME:-$HOME/.local/state}/yt-dlp` to reclaim the download and its state.
 
