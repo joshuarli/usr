@@ -139,25 +139,29 @@ test("a snapshot commits with its chunks and pinned objects and re-acks", async 
   const first = await storeObject(env, Buffer.from("first snapshot chunk"));
   const second = await storeObject(env, Buffer.from("second snapshot chunk"));
   const pinned = await storeObject(env, Buffer.from("pinned archive object"));
-  const snapshot = snapshotFor([first, second], [pinned]);
+  const secondPinned = await storeObject(env, Buffer.from("second pinned archive object"));
+  const snapshot = snapshotFor([first, second], [pinned, secondPinned]);
 
   const committed = await commitSnapshot(env, snapshot, 0);
   assert.equal(committed.response.status, 200, JSON.stringify(committed.body));
   assert.equal(committed.body.duplicate, false);
   assert.equal(committed.body.revision, 1);
   assert.equal(committed.body.snapshot, snapshot.id);
-  assert.equal(committed.body.objects, 1);
-  assert.equal(committed.body.object_bytes, pinned.size);
+  assert.equal(committed.body.objects, 2);
+  assert.equal(committed.body.object_bytes, pinned.size + secondPinned.size);
   assert.equal((await count(db, "snapshot")).count, 1);
   assert.equal((await count(db, "snapshot_chunk")).count, 2);
-  assert.equal((await count(db, "snapshot_object")).count, 1);
+  assert.equal((await count(db, "snapshot_object")).count, 2);
 
   const fetched = await detail(env, snapshot.id);
   assert.equal(fetched.response.status, 200, JSON.stringify(fetched.body));
   assert.equal(fetched.body.snapshot.id, snapshot.id);
   assert.deepEqual(fetched.body.chunks.map((chunk) => chunk.ordinal), [0, 1]);
   assert.equal(fetched.body.chunks[0].encoding, "identity");
-  assert.equal(fetched.body.objects[0].ciphertext_digest, pinned.ciphertext);
+  assert.deepEqual(
+    new Set(fetched.body.objects.map((object) => object.ciphertext_digest)),
+    new Set([pinned.ciphertext, secondPinned.ciphertext]),
+  );
   assert.equal((await listSnapshots(env)).body.snapshots.length, 1);
 
   const duplicate = await commitSnapshot(env, snapshot, 99);

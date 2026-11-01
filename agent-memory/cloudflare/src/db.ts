@@ -523,8 +523,8 @@ export async function commitSnapshot(
   for (let start = 0; start < snapshot.objects.length; start += ROWS_PER_STATEMENT) {
     const chunk = snapshot.objects.slice(start, start + ROWS_PER_STATEMENT);
     const values = chunk.map(() => "(?, ?, ?)").join(",");
-    const params: (string | number)[] = [snapshot.id];
-    for (const item of chunk) params.push(item.plaintext_digest, item.size);
+    const params: (string | number)[] = [];
+    for (const item of chunk) params.push(snapshot.id, item.plaintext_digest, item.size);
     statements.push(
       db.prepare(
         `INSERT INTO snapshot_object(snapshot, plaintext_digest, size) VALUES ${values}`,
