@@ -1545,7 +1545,7 @@ def _upload_group(client, refs, archive_dir, recipients, prepare):
     return counters
 
 
-def upload_objects(config, origin, archive_dir, objects, recipients=None, *, concurrency=4,
+def upload_objects(config, origin, archive_dir, objects, recipients=None, *, concurrency=12,
                    client_factory=None, prepare=None):
     if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
         raise ValueError("concurrency must be a positive integer")
@@ -1687,7 +1687,7 @@ def _apply_remote_tombstones(store, runtime, origin, store_id, watermark):
 
 
 def sync(store, config, remote_name, *, refresh=None, client=None, upload_client_factory=None,
-         recipients=None, concurrency=4, prepare=None, progress=None):
+         recipients=None, concurrency=12, prepare=None, progress=None):
     """Deliver the local archive to one Cloudflare mirror and pin its identity."""
     if not isinstance(remote_name, str) or not remote_name:
         raise MirrorError("invalid_config", "remote name is required")
@@ -2229,7 +2229,7 @@ def _download_with_identities(client, identities, row) -> bytes:
     raise MirrorError("invalid_config", "an age identity is required to decode the mirror")
 
 
-def upload_snapshot(store, config, *, client, origin, revision, recipients=None, concurrency=4,
+def upload_snapshot(store, config, *, client, origin, revision, recipients=None, concurrency=12,
                     prepare=None, client_factory=None) -> dict[str, Any]:
     if recipients is None:
         recipients = mirror_crypto.load_recipients(config.age_recipients_file)

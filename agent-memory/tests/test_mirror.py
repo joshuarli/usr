@@ -763,7 +763,7 @@ class UploadTests(unittest.TestCase):
         self.assertEqual(primary.puts, [])
         self.assertTrue(primary.closed)
 
-    def test_uploads_are_bounded_to_four_connections(self):
+    def test_uploads_stay_within_the_connection_limit(self):
         refs = self.refs([("object-%d" % index).encode() * 64 for index in range(8)], kind="artifact")
         tracker = Tracker()
         primary = FakeUploadClient()
