@@ -340,16 +340,6 @@ def _archive(args):
 
 def _backup(args):
     try:
-        if args.action == "restic":
-            restic = shutil.which("restic")
-            if restic is None:
-                raise StoreError("restic is not installed; the built-in `backup create` still works without it")
-            if not args.repo:
-                raise StoreError("backup restic needs --repo, for example an r2:s3 endpoint")
-            import subprocess
-
-            completed = subprocess.run([restic, "-r", args.repo, "backup", args.destination], check=False)
-            return 0 if completed.returncode == 0 else 1
         if args.action == "create":
             with Store(_state_dir(args)) as store:
                 manifest = backup_module.create(store, args.destination)
@@ -512,8 +502,7 @@ def status_document(store):
         "learning_synced": [dict(row) for row in store.db.execute("SELECT remote, digest, durable_at FROM transfer_learning")]
         if store.db.execute("SELECT 1 FROM sqlite_master WHERE name = 'transfer_learning'").fetchone() else [],
         "identity": archive_module.origin_for(store.db),
-        "backup": {"restic": shutil.which("restic") is not None,
-                   "builtin": True},
+        "backup": {"builtin": True},
         "integrity": store.db.execute("PRAGMA quick_check").fetchone()[0],
     }
 
@@ -667,12 +656,11 @@ def parser():
     archive.set_defaults(run=_archive)
 
     backup = commands.add_parser("backup", help="create or restore a consistent backup")
-    backup.add_argument("action", choices=("create", "restore", "restic"))
+    backup.add_argument("action", choices=("create", "restore"))
     backup.add_argument("--state-dir")
     backup.add_argument("destination", help="backup directory to create, or an existing backup to restore")
     backup.add_argument("--to", help="restore destination for `backup restore`")
     backup.add_argument("--tombstones-from", help="merge newer tombstones from this state directory (defaults to --state-dir)")
-    backup.add_argument("--repo", help="restic repository URL for the optional external backup")
     backup.set_defaults(run=_backup)
     return result
 
