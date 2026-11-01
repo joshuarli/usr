@@ -48,8 +48,28 @@ async function readBody(request) {
   return Buffer.concat(chunks);
 }
 
+const faultEvery = Number(process.env.FAULT_EVERY ?? 0);
+const faultStatuses = (process.env.FAULT_STATUSES ?? "429,500").split(",").map(Number);
+let requests = 0;
+let faults = 0;
+
 const handler = async (request, response) => {
   try {
+    if (process.env.TEST_STATE === "1" && request.url === "/__test/faults") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ requests, faults }));
+      return;
+    }
+    if (faultEvery > 0) {
+      requests += 1;
+      if (requests % faultEvery === 0) {
+        const status = faultStatuses[faults % faultStatuses.length];
+        faults += 1;
+        response.writeHead(status, { "content-type": "application/json", "retry-after": "0" });
+        response.end(JSON.stringify({ error: { code: "unavailable", message: "synthetic fault" } }));
+        return;
+      }
+    }
     const body = await readBody(request);
     const method = request.method ?? "GET";
     const forwarded = new Request(`https://memories.test${request.url}`, {

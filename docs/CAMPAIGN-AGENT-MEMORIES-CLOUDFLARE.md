@@ -34,9 +34,10 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   server-rendered landing, search, detail, and status pages), `P4.2` (the complete
   status API and page with bounded per-origin queries), and `P5.1` (the mirror CLI,
   status and dry-run reporting, overlap and offline behavior, token-mode refusal,
-  HTTPS-only routine sync, and the LaunchAgent template).
+  HTTPS-only routine sync, and the LaunchAgent template), and `P5.2` (the named
+  adversarial cases, the memory gate, and the ten-collector fault run).
 - **In flight:** none.
-- **Next slice:** `P5.2` (the adversarial suite); the first command re-checks the
+- **Next slice:** `P5.3` (performance close-out); the first command re-checks the
   baseline: `make test`.
 - **Known red:** none. All eleven agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
@@ -595,6 +596,19 @@ Miniflare HTTP and D1 access floor near 30 ms, not by corpus size:
 learning_experience_observed ((observed_at,remote_id)<(?,?))` for a deep page, and
 `SCAN memory_fts VIRTUAL TABLE INDEX` plus `SEARCH ... USING INTEGER PRIMARY KEY` for an
 FTS page. The gate passed before and after every sample.
+
+### Adversarial proof
+
+`cloudflare/test/adversarial.test.mjs` runs cases 1–24 by name through a real HTTP
+server over Miniflare D1/R2. Each case writes through the Worker, and the suite reads the
+resulting rows and objects directly through the D1 and R2 bindings, so a stubbed
+persistence boundary fails it. The Python suite adds the client-side gates. On
+2026-11-01, uploading an 8 MiB artifact and a 1 MiB snapshot chunk in a fresh process
+measured an idle peak of 40,544 KiB and a final peak of 53,648 KiB: a 13,104 KiB
+increase, below the 64 MiB limit. The ten-collector run injected a 429 or 500 before
+every thirteenth request; across 259 requests and 19 faults it recorded p50 7,576.1 ms
+and p95 7,620.8 ms per collector sync, delivered three generations for each collector,
+and an unchanged second round added no rows or duplicates.
 
 ## Performance contract
 

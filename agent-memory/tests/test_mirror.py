@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Mirror protocol parity, configuration, and pooled-client behavior."""
+import concurrent.futures
 import fcntl
 import hashlib
 import http.client
@@ -1325,11 +1326,13 @@ def ensure_age():
         os.environ["AGE_BIN"] = result.stdout.strip()
 
 
-def start_integration_server(node, worker_dir, collectors, tls=None):
+def start_integration_server(node, worker_dir, collectors, tls=None, extra_env=None):
     env = dict(os.environ)
     env["COLLECTORS"] = json.dumps(collectors)
     if tls is not None:
         env["TLS_KEY"], env["TLS_CERT"] = str(tls[0]), str(tls[1])
+    if extra_env:
+        env.update({key: str(value) for key, value in extra_env.items()})
     process = subprocess.Popen(
         [node, "test/integration-server.mjs"], cwd=str(worker_dir),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
@@ -2069,6 +2072,283 @@ class MirrorCliTests(unittest.TestCase):
         self.assertIn("<string>mirror</string>", rendered)
         self.assertIn("<string>sync</string>", rendered)
         self.assertIn("<integer>900</integer>", rendered)
+
+
+class MemoryGateTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        ensure_age()
+        node = shutil.which("node")
+        if node is None:
+            raise AssertionError("node is required for the mirror memory gate")
+        worker_dir = ROOT / "agent-memory" / "cloudflare"
+        bundle = worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
+        if not bundle.is_file():
+            raise AssertionError("missing worker bundle; run `npm run build` in agent-memory/cloudflare")
+        cls.process, cls.port = start_integration_server(
+            node, worker_dir, [{"client_id": "collector-client.access", "origin": "origin-a"}])
+
+    @classmethod
+    def tearDownClass(cls):
+        stop_integration_server(cls.process)
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.identity = self.root / "age.key"
+        recipient = mirror_crypto.keygen(self.identity)
+        self.recipients = self.root / "recipients.txt"
+        self.recipients.write_text(recipient + "\n")
+        self.token = self.root / "token.json"
+        self.token.write_text(json.dumps({"client_id": "collector-client.access", "client_secret": "synthetic"}))
+        os.chmod(self.token, 0o600)
+        self.archive = self.root / "archive"
+        self.archive.mkdir()
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_an_eight_mebibyte_artifact_and_a_mebibyte_chunk_stay_bounded(self):
+        settings = {
+            "root": str(ROOT), "url": "http://127.0.0.1:%d" % self.port,
+            "token": str(self.token), "identity": str(self.identity),
+            "recipients": str(self.recipients), "archive": str(self.archive),
+        }
+        env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "AGE_BIN") if key in os.environ}
+        env["HOME"] = str(self.root)
+        env["TMPDIR"] = str(WORK_TMP)
+        env["MEMORY_GATE"] = json.dumps(settings)
+        script = r"""
+import hashlib
+import http.client
+import json
+import os
+import resource
+import sys
+from pathlib import Path
+
+settings = json.loads(os.environ["MEMORY_GATE"])
+sys.path.insert(0, str(Path(settings["root"]) / "agent-memory" / "src"))
+from agent_memory import mirror, mirror_crypto
+port = int(settings["url"].rsplit(":", 1)[1])
+
+
+def peak_kib():
+    value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return value // 1024 if sys.platform == "darwin" else value
+
+
+def make_client():
+    return mirror.MirrorClient(
+        config, factory=lambda: http.client.HTTPConnection("127.0.0.1", port, timeout=60),
+        sleep=lambda delay: None)
+
+
+config = mirror.MirrorConfig(
+    url=settings["url"], service_token_file=Path(settings["token"]),
+    age_recipients_file=Path(settings["recipients"]), age_identity_file=Path(settings["identity"]),
+    learning_projection=False)
+recipients = mirror_crypto.load_recipients(settings["recipients"])
+archive = Path(settings["archive"])
+data = os.urandom(8 * 1024 * 1024)
+plaintext = hashlib.sha256(data).hexdigest()
+path = archive / "objects" / plaintext[:2] / plaintext
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_bytes(data)
+
+
+def same_size(raw, _recipients):
+    return mirror_crypto.PreparedObject(
+        plaintext_digest=hashlib.sha256(raw).hexdigest(), plaintext_size=len(raw),
+        encoding="identity", compressed_size=len(raw), ciphertext=raw,
+        ciphertext_digest=hashlib.sha256(raw).hexdigest(), ciphertext_size=len(raw),
+        compress_cpu_ms=0.0, encrypt_cpu_ms=0.0)
+
+
+idle = peak_kib()
+artifact = mirror.upload_objects(
+    config, "origin-a", archive, [(plaintext, len(data), "artifact")],
+    recipients=recipients, concurrency=1, client_factory=make_client, prepare=same_size)
+chunk = mirror_crypto.prepare_object(os.urandom(1024 * 1024), recipients)
+client = make_client()
+try:
+    client.put_object(chunk)
+finally:
+    client.close()
+peak = peak_kib()
+print(json.dumps({
+    "idle_kib": idle, "peak_kib": peak, "delta_kib": peak - idle,
+    "artifact_stored": artifact["objects_stored"], "chunk_bytes": chunk.ciphertext_size,
+}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-I", "-c", script], env=env, cwd=str(ROOT),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
+        if result.returncode != 0:
+            self.fail("memory probe failed: " + result.stderr.strip())
+        report = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual(report["artifact_stored"], 1)
+        self.assertGreaterEqual(report["chunk_bytes"], 1024 * 1024)
+        self.assertLess(report["delta_kib"], 64 * 1024, report)
+        self.assertGreater(report["peak_kib"], 0)
+        print("memory_gate idle_kib=%d peak_kib=%d delta_kib=%d" % (
+            report["idle_kib"], report["peak_kib"], report["delta_kib"]))
+
+
+class LoadRunTests(unittest.TestCase):
+    COLLECTORS = 10
+    SESSIONS = 3
+
+    @classmethod
+    def setUpClass(cls):
+        ensure_age()
+        node = shutil.which("node")
+        if node is None:
+            raise AssertionError("node is required for the mirror load run")
+        cls.worker_dir = ROOT / "agent-memory" / "cloudflare"
+        bundle = cls.worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
+        if not bundle.is_file():
+            raise AssertionError("missing worker bundle; run `npm run build` in agent-memory/cloudflare")
+        collectors = [{"client_id": "load-%d.access" % index, "origin": "load-%d" % index}
+                      for index in range(cls.COLLECTORS)]
+        cls.process, cls.port = start_integration_server(
+            node, cls.worker_dir, collectors,
+            extra_env={"TEST_STATE": "1", "FAULT_EVERY": "13", "FAULT_STATUSES": "429,500"})
+
+    @classmethod
+    def tearDownClass(cls):
+        stop_integration_server(cls.process)
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(dir=str(WORK_TMP))
+        self.root = Path(self.temporary.name)
+        self.identity = self.root / "age.key"
+        recipient = mirror_crypto.keygen(self.identity)
+        self.recipients_file = self.root / "recipients.txt"
+        self.recipients_file.write_text(recipient + "\n")
+        self.recipients = mirror_crypto.load_recipients(self.recipients_file)
+        self.stores = []
+        self.paths = []
+        self.configs = []
+        for index in range(self.COLLECTORS):
+            token = self.root / ("token-%d.json" % index)
+            token.write_text(json.dumps({
+                "client_id": "load-%d.access" % index, "client_secret": "synthetic"}))
+            os.chmod(token, 0o600)
+            path = self.root / ("state-%d" % index)
+            self.paths.append(path)
+            store = Store(path)
+            with store.db:
+                store.db.execute(
+                    "INSERT OR REPLACE INTO collector_identity(singleton, id, origin_host, display_label, created_at) "
+                    "VALUES(1, ?, ?, 'synthetic', 0)",
+                    ("load-%d" % index, "load-%d" % index))
+            self.stores.append(store)
+            self.configs.append(mirror.MirrorConfig(
+                url="http://127.0.0.1:%d" % self.port, service_token_file=token,
+                age_recipients_file=self.recipients_file, age_identity_file=self.identity,
+                learning_projection=False))
+
+    def tearDown(self):
+        for store in self.stores:
+            store.close()
+        self.temporary.cleanup()
+
+    def client(self, config):
+        return mirror.MirrorClient(
+            config,
+            factory=lambda: http.client.HTTPConnection("127.0.0.1", self.port, timeout=60),
+            sleep=lambda delay: None)
+
+    def capture(self, store, index, number):
+        source = self.root / ("%d-%d.jsonl" % (index, number))
+        source.write_text(json.dumps({
+            "type": "message", "id": "m-%d-%d" % (index, number), "parentId": None,
+            "timestamp": "2026-10-30T00:00:00Z",
+            "message": {"role": "user", "content": [{"type": "text", "text": "load needle %d %d" % (index, number)}],
+                        "meta": {"messageId": "m-%d-%d" % (index, number)}},
+        }, separators=(",", ":")) + "\n")
+        archive_module.capture(
+            store.db, store.archive_dir, "codex", "load-%d-%d" % (index, number), source)
+
+    def test_ten_collectors_with_injected_faults_lose_and_duplicate_nothing(self):
+        for index, store in enumerate(self.stores):
+            for number in range(self.SESSIONS):
+                self.capture(store, index, number)
+        for store in self.stores:
+            store.close()
+        self.stores = []
+
+        def run(index):
+            client = self.client(self.configs[index])
+            store = Store(self.paths[index])
+            started = time.perf_counter()
+            try:
+                result = mirror.sync(
+                    store, self.configs[index], "cloudflare", client=client,
+                    upload_client_factory=lambda: self.client(self.configs[index]),
+                    recipients=self.recipients, concurrency=2)
+            finally:
+                client.close()
+                store.close()
+            return result, (time.perf_counter() - started) * 1000
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.COLLECTORS) as pool:
+            first = list(pool.map(run, range(self.COLLECTORS)))
+        for result, _elapsed in first:
+            self.assertEqual(result["generations_committed"], self.SESSIONS)
+            self.assertEqual(result["store_id"], "usr-memories")
+            self.assertEqual(result["snapshots_created"], 1)
+
+        walls = [elapsed for _result, elapsed in first]
+        ordered = sorted(walls)
+
+        def percentile(value):
+            index = min(len(ordered) - 1, max(0, int(value * len(ordered) + 0.5) - 1))
+            return ordered[index]
+
+        p50 = percentile(0.50)
+        p95 = percentile(0.95)
+        self.assertLessEqual(p50, p95)
+
+        for index, config in enumerate(self.configs):
+            client = self.client(config)
+            try:
+                page = client.generations("load-%d" % index)
+                natives = [row["native_id"] for row in page["generations"]]
+                self.assertEqual(sorted(natives), sorted("load-%d-%d" % (index, number)
+                                                         for number in range(self.SESSIONS)))
+            finally:
+                client.close()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.COLLECTORS) as pool:
+            second = list(pool.map(run, range(self.COLLECTORS)))
+        for result, _elapsed in second:
+            self.assertTrue(result["unchanged"])
+            self.assertEqual(result["generations_committed"], 0)
+        for index, config in enumerate(self.configs):
+            client = self.client(config)
+            try:
+                self.assertEqual(len(client.generations("load-%d" % index)["generations"]), self.SESSIONS)
+            finally:
+                client.close()
+
+        status, _headers, body = _load_faults(self.port)
+        self.assertEqual(status, 200)
+        faults = json.loads(body)
+        self.assertGreater(faults["faults"], 0)
+        print("load_run p50_ms=%.1f p95_ms=%.1f faults=%d requests=%d" % (
+            p50, p95, faults["faults"], faults["requests"]))
+
+
+def _load_faults(port):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+    try:
+        connection.request("GET", "/__test/faults")
+        response = connection.getresponse()
+        return response.status, dict(response.getheaders()), response.read()
+    finally:
+        connection.close()
 
 
 if __name__ == "__main__":
