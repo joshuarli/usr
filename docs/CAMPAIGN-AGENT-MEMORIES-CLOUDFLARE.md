@@ -79,10 +79,10 @@ names what would reverse it.
 
 | ID | Decision | Reason | Reversal |
 | --- | --- | --- | --- |
-| CF1 | The Worker is TypeScript under `tools/agent-memory/cloudflare/`, built and deployed with `cf`; `wrangler.toml` is the source of truth and `cf migrate` regenerates `cloudflare.config.ts`. No Rust/Wasm, no frontend framework, no bundler beyond what `cf deploy` runs. | D1, R2, `ctx.access`, and HTML are native Worker APIs; a Wasm boundary would add a build and serialization cost with no measured benefit. `stuff` proves the `wrangler.toml` → `cf migrate` → `cf deploy` path. | A measured CPU or correctness need that TS cannot meet. |
+| CF1 | The Worker is TypeScript under `tools/agent-memory/cloudflare/` with `compatibility_date = "2026-10-30"` (the date `stuff` deploys with and `ctx.access` is documented for), built and deployed with `cf`; `wrangler.toml` is the source of truth and `cf migrate` regenerates `cloudflare.config.ts`. No Rust/Wasm, no frontend framework, no bundler beyond what `cf deploy` runs. | D1, R2, `ctx.access`, and HTML are native Worker APIs; a Wasm boundary would add a build and serialization cost with no measured benefit. `stuff` proves the `wrangler.toml` → `cf migrate` → `cf deploy` path. | A measured CPU or correctness need that TS cannot meet. |
 | CF2 | `ctx.access` is the authentication source. The Worker requires it on every route and fails closed when it is absent. No hand-rolled JWT parsing. | Cloudflare documents that Access runs before the Worker when the Worker is protected by a Worker-level Access application, and `ctx.access.getIdentity()` exposes the authenticated identity including `service_token_id`. Parsing the JWT again adds a network dependency for no security gain. | `ctx.access` regression on the deployed compatibility date, a route outside Access coverage, or a deployed identity that omits `service_token_id` for service tokens; in that last case verify the `Cf-Access-Jwt-Assertion` `common_name` against the team JWKS before P2.1 ships. |
 | CF3 | Access protection is deployed as a **Worker-level** application (`destination: worker`) plus `workers_dev = false` and `preview_urls = false` in `wrangler.toml`. Hostname-only protection is not sufficient. | Worker-level Access covers custom domains, `workers.dev`, and previews; the manifest flags remove the alternate hostnames entirely. | Cloudflare removes Worker-level Access destinations. |
-| CF4 | Two principals: browser readers (owner email, read-only) and collector service tokens (`client_id` bound to exactly one `origin_host` in D1). A collector token may read and write only its bound origin; a browser identity may read all origins and write nothing. The Access policy names the owner email and each specific service-token id; `any_valid_service_token` is not used. | The brief forbids trusting a caller-supplied origin. The binding is data, not a header. | A second human reader, added to `READERS`. |
+| CF4 | Two principals: browser readers (owner email, read-only) and collector service tokens (`client_id` bound to exactly one `origin_host` in D1). A collector token may read and write only its bound origin; a browser identity may read all origins and write nothing. The Access policy names the owner email and each specific service-token id; `any_valid_service_token` is not used. Collector tokens are created with a one-year duration and rotated by enrolling a new token before the old one expires. | The brief forbids trusting a caller-supplied origin. The binding is data, not a header. | A second human reader, added to `READERS`. |
 | CF5 | All responses are `Cache-Control: no-store`; Workers Cache is never made eligible (no `max-age`, no `s-maxage`, no public directive). No cache API calls. | Workers Cache can bypass Worker execution and its default key is not hostname-isolated; a private, mutable, authenticated service must not enter it. `no-store` is the documented opt-out. | A future immutable public asset on a separate Worker and route. |
 | CF6 | Protocol v1 is resource-oriented under `/api/v1/`, JSON for control and metadata, raw ciphertext for object bodies. The SSH frame protocol is untouched. | A stream protocol over chunked POSTs hides stalls and duplicates error semantics; a small resource API matches Workers and gives idempotent retries. | A protocol version bump. |
 | CF7 | Per-origin fencing is a monotonic D1 `origin_sync.revision`; every publication (generation, tombstone, learning delta) carries `base_revision` and is applied in one `db.batch()` (a SQL transaction) whose first insert is guarded by a trigger that raises `stale_revision` on mismatch. Wall-clock time is never the fence. | D1 serializes a database; `batch()` rolls back the whole sequence on failure. A stale writer therefore cannot publish anything. | A D1 change that removes transactional batches. |
@@ -93,7 +93,7 @@ names what would reverse it.
 | CF12 | The searchable learning projection is **off by default**. `mirror enable --searchable-learning` prints the disclosure and writes the opt-in to local config; without it, no learning record is written to D1 or any searchable index. Learning records still travel inside the encrypted recovery snapshot, which is required for recovery. | The brief requires explicit opt-in for a projection that can contain sensitive text, while recovery of canonical records must not depend on that opt-in. | The owner makes the projection the default. |
 | CF13 | Learning sync is a durable local change journal (SQLite triggers on the canonical learning tables), not a full export per run. Deltas are per-record digests applied in revision-fenced D1 batches. A full projection remains the explicit `--reconcile` fallback, reconciled by comparing a paginated remote key/digest index. | A full `export_snapshot()` on every 15-minute run serializes the whole corpus. The journal makes the no-op path one `max(seq)` query and the incremental path proportional to changed records. | A measured case where the journal coverage is incomplete. |
 | CF14 | Projection reconciliation (the explicit `--reconcile` path) uses an epoch: staged rows carry a new epoch and `pending=1`; search filters on `learning_state.epoch`; commit flips the epoch and revision atomically; old rows and FTS entries are deleted afterwards. An interrupted reconciliation is invisible. | A 100k-record replace cannot be one D1 statement; the epoch makes publication atomic without a giant transaction. | D1 gains atomic multi-request transactions. |
-| CF15 | Search is recency-ordered with keyset pagination on `(observed_at DESC, origin_host, record, remote_id)`; FTS5 is a filter, not a rank source. A first-page-only `sort=relevance` (bm25) may exist but never paginates deeply. | bm25 scores are not stable enough for a keyset cursor; recency is stable, index-friendly, and right for a personal knowledge base. | A stable rank scheme. |
+| CF15 | Search is recency-ordered with keyset pagination on `(observed_at DESC, origin_host, record, remote_id)`; FTS5 is a filter, not a rank source. No relevance sort is implemented in this campaign; bm25 is recorded for diagnostics only. | bm25 scores are not stable enough for a keyset cursor; recency is stable, index-friendly, and right for a personal knowledge base. | A stable rank scheme. |
 | CF16 | Project identity sent to D1 is `sha256("agent-memory-project:" + local_project_identity)[:16]`, optionally paired with a label the owner explicitly assigns with `mirror label <project-key> <name>`. No absolute checkout path or repository basename leaves the machine. | `project_identity` returns `git:/Users/...` or `path:/Users/...`; uploading it would leak private layout. The hash is stable and filterable, and a label is uploaded only when the owner chooses one. | The owner chooses to expose paths. |
 | CF17 | Snapshots keep 7 daily and 4 weekly copies. GC is explicit (`mirror gc`, dry-run by default), deletes only objects unreferenced by any live generation or retained snapshot for at least 7 days, and never deletes the newest verified snapshot. | Bounded retention without an unbounded automatic background mutation. | A measured storage or cost need. |
 | CF18 | Restic stays removed. The removal landed in `335fe09`; this campaign verifies no residue and changes nothing. | `rg -i restic` and `git log -S restic` show the CLI branch, option, doctor field, docs, and test references are gone; `backup create/restore` remain tested. | None. |
@@ -104,13 +104,14 @@ names what would reverse it.
 | CF23 | Routine collector sync uses stdlib `http.client` over HTTPS and never invokes `cf`. `cf` is only for provisioning, migrations, deploy, and administration. | The brief requires no `cf` dependency for scheduled sync, and `cf` is an interactive/admin tool. | A required administrative action that has no HTTP equivalent. |
 | CF24 | Runtime dependencies stay: Python stdlib, one external `age`/`rage` executable, and no npm runtime packages. Dev dependencies are pinned to `stuff`'s `wrangler ^4.156.0` and `miniflare 3.20250718.3`; the Worker bundle must stay under 200 KiB uncompressed and `cf build` time is recorded. | `age` provides audited cryptography; Workers and Miniflare are platform tooling. The brief forbids a dependency that moves build time, bundle size, or startup without justification. | A measured capability that the platform cannot provide. |
 | CF25 | `sync --to` gains the `cloudflare` transport, but `search --central`/`show --central` keep their existing local and SSH meaning. Remote search and inspection live in the authenticated web UI and `/api/v1/memories`. | A collector token is origin-scoped and should not become a general search credential; adding a second remote query stack duplicates the UI's query path. | The owner wants terminal search against the mirror. |
+| CF26 | The local `transfer_generation.remote` and `transfer_learning.remote` keys for the mirror are the remote's stable `store_id`, not its URL. A replacement store at the same URL therefore has no local acks, and `mirror adopt` is the only way to clear them explicitly. | This is the same rule the SSH transport already applies by recording the receiving store's identity, and it makes URL reuse harmless. | A durable remote id that is not exposed by the API. |
 
 **Delegated** — the executor decides inside the bound and records it in the commit body.
 
 | ID | Bound |
 | --- | --- |
 | G1 | Chunk-to-request packing and upload concurrency. Default: one object per request, 4 concurrent archive-object uploads, 1 snapshot-chunk upload. Change only if a measured initial backfill shows request/encryption overhead above 50% of wall time; then pack consecutive chunks into versioned ≤1 MiB packs with an indexed manifest and re-run restore and GC tests. |
-| G2 | Batch sizes for D1 learning writes. Bound by the platform limits (100 bound parameters and 100 KB per statement, 1000 queries per invocation): multi-row statements of at most 10 rows, at most 200 statements per `batch()`. Tune only against measurements. |
+| G2 | Batch sizes for D1 writes. Bound by the platform limits (100 bound parameters and 100 KB per statement, 1000 queries per invocation): learning deltas use multi-row statements of at most 10 rows and at most 200 statements per `batch()`; a generation commit may use up to 800 multi-row statements (25 rows of 4 columns) to insert its chunk references. Tune only against measurements. |
 | G3 | Cursor encoding and page size. Default page 20 in HTML, 100 for API; cursor is opaque base64 of the sort key. Never use `OFFSET`. |
 | G4 | Backoff and timeouts: 30 s connect, 120 s per request, 5 attempts with exponential 1–60 s for idempotent requests. Object uploads may retry more within one sync run; a failed sync leaves the backlog. |
 | G5 | Exact HTML copy and layout, provided it fits the payload budget and distinguishes reviewed guidance from advisory evidence. |
@@ -171,6 +172,7 @@ validated before allocation. `GET` never mutates. Unknown routes return 404, wro
 | `POST /api/v1/sync/tombstones` | Push unreconciled local tombstones before generations; idempotent by key and revision |
 | `POST /api/v1/sync/objects/missing` | `{objects:[{plaintext_digest,size}]}` → missing digests plus known ciphertext metadata; one round trip per generation |
 | `PUT /api/v1/sync/objects/{ciphertext_digest}` | Stream ciphertext to R2 with an R2 `sha256` checksum; headers carry plaintext digest/size; idempotent |
+| `POST /api/v1/sync/objects/{plaintext_digest}/replace` | Swap the ciphertext mapping after a key-rotation re-encryption; the old object becomes unreferenced |
 | `POST /api/v1/sync/generations` | Validate a manifest's tiling and digests, verify every object is recorded, commit in one D1 batch, return `{generation, manifest_digest, revision}` |
 | `GET /api/v1/sync/generations?origin=&after=&limit=` | Recovery inventory, keyset paginated |
 | `GET /api/v1/sync/manifests/{ciphertext_digest}` | Encrypted manifest body, scoped to the caller's origin |
@@ -180,13 +182,16 @@ validated before allocation. `GET` never mutates. Unknown routes return 404, wro
 | `GET /api/v1/sync/learning/keys?origin=&after=&limit=` | Paginated `(record, id, digest)` index for reconciliation |
 | `POST /api/v1/sync/learning/deltas` | Revision-fenced upserts/deletes, one atomic batch |
 | `POST /api/v1/sync/learning/reconcile` | `begin` / `commit` staged reconciliation |
-| `GET /api/v1/memories` | FTS5 search with `q`, `project`, `origin`, `type`, `state`, `since`, `until`, `after`, `limit`; keyset paginated |
+| `GET /api/v1/memories` | FTS5 search with `q`, `project`, `origin`, `type`, `kind`, `state`, `since`, `until`, `after`, `limit`; keyset paginated |
 | `GET /api/v1/memories/{origin}/{record}/{id}` | Detail with provenance and relationships |
 | `GET /`, `/search`, `/m/...`, `/status` | Server-rendered HTML |
 
 The Worker validates what it can see: contiguous chunk tiling, the source digest derivation from
 the chunk digests, closed-set harness, bounded sizes, and that every referenced object is
-recorded with the same plaintext size the manifest declares. It cannot recompute
+recorded with the same plaintext size the manifest declares. A digest absent from
+`remote_object` is rejected as missing, which covers a manifest that was never uploaded or
+whose objects GC removed. An object deleted or corrupted in R2 out of band is detected by
+`mirror verify`, not by a per-object HEAD loop at commit. It cannot recompute
 `manifest_digest` because the session metadata lives only in
 the encrypted manifest; restore decrypts the manifest, recomputes the digest with
 `archive.manifest_digest`, and refuses the generation if it differs. The ciphertext digest is
@@ -197,7 +202,8 @@ an opaque key on the server side and is not trusted as content proof.
 1. Open the local lock and store; read the configured remote and `mirror_remote` state.
 2. `hello`; verify the returned `store_id` matches the pinned one. A different store with
    existing acknowledgements stops the sync with `remote_identity_changed` until
-   `mirror adopt` is run explicitly.
+   `mirror adopt` is run explicitly; it clears that remote's local acknowledgements and
+   re-delivers, so an old ack never carries over.
 3. Fetch and apply remote tombstones **before** capture, so a session forgotten elsewhere
    cannot be re-captured and uploaded in this run.
 4. Refresh and capture locally (existing code).
@@ -278,10 +284,10 @@ learning_state(origin_host PK, revision, epoch, digest, records, updated_at)
 learning_experience(origin_host, epoch, remote_id, project_key, project_label, kind,
                     claim, applies_when, identifiers, fingerprint, basis, detector,
                     revision, worktree, observed_at, captured_at, validity, tags,
-                    state, state_reason, state_at, pending,
+                    state, state_reason, state_at, sync_revision, pending,
                     PK(origin_host, epoch, remote_id))
 learning_memory(origin_host, epoch, remote_id, project_key, project_label, action,
-                applicability, revision, validity, state, created_at, pending,
+                applicability, revision, validity, state, created_at, sync_revision, pending,
                 PK(origin_host, epoch, remote_id))
 learning_source(origin_host, epoch, record, remote_id, session, position, digest, role,
                 PK(origin_host, epoch, record, remote_id, session, position, role))
@@ -353,7 +359,7 @@ query builder quotes every term; `no:cacheprovider` must be searched as a quoted
   service tokens. `ctx.access` absent → 403; unknown principal → 403; wrong origin → 403.
   A digest is not authorization: every object, manifest, generation, and snapshot read is
   scoped to the caller's bound origin.
-- Request limits: JSON ≤ 8 MiB, manifest ≤ 50,000 chunks, object body ≤ 8 MiB, search
+- Request limits: JSON ≤ 8 MiB, manifest ≤ 20,000 chunks, object body ≤ 8 MiB, search
   `limit` ≤ 100, cursor and ids validated against closed patterns, all SQL parameterized.
 - The Worker never decompresses and never parses a transcript; restore does the bounded
   inflation on the collector, reusing `transfer.decompress` (exact-size bound, reject
@@ -363,7 +369,9 @@ query builder quotes every term; `no:cacheprovider` must be searched as a quoted
 - Browser identities are read-only: HTML and `/api/v1/memories` accept only `GET`/`HEAD`;
   every mutation route requires a collector token.
 - HTML escapes every record field; CSP allows no scripts, styles, images, or frames from
-  anywhere except the inline stylesheet; the UI needs no JavaScript. No content in logs or
+  anywhere except the inline stylesheet; the UI needs no JavaScript. Every response also
+  carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and
+  `frame-ancestors 'none'`. No content in logs or
   custom span attributes. A test asserts that a token, identity
   path, claim, and absolute path never appear in a rendered error or logged line.
 
@@ -385,7 +393,10 @@ commit, learning validation, D1 batch, FTS search, and HTML render. Attributes a
 allowlist of counts, bytes, durations, status codes, and revisions. Never keys, digests,
 origins, projects, claims, session ids, or paths. R2 automatic instrumentation shows
 ciphertext keys, which are opaque; the privacy limitation is documented rather than hidden.
-A test asserts the custom-attribute allowlist.
+A test asserts the custom-attribute allowlist. One residual exposure is documented rather
+than hidden: the HTML search form is a `GET`, so search terms travel in the request URL and
+may appear in Cloudflare's own request metadata. The Worker does not log them and custom
+spans carry only counts; the owner should not paste secrets into the search box.
 
 ## Baseline
 
@@ -425,7 +436,8 @@ them under one JSON schema with repeat statistics.
 ## Performance contract
 
 **Harness.** `eval/bench_mirror.py` with four commands, wrapped by
-`cloudflare/perf.sh` so the invocation is short:
+`cloudflare/perf.sh` so the invocation is short. The repo runner prefix
+`TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I` is omitted below.
 
 ```
 python -I tools/agent-memory/eval/bench_mirror.py local  --repeats 5 --json
@@ -510,7 +522,7 @@ writer.
 | ID | Slice | Owns | Prereq | Acceptance |
 | --- | --- | --- | --- | --- |
 | `P1.1` | Worker scaffold, `wrangler.toml`, `cf migrate` output, `workers_dev=false`, `preview_urls=false`, `READERS`, Access gate, `/api/v1/status`, JSON error envelope. Test-only wrapper that injects `ctx.access` and counts R2/D1 calls; the deployed bundle is scanned to prove the wrapper is absent. The Worker `package.json` declares `"test": "node --test test/*.test.mjs"` and pins the same `miniflare`/`wrangler` versions as `stuff`. | `cloudflare/{wrangler.toml,package.json,package-lock.json,cloudflare.config.ts,src/index.ts,src/auth.ts,src/errors.ts,test/*}` | `P0.2` | Case 15 and the fail-closed half of case 16 pass (the alternate-hostname half is P6.2); `npm test` green; unauthenticated request 403; wrong principal 403; status 200 for a reader; `cf deploy --dry-run` succeeds; `rg -q x-test-access .cloudflare/output` fails. |
-| `P1.2` | D1 migration `0001_init.sql` for `store_meta`, `collector`, `origin_sync`, `generation`, `generation_object`, `remote_object`, `tombstone`, `snapshot`, `snapshot_chunk`, `snapshot_object`; local application and Miniflare schema test. | `cloudflare/migrations/**`, `cloudflare/src/db.ts`, `cloudflare/test/schema.test.mjs` | `P1.1` | `cf d1 migrations apply <local-id> --local` applies cleanly twice (idempotent); every table and index exists; constraint tests reject duplicate ciphertext digests and negative sizes. |
+| `P1.2` | D1 migration `0001_init.sql` for `store_meta`, `collector`, `origin_sync`, `generation`, `generation_object`, `remote_object`, `tombstone`, `snapshot`, `snapshot_chunk`, `snapshot_object`; local application and Miniflare schema test. | `cloudflare/migrations/**`, `cloudflare/src/db.ts`, `cloudflare/test/schema.test.mjs` | `P1.1` | The migration applies cleanly twice in Miniflare (idempotent); `cf d1 migrations apply <database-id> --remote` is the production path; every table and index exists; constraint tests reject duplicate ciphertext digests and negative sizes. |
 | `P1.3` | Observability config, custom span helper and allowlist, privacy test; verify `cf migrate` preserves the block and the dry-run bundle reports it. | `cloudflare/wrangler.toml`, `cloudflare/cloudflare.config.ts`, `cloudflare/src/observe.ts`, `cloudflare/test/observe.test.mjs` | `P1.1` | The generated config contains logs 0.25, traces 0.10; the allowlist test rejects a forbidden attribute (key, digest, origin, claim, path); `cf deploy --dry-run` shows the observability settings. |
 | `P1.4` | Worker bench harness: seed D1/R2, run scenarios through the test wrapper, return counters and wall times; `bench_mirror.py worker` drives it over real HTTP. | `cloudflare/bench/**`, `cloudflare/test/serve.mjs`, `eval/bench_mirror.py` | `P1.2`, `P1.3` | `bench_mirror.py worker --scenario status --repeats 5` reports p50/p95; counters match the wrapper's own count; auth is required; a missing `node_modules` fails with the `npm ci` instruction instead of skipping. |
 | `P1.5` | Provision the real `usr-memories` D1/R2/Worker and Worker-level Access app with no data; apply the schema; deploy; verify the unauthenticated redirect, the `workers.dev`/preview refusal, and a reader/service-token status; record ids. | `cloudflare/scripts/provision.sh`, `cloudflare/wrangler.toml`, this doc | `P1.4` | `provision.sh --dry-run` lists every action; the real run records ids; the token secret lands only in a `0600` file; unauthenticated request is 302/403; `workers.dev` does not answer; authenticated status is 200; no memory data is uploaded. |
@@ -528,7 +540,7 @@ writer.
 
 | ID | Slice | Owns | Prereq | Acceptance |
 | --- | --- | --- | --- | --- |
-| `P3.1` | Local change journal: `learning_change` table, triggers on `learning_experiences`, `learning_experience_sources`, `learning_experience_links`, `learning_memories`, `learning_incidents`; prune after a durable ack; `export_record` shared by snapshot and delta; project hashing and the explicit `mirror label` mapping. | `learning.py`, `learning_sync.py`, `experience.py`, `store.py`, `tests/test_learning.py`, `tests/test_learning_ops.py` | `P2.3` | Every real mutation path (observe, promote, retire, supersede, withdraw, forget, forget-session) leaves the journal head moved; applying all journal rows from empty equals `export_snapshot()` of the final database; `rebuild_index` preserves the journal and triggers. |
+| `P3.1` | Local change journal: `learning_change` table, triggers on `learning_experiences`, `learning_experience_sources`, `learning_experience_links`, `learning_memories`, `learning_incidents`; prune after a durable ack, or after a recovery snapshot when the projection is off; `export_record` shared by snapshot and delta; project hashing and the explicit `mirror label` mapping. | `learning.py`, `learning_sync.py`, `experience.py`, `store.py`, `tests/test_learning.py`, `tests/test_learning_ops.py` | `P2.3` | Every real mutation path (observe, promote, retire, supersede, withdraw, forget, forget-session) leaves the journal head moved; applying all journal rows from empty equals `export_snapshot()` of the final database; `rebuild_index` preserves the journal and triggers. |
 | `P3.2` | D1 projection schema and delta apply: epoch, pending, revision fence, tombstones, FTS rows, deletes; sources rewritten to the qualified `harness:native_id@origin` form; forgetting a session removes every record citing it; TS record validator ported from `validate_record` with a shared fixture parity test. | `cloudflare/migrations/0002_learning.sql`, `cloudflare/src/learning.ts`, `cloudflare/src/routes/learning.ts`, `tests/test_mirror.py`, `tests/fixtures/learning_records.json` | `P3.1`, `P2.1` | Cases 5, 6, 8, 17, 19 pass; a delta stream and a reconciled full projection of the same database are identical; an unrecognised field or a bad closed-set value is rejected by both validators; a stale delta changes nothing; a tombstone deletes the citing records and leaves no FTS hit. |
 | `P3.3` | Search and inspection queries: FTS5, filters, keyset pagination, batched source fetch, detail; query-plan assertions. | `cloudflare/src/memories.ts`, `cloudflare/src/routes/memories.ts`, `cloudflare/test/search.test.mjs` | `P3.2` | `EXPLAIN QUERY PLAN` shows the FTS index and composite index, no full scans for filtered pages; a 20-result page issues ≤3 D1 queries; deep pages scan O(page); 1k/10k/100k benchmarks recorded. |
 | `P3.4` | Reconciliation: paginated key/digest index, diff, reconcile begin/commit, interrupted staging invisibility, retry idempotency. | `cloudflare/src/routes/learning.ts`, `mirror.py`, `tests/test_mirror.py` | `P3.2` | Case 7, 8, 17 pass; an interrupted reconciliation shows the old epoch until commit; a repeated identical reconciliation performs zero D1 writes; a concurrent delta during staging gets 409 and retries. |
@@ -537,16 +549,16 @@ writer.
 
 | ID | Slice | Owns | Prereq | Acceptance |
 | --- | --- | --- | --- | --- |
-| `P4.1` | Server-rendered HTML: landing with counts, last durable sync, last verified recovery point, an immediate search box, and recent retained experiences and approved memories; search with project/origin/type/state filters; result summaries with timestamps and an explicit `Reviewed` / `Observed` / `Advisory` marker (never `instruction`); detail with provenance, supporting sessions, digests, applicability, and supersession/conflict links; status; empty state; responsive inline CSS; autofocus and keyboard-operable form with no script; escaping; CSP; `no-store`. Payload budget 64 KiB uncompressed per page, no external requests. | `cloudflare/src/render.ts`, `cloudflare/src/routes/html.ts`, `cloudflare/test/render.test.mjs` | `P3.3` | Case 18 and 19 pass; a record containing `<script>`, quotes, and control characters renders inert; every response carries `no-store` and CSP; an empty database renders the explainer; a 20-result page is ≤64 KiB and ≤3 requests; no page links to raw evidence or a key. |
-| `P4.2` | Status page and API completeness: counts, last sync per origin, last verified snapshot, tombstone count, storage bytes, caller identity; bounded queries. | `cloudflare/src/routes/status.ts`, `cloudflare/src/render.ts`, `cloudflare/test/status.test.mjs` | `P4.1`, `P2.4` | Status works with zero data and with data; a 20-origin fixture issues ≤10 queries; no private content in the response. |
+| `P4.1` | Server-rendered HTML: landing with counts, last durable sync, last verified recovery point, an immediate search box, and recent retained experiences and approved memories; search with project/origin/type/kind/state filters, defaulting to retained experiences and approved memories with an explicit `state=all` for history; result summaries with timestamps and an explicit `Reviewed` / `Observed` / `Advisory` marker (never `instruction`); detail with provenance, supporting sessions, digests, applicability, and supersession/conflict links; status; empty state; responsive inline CSS; autofocus and keyboard-operable form with no script; escaping; CSP; `no-store`. Payload budget 64 KiB uncompressed per page, no external requests. | `cloudflare/src/render.ts`, `cloudflare/src/routes/html.ts`, `cloudflare/test/render.test.mjs` | `P3.3` | Case 18 and 19 pass; a record containing `<script>`, quotes, and control characters renders inert; every response carries `no-store` and CSP; an empty database renders the explainer; a 20-result page is ≤64 KiB and ≤3 requests; no page links to raw evidence or a key. |
+| `P4.2` | Status page and API completeness: counts, last durable change per origin, last verified snapshot, tombstone count, storage bytes, caller identity; bounded queries. | `cloudflare/src/routes/status.ts`, `cloudflare/src/render.ts`, `cloudflare/test/status.test.mjs` | `P4.1`, `P2.4` | Status works with zero data and with data; a 20-origin fixture issues ≤10 queries; no private content in the response. |
 
 ### P5 — Integration and adversarial proof
 
 | ID | Slice | Owns | Prereq | Acceptance |
 | --- | --- | --- | --- | --- |
-| `P5.1` | CLI and scheduling: `mirror configure/enable/disable/label/keygen/adopt/status/sync/verify/restore/snapshots/gc/rotate/doctor`; `sync` transport `cloudflare`; doctor fields; LaunchAgent and README setup; overlap and offline behavior; routine sync uses HTTPS only, never `cf`; `--central` query behavior is unchanged (CF25). | `sessions_cli.py`, `mirror.py`, `dotfiles/launchd/**.in`, `tools/agent-memory/README.md`, `docs/development.md`, `tests/test_mirror.py` | `P4.2` | Every documented command runs verbatim against a scratch state dir; `mirror sync --dry-run` reports pending objects, bytes, and estimated requests without network writes; two concurrent syncs: second exits 0 `overlapped=1`; offline sync exits non-zero with a backlog and local recall unaffected; the plist lints with `plutil -lint`; a test intercepts subprocess creation and asserts no `cf` process runs during sync; a world-readable token file is refused and a `0600` file is accepted. |
+| `P5.1` | CLI and scheduling: `mirror configure/enable/disable/label/keygen/adopt/status/sync/verify/restore/snapshots/gc/rotate/doctor`; `sync` transport `cloudflare`; doctor fields; LaunchAgent and README setup; overlap and offline behavior; routine sync uses HTTPS only, never `cf`; `--central` query behavior is unchanged (CF25). | `sessions_cli.py`, `mirror.py`, `dotfiles/launchd/**.in`, `tools/agent-memory/README.md`, `docs/development.md`, `tests/test_mirror.py` | `P4.2` | Every documented command runs verbatim against a scratch state dir; `mirror status --json` reports pending objects and bytes, the last error, the last durable revision, and the last verified snapshot; `mirror sync --dry-run` reports estimated objects, bytes, and requests without network writes; two concurrent syncs: second exits 0 `overlapped=1`; offline sync exits non-zero with a backlog and local recall unaffected; the plist lints with `plutil -lint`; a test intercepts subprocess creation and asserts no `cf` process runs during sync; a world-readable token file is refused and a `0600` file is accepted. |
 | `P5.2` | Adversarial suite: cases 1–24 in one file with real Miniflare/HTTP, including auth bypass, cross-origin isolation, corrupt/missing objects, stale revisions, concurrent collectors, malformed and oversized requests, bounded memory, and a 10-collector load run with retries under induced 429/500 responses. | `tests/test_mirror.py`, `cloudflare/test/adversarial.test.mjs` | `P5.1` | All 24 cases pass by name; the suite fails if the persistence boundary is stubbed; peak RSS increases by less than 64 MiB over the idle process while uploading an 8 MiB artifact and a 1 MiB snapshot chunk; the load run records p50/p95 latency and zero lost or duplicated records. |
-| `P5.3` | Performance close-out and cleanup: run all benchmark scenarios at 1k/10k/100k, compare with baseline, record JSON and the report table, document budgets and variance; delete superseded helpers and shims and prove no caller remains; confirm restic residue is absent; run the full existing suite, Ruff, `ty`, `mdtool`, and the skill checks for touched docs. | `eval/bench_mirror.py`, `README.md`, this doc | `P5.2` | Every deterministic invariant in **Acceptance** passes; time comparisons use interleaved runs and reject regressions beyond the measured spread; `perf-gate-ready` status recorded; `rg -n -i restic` returns nothing outside the campaign records and `git log -S restic` shows only the removal; no new export lacks a caller. |
+| `P5.3` | Performance close-out and cleanup: run all benchmark scenarios at 1k/10k/100k, compare with baseline, record JSON and the report table, document budgets and variance; delete superseded helpers and shims and prove no caller remains; confirm restic residue is absent; run the full existing suite, Ruff, `ty`, `mdtool`, and the skill checks for touched docs. | `eval/bench_mirror.py`, `README.md`, this doc | `P5.2` | Every deterministic invariant in **Acceptance** passes; `backup create`, `backup restore`, `archive verify`, and `archive reindex` stay green; time comparisons use interleaved runs and reject regressions beyond the measured spread; `perf-gate-ready` status recorded; `rg -n -i restic` returns nothing outside the campaign records and `git log -S restic` shows only the removal; no new export lacks a caller. |
 
 ### P6 — Deploy and production validation
 
@@ -554,7 +566,7 @@ writer.
 | --- | --- | --- | --- | --- |
 | `P6.1` | Finish production provisioning from `P1.5`: apply any new migrations, deploy the final bundle, enroll a synthetic origin with `--origin <id> --label <name> --token-out <path>`, and run the service-token smoke with synthetic data only. A missing permission stops before any data upload and records the exact scope. | `cloudflare/scripts/provision.sh`, `cloudflare/wrangler.toml`, `docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md` | `P5.3` | The deployed bundle is the one tested locally; the token secret lands only in a `0600` file; a synthetic generation round-trips and restores; a refused permission reports the API and scope without claiming success. |
 | `P6.2` | Validate the production deployment at `memories.17166969.xyz`; verify the custom domain, Access redirect, service-token API, and `workers.dev`/preview refusal; run the deployed synthetic benchmark and record p50/p95/p99, CPU where reported, bytes, and R2/D1 operation counts; tombstone every synthetic session, GC its objects, and verify no synthetic row is searchable. | `cloudflare/wrangler.toml`, this doc | `P6.1` | Unauthenticated browser request redirects to Access; `workers.dev` does not answer; service-token search works; deployed benchmark JSON is recorded; no real transcript is uploaded; after cleanup no synthetic record is searchable or referenced by a live generation, and encrypted remnants in retained snapshots expire with retention. |
-| `P6.3` | Independent review of durability, fencing, deletion, auth, and performance evidence; fix P1/P2 findings; final report. | touched files, this doc | `P6.2` | Review reports concrete counterexamples, not praise; every P1/P2 finding is fixed or parked with cause; the final report carries the brief's ten items with numbers: commits and changed files, deployed/blocked status, R2/D1 schema and data boundary, encryption and recovery verification, test counts, before/after local benchmarks, preview/production measurements, p50/p95/p99 and CPU/bytes/operations/throughput, the bottlenecks actually proven and the optimizations landed, and remaining risks and setup steps. |
+| `P6.3` | Independent review of durability, fencing, deletion, auth, and performance evidence; fix P1/P2 findings; final report. | touched files, this doc | `P6.2` | Review reports concrete counterexamples, not praise; every P1/P2 finding is fixed or parked with cause; the final report carries the brief's ten items with numbers: commits and changed files, deployed/blocked status, R2/D1 schema and data boundary, encryption and recovery verification, test counts, before/after local benchmarks, preview/production measurements, p50/p95/p99 and CPU/bytes/operations/throughput, the bottlenecks actually proven and the optimizations landed, the security guarantees and their limits, and remaining risks and exact setup steps. |
 
 ## Acceptance
 
@@ -604,14 +616,14 @@ fail only beyond the measured spread, and only on a quiet host.
 
 | # | Invariant | Command / evidence |
 | --- | --- | --- |
-| F1 | No network dependency in local recall, capture, or search | `bench_mirror.py local` with no remote configured; a test patches socket creation to raise during recall, observe, refresh, and search |
+| F1 | No network dependency in local recall, capture, or search | `bench_mirror.py local` with no remote configured; a test patches socket creation to raise during recall, observe, refresh, and search, and an import test proves the recall/learning modules do not import the mirror client |
 | F2 | Unchanged sync uploads zero objects and performs zero D1 writes | `bench_mirror.py worker --scenario noop` counters; case 2 |
 | F3 | Unchanged learning sends zero requests when the journal head is durable | `bench_mirror.py worker --scenario learning-noop`; one `max(seq)` local query |
 | F4 | Incremental sync cost tracks changed data, not corpus size | 10k-record corpus, change 3 records: uploaded bytes ≤ changed record bytes + one batch; D1 statements ≤ one batch |
 | F5 | No per-object HEAD loop | one missing-object request per generation; HTTP request count recorded |
 | F6 | No systematic duplicate R2 reads | commit reads no object body; restore reads each object once |
 | F7 | No N+1 search query | ≤3 D1 queries for a 20-result page; `EXPLAIN QUERY PLAN` assertions |
-| F8 | Bounded concurrency and batching | 4 archive uploads, 1 snapshot chunk, ≤200 statements per batch |
+| F8 | Bounded concurrency and batching | 4 archive uploads, 1 snapshot chunk, ≤200 statements per learning batch and ≤800 for a generation chunk insert |
 | F9 | No unnecessary buffering | 1 MiB snapshot chunks and 8 MiB artifacts stream to R2 with the `sha256` option; peak RSS recorded |
 | F10 | No JSON/Wasm round-trip amplification | no Wasm; controls are JSON, bodies are raw; request/byte counts recorded |
 | F11 | Local recall latency not materially worse | interleaved baseline/candidate, p95 regression ≤5% or the measured spread, whichever is larger |
