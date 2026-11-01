@@ -14,10 +14,10 @@ start with `docs/`, `dotfiles/`, or name a repository root file.
   projection privately; a lost collector restores from R2; a forgotten session never
   returns; meaningfully wasteful work on the no-op path is a failing gate.
 - **Accepted:** `P0.1` (benchmark harness, root `Makefile`, and the deterministic capture
-  baseline).
+  baseline) and `P0.2` (age adapter, dev `rage` build, and the crypto suite).
 - **In flight:** none.
-- **Next slice:** `P0.2` (age adapter); the first command re-checks the baseline:
-  `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_archive.py`.
+- **Next slice:** `P1.1` (Worker scaffold); the first command re-checks the baseline:
+  `TMPDIR="$PWD/.work/tmp" uv run --no-project --python '>=3.15' python -I tools/agent-memory/tests/test_mirror_crypto.py`.
 - **Known red:** none. All ten agent-memory suites are green on the baseline commit.
 - **perf gate deferred: host busy.** An unrelated `cargo test` in another checkout held load
   near 13 on 18 cores during the P0.1 run, so no wall or CPU time is accepted as a baseline.
