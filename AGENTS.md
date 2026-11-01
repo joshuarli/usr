@@ -24,6 +24,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Skills guide | [SKILLS.md](SKILLS.md) |
 | Deferred work and RFCs | [TODO.md](TODO.md), [docs/rfc/](docs/rfc/) |
 | Agent archive campaign record | [docs/CAMPAIGN-AGENT-ARCHIVE.md](docs/CAMPAIGN-AGENT-ARCHIVE.md) |
+| Cloudflare memories campaign record | [docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md](docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md) |
 
 ## Background work
 
