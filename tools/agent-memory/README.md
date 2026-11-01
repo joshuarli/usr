@@ -125,7 +125,7 @@ plaintext, compressed, and ciphertext bytes plus CPU per class; set `AGE_BIN` wh
 not on `PATH`. Ciphertext bytes live in the sample's `timings` because randomized age
 ciphertext length can vary by a few bytes, so they are measured, not used as a deterministic
 gate. `perf-worker` boots the built bundle with real Miniflare D1 and R2 and measures it over
-loopback HTTP; build it once with `cf build --mode production` in
+loopback HTTP; build it once with `npm run build` in
 `tools/agent-memory/cloudflare` after `npm ci`. `perf-deployed` lands with the first deploy.
 
 The capture baseline (200 sessions × 10 messages × 10 projects, 2,600 events) on

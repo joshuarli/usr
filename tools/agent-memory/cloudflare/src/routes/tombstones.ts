@@ -1,4 +1,4 @@
-import type { Principal } from "../auth";
+import type { Principal } from "../auth.js";
 import {
   pushTombstones,
   readOriginState,
@@ -6,24 +6,24 @@ import {
   readTombstones,
   type NewTombstone,
   type TombstoneRow,
-} from "../db";
-import { json, methodNotAllowed } from "../errors";
-import { serverTiming } from "../observe";
+} from "../db.js";
+import { json, methodNotAllowed } from "../errors.js";
+import { serverTiming } from "../observe.js";
 import {
   MAX_PAGE,
   PROTOCOL,
   decodeCursor,
   decodeTombstoneRequest,
   encodeCursor,
-} from "../protocol";
-import type { Env } from "../index";
+} from "../protocol.js";
+import type { Env } from "../index.js";
 import {
   boundOrigin,
   readJson,
   refuse,
   versionOrError,
   type SyncTiming,
-} from "./shared";
+} from "./shared.js";
 
 const TOMBSTONES_PATH = "/api/v1/sync/tombstones";
 

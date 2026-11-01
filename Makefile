@@ -9,7 +9,7 @@ OUT ?= .work/perf
 LOCAL ?=
 CF ?= cf
 WORKER_DIR ?= tools/agent-memory/cloudflare
-DATABASE_ID := $(shell jaq --from toml -r '.d1_databases[0].database_id' $(WORKER_DIR)/wrangler.toml 2>/dev/null)
+DATABASE_ID = $(shell node $(WORKER_DIR)/scripts/config.mjs database-id 2>/dev/null)
 MIGRATE_FLAGS := $(if $(filter 1,$(LOCAL)),--local --persist-to $(CURDIR)/.work/tmp/cf-state)
 PYTHON := uv run --no-project --python '>=3.15' python -I
 PERF := tools/agent-memory/cloudflare/perf.sh
@@ -29,13 +29,13 @@ deploy: ## Gate, test, deploy, and smoke the Worker
 	$(MAKE) smoke-deployed
 
 worker-bundle: ## Build the Worker bundle once for test and deploy
-	cd $(WORKER_DIR) && $(CF) build --mode production
+	cd $(WORKER_DIR) && npm run build
 
 worker-test: worker-bundle ## Exercise the built bundle and every Worker suite
 	cd $(WORKER_DIR) && npm test
 
 worker-check: ## Validate the Worker deploy plan without uploading
-	cd $(WORKER_DIR) && $(CF) deploy --dry-run
+	cd $(WORKER_DIR) && npm run build && $(CF) deploy --prebuilt --dry-run --mode production
 
 worker-deploy: worker-bundle ## Deploy the bundle worker-test exercised
 	cd $(WORKER_DIR) && $(CF) deploy --prebuilt --mode production
@@ -44,7 +44,7 @@ smoke-deployed: ## Read-only probe of the live Worker
 	sh $(WORKER_DIR)/scripts/smoke-deployed.sh
 
 migrate: ## Apply pending D1 migrations (LOCAL=1 for the simulation)
-	@[ -n "$(DATABASE_ID)" ] || { >&2 printf 'migrate: wrangler.toml has no D1 database id\n'; exit 1; }
+	@[ -n "$(DATABASE_ID)" ] || { >&2 printf 'migrate: cloudflare.config.ts has no D1 database id\n'; exit 1; }
 	@cd $(WORKER_DIR) && $(CF) d1 migrations list $(DATABASE_ID) $(MIGRATE_FLAGS)
 	@cd $(WORKER_DIR) && $(CF) d1 migrations apply $(DATABASE_ID) $(MIGRATE_FLAGS)
 

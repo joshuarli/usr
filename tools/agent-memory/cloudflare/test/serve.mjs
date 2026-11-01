@@ -9,7 +9,7 @@ function fail(message) {
   process.exit(2);
 }
 
-if (!existsSync(BUNDLE)) fail("missing worker bundle; run `cf build --mode production` in tools/agent-memory/cloudflare");
+if (!existsSync(BUNDLE)) fail("missing worker bundle; run `npm run build` in tools/agent-memory/cloudflare");
 
 let Miniflare;
 try {

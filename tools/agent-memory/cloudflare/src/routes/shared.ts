@@ -1,7 +1,7 @@
-import type { Principal } from "../auth";
-import { SECURITY_HEADERS, failure } from "../errors";
-import { serverTiming } from "../observe";
-import { MAX_JSON_BYTES, PROTOCOL, isRecord } from "../protocol";
+import type { Principal } from "../auth.js";
+import { SECURITY_HEADERS, failure } from "../errors.js";
+import { serverTiming } from "../observe.js";
+import { MAX_JSON_BYTES, PROTOCOL, isRecord } from "../protocol.js";
 
 export interface SyncTiming {
   d1: number;

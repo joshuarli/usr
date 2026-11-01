@@ -1,10 +1,10 @@
-import { authorize, identityOf, parseReaders, type AccessIdentity, type Principal } from "./auth";
-import { readStoreMeta, type StoreMeta } from "./db";
-import { failure, json, methodNotAllowed } from "./errors";
-import { serverTiming, trace } from "./observe";
-import { handleGenerations } from "./routes/generations";
-import { handleSync } from "./routes/sync";
-import { handleTombstones } from "./routes/tombstones";
+import { authorize, identityOf, parseReaders, type AccessIdentity, type Principal } from "./auth.js";
+import { readStoreMeta, type StoreMeta } from "./db.js";
+import { failure, json, methodNotAllowed } from "./errors.js";
+import { serverTiming, trace } from "./observe.js";
+import { handleGenerations } from "./routes/generations.js";
+import { handleSync } from "./routes/sync.js";
+import { handleTombstones } from "./routes/tombstones.js";
 
 export interface Env {
   readonly READERS?: string;

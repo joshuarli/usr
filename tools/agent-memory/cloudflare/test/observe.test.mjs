@@ -77,7 +77,7 @@ test("a forbidden attribute aborts before the action and ends the span", async (
   assert.equal(context.spans[0].ended, true);
 });
 
-test("the generated config preserves the observability block", () => {
+test("the config preserves the observability block", () => {
   const config = readFileSync(new URL("../cloudflare.config.ts", import.meta.url), "utf8");
   assert.match(config, /enabled:\s*true/);
   assert.match(config, /invocationLogs:\s*true/);

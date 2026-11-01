@@ -1,4 +1,4 @@
-import type { Principal } from "../auth";
+import type { Principal } from "../auth.js";
 import {
   insertRemoteObject,
   readKnownObjects,
@@ -9,17 +9,17 @@ import {
   type OriginState,
   type RemoteObjectRow,
   type StoreMeta,
-} from "../db";
-import { json, methodNotAllowed } from "../errors";
-import { serverTiming } from "../observe";
+} from "../db.js";
+import { json, methodNotAllowed } from "../errors.js";
+import { serverTiming } from "../observe.js";
 import {
   MAX_OBJECT_BYTES,
   PROTOCOL,
   decodeDigest,
   decodeHello,
   decodeMissingRequest,
-} from "../protocol";
-import type { Env } from "../index";
+} from "../protocol.js";
+import type { Env } from "../index.js";
 import {
   boundOrigin,
   contentLength,
@@ -29,7 +29,7 @@ import {
   refuse,
   versionOrError,
   type SyncTiming,
-} from "./shared";
+} from "./shared.js";
 
 const HELLO_PATH = "/api/v1/sync/hello";
 const MISSING_PATH = "/api/v1/sync/objects/missing";

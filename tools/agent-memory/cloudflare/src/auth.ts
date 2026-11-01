@@ -1,4 +1,4 @@
-import { verifyAssertion, type AccessConfig, type KeyLoader } from "./assertion";
+import { verifyAssertion, type AccessConfig, type KeyLoader } from "./assertion.js";
 
 export interface AccessIdentity {
   readonly email: string | undefined;

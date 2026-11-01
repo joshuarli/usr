@@ -545,7 +545,7 @@ def _worker_server():
     worker_dir = ROOT / "tools" / "agent-memory" / "cloudflare"
     bundle = worker_dir / ".cloudflare" / "output" / "v0" / "workers" / "default" / "bundle" / "index.js"
     if not bundle.is_file():
-        raise RuntimeError("missing worker bundle; run `cf build --mode production` in tools/agent-memory/cloudflare")
+        raise RuntimeError("missing worker bundle; run `npm run build` in tools/agent-memory/cloudflare")
     process = subprocess.Popen([node, "test/serve.mjs"], cwd=worker_dir, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
     stdout = process.stdout

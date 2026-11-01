@@ -40,8 +40,7 @@ if [ "$dry_run" = 1 ]; then
 	if [ "$access" = 0 ]; then
 		say 'would create R2 bucket usr-memories when absent'
 		say 'would create D1 database usr-memories when absent'
-		say 'would write the D1 id to wrangler.toml'
-		say 'would regenerate cloudflare.config.ts'
+		say 'would write the D1 id to cloudflare.config.ts'
 	else
 		say 'would enroll service token usr-memories-collector when absent'
 		say "would write its client id and secret to $token_out with mode 0600"
@@ -54,6 +53,7 @@ fi
 
 command -v "$cf" >/dev/null 2>&1 || fail "cf is not installed"
 "$cf" auth whoami >/dev/null 2>&1 || fail 'cf is not authenticated; run cf auth login'
+command -v node >/dev/null 2>&1 || fail 'node is not installed'
 command -v jaq >/dev/null 2>&1 || fail 'jaq is not installed'
 
 if [ "$access" = 0 ]; then
@@ -73,20 +73,18 @@ if [ "$access" = 0 ]; then
 		[ -n "$database_id" ] || fail 'could not read the new D1 database id'
 	fi
 	say "D1 database usr-memories is $database_id"
-	temporary="$root/.work/tmp/wrangler.$$.toml"
-	awk -v id="$database_id" '
-		/^database_id = / { print "database_id = \"" id "\""; found = 1; next }
-		{ print }
-		END { if (!found) exit 1 }
-	' "$worker/wrangler.toml" > "$temporary" || fail 'wrangler.toml has no database_id line'
-	mv "$temporary" "$worker/wrangler.toml"
-	say 'regenerating cloudflare.config.ts'
-	rm -f "$worker/cloudflare.config.ts"
-	(cd "$worker" && "$cf" migrate --force >/dev/null)
+	[ -f "$worker/cloudflare.config.ts" ] || fail 'cloudflare.config.ts is missing; restore it from git'
+	configured=$(node "$worker/scripts/config.mjs" database-id) || fail 'cannot read the D1 database id from cloudflare.config.ts'
+	if [ "$configured" = "$database_id" ]; then
+		say 'cloudflare.config.ts already has the D1 id'
+	else
+		say 'writing the D1 id to cloudflare.config.ts'
+		node "$worker/scripts/config.mjs" set-database-id "$database_id" || fail 'could not update cloudflare.config.ts'
+	fi
 	exit 0
 fi
 
-[ -f "$worker/cloudflare.config.ts" ] || fail 'cloudflare.config.ts is missing; run make provision first'
+[ -f "$worker/cloudflare.config.ts" ] || fail 'cloudflare.config.ts is missing; restore it from git'
 workers=$("$cf" workers scripts search --name usr-memories)
 worker_id=$(printf '%s' "$workers" | jaq -r '(.result? // .)[] | select(.script_name == "usr-memories" or .name == "usr-memories") | .id // .tag // empty' 2>/dev/null | head -1)
 [ -n "$worker_id" ] || fail 'Worker usr-memories is not deployed; run make worker-deploy first'
@@ -115,8 +113,7 @@ else
 fi
 chmod 600 "$token_out"
 
-database_id=$(jaq --from toml -r '.d1_databases[0].database_id' "$worker/wrangler.toml")
-[ -n "$database_id" ] && [ "$database_id" != "null" ] || fail 'wrangler.toml has no D1 database id'
+database_id=$(node "$worker/scripts/config.mjs" database-id) || fail 'cannot read the D1 database id from cloudflare.config.ts'
 now=$(date +%s)
 "$cf" d1 query "$database_id" --sql "INSERT OR REPLACE INTO collector(service_token_id, origin_host, label, created_at, disabled) VALUES ('$client_id', '$origin', '$label', $now, 0)" >/dev/null
 say "bound service token client $client_id to origin $origin"

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign as nodeSign } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { BUNDLE_PATH, context, environment, loadWorker, request } from "./harness.mjs";
@@ -119,9 +120,18 @@ test("a missing or failing store reports unavailable", async () => {
   assert.equal((await response.json()).error.code, "unavailable");
 });
 
+function bundleSources(dir) {
+  const sources = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) sources.push(...bundleSources(path));
+    else if (path.endsWith(".js")) sources.push(readFileSync(path, "utf8"));
+  }
+  return sources;
+}
+
 test("the deployed bundle carries no test hook", async () => {
-  const source = readFileSync(BUNDLE_PATH, "utf8");
-  assert.doesNotMatch(source, /x-test-access|__TEST_ACCESS__/);
+  assert.doesNotMatch(bundleSources(dirname(BUNDLE_PATH)).join("\n"), /x-test-access|__TEST_ACCESS__/);
 });
 
 function encode(value) {

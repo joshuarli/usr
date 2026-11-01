@@ -11,7 +11,11 @@
     "noImplicitOverride": true,
     "noUncheckedSideEffectImports": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true
+    "rootDir": "src",
+    "outDir": ".cloudflare/output/v0/workers/default/bundle",
+    "sourceMap": true,
+    "noEmitOnError": true,
+    "skipLibCheck": true
   },
   "include": ["src/**/*.ts"]
 }
