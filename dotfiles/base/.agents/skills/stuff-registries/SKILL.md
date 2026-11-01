@@ -24,8 +24,10 @@ description: "Apply when publishing or consuming packages through the 17166969.x
   - `deploy/r2-pull.py stuff-mycrates "$H/pull-mycrates"`, then `mycrates init`, `mycrates config set-public-base-url https://crates.17166969.xyz`, `mycrates adopt --from-site ...`
   - `deploy/r2-pull.py stuff-mynpm "$H/mynpm/site/mirror"`, then `mynpm adopt --site-dir ...`
   - `deploy/r2-pull.py stuff-mypypi "$H/mypypi/site"`
-- Syncs need an authenticated `cf` CLI. Check with `cf auth whoami`. The normal single-publisher path promotes through `cf` and needs no R2 S3 credentials. Use `R2_S3_ENDPOINT`, `R2_S3_ACCESS_KEY_ID`, and `R2_S3_SECRET_ACCESS_KEY` only for conditional promotion (`--promote=s3`) or files over 300 MB; a competing publisher is not detected in the `cf` mode.
+  - `r2-pull.py` lists with S3 and downloads `R2_PULL_JOBS` objects in parallel when `R2_S3_*` is set or mintable; it only pulls the current generation and shared stores. `R2_PULL_CF_ONLY=1` forces the paced `cf` transport.
+- Syncs need an authenticated `cf` CLI. Check with `cf auth whoami`. Uploads and remote listings normally use S3 with short-lived bucket credentials minted by `cf r2 temporary-credentials create`; no long-lived `R2_S3_*` is required. `R2_S3_ENDPOINT`, `R2_S3_ACCESS_KEY_ID`, and `R2_S3_SECRET_ACCESS_KEY` override minting. A failed mint falls back to the paced `cf` API. The normal single-publisher path promotes through `cf`; a competing publisher is not detected in that mode.
 - `deploy/publish REGISTRY` is the normal entry point. It checks `cf` auth, adopts the live bucket when local state is missing, and runs the matching helper. Pass `--promote=s3` only when another machine or CI can publish concurrently.
+- `make deploy` builds one Worker bundle, tests it, deploys it with `cf deploy --prebuilt`, runs the three republishes in parallel (`DEPLOY_JOBS`, default 3), then runs the live check. Each helper prunes inactive local generations after a successful sync; bucket manifests stay for rollback.
 
 ## Cargo
 
