@@ -32,6 +32,7 @@ MD_EXTS = {".md", ".markdown", ".mdx"}
 RST_EXTS = {".rst"}
 EXTS = MD_EXTS | RST_EXTS
 MAX_BYTES = 2 * 1024 * 1024
+DIR_FD_MAX = 64
 SKIP_DIRS = {".git", ".work", "target", "node_modules"}
 URL_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
@@ -98,48 +99,69 @@ def sparse_skipped(root):
     return {x[2:].decode("utf-8", "surrogateescape") for x in listing.split(b"\0") if x.startswith(b"S ")}
 
 
-def safe_read(root, rel):
+def open_dir(cache, root, flags, parts):
+
+    fd = cache.get(parts)
+    if fd is not None:
+        return fd
+    if parts:
+        fd = os.open(parts[-1], flags, dir_fd=open_dir(cache, root, flags, parts[:-1]))
+    else:
+        fd = os.open(root, flags)
+    cache[parts] = fd
+    return fd
+
+
+def read_entry(fd, name, flags):
+
+    final = os.open(name, flags, dir_fd=fd)
+    try:
+        st = os.fstat(final)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError("not a regular file")
+        if st.st_size > MAX_BYTES:
+            return None
+        chunks = []
+        total = 0
+        while total <= MAX_BYTES:
+            block = os.read(final, min(65536, MAX_BYTES + 1 - total))
+            if not block:
+                break
+            chunks.append(block)
+            total += len(block)
+        data = b"".join(chunks)
+        if len(data) > MAX_BYTES or b"\0" in data[:8192]:
+            return None
+        return data.decode("utf-8", "replace")
+    finally:
+        os.close(final)
+
+
+def safe_read(root, rel, dirs=None):
 
     raw = root / Path(rel)
-    try:
-        resolved = raw.resolve(strict=True)
-        resolved.relative_to(root.resolve())
-        parts = resolved.relative_to(root.resolve()).parts
-        if not parts:
-            raise OSError("not a file")
-        flags_dir = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        flags_file = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    base = root.resolve()
+    resolved = raw.resolve(strict=True)
+    parts = resolved.relative_to(base).parts
+    if not parts:
+        raise OSError("not a file")
+    flags_dir = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags_file = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    if dirs is None:
         fd = os.open(root, flags_dir)
         try:
             for part in parts[:-1]:
                 nxt = os.open(part, flags_dir, dir_fd=fd)
                 os.close(fd)
                 fd = nxt
-            final = os.open(parts[-1], flags_file, dir_fd=fd)
-            try:
-                st = os.fstat(final)
-                if not stat.S_ISREG(st.st_mode):
-                    raise OSError("not a regular file")
-                if st.st_size > MAX_BYTES:
-                    return None
-                chunks = []
-                total = 0
-                while total <= MAX_BYTES:
-                    block = os.read(final, min(65536, MAX_BYTES + 1 - total))
-                    if not block:
-                        break
-                    chunks.append(block)
-                    total += len(block)
-                data = b"".join(chunks)
-                if len(data) > MAX_BYTES or b"\0" in data[:8192]:
-                    return None
-                return data.decode("utf-8", "replace")
-            finally:
-                os.close(final)
+            return read_entry(fd, parts[-1], flags_file)
         finally:
             os.close(fd)
-    except (OSError, ValueError, RuntimeError):
-        raise
+    if len(dirs) >= DIR_FD_MAX:
+        for fd in dirs.values():
+            os.close(fd)
+        dirs.clear()
+    return read_entry(open_dir(dirs, root, flags_dir, parts[:-1]), parts[-1], flags_file)
 
 
 def markdown(path):
@@ -1716,14 +1738,18 @@ def router_findings(files, content, max_lines=150, tracked=None):
 
 def read_set(root, paths):
     content, unreadable = {}, []
-    for file in paths:
-        try:
-            value=safe_read(root,file)
-            if value is None: continue
-            content[file]=value
-        except (OSError,ValueError):
+    dirs = {}
+    try:
+        for file in paths:
+            try:
+                value=safe_read(root,file,dirs)
+                if value is None: continue
+                content[file]=value
+            except (OSError,ValueError):
 
-            if not ((root/file).is_dir() or (os.path.islink(root/file) and not markdown(file))): unreadable.append(file)
+                if not ((root/file).is_dir() or (os.path.islink(root/file) and not markdown(file))): unreadable.append(file)
+    finally:
+        for fd in dirs.values(): os.close(fd)
     return content, unreadable
 
 
@@ -2724,6 +2750,37 @@ class MdtoolTests(unittest.TestCase):
         content["src/c.py"]='"""CUSTOM marker."""\n'
         self.assertEqual(sorted((f.code,f.target) for f in pointer_findings(list(content),content,["CUSTOM"])),
                          [("P001","docs/guide.md"),("P002","section 2.1"),("P003","CUSTOM")])
+    def test_link_fragment_reads_a_target_outside_the_document_set(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td); (root/"docs").mkdir()
+            (root/"docs/notes.txt").write_text("# Heading\n")
+            (root/"a.md").write_text("[ok](docs/notes.txt#heading) [bad](docs/notes.txt#missing)\n")
+            found=link_findings(root,["a.md"],{"a.md":(root/"a.md").read_text()})
+            self.assertEqual([(f.code,f.target) for f in found],[("L002","docs/notes.txt#missing")])
+    def test_read_set_reads_across_more_directories_than_the_fd_cache(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
+            root=Path(td)
+            paths=[]
+            for i in range(DIR_FD_MAX+16):
+                name=f"d{i}/deep/doc.md"; (root/name).parent.mkdir(parents=True)
+                (root/name).write_text(f"# Doc {i}\n"); paths.append(name)
+            content,unreadable=read_set(root,sorted(paths))
+            self.assertEqual(unreadable,[])
+            self.assertEqual(len(content),len(paths))
+            self.assertEqual(content["d0/deep/doc.md"],"# Doc 0\n")
+            self.assertEqual(content[f"d{DIR_FD_MAX+15}/deep/doc.md"],f"# Doc {DIR_FD_MAX+15}\n")
+    def test_read_set_keeps_symlinks_inside_the_root(self):
+        with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td, tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as outside:
+            root=Path(td); (root/"docs").mkdir()
+            (root/"docs/real.md").write_text("# Real\n")
+            (Path(outside)/"secret.md").write_text("# Secret\n")
+            try:
+                (root/"docs/alias.md").symlink_to("real.md")
+                (root/"docs/escape.md").symlink_to(Path(outside)/"secret.md")
+            except (OSError,NotImplementedError): self.skipTest("symlinks unavailable")
+            content,unreadable=read_set(root,["docs/alias.md","docs/escape.md"])
+            self.assertEqual(content,{"docs/alias.md":"# Real\n"})
+            self.assertEqual(unreadable,["docs/escape.md"])
     def test_safe_read_enforces_size_and_binary_bounds(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as td:
             root=Path(td)
@@ -2731,11 +2788,13 @@ class MdtoolTests(unittest.TestCase):
             (root/"binary.md").write_text("text\n\0data\n")
             (root/"late.md").write_text("x"*9000+"\0data\n")
             (root/"ok.md").write_text("# ok\n")
+            (root/"sub").mkdir()
             self.assertIsNone(safe_read(root,"big.md"))
             self.assertIsNone(safe_read(root,"binary.md"))
             self.assertIsNotNone(safe_read(root,"late.md"))
             self.assertEqual(safe_read(root,"ok.md"),"# ok\n")
             with self.assertRaises(OSError): safe_read(root,"missing.md")
+            with self.assertRaises(OSError): safe_read(root,"sub")
             with self.assertRaises(OSError): safe_read(root,".")
     def test_outside_git_walks_the_tree_and_skips_work_dirs(self):
         from unittest import mock
