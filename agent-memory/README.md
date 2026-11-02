@@ -293,7 +293,8 @@ Scheduling is explicit and never installed by sync. Render
 `*/15 * * * * agent-sessions mirror sync`. An overlapping run exits 0 with
 `overlapped=1`, a disabled mirror exits 0 with `enabled=0`, and an unreachable mirror exits
 non-zero with the backlog intact for the next run. Routine sync uses HTTPS only and never
-invokes `cf`.
+invokes `cf`. Schedule `agent-sessions mirror gc --apply` separately, for example weekly;
+sync never applies retention.
 
 For a local or offline run, point the same commands at a directory: `agent-sessions sync --central-state DIR`, and `search --central --central-state DIR`. The receiver and the SSH path share one implementation, so the framing, digest checks, and acknowledgements are identical.
 
