@@ -837,7 +837,13 @@ def decode_snapshot_list_response(value) -> dict[str, Any] | None:
     cursor = value.get("next_cursor")
     if cursor is not None:
         parts = decode_cursor(cursor)
-        if parts is None or len(parts) != 2 or not parts[0].isdigit():
+        if parts is None or len(parts) != 2 or decode_digest(parts[1]) is None:
+            return None
+        try:
+            created_at = float(parts[0])
+        except ValueError:
+            return None
+        if _decode_timestamp(created_at) is None:
             return None
     return {"protocol": PROTOCOL, "origin": origin, "snapshots": clean, "next_cursor": cursor}
 

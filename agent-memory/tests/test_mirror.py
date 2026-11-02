@@ -594,6 +594,22 @@ class ClientTests(unittest.TestCase):
             with self.assertRaises(mirror.MirrorError):
                 runtime.get_object("not-a-digest")
 
+    def test_snapshot_list_accepts_a_fractional_timestamp_cursor(self):
+        row = {
+            "id": DIGEST, "origin_host": "origin-a", "created_at": 1762000002.5,
+            "schema_version": 10, "db_digest": DIGEST, "db_size": 15,
+            "objects": 1, "object_bytes": 4, "verified_at": None, "revision": 4,
+        }
+        cursor = mirror.encode_cursor(["1762000002.5", DIGEST])
+        connection = FakeConnection(response({
+            "protocol": 1, "origin": "origin-a", "snapshots": [row], "next_cursor": cursor,
+        }))
+        runtime, _delays = client(Factory(connection))
+        with runtime:
+            listed = runtime.snapshots("origin-a", limit=1)
+        self.assertEqual(listed["next_cursor"], cursor)
+        self.assertEqual(listed["snapshots"][0]["id"], DIGEST)
+
     def test_missing_request_and_response_are_validated(self):
         body = {
             "protocol": 1, "origin": "origin-a",
