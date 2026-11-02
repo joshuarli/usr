@@ -1,5 +1,5 @@
 export const PROTOCOL = 1;
-export const MAX_JSON_BYTES = 8 * 1024 * 1024;
+export const MAX_JSON_BYTES = 12 * 1024 * 1024;
 export const MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 export const MAX_CIPHERTEXT_BYTES = MAX_OBJECT_BYTES + 64 * 1024;
 export const MAX_MISSING_OBJECTS = 20_000;
@@ -8,7 +8,7 @@ export const MAX_GENERATION_ARTIFACTS = 1_000;
 export const MAX_TOMBSTONES = 900;
 export const MAX_SNAPSHOT_BYTES = 2 ** 40;
 export const MAX_SNAPSHOT_CHUNKS = 4_096;
-export const MAX_SNAPSHOT_OBJECTS = 70_000;
+export const MAX_SNAPSHOT_OBJECTS = 100_000;
 export const GC_GRACE_SECONDS = 3_600;
 export const MAX_SOURCE_BYTES = 2 ** 50;
 export const MAX_PAGE = 200;

@@ -6,6 +6,7 @@ import { after, before, test } from "node:test";
 import { Miniflare } from "miniflare";
 
 import { seedDatabase } from "../bench/seed.mjs";
+import { MAX_JSON_BYTES, MAX_OBJECT_BYTES } from "../src/protocol.ts";
 import { loadWorker } from "./harness.mjs";
 
 const worker = await loadWorker();
@@ -14,7 +15,7 @@ const COLLECTOR = "adversarial-collector.access";
 const OTHER = "adversarial-other.access";
 const ORIGIN = "adversarial-a";
 const OTHER_ORIGIN = "adversarial-b";
-const MAX_JSON = 8 * 1024 * 1024;
+const MAX_JSON = MAX_JSON_BYTES;
 
 let miniflare;
 let db;
@@ -651,7 +652,7 @@ test("case 22: large and malformed request rejection", async () => {
     token,
     body: Buffer.from("small"),
     headers: {
-      "X-Plaintext-Digest": "c".repeat(64), "X-Plaintext-Size": String(MAX_JSON + 1), "X-Encoding": "identity",
+      "X-Plaintext-Digest": "c".repeat(64), "X-Plaintext-Size": String(MAX_OBJECT_BYTES + 1), "X-Encoding": "identity",
     },
   });
   assert.equal(hugeObject.status, 400);
@@ -659,7 +660,7 @@ test("case 22: large and malformed request rejection", async () => {
 
 test("case 23: bounded memory and body limits", async () => {
   const { origin, token } = await pair("case-23");
-  const eight = Buffer.alloc(8 * 1024 * 1024, 0x61);
+  const eight = Buffer.alloc(MAX_OBJECT_BYTES, 0x61);
   const stored = await send("PUT", `/api/v1/sync/objects/${digest(eight)}`, {
     token,
     body: eight,
@@ -673,7 +674,7 @@ test("case 23: bounded memory and body limits", async () => {
     token,
     body: Buffer.from("tiny"),
     headers: {
-      "X-Plaintext-Digest": digest(eight), "X-Plaintext-Size": String(8 * 1024 * 1024 + 1),
+      "X-Plaintext-Digest": digest(eight), "X-Plaintext-Size": String(MAX_OBJECT_BYTES + 1),
       "X-Encoding": "identity",
     },
   });

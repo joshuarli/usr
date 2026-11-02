@@ -1,7 +1,7 @@
 {
   "protocol": 1,
   "limits": {
-    "json_bytes": 8388608,
+    "json_bytes": 12582912,
     "object_bytes": 8388608,
     "missing_objects": 20000,
     "cursor_chars": 512,
@@ -11,7 +11,7 @@
     "page": 200,
     "snapshot_bytes": 1099511627776,
     "snapshot_chunks": 4096,
-    "snapshot_objects": 70000,
+    "snapshot_objects": 100000,
     "gc_grace_seconds": 3600,
     "source_bytes": 1125899906842624
   },
