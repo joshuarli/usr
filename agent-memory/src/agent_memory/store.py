@@ -1060,15 +1060,23 @@ class Store:
                     "SELECT id, parent_id, fork_session_id, directory, time_created, time_updated FROM session_v2").fetchall()
                 counts = {row[0]: (row[1], row[2]) for row in connection.execute(
                     "SELECT session_id, count(*), max(time_updated) FROM session_message GROUP BY session_id")}
+                archived_changes = 0
                 if archive is not None:
                     try:
-                        self._archive_database(connection, sessions, counts, archive, forgotten)
+                        archived_changes = self._archive_database(connection, sessions, counts, archive, forgotten)
                     except (OSError, sqlite3.DatabaseError):
                         stats["archive_errors"] += 1
         except (OSError, sqlite3.DatabaseError):
             stats["unreadable"] += 1
             unreadable_paths.add(str(Path(root).absolute()))
             return
+        if archive is not None and (
+                archived_changes > 0
+                or self.db.execute("SELECT 1 FROM archive_generation WHERE harness = ? LIMIT 1", (harness,)).fetchone() is None):
+            try:
+                self._capture_opencode_sessions(archive, stats)
+            except (OSError, sqlite3.DatabaseError, archive_module.ArchiveError):
+                stats["archive_errors"] += 1
         stats["stat_operations"] += 1
         for row in sessions:
             native = clean_native_id(row["id"], database)
@@ -1225,6 +1233,68 @@ class Store:
                     target.execute("INSERT OR REPLACE INTO session_v2 VALUES (?, ?, ?, ?, ?, ?)", tuple(row))
                     for message in source.execute("SELECT type, seq, time_updated, data FROM session_message WHERE session_id = ? ORDER BY seq", (row["id"],)):
                         target.execute("INSERT OR REPLACE INTO session_message VALUES (?, ?, ?, ?, ?)", (row["id"], message["seq"], message["type"], message["time_updated"], message["data"]))
+        return len(changed)
+
+    def _capture_opencode_sessions(self, database, stats):
+        origin = archive_module.origin_for(self.db)
+        with contextlib.closing(_open_database(database)) as connection:
+            sessions = connection.execute(
+                "SELECT id, parent_id, fork_session_id, directory, time_created, time_updated FROM session_v2").fetchall()
+            counts = {row[0]: (int(row[1]), int(row[2] or 0)) for row in connection.execute(
+                "SELECT session_id, count(*), max(time_updated) FROM session_message GROUP BY session_id")}
+            for row in sessions:
+                native = clean_native_id(row["id"], database)
+                count, latest = counts.get(row["id"], (0, 0))
+                if count == 0:
+                    continue
+                previous = archive_module.last_generation(self.db, origin, "opencode", native)
+                if (previous is not None
+                        and int(previous["source_dev"] or 0) == int(row["time_updated"])
+                        and int(previous["source_mtime_ns"] or 0) == latest
+                        and int(previous["source_ctime_ns"] or 0) == count):
+                    continue
+                messages = connection.execute(
+                    "SELECT seq, type, data FROM session_message WHERE session_id = ? ORDER BY seq", (row["id"],)).fetchall()
+                export = bytearray()
+                for message in messages:
+                    export.extend(json.dumps(
+                        {"data": message["data"], "seq": int(message["seq"]), "type": message["type"]},
+                        sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+                    export.extend(b"\n")
+                stats["bytes_read"] += len(export)
+                lineage = row["parent_id"] or row["fork_session_id"]
+                metadata = {
+                    "cwd": row["directory"] if isinstance(row["directory"], str) else "",
+                    "parent": qualified_id("opencode", clean_native_id(lineage, database)) if lineage else None,
+                    "source": json.dumps({"subagent": {"parent": lineage}}) if row["parent_id"] else "user",
+                    "thread_source": "subagent" if row["parent_id"] else "user",
+                    "ancestry": "known",
+                    "branch_tip": None,
+                    "workspaces": json.dumps([row["directory"]], separators=(",", ":")) if row["directory"] else None,
+                    "step_count": None,
+                }
+                generation, created = archive_module.capture_bytes(
+                    self.db, self.archive_dir, "opencode", native, "%s#%s" % (Path(database).absolute(), native),
+                    bytes(export), session_metadata=metadata, workspace=metadata["cwd"] or None,
+                    stat_fields=(int(row["time_updated"]), 0, latest, count), stats=stats)
+                with self.db:
+                    self.db.execute(
+                        "UPDATE sessions SET archive_generation = ? WHERE harness = 'opencode' AND native_id = ? AND origin_host = ?",
+                        (generation, native, origin))
+                if created:
+                    stats["archived"] += 1
+
+    def _purge_opencode_rows(self, native_id):
+        root = self.archive_dir / "opencode"
+        if not root.is_dir():
+            return
+        for database in root.rglob(OPENCODE_DB):
+            if database.is_symlink() or not database.is_file():
+                continue
+            with contextlib.closing(sqlite3.connect(str(database), timeout=10)) as target, target:
+                target.execute("PRAGMA secure_delete = ON")
+                target.execute("DELETE FROM session_message WHERE session_id = ?", (native_id,))
+                target.execute("DELETE FROM session_v2 WHERE id = ?", (native_id,))
 
     def _archived_copy(self, harness, path):
         path = Path(path)
@@ -1247,13 +1317,8 @@ class Store:
 
     def _purge_archive(self, harness, source_path, native_id, origin_host):
         if harness in DATABASE_HARNESSES:
-            database, _, native = source_path.rpartition("#")
-            archive = self._archived_copy(harness, database)
-            if archive.is_file():
-                with contextlib.closing(sqlite3.connect(str(archive), timeout=10)) as target, target:
-                    target.execute("PRAGMA secure_delete = ON")
-                    target.execute("DELETE FROM session_message WHERE session_id = ?", (native,))
-                    target.execute("DELETE FROM session_v2 WHERE id = ?", (native,))
+            self._purge_opencode_rows(native_id)
+            self._purge_generations(origin_host, harness, native_id)
             return
         self._purge_generations(origin_host, harness, native_id)
         archive = self._archived_copy(harness, source_path)
@@ -1271,7 +1336,7 @@ class Store:
         except (OSError, sqlite3.DatabaseError) as exc:
             raise StoreError("cannot read OpenCode database " + database + ": " + str(exc)) from exc
         stats["content_opens"] += 1
-        added = malformed = recognized = unrecognized = 0
+        tally = _Tally()
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (meta["id"],))
             self.db.execute(
@@ -1285,29 +1350,18 @@ class Store:
             if self.db.execute("SELECT 1 FROM sessions WHERE id = ?", (meta["id"],)).fetchone() is None:
                 return False, 0, 0, 0
             for message in messages:
-                text = message["data"]
-                stats["bytes_read"] += len(text)
-                digest = _sha256(text.encode("utf-8"))
-                try:
-                    data = json.loads(text)
-                except ValueError:
-                    self.db.execute("INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')", (meta["id"], message["seq"] * OPENCODE_SUBPOSITIONS))
-                    malformed += 1
-                    continue
-                for sub, record in opencode_events(message["type"], data):
-                    self.db.execute(
-                        "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (meta["id"], message["seq"] * OPENCODE_SUBPOSITIONS + sub, record["kind"], record["text"], record["timestamp"], record["call_id"],
-                         record["raw_type"], digest, record["outcome"]))
-                    added += 1
-                    if record["kind"].startswith("unknown:"):
-                        unrecognized += 1
-                    elif record["kind"] in SUBSTANTIVE_KINDS:
-                        recognized += 1
-            coverage = "unsupported" if recognized == 0 and (unrecognized or malformed) else "degraded" if unrecognized or malformed else "complete"
-            self.db.execute("UPDATE sessions SET coverage = ?, malformed_lines = ?, recognized_events = ?, unrecognized_events = ? WHERE id = ?",
-                            (coverage, malformed, recognized, unrecognized, meta["id"]))
-        return existing is not None, added, malformed, 0
+                stats["bytes_read"] += len(message["data"])
+                self._ingest_opencode_message(meta["id"], message["seq"], message["type"], message["data"], tally)
+            coverage = "unsupported" if tally.recognized == 0 and (tally.unrecognized or tally.malformed) else (
+                "degraded" if tally.unrecognized or tally.malformed else "complete")
+            generation = archive_module.last_generation(
+                self.db, archive_module.origin_for(self.db), "opencode", meta["native_id"])
+            self.db.execute(
+                "UPDATE sessions SET coverage = ?, malformed_lines = ?, recognized_events = ?, unrecognized_events = ?, "
+                "archive_generation = ? WHERE id = ?",
+                (coverage, tally.malformed, tally.recognized, tally.unrecognized,
+                 int(generation["id"]) if generation is not None else None, meta["id"]))
+        return existing is not None, tally.added, tally.malformed, 0
 
     def _refresh_file(self, meta, stats):
         if meta["harness"] in DATABASE_HARNESSES:
@@ -1478,14 +1532,17 @@ class Store:
         with self.db:
             self.db.execute("DELETE FROM sessions WHERE id = ?", (str(session),))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)", (str(session), float(now)))
-            if harness not in DATABASE_HARNESSES and native:
+            if native:
                 self.db.execute(
                     "INSERT OR REPLACE INTO tombstone (origin_host, harness, native_id, scope, forgotten_at) VALUES (?, ?, ?, 'global', ?)",
                     (origin, harness, native, float(now)))
         if row is not None:
             self._purge_archive(row["harness"], row["source_path"], row["native_id"], origin)
-        elif harness not in DATABASE_HARNESSES and native:
-            self._purge_generations(origin, harness, native)
+        else:
+            if harness in DATABASE_HARNESSES and native:
+                self._purge_opencode_rows(native)
+            if native:
+                self._purge_generations(origin, harness, native)
 
     # -- archive transfer and central indexing -------------------------------
 
@@ -1520,8 +1577,8 @@ class Store:
         return all(self.object_intact(digest, size) for digest, size in clean.sizes.items())
 
     def generation_indexed(self, generation):
-        row = self.db.execute("SELECT indexed_at, tombstoned, harness FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
-        return row is not None and (row["indexed_at"] is not None or bool(row["tombstoned"]) or row["harness"] in DATABASE_HARNESSES)
+        row = self.db.execute("SELECT indexed_at, tombstoned FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
+        return row is not None and (row["indexed_at"] is not None or bool(row["tombstoned"]))
 
     def commit_generation(self, manifest, received):
         clean = archive_module.validate_manifest(manifest)
@@ -1596,6 +1653,29 @@ class Store:
                 tally.recognized += 1
         return digest
 
+    def _ingest_opencode_message(self, session_id, seq, message_type, data_text, tally):
+        digest = _sha256(data_text.encode("utf-8"))
+        try:
+            data = json.loads(data_text)
+        except ValueError:
+            self.db.execute(
+                "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
+                (session_id, int(seq) * OPENCODE_SUBPOSITIONS))
+            tally.malformed += 1
+            return digest
+        for sub, record in opencode_events(message_type, data):
+            self.db.execute(
+                "INSERT OR REPLACE INTO events(session, position, kind, text, timestamp, call_id, raw_type, digest, outcome) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (session_id, int(seq) * OPENCODE_SUBPOSITIONS + sub, record["kind"], record["text"],
+                 record["timestamp"], record["call_id"], record["raw_type"], digest, record["outcome"]))
+            tally.added += 1
+            if record["kind"].startswith("unknown:"):
+                tally.unrecognized += 1
+            elif record["kind"] in SUBSTANTIVE_KINDS:
+                tally.recognized += 1
+        return digest
+
     def _assess_coverage(self, session_id, recognized, unrecognized, partial, step_count):
         issues = self.db.execute("SELECT count(*) FROM index_issues WHERE session = ?", (session_id,)).fetchone()[0]
         if recognized == 0 and (unrecognized or issues):
@@ -1610,6 +1690,65 @@ class Store:
                             (session_id, 0))
         return coverage, issues
 
+    def _index_opencode_generation(self, row, generation):
+        native = row["native_id"]
+        origin = row["origin_host"]
+        session_id = self.central_session_id(origin, "opencode", native)
+        metadata = json.loads(row["session_metadata"]) if row["session_metadata"] else {
+            "cwd": row["workspace_path"] or "", "parent": None, "source": None, "thread_source": None,
+            "ancestry": "known", "branch_tip": None, "workspaces": None, "step_count": None}
+        suffix = session_id[len(qualified_id("opencode", native)):]
+        parent = metadata["parent"]
+        tally = _Tally()
+        line_state = {"partial": 0}
+        with self.db:
+            self.db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+            self._insert_session_row({
+                "id": session_id, "project": self._mapped_project(origin, metadata["cwd"]), "cwd": metadata["cwd"],
+                "parent": parent + suffix if parent else None, "source": metadata["source"],
+                "thread_source": metadata["thread_source"], "harness": "opencode",
+                "source_path": "generation:%d" % generation, "updated": float(row["captured_at"]),
+                "file_size": int(row["source_size"]), "file_mtime_ns": 0, "file_ctime_ns": 0,
+                "file_dev": 0, "file_ino": 0, "header_digest": _sha256(("opencode:" + native).encode()),
+                "native_id": native, "ancestry": metadata["ancestry"], "branch_tip": metadata["branch_tip"],
+                "workspaces": metadata["workspaces"], "step_count": metadata["step_count"],
+                "archive_generation": generation,
+            }, origin)
+            if self.db.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone() is None:
+                return
+            indexed = 0
+            for line_offset, line_bytes, line_length in archive_module.read_generation_lines(
+                    self.db, self.archive_dir, generation, line_state):
+                if line_bytes is None:
+                    self.db.execute(
+                        "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'oversized_record')",
+                        (session_id, line_offset))
+                    tally.malformed += 1
+                else:
+                    try:
+                        message = json.loads(line_bytes)
+                        seq = message["seq"]
+                        message_type = message["type"]
+                        data_text = message["data"]
+                        if (isinstance(seq, bool) or not isinstance(seq, int) or seq < 0
+                                or not isinstance(message_type, str) or not isinstance(data_text, str)):
+                            raise ValueError
+                    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                        self.db.execute(
+                            "INSERT OR REPLACE INTO index_issues(session, position, kind) VALUES (?, ?, 'malformed_json')",
+                            (session_id, line_offset))
+                        tally.malformed += 1
+                    else:
+                        self._ingest_opencode_message(session_id, seq, message_type, data_text, tally)
+                indexed = line_offset + line_length
+            coverage, issues = self._assess_coverage(
+                session_id, tally.recognized, tally.unrecognized, line_state["partial"], metadata["step_count"])
+            self.db.execute(
+                "UPDATE sessions SET coverage = ?, indexed_bytes = ?, partial_bytes = ?, malformed_lines = ?, "
+                "recognized_events = ?, unrecognized_events = ? WHERE id = ?",
+                (coverage, indexed, line_state["partial"], issues, tally.recognized, tally.unrecognized, session_id))
+            self.db.execute("UPDATE archive_generation SET indexed_at = ? WHERE id = ?", (time.time(), generation))
+
     def index_generation(self, generation):
         row = self.db.execute("SELECT * FROM archive_generation WHERE id = ?", (int(generation),)).fetchone()
         if row is None:
@@ -1622,6 +1761,7 @@ class Store:
                 self.db.execute("UPDATE archive_generation SET tombstoned = 1 WHERE id = ?", (int(generation),))
             return
         if harness in DATABASE_HARNESSES:
+            self._index_opencode_generation(row, int(generation))
             return
         session_id = self.central_session_id(origin, harness, native)
         first_line = self._first_line(generation)
@@ -1740,6 +1880,8 @@ class Store:
                             (harness, native_id, origin_host))
             self.db.execute("INSERT OR REPLACE INTO forgotten_sessions(id, forgotten_at) VALUES (?, ?)",
                             (session_id, float(forgotten_at)))
+        if harness in DATABASE_HARNESSES:
+            self._purge_opencode_rows(native_id)
         self._purge_generations(origin_host, harness, native_id)
 
     def tombstone_forgotten_at(self, origin_host, harness, native_id):
@@ -1915,8 +2057,36 @@ class Store:
         )
         return [dict(row) for row in rows]
 
+    def _opencode_generation_record(self, generation, position, digest, session):
+        seq, sub = divmod(int(position), OPENCODE_SUBPOSITIONS)
+        state = {"partial": 0}
+        for _offset, line, _length in archive_module.read_generation_lines(
+                self.db, self.archive_dir, int(generation), state):
+            if line is None:
+                continue
+            try:
+                message = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if message.get("seq") != seq:
+                continue
+            data_text = message.get("data")
+            if not isinstance(data_text, str) or not hmac.compare_digest(
+                    _sha256(data_text.encode("utf-8")), str(digest)):
+                raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")
+            record = opencode_record(message.get("type"), data_text, sub)
+            if record is None:
+                raise EvidenceChanged("transcript evidence no longer contains that event")
+            record = dict(record)
+            record.update({"session": str(session), "position": int(position), "digest": str(digest)})
+            return record
+        raise EvidenceUnavailable("indexed OpenCode generation is unavailable")
+
     def _resolve_database_evidence(self, row, session, position, digest):
-        database = row["source_path"].rpartition("#")[0]
+        source = str(row["source_path"])
+        if source.startswith("generation:"):
+            return self._opencode_generation_record(source.split(":", 1)[1], position, digest, session)
+        database = source.rpartition("#")[0]
         seq, sub = divmod(int(position), OPENCODE_SUBPOSITIONS)
         try:
             with contextlib.closing(_open_database(database)) as connection:
@@ -1931,8 +2101,12 @@ class Store:
                 with contextlib.closing(_open_database(str(self._archived_copy(row["harness"], database)))) as connection:
                     message = connection.execute("SELECT type, data FROM session_message WHERE session_id = ? AND seq = ?", (row["native_id"], seq)).fetchone()
             except (OSError, sqlite3.DatabaseError) as exc:
+                if row["archive_generation"] is not None:
+                    return self._opencode_generation_record(row["archive_generation"], position, digest, session)
                 raise EvidenceUnavailable("indexed OpenCode database is unavailable: " + str(exc)) from exc
             if message is None:
+                if row["archive_generation"] is not None:
+                    return self._opencode_generation_record(row["archive_generation"], position, digest, session)
                 if live_unavailable:
                     raise EvidenceUnavailable("indexed OpenCode database is unavailable")
                 raise EvidenceChanged("transcript evidence changed since indexing; refresh the session index")

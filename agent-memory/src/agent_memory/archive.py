@@ -607,6 +607,38 @@ def capture(db, archive_dir, harness, native_id, source_path, *, artifacts=(), s
     return generation, created
 
 
+def capture_bytes(db, archive_dir, harness, native_id, source_path, data, *, session_metadata=None,
+                  workspace=None, stat_fields=(0, 0, 0, 0), stats=None):
+    """Capture an in-memory source as an immutable generation."""
+    stats = stats if stats is not None else {}
+    archive_dir = Path(archive_dir)
+    metadata = normalize_session_metadata(session_metadata)
+    chunks = []
+    written = []
+    try:
+        with object_lock(archive_dir):
+            for start in range(0, len(data), CHUNK_BYTES):
+                chunk = data[start:start + CHUNK_BYTES]
+                digest, size, wrote = _write_object(archive_dir, chunk)
+                if wrote:
+                    written.append((digest, size))
+                    stats["archive_objects"] = stats.get("archive_objects", 0) + 1
+                    stats["archive_bytes"] = stats.get("archive_bytes", 0) + size
+                chunks.append((start, len(chunk), digest))
+            _register_objects(db, written)
+        source_digest = source_digest_of(chunk_digest for _offset, _size, chunk_digest in chunks)
+        identity = manifest_digest(source_digest, len(data), [], metadata)
+        generation, created = publish_generation(
+            db, origin_host=origin_for(db), harness=harness, native_id=native_id, source_path=source_path,
+            source_digest=source_digest, source_size=len(data), identity=identity, metadata=metadata,
+            workspace=workspace, captured=time.time(), chunks=chunks, artifacts=[], stat_fields=stat_fields)
+    finally:
+        _register_objects(db, written)
+    key = "archived" if created else "archive_unchanged"
+    stats[key] = stats.get(key, 0) + 1
+    return generation, created
+
+
 def capture_artifacts(paths, limit=MAX_ARTIFACTS):
     """Read bounded, session-owned artifact files without following symlinks.
 

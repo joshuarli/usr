@@ -753,6 +753,36 @@ class OpenCodeIndexTests(unittest.TestCase):
                 oc_tool("call_3", "shell", {"command": "pytest -q tests/test_cache.py"}, "1 passed in 0.2s", exit=0, status="completed")),
         ]}]
 
+    def test_opencode_sessions_become_generations_and_index_centrally(self):
+        opencode_database(self.data, self.project, self.sessions())
+        with Store(self.state) as store:
+            self.refresh(store)
+            row = store.db.execute(
+                "SELECT archive_generation FROM sessions WHERE id = 'opencode:ses_alpha'").fetchone()
+            self.assertIsNotNone(row["archive_generation"])
+            origin = STORE_MODULE.archive_module.origin_for(store.db)
+            pending = store.pending_generations("central", origin)
+            self.assertEqual(len(pending), 1)
+            manifest = STORE_MODULE.archive_module.generation_manifest(store.db, pending[0]["id"])
+            received = {
+                item["digest"]: store.read_object_bytes(item["digest"])
+                for item in [*manifest["chunks"], *manifest["artifacts"]]
+            }
+            central = Store(self.root / "central")
+            try:
+                central.commit_generation(manifest, received)
+                hits = central.search("KeyError")
+                self.assertEqual(len(hits), 1)
+                self.assertTrue(hits[0]["session"].startswith("opencode:ses_alpha@"))
+                self.assertEqual(central.resolve_evidence(
+                    hits[0]["session"], hits[0]["position"], hits[0]["digest"])["kind"], "tool-output")
+            finally:
+                central.close()
+            store.forget_session("opencode:ses_alpha", 0)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 0)
+            self.assertEqual(len(store.pending_tombstones("central", origin)), 1)
+            self.assertNotIn(b"KeyError", archived_bytes(store))
+
     def test_sessions_messages_and_explicit_exit_codes_are_indexed(self):
         opencode_database(self.data, self.project, self.sessions())
         with Store(self.state) as store:
