@@ -17,6 +17,11 @@ class SyncTests(unittest.TestCase):
         setup = (ROOT / "host/macos/setup-macos").read_text(encoding="utf-8")
         self.assertIn("dns)        step_dns ;;", setup)
 
+    def test_tailscale_ssh_remains_an_explicit_setup_step(self):
+        setup = (ROOT / "host/macos/setup-macos").read_text(encoding="utf-8")
+        self.assertIn("set -- brew packages touchid dns", setup)
+        self.assertIn("tailscale)  step_tailscale ;;", setup)
+
 
 if __name__ == "__main__":
     unittest.main()

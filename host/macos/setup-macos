@@ -10,9 +10,12 @@
 #           touchid     Touch ID for sudo, working inside tmux
 #           dns         unbound as a local caching resolver, and point the system at it
 #                       To undo: networksetup -setdnsservers SERVICE Empty
+#           tailscale   tailscaled as a system service, serving Tailscale SSH
+#                       Needs the GUI app gone and a reboot; see the step's refusal message.
 #   With no STEP the default is: brew packages touchid dns, in that order. Packages come
 #   first because touchid and dns use what they install, and touchid comes before dns so
-#   that later sudo prompts accept a fingerprint.
+#   that later sudo prompts accept a fingerprint. tailscale is not a default: it takes over
+#   the tunnel from the GUI app and signs in through a browser.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -271,6 +274,55 @@ step_dns() {
     fi
 }
 
+# Tailscale SSH's server exists only in the open source tailscaled build, and only one
+# variant can own the tunnel, so the GUI app has to go first.
+tailscale_gui_app=/Applications/Tailscale.app
+
+tailscale_service_state() {
+    sudo brew services list | awk '$1 == "tailscale" { print $2; exit }'
+}
+
+tailscale_ssh_enabled() {
+    sudo tailscale debug prefs 2>/dev/null | grep -q '"RunSSH": true'
+}
+
+step_tailscale() {
+    find_brew || die "Homebrew is missing; run: setup-macos brew"
+    [ -x "$(brew --prefix)/bin/tailscale" ] || die "tailscale is not installed; run: setup-macos packages"
+    if [ -e "$tailscale_gui_app" ]; then
+        die "The GUI app cannot serve Tailscale SSH. Quit Tailscale, then: sudo rm -rf $tailscale_gui_app && reboot && setup-macos tailscale"
+    fi
+
+    if $dry; then
+        printf '   would run: sudo brew services start tailscale\n'
+        printf '   would run: sudo tailscale up --ssh\n'
+        return
+    fi
+
+    need_sudo
+    if [ "$(tailscale_service_state)" = started ]; then
+        info "tailscaled is running"
+    else
+        info "Starting tailscaled as a system service"
+        sudo brew services start tailscale
+        tries=0
+        until [ "$(tailscale_service_state)" = started ]; do
+            tries=$((tries + 1))
+            [ "$tries" -lt 10 ] || die "tailscaled did not start; check: sudo brew services list"
+            sleep 1
+        done
+    fi
+
+    if tailscale_ssh_enabled; then
+        info "Tailscale SSH is enabled"
+        return
+    fi
+    info "Enabling Tailscale SSH; tailscale prints a sign-in URL if the node is logged out"
+    sudo tailscale up --ssh
+    tailscale_ssh_enabled || die "Tailscale SSH is still off; check: sudo tailscale debug prefs"
+    info "Tailscale SSH is enabled"
+}
+
 # ── main ──────────────────────────────────────────────────────────────────────
 [ "$(uname -s)" = Darwin ] || die "macOS only"
 
@@ -282,7 +334,7 @@ fi
 
 for step in "$@"; do
     case $step in
-        brew|packages|touchid|dns) ;;
+        brew|packages|touchid|dns|tailscale) ;;
         *) die "unknown step: $step (see the usage at the top of this script)" ;;
     esac
 done
@@ -294,5 +346,6 @@ while [ $# -gt 0 ]; do
         packages)   step_packages ;;
         touchid)    step_touchid ;;
         dns)        step_dns ;;
+        tailscale)  step_tailscale ;;
     esac
 done
