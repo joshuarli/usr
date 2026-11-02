@@ -141,6 +141,34 @@ test("missing objects are scoped to the collector origin", async (t) => {
   assert.equal(body.known[0].ciphertext_digest, digest("known-ciphertext"));
 });
 
+test("missing objects returns every known object across query chunks", async (t) => {
+  const { db, env } = await runtime(t);
+  const insert = db.prepare(
+    "INSERT INTO remote_object(plaintext_digest, plaintext_size, encoding, ciphertext_digest, ciphertext_size, origin_host, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)",
+  );
+  const known = Array.from({ length: 181 }, (_, index) => ({
+    plaintext_digest: digest("bulk-" + String(index)),
+    size: index + 1,
+  }));
+  await db.batch(known.map((object) => insert.bind(
+    object.plaintext_digest, object.size, "identity", digest("bulk-ciphertext-" + object.plaintext_digest),
+    object.size + 40, ORIGIN, 1,
+  )));
+  const absent = { plaintext_digest: digest("bulk-absent"), size: 1 };
+  const response = await worker.fetch(postJson("/api/v1/sync/objects/missing", {
+    protocol: 1,
+    origin: ORIGIN,
+    objects: [...known, absent].map((object) => ({
+      plaintext_digest: object.plaintext_digest,
+      size: object.size,
+    })),
+  }), env, collector());
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.known.length, known.length);
+  assert.deepEqual(body.missing.map((object) => object.plaintext_digest), [absent.plaintext_digest]);
+});
+
 test("wrong methods are refused with an Allow header", async (t) => {
   const { env } = await runtime(t);
   const hello = await worker.fetch(request("/api/v1/sync/hello"), env, collector());

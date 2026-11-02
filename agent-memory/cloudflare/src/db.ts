@@ -159,17 +159,18 @@ export async function readKnownObjects(
   origin: string,
   digests: readonly string[],
 ): Promise<readonly RemoteObjectRow[]> {
-  const rows: RemoteObjectRow[] = [];
+  const statements: D1PreparedStatement[] = [];
   for (let start = 0; start < digests.length; start += QUERY_CHUNK) {
     const chunk = digests.slice(start, start + QUERY_CHUNK);
     const placeholders = chunk.map(() => "?").join(",");
-    const result = await db.prepare(
+    statements.push(db.prepare(
       `SELECT plaintext_digest, plaintext_size, encoding, ciphertext_digest, ciphertext_size
        FROM remote_object WHERE origin_host = ? AND plaintext_digest IN (${placeholders})`,
-    ).bind(origin, ...chunk).all<RemoteObjectRow>();
-    rows.push(...result.results);
+    ).bind(origin, ...chunk));
   }
-  return rows;
+  if (statements.length === 0) return [];
+  const results = await db.batch<RemoteObjectRow>(statements);
+  return results.flatMap((result) => result.results);
 }
 
 export async function readObjectByCiphertext(
@@ -229,14 +230,19 @@ export async function readObjectSizes(
   origin: string,
   digests: readonly string[],
 ): Promise<ReadonlyMap<string, number>> {
-  const sizes = new Map<string, number>();
+  const statements: D1PreparedStatement[] = [];
   for (let start = 0; start < digests.length; start += QUERY_CHUNK) {
     const chunk = digests.slice(start, start + QUERY_CHUNK);
     const placeholders = chunk.map(() => "?").join(",");
-    const result = await db.prepare(
+    statements.push(db.prepare(
       `SELECT plaintext_digest, plaintext_size FROM remote_object
        WHERE origin_host = ? AND plaintext_digest IN (${placeholders})`,
-    ).bind(origin, ...chunk).all<{ readonly plaintext_digest: string; readonly plaintext_size: number }>();
+    ).bind(origin, ...chunk));
+  }
+  if (statements.length === 0) return new Map();
+  const sizes = new Map<string, number>();
+  const results = await db.batch<{ readonly plaintext_digest: string; readonly plaintext_size: number }>(statements);
+  for (const result of results) {
     for (const row of result.results) sizes.set(row.plaintext_digest, row.plaintext_size);
   }
   return sizes;
