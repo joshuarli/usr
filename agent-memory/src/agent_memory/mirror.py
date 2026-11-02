@@ -1874,7 +1874,8 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
         snapshot_ready = needs_snapshot
         if needs_snapshot:
             retry_snapshot = pinned is not None and pinned.get("last_error") is not None
-            snapshot_ready = retry_snapshot or _snapshot_due(runtime, origin)
+            learning_changed = learning_pending or journal_before > 0
+            snapshot_ready = retry_snapshot or learning_changed or _snapshot_due(runtime, origin)
             if not snapshot_ready:
                 counters["snapshots_deferred"] += 1
         if needs_snapshot and snapshot_ready:
