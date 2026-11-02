@@ -92,18 +92,21 @@ explanation if a check fails. The server install then:
 
 The server base also installs Tailscale. It loads `tun` at boot, enables and
 starts the `tailscale` OpenRC service, and enables Tailscale SSH on a logged-in
-node. Pass an auth key to log in during provisioning:
+node. For an unattended install, create a reusable auth key in the Tailscale
+admin console and pass it during provisioning:
 
 ```sh
 wget -O - https://17166969.xyz/setup.sh | TS_AUTHKEY=tskey-auth-... sh
 ```
 
-Without `TS_AUTHKEY`, the install leaves Tailscale logged out and prints
-`doas tailscale up --ssh`; run that afterward to authenticate and enable SSH.
-The node name comes from the machine hostname. Tailscale SSH also needs an
-`ssh` rule for the node in the tailnet policy, which the provisioner does not
-change. Once logged in, tailscaled manages `/etc/resolv.conf` through the
-`resolvconf` dependency, so MagicDNS names resolve on the machine.
+Without `TS_AUTHKEY`, an install with a terminal logs in interactively: it
+prints a Tailscale URL and waits up to two minutes for you to finish. A run with
+output redirected leaves Tailscale logged out and prints
+`doas tailscale up --ssh` instead. The node name comes from the machine
+hostname. Tailscale SSH also needs an `ssh` rule for the node in the tailnet
+policy, which the provisioner does not change. Once logged in, tailscaled
+manages `/etc/resolv.conf` through the `resolvconf` dependency, so MagicDNS
+names resolve on the machine.
 
 The desktop layer runs its own preflight checks before the first change, then:
 

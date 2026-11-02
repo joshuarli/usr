@@ -68,6 +68,13 @@ setup_tailscale() {
 			if [ -n "${TS_AUTHKEY:-}" ]; then
 				tailscale up --ssh --auth-key="$TS_AUTHKEY" --timeout=60s >/dev/null ||
 					die 'tailscale up failed; check TS_AUTHKEY and the tailnet policy'
+			elif [ -t 2 ]; then
+				printf 'home: logging in to Tailscale; open the URL below\n' >&2
+				if tailscale up --ssh --timeout=120s; then
+					printf 'home: logged in to Tailscale with SSH enabled\n' >&2
+				else
+					printf 'home: tailscale login did not finish; run: doas tailscale up --ssh\n' >&2
+				fi
 			else
 				say 'tailscale is logged out; run: doas tailscale up --ssh'
 			fi
