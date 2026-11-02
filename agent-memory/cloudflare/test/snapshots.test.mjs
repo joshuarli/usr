@@ -341,6 +341,24 @@ test("gc prunes one snapshot per batch and keeps the rest referenced", async (t)
   assert.equal(remaining.count, 1);
 });
 
+test("gc drops a verified snapshot once it falls outside the weekly window", async (t) => {
+  const { db, env } = await runtime(t);
+  const now = Date.now() / 1000;
+  const oldChunk = await storeObject(env, Buffer.from("old verified chunk"));
+  const newChunk = await storeObject(env, Buffer.from("new snapshot chunk"));
+  const oldSnapshot = snapshotFor([oldChunk], [], { idSeed: "old verified", createdAt: now - 35 * 86_400 });
+  const newest = snapshotFor([newChunk], [], { idSeed: "newest", createdAt: now });
+  assert.equal((await commitSnapshot(env, oldSnapshot, 0)).response.status, 200);
+  assert.equal((await commitSnapshot(env, newest, 1)).response.status, 200);
+  await db.prepare("UPDATE snapshot SET verified_at = ? WHERE id = ?")
+    .bind(now - 34 * 86_400, oldSnapshot.id).run();
+
+  const report = await gc(env, false);
+  assert.equal(report.response.status, 200, JSON.stringify(report.body));
+  assert.equal(report.body.snapshots_pruned, 1);
+  assert.equal(report.body.snapshots_retained, 1);
+});
+
 test("gc retains daily snapshots even when none are verified", async (t) => {
   const { db, env } = await runtime(t);
   const now = Date.now() / 1000;

@@ -244,7 +244,8 @@ generation the snapshot does not already contain, including work committed by an
 collector; it activates no project or review grant. `agent-sessions mirror gc` reports unreferenced objects without
 deleting; `--apply` prunes snapshots outside the 7-daily/4-weekly retention and sweeps
 objects unreferenced for an hour, both in bounded batches so a large backlog can be drained
-without one oversized request. `agent-sessions mirror rotate --recipients FILE
+without one oversized request. A verified snapshot is kept only while it is inside that
+four-week window, so an old attestation cannot pin storage forever. `agent-sessions mirror rotate --recipients FILE
 --identity NEWKEY` re-encrypts the origin to a new recipient set and leaves the old identity
 unable to read the new ciphertext.
 

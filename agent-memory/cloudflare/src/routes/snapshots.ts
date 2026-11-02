@@ -97,7 +97,9 @@ function retainedSnapshotIds(rows: readonly SnapshotRow[], now: number): Set<str
   if (newest !== undefined) keep.add(newest.id);
   const verified = sorted.filter((row) => row.verified_at !== null);
   const newestVerified = verified[0];
-  if (newestVerified !== undefined) keep.add(newestVerified.id);
+  if (newestVerified !== undefined && now - newestVerified.created_at <= 4 * WEEK_SECONDS) {
+    keep.add(newestVerified.id);
+  }
   const days = new Map<number, SnapshotRow>();
   const weeks = new Map<number, SnapshotRow>();
   for (const row of sorted) {
