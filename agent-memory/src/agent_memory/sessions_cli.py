@@ -537,13 +537,13 @@ def _mirror_sync(args, store):
             print("committed=%d duplicate=%d tombstoned=%d objects_stored=%d manifests=%d "
                   "bytes_plaintext=%d bytes_compressed=%d bytes_ciphertext=%d tombstones_fetched=%d "
                   "tombstones_pushed=%d learning_changes=%d learning_deletes=%d "
-                  "snapshots_created=%d unchanged=%d endpoint=%s store=%s revision=%d" % (
+                  "snapshots_created=%d snapshots_deferred=%d unchanged=%d endpoint=%s store=%s revision=%d" % (
                       result["generations_committed"], result["generations_duplicate"],
                       result["generations_tombstoned"], result["objects_stored"], result["manifests_uploaded"],
                       result["bytes_plaintext"], result["bytes_compressed"], result["bytes_ciphertext"],
                       result["tombstones_fetched"], result["tombstones_pushed"],
                       result["learning_changes"], result["learning_deletes"],
-                      result["snapshots_created"], int(result["unchanged"]),
+                      result["snapshots_created"], result["snapshots_deferred"], int(result["unchanged"]),
                       config.url, result["store_id"], result["revision"]))
         return 0
     finally:
