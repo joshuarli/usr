@@ -1,11 +1,11 @@
 Prefix: USR
-Next: 22
+Next: 23
 
 ### USR-21 · P2 · A snapshot commit ships every pinned object in one request
 
 - **Area:** Agent learning
 - **Where:** `agent-memory/src/agent_memory/mirror.py` (`upload_snapshot`), `agent-memory/cloudflare/src/routes/snapshots.ts`, `agent-memory/cloudflare/src/db.ts` (`commitSnapshot`)
-- **Problem:** A recovery snapshot commit carries one entry for every archive object its database references, plus the chunk list, so the request grows with the archive. This archive reached 58,134 objects against a 70,000 protocol cap and an 8 MiB JSON body bound, and the client refused the first snapshot three times before the limit was raised. Past the cap the sync fails with a named limit and commits no recovery point, and the Worker inserts roughly 3,800 statements in a single `db.batch()` for it.
+- **Problem:** A recovery snapshot commit carries one entry for every archive object its database references, plus the chunk list, so the request grows with the archive. This archive reached 58,134 objects against a 70,000 protocol cap and an 8 MiB JSON body bound, and the client refused the first snapshot three times before the limit was raised. The cap is now 100,000 objects and 12 MiB, and this archive already references 70,732, so the structural limit remains. Past the cap the sync fails with a named limit and commits no recovery point, and the Worker inserts thousands of statements in a single `db.batch()` for it.
 - **Recommendation:** Page the object list into a staging table, then commit with a final request that verifies the staged set is complete and unchanged, so request size, D1 statements per batch, and Worker memory stop scaling with the archive.
 - **Fix with:** none
 - **Effort:** M
@@ -46,3 +46,12 @@ Next: 22
 - **Recommendation:** After the quota resets, run `cd .work/pi-capture && vault GEMINI_API_KEY -- pi -p --no-approve --no-skills 'Call the subagent tool exactly once, in the foreground, with tasks set to two scout children that run in parallel: the first reads a.txt and reports its line count, the second reads b.txt and reports its line count. Do not read any documentation first.'` (create `a.txt` and `b.txt` first), using the default `TMPDIR`. Diff `$TMPDIR/pi-subagents-uid-*` and `~/.pi/agent/sessions` before and after. Add the child session location as a Pi root if it is outside the sessions directory, check that `parentSession` links the child to the parent in `agent-sessions recent`, and add a sanitized fixture to `agent-memory/tests/test_sessions.py`. Archive the run artifacts only if a consumer needs them.
 - **Fix with:** none
 - **Effort:** S
+
+### USR-22 · P3 · Mirror durability is bounded by the 15-minute capture interval
+
+- **Area:** Operability
+- **Where:** `agent-memory/src/agent_memory/mirror.py` (`sync` calls `refresh` before upload, `pending_report`), `agent-memory/src/agent_memory/store.py` (`pending_generations`, `transfer_generation`), `dotfiles/launchd/com.josh.agent-sessions-mirror.plist.in:25`
+- **Problem:** Reads and writes are local-first, but remote durability is eventual. The scheduled sync captures first and uploads second every 900 seconds, so a session written just after a run can stay local-only for about 15 minutes plus upload time. If the host is lost in that window, the remote has no copy. Durability is visible only as aggregate pending generations, objects, and bytes in `mirror status`, not per session. Shortening the interval also shortens the capture interval, and each changed session creates an immutable generation with new 64 KiB chunks, so busy sessions multiply generations, objects, and mirror storage; event-driven capture at session end avoids that churn but hooks are per-harness and unreliable. Synchronous acknowledgement would close the window but couple local writes to Cloudflare latency and availability, contrary to local-first.
+- **Recommendation:** Choose an RPO target, then make the smallest matching change. For about five minutes, shorten the scheduled interval and keep uploads asynchronous. For seconds, add a debounced end-of-turn capture-and-sync trigger while retaining the periodic backstop. Add per-session durable and pending reporting by joining `sessions`, `archive_generation`, and `transfer_generation`, and keep synchronous acknowledgement only behind an explicit `--wait` or `--durable` path. Account for generation and object growth before shortening capture itself.
+- **Fix with:** do
+- **Effort:** M
