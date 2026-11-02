@@ -306,6 +306,41 @@ test("gc keeps the newest verified snapshot and sweeps only old unreferenced obj
   assert.notEqual(await bucket.get(`v1/o/${newestChunk.ciphertext}`), null);
 });
 
+test("gc prunes one snapshot per batch and keeps the rest referenced", async (t) => {
+  const { db, env } = await runtime(t);
+  const now = Date.now() / 1000;
+  const firstChunk = await storeObject(env, Buffer.from("first prunable chunk"));
+  const secondChunk = await storeObject(env, Buffer.from("second prunable chunk"));
+  const newestChunk = await storeObject(env, Buffer.from("newest chunk"));
+  const first = snapshotFor([firstChunk], [], { idSeed: "first prunable", createdAt: now - 35 * 86_400 });
+  const second = snapshotFor([secondChunk], [], { idSeed: "second prunable", createdAt: now - 34 * 86_400 });
+  const newest = snapshotFor([newestChunk], [], { idSeed: "newest", createdAt: now });
+  assert.equal((await commitSnapshot(env, first, 0)).response.status, 200);
+  assert.equal((await commitSnapshot(env, second, 1)).response.status, 200);
+  assert.equal((await commitSnapshot(env, newest, 2)).response.status, 200);
+
+  const one = await gc(env, true);
+  assert.equal(one.response.status, 200, JSON.stringify(one.body));
+  assert.equal(one.body.snapshots_pruned, 1);
+  assert.equal(one.body.objects_marked, 1);
+  assert.equal((await count(db, "snapshot")).count, 2);
+  const pending = await db.prepare(
+    "SELECT plaintext_digest FROM remote_object WHERE gc_pending_at IS NOT NULL",
+  ).all();
+  const pendingDigests = new Set(pending.results.map((row) => row.plaintext_digest));
+  assert.equal(pendingDigests.size, 1);
+  assert.ok(pendingDigests.has(firstChunk.plaintext) !== pendingDigests.has(secondChunk.plaintext));
+  assert.equal(pendingDigests.has(newestChunk.plaintext), false);
+
+  const two = await gc(env, true);
+  assert.equal(two.response.status, 200, JSON.stringify(two.body));
+  assert.equal(two.body.snapshots_pruned, 1);
+  assert.equal(two.body.objects_marked, 1);
+  assert.equal((await count(db, "snapshot")).count, 1);
+  const remaining = await db.prepare("SELECT count(*) AS count FROM snapshot WHERE id = ?").bind(newest.id).first();
+  assert.equal(remaining.count, 1);
+});
+
 test("gc retains daily snapshots even when none are verified", async (t) => {
   const { db, env } = await runtime(t);
   const now = Date.now() / 1000;

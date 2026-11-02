@@ -90,6 +90,26 @@ class RecoveryTests(unittest.TestCase):
         store.refresh({"cmd": [cmd_root], "agy": [agy_root]}, project=None)
         return store
 
+    def test_mirror_snapshot_drops_the_rebuilt_search_projection(self):
+        state = self.root / "snapshot-source"
+        home, cmd_root, agy_root = self.source_home("snapshot", "snapshot evidence", "snapshot agy", "conv-s")
+        store = self.capture(state, home, cmd_root, agy_root)
+        try:
+            self.assertGreater(store.db.execute("SELECT count(*) FROM events").fetchone()[0], 0)
+            destination = self.root / "mirror-snapshot"
+            metadata = BACKUP.snapshot(store, destination)
+        finally:
+            store.close()
+        database = destination / "sessions.sqlite3"
+        with sqlite3.connect(database) as connection:
+            self.assertEqual(connection.execute("SELECT count(*) FROM events").fetchone()[0], 0)
+            self.assertEqual(connection.execute("SELECT count(*) FROM events_fts").fetchone()[0], 0)
+            self.assertGreater(
+                connection.execute("SELECT count(*) FROM archive_generation").fetchone()[0], 0)
+            self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        self.assertGreater(metadata["objects_count"], 0)
+        self.assertLess(database.stat().st_size, 1_000_000)
+
     def test_two_sources_one_central_and_a_restored_third_host(self):
         central_state = self.root / "central"
         home, cmd_root, agy_root = self.source_home("a", "alpha evidence", "antigravity alpha", "conv-a")

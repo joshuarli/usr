@@ -1099,7 +1099,7 @@ class SyncStore:
 
 class SyncClient:
     def __init__(self, hello=None, tombstone_pages=None, duplicate=None, commit=None, error=None,
-                 stored_ciphertext=None):
+                 stored_ciphertext=None, snapshot_rows=None):
         self.hello_body = hello or {
             "protocol": 1, "store_id": "usr-memories", "origin": "origin-a", "revision": 2,
             "tombstone_watermark": 0, "learning": {"revision": 0, "digest": None, "records": 0},
@@ -1110,8 +1110,14 @@ class SyncClient:
         self.commit = commit
         self.error = error
         self.stored_ciphertext = stored_ciphertext
+        self.snapshot_rows = list(snapshot_rows or [])
         self.calls = []
         self.puts = []
+
+    def snapshots(self, origin, limit=100, before=None):
+        self.calls.append(("snapshots", origin, limit))
+        return {"protocol": 1, "origin": origin, "snapshots": list(self.snapshot_rows),
+                "next_cursor": None}
 
     def hello(self, origin):
         self.calls.append(("hello", origin))
@@ -1266,6 +1272,34 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(snapshot.call_args.kwargs["revision"], 3)
         self.assertEqual(result["snapshots_created"], 1)
         self.assertEqual(store.writes[-1][1:4], ("usr-memories", 4, 0))
+
+    def test_a_changed_sync_defers_the_snapshot_inside_the_interval(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(commit=commit, snapshot_rows=[{"created_at": time.time()}])
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), mock.patch.object(
+                mirror, "upload_snapshot") as snapshot:
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        snapshot.assert_not_called()
+        self.assertEqual(result["generations_committed"], 1)
+        self.assertEqual(result["snapshots_created"], 0)
+        self.assertEqual(result["snapshots_deferred"], 1)
+
+    def test_a_due_snapshot_is_created_after_the_interval(self):
+        commit = {"protocol": 1, "origin": "origin-a", "generation": 7,
+                  "manifest_digest": self.manifest["manifest_digest"], "revision": 3, "duplicate": False}
+        store = SyncStore(pending_generations=[self.generation()])
+        runtime = SyncClient(commit=commit, snapshot_rows=[
+            {"created_at": time.time() - mirror.SNAPSHOT_MIN_INTERVAL_SECONDS - 60}])
+        with mock.patch.object(mirror, "upload_objects", return_value=upload_counters()), mock.patch.object(
+                mirror, "upload_snapshot",
+                side_effect=lambda *args, **kwargs: snapshot_counters(kwargs["revision"] + 1)):
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"],
+                                 prepare=self.prepared)
+        self.assertEqual(result["snapshots_created"], 1)
+        self.assertEqual(result["snapshots_deferred"], 0)
 
     def test_a_duplicate_generation_ack_skips_objects_and_refreshes_the_revision(self):
         duplicate = generation_row(self.manifest)
@@ -1604,6 +1638,7 @@ class MirrorIntegrationTests(unittest.TestCase):
             self.assertEqual(first["snapshots_created"], 1)
             snapshots = self.snapshots()
             self.assertEqual(len(snapshots), 1)
+            self.assertLess(snapshots[0]["db_size"], 1_000_000)
             snapshot_id = snapshots[0]["id"]
 
             self.capture(store, "native-2", "second")
@@ -1643,6 +1678,7 @@ class MirrorIntegrationTests(unittest.TestCase):
             self.assertEqual(len(generations), 2)
             for row in generations:
                 archive_module.verify_generation(restored.db, restored.archive_dir, row["id"])
+            self.assertGreater(restored.db.execute("SELECT count(*) FROM events").fetchone()[0], 0)
             tables = {row[0] for row in restored.db.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'")}
             if "learning_projects" in tables:

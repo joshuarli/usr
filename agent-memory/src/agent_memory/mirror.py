@@ -37,6 +37,8 @@ MAX_SNAPSHOT_BYTES = 1 << 40
 MAX_SNAPSHOT_CHUNKS = 4096
 MAX_SNAPSHOT_OBJECTS = 70000
 GC_GRACE_SECONDS = 3600
+MAX_GC_SWEEP = 200
+SNAPSHOT_MIN_INTERVAL_SECONDS = 6 * 60 * 60
 MAX_SOURCE_BYTES = 1 << 50
 MAX_PAGE = 200
 MAX_CURSOR_CHARS = 512
@@ -1617,7 +1619,8 @@ def _empty_sync_counters() -> dict[str, Any]:
         "manifest_plaintext_bytes": 0, "manifest_compressed_bytes": 0,
         "manifest_ciphertext_bytes": 0,
         "tombstones_fetched": 0, "tombstones_pushed": 0,
-        "snapshots_created": 0, "snapshots_duplicate": 0, "snapshot_chunks_uploaded": 0,
+        "snapshots_created": 0, "snapshots_duplicate": 0, "snapshots_deferred": 0,
+        "snapshot_chunks_uploaded": 0,
         "snapshot_objects_uploaded": 0, "snapshot_bytes": 0,
         "learning_batches": 0, "learning_changes": 0, "learning_deletes": 0,
     }
@@ -1687,6 +1690,11 @@ def _apply_remote_tombstones(store, runtime, origin, store_id, watermark):
         cursor = page["next_cursor"]
         if cursor is None:
             return watermark, applied
+
+
+def _snapshot_due(runtime, origin):
+    rows = runtime.snapshots(origin, 1)["snapshots"]
+    return not rows or time.time() - float(rows[0]["created_at"]) >= SNAPSHOT_MIN_INTERVAL_SECONDS
 
 
 def sync(store, config, remote_name, *, refresh=None, client=None, upload_client_factory=None,
@@ -1858,10 +1866,18 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
         if changed or (pinned is not None and pinned.get("last_error") is not None):
             store.write_mirror_remote(remote_name, store_id, revision, watermark,
                                       learning_seq=learning_seq, learning_digest=learning_digest)
-        if (counters["generations_committed"] > 0 or counters["generations_tombstoned"] > 0
-                or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0
-                or learning_pending or journal_before > 0
-                or (pinned is not None and pinned.get("last_error") is not None)):
+        needs_snapshot = (
+            counters["generations_committed"] > 0 or counters["generations_tombstoned"] > 0
+            or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0
+            or learning_pending or journal_before > 0
+            or (pinned is not None and pinned.get("last_error") is not None))
+        snapshot_ready = needs_snapshot
+        if needs_snapshot:
+            retry_snapshot = pinned is not None and pinned.get("last_error") is not None
+            snapshot_ready = retry_snapshot or _snapshot_due(runtime, origin)
+            if not snapshot_ready:
+                counters["snapshots_deferred"] += 1
+        if needs_snapshot and snapshot_ready:
             try:
                 snapshot: dict[str, Any] = upload_snapshot(
                     store, config, client=runtime, origin=origin, revision=revision,
@@ -2338,7 +2354,19 @@ def gc(config, *, apply=False, client=None) -> dict[str, Any]:
     runtime = client or MirrorClient(config)
     try:
         origin = _collector_origin(runtime)
-        return runtime.gc(origin, apply)
+        result = runtime.gc(origin, apply)
+        if not apply:
+            return result
+        total = dict(result)
+        for _batch in range(10000):
+            if result["objects_swept"] < MAX_GC_SWEEP and result["snapshots_pruned"] == 0:
+                return total
+            result = runtime.gc(origin, True)
+            for key in ("snapshots_pruned", "objects_marked", "bytes_marked",
+                        "objects_swept", "bytes_swept"):
+                total[key] += result[key]
+            total["snapshots_retained"] = result["snapshots_retained"]
+        raise MirrorError("gc_incomplete", "garbage collection did not finish in 10000 batches")
     finally:
         if owner:
             runtime.close()

@@ -21,6 +21,7 @@ from agent_memory.learning import apply_remote_forget
 
 MANIFEST = "manifest.json"
 SNAPSHOT_CHUNK_BYTES = 1 << 20
+SNAPSHOT_DERIVED_TABLES = ("events", "index_issues", "unindexed_sources")
 
 
 class BackupError(RuntimeError):
@@ -129,6 +130,23 @@ def snapshot(store, destination, publish=None):
         raise
 
 
+def _strip_derived_index(connection, tables):
+    """Remove the transcript search projection; restore rebuilds it from captured bytes."""
+    triggers = [row[0] for row in connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'events' AND sql IS NOT NULL")]
+    for name in ("events_ai", "events_ad", "events_au"):
+        connection.execute("DROP TRIGGER IF EXISTS " + name)
+    for name in SNAPSHOT_DERIVED_TABLES:
+        if name in tables:
+            connection.execute("DELETE FROM " + name)
+    if "events_fts" in tables:
+        connection.execute("INSERT INTO events_fts(events_fts) VALUES('delete-all')")
+    for sql in triggers:
+        connection.execute(sql)
+    connection.commit()
+    connection.execute("VACUUM")
+
+
 def _snapshot_metadata(database):
     with contextlib.closing(sqlite3.connect(str(database))) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -139,6 +157,7 @@ def _snapshot_metadata(database):
                 connection.execute("UPDATE learning_projects SET enabled = 0, grant_source = 'project'")
             if "learning_global_grant" in tables:
                 connection.execute("DELETE FROM learning_global_grant")
+        _strip_derived_index(connection, tables)
         if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise BackupError("snapshot database failed integrity_check")
         schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])

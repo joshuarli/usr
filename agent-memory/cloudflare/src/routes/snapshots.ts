@@ -42,6 +42,8 @@ const SNAPSHOT_PREFIX = "/api/v1/sync/snapshots/";
 const GC_PATH = "/api/v1/sync/gc";
 const DAY_SECONDS = 86_400;
 const WEEK_SECONDS = 604_800;
+const MAX_GC_SWEEP = 200;
+const MAX_GC_PRUNE = 1;
 
 function snapshotJson(row: SnapshotRow): Record<string, unknown> {
   return {
@@ -337,8 +339,9 @@ async function gc(
     const snapshots = await readSnapshots(env.DB, gcBody.origin, 1_000);
     const retained = retainedSnapshotIds(snapshots, now);
     const pruned = snapshots.filter((row) => !retained.has(row.id)).map((row) => row.id);
-    if (gcBody.apply && pruned.length > 0) await deleteSnapshots(env.DB, pruned);
-    const excluded = gcBody.apply ? [] : pruned;
+    const pruneBatch = gcBody.apply ? pruned.slice(0, MAX_GC_PRUNE) : pruned;
+    if (gcBody.apply && pruneBatch.length > 0) await deleteSnapshots(env.DB, pruneBatch);
+    const excluded = gcBody.apply ? pruneBatch : pruned;
     const pending = await readUnreferencedObjects(env.DB, gcBody.origin, excluded);
     const markable = pending.filter((row) => row.gc_pending_at === null);
     if (gcBody.apply && markable.length > 0) {
@@ -346,9 +349,10 @@ async function gc(
     }
     const cutoff = now - GC_GRACE_SECONDS;
     const sweepable = await readUnreferencedObjects(env.DB, gcBody.origin, excluded, cutoff);
+    const batch = gcBody.apply ? sweepable.slice(0, MAX_GC_SWEEP) : sweepable;
     let swept = 0;
     let sweptBytes = 0;
-    for (const row of sweepable) {
+    for (const row of batch) {
       if (gcBody.apply) {
         const deleted = await deleteObjectIfGcEligible(env.DB, gcBody.origin, row.plaintext_digest, cutoff, excluded);
         if (!deleted) continue;
@@ -361,8 +365,8 @@ async function gc(
       protocol: PROTOCOL,
       origin: gcBody.origin,
       apply: gcBody.apply,
-      snapshots_retained: snapshots.length - pruned.length,
-      snapshots_pruned: pruned.length,
+      snapshots_retained: snapshots.length - pruneBatch.length,
+      snapshots_pruned: pruneBatch.length,
       objects_marked: markable.length,
       bytes_marked: markable.reduce((total, row) => total + row.ciphertext_size, 0),
       objects_swept: swept,
