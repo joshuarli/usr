@@ -354,15 +354,17 @@ async function gc(
     const batch = gcBody.apply ? sweepable.slice(0, MAX_GC_SWEEP) : sweepable;
     let swept = 0;
     let sweptBytes = 0;
+    const deletedKeys: string[] = [];
     for (const row of batch) {
       if (gcBody.apply) {
         const deleted = await deleteObjectIfGcEligible(env.DB, gcBody.origin, row.plaintext_digest, cutoff, excluded);
         if (!deleted) continue;
-        await env.BUCKET.delete(`v1/o/${row.ciphertext_digest}`);
+        deletedKeys.push(`v1/o/${row.ciphertext_digest}`);
       }
       swept += 1;
       sweptBytes += row.ciphertext_size;
     }
+    if (deletedKeys.length > 0) await env.BUCKET.delete(deletedKeys);
     return json(200, {
       protocol: PROTOCOL,
       origin: gcBody.origin,
