@@ -1,11 +1,8 @@
 {
   "theme": "dark",
-  "defaultProvider": "inferx",
-  "defaultModel": "deepseek-v4.1-flash-1017-basic",
-  "defaultThinkingLevel": "off",
-  "enabledModels": [
-    "inferx/deepseek-v4.1-flash-1017-basic"
-  ],
+  "defaultProvider": "opencode-go",
+  "defaultModel": "muse-spark-1.3-contributor",
+  "defaultThinkingLevel": "high",
   "showCacheMissNotices": true,
   "collapseChangelog": true,
   "quietStartup": true,
@@ -13,21 +10,21 @@
   "hideThinkingBlock": true,
   "defaultProjectTrust": "always",
   "packages": [
-    "npm:pi-subagents@0.82.0"
+    "npm:pi-subagents@0.84.0"
   ],
   "skills": [
     "~/.agents/skills"
   ],
   "subagents": {
-    "defaultModel": "inferx/deepseek-v4.1-flash-1017-basic",
-    "defaultProvider": "inferx",
-    "defaultThinking": "off",
-    "maxThinking": "off",
+    "defaultModel": "muse-spark-1.3-contributor",
+    "defaultProvider": "opencode-go",
+    "defaultThinking": "high",
+    "maxThinking": "xhigh",
     "modelScope": {
       "enforce": true,
       "strict": true,
       "allow": [
-        "inferx/deepseek-v4.1-flash-1017-basic"
+        "opencode-go/muse-spark-1.3-contributor"
       ]
     }
   },

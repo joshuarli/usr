@@ -1,8 +1,8 @@
 ---
 name: expert
 description: Difficult debugging, cross-cutting implementation, architecture, and integration.
-model: inferx/deepseek-v4.1-flash-1017-basic
-thinking: off
+model: opencode-go/muse-spark-1.3-contributor
+thinking: xhigh
 tools: read, bash, edit, write, grep, find, ls
 ---
 

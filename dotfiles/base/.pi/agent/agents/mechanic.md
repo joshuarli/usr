@@ -1,8 +1,8 @@
 ---
 name: mechanic
 description: Mechanical edits and routine implementation with crisp acceptance criteria.
-model: inferx/deepseek-v4.1-flash-1017-basic
-thinking: off
+model: opencode-go/muse-spark-1.3-contributor
+thinking: medium
 tools: read, bash, edit, write, grep, find, ls
 ---
 

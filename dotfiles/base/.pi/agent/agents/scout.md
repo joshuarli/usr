@@ -1,8 +1,8 @@
 ---
 name: scout
 description: Read-only scouting, searches, inventories, documentation lookup, and log triage.
-model: inferx/deepseek-v4.1-flash-1017-basic
-thinking: off
+model: opencode-go/muse-spark-1.3-contributor
+thinking: low
 tools: read, grep, find, ls
 ---
 

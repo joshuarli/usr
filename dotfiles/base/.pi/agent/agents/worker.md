@@ -1,8 +1,8 @@
 ---
 name: worker
 description: Normal implementation, debugging, tests, and ordinary review.
-model: inferx/deepseek-v4.1-flash-1017-basic
-thinking: off
+model: opencode-go/muse-spark-1.3-contributor
+thinking: high
 tools: read, bash, edit, write, grep, find, ls
 ---
 
