@@ -91,8 +91,8 @@ explanation if a check fails. The server install then:
   `sh dl TOOL`.
 
 The server base also installs Tailscale. It loads `tun` at boot, enables and
-starts the `tailscale` OpenRC service, and turns on Tailscale SSH. Pass an auth
-key to log in during provisioning:
+starts the `tailscale` OpenRC service, and enables Tailscale SSH on a logged-in
+node. Pass an auth key to log in during provisioning:
 
 ```sh
 wget -O - https://17166969.xyz/setup.sh | TS_AUTHKEY=tskey-auth-... sh
