@@ -35,6 +35,46 @@ install_managed() {
 
 clang_major() { clang -dumpversion | cut -d. -f1; }
 
+setup_tailscale() {
+	grep -qx tun /etc/modules 2>/dev/null || printf 'tun\n' >>/etc/modules
+	modprobe tun 2>/dev/null || :
+	[ -c /dev/net/tun ] || die 'the tun module is unavailable; Tailscale needs /dev/net/tun'
+
+	rc-update show default | awk '$1 == "tailscale" { found = 1 } END { exit !found }' || rc-update add tailscale default
+	rc-service --ifstopped tailscale start
+
+	i=0
+	while [ ! -S /run/tailscale/tailscaled.sock ] && [ "$i" -lt 20 ]; do
+		sleep 1
+		i=$((i + 1))
+	done
+	[ -S /run/tailscale/tailscaled.sock ] ||
+		die 'tailscaled did not create /run/tailscale/tailscaled.sock; see /var/log/tailscaled.log'
+
+	i=0
+	while :; do
+		state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // empty')
+		case $state in Running | NeedsLogin) break ;; esac
+		[ "$i" -lt 20 ] || die "tailscaled is in state ${state:-unknown}; see /var/log/tailscaled.log"
+		sleep 1
+		i=$((i + 1))
+	done
+
+	case $state in
+		Running)
+			tailscale set --ssh >/dev/null || die 'could not enable Tailscale SSH'
+			;;
+		NeedsLogin)
+			if [ -n "${TS_AUTHKEY:-}" ]; then
+				tailscale up --ssh --auth-key="$TS_AUTHKEY" --timeout=60s >/dev/null ||
+					die 'tailscale up failed; check TS_AUTHKEY and the tailnet policy'
+			else
+				say 'tailscale is logged out; run: doas tailscale up --ssh'
+			fi
+			;;
+	esac
+}
+
 mode=${INSTALL_MODE:-}
 if [ -z "$mode" ]; then
 	[ -r /dev/tty ] || die 'no terminal for the install type prompt; set INSTALL_MODE=server or INSTALL_MODE=desktop'
@@ -201,6 +241,8 @@ if [ "$mode" = desktop ]; then
 		rc-service --ifstopped "$service" start
 	done
 fi
+
+setup_tailscale
 
 case $mode in
 server) say "provisioned server for $user. Run: doas sh usr/host/alpine/verify.sh server" ;;

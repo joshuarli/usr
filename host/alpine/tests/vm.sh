@@ -176,6 +176,12 @@ must "echo 'josh:$userpw' | chpasswd"
 
 must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/server.log 2>&1 || { cat /root/server.log; false; }' 1800
 must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server' 120
+must 'apk info -e tailscale'
+must 'rc-update show default | grep -qw tailscale'
+must 'rc-service tailscale status'
+must 'test -S /run/tailscale/tailscaled.sock'
+must 'grep -qx tun /etc/modules'
+must 'test -c /dev/net/tun'
 must 'grep -q "provisioned server for josh" /root/server.log'
 must '! apk info -e seatd && ! apk info -e wlroots0.20 && ! command -v dwl && ! command -v ghostty-custom'
 must 'test ! -e /usr/local/bin/home-session && test ! -e /etc/init.d/home-runtime && test ! -e /etc/profile.d/home-session.sh'
@@ -186,7 +192,7 @@ must 'cp /etc/apk/world /root/world.server'
 must "grep -q 'getty on tty0 shares the tty1 console' /root/tty0.log && cmp /etc/apk/world /root/world.server"
 must "sed -i 's/^tty0::/#tty0::/' /etc/inittab && kill -HUP 1"
 must "echo 'export WLR_RENDERER=pixman' > /etc/profile.d/00-vm-renderer.sh"
-must 'find /boot /etc/network /etc/fstab /etc/inittab /etc/doas.conf /etc/doas.d /etc/apk/repositories /etc/hostname -type f 2>/dev/null | sort | xargs sha256sum > /root/baseline'
+must 'find /boot /etc/network /etc/fstab /etc/inittab /etc/doas.conf /etc/doas.d /etc/apk/repositories /etc/hostname /etc/modules -type f 2>/dev/null | sort | xargs sha256sum > /root/baseline'
 
 must "echo 'echo unmanaged' > /etc/profile.d/home-session.sh"
 [ "$(run 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/conflict.log 2>&1')" != 0 ] ||

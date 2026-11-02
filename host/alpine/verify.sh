@@ -48,6 +48,17 @@ check 'npm runs' su -s /bin/sh "$user" -c "$home/.local/bin/npm --version"
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
+check 'tailscale installed' command -v tailscale
+check 'tailscale enabled' in_runlevel tailscale default
+check 'tailscale started' rc-service tailscale status
+check 'tun loads at boot' grep -qx tun /etc/modules
+check 'tun device available' test -c /dev/net/tun
+state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
+case $state in
+	Running) check 'tailscale SSH enabled' sh -c '[ "$(tailscale get ssh)" = true ]' ;;
+	NeedsLogin) printf 'note: tailscale is logged out; run: doas tailscale up --ssh\n' ;;
+	*) fail "tailscaled is in state $state" ;;
+esac
 
 if [ "$mode" = desktop ]; then
 	check 'volume helper matches config/volume, root 0755' managed config/volume /usr/local/bin/volume 755

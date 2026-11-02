@@ -53,8 +53,8 @@ after provisioning to boot the upgraded kernel.
 
 - `server` installs the headless base: `packages.txt` (and
   `packages-x86_64.txt` on x86_64) with the clang toolchain, the dotfile links,
-  and the default `dl` tool set except `agy`. It installs no Wayland, graphics,
-  or seatd packages.
+  Tailscale, and the default `dl` tool set except `agy`. It installs no Wayland,
+  graphics, or seatd packages.
 - `desktop` runs the server install first, then layers `packages-desktop.txt`,
   udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it.
 
@@ -89,6 +89,21 @@ explanation if a check fails. The server install then:
   except `agy` as the user. It does not run the rest of `dl` or
   `host/setup-linux`; install `agy` or other opt-in tools later with
   `sh dl TOOL`.
+
+The server base also installs Tailscale. It loads `tun` at boot, enables and
+starts the `tailscale` OpenRC service, and turns on Tailscale SSH. Pass an auth
+key to log in during provisioning:
+
+```sh
+wget -O - https://17166969.xyz/setup.sh | TS_AUTHKEY=tskey-auth-... sh
+```
+
+Without `TS_AUTHKEY`, the install leaves Tailscale logged out and prints
+`doas tailscale up --ssh`; run that afterward to authenticate and enable SSH.
+The node name comes from the machine hostname. Tailscale SSH also needs an
+`ssh` rule for the node in the tailnet policy, which the provisioner does not
+change. Once logged in, tailscaled manages `/etc/resolv.conf` through the
+`resolvconf` dependency, so MagicDNS names resolve on the machine.
 
 The desktop layer runs its own preflight checks before the first change, then:
 
@@ -179,7 +194,10 @@ switches a stable install to edge and replaces `linux-lts` with `linux-stable`;
 the provisioner itself does not manage repositories or the kernel. The desktop
 layer installs `alsa-utils` and a `volume` helper for the media keys, but it
 does not choose cards or persist mixer state. The desktop layer refuses to run
-while `linux-lts` is installed, while a server install accepts it.
+while `linux-lts` is installed, while a server install accepts it. Tailscale
+authentication, tailnet policy and ACLs, exit nodes, and subnet routes are not
+managed; the provisioner installs the package, loads `tun`, runs the service,
+and enables Tailscale SSH as described above.
 
 ## Hardware checklist (XPS 13 9343)
 

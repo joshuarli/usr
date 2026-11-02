@@ -90,7 +90,7 @@ setup_alpine() {
     bootstrap_git -C "$dest" pull --ff-only || die "could not update $dest; pull it by hand"
 
     say 'provisioning Alpine'
-    as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" \
+    as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" "TS_AUTHKEY=${TS_AUTHKEY:-}" \
         sh "$dest/host/alpine/install.sh" </dev/null
     [ "$converted" = false ] || say 'reboot to finish the edge upgrade'
 }
