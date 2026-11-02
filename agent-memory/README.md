@@ -315,8 +315,11 @@ agent-sessions backup create /backups/agent-sessions-$(date +%F)
 agent-sessions backup restore /backups/agent-sessions-2026-10-30 --to /new/state --tombstones-from ~/.agent-sessions
 agent-sessions archive verify
 agent-sessions archive reindex
+agent-sessions archive prune-legacy
 agent-sessions doctor --json
 ```
+
+`archive prune-legacy` reports the pre-object-store transcript trees by checking each file against a captured generation or artifact; `--apply` deletes only the files whose bytes are already captured and leaves the archive for a database harness untouched.
 
 A backup is a SQLite backup-API snapshot plus a digest-verified copy of every immutable object pinned in `manifest.json`. It holds the shared object lock from before the snapshot until the last object is copied; removing an unreferenced object takes that lock exclusively, so a concurrent forget deletes catalog rows immediately but cannot unlink an object the backup still needs. The backup is built in a sibling staging directory, the manifest is written last, and one rename publishes it, so a destination holds a complete backup or does not exist. A corrupt or missing live object fails the backup instead of being copied. Restore defaults to a **new** destination, verifies every object and `PRAGMA integrity_check`, refuses a newer schema, restores canonical learning and lifecycle records, reapplies current tombstones before anything becomes searchable, rebuilds derived indexes from the captured bytes alone, and activates no service and no review grant.
 

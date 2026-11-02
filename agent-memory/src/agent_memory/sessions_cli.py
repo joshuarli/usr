@@ -19,7 +19,7 @@ from agent_memory import mirror as mirror_module
 from agent_memory import transfer as transfer_module
 from agent_memory.store import Store, StoreError, default_state_dir, project_identity, rebuild_index, redact
 from agent_memory.transcripts import canonical_harness
-from agent_memory.types import HARNESSES, Harness
+from agent_memory.types import DATABASE_HARNESSES, HARNESSES, Harness
 
 
 def _state_dir(args):
@@ -729,6 +729,32 @@ def _archive(args):
                 count = store.reindex_generations()
                 print("generations_reindexed=%d sessions=%d" % (count, store.db.execute("SELECT count(*) FROM sessions").fetchone()[0]))
                 return 0
+            if args.action == "prune-legacy":
+                total = files = redundant_files = redundant_bytes = retained_files = retained_bytes = 0
+                for path, size, redundant in archive_module.legacy_copies(store.db, store.archive_dir):
+                    files += 1
+                    total += size
+                    if not redundant:
+                        retained_files += 1
+                        retained_bytes += size
+                        continue
+                    redundant_files += 1
+                    redundant_bytes += size
+                    if args.apply:
+                        path.unlink()
+                if args.apply:
+                    for root in sorted(store.archive_dir.iterdir()):
+                        if root.name not in HARNESSES or root.name in DATABASE_HARNESSES:
+                            continue
+                        for directory, _dirnames, _filenames in os.walk(root, topdown=False):
+                            try:
+                                Path(directory).rmdir()
+                            except OSError:
+                                pass
+                print("files=%d bytes=%d redundant_files=%d redundant_bytes=%d retained_files=%d retained_bytes=%d apply=%d"
+                      % (files, total, redundant_files, redundant_bytes, retained_files, retained_bytes,
+                         int(args.apply)))
+                return 0
             report = archive_module.retention_report(store.db)
             print("generations=%d objects=%d bytes=%d tombstoned=%d" % (
                 report["generations"], report["objects"], report["bytes"], report["tombstoned"]))
@@ -1082,7 +1108,8 @@ def parser():
     mirror.set_defaults(run=_mirror)
 
     archive = commands.add_parser("archive", help="verify, reindex, or report the local archive")
-    archive.add_argument("action", choices=("status", "verify", "reindex"))
+    archive.add_argument("action", choices=("status", "verify", "reindex", "prune-legacy"))
+    archive.add_argument("--apply", action="store_true", help="delete redundant legacy copies")
     archive.add_argument("--state-dir")
     archive.set_defaults(run=_archive)
 

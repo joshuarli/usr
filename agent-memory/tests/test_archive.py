@@ -71,6 +71,20 @@ class ArchiveTests(unittest.TestCase):
     def generations(self, store):
         return store.db.execute("SELECT count(*) FROM archive_generation").fetchone()[0]
 
+    def test_legacy_prune_classifies_captured_copies_and_keeps_unknown_files(self):
+        self.write("legacy evidence")
+        with Store(self.state) as store:
+            self.refresh(store)
+            legacy = store.archive_dir / "codex" / str(self.path.resolve()).lstrip(os.sep)
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_bytes(self.path.read_bytes())
+            unknown = legacy.parent / "unknown.jsonl"
+            unknown.write_text("not captured\n")
+            rows = {path: redundant for path, _size, redundant in
+                    ARCHIVE.legacy_copies(store.db, store.archive_dir)}
+        self.assertTrue(rows[legacy])
+        self.assertFalse(rows[unknown])
+
     def test_unchanged_refresh_reads_no_content_and_captures_nothing(self):
         self.write("alpha")
         with Store(self.state) as store:

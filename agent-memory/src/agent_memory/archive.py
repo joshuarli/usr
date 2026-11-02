@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_memory.types import HARNESSES
+from agent_memory.types import DATABASE_HARNESSES, HARNESSES
 
 CHUNK_BYTES = 65536
 PROTOCOL = 1
@@ -285,6 +285,47 @@ def source_digest_of(chunk_digests):
     for chunk_digest in chunk_digests:
         digest.update(chunk_digest.encode("ascii"))
     return digest.hexdigest()
+
+
+def file_digests(path):
+    """Return the generation source digest, source size, and whole-file digest in one pass."""
+    full = hashlib.sha256()
+    sequence = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as stream:
+        while True:
+            data = stream.read(CHUNK_BYTES)
+            if not data:
+                break
+            full.update(data)
+            sequence.update(sha256(data).encode("ascii"))
+            size += len(data)
+    return sequence.hexdigest(), size, full.hexdigest()
+
+
+def legacy_copies(db, archive_dir):
+    """Yield (path, size, redundant) for the pre-object-store transcript trees.
+
+    A copy is redundant when its captured bytes are already a generation or an
+    artifact. Files under a database harness stay in place because that archive
+    is still the only captured form.
+    """
+    for root in sorted(Path(archive_dir).iterdir()):
+        if not root.is_dir() or root.name not in HARNESSES or root.name in DATABASE_HARNESSES:
+            continue
+        for directory, _dirnames, filenames in os.walk(root, followlinks=False):
+            for filename in sorted(filenames):
+                path = Path(directory) / filename
+                if path.is_symlink() or not path.is_file():
+                    continue
+                source_digest, size, digest = file_digests(path)
+                redundant = db.execute(
+                    "SELECT 1 FROM archive_generation WHERE harness = ? AND source_digest = ? "
+                    "AND source_size = ? LIMIT 1", (root.name, source_digest, size)).fetchone() is not None
+                if not redundant:
+                    redundant = db.execute(
+                        "SELECT 1 FROM archive_artifact WHERE digest = ? LIMIT 1", (digest,)).fetchone() is not None
+                yield path, size, redundant
 
 
 def manifest_digest(source_digest, source_size, artifacts, metadata):
