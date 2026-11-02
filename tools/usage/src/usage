@@ -1362,6 +1362,8 @@ def main(arguments):
         print(HELP, end="", file=sys.stderr)
         return 2
     selected = arguments[0] if arguments else None
+    if selected == "opencode2":
+        selected = "opencode"
     providers = {item[0]: item for item in PROVIDERS}
     if selected is not None and selected not in providers:
         print(HELP, end="", file=sys.stderr)
