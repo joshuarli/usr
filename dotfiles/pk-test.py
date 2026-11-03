@@ -40,6 +40,7 @@ case "$PK_TEST_SELECTION" in
         exit 0 ;;
 esac
 data=$(cat)
+printf '%s\\n' "$data" > "$PK_TEST_CANDIDATES"
 if [ "$PK_TEST_SELECTION" = DUP ]; then
     line=$(printf '%s\n' "$data" | awk -v pid="$PK_TEST_PID" '$1 == pid { print; exit }')
     printf '%s\n%s\n' "$line" "$line"
@@ -69,15 +70,37 @@ exec "$PK_TEST_REAL_PS" "$@"
 """
         )
         ps.chmod(0o755)
+        lsof = bindir / "lsof"
+        lsof.write_text(
+            """#!/bin/sh
+set -eu
+for pid in ${PK_TEST_PORT_PIDS:-}; do
+    printf '%s\\n' "$pid"
+done
+"""
+        )
+        lsof.chmod(0o755)
+        ss = bindir / "ss"
+        ss.write_text(
+            """#!/bin/sh
+set -eu
+for pid in ${PK_TEST_PORT_PIDS:-}; do
+    printf 'LISTEN 0 511 127.0.0.1:4174 0.0.0.0:* users:(("node",pid=%s,fd=20))\\n' "$pid"
+done
+"""
+        )
+        ss.chmod(0o755)
         self.env = dict(os.environ)
         self.env.update(
             PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
             PK_TEST_REAL_PS=shutil.which("ps"),
             PK_TEST_CALLS=str(self.path / "calls"),
+            PK_TEST_CANDIDATES=str(self.path / "candidates"),
             PK_TEST_SELECTION="CANCEL",
             PK_TEST_QUERY="sleep",
         )
         self.env.pop("PK_TEST_STALE_PID", None)
+        self.env.pop("PK_TEST_PORT_PIDS", None)
         self.procs = []
         self.addCleanup(self.kill_procs)
 
@@ -115,6 +138,12 @@ exec "$PK_TEST_REAL_PS" "$@"
 
     def calls(self):
         return (self.path / "calls").read_text().splitlines()
+
+    def foreign_pid(self):
+        pid = 999999
+        while subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode == 0:
+            pid -= 1
+        return pid
 
     def test_single_selection_sends_term(self):
         proc = self.sleep()
@@ -189,6 +218,42 @@ exec "$PK_TEST_REAL_PS" "$@"
         self.assertEqual(result.returncode, 1)
         self.assertIn("process exited or changed", result.stderr)
         self.assertIsNone(proc.poll())
+
+    def test_port_mode_offers_only_the_listening_process(self):
+        holder, other = self.sleep(), self.sleep()
+        result = self.run_pk("-p", "4174", PK_TEST_SELECTION=str(holder.pid),
+                             PK_TEST_PORT_PIDS=str(holder.pid))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, f"pk: sent TERM to {holder.pid}\n")
+        self.assertIn("--query= --prompt=", self.calls()[0])
+        offered = (self.path / "candidates").read_text()
+        self.assertIn(f"{holder.pid}  ", offered)
+        self.assertNotIn(f"{other.pid}  ", offered)
+        self.assertEqual(holder.wait(timeout=5), -signal.SIGTERM)
+        self.assertIsNone(other.poll())
+
+    def test_port_without_listener_fails_loudly(self):
+        result = self.run_pk("-p", "4174", PK_TEST_SELECTION="CANCEL")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("nothing is listening on TCP port 4174", result.stderr)
+        self.assertFalse((self.path / "calls").exists())
+
+    def test_port_held_by_another_user_is_reported(self):
+        result = self.run_pk("-p", "4174", PK_TEST_SELECTION="CANCEL",
+                             PK_TEST_PORT_PIDS=str(self.foreign_pid()))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("owned by another user", result.stderr)
+
+    def test_invalid_port_is_rejected(self):
+        for port in ("0", "65536", "abc", "", "-1"):
+            with self.subTest(port=port):
+                result = self.run_pk("-p", port, PK_TEST_SELECTION="CANCEL")
+                self.assertEqual(result.returncode, 2, result.stderr)
+
+    def test_port_flag_requires_a_value(self):
+        result = self.run_pk("-p")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("-p requires a port", result.stderr)
 
     def test_force_sends_sigkill_without_automatic_escalation(self):
         proc = self.ignores_term()
