@@ -10,7 +10,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "sonnet",
+  "model": "opus",
   "hooks": {
     "Notification": [
       {
@@ -80,7 +80,7 @@
       "effortLevel": "high"
     },
     "claude-opus-5-5": {
-      "effortLevel": "medium"
+      "effortLevel": "high"
     }
   },
   "emojiCompletionEnabled": false,
