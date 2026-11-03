@@ -58,6 +58,12 @@ One owner per fact: one file per component, one definition per selector, one rul
   Prefer explicit stacks when collapse or expand must not reshuffle neighbors; otherwise ask the owner if the choice is not evident.
 - Constrain overflow at the container (`min-width: 0`, `overflow` on the scroller), not by shrinking content.
 
+## Rhythm and context-specific overrides
+
+Give the page container a column `gap` for vertical rhythm. A zero-height sentinel or observer node inside that container still receives a gap; cancel it with a negative margin equal to the gap on that node alone. Inside CSS multi-column layout, `gap` does not space vertically, so cards keep a per-card margin there and trailing margins at a column end are truncated; give a following full-span element its own top margin.
+
+When an override applies in every real use of a component, such as a chart that only ever renders inside one card grid, fold it into the base rule instead of keeping a context selector. Delete components and classes that markup no longer references; the dead-selector sweep finds them from both sides.
+
 ## Responsive rules
 
 A component's media queries sit inside its own file, next to the rules they change. Global media-query blocks that patch components are deleted and redistributed. Prefer fluid layout and container-owned reflow to adding a breakpoint; a breakpoint that only fixes one component's overflow belongs to that component.
