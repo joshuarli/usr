@@ -1,0 +1,6 @@
+interface:
+  display_name: "Refactor CSS"
+  short_description: "Consolidate plain CSS into tokens and per-component files"
+  default_prompt: "Use $refactor-css to refactor this frontend's plain CSS into one owner per fact, with geometry tests and no dark mode or accessibility work."
+policy:
+  allow_implicit_invocation: false

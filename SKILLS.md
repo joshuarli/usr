@@ -100,4 +100,4 @@ Repo upkeep and getting work merged.
 
 ## Not listed
 
-Skills for a language, stack, or engineering method are not in this index. Examples are `refactor-ts`, `rust-hash`, `rust-cli-lexopt`, `durable-state`, `error-model`, `root-cause`, and `make-it-fast`. Add a skill here only if it changes how the agent works rather than what it works on.
+Skills for a language, stack, or engineering method are not in this index. Examples are `refactor-ts`, `refactor-css`, `rust-hash`, `rust-cli-lexopt`, `durable-state`, `error-model`, `root-cause`, and `make-it-fast`. Add a skill here only if it changes how the agent works rather than what it works on.
