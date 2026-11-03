@@ -69,6 +69,9 @@ Cell { symbol, width, fg, bg, modifiers }
   position. Track the actual output position through wide glyphs.
 - A simple diff against the previous frame is enough; full repaints are also
   correct but can flicker on slow terminals.
+- Set the cursor after the diff writes and immediately before the flush. A diff
+  leaves the terminal cursor at the last changed cell, overwriting any cursor
+  position set before drawing.
 - Flush once per frame, not per row.
 
 ## Common failures

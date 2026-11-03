@@ -44,7 +44,9 @@ when styling matters, which is almost always.
 - Update only with an explicit environment variable such as
   `PTYTEST_UPDATE_SNAPSHOTS=1`, and review the diff.
 - Normalize only genuine nondeterminism (spinner frame, elapsed time, random
-  ids); do not normalize spacing, colors, or cursor position.
+  ids); do not normalize spacing, colors, or visible cursor position. A hidden
+  cursor's reported position is not visible, so it can be replaced with a bare
+  "hidden" line when the terminal reports one.
 - Keep one raw lifecycle golden per terminal mode if needed. Do not require
   byte-identical frame output.
 

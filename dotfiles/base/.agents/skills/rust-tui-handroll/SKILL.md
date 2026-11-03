@@ -24,6 +24,8 @@ Add a PTY harness such as `laputa-ptytest` before touching the renderer. Keep th
 
 List every framework item the app touches: terminal lifecycle, input decoding, layout constraints, text and width handling, blocks, paragraphs, tables, lists, scrolling, styles, cursor placement, and test-only backend calls. Read the framework version's source for the behaviors the snapshots depend on, especially layout distribution, wrapping, borders, table column allocation, and highlight spacing. Classify each item as required behavior or incidental API. Build only the required set.
 
+If the framework's layout is constraint-solver based, porting its setup against the same solver crate is usually smaller and truer than reimplementing distribution by hand. Ratatui 0.30's `Layout` is a Cassowary solve over `kasuari`, and a hand-written waterfill will not match it at tight widths.
+
 Prefer a narrow in-repo module with the same concepts the app already uses (`Screen`, `Rect`, `Style`, `Line`, `Block`, `Table`, `Terminal`) over editing every call site at once. Keep the module framework-free; the app must compile with the dependency removed.
 
 ## 3. Build the terminal layer

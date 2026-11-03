@@ -8,11 +8,16 @@ depend on, then implement only those.
 
 - A split distributes an area along one axis. `Length` is fixed, `Fill` shares
   the remainder by weight, `Percentage` is proportional, `Min`/`Max` clamp.
-  Decide what happens when fixed constraints exceed the area; the framework
-  usually shrinks or drops later items rather than overflowing.
+- Modern ratatui uses a Cassowary solver, not a waterfill. Constraints have
+  strengths: spacing and explicit lengths dominate `Fill`, and a short area can
+  shrink any fixed segment while keeping the others. Do not infer a rule from a
+  few widths; probe the real solver at cramped, ordinary, and wide sizes.
+- For exact parity, port the framework's solver setup against the same solver
+  crate. `kasuari` is the crate under ratatui 0.30; using it directly keeps the
+  priority behavior without porting the solver itself.
 - Spacing is subtracted between items before distribution.
 - Flex controls leftover space: `Center`, `End`, `SpaceBetween`. Implement the
-  variants the app uses.
+  variants the app uses. Ratatui's default flex is `Start`, not `Legacy`.
 - `Rect` arithmetic must saturate. A zero-size area is valid and must render
   nothing, not panic.
 - Nested blocks: the inner area is the outer area minus borders and padding.
@@ -33,7 +38,9 @@ depend on, then implement only those.
 - Text is a sequence of lines; a line is a sequence of styled spans.
 - Without wrapping, each line is clipped to the area width. With wrapping,
   word-wrap at spaces and fall back to breaking a word wider than the line.
-  `trim` controls whether leading whitespace on continuation lines is kept.
+  Hold whitespace until the next word fits; whitespace at a wrap point is
+  dropped, while whitespace at the end of a logical line is kept. Blank input
+  lines still produce a row. `trim` drops leading whitespace, not trailing.
 - Alignment applies within the area after wrapping.
 - Scroll offset is applied after wrapping.
 - Width is display width, not byte or char count.
@@ -80,4 +87,9 @@ depend on, then implement only those.
 - Table highlight column included in width calculations twice.
 - Wrapping by char count instead of display width.
 - Truncating at a byte boundary, splitting a UTF-8 sequence.
+- Keeping whitespace at a wrap point, which leaves a styled blank cell the
+  original did not have.
+- Setting the terminal cursor before the diff: the diff's last write overrides
+  it. Set it after drawing, before flushing.
+- Comparing a time-driven spinner phase across runs; snapshot a fixed phase.
 - Differences only at 40 columns or 12 rows; always run the cramped size.
