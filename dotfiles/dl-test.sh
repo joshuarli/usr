@@ -240,6 +240,34 @@ FEED
             exit 1
         fi
         ;;
+    https://github.com/joshuarli/soulseek-rs/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-11-03T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/soulseek-rs/releases/tag/release-sss000sss000sss000sss000sss000sss000sss0001"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/joshuarli/soulseek-rs/releases/download/release-sss000sss000sss000sss000sss000sss000sss0001/soulseek-rs-aarch64-apple-darwin.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: soulseek-rs-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'soulseek-rs-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/joshuarli/soulseek-rs/releases/download/release-sss000sss000sss000sss000sss000sss000sss0001/soulseek-rs-x86_64-unknown-linux-musl-static.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: soulseek-rs-static-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'soulseek-rs-static-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
     https://github.com/laputa-systems/fz/releases.atom)
         cat <<'FEED'
 <feed>
@@ -504,6 +532,8 @@ case "$mode" in
         case "$inner" in
             syncthing-aarch64-apple-darwin) printf '%s' 'syncthing-test-binary' ;;
             fz-x86_64-unknown-linux-musl-static) printf '%s' 'fz-static-test-binary' ;;
+            soulseek-rs-aarch64-apple-darwin) printf '%s' 'soulseek-rs-test-binary' ;;
+            soulseek-rs-x86_64-unknown-linux-musl-static) printf '%s' 'soulseek-rs-static-test-binary' ;;
             *) exit 1 ;;
         esac
         ;;
@@ -1592,6 +1622,55 @@ case "$output" in
     *'syncthing is current (release-bbb000bbb000bbb000bbb000bbb000bbb000bbb0002)'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
+
+begin_case "soulseek-rs install, current check, and musl-static asset"
+( set -e
+ss_home="$test_root/soulseek-rs-home"
+mkdir -p "$ss_home/.local/bin" "$ss_home/.local/state/dl"
+if output=$(HOME="$ss_home" XDG_STATE_HOME="$ss_home/.local/state" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" soulseek-rs 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$ss_home"'/.local/bin/soulseek-rs'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(cat "$ss_home/.local/bin/soulseek-rs")" = 'soulseek-rs-test-binary' ]
+[ "$(cat "$ss_home/.local/state/dl/soulseek-rs")" = 'soulseek-rs-test-etag' ]
+if output=$(HOME="$ss_home" XDG_STATE_HOME="$ss_home/.local/state" \
+    DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 TMPDIR="$test_root/tmp" \
+    run_dl "$mock_bin:$PATH" "$repo_root" soulseek-rs 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'soulseek-rs is current (release-sss000sss000sss000sss000sss000sss000sss0001)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+ss_linux_home="$test_root/soulseek-rs-linux-home"
+mkdir -p "$ss_linux_home/.local/bin" "$ss_linux_home/.local/state/dl"
+if output=$(HOME="$ss_linux_home" XDG_STATE_HOME="$ss_linux_home/.local/state" \
+    TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" soulseek-rs 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$ss_linux_home"'/.local/bin/soulseek-rs'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(cat "$ss_linux_home/.local/bin/soulseek-rs")" = 'soulseek-rs-static-test-binary' ]
+[ "$(cat "$ss_linux_home/.local/state/dl/soulseek-rs")" = 'soulseek-rs-static-test-etag' ]
 )
 end_case
 

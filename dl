@@ -587,7 +587,7 @@ install_release() {
     repo=$prog
     case "$prog" in
         e|fz|fdu|fastermod|tm|fs|srv|diff-pretty|vault) owner="laputa-systems" ;;
-        ish|stuff|mactop|gh|syncthing) owner="joshuarli" ;;
+        ish|stuff|mactop|gh|syncthing|soulseek-rs) owner="joshuarli" ;;
         bylaws) owner="joshuarli"; repo="swift-bylaws" ;;
         *) skip "$prog" "unknown tool"; return ;;
     esac
@@ -623,7 +623,7 @@ install_release() {
         return
     fi
     case "${OS}:${prog}" in
-        Linux:ish) artifact_target="${ARCH}-unknown-linux-musl-static" ;;
+        Linux:ish|Linux:soulseek-rs) artifact_target="${ARCH}-unknown-linux-musl-static" ;;
         Linux:e|Linux:fz|Linux:fdu|Linux:fastermod|Linux:tm|Linux:fs|Linux:srv|Linux:diff-pretty|Linux:vault|Linux:syncthing|Linux:stuff|Linux:gh) artifact_target="${ARCH}-unknown-linux-musl" ;;
         Linux:*) artifact_target="${ARCH}-unknown-linux-gnu" ;;
         *) artifact_target="${ARCH}-apple-darwin" ;;
@@ -632,7 +632,7 @@ install_release() {
     asset_candidates=$asset_base
     case "${OS}:${artifact_target}" in
         Linux:*musl)
-            [ "$prog" = ish ] || asset_candidates="$asset_base $asset_base-static"
+            [ "$prog" = ish ] || [ "$prog" = soulseek-rs ] || asset_candidates="$asset_base $asset_base-static"
             ;;
     esac
     asset=
@@ -3470,7 +3470,7 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg jaq fastermod tm ish stuff e fz fdu fs srv mactop vault gh bylaws mold cf player; do
+    for record_prog in fd rg jaq fastermod tm ish stuff e fz fdu fs srv mactop vault gh bylaws mold cf player soulseek-rs; do
         record_managed_binary "$record_prog"
     done
     if [ -s "${STATE}/cf" ] && [ -d "$CF_INSTALL_ROOT" ]; then own_dir "$CF_INSTALL_ROOT"; fi
