@@ -21,7 +21,7 @@ Choose:
 
 - a disk for the `sys` install (diskless and data modes are rejected),
 - networking, which this project never touches,
-- an admin user with a password (`setup-user -a`), which configures doas for `wheel`.
+- an admin user with a password (`setup-user -a`), which configures password-required doas for `wheel`. Provisioning grants passwordless doas only to the configured user.
 - no getty on `tty0` in `/etc/inittab` for a desktop install (installs booted
   with a VT `console=`, such as the virt ISO, add one, and it splits tty1
   keystrokes with the login).
@@ -94,10 +94,11 @@ explanation if a check fails. The server install then:
   `host/setup-linux`; install `agy` or other opt-in tools later with
   `sh dl TOOL`, and makes interactive logins start ish.
 
-The server base installs Docker Engine and its CLI, enables and starts the
-`docker` OpenRC service, and adds the user to the `docker` group. Docker group
-membership grants root-equivalent access to the host. Log out and back in to
-use Docker without `doas` or `sudo`.
+The server base grants the configured user passwordless root access through
+`doas` and installs Docker Engine and its CLI. It enables and starts the
+`docker` OpenRC service and adds the user to the `docker` group. Both the doas
+rule and Docker group grant full root access to the host. Log out and back in
+to use Docker without `doas` or `sudo`.
 
 The server base also installs Tailscale. It loads `tun` through Alpine's
 `modules` OpenRC service at boot, enables and starts the `tailscale` service,
@@ -205,7 +206,7 @@ provision.
 ## Not managed
 
 Disks, partitions, filesystems, encryption, bootloader, kernel, initramfs, EFI,
-Secure Boot, networking, DNS, passwords, doas policy, root account, SSH keys,
+Secure Boot, networking, DNS, passwords, root account, SSH keys,
 audio routing and mixer state, power management and lid handling. `setup.sh`
 switches a stable install to edge and replaces `linux-lts` with `linux-stable`;
 the provisioner itself does not manage repositories or the kernel. The desktop

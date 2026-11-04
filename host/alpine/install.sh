@@ -4,9 +4,20 @@ cd "$(dirname "$0")"
 
 usr_root=$(cd ../.. && pwd)
 usr_url=https://github.com/joshuarli/usr
+doas_policy=/etc/doas.d/30-home-nopass.conf
+conf=
+doas_tmp=
 
 die() { printf 'home: %s\n' "$*" >&2; exit 1; }
 say() { printf 'home: %s\n' "$*"; }
+
+cleanup() {
+	[ -z "$conf" ] || rm -f "$conf" || say "could not remove temporary file $conf"
+	[ -z "$doas_tmp" ] || rm -f "$doas_tmp" || say "could not remove temporary file $doas_tmp"
+}
+
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 as_user() { su -s /bin/sh "$user" -c "cd ~ && $1"; }
 
@@ -34,6 +45,39 @@ install_managed() {
 }
 
 clang_major() { clang -dumpversion | cut -d. -f1; }
+
+check_doas_policy() {
+	[ -d /etc/doas.d ] && [ ! -L /etc/doas.d ] || die '/etc/doas.d is missing or is not a regular directory; run setup-user -a'
+	[ -e "$doas_policy" ] || [ -L "$doas_policy" ] || return 0
+	[ -f "$doas_policy" ] && [ ! -L "$doas_policy" ] || die "$doas_policy exists and is not a regular file; move it aside"
+	if ! cmp -s "$doas_policy" - <<EOF
+permit nopass $user as root
+EOF
+	then
+		die "$doas_policy contains a different rule; move it aside or update it for $user"
+	fi
+}
+
+install_doas_policy() {
+	if [ -e "$doas_policy" ]; then
+		[ "$(stat -c %u:%g:%a "$doas_policy")" = '0:0:644' ] || {
+			chown root:root "$doas_policy"
+			chmod 0644 "$doas_policy"
+		}
+		return
+	fi
+	doas_tmp=$(mktemp /etc/doas.d/.home-nopass.XXXXXX)
+	printf 'permit nopass %s as root\n' "$user" >"$doas_tmp"
+	chown root:root "$doas_tmp"
+	chmod 0644 "$doas_tmp"
+	if ! ln "$doas_tmp" "$doas_policy" 2>/dev/null; then
+		check_doas_policy
+		[ -e "$doas_policy" ] || die "could not install $doas_policy"
+	fi
+	rm -f "$doas_tmp"
+	doas_tmp=
+	say "enabled passwordless doas for $user"
+}
 
 setup_tailscale() {
 	grep -qx tun /etc/modules 2>/dev/null || printf 'tun\n' >>/etc/modules
@@ -144,6 +188,7 @@ printf '%s\n' "$repos" | grep -Eqv '/edge/(main|community)/*$' &&
 	die "only edge main and community repositories are supported; remove the others from /etc/apk/repositories"
 printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
+check_doas_policy
 
 for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
@@ -167,7 +212,6 @@ as_user "sh '$usr_root/sync' plan >/dev/null" ||
 	die "dotfile links conflict with existing files; run sh $usr_root/sync plan as $user and resolve each CONFLICT"
 check_managed config/profile.sh /etc/profile.d/home-session.sh
 
-conf=
 if [ "$mode" = desktop ]; then
 	! apk info -e linux-lts >/dev/null 2>&1 ||
 		die 'linux-lts is installed; this desktop runs linux-stable: apk add linux-stable && apk del linux-lts, then reboot'
@@ -176,7 +220,6 @@ if [ "$mode" = desktop ]; then
 		die 'a getty on tty0 shares the tty1 console with the desktop login; comment out the tty0 line in /etc/inittab and run: kill -HUP 1'
 
 	conf=$(mktemp)
-	trap 'rm -f "$conf"' EXIT HUP INT TERM
 	printf 'home_user="%s"\n' "$user" > "$conf"
 	check_managed config/volume /usr/local/bin/volume
 	check_managed config/home-session /usr/local/bin/home-session
@@ -213,6 +256,7 @@ packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 [ ! -f "packages-$arch.txt" ] || packages="$packages $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "packages-$arch.txt")"
 # shellcheck disable=SC2086
 apk add --quiet $packages
+install_doas_policy
 setup_docker
 
 [ "$(clang_major)" -ge 23 ] || die "clang $(clang -dumpversion) is older than 23; check the edge repositories"

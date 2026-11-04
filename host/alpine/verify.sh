@@ -16,9 +16,19 @@ managed() { cmp -s "$1" "$2" && [ "$(stat -c %u:%g:%a "$2")" = "0:0:$3" ]; }
 no_match() { ! grep -Eqs "$@"; }
 no_extra_nopass() {
 	! cat /etc/doas.conf /etc/doas.d/*.conf 2>/dev/null |
-		sed 's/#.*//' |
-		grep -w nopass |
-		grep -qv 'tailscale as root cmd /usr/sbin/resolvconf'
+		awk -v user="$user" '
+			{ sub(/#.*/, "") }
+			/nopass/ &&
+				$0 != "permit nopass " user " as root" &&
+				index($0, "tailscale as root cmd /usr/sbin/resolvconf") == 0 { found = 1 }
+			END { exit found }
+		'
+}
+doas_policy_matches_user() {
+	[ "$(stat -c %u:%g:%a /etc/doas.d/30-home-nopass.conf 2>/dev/null)" = '0:0:644' ] || return 1
+	cmp -s /etc/doas.d/30-home-nopass.conf - <<EOF
+permit nopass $user as root
+EOF
 }
 major_at_least() { [ "$("$2" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1 | cut -d. -f1)" -ge "$1" ] 2>/dev/null; }
 
@@ -44,7 +54,9 @@ check 'clang builds and runs C with lld and compiler-rt' sh -c 't=$(mktemp) && p
 check 'clang++ builds and runs C++' sh -c 't=$(mktemp) && printf "#include <cstdio>\nint main(){std::puts(\"\");}\n" | clang++ -x c++ - -o "$t" && "$t" >/dev/null; s=$?; rm -f "$t"; exit $s'
 check "$user has a password" sh -c "awk -F: '\$1 == \"$user\" { exit !(\$2 ~ /^\\$/) }' /etc/shadow"
 check 'no getty autologin' no_match -- '--autologin|[[:space:]]-a[[:space:]]' /etc/inittab
-check 'no passwordless doas' no_extra_nopass
+check 'passwordless doas policy matches provisioned user' doas_policy_matches_user
+check 'no other passwordless doas rules' no_extra_nopass
+check 'passwordless doas works for user' su -s /bin/sh "$user" -c 'doas -n true'
 default_tools=$(sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
