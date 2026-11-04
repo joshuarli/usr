@@ -38,7 +38,9 @@ for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_l
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)
 check 'clang defaults match config/clang.cfg, root 0644' managed config/clang.cfg "$clang_dir/clang.cfg" 644
 check 'clang++ defaults match config/clang.cfg, root 0644' managed config/clang.cfg "$clang_dir/clang++.cfg" 644
+# shellcheck disable=SC2016
 check 'clang builds and runs C with lld and compiler-rt' sh -c 't=$(mktemp) && printf "int main(void){return 0;}\n" | clang -x c - -o "$t" && "$t"; s=$?; rm -f "$t"; exit $s'
+# shellcheck disable=SC2016
 check 'clang++ builds and runs C++' sh -c 't=$(mktemp) && printf "#include <cstdio>\nint main(){std::puts(\"\");}\n" | clang++ -x c++ - -o "$t" && "$t" >/dev/null; s=$?; rm -f "$t"; exit $s'
 check "$user has a password" sh -c "awk -F: '\$1 == \"$user\" { exit !(\$2 ~ /^\\$/) }' /etc/shadow"
 check 'no getty autologin' no_match -- '--autologin|[[:space:]]-a[[:space:]]' /etc/inittab
@@ -69,6 +71,7 @@ check 'tailscale started' rc-service tailscale status
 check 'tun loads at boot' grep -qx tun /etc/modules
 check 'tun device available' test -c /dev/net/tun
 state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
+# shellcheck disable=SC2016
 case $state in
 	Running) check 'tailscale SSH enabled' sh -c '[ "$(tailscale get ssh)" = true ]' ;;
 	NeedsLogin) printf 'note: tailscale is logged out; run: doas tailscale up --ssh\n' ;;
@@ -86,6 +89,7 @@ if [ "$mode" = desktop ]; then
 	check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'
 	check 'dwl build dependencies removed' sh -c '! apk info -e .home-dwl-build'
 	check 'ghostty-custom release tracked' sh -c 'grep -qx "release-[0-9a-f][0-9a-f]*" /usr/local/share/home/ghostty-custom.tag'
+	# shellcheck disable=SC2016
 	check 'ghostty-custom installed, root 0755' sh -c '[ -f /usr/local/bin/ghostty-custom ] && [ ! -L /usr/local/bin/ghostty-custom ] && [ -x /usr/local/bin/ghostty-custom ] && [ "$(stat -c %u:%g:%a /usr/local/bin/ghostty-custom)" = 0:0:755 ]'
 	check 'ghostty-custom shared libraries resolve' sh -c '! ldd /usr/local/bin/ghostty-custom 2>&1 | grep -q "not found"'
 	check 'ghostty-custom reports version' sh -c '/usr/local/bin/ghostty-custom --version >/dev/null'
@@ -95,6 +99,7 @@ if [ "$mode" = desktop ]; then
 	if [ "$(apk --print-arch)" = x86_64 ]; then
 		check 'helium tag recorded' grep -Eqx 'helium-[0-9].*' /usr/local/share/home/helium.tag
 		check 'helium launcher installed' test -x /usr/local/bin/helium
+		# shellcheck disable=SC2016
 		check 'helium launcher points at the current release' sh -c '[ -L /usr/local/bin/helium ] && [ "$(readlink /usr/local/bin/helium)" = /usr/local/lib/helium/current/helium-wrapper ]'
 		check 'helium shared libraries resolve' sh -c '! LD_LIBRARY_PATH=/usr/local/lib/helium/current/lib ldd /usr/local/lib/helium/current/helium 2>&1 | grep -q "not found"'
 		check 'helium reports version' su -s /bin/sh "$user" -c '/usr/local/bin/helium --version'

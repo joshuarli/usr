@@ -903,6 +903,7 @@ install_python3() {
         return
     fi
     release_json=$(curl -fsSL "https://api.github.com/repos/joshuarli/python-build/releases/tags/${tag}") || release_json=
+    # shellcheck disable=SC2016
     asset_url=$(printf '%s\n' "$release_json" \
         | run_jaq -r --arg triple "$triple" \
             '[.assets[] | select(.name | endswith("-\($triple)-install_only_stripped.tar.gz"))][0].browser_download_url // empty' 2>/dev/null) || asset_url=
@@ -1049,6 +1050,7 @@ install_nodebuild() {
         return
     fi
     release_json=$(curl -fsSL "https://api.github.com/repos/laputa-systems/node-build/releases/tags/${tag}") || release_json=
+    # shellcheck disable=SC2016
     asset_url=$(printf '%s\n' "$release_json" \
         | run_jaq -r --arg triple "$triple" \
             '[.assets[] | select(.name | endswith("-\($triple)-install_only_stripped.tar.gz"))][0].browser_download_url // empty' 2>/dev/null) || asset_url=

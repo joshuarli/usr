@@ -2281,7 +2281,7 @@ for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
 done
 [ "$(readlink "$git_bad_home/.local/share/git/current")" = "$git_bad_release" ]
 [ "$(cat "$git_bad_home/.local/state/dl/git")" = 'git-test-etag-a' ]
-[ "$(ls "$git_bad_home/.local/share/git/releases" | wc -l)" -eq 1 ]
+[ "$(find "$git_bad_home/.local/share/git/releases" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
 )
 end_case
 
@@ -2432,7 +2432,7 @@ for ssh_command in ssh ssh-keygen ssh-agent ssh-add sftp scp; do
     [ "$(readlink "$ssh_bad_home/.local/bin/$ssh_command")" = "$ssh_bad_current/$ssh_command" ]
 done
 [ "$(cat "$ssh_bad_home/.local/state/dl/ssh")" = 'ssh-test-etag-a' ]
-[ "$(ls "$ssh_bad_home/.local/share/ssh/releases" | wc -l)" -eq 1 ]
+[ "$(find "$ssh_bad_home/.local/share/ssh/releases" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
 )
 end_case
 
@@ -2488,7 +2488,7 @@ for oxish_command in oxish-server oxish-session; do
     [ "$(readlink "$oxish_home/.local/bin/$oxish_command")" = "$oxish_current/bin/$oxish_command" ]
 done
 [ "$(cat "$oxish_home/.local/state/dl/oxish-server")" = 'oxish-test-etag-a' ]
-[ "$(ls "$oxish_home/.local/share/oxish/releases" | wc -l)" -eq 1 ]
+[ "$(find "$oxish_home/.local/share/oxish/releases" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1 ]
 output=$(oxish_run) || { printf '%s\n' "$output" >&2; exit 1; }
 case "$output" in *'Installed '"$oxish_home"'/.local/bin/oxish-server'*) ;; *) printf '%s\n' "$output" >&2; exit 1 ;; esac
 oxish_new="$oxish_home/.local/share/oxish/releases/${ssh_tag}-${git_triple}"

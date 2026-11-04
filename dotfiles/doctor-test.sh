@@ -15,6 +15,7 @@ cp "$repo/sync" "$fixture/sync"
 cp "$repo/dotfiles/sym" "$fixture/dotfiles/sym"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
+# shellcheck disable=SC2016
 printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "testtool\\n"\n' > "$fixture/dl"
 printf '#!/bin/sh\nprintf "Linux\\n"\n' > "$fixture/mock/uname"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/testtool"
@@ -65,6 +66,7 @@ fi
 grep -q 'canonical agent instructions are unavailable' "$fixture/missing-agent"
 
 sh "$fixture/sync" links > "$fixture/relink-agents"
+# shellcheck disable=SC2016
 printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "ffmpeg\\n"\n' > "$fixture/dl"
 printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/ffmpeg"
 chmod +x "$HOME/.local/bin/ffmpeg"

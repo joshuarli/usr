@@ -99,6 +99,7 @@ case $mode in server | desktop) ;; *) die "INSTALL_MODE must be server or deskto
 say "installing $mode"
 
 [ "$(id -u)" -eq 0 ] || die 'run as root, for example: doas sh usr/host/alpine/install.sh'
+# shellcheck disable=SC1091
 [ -r /etc/os-release ] && . /etc/os-release
 [ "${ID:-}" = alpine ] || die 'this provisioner supports only Alpine Linux'
 case ${VERSION_ID:-} in

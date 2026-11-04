@@ -98,6 +98,7 @@ case $(uname -s) in
         ;;
     Linux)
         if [ -r /etc/os-release ]; then
+            # shellcheck disable=SC1091
             os_id=$( ( . /etc/os-release; printf '%s' "${ID:-}" ) )
             if [ "$os_id" = alpine ]; then
                 printf 'Alpine DNS:\n'
