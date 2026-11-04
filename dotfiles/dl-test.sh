@@ -806,6 +806,7 @@ ff_write_release() {
     _ff_tag=$2
     _ff_probe_exit=${3:-0}
     _ff_top=${4:-}
+    _ff_extra=${5:-}
     mkdir -p "$_ff_root/$_ff_tag"
     for _ff_triple in $ff_triples; do
         _ff_name="ffmpeg-9.0.2+${_ff_tag}-${_ff_triple}-tools"
@@ -817,6 +818,10 @@ ff_write_release() {
         printf '%s\n' '#!/bin/sh' "printf 'ffprobe ${_ff_tag} ${_ff_triple}\\n'" "exit ${_ff_probe_exit}" > "$_ff_stage/$_ff_dir/bin/ffprobe"
         chmod +x "$_ff_stage/$_ff_dir/bin/ffmpeg" "$_ff_stage/$_ff_dir/bin/ffprobe"
         printf '{}\n' > "$_ff_stage/$_ff_dir/share/ffmpeg-build/manifest.json"
+        case "$_ff_extra" in
+            symlink) ln -s ffmpeg "$_ff_stage/$_ff_dir/bin/extra" ;;
+            hardlink) ln "$_ff_stage/$_ff_dir/bin/ffmpeg" "$_ff_stage/$_ff_dir/bin/extra" ;;
+        esac
         tar -czf "$_ff_root/$_ff_tag/$_ff_name.tar.gz" -C "$_ff_stage" "$_ff_dir"
     done
     ff_write_sums "$_ff_root/$_ff_tag"
@@ -866,6 +871,16 @@ ff_root_top="$test_root/ff-root-top"
 cp -R "$ff_root_a" "$ff_root_top"
 ff_write_release "$ff_root_top" "$ff_tag" 0 unexpected-top
 ff_write_feed "$ff_root_top" "$ff_tag_old" "$ff_tag"
+
+ff_root_symlink="$test_root/ff-root-symlink"
+cp -R "$ff_root_a" "$ff_root_symlink"
+ff_write_release "$ff_root_symlink" "$ff_tag" 0 "" symlink
+ff_write_feed "$ff_root_symlink" "$ff_tag_old" "$ff_tag"
+
+ff_root_hardlink="$test_root/ff-root-hardlink"
+cp -R "$ff_root_a" "$ff_root_hardlink"
+ff_write_release "$ff_root_hardlink" "$ff_tag" 0 "" hardlink
+ff_write_feed "$ff_root_hardlink" "$ff_tag_old" "$ff_tag"
 
 ff_root_unlisted="$test_root/ff-root-unlisted"
 cp -R "$ff_root_b" "$ff_root_unlisted"
@@ -2750,6 +2765,27 @@ fi
 )
 end_case
 
+cat > "$mock_bin/mv" <<'EOF'
+#!/bin/sh
+if [ -n "${DL_TEST_MV_FAIL-}" ]; then
+    case "$*" in
+        *"$DL_TEST_MV_FAIL"*) exit 1 ;;
+    esac
+fi
+case "$1" in
+    -fh|-fT)
+        shift
+        if [ "$(/usr/bin/uname -s)" = Darwin ]; then
+            set -- -fh "$@"
+        else
+            set -- -fT "$@"
+        fi
+        ;;
+esac
+exec /bin/mv "$@"
+EOF
+chmod +x "$mock_bin/mv"
+
 ff_run() {
     _ff_home=$1
     _ff_with=$2
@@ -2995,6 +3031,79 @@ for ff_variant_root in "$ff_root_unlisted" "$ff_root_absent" "$ff_root_nosums"; 
     ff_said 'keeping installed ffmpeg'
     ff_installed_as "$ff_kept" "$ff_tag_old" aarch64-apple-darwin
 done
+)
+end_case
+
+begin_case "ffmpeg rejects archives with link members and keeps the previous pair"
+( set -e
+ff_home="$test_root/ff-links-home"
+ff_ok "$ff_home" "$ff_root_a" Linux x86_64 ffmpeg
+ff_state=$(cat "$ff_home/.local/state/dl/ffmpeg")
+for ff_root in "$ff_root_symlink" "$ff_root_hardlink"; do
+    ff_fails "$ff_home" "$ff_root" Linux x86_64 ffmpeg
+    ff_said "unsupported member type"
+    ff_installed_as "$ff_home" "$ff_tag_old" x86_64-unknown-linux-musl
+    [ "$(cat "$ff_home/.local/state/dl/ffmpeg")" = "$ff_state" ]
+    [ "$(printf '%s\n' "$ff_home"/.local/share/ffmpeg/releases/* | wc -l)" -eq 1 ]
+    [ -z "$(fd -H --max-depth 1 '^\.ffmpeg\.' "$ff_home/.local/share/ffmpeg/releases")" ]
+done
+)
+end_case
+
+begin_case "ffmpeg switches current atomically and keeps the previous current when the switch fails"
+( set -e
+ff_home="$test_root/ff-switch-home"
+ff_ok "$ff_home" "$ff_root_a" Linux x86_64 ffmpeg
+ff_state=$(cat "$ff_home/.local/state/dl/ffmpeg")
+(
+    DL_TEST_MV_FAIL="/ffmpeg/current"
+    export DL_TEST_MV_FAIL
+    ff_fails "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+    ff_said "could not switch"
+)
+ff_installed_as "$ff_home" "$ff_tag_old" x86_64-unknown-linux-musl
+[ "$(cat "$ff_home/.local/state/dl/ffmpeg")" = "$ff_state" ]
+[ "$(printf '%s\n' "$ff_home"/.local/share/ffmpeg/releases/* | wc -l)" -eq 1 ]
+[ -z "$(fd -H --max-depth 1 '^\.' "$ff_home/.local/share/ffmpeg")" ]
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
+[ -z "$(fd -H --max-depth 1 '^\.' "$ff_home/.local/share/ffmpeg")" ]
+)
+end_case
+
+begin_case "ffmpeg reinstalls when current is missing behind managed launchers"
+( set -e
+ff_home="$test_root/ff-nocurrent-home"
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+rm "$ff_home/.local/share/ffmpeg/current"
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
+)
+end_case
+
+begin_case "ffmpeg replaces a damaged release directory only after the new one passes"
+( set -e
+ff_home="$test_root/ff-damaged-home"
+ff_release="$ff_home/.local/share/ffmpeg/releases/${ff_tag}-x86_64-unknown-linux-musl"
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_state=$(cat "$ff_home/.local/state/dl/ffmpeg")
+printf 'broken\n' > "$ff_release/bin/ffprobe"
+printf 'sentinel\n' > "$ff_release/sentinel"
+ff_fails "$ff_home" "$ff_root_smoke" Linux x86_64 ffmpeg
+ff_said "working ffmpeg and ffprobe"
+[ "$(cat "$ff_release/sentinel")" = sentinel ]
+[ "$(cat "$ff_home/.local/state/dl/ffmpeg")" = "$ff_state" ]
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
+[ ! -e "$ff_release/sentinel" ]
+[ "$(printf '%s\n' "$ff_home"/.local/share/ffmpeg/releases/* | wc -l)" -eq 1 ]
+[ -z "$(fd -H --max-depth 1 '^\.' "$ff_home/.local/share/ffmpeg/releases")" ]
+printf '%s\n' "${ff_tag}:ffmpeg-etag-0" > "$ff_home/.local/state/dl/ffmpeg"
+printf 'sentinel\n' > "$ff_release/sentinel"
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+[ "$(cat "$ff_home/.local/state/dl/ffmpeg")" = "$ff_state" ]
+[ ! -e "$ff_release/sentinel" ]
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
 )
 end_case
 

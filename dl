@@ -423,6 +423,17 @@ ensure_ffmpeg_link() {
     own_file "$ffmpeg_dest_link"
 }
 
+switch_symlink() {
+    tmpbinlink=$(mktemp "$(dirname -- "$2")/.$(basename -- "$2").XXXXXX") || return 1
+    rm -f "$tmpbinlink"
+    ln -s "$1" "$tmpbinlink" || { tmpbinlink=; return 1; }
+    case "$OS" in
+        Darwin) mv -fh "$tmpbinlink" "$2" ;;
+        *) mv -fT "$tmpbinlink" "$2" ;;
+    esac || { rm -f "$tmpbinlink"; tmpbinlink=; return 1; }
+    tmpbinlink=
+}
+
 own_missing_dirs "$DEST"
 mkdir -p "$DEST"
 own_missing_dirs "$STATE"
@@ -1343,14 +1354,10 @@ install_nodejs() {
         tmpbundle=
     fi
     own_dir "$release_dir"
-    tmpbinlink=$(mktemp "${NODEJS_INSTALL_ROOT}/.current.XXXXXX")
-    rm -f "$tmpbinlink"
-    ln -s "$release_dir" "$tmpbinlink"
-    case "$OS" in
-        Darwin) mv -fh "$tmpbinlink" "${NODEJS_INSTALL_ROOT}/current" ;;
-        Linux) mv -fT "$tmpbinlink" "${NODEJS_INSTALL_ROOT}/current" ;;
-    esac
-    tmpbinlink=
+    if ! switch_symlink "$release_dir" "${NODEJS_INSTALL_ROOT}/current"; then
+        skip nodejs "could not switch ${NODEJS_INSTALL_ROOT}/current"
+        return
+    fi
     own_file "${NODEJS_INSTALL_ROOT}/current"
     for nodejs_command in node npm npx; do
         tmpbinlink=$(mktemp "${DEST}/.${nodejs_command}.XXXXXX")
@@ -3039,7 +3046,8 @@ install_ffmpeg() {
         if [ -e "$ffmpeg_existing" ] || [ -L "$ffmpeg_existing" ]; then
             ffmpeg_existing_target=$(readlink "$ffmpeg_existing" 2>/dev/null || :)
             if ! own_ffmpeg_release_target "$ffmpeg_existing_target" \
-                && ! own_ffmpeg_current_target "$ffmpeg_existing_target"; then
+                && ! own_ffmpeg_current_target "$ffmpeg_existing_target" \
+                && [ "$ffmpeg_existing_target" != "${FFMPEG_HOME}/current/bin/${ffmpeg_command}" ]; then
                 skip ffmpeg "${ffmpeg_existing} is not a dl-managed symlink"
                 return
             fi
@@ -3097,7 +3105,7 @@ install_ffmpeg() {
     release_dir="${releases}/${tag}-${triple}"
     if is_current ffmpeg "$record" && [ -L "${FFMPEG_HOME}/current" ] \
         && [ "$(readlink "${FFMPEG_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
-        && [ -d "$release_dir" ]; then
+        && [ -d "$release_dir" ] && ffmpeg_pair_runs "$release_dir"; then
         current_ok=true
         for ffmpeg_command in $FFMPEG_COMMANDS; do
             if [ "$(readlink "${DEST}/${ffmpeg_command}" 2>/dev/null || :)" \
@@ -3113,10 +3121,19 @@ install_ffmpeg() {
             return
         fi
     fi
+    ffmpeg_replacing=false
     if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
-        if [ "$(readlink "${FFMPEG_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
-            && [ "$(cat "${STATE}/ffmpeg" 2>/dev/null)" = "$record" ] \
+        if [ -L "$release_dir" ] || [ ! -d "$release_dir" ]; then
+            skip ffmpeg "$release_dir is not a release directory"
+            return
+        fi
+        if [ "$(cat "${STATE}/ffmpeg" 2>/dev/null)" = "$record" ] \
             && ffmpeg_pair_runs "$release_dir"; then
+            if [ "$(readlink "${FFMPEG_HOME}/current" 2>/dev/null || :)" != "$release_dir" ] \
+                && ! switch_symlink "$release_dir" "${FFMPEG_HOME}/current"; then
+                skip ffmpeg "could not switch ${FFMPEG_HOME}/current"
+                return
+            fi
             for ffmpeg_command in $FFMPEG_COMMANDS; do
                 ensure_ffmpeg_link "$ffmpeg_command" || return
             done
@@ -3127,8 +3144,7 @@ install_ffmpeg() {
             _dl_ok "Repaired ${DEST}/ffmpeg and ${DEST}/ffprobe"
             return
         fi
-        skip ffmpeg "$release_dir already exists"
-        return
+        ffmpeg_replacing=true
     fi
     own_missing_dirs "$releases"
     mkdir -p "$releases"
@@ -3145,6 +3161,16 @@ install_ffmpeg() {
         return
     fi
     ffmpeg_top=${asset%.tar.gz}
+    if ! tar -tvzf "$tmpzip" | awk '
+        BEGIN { bad = 0 }
+        { type = substr($0, 1, 1) }
+        type != "-" && type != "d" { bad = 1 }
+        END { exit bad }
+    '; then
+        ffmpeg_discard_downloads
+        skip ffmpeg "$asset contains an unsupported member type"
+        return
+    fi
     if ! tar -tzf "$tmpzip" | awk -v top="$ffmpeg_top" '
         BEGIN { bad = 0 }
         /^\// { bad = 1 }
@@ -3174,14 +3200,30 @@ install_ffmpeg() {
         skip ffmpeg "$asset does not contain a working ffmpeg and ffprobe"
         return
     fi
-    mv "$tmpbundle" "$release_dir"
+    if $ffmpeg_replacing; then
+        ffmpeg_old_release="${releases}/.ffmpeg-old.$$"
+        rm -rf "$ffmpeg_old_release"
+        if ! mv "$release_dir" "$ffmpeg_old_release"; then
+            ffmpeg_discard_downloads
+            skip ffmpeg "could not replace $release_dir"
+            return
+        fi
+    fi
+    if ! mv "$tmpbundle" "$release_dir"; then
+        if $ffmpeg_replacing; then mv "$ffmpeg_old_release" "$release_dir"; fi
+        ffmpeg_discard_downloads
+        skip ffmpeg "could not install $release_dir"
+        return
+    fi
     tmpbundle=
     own_dir "$release_dir"
-    if ! ln -sfn "$release_dir" "${FFMPEG_HOME}/current"; then
+    if ! switch_symlink "$release_dir" "${FFMPEG_HOME}/current"; then
         rm -rf "$release_dir"
+        if $ffmpeg_replacing; then mv "$ffmpeg_old_release" "$release_dir"; fi
         skip ffmpeg "could not switch ${FFMPEG_HOME}/current"
         return
     fi
+    if $ffmpeg_replacing; then rm -rf "$ffmpeg_old_release"; fi
     own_file "${FFMPEG_HOME}/current"
     printf '%s\n' "$record" > "${STATE}/ffmpeg"
     own_file "${STATE}/ffmpeg"
