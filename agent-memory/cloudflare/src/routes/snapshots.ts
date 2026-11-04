@@ -16,6 +16,7 @@ import {
   type SnapshotRow,
 } from "../db.js";
 import { json, methodNotAllowed } from "../errors.js";
+import { reportError } from "../observe-channel.js";
 import { serverTiming } from "../observe.js";
 import {
   GC_GRACE_SECONDS,
@@ -201,6 +202,7 @@ async function commit(
     if (message.includes("UNIQUE constraint failed")) {
       return refuse(409, "conflict", "snapshot already exists", timing);
     }
+    reportError("snapshots.commit", error);
     return refuse(503, "unavailable", "snapshot commit failed", timing);
   } finally {
     timing.d1 += performance.now() - started;

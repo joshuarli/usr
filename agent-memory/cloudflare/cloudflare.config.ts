@@ -4,6 +4,7 @@ export default defineConfig({
 	worker: {
 		name: "usr-memories",
 		compatibilityDate: "2026-10-30",
+		compatibilityFlags: ["nodejs_compat"],
 		entrypoint: "src/index.ts",
 		workersDev: false,
 		previewUrls: false,
@@ -22,6 +23,7 @@ export default defineConfig({
 		domains: [
 			"memories.17166969.xyz",
 		],
+		tailConsumers: [{ worker: "stats-observe" }],
 		env: {
 			ACCESS_TEAM_DOMAIN: bindings.text("joshuarli.cloudflareaccess.com"),
 			ACCESS_AUD: bindings.text("5a104e8f635a9b4d424e56de441221c443d3293ddd26c751da7e2393713bdfa6"),

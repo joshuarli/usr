@@ -12,6 +12,7 @@ import {
   type StoreMeta,
 } from "../db.js";
 import { json, methodNotAllowed } from "../errors.js";
+import { reportError } from "../observe-channel.js";
 import { readLearningState, type LearningState } from "../learning.js";
 import { serverTiming } from "../observe.js";
 import {
@@ -270,6 +271,7 @@ async function replaceObject(
     if (message.includes("UNIQUE constraint failed") || message.includes("FOREIGN KEY constraint failed")) {
       return refuse(409, "conflict", "object replacement conflicts with existing state", timing);
     }
+    reportError("sync.replace", error);
     return refuse(503, "unavailable", "object replacement failed", timing);
   } finally {
     timing.d1 += performance.now() - started;

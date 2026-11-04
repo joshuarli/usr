@@ -10,6 +10,7 @@ import {
   type NewGeneration,
 } from "../db.js";
 import { json, methodNotAllowed } from "../errors.js";
+import { reportError } from "../observe-channel.js";
 import { serverTiming } from "../observe.js";
 import {
   MAX_PAGE,
@@ -78,6 +79,7 @@ function commitFailure(error: unknown, timing: SyncTiming): Response {
   if (message.includes("tombstoned")) {
     return refuse(410, "tombstoned", "session is tombstoned", timing);
   }
+  reportError("generations.commit", error);
   return refuse(503, "unavailable", "generation commit failed", timing);
 }
 

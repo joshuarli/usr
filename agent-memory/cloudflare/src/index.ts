@@ -1,6 +1,7 @@
 import { authorize, identityOf, parseReaders, type AccessIdentity, type Principal } from "./auth.js";
 import { failure } from "./errors.js";
 import { serverTiming, trace } from "./observe.js";
+import { markInvocation, reportError } from "./observe-channel.js";
 import { handleGenerations } from "./routes/generations.js";
 import { handleHtml } from "./routes/html.js";
 import { handleLearning } from "./routes/learning.js";
@@ -20,6 +21,7 @@ export interface Env {
 
 export default {
   async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
+    markInvocation(context);
     const timing = { d1: 0, r2: 0 };
     const authStarted = performance.now();
     let identity: AccessIdentity | null;
@@ -31,7 +33,8 @@ export default {
       });
       principal = await trace(context, "auth", {}, async () =>
         authorize(env.DB, identity, parseReaders(env.READERS)));
-    } catch {
+    } catch (error) {
+      reportError("request.auth", error);
       timing.d1 += performance.now() - authStarted;
       return failure(503, "unavailable", "authentication is unavailable", {
         "Server-Timing": serverTiming(timing),
@@ -64,7 +67,8 @@ export default {
       if (memories !== null) return memories;
       const page = await handleHtml(request, env, principal, pathname, url, timing);
       if (page !== null) return page;
-    } catch {
+    } catch (error) {
+      reportError("request.route", error);
       return failure(503, "unavailable", "sync is unavailable", { "Server-Timing": serverTiming(timing) });
     }
     return failure(404, "not_found", "route not found", { "Server-Timing": serverTiming(timing) });

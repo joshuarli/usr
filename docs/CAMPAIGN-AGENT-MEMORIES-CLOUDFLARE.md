@@ -203,6 +203,8 @@ tooling: no runtime path calls it, and routine collector sync never needs it (CF
 | `provision` | `cloudflare/scripts/provision.sh`: create R2 and D1, then write the D1 id to `cloudflare.config.ts` |
 | `provision-access` | `provision.sh --access`: create the Worker-level Access app and policies, and enroll a collector token bound to one origin |
 | `observe` | Asserts the config carries logs 0.25 and traces 0.10, prints the dashboard URLs, and lists the serving deployment with `cf workers deployments list --worker usr-memories` |
+
+The Worker's tail consumer is `stats-observe`, the collector in the `stats` repository. `src/observe-channel.ts` publishes each request's span context and, at the five catch sites that turn an unexpected error into a 503, an error report on the `stats.observe` diagnostics channel. Its operations (`request.auth`, `request.route`, `sync.replace`, `snapshots.commit`, `generations.commit`) are a closed set the collector also lists; a report with any other operation is rejected there. The collector keeps only the Worker's known path segments, so object digests and memory ids are stored as `:id`. `nodejs_compat` is set explicitly because Miniflare does not apply the compatibility-date default when it resolves `node:diagnostics_channel`.
 | `perf-local` | `eval/bench_mirror.py local` |
 | `perf-worker` | `eval/bench_mirror.py worker` over the Miniflare bundle |
 | `perf-deployed` | `eval/bench_mirror.py deployed` against the live origin with the synthetic token; exits with a message until `P1.6` deploys |

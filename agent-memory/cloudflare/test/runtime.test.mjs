@@ -13,6 +13,7 @@ test("the built bundle boots and fails closed without Access", async (t) => {
     modulesRules: [{ type: "ESModule", include: ["**/*.js"] }],
     scriptPath: BUNDLE_PATH,
     compatibilityDate: "2026-08-06",
+    compatibilityFlags: ["nodejs_compat"],
     bindings: { READERS: "reader@example.test" },
   });
   t.after(() => miniflare.dispose());
