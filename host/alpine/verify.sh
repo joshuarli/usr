@@ -15,7 +15,7 @@ in_runlevel() { rc-update show "$2" | awk -v s="$1" '$1 == s { found = 1 } END {
 managed() { cmp -s "$1" "$2" && [ "$(stat -c %u:%g:%a "$2")" = "0:0:$3" ]; }
 no_match() { ! grep -Eqs "$@"; }
 no_extra_nopass() {
-	! cat /etc/doas.conf /etc/doas.d/*.conf 2>/dev/null |
+	cat /etc/doas.conf /etc/doas.d/*.conf 2>/dev/null |
 		awk -v user="$user" '
 			{ sub(/#.*/, "") }
 			/nopass/ &&
@@ -23,6 +23,13 @@ no_extra_nopass() {
 				index($0, "tailscale as root cmd /usr/sbin/resolvconf") == 0 { found = 1 }
 			END { exit found }
 		'
+}
+github_key_matches_user() {
+	[ "$(stat -c %u:%g:%a "$home/.ssh" 2>/dev/null)" = "$uid:$gid:700" ] || return 1
+	[ "$(stat -c %u:%g:%a "$github_key" 2>/dev/null)" = "$uid:$gid:600" ] || return 1
+	[ "$(stat -c %u:%g:%a "$github_pub" 2>/dev/null)" = "$uid:$gid:644" ] || return 1
+	ssh-keygen -y -P '' -f "$github_key" 2>/dev/null | cmp -s - "$github_pub" || return 1
+	ssh-keygen -lf "$github_pub" 2>/dev/null | grep -q '(ED25519)$'
 }
 doas_policy_matches_user() {
 	[ "$(stat -c %u:%g:%a /etc/doas.d/30-home-nopass.conf 2>/dev/null)" = '0:0:644' ] || return 1
@@ -35,7 +42,10 @@ major_at_least() { [ "$("$2" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[
 [ "$(id -u)" -eq 0 ] || { echo 'verify: run as root' >&2; exit 1; }
 user=${USER_NAME:-josh}
 uid=$(id -u "$user") || { echo "verify: no user $user" >&2; exit 1; }
+gid=$(id -g "$user") || { echo "verify: no group for $user" >&2; exit 1; }
 home=$(getent passwd "$user" | cut -d: -f6)
+github_key=$home/.ssh/github
+github_pub=$github_key.pub
 
 check 'curl installed' command -v curl
 check 'bash installed' command -v bash
@@ -57,6 +67,7 @@ check 'no getty autologin' no_match -- '--autologin|[[:space:]]-a[[:space:]]' /e
 check 'passwordless doas policy matches provisioned user' doas_policy_matches_user
 check 'no other passwordless doas rules' no_extra_nopass
 check 'passwordless doas works for user' su -s /bin/sh "$user" -c 'doas -n true'
+check 'unencrypted Ed25519 GitHub key matches user and modes' github_key_matches_user
 default_tools=$(sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
@@ -86,7 +97,10 @@ check 'tun device available' test -c /dev/net/tun
 state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
 # shellcheck disable=SC2016
 case $state in
-	Running) check 'tailscale SSH enabled' sh -c '[ "$(tailscale get ssh)" = true ]' ;;
+	Running)
+		check 'tailscale node is online' sh -c 'tailscale status --json | jq -e ".Self.Online == true" >/dev/null'
+		check 'tailscale SSH enabled' sh -c '[ "$(tailscale get ssh)" = true ]'
+		;;
 	NeedsLogin) printf 'note: tailscale is logged out; run: doas tailscale up --ssh\n' ;;
 	*) fail "tailscaled is in state $state" ;;
 esac

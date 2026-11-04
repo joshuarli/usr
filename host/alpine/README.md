@@ -100,6 +100,10 @@ The server base grants the configured user passwordless root access through
 rule and Docker group grant full root access to the host. Log out and back in
 to use Docker without `doas` or `sudo`.
 
+Provisioning creates an unencrypted Ed25519 GitHub key at `~/.ssh/github` when
+that path is unused. It prints the public key for you to add to GitHub and never
+prints or uploads the private key. Existing matching key pairs are preserved.
+
 The server base also installs Tailscale. It loads `tun` through Alpine's
 `modules` OpenRC service at boot, enables and starts the `tailscale` service,
 and enables Tailscale SSH on a logged-in node. For an unattended install,
@@ -110,9 +114,10 @@ provisioning:
 wget -O - https://17166969.xyz/setup.sh | TS_AUTHKEY=tskey-auth-... sh
 ```
 
-Without `TS_AUTHKEY`, an install with a terminal logs in interactively: it
-prints a Tailscale URL and waits up to two minutes for you to finish. A run with
-output redirected leaves Tailscale logged out and prints
+Without `TS_AUTHKEY`, an install with a terminal requests device authorization:
+it prints the device authorization URL to open and waits up to two minutes for
+you to finish.
+A run with output redirected leaves Tailscale logged out and prints
 `doas tailscale up --ssh` instead. The node name comes from the machine
 hostname. Tailscale SSH also needs an `ssh` rule for the node in the tailnet
 policy, which the provisioner does not change. Once logged in, tailscaled
@@ -206,8 +211,9 @@ provision.
 ## Not managed
 
 Disks, partitions, filesystems, encryption, bootloader, kernel, initramfs, EFI,
-Secure Boot, networking, DNS, passwords, root account, SSH keys,
-audio routing and mixer state, power management and lid handling. `setup.sh`
+Secure Boot, networking, DNS, passwords, root account, SSH server configuration,
+authorized keys and SSH keys other than the generated GitHub key, audio routing
+and mixer state, power management and lid handling. `setup.sh`
 switches a stable install to edge and replaces `linux-lts` with `linux-stable`;
 the provisioner itself does not manage repositories or the kernel. The desktop
 layer installs `alsa-utils` and a `volume` helper for the media keys, but it

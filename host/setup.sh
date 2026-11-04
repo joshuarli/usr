@@ -94,6 +94,9 @@ setup_alpine() {
     bootstrap_git -C "$dest" pull --ff-only || die "could not update $dest; pull it by hand"
 
     say 'provisioning Alpine'
+    if [ -z "${TS_AUTHKEY:-}" ] && [ -t 2 ]; then
+        say 'if Tailscale needs authorization, open the device URL printed during provisioning'
+    fi
     as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" "TS_AUTHKEY=${TS_AUTHKEY:-}" \
         sh "$dest/host/alpine/install.sh" </dev/null
     [ "$converted" = false ] || say 'reboot to finish the edge upgrade'

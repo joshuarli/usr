@@ -58,6 +58,25 @@ EOF
 	fi
 }
 
+check_github_key() {
+	if [ -e "$ssh_dir" ] || [ -L "$ssh_dir" ]; then
+		[ -d "$ssh_dir" ] && [ ! -L "$ssh_dir" ] || die "$ssh_dir exists and is not a regular directory"
+		[ "$(stat -c %u "$ssh_dir")" = "$uid" ] || die "$ssh_dir is not owned by $user"
+	fi
+	if [ -e "$github_key" ] || [ -L "$github_key" ] || [ -e "$github_pub" ] || [ -L "$github_pub" ]; then
+		[ -f "$github_key" ] && [ ! -L "$github_key" ] && [ -f "$github_pub" ] && [ ! -L "$github_pub" ] ||
+			die "$github_key and $github_pub must be regular files; move both aside to generate a new key"
+		[ "$(stat -c %u "$github_key")" = "$uid" ] && [ "$(stat -c %u "$github_pub")" = "$uid" ] ||
+			die "$github_key and $github_pub must be owned by $user"
+		command -v ssh-keygen >/dev/null || die 'ssh-keygen is required to check the existing GitHub key; install openssh-keygen'
+		if ! ssh-keygen -y -P '' -f "$github_key" 2>/dev/null | cmp -s - "$github_pub"; then
+			die "$github_key must be an unencrypted key matching $github_pub; move both aside to generate a new key"
+		fi
+		ssh-keygen -lf "$github_pub" 2>/dev/null | grep -q '(ED25519)$' ||
+			die "$github_pub is not an Ed25519 key; move both aside to generate a new key"
+	fi
+}
+
 install_doas_policy() {
 	if [ -e "$doas_policy" ]; then
 		[ "$(stat -c %u:%g:%a "$doas_policy")" = '0:0:644' ] || {
@@ -77,6 +96,20 @@ install_doas_policy() {
 	rm -f "$doas_tmp"
 	doas_tmp=
 	say "enabled passwordless doas for $user"
+}
+
+setup_github_key() {
+	install -d -o "$uid" -g "$gid" -m 0700 "$ssh_dir"
+	if [ ! -e "$github_key" ]; then
+		as_user "umask 077 && ssh-keygen -q -t ed25519 -N '' -f .ssh/github </dev/null" ||
+			die "could not generate $github_key"
+		say "generated an unencrypted Ed25519 GitHub key at $github_key"
+	fi
+	chown "$uid:$gid" "$github_key" "$github_pub"
+	chmod 0600 "$github_key"
+	chmod 0644 "$github_pub"
+	say 'add this public key to your GitHub account:'
+	cat "$github_pub"
 }
 
 setup_tailscale() {
@@ -117,14 +150,14 @@ setup_tailscale() {
 				tailscale up --ssh --auth-key="$TS_AUTHKEY" --timeout=60s >/dev/null ||
 					die 'tailscale up failed; check TS_AUTHKEY and the tailnet policy'
 			elif [ -t 2 ]; then
-				printf 'home: logging in to Tailscale; open the URL below\n' >&2
+				printf 'home: Tailscale device authorization is required; open the URL printed below\n' >&2
 				if tailscale up --ssh --timeout=120s; then
 					printf 'home: logged in to Tailscale with SSH enabled\n' >&2
 				else
-					printf 'home: tailscale login did not finish; run: doas tailscale up --ssh\n' >&2
+					printf 'home: Tailscale authorization did not finish; rerun setup and open its URL, or run: doas tailscale up --ssh\n' >&2
 				fi
 			else
-				say 'tailscale is logged out; run: doas tailscale up --ssh'
+				say 'Tailscale needs device authorization; run: doas tailscale up --ssh'
 			fi
 			;;
 	esac
@@ -176,7 +209,11 @@ user=${USER_NAME:-josh}
 [ "$user" != root ] || die 'USER_NAME must be a regular user, not root'
 entry=$(getent passwd "$user") || die "user $user does not exist; create it with setup-user or adduser"
 uid=$(printf '%s\n' "$entry" | cut -d: -f3)
+gid=$(printf '%s\n' "$entry" | cut -d: -f4)
 home=$(printf '%s\n' "$entry" | cut -d: -f6)
+ssh_dir=$home/.ssh
+github_key=$ssh_dir/github
+github_pub=$github_key.pub
 [ "$uid" -ge 1000 ] || die "user $user has uid $uid; a regular login (uid >= 1000) is required"
 [ -d "$home" ] && [ "$(stat -c %u "$home")" = "$uid" ] || die "home directory $home of $user is missing or not owned by $user"
 hash=$(awk -F: -v u="$user" '$1 == u { print $2 }' /etc/shadow)
@@ -189,6 +226,7 @@ printf '%s\n' "$repos" | grep -Eqv '/edge/(main|community)/*$' &&
 printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 check_doas_policy
+check_github_key
 
 for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
@@ -257,6 +295,7 @@ packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 # shellcheck disable=SC2086
 apk add --quiet $packages
 install_doas_policy
+setup_github_key
 setup_docker
 
 [ "$(clang_major)" -ge 23 ] || die "clang $(clang -dumpversion) is older than 23; check the edge repositories"
