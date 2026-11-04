@@ -210,6 +210,7 @@ for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
 	case $tool in
 		nodejs) [ -x "$home/.local/bin/node" ] && [ -x "$home/.local/bin/npm" ] ;;
+		ffmpeg) [ -x "$home/.local/bin/ffmpeg" ] && [ -x "$home/.local/bin/ffprobe" ] ;;
 		*) [ -x "$home/.local/bin/$tool" ] ;;
 	esac || missing_tools="$missing_tools $tool"
 done

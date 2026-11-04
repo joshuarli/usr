@@ -40,7 +40,7 @@ run_dl() {
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
         GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION \
         GHOSTTY_CUSTOM_TEST_BAD_SUMS GHOSTTY_CUSTOM_TEST_BUNDLE_ID \
-        PLAYER_APPLICATIONS_DIR PLAYER_TEST_BAD_SUMS
+        PLAYER_APPLICATIONS_DIR PLAYER_TEST_BAD_SUMS FFMPEG_ROOT
     return $_run_dl_status
 }
 
@@ -480,6 +480,24 @@ FEED
             exit 1
         fi
         ;;
+    https://github.com/laputa-systems/ffmpeg-build/releases.atom)
+        [ -f "$FFMPEG_ROOT/feed.atom" ] || exit 22
+        cat "$FFMPEG_ROOT/feed.atom"
+        ;;
+    https://github.com/laputa-systems/ffmpeg-build/releases/download/*)
+        ffmpeg_path=${url#https://github.com/laputa-systems/ffmpeg-build/releases/download/}
+        case "$ffmpeg_path" in *+*) exit 22 ;; esac
+        ffmpeg_path=$(printf '%s' "$ffmpeg_path" | sed 's/%2B/+/g')
+        ffmpeg_file="$FFMPEG_ROOT/$ffmpeg_path"
+        [ -f "$ffmpeg_file" ] || exit 22
+        if [ "$headers" = - ]; then
+            printf 'ETag: ffmpeg-etag-%s\n' "$(cksum < "$ffmpeg_file" | awk '{print $1}')"
+        elif [ -n "$output" ]; then
+            cp "$ffmpeg_file" "$output"
+        else
+            exit 1
+        fi
+        ;;
     *) exit 1 ;;
 esac
 EOF
@@ -764,6 +782,103 @@ else
 fi
 printf '%s  %s\n' "$OXISH_ZIP_SHA256" "$oxish_asset" > "$test_root/oxish.SHA256SUMS"
 printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' "$oxish_asset" > "$test_root/oxish-bad.SHA256SUMS"
+
+test_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+ff_triples="aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl"
+ff_zero_sha=0000000000000000000000000000000000000000000000000000000000000000
+
+ff_write_sums() {
+    : > "$1/SHA256SUMS"
+    for _ff_archive in "$1"/ffmpeg-*.tar.gz; do
+        printf '%s  %s\n' "$(test_sha256 "$_ff_archive")" "${_ff_archive##*/}" >> "$1/SHA256SUMS"
+    done
+    printf '%s  release.json\n' "$ff_zero_sha" >> "$1/SHA256SUMS"
+}
+
+ff_write_release() {
+    _ff_root=$1
+    _ff_tag=$2
+    _ff_probe_exit=${3:-0}
+    _ff_top=${4:-}
+    mkdir -p "$_ff_root/$_ff_tag"
+    for _ff_triple in $ff_triples; do
+        _ff_name="ffmpeg-9.0.2+${_ff_tag}-${_ff_triple}-tools"
+        _ff_dir=${_ff_top:-$_ff_name}
+        _ff_stage="$test_root/ff-stage/$_ff_root/$_ff_tag"
+        rm -rf "${_ff_stage:?}"
+        mkdir -p "$_ff_stage/$_ff_dir/bin" "$_ff_stage/$_ff_dir/share/ffmpeg-build"
+        printf '%s\n' '#!/bin/sh' "printf 'ffmpeg ${_ff_tag} ${_ff_triple}\\n'" > "$_ff_stage/$_ff_dir/bin/ffmpeg"
+        printf '%s\n' '#!/bin/sh' "printf 'ffprobe ${_ff_tag} ${_ff_triple}\\n'" "exit ${_ff_probe_exit}" > "$_ff_stage/$_ff_dir/bin/ffprobe"
+        chmod +x "$_ff_stage/$_ff_dir/bin/ffmpeg" "$_ff_stage/$_ff_dir/bin/ffprobe"
+        printf '{}\n' > "$_ff_stage/$_ff_dir/share/ffmpeg-build/manifest.json"
+        tar -czf "$_ff_root/$_ff_tag/$_ff_name.tar.gz" -C "$_ff_stage" "$_ff_dir"
+    done
+    ff_write_sums "$_ff_root/$_ff_tag"
+}
+
+ff_write_feed() {
+    _ff_feed=$1
+    shift
+    {
+        printf '<feed>\n'
+        for _ff_entry in "$@"; do
+            printf '<entry>\n<updated>2026-11-04T10:00:00Z</updated>\n'
+            printf '<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/ffmpeg-build/releases/tag/%s"/>\n</entry>\n' "$_ff_entry"
+        done
+        printf '</feed>\n'
+    } > "$_ff_feed/feed.atom"
+}
+
+ff_tag_old=20261103
+ff_tag=20261104-r10
+ff_root_a="$test_root/ff-root-a"
+ff_write_release "$ff_root_a" "$ff_tag_old"
+ff_write_feed "$ff_root_a" "$ff_tag_old"
+
+ff_root_b="$test_root/ff-root-b"
+ff_write_release "$ff_root_b" "$ff_tag_old"
+ff_write_release "$ff_root_b" "$ff_tag"
+ff_write_feed "$ff_root_b" "$ff_tag_old" 20261105-rc1 20261104-r2 "$ff_tag" 20261104
+
+ff_root_bad="$test_root/ff-root-bad"
+cp -R "$ff_root_b" "$ff_root_bad"
+sed "s/^[0-9a-f]\{64\}/$ff_zero_sha/" "$ff_root_b/$ff_tag/SHA256SUMS" > "$ff_root_bad/$ff_tag/SHA256SUMS"
+
+ff_root_garbage="$test_root/ff-root-garbage"
+cp -R "$ff_root_b" "$ff_root_garbage"
+for _ff_archive in "$ff_root_garbage/$ff_tag"/ffmpeg-*.tar.gz; do
+    printf 'not an archive\n' > "$_ff_archive"
+done
+ff_write_sums "$ff_root_garbage/$ff_tag"
+
+ff_root_smoke="$test_root/ff-root-smoke"
+cp -R "$ff_root_a" "$ff_root_smoke"
+ff_write_release "$ff_root_smoke" "$ff_tag" 1
+ff_write_feed "$ff_root_smoke" "$ff_tag_old" "$ff_tag"
+
+ff_root_top="$test_root/ff-root-top"
+cp -R "$ff_root_a" "$ff_root_top"
+ff_write_release "$ff_root_top" "$ff_tag" 0 unexpected-top
+ff_write_feed "$ff_root_top" "$ff_tag_old" "$ff_tag"
+
+ff_root_unlisted="$test_root/ff-root-unlisted"
+cp -R "$ff_root_b" "$ff_root_unlisted"
+sed '/aarch64-apple-darwin/d' "$ff_root_b/$ff_tag/SHA256SUMS" > "$ff_root_unlisted/$ff_tag/SHA256SUMS"
+
+ff_root_absent="$test_root/ff-root-absent"
+cp -R "$ff_root_b" "$ff_root_absent"
+rm -f "$ff_root_absent/$ff_tag"/ffmpeg-*.tar.gz
+
+ff_root_nosums="$test_root/ff-root-nosums"
+cp -R "$ff_root_b" "$ff_root_nosums"
+rm -f "$ff_root_nosums/$ff_tag/SHA256SUMS"
 
 cat > "$mock_bin/file" <<'EOF'
 #!/bin/sh
@@ -2658,6 +2773,265 @@ if HOME="$player_home" DL_TEST_OS=Linux DL_TEST_ARCH=aarch64 \
 fi
 [ ! -e "$player_home/.local/bin/player" ]
 [ ! -e "$player_home/.local/state/dl/player" ]
+)
+end_case
+
+ff_run() {
+    _ff_home=$1
+    _ff_with=$2
+    _ff_os=$3
+    _ff_arch=$4
+    shift 4
+    HOME="$_ff_home" XDG_STATE_HOME="$_ff_home/.local/state" TMPDIR="$test_root/tmp" \
+        FFMPEG_ROOT="$_ff_with" DL_TEST_OS="$_ff_os" DL_TEST_ARCH="$_ff_arch" \
+        run_dl "$mock_bin:$PATH" "$repo_root" "$@" 2>&1
+}
+
+ff_ok() {
+    if ff_out=$(ff_run "$@"); then return 0; fi
+    printf '%s\n' "$ff_out" >&2
+    return 1
+}
+
+ff_fails() {
+    if ff_out=$(ff_run "$@"); then
+        printf '%s\n' "$ff_out" >&2
+        return 1
+    fi
+    return 0
+}
+
+ff_said() {
+    case "$ff_out" in
+        *"$1"*) return 0 ;;
+    esac
+    printf 'missing %s in:\n%s\n' "$1" "$ff_out" >&2
+    return 1
+}
+
+ff_owns() {
+    awk -F '\t' -v kind="$2" -v path="$3" \
+        '$1 == kind && $2 == path { found = 1 } END { exit !found }' "$1"
+}
+
+ff_installed_as() {
+    [ "$("$1/.local/bin/ffmpeg" -version)" = "ffmpeg $2 $3" ]
+    [ "$("$1/.local/bin/ffprobe" -version)" = "ffprobe $2 $3" ]
+    [ "$(readlink "$1/.local/bin/ffmpeg")" = "$1/.local/share/ffmpeg/current/bin/ffmpeg" ]
+    [ "$(readlink "$1/.local/bin/ffprobe")" = "$1/.local/share/ffmpeg/current/bin/ffprobe" ]
+    [ "$(readlink "$1/.local/share/ffmpeg/current")" = "$1/.local/share/ffmpeg/releases/$2-$3" ]
+}
+
+begin_case "ffmpeg maps each supported target to its musl or darwin tools archive"
+( set -e
+for ff_case in Darwin:aarch64:aarch64-apple-darwin Linux:x86_64:x86_64-unknown-linux-musl Linux:aarch64:aarch64-unknown-linux-musl; do
+    ff_case_os=${ff_case%%:*}
+    ff_case_rest=${ff_case#*:}
+    ff_case_arch=${ff_case_rest%%:*}
+    ff_case_triple=${ff_case_rest#*:}
+    ff_map_home="$test_root/ff-map-$ff_case_arch-$ff_case_os"
+    ff_ok "$ff_map_home" "$ff_root_b" "$ff_case_os" "$ff_case_arch" ffmpeg
+    ff_installed_as "$ff_map_home" "$ff_tag" "$ff_case_triple"
+done
+for ff_case in Darwin:x86_64 Linux:armv7l Linux:riscv64; do
+    ff_bad_home="$test_root/ff-unsupported-${ff_case%%:*}-${ff_case#*:}"
+    ff_fails "$ff_bad_home" "$ff_root_b" "${ff_case%%:*}" "${ff_case#*:}" ffmpeg
+    ff_said 'no ffmpeg-build release'
+    [ ! -e "$ff_bad_home/.local/bin/ffmpeg" ]
+    [ ! -e "$ff_bad_home/.local/bin/ffprobe" ]
+    [ ! -e "$ff_bad_home/.local/state/dl/ffmpeg" ]
+    [ ! -e "$ff_bad_home/.local/share/ffmpeg" ]
+done
+)
+end_case
+
+begin_case "ffmpeg installs both commands from the newest release and repeats as current"
+( set -e
+ff_home="$test_root/ff-install-home"
+ff_owned="$ff_home/.local/state/sync/dl-owned"
+mkdir -p "$(dirname "$ff_owned")"
+DL_OWNED_FILE="$ff_owned" ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_said "Installed $ff_home/.local/bin/ffmpeg and $ff_home/.local/bin/ffprobe"
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
+ff_release="$ff_home/.local/share/ffmpeg/releases/${ff_tag}-x86_64-unknown-linux-musl"
+[ -f "$ff_release/share/ffmpeg-build/manifest.json" ]
+[ ! -e "$ff_home/.local/share/ffmpeg/releases/20261105-rc1-x86_64-unknown-linux-musl" ]
+case "$(cat "$ff_home/.local/state/dl/ffmpeg")" in
+    "$ff_tag":ffmpeg-etag-*) ;;
+    *) printf 'bad state record\n' >&2; exit 1 ;;
+esac
+ff_owns "$ff_owned" D "$ff_release"
+ff_owns "$ff_owned" F "$ff_home/.local/share/ffmpeg/current"
+ff_owns "$ff_owned" F "$ff_home/.local/bin/ffmpeg"
+ff_owns "$ff_owned" F "$ff_home/.local/bin/ffprobe"
+ff_owns "$ff_owned" F "$ff_home/.local/state/dl/ffmpeg"
+DL_OWNED_FILE="$ff_owned" ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_said "ffmpeg is current ($ff_tag)"
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
+[ "$(printf '%s\n' "$ff_home"/.local/share/ffmpeg/releases/* | wc -l)" -eq 1 ]
+)
+end_case
+
+begin_case "ffmpeg upgrade promotes the new pair and keeps the previous release"
+( set -e
+ff_home="$test_root/ff-upgrade-home"
+ff_ok "$ff_home" "$ff_root_a" Darwin aarch64 ffmpeg
+ff_installed_as "$ff_home" "$ff_tag_old" aarch64-apple-darwin
+ff_ok "$ff_home" "$ff_root_b" Darwin aarch64 ffmpeg
+ff_said Installed
+ff_installed_as "$ff_home" "$ff_tag" aarch64-apple-darwin
+[ -x "$ff_home/.local/share/ffmpeg/releases/${ff_tag_old}-aarch64-apple-darwin/bin/ffprobe" ]
+case "$(cat "$ff_home/.local/state/dl/ffmpeg")" in
+    "$ff_tag":*) ;;
+    *) printf 'state not updated\n' >&2; exit 1 ;;
+esac
+)
+end_case
+
+begin_case "ffmpeg repairs a missing launcher of the pair"
+( set -e
+ff_home="$test_root/ff-repair-home"
+ff_ok "$ff_home" "$ff_root_b" Linux aarch64 ffmpeg
+rm "$ff_home/.local/bin/ffprobe"
+ff_ok "$ff_home" "$ff_root_b" Linux aarch64 ffmpeg
+ff_said Repaired
+ff_installed_as "$ff_home" "$ff_tag" aarch64-unknown-linux-musl
+rm "$ff_home/.local/bin/ffmpeg"
+ff_ok "$ff_home" "$ff_root_b" Linux aarch64 ffmpeg
+ff_installed_as "$ff_home" "$ff_tag" aarch64-unknown-linux-musl
+ff_ok "$ff_home" "$ff_root_b" Linux aarch64 ffmpeg
+ff_said "ffmpeg is current ($ff_tag)"
+)
+end_case
+
+begin_case "ffmpeg failures keep the previous working pair"
+( set -e
+ff_home="$test_root/ff-preserve-home"
+ff_ok "$ff_home" "$ff_root_a" Linux x86_64 ffmpeg
+ff_state=$(cat "$ff_home/.local/state/dl/ffmpeg")
+for ff_variant in "$ff_root_bad|checksum mismatch" "$ff_root_garbage|could not be extracted" "$ff_root_smoke|working ffmpeg and ffprobe" "$ff_root_top|invalid path"; do
+    ff_fails "$ff_home" "${ff_variant%%|*}" Linux x86_64 ffmpeg
+    ff_said "${ff_variant#*|}"
+    ff_installed_as "$ff_home" "$ff_tag_old" x86_64-unknown-linux-musl
+    [ "$(cat "$ff_home/.local/state/dl/ffmpeg")" = "$ff_state" ]
+    [ "$(printf '%s\n' "$ff_home"/.local/share/ffmpeg/releases/* | wc -l)" -eq 1 ]
+done
+ff_fresh="$test_root/ff-preserve-fresh-home"
+ff_fails "$ff_fresh" "$ff_root_bad" Linux x86_64 ffmpeg
+[ ! -e "$ff_fresh/.local/bin/ffmpeg" ]
+[ ! -e "$ff_fresh/.local/bin/ffprobe" ]
+[ ! -e "$ff_fresh/.local/share/ffmpeg/current" ]
+[ ! -e "$ff_fresh/.local/state/dl/ffmpeg" ]
+)
+end_case
+
+begin_case "ffmpeg leaves unmanaged launchers and release files alone"
+( set -e
+ff_home="$test_root/ff-unmanaged-home"
+mkdir -p "$ff_home/.local/bin"
+printf 'mine\n' > "$ff_home/.local/bin/ffprobe"
+chmod +x "$ff_home/.local/bin/ffprobe"
+ff_fails "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_said 'is not a dl-managed symlink'
+[ "$(cat "$ff_home/.local/bin/ffprobe")" = mine ]
+[ ! -e "$ff_home/.local/bin/ffmpeg" ]
+[ ! -e "$ff_home/.local/share/ffmpeg/current" ]
+[ ! -e "$ff_home/.local/state/dl/ffmpeg" ]
+ff_other="$test_root/ff-unmanaged-other-home"
+mkdir -p "$ff_other/.local/bin" "$ff_other/bin"
+printf 'brew\n' > "$ff_other/bin/ffmpeg"
+ln -s "$ff_other/bin/ffmpeg" "$ff_other/.local/bin/ffmpeg"
+ff_fails "$ff_other" "$ff_root_b" Darwin aarch64 ffmpeg
+[ "$(readlink "$ff_other/.local/bin/ffmpeg")" = "$ff_other/bin/ffmpeg" ]
+[ ! -e "$ff_other/.local/bin/ffprobe" ]
+ff_keep="$test_root/ff-unmanaged-keep-home"
+ff_ok "$ff_keep" "$ff_root_a" Linux x86_64 ffmpeg
+mkdir -p "$ff_keep/.local/share/ffmpeg/releases/mine"
+printf 'mine\n' > "$ff_keep/.local/share/ffmpeg/releases/mine/note"
+printf 'mine\n' > "$ff_keep/.local/share/ffmpeg/note"
+ff_ok "$ff_keep" "$ff_root_b" Linux x86_64 ffmpeg
+[ "$(cat "$ff_keep/.local/share/ffmpeg/releases/mine/note")" = mine ]
+[ "$(cat "$ff_keep/.local/share/ffmpeg/note")" = mine ]
+ff_installed_as "$ff_keep" "$ff_tag" x86_64-unknown-linux-musl
+ff_clash="$test_root/ff-unmanaged-current-home"
+mkdir -p "$ff_clash/.local/share/ffmpeg/current"
+printf 'mine\n' > "$ff_clash/.local/share/ffmpeg/current/note"
+ff_fails "$ff_clash" "$ff_root_b" Linux x86_64 ffmpeg
+[ "$(cat "$ff_clash/.local/share/ffmpeg/current/note")" = mine ]
+[ ! -e "$ff_clash/.local/bin/ffmpeg" ]
+)
+end_case
+
+begin_case "ffmpeg ownership is recorded for both launchers, the release, and current"
+( set -e
+ff_home="$test_root/ff-record-home"
+ff_owned="$ff_home/.local/state/sync/dl-owned"
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+mkdir -p "$(dirname "$ff_owned")"
+DL_RECORD_OWNED=true DL_OWNED_FILE="$ff_owned" ff_ok "$ff_home" "$ff_root_b" Linux x86_64
+ff_owns "$ff_owned" D "$ff_home/.local/share/ffmpeg/releases/${ff_tag}-x86_64-unknown-linux-musl"
+ff_owns "$ff_owned" F "$ff_home/.local/share/ffmpeg/current"
+ff_owns "$ff_owned" F "$ff_home/.local/bin/ffmpeg"
+ff_owns "$ff_owned" F "$ff_home/.local/bin/ffprobe"
+ff_owns "$ff_owned" F "$ff_home/.local/state/dl/ffmpeg"
+)
+end_case
+
+begin_case "ffmpeg is a default tool on the three supported targets only, as one pair entry"
+( set -e
+for ff_case in Darwin:aarch64 Linux:x86_64 Linux:aarch64; do
+    ff_list=$(HOME="$test_root/ff-list-home" DL_TEST_OS="${ff_case%%:*}" DL_TEST_ARCH="${ff_case#*:}" \
+        TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+    [ "$(printf '%s\n' "$ff_list" | grep -cx ffmpeg)" -eq 1 ]
+    if printf '%s\n' "$ff_list" | grep -qx ffprobe; then exit 1; fi
+done
+ff_list=$(HOME="$test_root/ff-list-home" DL_TEST_OS=Darwin DL_TEST_ARCH=x86_64 \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+if printf '%s\n' "$ff_list" | grep -qx ffmpeg; then exit 1; fi
+)
+end_case
+
+begin_case "ffmpeg discovery chooses the newest valid tag and ignores prerelease-looking tags"
+( set -e
+ff_home="$test_root/ff-discovery-home"
+ff_ok "$ff_home" "$ff_root_b" Linux x86_64 ffmpeg
+ff_installed_as "$ff_home" 20261104-r10 x86_64-unknown-linux-musl
+ff_only="$test_root/ff-root-only-prerelease"
+mkdir -p "$ff_only"
+ff_write_feed "$ff_only" 20261105-rc1 v1 latest
+ff_fresh="$test_root/ff-discovery-none-home"
+ff_fails "$ff_fresh" "$ff_only" Linux x86_64 ffmpeg
+ff_said 'no release found'
+[ ! -e "$ff_fresh/.local/bin/ffmpeg" ]
+)
+end_case
+
+begin_case "ffmpeg missing assets fail a fresh install and keep an existing pair"
+( set -e
+for ff_variant_root in "$ff_root_unlisted" "$ff_root_absent" "$ff_root_nosums"; do
+    ff_variant=${ff_variant_root##*-}
+    ff_fresh="$test_root/ff-missing-$ff_variant-home"
+    ff_fails "$ff_fresh" "$ff_variant_root" Darwin aarch64 ffmpeg
+    [ ! -e "$ff_fresh/.local/bin/ffmpeg" ]
+    [ ! -e "$ff_fresh/.local/bin/ffprobe" ]
+    [ ! -e "$ff_fresh/.local/state/dl/ffmpeg" ]
+    ff_kept="$test_root/ff-missing-$ff_variant-kept-home"
+    ff_ok "$ff_kept" "$ff_root_a" Darwin aarch64 ffmpeg
+    ff_ok "$ff_kept" "$ff_variant_root" Darwin aarch64 ffmpeg
+    ff_said 'keeping installed ffmpeg'
+    ff_installed_as "$ff_kept" "$ff_tag_old" aarch64-apple-darwin
+done
+)
+end_case
+
+begin_case "sync tools ffmpeg installs the pair through dl"
+( set -e
+ff_home="$test_root/ff-sync-home"
+mkdir -p "$ff_home"
+sh -c 'PATH=$1; export PATH; XDG_DATA_HOME=; export XDG_DATA_HOME; XDG_STATE_HOME=$2; export XDG_STATE_HOME; HOME=$3; export HOME; TMPDIR=$4; export TMPDIR; FFMPEG_ROOT=$5; export FFMPEG_ROOT; DL_TEST_OS=Linux; export DL_TEST_OS; DL_TEST_ARCH=x86_64; export DL_TEST_ARCH; DL_OWNED_FILE=$3/.local/state/sync/dl-owned; export DL_OWNED_FILE; exec /bin/sh "$6/sync" tools ffmpeg' \
+    sync_ffmpeg "$mock_bin:$PATH" "$ff_home/.local/state" "$ff_home" "$test_root/tmp" "$ff_root_b" "$repo_root" >/dev/null
+ff_installed_as "$ff_home" "$ff_tag" x86_64-unknown-linux-musl
+ff_owns "$ff_home/.local/state/sync/dl-owned" F "$ff_home/.local/bin/ffprobe"
 )
 end_case
 

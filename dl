@@ -25,6 +25,9 @@ CODEX_LEGACY_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/codex"
 GIT_HOME="${GIT_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/git}"
 SSH_HOME="${SSH_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/ssh}"
 SSH_COMMANDS="ssh ssh-keygen ssh-agent ssh-add sftp scp"
+FFMPEG_REPO=laputa-systems/ffmpeg-build
+FFMPEG_HOME="${FFMPEG_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/ffmpeg}"
+FFMPEG_COMMANDS="ffmpeg ffprobe"
 OXISH_HOME="${OXISH_HOME:-${XDG_DATA_HOME:-${HOME}/.local/share}/oxish}"
 OXISH_COMMANDS="oxish-server oxish-session"
 GROK_HOME="${HOME}/.grok"
@@ -77,6 +80,7 @@ tmpbundle=
 tmpmnt=
 tmpbinlink=
 git_tmplink=
+ffmpeg_tmplink=
 worker_pids=
 worker_count=0
 log_dir=
@@ -355,6 +359,70 @@ ensure_oxish_link() {
     own_file "$oxish_dest_link"
 }
 
+own_ffmpeg_release_target() {
+    ffmpeg_release_prefix="${FFMPEG_HOME}/releases/"
+    case "$1" in
+        "${ffmpeg_release_prefix}"*/bin/*) ;;
+        *) return 1 ;;
+    esac
+    ffmpeg_release_rest=${1#"$ffmpeg_release_prefix"}
+    ffmpeg_release_name=${ffmpeg_release_rest%%/*}
+    case "$ffmpeg_release_name" in
+        ''|.|..) return 1 ;;
+    esac
+    ffmpeg_release_command=${ffmpeg_release_rest#"${ffmpeg_release_name}/bin/"}
+    case " $FFMPEG_COMMANDS " in
+        *" $ffmpeg_release_command "*) ;;
+        *) return 1 ;;
+    esac
+    [ "$ffmpeg_release_rest" = "${ffmpeg_release_name}/bin/${ffmpeg_release_command}" ] || return 1
+    own_dir "${ffmpeg_release_prefix}${ffmpeg_release_name}"
+}
+
+own_ffmpeg_current_target() {
+    case "$1" in
+        "${FFMPEG_HOME}/current/bin/"*) ;;
+        *) return 1 ;;
+    esac
+    ffmpeg_current_command=${1#"${FFMPEG_HOME}/current/bin/"}
+    case " $FFMPEG_COMMANDS " in
+        *" $ffmpeg_current_command "*) ;;
+        *) return 1 ;;
+    esac
+    [ -L "${FFMPEG_HOME}/current" ] || return 1
+    ffmpeg_pointed=$(readlink "${FFMPEG_HOME}/current") || return 1
+    own_ffmpeg_release_target "${ffmpeg_pointed}/bin/${ffmpeg_current_command}" || return 1
+    [ -d "$ffmpeg_pointed" ] || return 1
+}
+
+ensure_ffmpeg_link() {
+    ffmpeg_dest_link="${DEST}/$1"
+    ffmpeg_want="${FFMPEG_HOME}/current/bin/$1"
+    if [ -L "$ffmpeg_dest_link" ]; then
+        ffmpeg_have=$(readlink "$ffmpeg_dest_link") || ffmpeg_have=
+        if [ "$ffmpeg_have" = "$ffmpeg_want" ]; then
+            own_file "$ffmpeg_dest_link"
+            return 0
+        fi
+        if own_ffmpeg_release_target "$ffmpeg_have" 2>/dev/null \
+            || own_ffmpeg_current_target "$ffmpeg_have" 2>/dev/null; then
+            :
+        else
+            skip ffmpeg "${ffmpeg_dest_link} is not a dl-managed symlink"
+            return 1
+        fi
+    elif [ -e "$ffmpeg_dest_link" ]; then
+        skip ffmpeg "${ffmpeg_dest_link} is not a dl-managed symlink"
+        return 1
+    fi
+    ffmpeg_tmplink=$(mktemp "${DEST}/.ffmpeg.XXXXXX")
+    rm -f "$ffmpeg_tmplink"
+    ln -s "$ffmpeg_want" "$ffmpeg_tmplink"
+    mv -f "$ffmpeg_tmplink" "$ffmpeg_dest_link"
+    ffmpeg_tmplink=
+    own_file "$ffmpeg_dest_link"
+}
+
 own_missing_dirs "$DEST"
 mkdir -p "$DEST"
 own_missing_dirs "$STATE"
@@ -391,6 +459,10 @@ cleanup_temporary_files() {
     if [ -n "$git_tmplink" ]; then
         rm -f "$git_tmplink" || _dl_warn "Warning: could not remove $git_tmplink"
         git_tmplink=
+    fi
+    if [ -n "$ffmpeg_tmplink" ]; then
+        rm -f "$ffmpeg_tmplink" || _dl_warn "Warning: could not remove $ffmpeg_tmplink"
+        ffmpeg_tmplink=
     fi
     if [ -n "$log_dir" ]; then
         rm -rf "$log_dir" || _dl_warn "Warning: could not remove $log_dir"
@@ -2909,6 +2981,215 @@ install_git() {
     _dl_ok "Installed ${DEST}/git"
 }
 
+ffmpeg_discard_downloads() {
+    rm -f "$tmpzip" "$tmpoutput"
+    tmpzip=
+    tmpoutput=
+    if [ -n "$tmpbundle" ]; then
+        rm -rf "$tmpbundle"
+        tmpbundle=
+    fi
+}
+
+ffmpeg_pair_runs() {
+    for ffmpeg_probe in $FFMPEG_COMMANDS; do
+        [ -f "${1}/bin/${ffmpeg_probe}" ] && [ ! -L "${1}/bin/${ffmpeg_probe}" ] \
+            && [ -x "${1}/bin/${ffmpeg_probe}" ] \
+            && "${1}/bin/${ffmpeg_probe}" -version >/dev/null 2>&1 || return 1
+    done
+}
+
+install_ffmpeg() {
+    case "$OS:$ARCH" in
+        Darwin:aarch64) triple=aarch64-apple-darwin ;;
+        Linux:x86_64) triple=x86_64-unknown-linux-musl ;;
+        Linux:aarch64) triple=aarch64-unknown-linux-musl ;;
+        *) skip ffmpeg "no ffmpeg-build release for ${OS}/${ARCH}"; return ;;
+    esac
+    tag=$(curl -fsSL "https://github.com/${FFMPEG_REPO}/releases.atom" \
+        | awk '
+            /<entry>/ { in_entry = 1; tag = "" }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+            }
+            /<\/entry>/ {
+                if (tag ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9](-r[0-9]+)?$/) {
+                    rev = 0
+                    if (length(tag) > 8) rev = substr(tag, 11) + 0
+                    key = sprintf("%s%06d", substr(tag, 1, 8), rev)
+                    if (key > newest_key) {
+                        newest_key = key
+                        newest_tag = tag
+                    }
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
+    if [ -z "$tag" ]; then
+        unchecked ffmpeg "no release found"
+        return
+    fi
+    for ffmpeg_command in $FFMPEG_COMMANDS; do
+        ffmpeg_existing="${DEST}/${ffmpeg_command}"
+        if [ -e "$ffmpeg_existing" ] || [ -L "$ffmpeg_existing" ]; then
+            ffmpeg_existing_target=$(readlink "$ffmpeg_existing" 2>/dev/null || :)
+            if ! own_ffmpeg_release_target "$ffmpeg_existing_target" \
+                && ! own_ffmpeg_current_target "$ffmpeg_existing_target"; then
+                skip ffmpeg "${ffmpeg_existing} is not a dl-managed symlink"
+                return
+            fi
+        fi
+    done
+    releases="${FFMPEG_HOME}/releases"
+    if [ -L "$releases" ] || { [ -e "$releases" ] && [ ! -d "$releases" ]; }; then
+        skip ffmpeg "$releases is not a directory"
+        return
+    fi
+    if [ -e "${FFMPEG_HOME}/current" ] && [ ! -L "${FFMPEG_HOME}/current" ]; then
+        skip ffmpeg "${FFMPEG_HOME}/current is not a dl-managed symlink"
+        return
+    fi
+    release_base="https://github.com/${FFMPEG_REPO}/releases/download/${tag}"
+    tmpoutput=$(mktemp)
+    if ! curl -fsSL -o "$tmpoutput" "${release_base}/SHA256SUMS"; then
+        ffmpeg_discard_downloads
+        unchecked ffmpeg "SHA256SUMS is unavailable in ${tag}"
+        return
+    fi
+    ffmpeg_listed=$(awk -v suffix="-${triple}-tools.tar.gz" '
+        NF == 2 && length($1) == 64 && index($2, "ffmpeg-") == 1 {
+            start = length($2) - length(suffix) + 1
+            if (start > 1 && substr($2, start) == suffix) {
+                count++
+                sha = $1
+                name = $2
+            }
+        }
+        END { if (count == 1) print sha, name }
+    ' "$tmpoutput")
+    rm -f "$tmpoutput"
+    tmpoutput=
+    expected_sha256=${ffmpeg_listed%% *}
+    asset=${ffmpeg_listed#* }
+    case "$asset" in
+        ffmpeg-*"+${tag}-${triple}-tools.tar.gz") ;;
+        *) asset= ;;
+    esac
+    case "$asset" in
+        *[!A-Za-z0-9._+-]*) asset= ;;
+    esac
+    if [ -z "$asset" ] || [ "${#expected_sha256}" -ne 64 ]; then
+        unchecked ffmpeg "the ${triple} tools archive is not listed in ${tag}"
+        return
+    fi
+    url="${release_base}/$(printf '%s' "$asset" | sed 's/+/%2B/g')"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked ffmpeg "$asset is unavailable"
+        return
+    fi
+    record="${tag}:${id}"
+    release_dir="${releases}/${tag}-${triple}"
+    if is_current ffmpeg "$record" && [ -L "${FFMPEG_HOME}/current" ] \
+        && [ "$(readlink "${FFMPEG_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
+        && [ -d "$release_dir" ]; then
+        current_ok=true
+        for ffmpeg_command in $FFMPEG_COMMANDS; do
+            if [ "$(readlink "${DEST}/${ffmpeg_command}" 2>/dev/null || :)" \
+                != "${FFMPEG_HOME}/current/bin/${ffmpeg_command}" ] \
+                || [ ! -x "${DEST}/${ffmpeg_command}" ]; then
+                current_ok=false
+            else
+                own_file "${DEST}/${ffmpeg_command}"
+            fi
+        done
+        if $current_ok && own_ffmpeg_release_target "${release_dir}/bin/ffmpeg"; then
+            _dl_current "ffmpeg is current (${tag})"
+            return
+        fi
+    fi
+    if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        if [ "$(readlink "${FFMPEG_HOME}/current" 2>/dev/null || :)" = "$release_dir" ] \
+            && [ "$(cat "${STATE}/ffmpeg" 2>/dev/null)" = "$record" ] \
+            && ffmpeg_pair_runs "$release_dir"; then
+            for ffmpeg_command in $FFMPEG_COMMANDS; do
+                ensure_ffmpeg_link "$ffmpeg_command" || return
+            done
+            own_dir "$release_dir"
+            own_file "${FFMPEG_HOME}/current"
+            own_file "${STATE}/ffmpeg"
+            changed=true
+            _dl_ok "Repaired ${DEST}/ffmpeg and ${DEST}/ffprobe"
+            return
+        fi
+        skip ffmpeg "$release_dir already exists"
+        return
+    fi
+    own_missing_dirs "$releases"
+    mkdir -p "$releases"
+    _dl_fetch "Downloading ${asset} ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        ffmpeg_discard_downloads
+        skip ffmpeg "$asset download failed"
+        return
+    fi
+    if [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+        ffmpeg_discard_downloads
+        skip ffmpeg "$asset checksum mismatch"
+        return
+    fi
+    ffmpeg_top=${asset%.tar.gz}
+    if ! tar -tzf "$tmpzip" | awk -v top="$ffmpeg_top" '
+        BEGIN { bad = 0 }
+        /^\// { bad = 1 }
+        $0 != top && $0 != (top "/") && index($0, top "/") != 1 { bad = 1 }
+        {
+            count = split($0, path, "/")
+            for (component = 1; component <= count; component++) {
+                if (path[component] == "..") bad = 1
+            }
+        }
+        END { exit bad }
+    '; then
+        ffmpeg_discard_downloads
+        skip ffmpeg "$asset contains an invalid path"
+        return
+    fi
+    tmpbundle=$(mktemp -d "${releases}/.ffmpeg.XXXXXX")
+    if ! tar -xzf "$tmpzip" -C "$tmpbundle" --strip-components=1; then
+        ffmpeg_discard_downloads
+        skip ffmpeg "$asset could not be extracted"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    if ! ffmpeg_pair_runs "$tmpbundle"; then
+        ffmpeg_discard_downloads
+        skip ffmpeg "$asset does not contain a working ffmpeg and ffprobe"
+        return
+    fi
+    mv "$tmpbundle" "$release_dir"
+    tmpbundle=
+    own_dir "$release_dir"
+    if ! ln -sfn "$release_dir" "${FFMPEG_HOME}/current"; then
+        rm -rf "$release_dir"
+        skip ffmpeg "could not switch ${FFMPEG_HOME}/current"
+        return
+    fi
+    own_file "${FFMPEG_HOME}/current"
+    printf '%s\n' "$record" > "${STATE}/ffmpeg"
+    own_file "${STATE}/ffmpeg"
+    for ffmpeg_command in $FFMPEG_COMMANDS; do
+        ensure_ffmpeg_link "$ffmpeg_command" || return
+    done
+    changed=true
+    _dl_ok "Installed ${DEST}/ffmpeg and ${DEST}/ffprobe"
+}
+
 install_ssh() {
     if ! command -v zipinfo >/dev/null 2>&1; then
         skip ssh "zipinfo is required to validate the archive"
@@ -3600,6 +3881,19 @@ record_managed_installs() {
         agent="${HOME}/Library/LaunchAgents/com.mactop.plist"
         if [ -f "$agent" ]; then own_file "$agent"; fi
     fi
+    if [ -s "${STATE}/ffmpeg" ]; then
+        ffmpeg_recorded_target=$(readlink "${FFMPEG_HOME}/current" 2>/dev/null || :)
+        if own_ffmpeg_release_target "${ffmpeg_recorded_target}/bin/ffmpeg" && [ -d "$ffmpeg_recorded_target" ]; then
+            own_file "${STATE}/ffmpeg"
+            own_file "${FFMPEG_HOME}/current"
+            for record_command in $FFMPEG_COMMANDS; do
+                if [ "$(readlink "${DEST}/${record_command}" 2>/dev/null || :)" \
+                    = "${FFMPEG_HOME}/current/bin/${record_command}" ]; then
+                    own_file "${DEST}/${record_command}"
+                fi
+            done
+        fi
+    fi
     if [ -s "${STATE}/player" ] && [ "$OS" = Darwin ] \
         && [ -d "$PLAYER_APP" ] && [ ! -L "$PLAYER_APP" ]; then
         own_dir "$PLAYER_APP"
@@ -3643,6 +3937,9 @@ if [ $# -eq 0 ]; then
         *) set -- "$@" jaq ;;
     esac
     set -- "$@" codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 cf agent-browser
+    case "${OS}:${ARCH}" in
+        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" ffmpeg ;;
+    esac
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
     esac
@@ -3720,6 +4017,7 @@ for prog in "$@"; do
         node-build) install_nodebuild ;;
         gh) install_release gh ;;
         git) install_git ;;
+        ffmpeg) install_ffmpeg ;;
         ssh) install_ssh ;;
         oxish) install_oxish ;;
         *)

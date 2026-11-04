@@ -57,11 +57,13 @@ if sh "$root/dl" --list > "$scratch/tools" 2> "$scratch/tool-errors"; then
     tool_missing=0
     while IFS= read -r tool; do
         [ -n "$tool" ] || continue
-        case "$tool" in nodejs) launcher=node ;; *) launcher=$tool ;; esac
-        if [ ! -x "$target/.local/bin/$launcher" ]; then
-            printf 'missing: %s (~/.local/bin/%s)\n' "$tool" "$launcher"
-            tool_missing=$((tool_missing + 1))
-        fi
+        case "$tool" in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; *) launchers=$tool ;; esac
+        for launcher in $launchers; do
+            if [ ! -x "$target/.local/bin/$launcher" ]; then
+                printf 'missing: %s (~/.local/bin/%s)\n' "$tool" "$launcher"
+                tool_missing=$((tool_missing + 1))
+            fi
+        done
     done < "$scratch/tools"
     if [ "$tool_missing" -eq 0 ]; then ok 'default tool launchers exist';
     else problem "$tool_missing default tool launchers are missing"; fi

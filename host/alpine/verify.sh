@@ -46,9 +46,18 @@ check 'no passwordless doas' no_extra_nopass
 default_tools=$(sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
-	case $tool in nodejs) launcher=node ;; *) launcher=$tool ;; esac
-	check "$tool installed for $user" test -x "$home/.local/bin/$launcher"
+	case $tool in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; *) launchers=$tool ;; esac
+	for launcher in $launchers; do
+		check "$launcher installed for $user" test -x "$home/.local/bin/$launcher"
+	done
 done
+case " $default_tools " in
+	*" ffmpeg "*)
+		for launcher in ffmpeg ffprobe; do
+			check "$launcher reports version" su -s /bin/sh "$user" -c "$home/.local/bin/$launcher -version"
+		done
+		;;
+esac
 check 'node runs' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
 check 'npm runs' su -s /bin/sh "$user" -c "PATH='$home/.local/bin':\$PATH '$home/.local/bin/npm' --version"
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"

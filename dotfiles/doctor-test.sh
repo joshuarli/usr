@@ -64,4 +64,20 @@ if sh "$fixture/sync" doctor > "$fixture/missing-agent"; then
 fi
 grep -q 'canonical agent instructions are unavailable' "$fixture/missing-agent"
 
+sh "$fixture/sync" links > "$fixture/relink-agents"
+printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "ffmpeg\\n"\n' > "$fixture/dl"
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/ffmpeg"
+chmod +x "$HOME/.local/bin/ffmpeg"
+if sh "$fixture/sync" doctor > "$fixture/half-pair"; then
+    echo 'doctor accepted ffmpeg without ffprobe' >&2; exit 1
+fi
+grep -q 'missing: ffmpeg (~/.local/bin/ffprobe)' "$fixture/half-pair"
+if grep -q 'missing: ffmpeg (~/.local/bin/ffmpeg)' "$fixture/half-pair"; then
+    echo 'doctor reported the present ffmpeg launcher' >&2; exit 1
+fi
+printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/ffprobe"
+chmod +x "$HOME/.local/bin/ffprobe"
+sh "$fixture/sync" doctor > "$fixture/full-pair"
+grep -q 'ok: doctor passed' "$fixture/full-pair"
+
 printf 'doctor: fixture checks passed\n'
