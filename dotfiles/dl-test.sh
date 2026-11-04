@@ -26,7 +26,7 @@ run_dl() {
     _run_dl_path=$1
     _run_dl_root=$2
     shift 2
-    sh -c 'PATH=$1; export PATH; XDG_DATA_HOME=$2; export XDG_DATA_HOME; XDG_STATE_HOME=$3; export XDG_STATE_HOME; _dl_root=$4; shift 4; exec /bin/sh "$_dl_root/dl" "$@"' \
+    sh -c 'PATH=$1; export PATH; XDG_DATA_HOME=$2; export XDG_DATA_HOME; XDG_STATE_HOME=$3; export XDG_STATE_HOME; DL_PROFILE=${DL_PROFILE:-desktop}; export DL_PROFILE; _dl_root=$4; shift 4; exec /bin/sh "$_dl_root/dl" "$@"' \
         run_dl "$_run_dl_path" "${XDG_DATA_HOME-}" "${XDG_STATE_HOME-}" "$_run_dl_root" "$@"
     _run_dl_status=$?
     unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \
@@ -34,7 +34,7 @@ run_dl() {
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
         SSH_ZIP SSH_SUMS SSH_UNZIP_LIST_FAIL SSH_UNZIP_EXTRACT_FAIL SSH_FEED_OLD OXISH_ZIP OXISH_SUMS OXISH_UNZIP_EXTRACT_FAIL \
-        DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG \
+        DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG DL_PROFILE \
         XDG_DATA_HOME XDG_STATE_HOME CODEX_HOME \
         GHOSTTY_APPLICATIONS_DIR GHOSTTY_TEST_EXTRACT_FAIL \
         GHOSTTY_TEST_BAD_SIGNATURE GHOSTTY_TEST_VERSION \
@@ -1514,6 +1514,27 @@ if printf '%s\n' "$targets" | grep -qx player; then
     printf '%s\n' 'player is a default target on aarch64' >&2
     exit 1
 fi
+)
+end_case
+
+begin_case "server profile keeps only the minimal tools"
+( set -e
+DL_PROFILE=server
+export DL_PROFILE
+targets=$(HOME="$test_root/server-profile-home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 gh; do
+    printf '%s\n' "$targets" | grep -qx "$expected" || {
+        printf 'server profile is missing %s\n' "$expected" >&2
+        exit 1
+    }
+done
+for excluded in codex claude opencode2 pi agent-browser cf ffmpeg nodejs syncthing mold player; do
+    if printf '%s\n' "$targets" | grep -qx "$excluded"; then
+        printf 'server profile includes %s\n' "$excluded" >&2
+        exit 1
+    fi
+done
 )
 end_case
 

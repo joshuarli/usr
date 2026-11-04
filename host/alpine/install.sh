@@ -175,7 +175,9 @@ setup_docker() {
 
 mode=${INSTALL_MODE:-}
 if [ -z "$mode" ]; then
-	[ -r /dev/tty ] || die 'no terminal for the install type prompt; set INSTALL_MODE=server or INSTALL_MODE=desktop'
+	if ! (: </dev/tty) 2>/dev/null; then
+		die 'no terminal for the install type prompt; set INSTALL_MODE=server or INSTALL_MODE=desktop'
+	fi
 	while :; do
 		printf 'home: install type, server or desktop: ' >/dev/tty
 		IFS= read -r answer </dev/tty || die 'no install type chosen; set INSTALL_MODE=server or INSTALL_MODE=desktop'
@@ -227,6 +229,9 @@ printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 check_doas_policy
 check_github_key
+if [ "$mode" = server ]; then
+	[ -s tools-server.txt ] || die 'tools-server.txt is missing or empty; the server tool profile cannot be selected'
+fi
 
 for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
@@ -302,8 +307,14 @@ setup_docker
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang++.cfg" 0644
 
+install -d -o root -g root -m 0755 /etc/home
+if [ "$(cat /etc/home/install-mode 2>/dev/null || :)" != "$mode" ]; then
+	printf '%s\n' "$mode" > /etc/home/install-mode
+fi
+chmod 0644 /etc/home/install-mode
+
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
-default_tools=$(as_user "sh '$usr_root/dl' --list") || die "reading the default tool list from $usr_root failed"
+default_tools=$(as_user "DL_PROFILE='$mode' sh '$usr_root/dl' --list") || die "reading the default tool list from $usr_root failed"
 missing_tools=
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue

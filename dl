@@ -10,6 +10,7 @@ case "$script_path" in
     */*) ;;
     *) script_path=$(command -v "$script_path" || printf './%s\n' "$script_path") ;;
 esac
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$script_path")" && pwd)
 
 ARCH=$(uname -m | sed 's/arm64/aarch64/')
 OS=$(uname -s)
@@ -3974,6 +3975,15 @@ if [ "$DL_RECORD_OWNED" = true ]; then
     exit 0
 fi
 
+dl_profile=${DL_PROFILE:-}
+if [ -z "$dl_profile" ] && [ -r /etc/home/install-mode ]; then
+    IFS= read -r dl_profile < /etc/home/install-mode || dl_profile=
+fi
+case $dl_profile in
+    server | desktop) ;;
+    *) dl_profile= ;;
+esac
+
 if [ $# -eq 0 ]; then
     set -- fd rg
     case "${OS}:${ARCH}" in
@@ -3996,6 +4006,17 @@ if [ $# -eq 0 ]; then
         Linux:x86_64) set -- "$@" mold player ;;
         Linux:aarch64) set -- "$@" mold ;;
     esac
+    if [ "$dl_profile" = server ]; then
+        server_tools=$repo_root/host/alpine/tools-server.txt
+        [ -f "$server_tools" ] || { _dl_fail "server tool profile is missing: $server_tools"; exit 1; }
+        filtered_tools=
+        for default_tool in "$@"; do
+            if grep -qx "$default_tool" "$server_tools"; then
+                filtered_tools="${filtered_tools}${filtered_tools:+ }${default_tool}"
+            fi
+        done
+        set -- $filtered_tools
+    fi
 fi
 
 if $list_only; then

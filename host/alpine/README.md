@@ -28,6 +28,10 @@ Choose:
 
 Reboot into the installed system and log in as that user.
 
+Installing edge this way means `setup.sh` does not convert the system or
+require a reboot before provisioning. A stable install is converted first and
+stops for a reboot.
+
 If Alpine is already installed from a stable release, `setup.sh` converts it
 to edge, then stops so the new kernel can boot before provisioning. Reboot and
 run the same setup command again. When running `install.sh` by hand, make the
@@ -56,16 +60,36 @@ that checkout), and runs `install.sh` as root through `doas` or `sudo`.
 
 - `server` installs the headless base: `packages.txt` (and
   `packages-x86_64.txt` on x86_64) with the clang toolchain, Docker, Tailscale,
-  the dotfile links, and the default `dl` tool set except `agy`. It installs no
-  Wayland, graphics, or seatd packages.
+  the dotfile links, and the minimal server tool profile in
+  `tools-server.txt`. It installs no Wayland, graphics, or seatd packages.
 - `desktop` runs the server install first, then layers `packages-desktop.txt`,
-  udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it.
+  udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it. It also
+  installs the full default `dl` tool set.
+
+The server profile installs `fd`, `rg`, `jaq`, `fastermod`, `tm`, `ish`,
+`stuff`, `e`, `fz`, `fdu`, `fs`, `srv`, `git`, `python3`, and `gh`. The heavy
+agent, media, sync, and build extras (`codex`, `claude`, `opencode2`, `pi`,
+`agent-browser`, `cf`, `ffmpeg`, `nodejs`, `syncthing`, `player`, `mold`) are
+opt-in on a server with `sh dl TOOL...`. The full set is installed by default
+in desktop mode. `dl`, `sync`, and `doctor` follow the profile recorded in
+`/etc/home/install-mode`.
 
 Answer the prompt, or skip it with `INSTALL_MODE=server` or
 `INSTALL_MODE=desktop`, for example:
 
 ```sh
 wget -O - https://17166969.xyz/setup.sh | INSTALL_MODE=server sh
+```
+
+For a fully unattended server install, pass a Tailscale auth key and a GitHub
+token with the `admin:public_key` scope:
+
+```sh
+wget -O - https://17166969.xyz/setup.sh | \
+  INSTALL_MODE=server \
+  TS_AUTHKEY=tskey-auth-... \
+  GH_TOKEN=github_pat_... \
+  sh
 ```
 
 Without the bootstrap, do it by hand instead. If the system needed edge
@@ -89,10 +113,9 @@ explanation if a check fails. The server install then:
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by
   default through `/etc/clang<major>/clang.cfg` and `clang++.cfg`, so no gcc or
   binutils is needed (there is no `cc`; use `CC=clang`),
-- links the enclosing checkout's dotfiles and installs every default `dl` tool
-  except `agy` as the user. It does not run the rest of `dl` or
-  `host/setup-linux`; install `agy` or other opt-in tools later with
-  `sh dl TOOL`, and makes interactive logins start ish.
+- links the enclosing checkout's dotfiles and installs the server tool profile
+  as the user. It does not run the rest of `dl` or `host/setup-linux`; install
+  other tools later with `sh dl TOOL`, and makes interactive logins start ish.
 
 The server base grants the configured user passwordless root access through
 `doas` and installs Docker Engine and its CLI. It enables and starts the
@@ -104,9 +127,11 @@ Provisioning creates an unencrypted Ed25519 GitHub key at `~/.ssh/github` when
 that path is unused. It prints the public key for you to add to GitHub and never
 prints or uploads the private key. Existing matching key pairs are preserved.
 The `setup.sh` bootstrap logs in with `gh` when needed and uploads the public
-key as an authentication key. GitHub CLI stores its token in
-`~/.config/gh/hosts.yml` with mode `0600`; without a credential store, the token
-is plain text. A setup run without a terminal prints the login command instead.
+key as an authentication key. Set `GH_TOKEN` to a token with the
+`admin:public_key` scope to skip the device login. GitHub CLI stores its token
+in `~/.config/gh/hosts.yml` with mode `0600`; without a credential store, the
+token is plain text. A setup run without a terminal prints the login command
+instead.
 
 The server base also installs Tailscale. It loads `tun` through Alpine's
 `modules` OpenRC service at boot, enables and starts the `tailscale` service,
@@ -182,9 +207,9 @@ doas sh usr/host/alpine/verify.sh server
 doas sh usr/host/alpine/verify.sh
 ```
 
-The second command checks the desktop; it is the default. A server install can
-be verified before adding the desktop layer, and a desktop install includes
-every server check.
+The first command forces the server checks. The second checks the profile
+recorded in `/etc/home/install-mode`; a desktop install includes every server
+check. Pass `desktop` to force the desktop checks.
 
 ## 4. Recover
 
@@ -200,9 +225,10 @@ again, or answer `desktop` at the prompt. Use `INSTALL_MODE=server` to reapply
 only the headless base.
 Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
 `config/dwl.h` changes, ghostty-custom and helium are updated only when a newer
-matching prerelease appears, and each default tool is installed only if
-missing (update it with `usr`'s own `dl`). A managed path holding something home
-did not install stops the run; move it aside or merge it, then rerun.
+matching prerelease appears, and each tool in the installed profile is
+installed only if missing (update it with `usr`'s own `dl`). `sh dl TOOL` adds
+an opt-in tool. A managed path holding something home did not install stops the
+run; move it aside or merge it, then rerun.
 
 home recognizes files it installed by comparing them with every committed
 version of their source, so it needs a full clone; a shallow clone is refused.

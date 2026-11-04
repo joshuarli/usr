@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+[ -s tools-server.txt ] || { echo 'static: tools-server.txt is missing or empty' >&2; exit 1; }
 scripts='install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh tests/static.sh tests/vm.sh'
 services=services/home-runtime
 

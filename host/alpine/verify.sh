@@ -3,7 +3,7 @@ set -u
 cd "$(dirname "$0")" || exit 1
 usr_root=$(cd ../.. && pwd)
 
-mode=${1:-desktop}
+mode=${1:-$(cat /etc/home/install-mode 2>/dev/null || printf desktop)}
 case $mode in server | desktop) ;; *) echo "usage: $0 [server|desktop]" >&2; exit 2 ;; esac
 
 failures=0
@@ -23,6 +23,9 @@ no_extra_nopass() {
 				index($0, "tailscale as root cmd /usr/sbin/resolvconf") == 0 { found = 1 }
 			END { exit found }
 		'
+}
+install_profile_matches() {
+	[ "$(cat /etc/home/install-mode 2>/dev/null)" = "$mode" ]
 }
 github_key_matches_user() {
 	[ "$(stat -c %u:%g:%a "$home/.ssh" 2>/dev/null)" = "$uid:$gid:700" ] || return 1
@@ -68,7 +71,8 @@ check 'passwordless doas policy matches provisioned user' doas_policy_matches_us
 check 'no other passwordless doas rules' no_extra_nopass
 check 'passwordless doas works for user' su -s /bin/sh "$user" -c 'doas -n true'
 check 'unencrypted Ed25519 GitHub key matches user and modes' github_key_matches_user
-default_tools=$(sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
+check "install profile is $mode" install_profile_matches
+default_tools=$(DL_PROFILE="$mode" sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
 	case $tool in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; *) launchers=$tool ;; esac
@@ -83,8 +87,12 @@ case " $default_tools " in
 		done
 		;;
 esac
-check 'node runs' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
-check 'npm runs' su -s /bin/sh "$user" -c "PATH='$home/.local/bin':\$PATH '$home/.local/bin/npm' --version"
+case " $default_tools " in
+	*" nodejs "*)
+		check 'node runs' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
+		check 'npm runs' su -s /bin/sh "$user" -c "PATH='$home/.local/bin':\$PATH '$home/.local/bin/npm' --version"
+		;;
+esac
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"
 check 'sudo not installed' sh -c '! apk info -e sudo'
 check "usr dotfiles linked" sh -c "su -s /bin/sh '$user' -c \"cd ~ && sh '$usr_root/sync' plan\" | awk '/^(LINK|CONFLICT|PRUNE)/ { found = 1 } END { exit found }'"
