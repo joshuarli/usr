@@ -103,6 +103,10 @@ to use Docker without `doas` or `sudo`.
 Provisioning creates an unencrypted Ed25519 GitHub key at `~/.ssh/github` when
 that path is unused. It prints the public key for you to add to GitHub and never
 prints or uploads the private key. Existing matching key pairs are preserved.
+The `setup.sh` bootstrap logs in with `gh` when needed and uploads the public
+key as an authentication key. GitHub CLI stores its token in
+`~/.config/gh/hosts.yml` with mode `0600`; without a credential store, the token
+is plain text. A setup run without a terminal prints the login command instead.
 
 The server base also installs Tailscale. It loads `tun` through Alpine's
 `modules` OpenRC service at boot, enables and starts the `tailscale` service,

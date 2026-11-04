@@ -35,6 +35,76 @@ as_root() {
     fi
 }
 
+as_setup_user() {
+    if [ "$(id -u)" -eq "$setup_uid" ]; then
+        sh -c "$1"
+    else
+        su -l -s /bin/sh "$setup_user" -c "$1"
+    fi
+}
+
+setup_github_ssh_key() {
+    setup_user=${USER_NAME:-josh}
+    setup_entry=$(getent passwd "$setup_user") || die "no such user: $setup_user"
+    setup_uid=$(printf '%s\n' "$setup_entry" | cut -d: -f3)
+    setup_home=$(printf '%s\n' "$setup_entry" | cut -d: -f6)
+    github_key=$setup_home/.ssh/github.pub
+    [ -x "$setup_home/.local/bin/gh" ] || die 'gh is not installed for the setup user'
+    [ -f "$github_key" ] && [ ! -L "$github_key" ] || die "missing public key: $github_key"
+    [ "$(stat -c %u "$github_key")" = "$setup_uid" ] || die "$github_key is not owned by $setup_user"
+
+    if [ "$(id -u)" -ne 0 ] && [ "$(id -u)" -ne "$setup_uid" ]; then
+        say "GitHub login and key upload must run as $setup_user; run setup.sh from that account"
+        return 0
+    fi
+
+    if auth_status=$(as_setup_user '~/.local/bin/gh auth status --hostname github.com 2>&1'); then
+        :
+    else
+        if [ ! -r /dev/tty ] || [ ! -t 2 ]; then
+            say 'GitHub is not authenticated. Run: gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key --scopes admin:public_key'
+            say 'then rerun setup.sh'
+            return 0
+        fi
+        say 'log in to GitHub and approve public-key access'
+        as_setup_user '~/.local/bin/gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key --scopes admin:public_key' </dev/tty ||
+            die 'GitHub login failed'
+        auth_status=$(as_setup_user '~/.local/bin/gh auth status --hostname github.com 2>&1') ||
+            die 'GitHub login did not complete'
+    fi
+
+    case $auth_status in
+        *admin:public_key*) ;;
+        *)
+            if [ ! -r /dev/tty ] || [ ! -t 2 ]; then
+                say 'GitHub login needs admin:public_key. Run: gh auth refresh --hostname github.com --scopes admin:public_key'
+                say 'then rerun setup.sh'
+                return 0
+            fi
+            say 'refresh GitHub access to allow SSH-key upload'
+            as_setup_user '~/.local/bin/gh auth refresh --hostname github.com --scopes admin:public_key' </dev/tty ||
+                die 'could not grant GitHub public-key access'
+            auth_status=$(as_setup_user '~/.local/bin/gh auth status --hostname github.com 2>&1') ||
+                die 'GitHub authentication is unavailable'
+            case $auth_status in
+                *admin:public_key*) ;;
+                *) die 'GitHub login lacks admin:public_key access' ;;
+            esac
+            ;;
+    esac
+
+    registered_keys=$(as_setup_user '~/.local/bin/gh api user/keys --jq ".[].key"') ||
+        die 'could not list GitHub SSH keys'
+    public_key=$(cat "$github_key")
+    if printf '%s\n' "$registered_keys" | grep -Fqx "$public_key"; then
+        say 'GitHub SSH key is already registered'
+    else
+        as_setup_user '~/.local/bin/gh ssh-key add ~/.ssh/github.pub --title "$(hostname) Alpine" --type authentication' ||
+            die 'could not upload the GitHub SSH key'
+        say 'uploaded the GitHub SSH key'
+    fi
+}
+
 bootstrap_git() {
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"
 }
@@ -99,6 +169,7 @@ setup_alpine() {
     fi
     as_root env "USER_NAME=${USER_NAME:-}" "INSTALL_MODE=${INSTALL_MODE:-}" "TS_AUTHKEY=${TS_AUTHKEY:-}" \
         sh "$dest/host/alpine/install.sh" </dev/null
+    setup_github_ssh_key
     [ "$converted" = false ] || say 'reboot to finish the edge upgrade'
 }
 
