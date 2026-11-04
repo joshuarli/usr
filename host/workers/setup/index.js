@@ -1,10 +1,12 @@
+import setupSh from "./setup.js";
+
 const headers = {
 	"content-type": "text/x-sh; charset=utf-8",
 	"cache-control": "no-cache",
 };
 
 export default {
-	fetch(request, env) {
+	fetch(request) {
 		if (new URL(request.url).pathname !== "/setup.sh") {
 			return new Response("not found", { status: 404 });
 		}
@@ -14,6 +16,6 @@ export default {
 		if (request.method !== "GET") {
 			return new Response("method not allowed", { status: 405 });
 		}
-		return new Response(env.SETUP_SH, { headers });
+		return new Response(setupSh, { headers });
 	},
 };

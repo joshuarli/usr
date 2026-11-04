@@ -1,8 +1,24 @@
 #!/bin/sh
 set -eu
 
-root=$(cd "$(dirname "$0")" && pwd)
+root=$(CDPATH='' cd -P -- "$(dirname -- "$0")" && pwd)
+worker=$root/workers/setup
+out=$root/../.work/tmp/setup-worker
+cf=${CF_BIN:-cf}
 
-cd "$root/workers/setup"
-npm install
-npm run deploy
+command -v "$cf" >/dev/null 2>&1 || { >&2 printf 'setup-deploy: %s is not installed\n' "$cf"; exit 1; }
+command -v jaq >/dev/null 2>&1 || { >&2 printf 'setup-deploy: jaq is not installed\n'; exit 1; }
+
+rm -rf "$out"
+mkdir -p "$out/.cloudflare/output/v0/workers/default/bundle"
+
+cp "$worker/index.js" "$out/.cloudflare/output/v0/workers/default/bundle/index.js"
+{
+	printf 'export default '
+	jaq -Rs . < "$root/setup.sh"
+} > "$out/.cloudflare/output/v0/workers/default/bundle/setup.js"
+cp "$worker/worker.config.json" "$out/.cloudflare/output/v0/workers/default/worker.config.json"
+printf '%s\n' '{"buildContext":{"isPreview":false,"mode":"production"}}' > "$out/.cloudflare/output/v0/config.json"
+
+cd "$out"
+exec "$cf" deploy --prebuilt --mode production "$@"

@@ -29,7 +29,7 @@ deploy: ## Gate, test, deploy, and smoke the Worker
 	$(MAKE) smoke-deployed
 
 deploy-setup.sh: ## Deploy the Alpine bootstrap Worker
-	sh host/setup-deploy
+	CF_BIN="$(CF)" sh host/setup-deploy
 
 worker-bundle: ## Build the Worker bundle once for test and deploy
 	cd $(WORKER_DIR) && npm run build

@@ -1,0 +1,13 @@
+{
+	"name": "usr-setup",
+	"compatibilityDate": "2026-10-28",
+	"triggers": [{ "type": "fetch", "pattern": "17166969.xyz/setup.sh", "zone": "17166969.xyz" }],
+	"manifest": {
+		"type": "complete",
+		"mainModule": "index.js",
+		"modules": {
+			"index.js": { "type": "esm" },
+			"setup.js": { "type": "esm" }
+		}
+	}
+}
