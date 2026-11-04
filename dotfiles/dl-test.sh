@@ -1399,6 +1399,20 @@ esac
 EOF
 chmod +x "$mock_bin/uname"
 
+begin_case "player is a default target on x86-64 Linux only"
+( set -e
+targets=$(HOME="$test_root/player-default-home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+printf '%s\n' "$targets" | grep -qx player
+targets=$(HOME="$test_root/player-default-home" DL_TEST_OS=Linux DL_TEST_ARCH=aarch64 \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+if printf '%s\n' "$targets" | grep -qx player; then
+    printf '%s\n' 'player is a default target on aarch64' >&2
+    exit 1
+fi
+)
+end_case
+
 begin_case "ghostty direct macOS install, idempotency, and ownership"
 ( set -e
 ghostty_home="$test_root/ghostty-home"

@@ -110,8 +110,9 @@ names resolve on the machine.
 
 The desktop layer runs its own preflight checks before the first change, then:
 
-- installs the packages in `packages-desktop.txt` and removes `foot` if an
-  older install left it behind,
+- installs the packages in `packages-desktop.txt` (including the Vulkan, font,
+  and ALSA runtime that Player needs) and removes `foot` if an older install
+  left it behind,
 - switches the device manager to udev with `setup-devd udev`,
 - builds the pinned dwl 0.9 with clang and lld using `config/dwl.h`, then removes
   the build-only headers,

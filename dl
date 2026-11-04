@@ -3652,7 +3652,8 @@ if [ $# -eq 0 ]; then
     if [ "$OS" = Darwin ]; then set -- "$@" mactop vault ghostty; fi
     set -- "$@" gh
     case "${OS}:${ARCH}" in
-        Linux:x86_64|Linux:aarch64) set -- "$@" mold ;;
+        Linux:x86_64) set -- "$@" mold player ;;
+        Linux:aarch64) set -- "$@" mold ;;
     esac
 fi
 
