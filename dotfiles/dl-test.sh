@@ -30,7 +30,6 @@ run_dl() {
         run_dl "$_run_dl_path" "${XDG_DATA_HOME-}" "${XDG_STATE_HOME-}" "$_run_dl_root" "$@"
     _run_dl_status=$?
     unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \
-        FREEBUFF_TEST_VERSION FREEBUFF_INSTALL_FAIL \
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK FX_TAR FX_TEST_SHA \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
         GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
@@ -898,7 +897,6 @@ case "$1" in
             @deepseek-ai/dsh@next) printf '%s\n' '0.2.1-rc.2' ;;
             @deepseek-harness-tui/dsh-tui) printf '%s\n' '0.16.0' ;;
             command-code@latest) printf '%s\n' "${CMD_TEST_VERSION:-1.87.3}" ;;
-
             *) exit 1 ;;
         esac
         ;;
@@ -927,16 +925,6 @@ case "$1" in
             printf '%s\n' "install $*" >> "$NPM_LOG"
             exit 0
         fi
-                    mkdir -p "$prefix/bin" "$prefix/lib/node_modules/freebuff"
-                    printf '%s\n' '#!/usr/bin/env node' 'console.log(1)' > \
-                        "$prefix/lib/node_modules/freebuff/index.js"
-                    chmod +x "$prefix/lib/node_modules/freebuff/index.js"
-                    ln -sf ../lib/node_modules/freebuff/index.js "$prefix/bin/freebuff"
-                    printf '%s\n' "install $*" >> "$NPM_LOG"
-                    exit 0
-                    ;;
-            esac
-        done
         mkdir -p "$prefix/bin"
         mkdir -p "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui"
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh"
@@ -1106,29 +1094,15 @@ printf '%s\n' '26.11.0'
 EOF
 chmod +x "$stale_node_dir/node"
 if output=$(HOME="$managed_node_home" TMPDIR="$test_root/tmp" NPM_LOG="$npm_log" \
-    run_dl "$stale_node_dir:$mock_bin:/usr/bin:/bin" "$repo_root" freebuff 2>&1); then
+    run_dl "$stale_node_dir:$mock_bin:/usr/bin:/bin" "$repo_root" cmd 2>&1); then
     :
 else
     printf '%s\n' "$output" >&2
     exit 1
 fi
 case "$output" in
-    *"Installed $managed_node_home/.local/bin/freebuff"*) ;;
+    *"Installed $managed_node_home/.local/bin/cmd"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
-esac
-managed_sbx_log="$test_root/managed-node-sbx.log"
-rm -f "$managed_sbx_log"
-if shim_output=$(HOME="$managed_node_home" SBX_LOG="$managed_sbx_log" \
-    PATH="$sbx_mock_bin:/usr/bin:/bin" \
-    "$managed_node_home/.local/bin/freebuff" --version 2>&1); then
-    :
-else
-    printf '%s\n' "$shim_output" >&2
-    exit 1
-fi
-case "$(cat "$managed_sbx_log")" in
-    *"-- $managed_node_home/.local/share/nodejs/26.12.1/bin/node"*) ;;
-    *) cat "$managed_sbx_log" >&2; exit 1 ;;
 esac
 )
 end_case
@@ -1137,7 +1111,7 @@ begin_case "default targets include required tools and exclude optional agents"
 ( set -e
 default_targets=$(sed -n '/^if \[ \$# -eq 0 \]; then/,/^fi$/p' "$repo_root/dl")
 case "$default_targets" in
-    *'set -- '*grok*|*'set -- '*cmd*|*'set -- '*freebuff*|*'set -- '*fx*)
+    *'set -- '*grok*|*'set -- '*cmd*|*'set -- '*fx*)
         printf 'optional coding agents appeared in the default dl targets\n' >&2
         exit 1 ;;
 esac
