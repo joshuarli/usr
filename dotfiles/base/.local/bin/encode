@@ -2,6 +2,11 @@
 
 set -e
 
+if [ "$(uname -s)" != Darwin ]; then
+    echo "Error: encode requires macOS (HEVC/VideoToolbox); ffmpeg here has no HEVC encoder" >&2
+    exit 1
+fi
+
 profile="$1"
 input="$2"
 
