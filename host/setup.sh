@@ -93,16 +93,9 @@ setup_github_ssh_key() {
             ;;
     esac
 
-    registered_keys=$(as_setup_user '~/.local/bin/gh api user/keys --jq ".[].key"') ||
-        die 'could not list GitHub SSH keys'
-    public_key=$(cat "$github_key")
-    if printf '%s\n' "$registered_keys" | grep -Fqx "$public_key"; then
-        say 'GitHub SSH key is already registered'
-    else
-        as_setup_user '~/.local/bin/gh ssh-key add ~/.ssh/github.pub --title "$(hostname) Alpine" --type authentication' ||
-            die 'could not upload the GitHub SSH key'
-        say 'uploaded the GitHub SSH key'
-    fi
+    as_setup_user '~/.local/bin/gh ssh-key add ~/.ssh/github.pub --title "$(hostname) Alpine" --type authentication' ||
+        die 'could not upload the GitHub SSH key'
+    say 'GitHub SSH key is registered'
 }
 
 bootstrap_git() {
