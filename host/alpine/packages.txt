@@ -5,6 +5,8 @@ jq
 unzip
 openssh-client
 tailscale
+docker
+docker-openrc
 uv
 libgcc
 libstdc++

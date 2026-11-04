@@ -69,6 +69,7 @@ check 'tailscale installed' command -v tailscale
 check 'tailscale enabled' in_runlevel tailscale default
 check 'tailscale started' rc-service tailscale status
 check 'tun loads at boot' grep -qx tun /etc/modules
+check 'kernel modules service enabled at boot' in_runlevel modules boot
 check 'tun device available' test -c /dev/net/tun
 state=$(tailscale status --json 2>/dev/null | jq -r '.BackendState // "Unknown"')
 # shellcheck disable=SC2016
@@ -77,13 +78,19 @@ case $state in
 	NeedsLogin) printf 'note: tailscale is logged out; run: doas tailscale up --ssh\n' ;;
 	*) fail "tailscaled is in state $state" ;;
 esac
+check 'Docker CLI installed' command -v docker
+check 'Docker engine installed' command -v dockerd
+check 'Docker enabled' in_runlevel docker default
+check 'Docker started' rc-service docker status
+check "$user in docker group" sh -c "id -Gn '$user' | tr ' ' '\\n' | grep -qx docker"
+check 'Docker CLI connects to engine as user' su -s /bin/sh "$user" -c 'docker info --format "{{.ServerVersion}}"'
+check 'interactive login hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
 
 if [ "$mode" = desktop ]; then
 	check 'volume helper matches config/volume, root 0755' managed config/volume /usr/local/bin/volume 755
 	check 'amixer installed' command -v amixer
 	check 'home-session matches config/home-session, root 0755' managed config/home-session /usr/local/bin/home-session 755
 	check 'home-runtime service matches services/home-runtime, root 0755' managed services/home-runtime /etc/init.d/home-runtime 755
-	check 'tty1 hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
 	check "home-runtime configured for $user" grep -qx "home_user=\"$user\"" /etc/conf.d/home-runtime
 	check 'dwl build matches build/dwl.sh, config/dwl.h, and config/dwl-relative-tags.patch' test "$(/usr/local/bin/dwl -v 2>&1)" = "$(sh build/dwl.sh --version)"
 	check 'dwl shared libraries resolve' sh -c '! ldd /usr/local/bin/dwl 2>&1 | grep -q "not found"'

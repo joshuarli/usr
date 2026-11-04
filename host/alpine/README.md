@@ -29,12 +29,14 @@ Choose:
 Reboot into the installed system and log in as that user.
 
 If Alpine is already installed from a stable release, `setup.sh` converts it
-to edge before provisioning. When running `install.sh` by hand, make the same
-change first: replace both repository lines in `/etc/apk/repositories` with
-`edge/main` and `edge/community`, run `doas apk update` and
+to edge, then stops so the new kernel can boot before provisioning. Reboot and
+run the same setup command again. When running `install.sh` by hand, make the
+same change first: replace both repository lines in `/etc/apk/repositories`
+with `edge/main` and `edge/community`, run `doas apk update` and
 `doas apk upgrade --available`, and use `linux-stable` instead of `linux-lts`
-(`doas apk add linux-stable && doas apk del linux-lts`). The switch to edge is
-one-way, and packages follow the rolling branch.
+(`doas apk add linux-stable && doas apk del linux-lts`). Reboot with
+`doas reboot` before running `install.sh`. The switch to edge is one-way, and
+packages follow the rolling branch.
 
 ## 2. Provision
 
@@ -44,17 +46,18 @@ wget -O - https://17166969.xyz/setup.sh | sh
 
 `setup.sh` detects Alpine and refuses anywhere else. On a stable release it
 switches the repositories to edge, upgrades the system, and replaces
-`linux-lts` with `linux-stable` where needed; then it installs `git` if
+`linux-lts` with `linux-stable` where needed, then stops and asks you to reboot
+and rerun the command. Repeat any `INSTALL_MODE`, `USER_NAME`, or `TS_AUTHKEY`
+assignments on that second run. Once booted into edge, it installs `git` if
 missing, clones this repository over HTTPS to `~/usr` (or updates and reuses
-that checkout), and runs `install.sh` as root through `doas` or `sudo`. Reboot
-after provisioning to boot the upgraded kernel.
+that checkout), and runs `install.sh` as root through `doas` or `sudo`.
 
 `install.sh` first asks for the install type:
 
 - `server` installs the headless base: `packages.txt` (and
-  `packages-x86_64.txt` on x86_64) with the clang toolchain, the dotfile links,
-  Tailscale, and the default `dl` tool set except `agy`. It installs no Wayland,
-  graphics, or seatd packages.
+  `packages-x86_64.txt` on x86_64) with the clang toolchain, Docker, Tailscale,
+  the dotfile links, and the default `dl` tool set except `agy`. It installs no
+  Wayland, graphics, or seatd packages.
 - `desktop` runs the server install first, then layers `packages-desktop.txt`,
   udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it.
 
@@ -65,7 +68,8 @@ Answer the prompt, or skip it with `INSTALL_MODE=server` or
 wget -O - https://17166969.xyz/setup.sh | INSTALL_MODE=server sh
 ```
 
-Without the bootstrap, do it by hand instead:
+Without the bootstrap, do it by hand instead. If the system needed edge
+conversion, reboot before running these commands:
 
 ```sh
 doas apk add git && git clone https://github.com/joshuarli/usr
@@ -88,12 +92,18 @@ explanation if a check fails. The server install then:
 - links the enclosing checkout's dotfiles and installs every default `dl` tool
   except `agy` as the user. It does not run the rest of `dl` or
   `host/setup-linux`; install `agy` or other opt-in tools later with
-  `sh dl TOOL`.
+  `sh dl TOOL`, and makes interactive logins start ish.
 
-The server base also installs Tailscale. It loads `tun` at boot, enables and
-starts the `tailscale` OpenRC service, and enables Tailscale SSH on a logged-in
-node. For an unattended install, create a reusable auth key in the Tailscale
-admin console and pass it during provisioning:
+The server base installs Docker Engine and its CLI, enables and starts the
+`docker` OpenRC service, and adds the user to the `docker` group. Docker group
+membership grants root-equivalent access to the host. Log out and back in to
+use Docker without `doas` or `sudo`.
+
+The server base also installs Tailscale. It loads `tun` through Alpine's
+`modules` OpenRC service at boot, enables and starts the `tailscale` service,
+and enables Tailscale SSH on a logged-in node. For an unattended install,
+create a reusable auth key in the Tailscale admin console and pass it during
+provisioning:
 
 ```sh
 wget -O - https://17166969.xyz/setup.sh | TS_AUTHKEY=tskey-auth-... sh
@@ -124,12 +134,15 @@ The desktop layer runs its own preflight checks before the first change, then:
   it under `/usr/local/lib/helium` with `/usr/local/bin/helium`; the same step
   installs the Intel i965 VA-API driver for hardware H.264 and VP8 decode on
   Broadwell-class graphics, while VP9 and HEVC stay on software,
-- installs `home-session`, the `home-runtime` service, and a tty1 login hook,
+- installs `home-session` and the `home-runtime` service; the profile hook from
+  the server base starts the desktop on tty1,
 - adds the user to the `seat` group and starts `seatd` and `home-runtime`.
 
-Log out, then log in on tty1. dwl starts with a ghostty-custom terminal running ish.
-The login shell stays `/bin/ash`: ish has no `-c` command mode and reads no
-profile, so it cannot serve ssh commands or start the desktop.
+Log out, then log in on tty1. dwl starts with a ghostty-custom terminal running
+ish. Interactive logins for the provisioned user also hand off to ish after
+profile startup. The account shell stays `/bin/ash`: ish is purely interactive,
+so it cannot handle OpenSSH's `-c` remote commands or read the profile that
+starts the desktop.
 
 | Keys | Action |
 | --- | --- |
@@ -198,10 +211,11 @@ switches a stable install to edge and replaces `linux-lts` with `linux-stable`;
 the provisioner itself does not manage repositories or the kernel. The desktop
 layer installs `alsa-utils` and a `volume` helper for the media keys, but it
 does not choose cards or persist mixer state. The desktop layer refuses to run
-while `linux-lts` is installed, while a server install accepts it. Tailscale
-authentication, tailnet policy and ACLs, exit nodes, and subnet routes are not
-managed; the provisioner installs the package, loads `tun`, runs the service,
-and enables Tailscale SSH as described above.
+while `linux-lts` is installed, while a server install accepts it. Docker
+daemon configuration is not managed. Tailscale authentication, tailnet policy
+and ACLs, exit nodes, and subnet routes are not managed; the provisioner
+installs the package, loads `tun`, runs the service, and enables Tailscale SSH
+as described above.
 
 ## Hardware checklist (XPS 13 9343)
 

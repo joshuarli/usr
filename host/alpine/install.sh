@@ -37,10 +37,14 @@ clang_major() { clang -dumpversion | cut -d. -f1; }
 
 setup_tailscale() {
 	grep -qx tun /etc/modules 2>/dev/null || printf 'tun\n' >>/etc/modules
-	modprobe tun 2>/dev/null || :
-	[ -c /dev/net/tun ] || die 'the tun module is unavailable; Tailscale needs /dev/net/tun'
+	rc-update show boot | awk '$1 == "modules" { found = 1 } END { exit !found }' || rc-update add modules boot
 
 	rc-update show default | awk '$1 == "tailscale" { found = 1 } END { exit !found }' || rc-update add tailscale default
+	if [ ! -c /dev/net/tun ]; then
+		modprobe tun || die 'could not load tun for the running kernel; reboot after a kernel upgrade, otherwise check kernel support and device access'
+	fi
+	[ -c /dev/net/tun ] || die 'the tun module did not create /dev/net/tun; check kernel support and device access'
+
 	rc-service --ifstopped tailscale start
 
 	i=0
@@ -80,6 +84,16 @@ setup_tailscale() {
 			fi
 			;;
 	esac
+}
+
+setup_docker() {
+	getent group docker >/dev/null 2>&1 || addgroup -S docker
+	id -Gn "$user" | tr ' ' '\n' | grep -qx docker || {
+		addgroup "$user" docker
+		say "added $user to docker (root-equivalent access); log out and back in to use Docker"
+	}
+	rc-update show default | awk '$1 == "docker" { found = 1 } END { exit !found }' || rc-update add docker default
+	rc-service --ifstopped docker start
 }
 
 mode=${INSTALL_MODE:-}
@@ -151,6 +165,7 @@ fi
 
 as_user "sh '$usr_root/sync' plan >/dev/null" ||
 	die "dotfile links conflict with existing files; run sh $usr_root/sync plan as $user and resolve each CONFLICT"
+check_managed config/profile.sh /etc/profile.d/home-session.sh
 
 conf=
 if [ "$mode" = desktop ]; then
@@ -166,7 +181,6 @@ if [ "$mode" = desktop ]; then
 	check_managed config/volume /usr/local/bin/volume
 	check_managed config/home-session /usr/local/bin/home-session
 	check_managed services/home-runtime /etc/init.d/home-runtime
-	check_managed config/profile.sh /etc/profile.d/home-session.sh
 	if [ -e /etc/conf.d/home-runtime ] && ! cmp -s "$conf" /etc/conf.d/home-runtime; then
 		die "/etc/conf.d/home-runtime configures a different user or was not written by home; remove it to provision $user"
 	fi
@@ -199,6 +213,7 @@ packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 [ ! -f "packages-$arch.txt" ] || packages="$packages $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "packages-$arch.txt")"
 # shellcheck disable=SC2086
 apk add --quiet $packages
+setup_docker
 
 [ "$(clang_major)" -ge 23 ] || die "clang $(clang -dumpversion) is older than 23; check the edge repositories"
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
@@ -219,6 +234,7 @@ if [ -n "$missing_tools" ]; then
 	# shellcheck disable=SC2086
 	as_user "sh '$usr_root/sync' tools$missing_tools" >/dev/null || die "installing$missing_tools from $usr_root failed"
 fi
+install_managed config/profile.sh /etc/profile.d/home-session.sh 0644
 
 if [ "$mode" = desktop ]; then
 	desktop_packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages-desktop.txt)
@@ -242,7 +258,6 @@ if [ "$mode" = desktop ]; then
 	install_managed config/home-session /usr/local/bin/home-session 0755
 	install_managed services/home-runtime /etc/init.d/home-runtime 0755
 	install_managed "$conf" /etc/conf.d/home-runtime 0644
-	install_managed config/profile.sh /etc/profile.d/home-session.sh 0644
 
 	id -Gn "$user" | tr ' ' '\n' | grep -qx seat || { addgroup "$user" seat; say "added $user to seat"; }
 	for service in seatd home-runtime; do

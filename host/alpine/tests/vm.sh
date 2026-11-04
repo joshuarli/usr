@@ -184,7 +184,7 @@ must 'grep -qx tun /etc/modules'
 must 'test -c /dev/net/tun'
 must 'grep -q "provisioned server for josh" /root/server.log'
 must '! apk info -e seatd && ! apk info -e wlroots0.20 && ! command -v dwl && ! command -v ghostty-custom'
-must 'test ! -e /usr/local/bin/home-session && test ! -e /etc/init.d/home-runtime && test ! -e /etc/profile.d/home-session.sh'
+must 'test ! -e /usr/local/bin/home-session && test ! -e /etc/init.d/home-runtime && cmp /home/josh/usr/host/alpine/config/profile.sh /etc/profile.d/home-session.sh'
 must 'cp /etc/apk/world /root/world.server'
 
 [ "$(run 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/tty0.log 2>&1')" != 0 ] ||

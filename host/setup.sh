@@ -65,6 +65,10 @@ ensure_edge() {
 
 setup_alpine() {
     ensure_edge
+    if [ "$converted" = true ]; then
+        say 'reboot into Alpine edge, then rerun setup.sh to provision'
+        return 0
+    fi
 
     command -v git >/dev/null 2>&1 || {
         say 'installing git'
