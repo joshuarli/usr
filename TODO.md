@@ -47,11 +47,3 @@ Next: 24
 - **Fix with:** do
 - **Effort:** M
 
-### USR-23 · P3 · Mirror encryption depends on unprovisioned age binary
-
-- **Area:** Dependencies
-- **Where:** `agent-memory/src/agent_memory/mirror_crypto.py:23-48`
-- **Problem:** `mirror_crypto` requires `rage` or `age` (and `rage-keygen`/`age-keygen`) to encrypt session mirror backups, but no `age` implementation is packaged or installed by `usr`.
-- **Recommendation:** Set up the fork at https://github.com/laputa-systems/rage to publish release binaries, and package `rage` under `dl`.
-- **Fix with:** none
-- **Effort:** S
