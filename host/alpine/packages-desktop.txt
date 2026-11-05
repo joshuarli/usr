@@ -14,7 +14,6 @@ wayland-libs-client
 libxkbcommon
 xkeyboard-config
 font-dejavu
-font-hack
 fontconfig
 freetype
 harfbuzz

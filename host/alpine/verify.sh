@@ -157,7 +157,6 @@ if [ "$mode" = desktop ]; then
 	fi
 	check 'foot not installed' sh -c '! apk info -e foot && ! apk info -e foot-extra-terminfo'
 	for cmd in ghostty-custom bemenu-run grim slurp wl-copy; do check "$cmd installed" command -v "$cmd"; done
-	check 'Hack font installed' sh -c 'fc-list | grep -q Hack'
 	check 'player shared libraries resolve' sh -c "! ldd '$home/.local/bin/player' 2>&1 | grep -q 'not found'"
 	check 'player reports version' su -s /bin/sh "$user" -c "$home/.local/bin/player --version"
 	check 'Vulkan ICD installed' sh -c 'ls /usr/share/vulkan/icd.d/*.json >/dev/null 2>&1'

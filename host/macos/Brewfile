@@ -1,5 +1,3 @@
-cask "font-hack"
-
 brew "git"
 brew "rustup"
 brew "prek"
