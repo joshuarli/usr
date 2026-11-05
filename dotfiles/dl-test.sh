@@ -965,6 +965,13 @@ case "$1" in
             printf '%s\n' "install $*" >> "$NPM_LOG"
             exit 0
         fi
+        if [ "${5:-}" = "pnpm@12.16.1" ]; then
+            mkdir -p "$prefix/bin" "$prefix/lib/node_modules/pnpm"
+            printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/pnpm"
+            chmod +x "$prefix/bin/pnpm"
+            printf '%s\n' "install $*" >> "$NPM_LOG"
+            exit 0
+        fi
         mkdir -p "$prefix/bin"
         mkdir -p "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui"
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh"
@@ -1144,6 +1151,41 @@ case "$output" in
     *"Installed $managed_node_home/.local/bin/cmd"*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+)
+end_case
+
+begin_case "pnpm installs under its own prefix, is idempotent, and is recorded"
+( set -e
+pnpm_home="$test_root/pnpm-home"
+pnpm_log="$test_root/pnpm-npm.log"
+for run in 1 2; do
+    if output=$(HOME="$pnpm_home" TMPDIR="$test_root/tmp" NPM_LOG="$pnpm_log" \
+        run_dl "$mock_bin:$PATH" "$repo_root" pnpm 2>&1); then
+        :
+    else
+        printf '%s\n' "$output" >&2
+        exit 1
+    fi
+    if [ "$run" = 2 ]; then
+        case "$output" in
+            *'pnpm is current (12.16.1)'*) ;;
+            *) printf '%s\n' "$output" >&2; exit 1 ;;
+        esac
+    fi
+done
+[ "$(readlink "$pnpm_home/.local/bin/pnpm")" = "$pnpm_home/.local/share/pnpm/bin/pnpm" ]
+[ "$(cat "$pnpm_home/.local/state/dl/pnpm")" = 12.16.1 ]
+[ "$(wc -l < "$pnpm_log")" -eq 1 ]
+pnpm_owned="$pnpm_home/.local/state/sync/dl-owned"
+mkdir -p "$(dirname "$pnpm_owned")"
+HOME="$pnpm_home" DL_RECORD_OWNED=true DL_OWNED_FILE="$pnpm_owned" \
+    TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root"
+for pnpm_path in "$pnpm_home/.local/bin/pnpm" "$pnpm_home/.local/state/dl/pnpm"; do
+    awk -F '\t' -v path="$pnpm_path" \
+        '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$pnpm_owned"
+done
+awk -F '\t' -v path="$pnpm_home/.local/share/pnpm" \
+    '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$pnpm_owned"
 )
 end_case
 

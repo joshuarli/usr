@@ -42,6 +42,8 @@ NODE_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/node-build"
 NODE_MINIMUM=26.12.0
 NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
+PNPM_VERSION=12.16.1
+PNPM_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pnpm"
 CF_VERSION=1.0.0-beta.27
 CF_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/cf"
 AGENT_BROWSER_VERSION=0.41.0
@@ -2346,6 +2348,74 @@ install_cmd() {
     _dl_ok "Installed ${DEST}/cmd"
 }
 
+install_pnpm() {
+    command -v npm >/dev/null 2>&1 || { unchecked pnpm "npm is required"; return; }
+    if ! node_meets_minimum; then
+        unchecked pnpm "Node.js $NODE_MINIMUM or newer is required"
+        return
+    fi
+    version=$PNPM_VERSION
+    if [ -e "${DEST}/pnpm" ] || [ -L "${DEST}/pnpm" ]; then
+        if [ "$(readlink "${DEST}/pnpm" 2>/dev/null || :)" != "${PNPM_INSTALL_ROOT}/bin/pnpm" ] \
+            || [ ! -s "${STATE}/pnpm" ]; then
+            skip pnpm "${DEST}/pnpm already exists outside dl management"
+            return
+        fi
+    fi
+    if [ -e "$PNPM_INSTALL_ROOT" ] || [ -L "$PNPM_INSTALL_ROOT" ]; then
+        if [ ! -d "$PNPM_INSTALL_ROOT" ] || [ -L "$PNPM_INSTALL_ROOT" ] \
+            || [ ! -s "${STATE}/pnpm" ]; then
+            skip pnpm "$PNPM_INSTALL_ROOT already exists without dl install records"
+            return
+        fi
+    fi
+    if [ "$(cat "${STATE}/pnpm" 2>/dev/null)" = "$version" ] \
+        && [ -x "${PNPM_INSTALL_ROOT}/bin/pnpm" ] \
+        && [ "$(readlink "${DEST}/pnpm" 2>/dev/null || :)" = "${PNPM_INSTALL_ROOT}/bin/pnpm" ]; then
+        own_dir "$PNPM_INSTALL_ROOT"
+        own_file "${DEST}/pnpm"
+        own_file "${STATE}/pnpm"
+        _dl_current "pnpm is current (${version})"
+        return
+    fi
+    own_parent=${PNPM_INSTALL_ROOT%/*}
+    own_missing_dirs "$own_parent"
+    mkdir -p "$own_parent"
+    install_prefix=$PNPM_INSTALL_ROOT
+    if [ ! -d "$PNPM_INSTALL_ROOT" ]; then
+        tmpbundle=$(mktemp -d "${PNPM_INSTALL_ROOT}.XXXXXX")
+        install_prefix=$tmpbundle
+    fi
+    _dl_fetch "Installing pnpm (${version}) ..."
+    if ! npm install --global --prefix "$install_prefix" "pnpm@${version}"; then
+        skip pnpm "npm install failed"
+        return
+    fi
+    if [ ! -x "${install_prefix}/bin/pnpm" ]; then
+        skip pnpm "npm did not install ${install_prefix}/bin/pnpm"
+        return
+    fi
+    if [ "$install_prefix" != "$PNPM_INSTALL_ROOT" ]; then
+        if [ -e "$PNPM_INSTALL_ROOT" ] || [ -L "$PNPM_INSTALL_ROOT" ]; then
+            skip pnpm "$PNPM_INSTALL_ROOT appeared during install"
+            return
+        fi
+        mv "$install_prefix" "$PNPM_INSTALL_ROOT"
+        tmpbundle=
+    fi
+    own_dir "$PNPM_INSTALL_ROOT"
+    tmpbinlink=$(mktemp "${DEST}/.pnpm.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "${PNPM_INSTALL_ROOT}/bin/pnpm" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/pnpm"
+    tmpbinlink=
+    printf '%s\n' "$version" > "${STATE}/pnpm"
+    own_file "${DEST}/pnpm"
+    own_file "${STATE}/pnpm"
+    changed=true
+    _dl_ok "Installed ${DEST}/pnpm"
+}
+
 install_cf() {
     command -v npm >/dev/null 2>&1 || { unchecked cf "npm is required"; return; }
     if ! node_meets_minimum; then
@@ -3823,7 +3893,7 @@ run_parallel() {
             *" $prog "*) continue ;;
         esac
         case "$prog" in
-            agent-browser|cmd|dsh|pi|cf) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
+            agent-browser|cmd|dsh|pi|cf|pnpm) npm_tools="${npm_tools}${npm_tools:+ }${prog}" ;;
             *) binary_tools="${binary_tools}${binary_tools:+ }${prog}" ;;
         esac
     done
@@ -3936,6 +4006,15 @@ record_managed_installs() {
             && [ "$(readlink "${DEST}/cmd" 2>/dev/null || :)" = "${CMD_INSTALL_ROOT}/bin/cmd" ]; then
             own_dir "$CMD_INSTALL_ROOT"
             own_file "${DEST}/cmd"
+        fi
+    fi
+    if [ -s "${STATE}/pnpm" ]; then
+        own_file "${STATE}/pnpm"
+        if [ -d "$PNPM_INSTALL_ROOT" ] && [ ! -L "$PNPM_INSTALL_ROOT" ] \
+            && [ -x "${PNPM_INSTALL_ROOT}/bin/pnpm" ] \
+            && [ "$(readlink "${DEST}/pnpm" 2>/dev/null || :)" = "${PNPM_INSTALL_ROOT}/bin/pnpm" ]; then
+            own_dir "$PNPM_INSTALL_ROOT"
+            own_file "${DEST}/pnpm"
         fi
     fi
     if [ -s "${STATE}/pi" ]; then
@@ -4051,7 +4130,7 @@ if [ $# -eq 0 ]; then
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" ffmpeg ;;
     esac
     case "${OS}:${ARCH}" in
-        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs ;;
+        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs pnpm ;;
     esac
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" syncthing ;;
@@ -4122,6 +4201,7 @@ for prog in "$@"; do
         fx) install_fx ;;
         dsh) install_dsh ;;
         cmd) install_cmd ;;
+        pnpm) install_pnpm ;;
         cf) install_cf ;;
         agent-browser) install_agent_browser ;;
         pi) install_pi ;;
