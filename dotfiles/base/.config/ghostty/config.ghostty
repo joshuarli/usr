@@ -15,7 +15,7 @@ resize-overlay = never
 link-previews = false
 progress-style = false
 desktop-notifications = false
-image-storage-limit = 0
+image-storage-limit = 320000000
 
 window-save-state = never
 macos-applescript = false
