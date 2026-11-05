@@ -6,7 +6,7 @@ The bridge uses `@opencode/client` and its managed local service, not repeated `
 
 ## Install (manual on the machine running Claude)
 
-Requires Node.js **26+**, Git, OpenCode **V2**, and Claude Code. The free model is cloud-hosted inside OpenCode; there are no local model weights to download and **no OpenCode API key is needed for its temporary free offering**. `usr` already installs OpenCode and Node via its normal setup; run their existing installers if missing.
+Requires Node.js **26+**, Git, OpenCode **V2**, and Claude Code. The free model is cloud-hosted inside OpenCode; there are no local model weights to download. **Provider access depends on the installed OpenCode account/configuration**. Check `opencode models` and authenticate with OpenCode if necessary; the free offering is temporary and may disappear. `usr` already installs OpenCode and Node via its normal setup; run their existing installers if missing.
 
 ```sh
 cd ~/usr/tools/opencode-worker
