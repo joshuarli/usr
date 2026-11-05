@@ -2387,7 +2387,7 @@ install_pnpm() {
         install_prefix=$tmpbundle
     fi
     _dl_fetch "Installing pnpm (${version}) ..."
-    if ! npm install --global --prefix "$install_prefix" "pnpm@${version}"; then
+    if ! npm install --global --prefix "$install_prefix" --allow-scripts=pnpm "pnpm@${version}"; then
         skip pnpm "npm install failed"
         return
     fi

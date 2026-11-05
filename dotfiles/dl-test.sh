@@ -954,24 +954,26 @@ case "$1" in
             esac
         done
         [ -n "$prefix" ] || exit 1
-        if [ "${5:-}" = "command-code@${CMD_TEST_VERSION:-1.87.3}" ]; then
-            if [ "${CMD_INSTALL_FAIL:-false}" = true ]; then
-                mkdir -p "$prefix/lib/node_modules/command-code"
-                exit 17
-            fi
-            mkdir -p "$prefix/bin" "$prefix/lib/node_modules/command-code"
-            printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/cmd"
-            chmod +x "$prefix/bin/cmd"
-            printf '%s\n' "install $*" >> "$NPM_LOG"
-            exit 0
-        fi
-        if [ "${5:-}" = "pnpm@12.16.1" ]; then
-            mkdir -p "$prefix/bin" "$prefix/lib/node_modules/pnpm"
-            printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/pnpm"
-            chmod +x "$prefix/bin/pnpm"
-            printf '%s\n' "install $*" >> "$NPM_LOG"
-            exit 0
-        fi
+        case " $* " in
+            *" command-code@${CMD_TEST_VERSION:-1.87.3} "*)
+                if [ "${CMD_INSTALL_FAIL:-false}" = true ]; then
+                    mkdir -p "$prefix/lib/node_modules/command-code"
+                    exit 17
+                fi
+                mkdir -p "$prefix/bin" "$prefix/lib/node_modules/command-code"
+                printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/cmd"
+                chmod +x "$prefix/bin/cmd"
+                printf '%s\n' "install $*" >> "$NPM_LOG"
+                exit 0
+                ;;
+            *" pnpm@12.16.1 "*)
+                mkdir -p "$prefix/bin" "$prefix/lib/node_modules/pnpm"
+                printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/pnpm"
+                chmod +x "$prefix/bin/pnpm"
+                printf '%s\n' "install $*" >> "$NPM_LOG"
+                exit 0
+                ;;
+        esac
         mkdir -p "$prefix/bin"
         mkdir -p "$prefix/lib/node_modules/@deepseek-harness-tui/dsh-tui"
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/dsh"
