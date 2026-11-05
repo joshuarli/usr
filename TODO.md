@@ -1,13 +1,13 @@
 Prefix: USR
 Next: 23
 
-### USR-21 · P2 · A snapshot commit ships every pinned object in one request
+### USR-21 · P1 · Snapshot commits fail, and each retry rewrites every object row
 
 - **Area:** Agent learning
-- **Where:** `agent-memory/src/agent_memory/mirror.py` (`upload_snapshot`), `agent-memory/cloudflare/src/routes/snapshots.ts`, `agent-memory/cloudflare/src/db.ts` (`commitSnapshot`)
-- **Problem:** A recovery snapshot commit carries one entry for every archive object its database references, plus the chunk list, so the request grows with the archive. This archive reached 58,134 objects against a 70,000 protocol cap and an 8 MiB JSON body bound, and the client refused the first snapshot three times before the limit was raised. The cap is now 100,000 objects and 12 MiB, and this archive already references 70,732, so the structural limit remains. Past the cap the sync fails with a named limit and commits no recovery point, and the Worker inserts thousands of statements in a single `db.batch()` for it.
-- **Recommendation:** Page the object list into a staging table, then commit with a final request that verifies the staged set is complete and unchanged, so request size, D1 statements per batch, and Worker memory stop scaling with the archive.
-- **Fix with:** none
+- **Where:** `agent-memory/src/agent_memory/mirror.py` (`upload_snapshot`), `agent-memory/cloudflare/src/routes/snapshots.ts`, `agent-memory/cloudflare/src/db.ts` (`commitSnapshot`), `dotfiles/launchd/com.josh.agent-sessions-mirror.plist.in`
+- **Problem:** No recovery snapshot has landed since 2026-11-03 22:22 UTC. Every `commitSnapshot` batch since then fails in `D1DatabaseSessionAlwaysPrimary._sendOrThrow` (observed issue `37661b7a`, `snapshots.commit`, message withheld), and `mirror status` on origin `fbb5b1b8` reports `snapshot commit failed`. The batch rolls back, but D1 analytics count every row it wrote: 66.4M rows written on 2026-11-04, about $2,000 a month at list price, because the 15-minute mirror run retries the full commit. Each object costs 3 rows written (the row, the primary key, and `snapshot_object_plaintext`), and the commit inserts the whole object list, so even a successful snapshot costs about 400,000 rows (16 snapshots wrote 6.3M rows on 2026-11-03). The commit also carries one entry per referenced object in one request and one `db.batch()`. The archive referenced 75,000 objects against a 100,000-object, 12 MiB protocol cap. Unproven: that the batch's size is what fails it, and whether rolled-back rows are billed. The mirror LaunchAgent was unloaded on 2026-11-05 to stop the spend, so new sessions are local-only until this is fixed. See `agent-memory/docs/cost.md`.
+- **Recommendation:** Read the withheld error first (for example from `wrangler tail` during one manual `agent-sessions mirror sync`) to confirm the cause. Then page the object list into a staging table and commit with a final request that verifies the staged set, so no single batch scales with the archive. Store the object list as a delta against the previous snapshot rather than rewriting it, and stop the client from retrying a failed commit on every run without backoff. Reload the mirror LaunchAgent only after a commit succeeds.
+- **Fix with:** root-cause
 - **Effort:** M
 
 ### USR-5 · P2 · Push rules do not require user approval

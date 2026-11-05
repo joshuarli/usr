@@ -16,6 +16,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
 | Agent learning, session search, and archive | [agent-memory/README.md](agent-memory/README.md) |
+| usr-memories Cloudflare cost and what drives it | [agent-memory/docs/cost.md](agent-memory/docs/cost.md) |
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
