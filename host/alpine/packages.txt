@@ -4,6 +4,7 @@ bash
 dash
 jq
 unzip
+file
 openssh-client
 tailscale
 docker

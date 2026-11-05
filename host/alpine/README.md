@@ -110,7 +110,7 @@ for the bootstrap, or
 explanation if a check fails. The server install then:
 
 - installs the packages in `packages.txt` (and `packages-x86_64.txt` on x86_64),
-  including `make`, `rustup`, `dash`, and `shellcheck`,
+  including `make`, `rustup`, `dash`, `shellcheck`, and `file`,
 - initializes rustup for the user from the `rustup` package, before any tool
   install, so `sh sync` can install kache,
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by

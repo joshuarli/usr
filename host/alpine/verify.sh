@@ -55,6 +55,7 @@ check 'bash installed' command -v bash
 check 'jq installed' command -v jq
 check 'unzip installed' command -v unzip
 check 'zipinfo installed' command -v zipinfo
+check 'file installed' command -v file
 check 'ssh installed' command -v ssh
 check 'uv installed' command -v uv
 check 'make installed' command -v make
