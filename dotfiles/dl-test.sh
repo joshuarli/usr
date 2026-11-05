@@ -286,6 +286,25 @@ FEED
             exit 1
         fi
         ;;
+    https://github.com/laputa-systems/zzz/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-10-25T22:22:20Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/laputa-systems/zzz/releases/tag/release-37544a545a89ce94721cba6a953fb18f26123ab3"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/laputa-systems/zzz/releases/download/release-37544a545a89ce94721cba6a953fb18f26123ab3/zzz-linux-musl-static-*)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: zzz-test-etag'
+        elif [ -n "$output" ]; then
+            cp "$ZZZ_BIN" "$output"
+        else
+            exit 1
+        fi
+        ;;
     https://github.com/joshuarli/ghostty/releases.atom)
         cat <<'FEED'
 <feed>
@@ -748,6 +767,12 @@ else
 fi
 PLAYER_TAR="$test_root/player.tar.gz"
 export PLAYER_TAR PLAYER_ZIP_SHA256 PLAYER_TAR_SHA256
+
+mkdir -p "$test_root/zzz-package"
+printf '%s' 'zzz-test-binary' > "$test_root/zzz-package/zzz"
+chmod +x "$test_root/zzz-package/zzz"
+ZZZ_BIN="$test_root/zzz-package/zzz"
+export ZZZ_BIN
 
 git_tag=release-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 git_triple=x86_64-unknown-linux-musl
@@ -2238,6 +2263,66 @@ case "$output" in
 esac
 [ "$(cat "$fz_home/.local/bin/fz")" = 'fz-static-test-binary' ]
 [ "$(cat "$fz_home/.local/state/dl/fz")" = 'fz-static-test-etag' ]
+)
+end_case
+
+begin_case "zzz installs the linux musl static release and stays current"
+( set -e
+    zzz_home="$test_root/zzz-home"
+    if output=$(HOME="$zzz_home" XDG_STATE_HOME="$zzz_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" zzz 2>&1); then
+        :
+    else
+        printf '%s\n' "$output" >&2; exit 1
+    fi
+    case "$output" in
+        *"Installed $zzz_home/.local/bin/zzz"*) ;;
+        *) printf '%s\n' "$output" >&2; exit 1 ;;
+    esac
+    [ "$(cat "$zzz_home/.local/bin/zzz")" = 'zzz-test-binary' ]
+    [ "$(cat "$zzz_home/.local/state/dl/zzz")" = 'zzz-test-etag' ]
+    if output=$(HOME="$zzz_home" XDG_STATE_HOME="$zzz_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" zzz 2>&1); then
+        :
+    else
+        printf '%s\n' "$output" >&2; exit 1
+    fi
+    case "$output" in
+        *'zzz is current (release-37544a545a89ce94721cba6a953fb18f26123ab3)'*) ;;
+        *) printf '%s\n' "$output" >&2; exit 1 ;;
+    esac
+)
+end_case
+
+begin_case "zzz is a default target on Linux only"
+( set -e
+    zzz_list_home="$test_root/zzz-list-home"
+    zzz_list=$(HOME="$zzz_list_home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+    printf '%s\n' "$zzz_list" | grep -qx zzz
+    zzz_list=$(HOME="$zzz_list_home" DL_TEST_OS=Linux DL_TEST_ARCH=aarch64 \
+        TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+    printf '%s\n' "$zzz_list" | grep -qx zzz
+    zzz_list=$(HOME="$zzz_list_home" DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 \
+        TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
+    if printf '%s\n' "$zzz_list" | grep -qx zzz; then
+        printf 'zzz is a default target on macOS\n' >&2; exit 1
+    fi
+)
+end_case
+
+begin_case "zzz skips unsupported platforms"
+( set -e
+    zzz_darwin_home="$test_root/zzz-darwin-home"
+    if HOME="$zzz_darwin_home" XDG_STATE_HOME="$zzz_darwin_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" zzz >/dev/null 2>&1; then
+        printf 'zzz installed on an unsupported platform\n' >&2; exit 1
+    fi
+    [ ! -e "$zzz_darwin_home/.local/bin/zzz" ]
+    [ ! -e "$zzz_darwin_home/.local/state/dl/zzz" ]
 )
 end_case
 
