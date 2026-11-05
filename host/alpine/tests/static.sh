@@ -2,13 +2,14 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -s tools-server.txt ] || { echo 'static: tools-server.txt is missing or empty' >&2; exit 1; }
-scripts='install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh tests/static.sh tests/vm.sh'
+scripts='install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh tests/static.sh tests/profile-test.sh tests/vm.sh'
 services=services/home-runtime
 
 for script in $scripts $services; do
 	sh -n "$script"
 	! command -v dash >/dev/null || dash -n "$script"
 done
+sh tests/profile-test.sh
 if command -v shellcheck >/dev/null; then
 	shellcheck -s sh -S warning $scripts
 	shellcheck -s sh -S warning -e SC2034 $services
