@@ -601,8 +601,8 @@ test("a snapshot spanning several object pages commits and reads back page by pa
   }));
   const insert = db.prepare(
     `INSERT INTO remote_object(origin_host, plaintext_digest, plaintext_size, encoding, ciphertext_digest,
-       ciphertext_size, created_at, last_referenced_at, gc_pending_at)
-     VALUES(?, ?, ?, 'identity', ?, ?, 0, NULL, ?)`,
+       ciphertext_size, created_at, gc_pending_at)
+     VALUES(?, ?, ?, 'identity', ?, ?, 0, ?)`,
   );
   for (let start = 0; start < pinned.length; start += 1_000) {
     await db.batch(pinned.slice(start, start + 1_000)
@@ -657,8 +657,8 @@ test("pages and commit write rows in proportion to pending objects and chunks, n
   }));
   const insert = db.prepare(
     `INSERT INTO remote_object(origin_host, plaintext_digest, plaintext_size, encoding, ciphertext_digest,
-       ciphertext_size, created_at, last_referenced_at, gc_pending_at)
-     VALUES(?, ?, ?, 'identity', ?, ?, 0, NULL, ?)`,
+       ciphertext_size, created_at, gc_pending_at)
+     VALUES(?, ?, ?, 'identity', ?, ?, 0, ?)`,
   );
   for (let start = 0; start < pinned.length; start += 1_000) {
     await db.batch(pinned.slice(start, start + 1_000).map((object, offset) =>

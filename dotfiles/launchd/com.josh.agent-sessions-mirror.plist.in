@@ -23,7 +23,7 @@
 		<string>@@HOME@@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
 	<key>StartInterval</key>
-	<integer>900</integer>
+	<integer>3600</integer>
 	<key>RunAtLoad</key>
 	<false/>
 	<key>ProcessType</key>

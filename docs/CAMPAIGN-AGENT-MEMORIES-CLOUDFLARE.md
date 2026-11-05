@@ -379,7 +379,7 @@ store_meta(id, created_at)
 collector(service_token_id PK, origin_host, label, created_at, disabled)
 origin_sync(origin_host PK, revision, last_change_at)
 remote_object(origin_host, plaintext_digest, plaintext_size, encoding, ciphertext_digest,
-              ciphertext_size, created_at, last_referenced_at, gc_pending_at,
+              ciphertext_size, created_at, gc_pending_at,
               PK(origin_host, plaintext_digest), UNIQUE(origin_host, ciphertext_digest))
 generation(id INTEGER PK, origin_host, harness, native_id, manifest_digest,
            source_digest, source_size, captured_at, committed_at, revision, manifest_object,
@@ -433,8 +433,10 @@ Objects are origin-scoped: `remote_object` is keyed by `(origin_host, plaintext_
 the same transcript content at two origins is two independent rows and one collector cannot
 read another collector's ciphertext. The generation and snapshot child tables therefore
 carry no foreign key to `remote_object`; the Worker validates every reference at commit.
-`generation_object` holds every referenced archive object, with transcript chunks in offset
-order followed by artifacts; artifact names remain only in the encrypted manifest.
+`generation_object` holds the archive objects a generation references that no earlier
+generation of the same session lists, keyed by their ordinal in the manifest, so GC can
+decide reachability per session without a row per object per generation; the full
+order and artifact names remain only in the encrypted manifest.
 Migrations live in `cloudflare/migrations/` and are applied with
 `cf d1 migrations apply <database-id>`; `cf` targets the real database by default and
 `--local` selects its simulation.

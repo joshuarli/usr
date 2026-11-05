@@ -2426,7 +2426,7 @@ class MirrorCliTests(unittest.TestCase):
         self.assertIn("OK", linted.stdout)
         self.assertIn("<string>mirror</string>", rendered)
         self.assertIn("<string>sync</string>", rendered)
-        self.assertIn("<integer>900</integer>", rendered)
+        self.assertIn("<integer>3600</integer>", rendered)
 
 
 class MemoryGateTests(unittest.TestCase):

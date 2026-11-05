@@ -91,6 +91,23 @@ new generations, wrote 2,584 rows. GC then marked 9,006 objects (4.2 GB) that on
 the dropped snapshots had referenced, mostly their database chunks, for deletion
 after the one-hour grace period.
 
+## Generation commits write only what is new to the session
+
+After the snapshot fix, a 15-minute sync wrote about 8,000 rows, all from
+`commitGeneration`. Each new generation listed every object of its session in
+`generation_object`, so a long session rewrote its whole object list on every
+sync. Each commit also ran `UPDATE remote_object SET last_referenced_at = ...` on
+every object it named, although nothing read that column.
+
+`generation_object` now holds, for each generation, only the objects no earlier
+generation of the same session lists. GC reachability is unchanged: it asks whether
+any live generation of a session lists an object, and generations are deleted only
+by a tombstone, which removes the whole session. Migration 0009 drops
+`last_referenced_at`, and a commit resets `gc_pending_at` only on objects that are
+pending. The mirror LaunchAgent now runs every hour instead of every 15 minutes,
+so an active session makes at most one generation an hour. A session written just
+after a run can stay local-only for up to an hour.
+
 ## Pausing the mirror
 
 To stop all mirror writes, unload the LaunchAgent with

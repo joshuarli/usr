@@ -387,3 +387,40 @@ test("the same harness and native id can exist at two origins", async (t) => {
   assert.deepEqual((await firstPage.json()).generations.map((row) => row.origin_host), [ORIGIN]);
   assert.deepEqual((await secondPage.json()).generations.map((row) => row.origin_host), [OTHER_ORIGIN]);
 });
+
+function countingWrites(db) {
+  const counter = { rows: 0 };
+  const wrapped = new Proxy(db, {
+    get(target, property) {
+      if (property !== "batch") return Reflect.get(target, property).bind(target);
+      return async (statements) => {
+        const results = await target.batch(statements);
+        for (const result of results) counter.rows += result.meta.rows_written;
+        return results;
+      };
+    },
+  });
+  return { counter, wrapped };
+}
+
+test("a session's next generation writes rows only for objects the session has not referenced", async (t) => {
+  const { db, env } = await runtime(t);
+  const chunks = [];
+  for (let index = 0; index < 40; index += 1) {
+    const data = Buffer.from(`repeated chunk ${index}`);
+    chunks.push({ digest: (await storeObject(env, data)).plaintext, size: data.byteLength });
+  }
+  const first = manifestFor({ chunks });
+  first.manifest_object = await storeManifest(env, first);
+  assert.equal((await commit(env, first, 0)).response.status, 200);
+  assert.equal((await count(db, "generation_object")).count, 40);
+
+  const appended = Buffer.from("appended chunk");
+  const second = manifestFor({ chunks: [...chunks, { digest: (await storeObject(env, appended)).plaintext, size: appended.byteLength }] });
+  second.manifest_object = await storeManifest(env, second);
+  const { counter, wrapped } = countingWrites(db);
+  const committed = await commit({ ...env, DB: wrapped }, second, 1);
+  assert.equal(committed.response.status, 200, JSON.stringify(committed.body));
+  assert.equal((await count(db, "generation_object")).count, 41);
+  assert.ok(counter.rows < 15, `the second generation wrote ${counter.rows} rows for one new object`);
+});

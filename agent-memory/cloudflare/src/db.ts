@@ -284,34 +284,33 @@ export async function commitGeneration(
       generation.manifest_object,
     ),
   ];
-  const ROWS_PER_STATEMENT = 32;
-  for (let start = 0; start < generation.objects.length; start += ROWS_PER_STATEMENT) {
-    const chunk = generation.objects.slice(start, start + ROWS_PER_STATEMENT);
-    const values = chunk.map(() => "(?, ?, ?)").join(",");
-    const params: (string | number)[] = [generation.origin_host, generation.manifest_digest];
-    chunk.forEach((object, index) => {
-      params.push(start + index, object.digest, object.size);
-    });
+  const firstReferences = new Map<string, { readonly ordinal: number; readonly size: number }>();
+  generation.objects.forEach((object, ordinal) => {
+    if (!firstReferences.has(object.digest)) firstReferences.set(object.digest, { ordinal, size: object.size });
+  });
+  const unreferenced = [...firstReferences].map(([digest, object]) => ({ digest, ...object }));
+  for (let start = 0; start < unreferenced.length; start += LIST_CHUNK) {
     statements.push(
       db.prepare(
         `INSERT INTO generation_object(generation, ordinal, plaintext_digest, size)
-         SELECT (SELECT id FROM generation WHERE origin_host = ? AND manifest_digest = ?),
-                column1, column2, column3
-         FROM (VALUES ${values})`,
-      ).bind(...params),
+         SELECT (SELECT id FROM generation WHERE origin_host = ?1 AND manifest_digest = ?2),
+                listed.value ->> '$.ordinal', listed.value ->> '$.digest', listed.value ->> '$.size'
+         FROM json_each(?5) listed
+         WHERE NOT EXISTS (
+           SELECT 1 FROM generation_object go JOIN generation g ON g.id = go.generation
+           WHERE g.origin_host = ?1 AND g.harness = ?3 AND g.native_id = ?4
+             AND go.plaintext_digest = listed.value ->> '$.digest'
+         )`,
+      ).bind(
+        generation.origin_host,
+        generation.manifest_digest,
+        generation.harness,
+        generation.native_id,
+        JSON.stringify(unreferenced.slice(start, start + LIST_CHUNK)),
+      ),
     );
   }
-  const referenced = [...new Set([generation.manifest_digest, ...generation.objects.map((object) => object.digest)])];
-  for (let start = 0; start < referenced.length; start += ROWS_PER_STATEMENT) {
-    const chunk = referenced.slice(start, start + ROWS_PER_STATEMENT);
-    const placeholders = chunk.map(() => "?").join(",");
-    statements.push(
-      db.prepare(
-        `UPDATE remote_object SET last_referenced_at = ?, gc_pending_at = NULL
-         WHERE origin_host = ? AND plaintext_digest IN (${placeholders})`,
-      ).bind(generation.committed_at, generation.origin_host, ...chunk),
-    );
-  }
+  statements.push(...clearGcPending(db, generation.origin_host, [generation.manifest_digest, ...firstReferences.keys()]));
   statements.push(
     db.prepare("UPDATE origin_sync SET revision = revision + 1, last_change_at = ? WHERE origin_host = ?")
       .bind(generation.committed_at, generation.origin_host),
@@ -688,14 +687,12 @@ export async function replaceRemoteObject(
     ).bind(object.ciphertext_digest, oldCiphertext, object.origin_host),
     db.prepare(
       `UPDATE remote_object
-       SET encoding = ?, ciphertext_digest = ?, ciphertext_size = ?,
-           last_referenced_at = ?, gc_pending_at = NULL
+       SET encoding = ?, ciphertext_digest = ?, ciphertext_size = ?, gc_pending_at = NULL
        WHERE origin_host = ? AND plaintext_digest = ?`,
     ).bind(
       object.encoding,
       object.ciphertext_digest,
       object.ciphertext_size,
-      object.created_at,
       object.origin_host,
       object.plaintext_digest,
     ),

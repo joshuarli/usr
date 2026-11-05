@@ -294,7 +294,7 @@ Scheduling is explicit and never installed by sync. Render
 `dotfiles/launchd/com.josh.agent-sessions-mirror.plist.in`, replacing `@@HOME@@`,
 `@@STATE_DIR@@`, and `@@REMOTE@@`, lint it with `plutil -lint`, and load it with
 `launchctl bootstrap gui/$(id -u) PLIST`. The portable equivalent is
-`*/15 * * * * agent-sessions mirror sync`. An overlapping run exits 0 with
+`0 * * * * agent-sessions mirror sync`. An overlapping run exits 0 with
 `overlapped=1`, a disabled mirror exits 0 with `enabled=0`, and an unreachable mirror exits
 non-zero with the backlog intact for the next run. Routine sync uses HTTPS only and never
 invokes `cf`. Schedule `agent-sessions mirror gc --apply` separately, for example weekly;
