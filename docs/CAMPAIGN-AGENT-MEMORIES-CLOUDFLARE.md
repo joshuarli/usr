@@ -339,10 +339,13 @@ requests when the journal head equals the durable head, and zero D1 writes.
 - Encrypted generation manifest (full `archive.generation_manifest` JSON): `v1/m/<origin>/<ciphertext_sha256>`.
 - Snapshot chunks: `v1/o/<ciphertext_sha256>` as well. A snapshot is not a separate blob; it is a D1 record naming an ordered list of content-addressed chunks of the consistent SQLite image.
 - A snapshot record in D1 pins the DB plaintext digest/size, chunk digest list, schema version,
-  object count/bytes, and capture time, plus the archive objects its database references. Restore
-  concatenates and verifies the chunks, verifies `PRAGMA integrity_check`, then verifies every
-  archive object named by `snapshot_object` before rebuilding derived indexes. Pinning those
-  objects is what lets a retained snapshot survive GC of generations it predates.
+  object count/bytes, the SHA-256 of its object list, and capture time. The archive objects its
+  database references live in R2 at `v1/s/<origin>/<snapshot>/<page>`: sorted pages of up to
+  10,000 `<plaintext_sha256> <size>` lines, uploaded and checked against `remote_object` before
+  the commit, which verifies their count, bytes, and digest. Restore concatenates and verifies
+  the chunks, verifies `PRAGMA integrity_check`, then verifies every archive object on those
+  pages before rebuilding derived indexes. GC unions the retained snapshots' pages, so pinning
+  those objects is what lets a retained snapshot survive GC of generations it predates.
 - A snapshot is taken when a sync changed generations, canonical learning, or tombstones; an unchanged
   database is not snapshotted again. Unchanged chunks keep their ciphertext and are never
   re-uploaded.
@@ -387,10 +390,9 @@ generation_object(generation, ordinal, plaintext_digest, size, PK(generation, or
 tombstone(origin_host, harness, native_id, scope, forgotten_at, revision,
           PK(origin_host, harness, native_id))
 snapshot(id TEXT PK, origin_host, created_at, schema_version, db_digest, db_size,
-         objects, object_bytes, verified_at, revision)
+         objects, object_bytes, objects_digest, verified_at, revision)
 snapshot_chunk(snapshot, ordinal, plaintext_digest, size, ciphertext_digest,
                PK(snapshot, ordinal))
-snapshot_object(snapshot, plaintext_digest, size, PK(snapshot, plaintext_digest))
 learning_state(origin_host PK, revision, epoch, digest, records, updated_at)
 learning_fence(singleton PK CHECK(singleton=1), changed)
 learning_experience(origin_host, epoch, remote_id, record_digest, project_key, project_label, kind,

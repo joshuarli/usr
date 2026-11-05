@@ -231,10 +231,14 @@ generation, or tombstone writes.
 
 A sync that changes generations, tombstones, or the learning journal uploads a recovery
 snapshot: a sanitized SQLite copy in 1 MiB content-addressed chunks plus pins for every
-archive object the copy references. Snapshots are created at most once a day, and immediately
-after a learning change. The copy omits the transcript search projection, which restore
+archive object the copy references. Snapshots are created at most once a day; a learning
+change waits for the next one, and the local learning journal keeps it until then. The pins
+travel as sorted pages of up to 10,000 objects that the Worker stores in R2, and the commit
+names their count, bytes, and SHA-256, so committing a snapshot writes D1 rows for its chunks
+but none per pinned object. The copy omits the transcript search projection, which restore
 rebuilds from the captured bytes, so it carries the archive and learning catalog without
-duplicating the local search index. A failed snapshot is retried on the next sync.
+duplicating the local search index. A failed snapshot is retried after 15 minutes, then after
+twice the previous wait, up to a day, and a successful one resets the wait.
 `agent-sessions mirror snapshots` lists them, and `agent-sessions mirror verify --objects`
 recomputes every manifest and snapshot and attests a snapshot only after every pinned
 archive object inside it has been downloaded; `--sample` below the pinned-object count

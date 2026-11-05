@@ -213,6 +213,7 @@ class FixtureParityTests(unittest.TestCase):
         self.assertEqual(mirror.MAX_SNAPSHOT_BYTES, FIXTURE["limits"]["snapshot_bytes"])
         self.assertEqual(mirror.MAX_SNAPSHOT_CHUNKS, FIXTURE["limits"]["snapshot_chunks"])
         self.assertEqual(mirror.MAX_SNAPSHOT_OBJECTS, FIXTURE["limits"]["snapshot_objects"])
+        self.assertEqual(mirror.MAX_SNAPSHOT_PAGE_OBJECTS, FIXTURE["limits"]["snapshot_page_objects"])
         self.assertEqual(mirror.MAX_SOURCE_BYTES, FIXTURE["limits"]["source_bytes"])
         self.assertEqual(mirror.GC_GRACE_SECONDS, FIXTURE["limits"]["gc_grace_seconds"])
         self.assertEqual(mirror.ERROR_CODES, frozenset(FIXTURE["error_codes"]))
@@ -356,7 +357,13 @@ class FixtureParityTests(unittest.TestCase):
             if decoded is not None:
                 self.assertEqual(decoded["snapshot"]["id"], item["value"]["snapshot"]["db_digest"])
                 self.assertEqual(len(decoded["snapshot"]["chunks"]), len(item["value"]["snapshot"]["chunks"]))
-                self.assertEqual(len(decoded["snapshot"]["objects"]), len(item["value"]["snapshot"]["objects"]))
+                self.assertEqual(decoded["snapshot"]["objects"], item["value"]["snapshot"]["objects"])
+        for item in FIXTURE["snapshot_pages"]:
+            decoded = mirror.decode_snapshot_page(item["value"])
+            self.assertEqual(decoded is None, not item["ok"], item["name"])
+        body = FIXTURE["snapshot_page_body"]
+        self.assertEqual(mirror.encode_snapshot_page(body["objects"]), body["body"])
+        self.assertEqual(hashlib.sha256(body["body"].encode("ascii")).hexdigest(), body["digest"])
         for item in FIXTURE["gc_requests"]:
             decoded = mirror.decode_gc_request(item["value"])
             self.assertEqual(decoded is None, not item["ok"], item["name"])
@@ -598,7 +605,7 @@ class ClientTests(unittest.TestCase):
         row = {
             "id": DIGEST, "origin_host": "origin-a", "created_at": 1762000002.5,
             "schema_version": 10, "db_digest": DIGEST, "db_size": 15,
-            "objects": 1, "object_bytes": 4, "verified_at": None, "revision": 4,
+            "objects": 1, "object_bytes": 4, "objects_digest": "e" * 64, "verified_at": None, "revision": 4,
         }
         cursor = mirror.encode_cursor(["1762000002.5", DIGEST])
         connection = FakeConnection(response({
@@ -874,8 +881,8 @@ class StoreMirrorTests(unittest.TestCase):
         self.store.close()
         self.temporary.cleanup()
 
-    def test_schema_v10_pins_a_remote_and_tracks_acks(self):
-        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 10)
+    def test_schema_v11_pins_a_remote_and_tracks_acks(self):
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 11)
         self.assertEqual(self.store.mirror_remote_state("cloudflare"), None)
         self.store.write_mirror_remote("cloudflare", "usr-memories", 4, 2)
         state = self.store.mirror_remote_state("cloudflare")
@@ -1003,12 +1010,34 @@ class StoreMirrorTests(unittest.TestCase):
             connection.execute("DROP TABLE mirror_remote")
             connection.execute("PRAGMA user_version = 9")
         self.store = Store(self.root)
-        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 10)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 11)
         self.assertEqual(self.store.db.execute("SELECT count(*) FROM tombstone").fetchone()[0], 1)
         self.store.write_mirror_remote("cloudflare", "usr-memories", 1, 0)
         state = self.store.mirror_remote_state("cloudflare")
         self.assertIsNotNone(state)
         self.assertEqual(cast(dict[str, Any], state)["revision"], 1)
+
+    def test_a_v10_schema_gains_snapshot_backoff_without_losing_its_remote(self):
+        self.store.write_mirror_remote("cloudflare", "usr-memories", 7, 3, error="snapshot commit failed")
+        self.store.close()
+        with sqlite3.connect(self.store.path) as connection:
+            connection.execute("ALTER TABLE mirror_remote DROP COLUMN snapshot_failures")
+            connection.execute("ALTER TABLE mirror_remote DROP COLUMN snapshot_failed_at")
+            connection.execute("PRAGMA user_version = 10")
+        self.store = Store(self.root)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 11)
+        state = cast(dict[str, Any], self.store.mirror_remote_state("cloudflare"))
+        self.assertEqual((state["revision"], state["last_error"], state["snapshot_failures"]),
+                         (7, "snapshot commit failed", 0))
+        self.store.record_snapshot_failure("cloudflare")
+        self.store.record_snapshot_failure("cloudflare")
+        self.store.write_mirror_remote("cloudflare", "usr-memories", 8, 3)
+        state = cast(dict[str, Any], self.store.mirror_remote_state("cloudflare"))
+        self.assertEqual(state["snapshot_failures"], 2)
+        self.assertIsNotNone(state["snapshot_failed_at"])
+        self.store.clear_snapshot_failures("cloudflare")
+        state = cast(dict[str, Any], self.store.mirror_remote_state("cloudflare"))
+        self.assertEqual((state["snapshot_failures"], state["snapshot_failed_at"]), (0, None))
 
     def test_applying_a_remote_tombstone_is_durable_for_that_remote(self):
         self.assertTrue(self.store.apply_remote_tombstone(
@@ -1108,9 +1137,21 @@ class SyncStore:
                             learning_seq=0, learning_digest=None, error=None):
         self.calls.append(("write", remote, store_id, revision, watermark, error))
         self.writes.append((remote, store_id, revision, watermark, error))
+        failures = (self.pinned or {}).get("snapshot_failures", 0)
+        failed_at = (self.pinned or {}).get("snapshot_failed_at")
         self.pinned = {"remote": remote, "store_id": store_id, "revision": revision,
                        "tombstone_watermark": watermark, "learning_seq": learning_seq,
-                       "learning_digest": learning_digest, "last_sync_at": 1.0, "last_error": error}
+                       "learning_digest": learning_digest, "last_sync_at": 1.0, "last_error": error,
+                       "snapshot_failures": failures, "snapshot_failed_at": failed_at}
+
+    def record_snapshot_failure(self, remote):
+        self.calls.append(("snapshot_failure", remote))
+        self.pinned = {**(self.pinned or {}), "snapshot_failures": (self.pinned or {}).get("snapshot_failures", 0) + 1,
+                       "snapshot_failed_at": time.time()}
+
+    def clear_snapshot_failures(self, remote):
+        self.calls.append(("snapshot_cleared", remote))
+        self.pinned = {**(self.pinned or {}), "snapshot_failures": 0, "snapshot_failed_at": None}
 
 
 class SyncClient:
@@ -1477,18 +1518,46 @@ class SyncTests(unittest.TestCase):
         for argv in launched:
             self.assertNotEqual(Path(str(argv[0])).name if argv else "", "cf")
 
-    def test_a_previous_snapshot_failure_is_retried_without_new_changes(self):
-        store = SyncStore(pinned={"store_id": "usr-memories", "revision": 2,
-                                  "tombstone_watermark": 0, "learning_seq": 0,
-                                  "last_error": "snapshot_failed: synthetic"})
-        runtime = SyncClient()
-        with mock.patch.object(mirror, "upload_snapshot",
-                               return_value=snapshot_counters(2)) as upload:
-            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+    def test_a_failed_snapshot_backs_off_before_it_is_retried(self):
+        store = SyncStore(pinned={"store_id": "usr-memories", "revision": 2, "tombstone_watermark": 0,
+                                  "learning_seq": 0, "last_error": None,
+                                  "snapshot_failures": 0, "snapshot_failed_at": None})
+        failure = mirror.MirrorError("unavailable", "snapshot commit failed", status=503)
+        with mock.patch.object(mirror, "upload_snapshot", side_effect=failure):
+            store.pinned["last_error"] = "earlier failure"
+            with self.assertRaises(mirror.MirrorError):
+                mirror.sync(store, config(), "cloudflare", client=SyncClient(), recipients=["age1"])
+        self.assertEqual(store.pinned["snapshot_failures"], 1)
+
+        with mock.patch.object(mirror, "upload_snapshot", return_value=snapshot_counters(2)) as upload:
+            deferred = mirror.sync(store, config(), "cloudflare", client=SyncClient(), recipients=["age1"])
+            self.assertEqual(upload.call_count, 0)
+            self.assertEqual(deferred["snapshots_deferred"], 1)
+            store.pinned["snapshot_failed_at"] = time.time() - mirror.snapshot_retry_delay(1) - 1
+            retried = mirror.sync(store, config(), "cloudflare", client=SyncClient(), recipients=["age1"])
         self.assertEqual(upload.call_count, 1)
-        self.assertEqual(result["snapshots_created"], 1)
-        self.assertFalse(result["unchanged"])
-        self.assertEqual(store.writes[-1][4], None)
+        self.assertEqual(retried["snapshots_created"], 1)
+        self.assertEqual(store.pinned["snapshot_failures"], 0)
+
+    def test_snapshot_retry_delay_doubles_up_to_the_snapshot_interval(self):
+        self.assertEqual(mirror.snapshot_retry_delay(1), mirror.SNAPSHOT_RETRY_BASE_SECONDS)
+        self.assertEqual(mirror.snapshot_retry_delay(3), 4 * mirror.SNAPSHOT_RETRY_BASE_SECONDS)
+        self.assertEqual(mirror.snapshot_retry_delay(40), mirror.SNAPSHOT_MIN_INTERVAL_SECONDS)
+
+    def test_a_learning_change_waits_for_the_daily_snapshot(self):
+        class JournalStore(SyncStore):
+            def learning_journal_head(self):
+                return 5
+
+        store = JournalStore(pinned={"store_id": "usr-memories", "revision": 2, "tombstone_watermark": 0,
+                                     "learning_seq": 0, "last_error": None,
+                                     "snapshot_failures": 0, "snapshot_failed_at": None})
+        runtime = SyncClient(snapshot_rows=[{"created_at": time.time() - 60}])
+        with mock.patch.object(mirror, "upload_snapshot", return_value=snapshot_counters(2)) as upload:
+            result = mirror.sync(store, config(), "cloudflare", client=runtime, recipients=["age1"])
+        self.assertEqual(upload.call_count, 0)
+        self.assertEqual(result["snapshots_deferred"], 1)
+        self.assertNotIn(("prune_journal", 5), store.calls)
 
     def test_a_stale_revision_records_the_attempt_and_stops(self):
         store = SyncStore(pending_generations=[self.generation()])

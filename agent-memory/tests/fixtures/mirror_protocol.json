@@ -11,7 +11,8 @@
     "page": 200,
     "snapshot_bytes": 1099511627776,
     "snapshot_chunks": 4096,
-    "snapshot_objects": 100000,
+    "snapshot_objects": 200000,
+    "snapshot_page_objects": 10000,
     "gc_grace_seconds": 3600,
     "source_bytes": 1125899906842624
   },
@@ -1012,12 +1013,9 @@
               "ciphertext_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
             }
           ],
-          "objects": [
-            {
-              "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "size": 4
-            }
-          ]
+          "objects": 1,
+          "object_bytes": 4,
+          "objects_digest": "c5ea45cc67014852d3a1d3b987e4eac795eb3b6af512838da74a82f9979660b5"
         }
       }
     },
@@ -1041,7 +1039,9 @@
               "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             }
           ],
-          "objects": []
+          "objects": 0,
+          "object_bytes": 0,
+          "objects_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       }
     },
@@ -1065,40 +1065,9 @@
               "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             }
           ],
-          "objects": []
-        }
-      }
-    },
-    {
-      "name": "duplicate pinned object rejected",
-      "ok": false,
-      "value": {
-        "protocol": 1,
-        "origin": "origin-a",
-        "base_revision": 4,
-        "snapshot": {
-          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "created_at": 1762000002,
-          "schema_version": 10,
-          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "db_size": 15,
-          "chunks": [
-            {
-              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "size": 15,
-              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-            }
-          ],
-          "objects": [
-            {
-              "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "size": 4
-            },
-            {
-              "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "size": 4
-            }
-          ]
+          "objects": 0,
+          "object_bytes": 0,
+          "objects_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       }
     },
@@ -1122,12 +1091,189 @@
               "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             }
           ],
-          "objects": [],
+          "objects": 0,
+          "object_bytes": 0,
+          "objects_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           "note": "extra"
+        }
+      }
+    },
+    {
+      "name": "negative object count rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 15,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 10,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            },
+            {
+              "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "size": 5,
+              "ciphertext_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+          ],
+          "objects": -1,
+          "object_bytes": 4,
+          "objects_digest": "c5ea45cc67014852d3a1d3b987e4eac795eb3b6af512838da74a82f9979660b5"
+        }
+      }
+    },
+    {
+      "name": "object count above the limit rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "base_revision": 4,
+        "snapshot": {
+          "id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "created_at": 1762000002,
+          "schema_version": 10,
+          "db_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "db_size": 15,
+          "chunks": [
+            {
+              "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "size": 10,
+              "ciphertext_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+            },
+            {
+              "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "size": 5,
+              "ciphertext_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            }
+          ],
+          "objects": 200001,
+          "object_bytes": 4,
+          "objects_digest": "c5ea45cc67014852d3a1d3b987e4eac795eb3b6af512838da74a82f9979660b5"
         }
       }
     }
   ],
+  "snapshot_pages": [
+    {
+      "name": "valid",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "page": 0,
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 1
+          },
+          {
+            "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "last allowed page",
+      "ok": true,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "page": 19,
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "page past the limit rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "page": 20,
+        "objects": [
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty page rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "page": 0,
+        "objects": []
+      }
+    },
+    {
+      "name": "descending digests rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "page": 0,
+        "objects": [
+          {
+            "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size": 2
+          },
+          {
+            "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate digest rejected",
+      "ok": false,
+      "value": {
+        "protocol": 1,
+        "origin": "origin-a",
+        "page": 0,
+        "objects": [
+          {
+            "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          },
+          {
+            "plaintext_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size": 4
+          }
+        ]
+      }
+    }
+  ],
+  "snapshot_page_body": {
+    "objects": [
+      {
+        "plaintext_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 0
+      },
+      {
+        "plaintext_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size": 8388608
+      }
+    ],
+    "body": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 8388608\n",
+    "digest": "c004fb6d49bd3d57f0839f82943d59c11a02e8fa09704f63c273b4c47e047bb7"
+  },
   "gc_requests": [
     {
       "name": "apply",

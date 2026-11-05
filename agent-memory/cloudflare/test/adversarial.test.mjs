@@ -206,6 +206,7 @@ async function learningDelta(origin, baseRevision, changes, token = COLLECTOR, s
 
 function snapshotFor(chunks, objects, { seed = "snapshot" } = {}) {
   const dbDigest = digest(seed);
+  const body = objects.map((object) => `${object.plaintext_digest} ${object.size}\n`).join("");
   return {
     id: dbDigest,
     created_at: 1762000000,
@@ -213,7 +214,9 @@ function snapshotFor(chunks, objects, { seed = "snapshot" } = {}) {
     db_digest: dbDigest,
     db_size: chunks.reduce((total, chunk) => total + chunk.size, 0),
     chunks,
-    objects,
+    objects: objects.length,
+    object_bytes: objects.reduce((total, object) => total + object.size, 0),
+    objects_digest: digest(body),
   };
 }
 
@@ -612,6 +615,10 @@ test("case 21: consistent restore of canonical records", async () => {
     ],
     [{ plaintext_digest: pinned.plaintext, size: pinned.size }],
   );
+  const page = await json("POST", `/api/v1/sync/snapshots/${snapshot.id}/objects`, {
+    protocol: 1, origin, page: 0, objects: [{ plaintext_digest: pinned.plaintext, size: pinned.size }],
+  }, { token });
+  assert.equal(page.response.status, 200, JSON.stringify(page.body));
   const committed = await json("POST", "/api/v1/sync/snapshots", {
     protocol: 1, origin, base_revision: 0, snapshot,
   }, { token });
@@ -620,7 +627,10 @@ test("case 21: consistent restore of canonical records", async () => {
     "GET", `/api/v1/sync/snapshots/${snapshot.id}?origin=${encodeURIComponent(origin)}`, null, { token });
   assert.equal(detail.response.status, 200);
   assert.deepEqual(detail.body.chunks.map((chunk) => chunk.ordinal), [0, 1]);
-  assert.equal(detail.body.objects.length, 1);
+  const objects = await json(
+    "GET", `/api/v1/sync/snapshots/${snapshot.id}/objects?page=0`, null, { token });
+  assert.equal(objects.response.status, 200, JSON.stringify(objects.body));
+  assert.equal(objects.body.objects.length, 1);
   for (const chunk of detail.body.chunks) {
     assert.equal((await send("GET", `/api/v1/sync/objects/${chunk.ciphertext_digest}`, { token })).status, 200);
   }

@@ -21,7 +21,7 @@ from agent_memory.transcripts import opencode_database, opencode_events, opencod
 from agent_memory.types import DATABASE_HARNESSES, HARNESSES, OPENCODE_DB, OPENCODE_SUBPOSITIONS, SUBSTANTIVE_KINDS, Harness
 
 DB_FILENAME = "sessions.sqlite3"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 ARCHIVE_DIRNAME = "archive"
 ARCHIVE_OBJECTS = "objects"
 ARCHIVE_COMPANIONS = {"grok": ("summary.json", "events.jsonl")}
@@ -423,7 +423,7 @@ class Store:
             existing = {row[0] for row in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if version == 0 and existing & owned:
                 raise StoreError("session index has an unversioned schema; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
-            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, SCHEMA_VERSION):
+            if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SCHEMA_VERSION):
                 raise StoreError("unsupported session index schema version " + str(version))
             if version == 1:
                 if not self._schema_ready(1):
@@ -469,6 +469,11 @@ class Store:
                 if not self._schema_ready(9):
                     raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
                 self._migrate_v9()
+                version = 10
+            if version == 10:
+                if not self._schema_ready(10):
+                    raise StoreError("session index schema is incomplete; run `agent-sessions doctor --rebuild-index` to rebuild only index tables")
+                self._migrate_v10()
                 return
             if version == SCHEMA_VERSION:
                 if not self._schema_ready(SCHEMA_VERSION):
@@ -501,6 +506,7 @@ class Store:
             session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}
             event_columns = {row[1] for row in self.db.execute("PRAGMA table_info(events)")}
             generation_columns = {row[1] for row in self.db.execute("PRAGMA table_info(archive_generation)")}
+            mirror_remote_columns = {row[1] for row in self.db.execute("PRAGMA table_info(mirror_remote)")}
         except sqlite3.DatabaseError:
             return False
         return (
@@ -520,6 +526,7 @@ class Store:
             and (expected_version < 8 or {"capture_failure", "transfer_tombstone"} <= existing)
             and (expected_version < 9 or {"manifest_digest", "session_metadata"} <= generation_columns)
             and (expected_version < 10 or "mirror_remote" in existing)
+            and (expected_version < 11 or {"snapshot_failures", "snapshot_failed_at"} <= mirror_remote_columns)
         )
 
     def _migrate_v1(self):
@@ -719,6 +726,18 @@ class Store:
             self.db.rollback()
             raise
 
+    def _migrate_v10(self):
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(mirror_remote)")}
+        added = [statement for name, statement in (
+            ("snapshot_failures", "ALTER TABLE mirror_remote ADD COLUMN snapshot_failures INTEGER NOT NULL DEFAULT 0;"),
+            ("snapshot_failed_at", "ALTER TABLE mirror_remote ADD COLUMN snapshot_failed_at REAL;"),
+        ) if name not in columns]
+        try:
+            self.db.executescript("BEGIN IMMEDIATE;" + "".join(added) + "PRAGMA user_version = 11;COMMIT;")
+        except sqlite3.DatabaseError:
+            self.db.rollback()
+            raise
+
     def _create_schema(self):
         self.db.executescript(
             "BEGIN IMMEDIATE;"
@@ -799,7 +818,8 @@ class Store:
             "CREATE TABLE IF NOT EXISTS mirror_remote ("
             "remote TEXT PRIMARY KEY, store_id TEXT, revision INTEGER NOT NULL DEFAULT 0, "
             "tombstone_watermark INTEGER NOT NULL DEFAULT 0, learning_seq INTEGER NOT NULL DEFAULT 0, "
-            "learning_digest TEXT, last_sync_at REAL, last_error TEXT);"
+            "learning_digest TEXT, last_sync_at REAL, last_error TEXT, "
+            "snapshot_failures INTEGER NOT NULL DEFAULT 0, snapshot_failed_at REAL);"
             "PRAGMA user_version = " + str(SCHEMA_VERSION) + ";COMMIT;"
         )
 
@@ -1970,7 +1990,8 @@ class Store:
     def mirror_remote_state(self, remote):
         row = self.db.execute(
             "SELECT remote, store_id, revision, tombstone_watermark, learning_seq, learning_digest, "
-            "last_sync_at, last_error FROM mirror_remote WHERE remote = ?", (str(remote),)).fetchone()
+            "last_sync_at, last_error, snapshot_failures, snapshot_failed_at FROM mirror_remote WHERE remote = ?",
+            (str(remote),)).fetchone()
         return dict(row) if row is not None else None
 
     def write_mirror_remote(self, remote, store_id, revision, tombstone_watermark,
@@ -1994,6 +2015,18 @@ class Store:
                 "ON CONFLICT(remote) DO UPDATE SET last_sync_at = excluded.last_sync_at, "
                 "last_error = excluded.last_error",
                 (str(remote), time.time(), str(error)[:500]))
+
+    def record_snapshot_failure(self, remote):
+        with self.db:
+            self.db.execute(
+                "UPDATE mirror_remote SET snapshot_failures = snapshot_failures + 1, snapshot_failed_at = ? "
+                "WHERE remote = ?", (time.time(), str(remote)))
+
+    def clear_snapshot_failures(self, remote):
+        with self.db:
+            self.db.execute(
+                "UPDATE mirror_remote SET snapshot_failures = 0, snapshot_failed_at = NULL WHERE remote = ?",
+                (str(remote),))
 
     def forget_mirror_remote(self, remote):
         with self.db:

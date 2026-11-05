@@ -76,8 +76,15 @@ async function storeObject(env, data, client = COLLECTOR) {
   return await putCiphertext(env, data, Buffer.concat([Buffer.from("ciphertext:"), data]), client);
 }
 
+const PAGE_OBJECTS = 10_000;
+
+function pageBody(objects) {
+  return objects.map((object) => `${object.plaintext} ${object.size}\n`).join("");
+}
+
 function snapshotFor(chunks, objects, { idSeed = "snapshot", createdAt = Date.now() / 1000 } = {}) {
   const dbDigest = digest(idSeed);
+  const pinned = [...objects].sort((a, b) => (a.plaintext < b.plaintext ? -1 : 1));
   return {
     id: dbDigest,
     created_at: createdAt,
@@ -89,17 +96,40 @@ function snapshotFor(chunks, objects, { idSeed = "snapshot", createdAt = Date.no
       size: chunk.size,
       ciphertext_digest: chunk.ciphertext,
     })),
-    objects: objects.map((object) => ({ plaintext_digest: object.plaintext, size: object.size })),
+    objects: pinned.length,
+    object_bytes: pinned.reduce((total, object) => total + object.size, 0),
+    objects_digest: digest(pageBody(pinned)),
+    pinned,
   };
 }
 
-async function commitSnapshot(env, snapshot, baseRevision, client = COLLECTOR) {
+async function putPage(env, id, page, objects, client = COLLECTOR) {
+  const response = await worker.fetch(postJson(`/api/v1/sync/snapshots/${id}/objects`, {
+    protocol: 1,
+    origin: ORIGIN,
+    page,
+    objects: objects.map((object) => ({ plaintext_digest: object.plaintext, size: object.size })),
+  }), env, collector(client));
+  return { response, body: await response.json() };
+}
+
+async function commitSnapshot(env, snapshot, baseRevision, client = COLLECTOR, { pages = true } = {}) {
+  const { pinned, ...wire } = snapshot;
+  for (let start = 0; pages && start < pinned.length; start += PAGE_OBJECTS) {
+    const uploaded = await putPage(env, wire.id, start / PAGE_OBJECTS, pinned.slice(start, start + PAGE_OBJECTS), client);
+    if (uploaded.response.status !== 200) return uploaded;
+  }
   const response = await worker.fetch(postJson("/api/v1/sync/snapshots", {
     protocol: 1,
     origin: ORIGIN,
     base_revision: baseRevision,
-    snapshot,
+    snapshot: wire,
   }), env, collector(client));
+  return { response, body: await response.json() };
+}
+
+async function objectsPage(env, id, page, client = COLLECTOR) {
+  const response = await worker.fetch(request(`/api/v1/sync/snapshots/${id}/objects?page=${page}`), env, collector(client));
   return { response, body: await response.json() };
 }
 
@@ -151,17 +181,22 @@ test("a snapshot commits with its chunks and pinned objects and re-acks", async 
   assert.equal(committed.body.object_bytes, pinned.size + secondPinned.size);
   assert.equal((await count(db, "snapshot")).count, 1);
   assert.equal((await count(db, "snapshot_chunk")).count, 2);
-  assert.equal((await count(db, "snapshot_object")).count, 2);
+  const tables = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'snapshot_object'").all();
+  assert.equal(tables.results.length, 0);
 
   const fetched = await detail(env, snapshot.id);
   assert.equal(fetched.response.status, 200, JSON.stringify(fetched.body));
   assert.equal(fetched.body.snapshot.id, snapshot.id);
   assert.deepEqual(fetched.body.chunks.map((chunk) => chunk.ordinal), [0, 1]);
   assert.equal(fetched.body.chunks[0].encoding, "identity");
+  assert.equal(fetched.body.snapshot.objects_digest, snapshot.objects_digest);
+  const objects = await objectsPage(env, snapshot.id, 0);
+  assert.equal(objects.response.status, 200, JSON.stringify(objects.body));
   assert.deepEqual(
-    new Set(fetched.body.objects.map((object) => object.ciphertext_digest)),
+    new Set(objects.body.objects.map((object) => object.ciphertext_digest)),
     new Set([pinned.ciphertext, secondPinned.ciphertext]),
   );
+  assert.equal((await objectsPage(env, snapshot.id, 1)).response.status, 404);
   assert.equal((await listSnapshots(env)).body.snapshots.length, 1);
 
   const duplicate = await commitSnapshot(env, snapshot, 99);
@@ -507,4 +542,132 @@ test("snapshot routes are scoped to the collector origin", async (t) => {
   assert.equal(foreignVerify.response.status, 403);
   const foreignGc = await gc(env, false, OTHER_COLLECTOR);
   assert.equal(foreignGc.response.status, 403);
+});
+
+test("a commit is refused unless its stored pages match its count, bytes, and digest", async (t) => {
+  const { db, env } = await runtime(t);
+  const chunk = await storeObject(env, Buffer.from("paged snapshot chunk"));
+  const first = await storeObject(env, Buffer.from("first paged object"));
+  const second = await storeObject(env, Buffer.from("second paged object"));
+
+  const unpaged = snapshotFor([chunk], [first, second], { idSeed: "unpaged" });
+  const missing = await commitSnapshot(env, unpaged, 0, COLLECTOR, { pages: false });
+  assert.equal(missing.response.status, 409);
+  assert.equal(missing.body.error.code, "missing_object");
+
+  const short = snapshotFor([chunk], [first, second], { idSeed: "short" });
+  assert.equal((await putPage(env, short.id, 0, [short.pinned[0]])).response.status, 200);
+  const shortCommit = await commitSnapshot(env, short, 0, COLLECTOR, { pages: false });
+  assert.equal(shortCommit.response.status, 409);
+  assert.equal(shortCommit.body.error.code, "missing_object");
+
+  const forged = snapshotFor([chunk], [first, second], { idSeed: "forged" });
+  forged.objects_digest = digest("a different object list");
+  const forgedCommit = await commitSnapshot(env, forged, 0);
+  assert.equal(forgedCommit.response.status, 409);
+  assert.equal(forgedCommit.body.error.code, "missing_object");
+
+  const unsorted = await putPage(env, digest("unsorted"), 0, [...short.pinned].reverse());
+  assert.equal(unsorted.response.status, 400);
+  assert.equal(unsorted.body.error.code, "invalid_request");
+  assert.equal((await count(db, "snapshot")).count, 0);
+});
+
+function countingWrites(db) {
+  const counter = { rows: 0 };
+  const wrapped = new Proxy(db, {
+    get(target, property) {
+      if (property !== "batch") return Reflect.get(target, property).bind(target);
+      return async (statements) => {
+        const results = await target.batch(statements);
+        for (const result of results) {
+          assert.equal(typeof result.meta.rows_written, "number");
+          counter.rows += result.meta.rows_written;
+        }
+        return results;
+      };
+    },
+  });
+  return { counter, wrapped };
+}
+
+test("a snapshot spanning several object pages commits and reads back page by page", async (t) => {
+  const { db, env } = await runtime(t);
+  const chunk = await storeObject(env, Buffer.from("large snapshot chunk"));
+  const pinned = Array.from({ length: PAGE_OBJECTS + 3 }, (_, index) => ({
+    plaintext: digest(`large pinned ${index}`),
+    size: index + 1,
+    ciphertext: digest(`large pinned ciphertext ${index}`),
+  }));
+  const insert = db.prepare(
+    `INSERT INTO remote_object(origin_host, plaintext_digest, plaintext_size, encoding, ciphertext_digest,
+       ciphertext_size, created_at, last_referenced_at, gc_pending_at)
+     VALUES(?, ?, ?, 'identity', ?, ?, 0, NULL, ?)`,
+  );
+  for (let start = 0; start < pinned.length; start += 1_000) {
+    await db.batch(pinned.slice(start, start + 1_000)
+      .map((object) => insert.bind(ORIGIN, object.plaintext, object.size, object.ciphertext, object.size, 1)));
+  }
+  const snapshot = snapshotFor([chunk], pinned, { idSeed: "large" });
+  const committed = await commitSnapshot(env, snapshot, 0);
+  assert.equal(committed.response.status, 200, JSON.stringify(committed.body));
+  assert.equal(committed.body.objects, PAGE_OBJECTS + 3);
+  const pending = await db.prepare("SELECT count(*) AS count FROM remote_object WHERE gc_pending_at IS NOT NULL").first();
+  assert.equal(pending.count, 0);
+  const firstPage = await objectsPage(env, snapshot.id, 0);
+  const lastPage = await objectsPage(env, snapshot.id, 1);
+  assert.equal(firstPage.body.objects.length, PAGE_OBJECTS);
+  assert.equal(lastPage.body.objects.length, 3);
+  assert.equal(lastPage.body.objects.at(-1).plaintext_digest, snapshot.pinned.at(-1).plaintext);
+});
+
+test("gc never sweeps an object pinned only by a retained snapshot and deletes a pruned snapshot's pages", async (t) => {
+  const { db, bucket, env } = await runtime(t);
+  const now = Date.now() / 1000;
+  const oldChunk = await storeObject(env, Buffer.from("pruned snapshot chunk"));
+  const oldPinned = await storeObject(env, Buffer.from("pinned only by the pruned snapshot"));
+  const keptChunk = await storeObject(env, Buffer.from("kept snapshot chunk"));
+  const keptPinned = await storeObject(env, Buffer.from("pinned only by the kept snapshot"));
+  const old = snapshotFor([oldChunk], [oldPinned], { idSeed: "pruned", createdAt: now - 35 * 86_400 });
+  const kept = snapshotFor([keptChunk], [keptPinned], { idSeed: "kept", createdAt: now });
+  assert.equal((await commitSnapshot(env, old, 0)).response.status, 200);
+  assert.equal((await commitSnapshot(env, kept, 1)).response.status, 200);
+
+  const first = await gc(env, true);
+  assert.equal(first.response.status, 200, JSON.stringify(first.body));
+  assert.equal(first.body.snapshots_pruned, 1);
+  assert.equal(await bucket.get(`v1/s/${ORIGIN}/${old.id}/0`), null);
+  assert.notEqual(await bucket.get(`v1/s/${ORIGIN}/${kept.id}/0`), null);
+
+  await db.prepare("UPDATE remote_object SET gc_pending_at = ?").bind(now - 3_601).run();
+  const swept = await gc(env, true);
+  assert.equal(swept.response.status, 200, JSON.stringify(swept.body));
+  assert.equal(await bucket.get(`v1/o/${oldPinned.ciphertext}`), null);
+  assert.notEqual(await bucket.get(`v1/o/${keptPinned.ciphertext}`), null);
+  assert.notEqual(await bucket.get(`v1/o/${keptChunk.ciphertext}`), null);
+});
+
+test("pages and commit write rows in proportion to pending objects and chunks, not pinned objects", async (t) => {
+  const { db, env } = await runtime(t);
+  const chunk = await storeObject(env, Buffer.from("bounded write chunk"));
+  const pinned = Array.from({ length: 2 * PAGE_OBJECTS + 5 }, (_, index) => ({
+    plaintext: digest(`bounded pinned ${index}`),
+    size: 7,
+    ciphertext: digest(`bounded ciphertext ${index}`),
+  }));
+  const insert = db.prepare(
+    `INSERT INTO remote_object(origin_host, plaintext_digest, plaintext_size, encoding, ciphertext_digest,
+       ciphertext_size, created_at, last_referenced_at, gc_pending_at)
+     VALUES(?, ?, ?, 'identity', ?, ?, 0, NULL, ?)`,
+  );
+  for (let start = 0; start < pinned.length; start += 1_000) {
+    await db.batch(pinned.slice(start, start + 1_000).map((object, offset) =>
+      insert.bind(ORIGIN, object.plaintext, object.size, object.ciphertext, object.size, start + offset < 3 ? 1 : null)));
+  }
+  const { counter, wrapped } = countingWrites(db);
+  const counted = { ...env, DB: wrapped };
+  const committed = await commitSnapshot(counted, snapshotFor([chunk], pinned, { idSeed: "bounded" }), 0);
+  assert.equal(committed.response.status, 200, JSON.stringify(committed.body));
+  assert.ok(counter.rows > 0);
+  assert.ok(counter.rows < 100, `pages and commit wrote ${counter.rows} rows for ${pinned.length} pinned objects`);
 });

@@ -8,7 +8,9 @@ export const MAX_GENERATION_ARTIFACTS = 1_000;
 export const MAX_TOMBSTONES = 900;
 export const MAX_SNAPSHOT_BYTES = 2 ** 40;
 export const MAX_SNAPSHOT_CHUNKS = 4_096;
-export const MAX_SNAPSHOT_OBJECTS = 100_000;
+export const MAX_SNAPSHOT_OBJECTS = 200_000;
+export const MAX_SNAPSHOT_PAGE_OBJECTS = 10_000;
+export const MAX_SNAPSHOT_PAGES = MAX_SNAPSHOT_OBJECTS / MAX_SNAPSHOT_PAGE_OBJECTS;
 export const GC_GRACE_SECONDS = 3_600;
 export const MAX_SOURCE_BYTES = 2 ** 50;
 export const MAX_PAGE = 200;
@@ -324,6 +326,15 @@ export interface SnapshotInput {
   readonly db_digest: string;
   readonly db_size: number;
   readonly chunks: readonly SnapshotChunkRef[];
+  readonly objects: number;
+  readonly object_bytes: number;
+  readonly objects_digest: string;
+}
+
+export interface SnapshotPage {
+  readonly protocol: 1;
+  readonly origin: string;
+  readonly page: number;
   readonly objects: readonly SnapshotObjectRef[];
 }
 
@@ -371,6 +382,53 @@ function decodeSnapshotObject(value: unknown): SnapshotObjectRef | null {
   return digest === null || size === null ? null : { plaintext_digest: digest, size };
 }
 
+export function snapshotPageCount(objects: number): number {
+  return Math.ceil(objects / MAX_SNAPSHOT_PAGE_OBJECTS);
+}
+
+export function encodeSnapshotPage(objects: readonly SnapshotObjectRef[]): string {
+  return objects.map((object) => `${object.plaintext_digest} ${object.size}\n`).join("");
+}
+
+const PAGE_LINE = /^([0-9a-f]{64}) (0|[1-9][0-9]*)$/;
+
+export function decodeSnapshotPageBody(text: string): readonly SnapshotObjectRef[] | null {
+  if (!text.endsWith("\n")) return null;
+  const objects: SnapshotObjectRef[] = [];
+  for (const line of text.slice(0, -1).split("\n")) {
+    const match = PAGE_LINE.exec(line);
+    const size = match === null ? null : decodeSize(Number(match[2]));
+    if (match === null || size === null) return null;
+    objects.push({ plaintext_digest: match[1]!, size });
+  }
+  return objects.length > MAX_SNAPSHOT_PAGE_OBJECTS ? null : objects;
+}
+
+function decodeObjectBytes(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+export function decodeSnapshotPage(value: unknown): SnapshotPage | null {
+  if (!isRecord(value) || !exactKeys(value, ["protocol", "origin", "page", "objects"])) return null;
+  if (decodeProtocol(value.protocol) === null) return null;
+  const origin = decodeOrigin(value.origin);
+  const page = value.page;
+  if (origin === null || typeof page !== "number" || !Number.isSafeInteger(page) || page < 0 || page >= MAX_SNAPSHOT_PAGES) {
+    return null;
+  }
+  if (!Array.isArray(value.objects) || value.objects.length === 0 || value.objects.length > MAX_SNAPSHOT_PAGE_OBJECTS) {
+    return null;
+  }
+  const objects: SnapshotObjectRef[] = [];
+  for (const entry of value.objects) {
+    const object = decodeSnapshotObject(entry);
+    const previous = objects.at(-1);
+    if (object === null || (previous !== undefined && previous.plaintext_digest >= object.plaintext_digest)) return null;
+    objects.push(object);
+  }
+  return { protocol: PROTOCOL, origin, page, objects };
+}
+
 export function decodeSnapshotCommit(value: unknown): SnapshotCommit | null {
   if (!isRecord(value) || !exactKeys(value, ["protocol", "origin", "base_revision", "snapshot"])) return null;
   if (decodeProtocol(value.protocol) === null) return null;
@@ -379,7 +437,7 @@ export function decodeSnapshotCommit(value: unknown): SnapshotCommit | null {
   const snapshot = value.snapshot;
   if (origin === null || baseRevision === null) return null;
   if (!isRecord(snapshot) || !exactKeys(snapshot, [
-    "id", "created_at", "schema_version", "db_digest", "db_size", "chunks", "objects",
+    "id", "created_at", "schema_version", "db_digest", "db_size", "chunks", "objects", "object_bytes", "objects_digest",
   ])) return null;
   const id = decodeDigest(snapshot.id);
   const dbDigest = decodeDigest(snapshot.db_digest);
@@ -394,7 +452,13 @@ export function decodeSnapshotCommit(value: unknown): SnapshotCommit | null {
   if (!Array.isArray(snapshot.chunks) || snapshot.chunks.length === 0 || snapshot.chunks.length > MAX_SNAPSHOT_CHUNKS) {
     return null;
   }
-  if (!Array.isArray(snapshot.objects) || snapshot.objects.length > MAX_SNAPSHOT_OBJECTS) return null;
+  const objects = snapshot.objects;
+  if (typeof objects !== "number" || !Number.isSafeInteger(objects) || objects < 0 || objects > MAX_SNAPSHOT_OBJECTS) {
+    return null;
+  }
+  const objectBytes = decodeObjectBytes(snapshot.object_bytes);
+  const objectsDigest = decodeDigest(snapshot.objects_digest);
+  if (objectBytes === null || objectsDigest === null) return null;
   const chunks: SnapshotChunkRef[] = [];
   let cursor = 0;
   for (const entry of snapshot.chunks) {
@@ -405,20 +469,13 @@ export function decodeSnapshotCommit(value: unknown): SnapshotCommit | null {
     chunks.push(chunk);
   }
   if (cursor !== dbSize) return null;
-  const objects: SnapshotObjectRef[] = [];
-  const digests = new Set<string>();
-  for (const entry of snapshot.objects) {
-    const object = decodeSnapshotObject(entry);
-    if (object === null || digests.has(object.plaintext_digest)) return null;
-    digests.add(object.plaintext_digest);
-    objects.push(object);
-  }
   return {
     protocol: PROTOCOL,
     origin,
     base_revision: baseRevision,
     snapshot: {
-      id, created_at: createdAt, schema_version: schemaVersion, db_digest: dbDigest, db_size: dbSize, chunks, objects,
+      id, created_at: createdAt, schema_version: schemaVersion, db_digest: dbDigest, db_size: dbSize, chunks,
+      objects, object_bytes: objectBytes, objects_digest: objectsDigest,
     },
   };
 }

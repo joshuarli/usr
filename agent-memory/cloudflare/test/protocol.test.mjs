@@ -16,6 +16,7 @@ import {
   MAX_SNAPSHOT_BYTES,
   MAX_SNAPSHOT_CHUNKS,
   MAX_SNAPSHOT_OBJECTS,
+  MAX_SNAPSHOT_PAGE_OBJECTS,
   MAX_SOURCE_BYTES,
   MAX_TOMBSTONES,
   PROTOCOL,
@@ -28,6 +29,9 @@ import {
   decodeObjectReplaceRequest,
   decodeOrigin,
   decodeSnapshotCommit,
+  decodeSnapshotPage,
+  decodeSnapshotPageBody,
+  encodeSnapshotPage,
   decodeTombstoneRequest,
   encodeCursor,
 } from "../src/protocol.ts";
@@ -122,9 +126,17 @@ test("the snapshot validators agree with every fixture", () => {
     if (decoded !== null) {
       assert.equal(decoded.snapshot.id, item.value.snapshot.db_digest, item.name);
       assert.equal(decoded.snapshot.chunks.length, item.value.snapshot.chunks.length, item.name);
-      assert.equal(decoded.snapshot.objects.length, item.value.snapshot.objects.length, item.name);
+      assert.equal(decoded.snapshot.objects, item.value.snapshot.objects, item.name);
     }
   }
+  for (const item of FIXTURE.snapshot_pages) {
+    const decoded = decodeSnapshotPage(item.value);
+    assert.equal(decoded === null, !item.ok, item.name);
+    if (decoded !== null) assert.equal(decoded.objects.length, item.value.objects.length, item.name);
+  }
+  const body = FIXTURE.snapshot_page_body;
+  assert.equal(encodeSnapshotPage(body.objects), body.body);
+  assert.deepEqual(decodeSnapshotPageBody(body.body), body.objects);
   for (const item of FIXTURE.gc_requests) {
     const decoded = decodeGcRequest(item.value);
     assert.equal(decoded === null, !item.ok, item.name);
@@ -147,5 +159,6 @@ test("harnesses and generation limits match the shared fixture", () => {
   assert.equal(MAX_SOURCE_BYTES, FIXTURE.limits.source_bytes);
   assert.equal(MAX_SNAPSHOT_CHUNKS, FIXTURE.limits.snapshot_chunks);
   assert.equal(MAX_SNAPSHOT_OBJECTS, FIXTURE.limits.snapshot_objects);
+  assert.equal(MAX_SNAPSHOT_PAGE_OBJECTS, FIXTURE.limits.snapshot_page_objects);
   assert.equal(GC_GRACE_SECONDS, FIXTURE.limits.gc_grace_seconds);
 });

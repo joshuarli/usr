@@ -35,10 +35,13 @@ MAX_GENERATION_ARTIFACTS = 1000
 MAX_TOMBSTONES = 900
 MAX_SNAPSHOT_BYTES = 1 << 40
 MAX_SNAPSHOT_CHUNKS = 4096
-MAX_SNAPSHOT_OBJECTS = 100000
+MAX_SNAPSHOT_OBJECTS = 200000
+MAX_SNAPSHOT_PAGE_OBJECTS = 10000
+MAX_SNAPSHOT_PAGES = MAX_SNAPSHOT_OBJECTS // MAX_SNAPSHOT_PAGE_OBJECTS
 GC_GRACE_SECONDS = 3600
 MAX_GC_SWEEP = 200
 SNAPSHOT_MIN_INTERVAL_SECONDS = 24 * 60 * 60
+SNAPSHOT_RETRY_BASE_SECONDS = 15 * 60
 MAX_SOURCE_BYTES = 1 << 50
 MAX_PAGE = 200
 MAX_CURSOR_CHARS = 512
@@ -651,6 +654,35 @@ def _decode_snapshot_object(value) -> dict[str, Any] | None:
     return None if digest is None or size is None else {"plaintext_digest": digest, "size": size}
 
 
+def encode_snapshot_page(objects: list[dict[str, Any]]) -> str:
+    return "".join(f"{item['plaintext_digest']} {int(item['size'])}\n" for item in objects)
+
+
+def snapshot_page_count(objects) -> int:
+    return -(-int(objects) // MAX_SNAPSHOT_PAGE_OBJECTS)
+
+
+def decode_snapshot_page(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "page", "objects")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    page = value.get("page")
+    objects = value.get("objects")
+    if origin is None or isinstance(page, bool) or not isinstance(page, int) or not 0 <= page < MAX_SNAPSHOT_PAGES:
+        return None
+    if not isinstance(objects, list) or not 0 < len(objects) <= MAX_SNAPSHOT_PAGE_OBJECTS:
+        return None
+    clean = []
+    for item in objects:
+        obj = _decode_snapshot_object(item)
+        if obj is None or (clean and clean[-1]["plaintext_digest"] >= obj["plaintext_digest"]):
+            return None
+        clean.append(obj)
+    return {"protocol": PROTOCOL, "origin": origin, "page": page, "objects": clean}
+
+
 def decode_snapshot_commit(value) -> dict[str, Any] | None:
     if not _exact_keys(value, ("protocol", "origin", "base_revision", "snapshot")):
         return None
@@ -661,24 +693,29 @@ def decode_snapshot_commit(value) -> dict[str, Any] | None:
     snapshot = value.get("snapshot")
     if origin is None or base_revision is None or not _record(snapshot):
         return None
-    if not _exact_keys(snapshot, ("id", "created_at", "schema_version", "db_digest", "db_size", "chunks", "objects")):
+    if not _exact_keys(snapshot, ("id", "created_at", "schema_version", "db_digest", "db_size", "chunks",
+                                  "objects", "object_bytes", "objects_digest")):
         return None
     identifier = decode_digest(snapshot.get("id"))
     db_digest = decode_digest(snapshot.get("db_digest"))
     created_at = _decode_timestamp(snapshot.get("created_at"))
     schema_version = _decode_revision(snapshot.get("schema_version"))
     db_size = snapshot.get("db_size")
+    objects = snapshot.get("objects")
+    object_bytes = snapshot.get("object_bytes")
+    objects_digest = decode_digest(snapshot.get("objects_digest"))
     if identifier is None or db_digest is None or identifier != db_digest:
         return None
     if created_at is None or schema_version is None or schema_version > 1000:
         return None
     if isinstance(db_size, bool) or not isinstance(db_size, int) or not 0 <= db_size <= MAX_SNAPSHOT_BYTES:
         return None
-    chunks = snapshot.get("chunks")
-    objects = snapshot.get("objects")
-    if not isinstance(chunks, list) or not 0 < len(chunks) <= MAX_SNAPSHOT_CHUNKS:
+    if isinstance(objects, bool) or not isinstance(objects, int) or not 0 <= objects <= MAX_SNAPSHOT_OBJECTS:
         return None
-    if not isinstance(objects, list) or len(objects) > MAX_SNAPSHOT_OBJECTS:
+    if isinstance(object_bytes, bool) or not isinstance(object_bytes, int) or object_bytes < 0 or objects_digest is None:
+        return None
+    chunks = snapshot.get("chunks")
+    if not isinstance(chunks, list) or not 0 < len(chunks) <= MAX_SNAPSHOT_CHUNKS:
         return None
     clean_chunks = []
     cursor = 0
@@ -692,19 +729,12 @@ def decode_snapshot_commit(value) -> dict[str, Any] | None:
         clean_chunks.append(chunk)
     if cursor != db_size:
         return None
-    clean_objects = []
-    digests = set()
-    for item in objects:
-        obj = _decode_snapshot_object(item)
-        if obj is None or obj["plaintext_digest"] in digests:
-            return None
-        digests.add(obj["plaintext_digest"])
-        clean_objects.append(obj)
     return {
         "protocol": PROTOCOL, "origin": origin, "base_revision": base_revision,
         "snapshot": {
             "id": identifier, "created_at": created_at, "schema_version": schema_version,
-            "db_digest": db_digest, "db_size": db_size, "chunks": clean_chunks, "objects": clean_objects,
+            "db_digest": db_digest, "db_size": db_size, "chunks": clean_chunks,
+            "objects": objects, "object_bytes": object_bytes, "objects_digest": objects_digest,
         },
     }
 
@@ -753,7 +783,7 @@ def decode_object_replace_request(value) -> dict[str, Any] | None:
 
 def _decode_snapshot_row(value) -> dict[str, Any] | None:
     keys = ("id", "origin_host", "created_at", "schema_version", "db_digest", "db_size",
-            "objects", "object_bytes", "verified_at", "revision")
+            "objects", "object_bytes", "objects_digest", "verified_at", "revision")
     if not _exact_keys(value, keys):
         return None
     identifier = decode_digest(value.get("id"))
@@ -764,9 +794,10 @@ def _decode_snapshot_row(value) -> dict[str, Any] | None:
     db_size = value.get("db_size")
     objects = value.get("objects")
     object_bytes = value.get("object_bytes")
+    objects_digest = decode_digest(value.get("objects_digest"))
     verified_at = value.get("verified_at")
     revision = _decode_revision(value.get("revision"))
-    if None in (identifier, origin, created_at, schema_version, db_digest, revision):
+    if None in (identifier, origin, created_at, schema_version, db_digest, objects_digest, revision):
         return None
     if identifier != db_digest:
         return None
@@ -780,7 +811,8 @@ def _decode_snapshot_row(value) -> dict[str, Any] | None:
     return {
         "id": identifier, "origin_host": origin, "created_at": created_at,
         "schema_version": schema_version, "db_digest": db_digest, "db_size": db_size,
-        "objects": objects, "object_bytes": object_bytes, "verified_at": verified_at, "revision": revision,
+        "objects": objects, "object_bytes": object_bytes, "objects_digest": objects_digest,
+        "verified_at": verified_at, "revision": revision,
     }
 
 
@@ -849,16 +881,14 @@ def decode_snapshot_list_response(value) -> dict[str, Any] | None:
 
 
 def decode_snapshot_detail_response(value) -> dict[str, Any] | None:
-    if not _exact_keys(value, ("protocol", "origin", "snapshot", "chunks", "objects")):
+    if not _exact_keys(value, ("protocol", "origin", "snapshot", "chunks")):
         return None
     if decode_protocol(value.get("protocol")) is None:
         return None
     origin = decode_origin(value.get("origin"))
     row = _decode_snapshot_row(value.get("snapshot"))
-    chunks, objects = value.get("chunks"), value.get("objects")
-    if origin is None or row is None or row["origin_host"] != origin:
-        return None
-    if not isinstance(chunks, list) or not isinstance(objects, list):
+    chunks = value.get("chunks")
+    if origin is None or row is None or row["origin_host"] != origin or not isinstance(chunks, list):
         return None
     clean_chunks: list[dict[str, Any]] = []
     cursor: int = 0
@@ -870,17 +900,48 @@ def decode_snapshot_detail_response(value) -> dict[str, Any] | None:
         clean_chunks.append(chunk)
     if cursor != row["db_size"]:
         return None
-    clean_objects: list[dict[str, Any]] = []
-    digests: set[str] = set()
+    return {"protocol": PROTOCOL, "origin": origin, "snapshot": row, "chunks": clean_chunks}
+
+
+def decode_snapshot_objects_response(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "snapshot", "page", "objects")):
+        return None
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    identifier = decode_digest(value.get("snapshot"))
+    page = value.get("page")
+    objects = value.get("objects")
+    if origin is None or identifier is None or isinstance(page, bool) or not isinstance(page, int) or page < 0:
+        return None
+    if not isinstance(objects, list) or not 0 < len(objects) <= MAX_SNAPSHOT_PAGE_OBJECTS:
+        return None
+    clean: list[dict[str, Any]] = []
     for item in objects:
         obj = _decode_snapshot_object_row(item)
-        if obj is None or obj["plaintext_digest"] in digests:
+        if obj is None or (clean and clean[-1]["plaintext_digest"] >= obj["plaintext_digest"]):
             return None
-        digests.add(obj["plaintext_digest"])
-        clean_objects.append(obj)
-    if len(clean_objects) != row["objects"] or sum(item["size"] for item in clean_objects) != row["object_bytes"]:
+        clean.append(obj)
+    return {"protocol": PROTOCOL, "origin": origin, "snapshot": identifier, "page": page, "objects": clean}
+
+
+def decode_snapshot_page_response(value) -> dict[str, Any] | None:
+    if not _exact_keys(value, ("protocol", "origin", "snapshot", "page", "objects", "duplicate")):
         return None
-    return {"protocol": PROTOCOL, "origin": origin, "snapshot": row, "chunks": clean_chunks, "objects": clean_objects}
+    if decode_protocol(value.get("protocol")) is None:
+        return None
+    origin = decode_origin(value.get("origin"))
+    identifier = decode_digest(value.get("snapshot"))
+    page = value.get("page")
+    objects = value.get("objects")
+    duplicate = value.get("duplicate")
+    if origin is None or identifier is None or not isinstance(duplicate, bool):
+        return None
+    for number in (page, objects):
+        if isinstance(number, bool) or not isinstance(number, int) or number < 0:
+            return None
+    return {"protocol": PROTOCOL, "origin": origin, "snapshot": identifier, "page": page,
+            "objects": objects, "duplicate": duplicate}
 
 
 def decode_snapshot_commit_response(value) -> dict[str, Any] | None:
@@ -1432,6 +1493,27 @@ class MirrorClient:
             raise MirrorError("invalid_response", "snapshot detail response is invalid")
         return decoded
 
+    def put_snapshot_page(self, origin, identifier, page, objects):
+        request = {"protocol": PROTOCOL, "origin": origin, "page": page, "objects": list(objects)}
+        if decode_digest(identifier) is None or decode_snapshot_page(request) is None:
+            raise MirrorError("invalid_request", "snapshot object page is invalid")
+        decoded = decode_snapshot_page_response(
+            self._json("POST", "/api/v1/sync/snapshots/" + identifier + "/objects", request))
+        if decoded is None or decoded["snapshot"] != identifier or decoded["page"] != page:
+            raise MirrorError("invalid_response", "snapshot object page response is invalid")
+        if decoded["objects"] != len(objects) and not decoded["duplicate"]:
+            raise MirrorError("invalid_response", "snapshot object page response names a different page")
+        return decoded
+
+    def snapshot_objects(self, origin, identifier, page):
+        if decode_origin(origin) is None or decode_digest(identifier) is None or page < 0:
+            raise MirrorError("invalid_request", "snapshot objects request is invalid")
+        decoded = decode_snapshot_objects_response(self._json(
+            "GET", "/api/v1/sync/snapshots/" + identifier + "/objects?" + urlencode({"page": page})))
+        if decoded is None or decoded["snapshot"] != identifier or decoded["page"] != page:
+            raise MirrorError("invalid_response", "snapshot objects response is invalid")
+        return decoded
+
     def commit_snapshot(self, origin, base_revision, snapshot):
         request = {"protocol": PROTOCOL, "origin": origin, "base_revision": base_revision, "snapshot": snapshot}
         if decode_snapshot_commit(request) is None:
@@ -1703,6 +1785,14 @@ def _snapshot_due(runtime, origin):
     return not rows or time.time() - float(rows[0]["created_at"]) >= SNAPSHOT_MIN_INTERVAL_SECONDS
 
 
+def snapshot_retry_delay(failures):
+    return min(SNAPSHOT_RETRY_BASE_SECONDS * 2 ** (int(failures) - 1), SNAPSHOT_MIN_INTERVAL_SECONDS)
+
+
+def _snapshot_retry_due(pinned, now):
+    return now - float(pinned["snapshot_failed_at"]) >= snapshot_retry_delay(pinned["snapshot_failures"])
+
+
 def sync(store, config, remote_name, *, refresh=None, client=None, upload_client_factory=None,
          recipients=None, concurrency=12, prepare=None, progress=None):
     """Deliver the local archive to one Cloudflare mirror and pin its identity."""
@@ -1872,16 +1962,16 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
         if changed or (pinned is not None and pinned.get("last_error") is not None):
             store.write_mirror_remote(remote_name, store_id, revision, watermark,
                                       learning_seq=learning_seq, learning_digest=learning_digest)
+        snapshot_failed = pinned is not None and int(pinned.get("snapshot_failures") or 0) > 0
         needs_snapshot = (
             counters["generations_committed"] > 0 or counters["generations_tombstoned"] > 0
             or counters["tombstones_fetched"] > 0 or counters["tombstones_pushed"] > 0
-            or learning_pending or journal_before > 0
+            or learning_pending or journal_before > 0 or snapshot_failed
             or (pinned is not None and pinned.get("last_error") is not None))
         snapshot_ready = needs_snapshot
         if needs_snapshot:
-            retry_snapshot = pinned is not None and pinned.get("last_error") is not None
-            learning_changed = learning_pending or journal_before > 0
-            snapshot_ready = retry_snapshot or learning_changed or _snapshot_due(runtime, origin)
+            snapshot_ready = (_snapshot_retry_due(pinned, time.time()) if snapshot_failed
+                              else _snapshot_due(runtime, origin))
             if not snapshot_ready:
                 counters["snapshots_deferred"] += 1
         if needs_snapshot and snapshot_ready:
@@ -1890,9 +1980,14 @@ def sync(store, config, remote_name, *, refresh=None, client=None, upload_client
                     store, config, client=runtime, origin=origin, revision=revision,
                     recipients=recipients, concurrency=concurrency, prepare=prepare,
                     client_factory=factory)
+            except MirrorError:
+                store.record_snapshot_failure(remote_name)
+                raise
             except (OSError, sqlite3.DatabaseError, backup_module.BackupError,
                     archive_module.ArchiveError) as exc:
+                store.record_snapshot_failure(remote_name)
                 raise MirrorError("snapshot_failed", "snapshot failed: " + str(exc)) from exc
+            store.clear_snapshot_failures(remote_name)
             if snapshot["duplicate"]:
                 counters["snapshots_duplicate"] += 1
             else:
@@ -2166,12 +2261,26 @@ def _reassemble_snapshot(client, identity_path, detail, destination) -> Path:
     return _check_snapshot_image(destination, snapshot)
 
 
-def _snapshot_backup_dir(client, identity_path, detail, directory) -> dict[str, Any]:
+def _snapshot_objects(client, origin, row) -> list[dict[str, Any]]:
+    objects: list[dict[str, Any]] = []
+    for page in range(snapshot_page_count(row["objects"])):
+        rows = client.snapshot_objects(origin, row["id"], page)["objects"]
+        if objects and rows and objects[-1]["plaintext_digest"] >= rows[0]["plaintext_digest"]:
+            raise MirrorError("invalid_response", "snapshot object pages are out of order")
+        objects.extend(rows)
+    pinned = [{"plaintext_digest": item["plaintext_digest"], "size": item["size"]} for item in objects]
+    if (len(pinned) != row["objects"] or sum(item["size"] for item in pinned) != row["object_bytes"]
+            or archive_module.sha256(encode_snapshot_page(pinned).encode("ascii")) != row["objects_digest"]):
+        raise MirrorError("invalid_response", "snapshot objects do not match the snapshot digest")
+    return objects
+
+
+def _snapshot_backup_dir(client, identity_path, detail, objects_rows, directory) -> dict[str, Any]:
     directory = Path(directory)
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     _reassemble_snapshot(client, identity_path, detail, directory / "sessions.sqlite3")
     objects = []
-    for item in detail["objects"]:
+    for item in objects_rows:
         data = _download_object(client, identity_path, _object_row(item))
         archive_module._write_object(directory, data)
         objects.append({"digest": item["plaintext_digest"], "size": item["size"]})
@@ -2316,8 +2425,12 @@ def upload_snapshot(store, config, *, client, origin, revision, recipients=None,
             upload: dict[str, Any] = upload_objects(
                 config, origin, store.archive_dir, object_refs, recipients,
                 concurrency=concurrency, client_factory=factory, prepare=prepare)
-            final: dict[str, dict[str, Any]] = _resolve_known(
-                client, origin, chunk_refs + [(item["digest"], item["size"]) for item in metadata["objects"]])
+            final: dict[str, dict[str, Any]] = _resolve_known(client, origin, chunk_refs)
+            pinned = sorted(({"plaintext_digest": item["digest"], "size": item["size"]} for item in metadata["objects"]),
+                            key=lambda item: item["plaintext_digest"])
+            for page, start in enumerate(range(0, len(pinned), MAX_SNAPSHOT_PAGE_OBJECTS)):
+                client.put_snapshot_page(origin, metadata["db_digest"], page,
+                                         pinned[start:start + MAX_SNAPSHOT_PAGE_OBJECTS])
             wire: dict[str, Any] = {
                 "id": metadata["db_digest"],
                 "created_at": metadata["created_at"],
@@ -2329,7 +2442,9 @@ def upload_snapshot(store, config, *, client, origin, revision, recipients=None,
                      "ciphertext_digest": final[chunk["digest"]]["ciphertext_digest"]}
                     for chunk in metadata["chunks"]
                 ],
-                "objects": [{"plaintext_digest": item["digest"], "size": item["size"]} for item in metadata["objects"]],
+                "objects": len(pinned),
+                "object_bytes": sum(item["size"] for item in pinned),
+                "objects_digest": archive_module.sha256(encode_snapshot_page(pinned).encode("ascii")),
             }
             committed: dict[str, Any] = client.commit_snapshot(origin, revision, wire)
             return {
@@ -2464,14 +2579,15 @@ def verify(config, *, client=None, objects=False, sample=None, concurrency=12,
         with tempfile.TemporaryDirectory(prefix="mirror-verify-") as temporary:
             for index, snapshot in enumerate(snapshot_rows):
                 detail = runtime.snapshot(origin, snapshot["id"])
+                pinned = _snapshot_objects(runtime, origin, detail["snapshot"])
                 reassemble(detail, Path(temporary) / ("%d.sqlite3" % index))
                 chunks += len(detail["chunks"])
-                sampled_all = objects and (sample is None or sample >= len(detail["objects"]))
+                sampled_all = objects and (sample is None or sample >= len(pinned))
                 if sampled_all:
-                    download([_object_row(item) for item in detail["objects"]])
+                    download([_object_row(item) for item in pinned])
                     runtime.verify_snapshot(origin, snapshot["id"])
                     attested += 1
-                for item in detail["objects"]:
+                for item in pinned:
                     known_size = snapshot_objects.setdefault(item["plaintext_digest"], item["size"])
                     if known_size != item["size"]:
                         raise MirrorError("corrupt_object", "object size conflicts: " + item["plaintext_digest"])
@@ -2506,9 +2622,10 @@ def restore(config, remote_name, snapshot_id, destination, *, client=None, ident
     try:
         origin = _collector_origin(runtime)
         detail: dict[str, Any] = runtime.snapshot(origin, snapshot_id)
+        pinned = _snapshot_objects(runtime, origin, detail["snapshot"])
         with tempfile.TemporaryDirectory(prefix="mirror-restore-") as temporary:
             backup_dir = Path(temporary) / "backup"
-            _snapshot_backup_dir(runtime, identity, detail, backup_dir)
+            _snapshot_backup_dir(runtime, identity, detail, pinned, backup_dir)
             runtime.verify_snapshot(origin, snapshot_id)
             backup_module.restore(backup_dir, destination)
         from agent_memory.store import Store
@@ -2548,7 +2665,7 @@ def restore(config, remote_name, snapshot_id, destination, *, client=None, ident
                 remote_name, hello["store_id"], hello["revision"], hello["tombstone_watermark"])
         return {
             "snapshot": detail["snapshot"]["id"], "db_size": detail["snapshot"]["db_size"],
-            "chunks": len(detail["chunks"]), "objects": len(detail["objects"]),
+            "chunks": len(detail["chunks"]), "objects": len(pinned),
             "replayed": replayed, "tombstones": applied,
         }
     finally:
@@ -2577,7 +2694,7 @@ def rotate(config, *, recipients_file, identity_file, old_identity_file=None, cl
             detail: dict[str, Any] = runtime.snapshot(origin, snapshot["id"])
             for chunk in detail["chunks"]:
                 objects[chunk["plaintext_digest"]] = _chunk_row(chunk)
-            for item in detail["objects"]:
+            for item in _snapshot_objects(runtime, origin, detail["snapshot"]):
                 objects[item["plaintext_digest"]] = _object_row(item)
         rotated = 0
         for digest in sorted(objects):
