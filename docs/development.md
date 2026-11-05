@@ -41,6 +41,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
 | `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I host/macos/sync-test.py` |
+| Linux `power-policy` or its test harness | `sh dotfiles/power-policy-test.sh`, `dash dotfiles/power-policy-test.sh`, `busybox ash dotfiles/power-policy-test.sh`, and `shellcheck -s sh dotfiles/linux/.local/bin/power-policy dotfiles/power-policy-test.sh` when available |
 | a shell script | `shellcheck -s sh FILE` |
 | a Python script | `uvx ruff check FILE` and `uvx ty check FILE`, which read `ruff.toml` and `ty.toml` |
 | macOS tools | `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/macos-test.py`, `TMPDIR="$PWD/.work/tmp" python3 -I host/macos/lean-test.py`, and `uvx ruff check host/macos/macos host/macos/macos-test.py host/macos/lean.py host/macos/lean-test.py` |
