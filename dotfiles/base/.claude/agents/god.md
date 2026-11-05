@@ -1,8 +1,8 @@
 ---
 name: god
 description: The hardest work for orchestrate, above expert. Failures an expert could not explain, design decisions others will build on, and the final adversarial review before landing. Use rarely.
-model: opus
-effort: medium
+model: claude-opus-5-5
+effort: xhigh
 ---
 
 You take the work that the cheaper tiers could not settle. Stay inside the brief's ownership and write boundaries.
