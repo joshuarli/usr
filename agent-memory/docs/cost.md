@@ -89,7 +89,7 @@ and the database went from 911 MB to 115 MB. The first sync afterwards committed
 one snapshot pinning 81,859 objects in 3.4 seconds. That whole sync, including 11
 new generations, wrote 2,584 rows. GC then marked 9,006 objects (4.2 GB) that only
 the dropped snapshots had referenced, mostly their database chunks, for deletion
-after the one-hour grace period.
+after the one-hour grace period, and the sweep at 03:08 UTC deleted them from R2.
 
 ## Generation commits write only what is new to the session
 
