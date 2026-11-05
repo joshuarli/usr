@@ -65,9 +65,10 @@ snapshot landed, but D1 analytics counted every row it wrote before it failed.
 minutes, and a stored error made each run retry the commit. That is the 66.4M
 rows on Nov 4, a 30-day rate of about $2,000.
 
-Cloudflare's pricing page does not say whether rolled-back rows are billed. If
-the billing page's November D1 rows written is near 97M, they are. If it is
-near 30M, they are not, and the Nov 4 failure cost nothing beyond the allowance.
+Rolled-back rows are billed. On 2026-11-05 the billing page counted 98.28M D1
+rows written for the cycle, which matches the analytics total that includes every
+failed commit. The cycle is 48.28M over the 50M allowance, about $48, and the
+billing page showed $0 billable usage while the cycle was still open.
 
 ## What changed on 2026-11-05
 
