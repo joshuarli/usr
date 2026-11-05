@@ -1,6 +1,6 @@
 # Actionable Executable Audit
 
-Executables that `usr` uses, invokes, or configures, but does not set up. Standard OS built-ins (macOS `/usr/bin/*` like `zip`, `lsof`, `openssl`, `sqlite3`, `less`, and Alpine standard utilities like `wget`, `sha256sum`, BusyBox tools) and ephemeral `uvx` runners (`ruff`, `ty`, `pytest`) have been pruned.
+Executables that `usr` uses, invokes, or configures, but does not set up. Standard OS built-ins (macOS `/usr/bin/*` like `trash`, `zip`, `lsof`, `openssl`, `sqlite3`, `less`, and Alpine standard utilities like `wget`, `sha256sum`, BusyBox tools) and ephemeral `uvx` runners (`ruff`, `ty`, `pytest`) have been pruned.
 
 ---
 
@@ -8,7 +8,6 @@ Executables that `usr` uses, invokes, or configures, but does not set up. Standa
 
 | Executable | Used By | Context | Suggested Action |
 | --- | --- | --- | --- |
-| **`trash`** | [`encode`](file:///Users/josh/usr/dotfiles/base/.local/bin/encode#L34-L37) | Hard requirement (`command -v trash || die`; moves encoded inputs to Trash at line 152). | Add `brew "trash"` to [host/macos/Brewfile](file:///Users/josh/usr/host/macos/Brewfile). |
 | **`age`** / **`rage`** | [`mirror_crypto`](file:///Users/josh/usr/agent-memory/src/agent_memory/mirror_crypto.py#L30-L47) | Encrypts agent session mirror objects (`rage`/`age` and `rage-keygen`/`age-keygen`). | Ticketed in [TODO.md](file:///Users/josh/usr/TODO.md) as **USR-23** to publish binaries from https://github.com/laputa-systems/rage and package in `dl`. |
 | **`mpv`** | [`stream`](file:///Users/josh/usr/dotfiles/base/.local/bin/stream#L10-L19) | Launches media player to stream video (`command -v mpv` or `/Applications/mpv.app`). | Add `brew "mpv"` to [Brewfile](file:///Users/josh/usr/host/macos/Brewfile) or install MPV cask. |
 
