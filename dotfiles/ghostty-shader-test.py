@@ -9,7 +9,6 @@ GLSL compilation and visual GPU behavior still need testing in Ghostty.
 
 from __future__ import annotations
 
-import math
 import re
 from pathlib import Path
 

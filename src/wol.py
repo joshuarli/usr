@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import socket
-import struct
 import sys
 
 
@@ -164,7 +162,7 @@ def main():
                 if len(args.args[idx]) <= IPV4_ADDR_LEN:
                     broadcast_address = args.args[idx]
                     idx += 1
-            except:
+            except OSError:
                 pass
         if idx < len(args.args) and sys.platform != 'win32':
             interface = args.args[idx]
@@ -175,7 +173,7 @@ def main():
                 socket.inet_aton(args.args[1])
                 if len(args.args[1]) <= IPV4_ADDR_LEN:
                     broadcast_address = args.args[1]
-            except:
+            except OSError:
                 pass
         if len(args.args) > 2 and sys.platform != 'win32':
             interface = args.args[2]
