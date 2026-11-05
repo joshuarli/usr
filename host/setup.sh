@@ -58,7 +58,7 @@ setup_github_ssh_key() {
         return 0
     fi
 
-    if auth_status=$(as_setup_user '~/.local/bin/gh auth status --hostname github.com 2>&1'); then
+    if auth_status=$(as_setup_user '$HOME/.local/bin/gh auth status --hostname github.com 2>&1'); then
         :
     else
         if [ ! -r /dev/tty ] || [ ! -t 2 ]; then
@@ -67,9 +67,9 @@ setup_github_ssh_key() {
             return 0
         fi
         say 'log in to GitHub and approve public-key access'
-        as_setup_user '~/.local/bin/gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key --scopes admin:public_key' </dev/tty ||
+        as_setup_user '$HOME/.local/bin/gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key --scopes admin:public_key' </dev/tty ||
             die 'GitHub login failed'
-        auth_status=$(as_setup_user '~/.local/bin/gh auth status --hostname github.com 2>&1') ||
+        auth_status=$(as_setup_user '$HOME/.local/bin/gh auth status --hostname github.com 2>&1') ||
             die 'GitHub login did not complete'
     fi
 
@@ -82,9 +82,9 @@ setup_github_ssh_key() {
                 return 0
             fi
             say 'refresh GitHub access to allow SSH-key upload'
-            as_setup_user '~/.local/bin/gh auth refresh --hostname github.com --scopes admin:public_key' </dev/tty ||
+            as_setup_user '$HOME/.local/bin/gh auth refresh --hostname github.com --scopes admin:public_key' </dev/tty ||
                 die 'could not grant GitHub public-key access'
-            auth_status=$(as_setup_user '~/.local/bin/gh auth status --hostname github.com 2>&1') ||
+            auth_status=$(as_setup_user '$HOME/.local/bin/gh auth status --hostname github.com 2>&1') ||
                 die 'GitHub authentication is unavailable'
             case $auth_status in
                 *admin:public_key*) ;;
@@ -93,7 +93,7 @@ setup_github_ssh_key() {
             ;;
     esac
 
-    as_setup_user '~/.local/bin/gh ssh-key add ~/.ssh/github.pub --title "$(hostname) Alpine" --type authentication' ||
+    as_setup_user '$HOME/.local/bin/gh ssh-key add $HOME/.ssh/github.pub --title "$(hostname) Alpine" --type authentication' ||
         die 'could not upload the GitHub SSH key'
     say 'GitHub SSH key is registered'
 }
