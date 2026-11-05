@@ -42,17 +42,10 @@ NODE_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/node-build"
 NODE_MINIMUM=26.12.0
 NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
-PNPM_VERSION=12.16.1
 PNPM_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pnpm"
-CF_VERSION=1.0.0-beta.27
 CF_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/cf"
-AGENT_BROWSER_VERSION=0.41.0
 AGENT_BROWSER_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-browser"
-FX_VERSION=v0.0.16
-GHOSTTY_VERSION=1.4.0
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"
-GHOSTTY_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty.app"
-GHOSTTY_EXEC="${GHOSTTY_APP}/Contents/MacOS/ghostty"
 GHOSTTY_CUSTOM_ASSET=Ghostty-Custom-aarch64-apple-darwin.dmg
 GHOSTTY_CUSTOM_BUNDLE_ID=com.joshuarli.ghostty-custom
 GHOSTTY_CUSTOM_APP="${GHOSTTY_APPLICATIONS_DIR}/Ghostty Custom.app"
@@ -1433,106 +1426,6 @@ install_nodejs() {
     _dl_ok "Installed ${DEST}/node (${NODEJS_VERSION}, npm ${npm_latest})"
 }
 
-install_ghostty() {
-    if [ "$OS" != Darwin ]; then skip ghostty "macOS only"; return; fi
-    case "$ARCH" in
-        aarch64|x86_64) ;;
-        *) skip ghostty "unsupported architecture: $ARCH"; return ;;
-    esac
-
-    installed_version=$(cat "${STATE}/ghostty" 2>/dev/null || :)
-    launcher_target=$(readlink "${DEST}/ghostty" 2>/dev/null || :)
-    if [ -d "$GHOSTTY_APP" ] && [ ! -L "$GHOSTTY_APP" ] \
-        && [ "$installed_version" = "$GHOSTTY_VERSION" ] \
-        && [ -x "$GHOSTTY_EXEC" ] && [ "$launcher_target" = "$GHOSTTY_EXEC" ]; then
-        own_dir "$GHOSTTY_APP"
-        own_file "${DEST}/ghostty"
-        own_file "${STATE}/ghostty"
-        _dl_current "ghostty is current ($GHOSTTY_VERSION)"
-        return
-    fi
-
-    # Never claim or replace an app/launcher that dl did not install.
-    if [ -L "$GHOSTTY_APP" ] \
-        || { [ -e "$GHOSTTY_APP" ] && [ -z "$installed_version" ]; }; then
-        skip ghostty "existing $GHOSTTY_APP is not managed by dl"
-        return
-    fi
-    if { [ -e "${DEST}/ghostty" ] || [ -L "${DEST}/ghostty" ]; } \
-        && [ "$launcher_target" != "$GHOSTTY_EXEC" ]; then
-        skip ghostty "existing ${DEST}/ghostty is not managed by dl"
-        return
-    fi
-
-    _dl_fetch "Downloading Ghostty $GHOSTTY_VERSION ..."
-    tmpzip=$(mktemp "${TMPDIR:-/tmp}/ghostty.XXXXXX")
-    if ! curl -fsSL -o "$tmpzip" \
-        "https://release.files.ghostty.org/${GHOSTTY_VERSION}/ghostty-macos-universal.zip"; then
-        skip ghostty "release download failed"
-        return
-    fi
-    own_missing_dirs "$GHOSTTY_APPLICATIONS_DIR"
-    if ! mkdir -p "$GHOSTTY_APPLICATIONS_DIR"; then
-        skip ghostty "cannot create $GHOSTTY_APPLICATIONS_DIR"
-        return
-    fi
-    tmpbundle=$(mktemp -d "${GHOSTTY_APPLICATIONS_DIR}/.ghostty.XXXXXX") || {
-        skip ghostty "cannot stage application in $GHOSTTY_APPLICATIONS_DIR"
-        return
-    }
-    if ! ditto -x -k "$tmpzip" "$tmpbundle" \
-        || [ ! -x "${tmpbundle}/Ghostty.app/Contents/MacOS/ghostty" ]; then
-        skip ghostty "release archive is invalid"
-        return
-    fi
-    if ! codesign --verify --deep --strict "${tmpbundle}/Ghostty.app" \
-        || ! spctl --assess --type execute "${tmpbundle}/Ghostty.app"; then
-        skip ghostty "upstream signature or Gatekeeper verification failed"
-        return
-    fi
-    actual_version=$(plutil -extract CFBundleShortVersionString raw -o - \
-        "${tmpbundle}/Ghostty.app/Contents/Info.plist" 2>/dev/null || :)
-    if [ "$actual_version" != "$GHOSTTY_VERSION" ]; then
-        skip ghostty "release bundle version ${actual_version:-unknown} does not match $GHOSTTY_VERSION"
-        return
-    fi
-
-    # Stage on the same filesystem, and preserve the prior managed app if
-    # replacing it fails. Never re-sign or remove the upstream signature.
-    previous_app=
-    if [ -d "$GHOSTTY_APP" ]; then
-        previous_app=$(mktemp -d "${GHOSTTY_APPLICATIONS_DIR}/.ghostty-previous.XXXXXX")
-        rmdir "$previous_app"
-        if ! mv "$GHOSTTY_APP" "$previous_app"; then
-            skip ghostty "cannot move previous application"
-            return
-        fi
-    fi
-    if ! mv "${tmpbundle}/Ghostty.app" "$GHOSTTY_APP"; then
-        if [ -n "$previous_app" ]; then
-            mv "$previous_app" "$GHOSTTY_APP" || _dl_warn "Restore manually from $previous_app"
-        fi
-        skip ghostty "cannot install application"
-        return
-    fi
-    if [ -n "$previous_app" ]; then rm -rf "$previous_app"; fi
-
-    if [ "$launcher_target" != "$GHOSTTY_EXEC" ]; then
-        tmpbinlink=$(mktemp "${DEST}/.ghostty.XXXXXX")
-        rm -f "$tmpbinlink"
-        ln -s "$GHOSTTY_EXEC" "$tmpbinlink"
-        mv -f "$tmpbinlink" "${DEST}/ghostty"
-        tmpbinlink=
-    fi
-    own_dir "$GHOSTTY_APP"
-    own_file "${DEST}/ghostty"
-    printf '%s\n' "$GHOSTTY_VERSION" > "${STATE}/ghostty"
-    own_file "${STATE}/ghostty"
-    changed=true
-    _dl_ok "Installed $GHOSTTY_APP ($GHOSTTY_VERSION)"
-    printf '%s\n' "Run 'ghostty-fda-check' inside Ghostty to verify Full Disk Access."
-}
-
 install_ghostty_custom() {
     if [ "$OS" != Darwin ]; then skip ghostty-custom "macOS only"; return; fi
     case "$ARCH" in
@@ -2041,22 +1934,10 @@ sha256_file() {
 
 install_fx() {
     case "${OS}:${ARCH}" in
-        Darwin:aarch64)
-            fx_platform=macos-aarch64
-            expected_sha256=2158a8d42e77457a774400d225d9802bb6c0e60a0bb0674a1116bc31252490d6
-            ;;
-        Darwin:x86_64)
-            fx_platform=macos-x86_64
-            expected_sha256=b287974f97a0879f50b4439c46537fcd44b83326c11a230d87f596073f8d8d9b
-            ;;
-        Linux:aarch64)
-            fx_platform=linux-aarch64
-            expected_sha256=ca9441b104357e2105039dbfd4c2eaf0d6ee65a84085f23f51e880c95cbf46af
-            ;;
-        Linux:x86_64)
-            fx_platform=linux-x86_64
-            expected_sha256=f0fb822c7be546c80bcc89d50521bc1454435e0c6f586e8420c4e2b84fa80599
-            ;;
+        Darwin:aarch64) fx_platform=macos-aarch64 ;;
+        Darwin:x86_64) fx_platform=macos-x86_64 ;;
+        Linux:aarch64) fx_platform=linux-aarch64 ;;
+        Linux:x86_64) fx_platform=linux-x86_64 ;;
         *) skip fx "no upstream binary for ${OS}/${ARCH}"; return ;;
     esac
     if [ -e "${DEST}/fx" ] || [ -L "${DEST}/fx" ]; then
@@ -2065,34 +1946,90 @@ install_fx() {
             return
         fi
     fi
-    fx_record="${FX_VERSION}:${expected_sha256}"
-    if is_current fx "$fx_record"; then
-        _dl_current "fx is current (${FX_VERSION})"
+    tag=$(curl -fsSL "https://github.com/vercel-labs/fx/releases.atom" \
+        | awk '
+            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+            in_entry && /<updated>/ {
+                updated = $0
+                sub(/^.*<updated>/, "", updated)
+                sub(/<.*/, "", updated)
+            }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+            }
+            /<\/entry>/ {
+                if (updated > newest_updated && tag != "") {
+                    newest_updated = updated
+                    newest_tag = tag
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
+    if [ -z "$tag" ]; then
+        unchecked fx "no release found"
         return
     fi
-
     asset="fx-${fx_platform}.tar.gz"
-    url="https://github.com/vercel-labs/fx/releases/download/${FX_VERSION}/${asset}"
-    _dl_fetch "Downloading fx ${FX_VERSION} (${fx_platform}) ..."
+    base="https://github.com/vercel-labs/fx/releases/download/${tag}"
+    url="${base}/${asset}"
+    sums_url="${base}/${asset}.sha256"
+    tmpoutput=$(mktemp)
+    if ! curl -fsSL -o "$tmpoutput" "$sums_url"; then
+        rm -f "$tmpoutput"
+        tmpoutput=
+        unchecked fx "${asset}.sha256 is unavailable"
+        return
+    fi
+    expected_sha256=$(awk 'NF { print $1; exit }' "$tmpoutput")
+    rm -f "$tmpoutput"
+    tmpoutput=
+    case "$expected_sha256" in
+        *[!0-9a-fA-F]*|'') unchecked fx "${asset}.sha256 is invalid"; return ;;
+    esac
+    if [ "${#expected_sha256}" -ne 64 ]; then
+        unchecked fx "${asset}.sha256 is invalid"
+        return
+    fi
+    fx_record="${tag}:${expected_sha256}"
+    if is_current fx "$fx_record"; then
+        _dl_current "fx is current (${tag})"
+        return
+    fi
+    _dl_fetch "Downloading fx ${tag} (${fx_platform}) ..."
     tmpzip=$(mktemp)
     if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
         skip fx "${asset} download failed"
         return
     fi
     if [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+        rm -f "$tmpzip"
+        tmpzip=
         skip fx "${asset} checksum mismatch"
         return
     fi
     if ! tar -tzf "$tmpzip" | awk '$0 == "fx" { count++ } END { exit count != 1 }'; then
+        rm -f "$tmpzip"
+        tmpzip=
         skip fx "${asset} does not contain exactly one fx binary"
         return
     fi
     tmpbin=$(mktemp "${DEST}/.fx.XXXXXX")
     if ! tar -xOzf "$tmpzip" fx > "$tmpbin" || [ ! -s "$tmpbin" ]; then
+        rm -f "$tmpzip" "$tmpbin"
+        tmpzip=
+        tmpbin=
         skip fx "${asset} could not extract fx"
         return
     fi
     if [ "$OS" = Darwin ] && ! codesign --verify --strict "$tmpbin" >/dev/null 2>&1; then
+        rm -f "$tmpzip" "$tmpbin"
+        tmpzip=
+        tmpbin=
         skip fx "${asset} signature verification failed"
         return
     fi
@@ -2105,7 +2042,7 @@ install_fx() {
     printf '%s\n' "$fx_record" > "${STATE}/fx"
     own_file "${STATE}/fx"
     changed=true
-    _dl_ok "Installed ${DEST}/fx (${FX_VERSION})"
+    _dl_ok "Installed ${DEST}/fx (${tag})"
 }
 
 install_grok() {
@@ -2354,7 +2291,9 @@ install_pnpm() {
         unchecked pnpm "Node.js $NODE_MINIMUM or newer is required"
         return
     fi
-    version=$PNPM_VERSION
+    version=$(npm view "pnpm@latest" version 2>/dev/null) || version=
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked pnpm "could not resolve the latest pnpm version"; return; }
     if [ -e "${DEST}/pnpm" ] || [ -L "${DEST}/pnpm" ]; then
         if [ "$(readlink "${DEST}/pnpm" 2>/dev/null || :)" != "${PNPM_INSTALL_ROOT}/bin/pnpm" ] \
             || [ ! -s "${STATE}/pnpm" ]; then
@@ -2413,7 +2352,7 @@ install_pnpm() {
     own_file "${DEST}/pnpm"
     own_file "${STATE}/pnpm"
     changed=true
-    _dl_ok "Installed ${DEST}/pnpm"
+    _dl_ok "Installed ${DEST}/pnpm (${version})"
 }
 
 install_cf() {
@@ -2422,7 +2361,9 @@ install_cf() {
         unchecked cf "Node.js $NODE_MINIMUM or newer is required"
         return
     fi
-    version=$CF_VERSION
+    version=$(npm view "cf@latest" version 2>/dev/null) || version=
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked cf "could not resolve the latest cf version"; return; }
     if [ -e "${DEST}/cf" ] || [ -L "${DEST}/cf" ]; then
         if [ "$(readlink "${DEST}/cf" 2>/dev/null || :)" != "${CF_INSTALL_ROOT}/bin/cf" ] \
             || [ ! -s "${STATE}/cf" ]; then
@@ -2490,7 +2431,9 @@ install_agent_browser() {
         unchecked agent-browser "Node.js $NODE_MINIMUM or newer is required"
         return
     fi
-    version=$AGENT_BROWSER_VERSION
+    version=$(npm view "agent-browser@latest" version 2>/dev/null) || version=
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
+        || { unchecked agent-browser "could not resolve the latest agent-browser version"; return; }
     if [ -e "${DEST}/agent-browser" ] || [ -L "${DEST}/agent-browser" ]; then
         if [ "$(readlink "${DEST}/agent-browser" 2>/dev/null || :)" != "${AGENT_BROWSER_INSTALL_ROOT}/bin/agent-browser" ] \
             || [ ! -s "${STATE}/agent-browser" ]; then
@@ -4047,13 +3990,13 @@ record_managed_installs() {
     if [ -s "${STATE}/dsh" ] || [ -s "${STATE}/dsh-tui" ]; then
         if [ -d "$DSH_INSTALL_ROOT" ]; then own_dir "$DSH_INSTALL_ROOT"; fi
     fi
-    if [ -s "${STATE}/ghostty" ]; then
-        own_file "${STATE}/ghostty"
-        if [ -d "$GHOSTTY_APP" ] && [ ! -L "$GHOSTTY_APP" ]; then
-            own_dir "$GHOSTTY_APP"
+    if [ -s "${STATE}/ghostty-custom" ]; then
+        own_file "${STATE}/ghostty-custom"
+        if [ -d "$GHOSTTY_CUSTOM_APP" ] && [ ! -L "$GHOSTTY_CUSTOM_APP" ]; then
+            own_dir "$GHOSTTY_CUSTOM_APP"
         fi
-        if [ "$(readlink "${DEST}/ghostty" 2>/dev/null || :)" = "$GHOSTTY_EXEC" ]; then
-            own_file "${DEST}/ghostty"
+        if [ "$(readlink "${DEST}/ghostty-custom" 2>/dev/null || :)" = "$GHOSTTY_CUSTOM_EXEC" ]; then
+            own_file "${DEST}/ghostty-custom"
         fi
     fi
     if [ -s "${STATE}/mactop" ]; then
@@ -4138,7 +4081,7 @@ if [ $# -eq 0 ]; then
     case "${OS}:${ARCH}" in
         Linux:x86_64|Linux:aarch64) set -- "$@" zzz ;;
     esac
-    if [ "$OS" = Darwin ]; then set -- "$@" mactop vault ghostty; fi
+    if [ "$OS" = Darwin ]; then set -- "$@" mactop vault ghostty-custom; fi
     set -- "$@" gh
     case "${OS}:${ARCH}" in
         Linux:x86_64) set -- "$@" mold player ;;
@@ -4210,8 +4153,7 @@ for prog in "$@"; do
         claude) install_claude ;;
         codex) install_codex ;;
         opencode2) install_opencode2 ;;
-        ghostty) install_ghostty ;;
-        ghostty-custom) install_ghostty_custom ;;
+        ghostty|ghostty-custom) install_ghostty_custom ;;
         play|player) install_player ;;
         vault) install_release vault ;;
         jaq) install_jaq ;;
