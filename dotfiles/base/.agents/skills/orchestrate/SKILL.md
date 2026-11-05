@@ -29,9 +29,15 @@ Assign each Codex child only the model and effort in the Codex column. This prof
 
 For V2, spawn children only from the root and explicitly forbid further spawning in every child brief. `agents.max_depth` limits only V1; V2 has a separate resident-thread cap, not a nesting limit.
 
-### Claude and Grok
+### Claude and Grok (native subagents)
 
 Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that order. A caller spawns only a lower tier, and `scout` spawns nothing. `agent-tier-gate` enforces that: Claude matches `Agent`, Grok matches `spawn_subagent`. `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps Claude nesting at 3. Model and effort come from `~/.claude/agents` or `~/.grok/agents`, not from the call. Every Grok definition pins `grok-4.7`. Do not use another model or `xhigh`. Change a type's model or effort in its file. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed, or a decision others build on. Add a definition when none of the five fit. Prefer a fresh agent; fork only when the child needs the conversation.
+
+### Claude → OpenCode normal workers
+
+In Claude Code, route ordinary `worker` implementation lanes through the first-party `usr-opencode-worker` MCP bridge by default. This overrides the native Claude `worker` route above, but only for Claude; Grok and every other harness keep their own routing. The parent alone invokes `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, and `worker_cancel`; never delegate these controls to a child. See [the installation and handoff](../../../../../tools/opencode-worker/README.md).
+
+The parent creates a clean, dedicated `.work/wt/<slice>` worktree, supplies a self-contained bounded brief, and retains the session ID, diff review, acceptance checks, integration, and cleanup. Start only after checking availability of the exact pinned DeepSeek model. If the bridge, model, or provider is unavailable, stop and report rather than silently substituting the native Sonnet worker or changing providers. The existing native Claude `worker` definition remains available only on explicit owner instruction. This MCP bridge is not an OS sandbox and does not inherit `agent-tier-gate`'s native Agent-spawn enforcement.
 
 ### OpenCode
 

@@ -1,0 +1,12 @@
+{
+  "name": "usr-opencode-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=26.0.0" },
+  "dependencies": { "@opencode/client": "2.2.5" },
+  "scripts": {
+    "start": "node --experimental-strip-types src/server.ts",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  }
+}
