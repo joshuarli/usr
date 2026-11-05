@@ -34,17 +34,23 @@ def binary() -> str:
     raise CryptoError("no age or rage executable found; " + INSTALL_HINT)
 
 
-def _keygen() -> str:
+def _keygen_cmd() -> list[str]:
     primary = Path(binary())
     for name in ("rage-keygen", "age-keygen"):
         sibling = primary.with_name(name)
         if sibling.is_file() and os.access(sibling, os.X_OK):
-            return str(sibling)
+            return [str(sibling)]
     for name in ("rage-keygen", "age-keygen"):
         found = shutil.which(name)
         if found:
-            return found
+            return [found]
+    if primary.name == "rage":
+        return [str(primary), "keygen"]
     raise CryptoError("no age-keygen or rage-keygen executable found next to " + primary.name)
+
+
+def _keygen() -> str:
+    return _keygen_cmd()[0]
 
 
 def _fail(what, returncode, output, sensitive):
@@ -191,14 +197,14 @@ def keygen(identity_path) -> str:
     if path.exists():
         raise CryptoError("identity already exists")
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    _run([_keygen(), "-o", str(path)], "age-keygen", sensitive=[path])
+    _run(_keygen_cmd() + ["-o", str(path)], "age-keygen", sensitive=[path])
     os.chmod(path, 0o600)
     return recipient(path)
 
 
 def recipient(identity_path) -> str:
     path = Path(identity_path)
-    result = _run([_keygen(), "-y", str(path)], "age-keygen", sensitive=[path])
+    result = _run(_keygen_cmd() + ["-y", str(path)], "age-keygen", sensitive=[path])
     value = result.stdout.strip()
     if not value:
         raise CryptoError("identity has no recipient")

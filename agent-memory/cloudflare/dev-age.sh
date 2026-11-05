@@ -1,11 +1,22 @@
 #!/bin/sh
-# Build rage under .work when no age implementation is installed.
 set -eu
 
 root=$(CDPATH='' cd -P -- "$(dirname -- "$0")/../.." && pwd)
+if command -v rage >/dev/null 2>&1; then
+	command -v rage
+	exit 0
+fi
+if [ -x "${HOME}/.local/bin/rage" ]; then
+	printf '%s\n' "${HOME}/.local/bin/rage"
+	exit 0
+fi
 bin="$root/.work/tools/rage/bin/rage"
 if [ -x "$bin" ]; then
 	printf '%s\n' "$bin"
+	exit 0
+fi
+if sh "$root/dl" rage >/dev/null 2>&1 && [ -x "${HOME}/.local/bin/rage" ]; then
+	printf '%s\n' "${HOME}/.local/bin/rage"
 	exit 0
 fi
 if ! command -v cargo >/dev/null 2>&1; then
