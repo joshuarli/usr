@@ -8,10 +8,10 @@ former `threadripper-tune` executable.
 ```sh
 power-policy status              # source, driver, governor, EPP/EPB, boost
 power-policy diff auto           # preview only; does not require root
-doas power-policy auto           # choose AC/battery once
-doas power-policy battery        # explicitly prefer energy savings
-doas power-policy ac             # explicitly prefer balanced performance
-doas power-policy performance    # performance hint + boost, where supported
+doas "$HOME/.local/bin/power-policy" auto           # choose AC/battery once
+doas "$HOME/.local/bin/power-policy" battery        # explicitly prefer energy savings
+doas "$HOME/.local/bin/power-policy" ac             # explicitly prefer balanced performance
+doas "$HOME/.local/bin/power-policy" performance    # performance hint + boost, where supported
 ```
 
 `power-policy apply MODE` and `power-policy MODE` are equivalent, and no

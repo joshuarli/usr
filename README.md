@@ -23,4 +23,4 @@ Run `sh sync doctor` to inspect installed links, tools, agent configuration, and
 
 ## Linux CPU power policy
 
-`power-policy` is a daemonless POSIX shell tool installed by the Linux dotfile layer. Run `power-policy status`, preview with `power-policy diff auto`, and apply with `doas power-policy auto` or `doas power-policy performance`. It supports Intel N100 (`intel_pstate`/`intel_cpufreq`), AMD Ryzen 2400GE (`acpi-cpufreq`), and modern AMD P-State/EPP. It replaces `threadripper-tune`; boot/event hooks are opt-in. See [Linux CPU power policy](docs/power-policy.md).
+`power-policy` is a daemonless POSIX shell tool installed by the Linux dotfile layer. Run `power-policy status`, preview with `power-policy diff auto`, and apply with `doas "$HOME/.local/bin/power-policy" auto` or `doas "$HOME/.local/bin/power-policy" performance`. It supports Intel N100 (`intel_pstate`/`intel_cpufreq`), AMD Ryzen 2400GE (`acpi-cpufreq`), and modern AMD P-State/EPP. It replaces `threadripper-tune`; boot/event hooks are opt-in. See [Linux CPU power policy](docs/power-policy.md).
