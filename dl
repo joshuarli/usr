@@ -4212,7 +4212,7 @@ for prog in "$@"; do
         opencode2) install_opencode2 ;;
         ghostty) install_ghostty ;;
         ghostty-custom) install_ghostty_custom ;;
-        player) install_player ;;
+        play|player) install_player ;;
         vault) install_release vault ;;
         jaq) install_jaq ;;
         mold) install_mold ;;
