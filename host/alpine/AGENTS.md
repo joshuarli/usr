@@ -13,7 +13,7 @@ It lives at `host/alpine/` in the `usr` checkout.
 - In `host/setup.sh`, use `gh` device login with `admin:public_key` only when needed and register `~/.ssh/github.pub` as an authentication key; never expose tokens or private keys.
 - Tailscale is part of the server base: add `tun` to `/etc/modules`, enable the `modules` service in `boot`, enable and start the `tailscale` service, and enable Tailscale SSH. `TS_AUTHKEY` logs in during provisioning; without it, log in interactively when stderr is a terminal, otherwise leave the node logged out and print `doas tailscale up --ssh`. Never manage tailnet policy, ACLs, exit nodes or subnet routes.
 - Docker Engine and CLI are part of the server base; enable and start `docker` and add the user to `docker`. Docker group membership grants root-equivalent host access and is the explicit passwordless Docker permission.
-- `make` and rustup are part of the server base; rustup is initialized for the user before tools are installed because kache needs it when `sh sync` installs kache.
+- `make`, `dash`, `shellcheck`, and rustup are part of the server base; rustup is initialized for the user before tools are installed because kache needs it when `sh sync` installs kache, and `tests/static.sh` runs its dash and shellcheck checks when they are present.
 - `pnpm` ships with `nodejs` in the default tool set; neither is part of the minimal server profile.
 - No autologin; seat access comes from seatd's `seat` group only.
 - User dotfiles come from the enclosing `usr` checkout via `sh sync links`; the server tool profile, or the full `dl` set on desktop, comes from `sh sync tools` (never `setup-linux`). The account shell stays ash for OpenSSH command execution and login profile startup; interactive logins hand off to ish.

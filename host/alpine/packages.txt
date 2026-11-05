@@ -1,6 +1,7 @@
 ncurses-terminfo
 curl
 bash
+dash
 jq
 unzip
 openssh-client
@@ -17,4 +18,5 @@ lld>=23
 compiler-rt>=23
 llvm-libunwind-dev>=23
 make
+shellcheck
 rustup

@@ -58,6 +58,8 @@ check 'zipinfo installed' command -v zipinfo
 check 'ssh installed' command -v ssh
 check 'uv installed' command -v uv
 check 'make installed' command -v make
+check 'dash installed' command -v dash
+check 'shellcheck installed' command -v shellcheck
 check 'rustup initialized for user' test -x "$home/.cargo/bin/rustup"
 for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_least 23 "$tool"; done
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)
