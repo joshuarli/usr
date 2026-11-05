@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 23
+Next: 24
 
 ### USR-5 · P2 · Push rules do not require user approval
 
@@ -46,3 +46,12 @@ Next: 23
 - **Recommendation:** Choose an RPO target, then make the smallest matching change. For about five minutes, shorten the scheduled interval and keep uploads asynchronous. For seconds, add a debounced end-of-turn capture-and-sync trigger while retaining the periodic backstop. Add per-session durable and pending reporting by joining `sessions`, `archive_generation`, and `transfer_generation`, and keep synchronous acknowledgement only behind an explicit `--wait` or `--durable` path. Account for generation and object growth before shortening capture itself.
 - **Fix with:** do
 - **Effort:** M
+
+### USR-23 · P3 · Mirror encryption depends on unprovisioned age binary
+
+- **Area:** Dependencies
+- **Where:** `agent-memory/src/agent_memory/mirror_crypto.py:23-48`
+- **Problem:** `mirror_crypto` requires `rage` or `age` (and `rage-keygen`/`age-keygen`) to encrypt session mirror backups, but no `age` implementation is packaged or installed by `usr`.
+- **Recommendation:** Set up the fork at https://github.com/laputa-systems/rage to publish release binaries, and package `rage` under `dl`.
+- **Fix with:** none
+- **Effort:** S
