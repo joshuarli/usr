@@ -2,7 +2,9 @@
 
 A small, first-party Claude Code MCP bridge to the OpenCode **V2** TypeScript client. The Claude parent plans, creates Git worktrees, reviews the diff, runs integration checks, and merges; each normal `worker` implementation slice executes in an independent OpenCode session using **DeepSeek V4.1 Flash**.
 
-The bridge uses `@opencode/client` and its managed local service, not repeated `opencode run` subprocesses or CLI output scraping. Session IDs live in OpenCode and survive MCP process restarts. This changes **Claude worker routing only**: `scout`, `mechanic`, `expert`, and `god`, the other harnesses, and Claude's native worker fallback definition are untouched.
+**Status: disabled / opt-in.** Claude's `orchestrate` skill uses the native Claude `worker` tier by default. This bridge is retained for an explicitly requested experiment only; its presence in the repo or an existing MCP registration must not trigger automatic delegation. If you previously registered it and want to remove it, run `claude mcp remove --scope user usr-opencode-worker` and restart Claude.
+
+The bridge uses `@opencode/client` and its managed local service, not repeated `opencode run` subprocesses or CLI output scraping. Session IDs live in OpenCode and survive MCP process restarts. When explicitly invoked, it runs only the requested worker slice: no default Claude routing, no changes to the other tiers or harnesses.
 
 ## Install (manual on the machine running Claude)
 
@@ -29,7 +31,7 @@ claude mcp add --scope user --env USR_OPENCODE_WORKER_MODEL=go --transport stdio
 
 `go` pins `opencode-go/deepseek-v4.1-flash#max`. The only accepted values are `free` and `go`. Different provider or model IDs require a code change and tests; never silently fall back to Sonnet or other models. Costs reported for Go are informational and do not necessarily match subscription allowance accounting.
 
-## Normal implementation lane
+## Explicitly requested trial lane
 
 1. **Parent** creates a clean linked worktree at `<repo>/.work/wt/<slice>` and its own branch, as already required by `orchestrate`. Do not use the primary checkout, a subdirectory, an untracked dirty tree, or an arbitrary temp directory.
 2. **Parent** calls `worker_model_check(cwd)`. If the exact pinned model/variant isn't available, report that blocker or seek authorization to change the configuration; don't silently change models.
