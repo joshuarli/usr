@@ -57,6 +57,7 @@ check 'unzip installed' command -v unzip
 check 'zipinfo installed' command -v zipinfo
 check 'ssh installed' command -v ssh
 check 'uv installed' command -v uv
+check 'make installed' command -v make
 check 'rustup initialized for user' test -x "$home/.cargo/bin/rustup"
 for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_least 23 "$tool"; done
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)
@@ -92,6 +93,7 @@ case " $default_tools " in
 	*" nodejs "*)
 		check 'node runs' su -s /bin/sh "$user" -c "$home/.local/bin/node --version"
 		check 'npm runs' su -s /bin/sh "$user" -c "PATH='$home/.local/bin':\$PATH '$home/.local/bin/npm' --version"
+		check 'pnpm runs' su -s /bin/sh "$user" -c "PATH='$home/.local/bin':\$PATH '$home/.local/bin/pnpm' --version"
 		;;
 esac
 check 'python3 imports sqlite3 and ssl' su -s /bin/sh "$user" -c "$home/.local/bin/python3 -c 'import sqlite3, ssl'"

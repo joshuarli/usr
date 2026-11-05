@@ -69,8 +69,8 @@ that checkout), and runs `install.sh` as root through `doas` or `sudo`.
 The server profile installs `fd`, `rg`, `jaq`, `fastermod`, `tm`, `ish`,
 `stuff`, `e`, `fz`, `fdu`, `fs`, `srv`, `git`, `python3`, `gh`, and `zzz`. The heavy
 agent, media, sync, and build extras (`codex`, `claude`, `opencode2`, `pi`,
-`agent-browser`, `cf`, `ffmpeg`, `nodejs`, `syncthing`, `player`, `mold`) are
-opt-in on a server with `sh dl TOOL...`. The full set is installed by default
+`agent-browser`, `cf`, `ffmpeg`, `nodejs`, `pnpm`, `syncthing`, `player`, `mold`)
+are opt-in on a server with `sh dl TOOL...`. The full set is installed by default
 in desktop mode. `dl`, `sync`, and `doctor` follow the profile recorded in
 `/etc/home/install-mode`.
 
@@ -110,6 +110,7 @@ for the bootstrap, or
 explanation if a check fails. The server install then:
 
 - installs the packages in `packages.txt` (and `packages-x86_64.txt` on x86_64),
+  including `make` and `rustup`,
 - initializes rustup for the user from the `rustup` package, before any tool
   install, so `sh sync` can install kache,
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by
