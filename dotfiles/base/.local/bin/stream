@@ -75,7 +75,7 @@ display_name() {
 			-e 's/%5D/]/g'
 }
 
-if command -v fzy >/dev/null 2>&1; then
+if command -v fz >/dev/null 2>&1; then
 	choices_file=$(mktemp "${TMPDIR:-/tmp}/stream-choices.XXXXXX")
 	trap 'rm -f "$listing_file" "$links_file" "$choices_file"' EXIT HUP INT TERM
 	number=1
@@ -84,13 +84,12 @@ if command -v fzy >/dev/null 2>&1; then
 		number=$((number + 1))
 	done <"$links_file"
 
-	# fzy cannot hide the IDs; keep them to distinguish identical display names.
 	terminal_lines=$(tput lines 2>/dev/null || printf '24\n')
 	choice_lines=$((terminal_lines * 80 / 100 - 1))
-	if [ "$choice_lines" -lt 1 ]; then
-		choice_lines=1
+	if [ "$choice_lines" -lt 3 ]; then
+		choice_lines=3
 	fi
-	if ! selected_line=$(fzy --lines="$choice_lines" <"$choices_file"); then
+	if ! selected_line=$(fz --lines="$choice_lines" <"$choices_file"); then
 		exit 0
 	fi
 	selected_number=$(printf '%s\n' "$selected_line" | awk -F '\t' '{ print $1 }')
