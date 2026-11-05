@@ -1548,7 +1548,7 @@ DL_PROFILE=server
 export DL_PROFILE
 targets=$(HOME="$test_root/server-profile-home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
-for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 gh; do
+for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 gh zzz; do
     printf '%s\n' "$targets" | grep -qx "$expected" || {
         printf 'server profile is missing %s\n' "$expected" >&2
         exit 1
