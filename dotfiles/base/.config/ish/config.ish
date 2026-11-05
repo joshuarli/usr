@@ -19,8 +19,7 @@ set HOMEBREW_NO_ANALYTICS 1
 
 set CARGO_NET_GIT_FETCH_WITH_CLI true
 
-alias mpv /Applications/mpv.app/Contents/MacOS/mpv
-alias p   /Applications/mpv.app/Contents/MacOS/mpv -vo null
+alias p   "$HOME/Applications/Player.app/Contents/MacOS/player"
 
 alias sshnew ssh-keygen -t ed25519 -N ""
 
