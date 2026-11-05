@@ -164,7 +164,7 @@ setup_tailscale() {
 }
 
 setup_rustup() {
-	[ ! -x "$home/.cargo/bin/rustup" ] || return
+	[ ! -x "$home/.cargo/bin/rustup" ] || return 0
 	command -v rustup-init >/dev/null || die 'rustup-init is missing; the rustup package did not install it'
 	as_user "rustup-init -y --no-modify-path --default-toolchain none" ||
 		die "could not initialize rustup for $user"
