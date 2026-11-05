@@ -163,6 +163,14 @@ setup_tailscale() {
 	esac
 }
 
+setup_rustup() {
+	[ ! -x "$home/.cargo/bin/rustup" ] || return
+	command -v rustup-init >/dev/null || die 'rustup-init is missing; the rustup package did not install it'
+	as_user "rustup-init -y --no-modify-path --default-toolchain none" ||
+		die "could not initialize rustup for $user"
+	say "initialized rustup for $user"
+}
+
 setup_docker() {
 	getent group docker >/dev/null 2>&1 || addgroup -S docker
 	id -Gn "$user" | tr ' ' '\n' | grep -qx docker || {
@@ -299,6 +307,7 @@ packages=$(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' packages.txt)
 [ ! -f "packages-$arch.txt" ] || packages="$packages $(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "packages-$arch.txt")"
 # shellcheck disable=SC2086
 apk add --quiet $packages
+setup_rustup
 install_doas_policy
 setup_github_key
 setup_docker

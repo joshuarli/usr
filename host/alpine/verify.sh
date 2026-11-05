@@ -57,6 +57,7 @@ check 'unzip installed' command -v unzip
 check 'zipinfo installed' command -v zipinfo
 check 'ssh installed' command -v ssh
 check 'uv installed' command -v uv
+check 'rustup initialized for user' test -x "$home/.cargo/bin/rustup"
 for tool in clang ld.lld llc; do check "$tool is version 23 or newer" major_at_least 23 "$tool"; done
 clang_dir=/etc/clang$(clang -dumpversion | cut -d. -f1)
 check 'clang defaults match config/clang.cfg, root 0644' managed config/clang.cfg "$clang_dir/clang.cfg" 644
