@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent-memory" / "src"))
 from agent_memory.transcripts import default_roots, is_source_name, normalize
 from agent_memory.types import Harness
 
