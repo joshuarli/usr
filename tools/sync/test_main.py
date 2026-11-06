@@ -1,5 +1,4 @@
 """Graph construction and scoped action selection without real installs."""
-import os
 from pathlib import Path
 import sys
 import tempfile
@@ -39,17 +38,17 @@ class MainTests(unittest.TestCase):
     def test_alternate_target_links_never_touch_home(self):
         target = self.ctx.root / "fixture-home"
         target.mkdir()
+        source = self.ctx.root / "dotfiles/base/.profile"
+        source.parent.mkdir(parents=True)
+        source.write_text("managed")
         ctx = main.Context(self.ctx.root, self.ctx.home, "darwin", "desktop", self.ctx.env, target)
-        seen = []
-        def run(_ctx, *args, **kwargs):
-            seen.append(args)
-            return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-        with patch.object(main, "command", side_effect=run):
+        # Only the pinact migration is external; planning and application are Python.
+        with patch.object(main, "command") as run:
+            run.return_value.returncode = 0
             main.apply_links(ctx)
-            main.link_status(ctx)
         self.assertEqual(ctx.state, target / ".local/state/sync/dl-owned")
-        self.assertTrue(all(str(target) in item for item in (args for args in seen if "-t" in args) for item in (args[args.index("-t")+1],)))
-        self.assertTrue(all(str(self.ctx.home) not in args for args in seen))
+        self.assertTrue((target / ".profile").is_symlink())
+        self.assertFalse((self.ctx.home / ".profile").exists())
 
     def test_alt_target_blocks_host_mutations(self):
         target = self.ctx.root / "fixture-home"
@@ -60,26 +59,25 @@ class MainTests(unittest.TestCase):
                 with self.subTest(operation=operation), self.assertRaisesRegex(main.GraphError, "TARGET different from HOME"):
                     main.main(list(operation))
 
-    def test_link_preflight_shares_planned_prunes_across_layers(self):
-        (self.ctx.root / "dotfiles/base").mkdir(parents=True)
-        (self.ctx.root / "dotfiles/darwin").mkdir(parents=True)
-        paths = []
-        def run(_ctx, *args, **kwargs):
-            path = Path(kwargs["extra"]["SYM_PLANNED_PRUNES"])
-            paths.append(path)
-            if args[-1].endswith("base"):
-                path.write_text("planned-prune\n")
-                out = "PRUNE: old\n"
-            else:
-                self.assertEqual(path.read_text(), "planned-prune\n")
-                out = "LINK: new\n"
-            return type("Completed", (), {"returncode": 0, "stdout": out, "stderr": ""})()
-        with patch.object(main, "command", side_effect=run):
-            status = main.link_status(self.ctx)
-        self.assertFalse(status.conflict)
-        self.assertEqual(len(paths), 2)
-        self.assertEqual(paths[0], paths[1])
-        self.assertFalse(paths[0].exists())
+    def test_global_link_plan_replaces_stale_other_layer(self):
+        from links import discover
+        from link_plan import plan_links
+        from link_apply import apply
+        base = self.ctx.root / "dotfiles/base"
+        other = self.ctx.root / "dotfiles/darwin"
+        base.mkdir(parents=True)
+        other.mkdir(parents=True)
+        source = base / ".moved"
+        source.write_text("original")
+        ctx = self.ctx
+        plan = plan_links(discover(ctx.root, ctx.home, "darwin"), ctx.state)
+        apply(plan, ctx.state)
+        new = other / ".moved"
+        source.rename(new)
+        plan = plan_links(discover(ctx.root, ctx.home, "darwin"), ctx.state)
+        self.assertEqual([item.kind for item in plan.actions], ["replace"])
+        apply(plan, ctx.state)
+        self.assertEqual((ctx.home / ".moved").resolve(), new)
 
     def test_server_profile_omits_claude_bridge(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)

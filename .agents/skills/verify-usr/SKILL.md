@@ -9,11 +9,11 @@ metadata:
 
 # Verify usr
 
-Use this procedure for the `sym` command and repository-level Markdown and skill checks. `dotfiles-health` owns agent setup policy and structural invariants; this skill exercises behavior through tracked tools.
+Use this procedure for Python link reconciliation and repository-level Markdown and skill checks. `dotfiles-health` owns agent setup policy and structural invariants; this skill exercises behavior through tracked tools.
 
 ## Scope and prerequisites
 
-The `sym` journey runs in a disposable Git fixture and scratch home under `.work/tmp`. It never uses the real home directory. The Markdown checks read the repository and write nothing. You need `sh`, `git`, and Python 3.
+The link-reconciliation journey runs in a disposable Git fixture and scratch home under `.work/tmp`. It never uses the real home directory. The Markdown checks read the repository and write nothing. You need `sh`, `git`, and Python 3.
 
 This procedure does not exercise `sync tools`, home sync, platform setup, installed system services, or applications outside this repository.
 
@@ -22,7 +22,7 @@ This procedure does not exercise `sync tools`, home sync, platform setup, instal
 Run from the repository root. Before creating scratch files, the helper checks that `.work` is ignored by `.git/info/exclude` and rejects `.work` or `.work/tmp` symlinks.
 
 ```sh
-./.agents/skills/verify-usr/scripts/sym-journey.sh
+./.agents/skills/verify-usr/scripts/links-journey.sh
 ```
 
 The helper creates no server or long-running process.
@@ -53,11 +53,11 @@ python3 -I dotfiles/base/.local/bin/mdtool check --untracked
 
 ## Evidence and cleanup
 
-The helper prints the path to a text record under `.work/tmp/verify-usr.*.log`. Read it to see the commands' output and the observed filesystem results. It contains no environment dump or credentials. A successful record proves only the exercised `sym` behavior on this platform.
+The helper prints the path to a text record under `.work/tmp/verify-usr.*.log`. Read it to see the commands' output and the observed filesystem results. It contains no environment dump or credentials. A successful record proves only the exercised Python link behavior on this platform.
 
 On success, failure, or interruption after the cleanup trap is installed, the helper removes only its own fixture directory and keeps the evidence file. If interrupted before its first observation, the evidence says no observation was recorded. Each run uses a unique name, so rerunning creates a fresh fixture and prior evidence cannot collide. Do not delete evidence as part of fixture cleanup.
 
-Update this procedure if `sym` flags, its fixture assumptions, `.work` handling, or the repository check commands change.
+Update this procedure if link planner semantics, its fixture assumptions, `.work` handling, or the repository check commands change.
 
 **The test:** the helper demonstrates linking, repeat-run behavior, and preservation of a conflicting destination, removes its fixture after both outcomes, keeps evidence, and passes on a second run.
 

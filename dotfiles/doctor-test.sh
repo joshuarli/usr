@@ -12,8 +12,9 @@ mkdir -p "$fixture/dotfiles/base/.config" "$fixture/dotfiles/base/.codex" \
     "$fixture/dotfiles/base/.agents/skills/example" "$fixture/dotfiles/linux/.config" \
     "$fixture/dotfiles" "$fixture/home/.local/bin" "$fixture/tmp" "$fixture/mock" "$fixture/tools/sync"
 cp "$repo/sync" "$fixture/sync"
-cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninstall.py" "$fixture/tools/sync/"
-cp "$repo/dotfiles/sym" "$fixture/dotfiles/sym"
+cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninstall.py" \
+   "$repo/tools/sync/ownership.py" "$repo/tools/sync/links.py" \
+   "$repo/tools/sync/link_plan.py" "$repo/tools/sync/link_apply.py" "$fixture/tools/sync/"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
 # shellcheck disable=SC2016

@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 
@@ -21,11 +20,10 @@ class SyncIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for relative in ("tools/sync", "dotfiles/base", "dotfiles/linux", "bin", "home"):
             (self.root / relative).mkdir(parents=True, exist_ok=True)
-        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py"):
+        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py"):
             shutil.copy2(SOURCE / name, self.root / "tools/sync" / name)
         shutil.copy2(SYNC, self.root / "sync")
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
-        self._script("dotfiles/sym", "#!/bin/sh\nexit 0\n")
         self._script("dotfiles/migrate-pinact.sh", "#!/bin/sh\nexit 0\n")
         self._script("tools/sync/install.sh", '''#!/bin/sh
 if [ "$1" = --list ]; then printf 'nodejs\\ncmd\\n'; exit 0; fi
@@ -36,7 +34,7 @@ for name in "$@"; do printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$name"; 
 ''')
         self.env = dict(os.environ, HOME=str(self.root / "home"),
                         PATH=str(self.root / "bin") + os.pathsep + os.environ.get("PATH", ""),
-                        DL_PROFILE="server")
+                        DL_PROFILE="server", TARGET=str(self.root / "home"))
 
     def _script(self, path: str, content: str) -> None:
         file = self.root / path
@@ -55,6 +53,28 @@ for name in "$@"; do printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$name"; 
         self.run_sync("tools", "cmd")
         self.assertEqual((self.root / "home/installed").read_text().splitlines(),
                          ["nodejs", "cmd", "nodejs", "cmd"])
+
+    def test_links_plan_and_apply_without_sym_shell(self):
+        source = self.root / "dotfiles/base/.config/app.conf"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("hello")
+        plan = self.run_sync("plan").stdout
+        self.assertIn("LINK:", plan)
+        self.assertFalse((self.root / "home/.config/app.conf").exists())
+        self.run_sync("links")
+        link = self.root / "home/.config/app.conf"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.read_text(), "hello")
+        self.run_sync("links")
+        self.assertIn("CURRENT", self.run_sync("plan").stdout)
+
+    def test_links_foreign_file_blocks_entire_apply(self):
+        self.root.joinpath("dotfiles/base/first").write_text("first")
+        self.root.joinpath("dotfiles/base/second").write_text("second")
+        self.root.joinpath("home/second").write_text("custom")
+        self.run_sync("links", success=False)
+        self.assertEqual(self.root.joinpath("home/second").read_text(), "custom")
+        self.assertFalse(self.root.joinpath("home/first").exists())
 
     def test_plan_does_not_change_home(self):
         self.assertIn("nodejs", self.run_sync("list").stdout)

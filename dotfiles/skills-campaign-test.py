@@ -18,7 +18,7 @@ CHECKER = ROOT / "dotfiles" / "skills-check.sh"
 MDTOOL = ROOT / "dotfiles" / "base" / ".local" / "bin" / "mdtool"
 FIXTURE_TOOL = ROOT / "dotfiles" / "skill-evals" / "fixtures.py"
 VERIFY_SKILL = ROOT / ".agents" / "skills" / "verify-usr"
-VERIFY_HELPER = VERIFY_SKILL / "scripts" / "sym-journey.sh"
+VERIFY_HELPER = VERIFY_SKILL / "scripts" / "links-journey.sh"
 SCRATCH_CHECK = ROOT / "dotfiles" / "scratch-check.sh"
 EXPLICIT_SKILL = "---\nname: sample\ndescription: Test explicit invocation.\ndisable-model-invocation: true\nmetadata:\n  opencode/slash: \"true\"\n  opencode/autoinvoke: \"false\"\n---\n\n**The test:** the sample is explicit.\n\n**Report:** the sample passed.\n"
 CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
@@ -55,7 +55,7 @@ def install_fixture_skill(root: Path) -> Path:
 
 
 def install_journey(repo: Path) -> Path:
-    helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "sym-journey.sh"
+    helper = repo / ".agents" / "skills" / "verify-usr" / "scripts" / "links-journey.sh"
     helper.parent.mkdir(parents=True)
     shutil.copy2(VERIFY_HELPER, helper)
     scratch_check = repo / "dotfiles" / "scratch-check.sh"
@@ -338,7 +338,7 @@ class SkillCampaignTests(unittest.TestCase):
             skill = work / "verify-usr"
             (skill / "scripts").mkdir(parents=True)
             (skill / "SKILL.md").write_text((VERIFY_SKILL / "SKILL.md").read_text(encoding="utf-8"), encoding="utf-8")
-            self.assertEqual(["missing or non-executable helper: scripts/sym-journey.sh"], skill_errors(skill))
+            self.assertEqual(["missing or non-executable helper: scripts/links-journey.sh"], skill_errors(skill))
         finally:
             shutil.rmtree(work)
 
@@ -357,7 +357,7 @@ class SkillCampaignTests(unittest.TestCase):
             content = evidence.read_text(encoding="utf-8")
             self.assertIn("observed: link target and contents match the fixture", content)
             self.assertIn("observed: repeat run produced no changes or output", content)
-            self.assertIn("observed: sym reported the conflict and preserved both destination and source", content)
+            self.assertIn("observed: Python linker reported the conflict and preserved both destination and source", content)
             artifacts.append(evidence)
         fake_bin = Path(tempfile.mkdtemp(prefix="verify-usr-failure-", dir=work))
         try:

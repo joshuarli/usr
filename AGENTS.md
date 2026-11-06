@@ -4,7 +4,7 @@ This repository is the source of truth for my home configuration and machine set
 
 Use the [README](README.md) to install.
 
-`sh sync plan` previews home sync. Do not run `sh sync`, `host/macos/*`, `host/setup-*`, or reset scripts unless asked; they can alter the host or remove agent state. Run `sym` only with `-t <tmpdir>` and `sync tools` only with `HOME` set to a scratch directory under `.work/`. For checks, use the narrow commands in [development checks](docs/development.md). Keep scripts POSIX `sh` and use only the Python standard library. Fix a `sym` bug with a failing numbered case in `dotfiles/sym-test.sh` first.
+`sh sync plan` previews home sync. Do not run `sh sync`, `host/macos/*`, `host/setup-*`, or reset scripts unless asked; they can alter the host or remove agent state. Run `sh sync links` only with `TARGET` set to a scratch home under `.work/`, and `sync tools` only with `HOME` set to a scratch directory under `.work/`. For checks, use the narrow commands in [development checks](docs/development.md). Keep scripts POSIX `sh` and use only the Python standard library. Fix a link-reconciliation bug with a failing numbered case in `tools/sync/test_links.py` first.
 
 Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or `rg` binaries in `~/.local/bin`; use `git ls-files dotfiles/*/.local/bin` to list repository scripts.
 

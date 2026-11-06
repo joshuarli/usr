@@ -245,7 +245,7 @@ for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh
 	sh -n "$script" || die "$script has a syntax error"
 done
 
-[ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ]  ||
+[ -f "$usr_root/sync" ] && [ -f "$usr_root/tools/sync/links.py" ] ||
 	die "$usr_root is not the usr checkout; clone $usr_url and run usr/host/alpine/install.sh from it"
 origin=$(as_user "git -C '$usr_root' remote get-url origin" 2>/dev/null) ||
 	die "$usr_root is not a git checkout"

@@ -2,10 +2,12 @@
 set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$root"
+tmpdir=${TMPDIR:-$root/.work/tmp}
 	python3 -I host/macos/sync-test.py
 	python3 -I tools/sync/claude-worker-test.py
 	python3 -I tools/sync/test_dag.py
 	python3 -I tools/sync/test_main.py
+	python3 -I tools/sync/test_links.py
 	python3 -I tools/sync/test_uninstall.py
 	python3 -I tools/sync/test_integration.py
 	sh dotfiles/doctor-test.sh
@@ -21,7 +23,6 @@ cd "$root"
 	python3 -I dotfiles/pi-test.py
 	python3 -I dotfiles/ghostty-shader-test.py
 	TMPDIR="$tmpdir" python3 -I dotfiles/sbx-test.py
-	(cd dotfiles && sh sym-test.sh && { ! command -v dash >/dev/null || dash sym-test.sh; })
 	(cd dotfiles && sh agent-tier-gate-test.sh)
 	sh dotfiles/reset-agents-test.sh
 	(cd dotfiles && sh pre-push-test.sh)

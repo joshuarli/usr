@@ -7,7 +7,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Changed | Run |
 | --- | --- |
 | `dotfiles/base/.local/bin/sbx` or its policy spec | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py`; on macOS also run `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py --live` |
-| `dotfiles/sym` | `cd dotfiles && sh sym-test.sh`, and `dash sym-test.sh` |
+| Python link discovery, planning or apply | `python3 -I tools/sync/test_links.py`, `python3 -I tools/sync/test_main.py`, and `python3 -I tools/sync/test_integration.py` |
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
 | `agent-learn`, `agent-sessions`, `agent-sessions-serve`, or `skill-usage` launchers, or the agent LaunchAgent templates | `cd dotfiles && sh agent-memory-launchers-test.sh` (also under `dash`) and `shellcheck -s sh` on the changed launchers |
 | `tools/skill-usage` | `TMPDIR="$PWD/.work/tmp" skill-usage selftest`, `uvx ruff check tools/skill-usage/src/skill_usage.py`, and `uvx ty check --python "${AGENT_MEMORY_VENV:-$HOME/d/agent-memory/.venv}" tools/skill-usage/src/skill_usage.py` |
@@ -52,7 +52,7 @@ After changing Markdown, choose the `mdtool` check that matches the edit: use `l
 
 ## Conventions
 
-Keep shell scripts compatible with macOS `/bin/sh` and dash. Python scripts use only the standard library. Add a failing numbered case to `dotfiles/sym-test.sh` before fixing a `sym` bug, then run the suite under both shells.
+Keep shell scripts compatible with macOS `/bin/sh` and dash. Python scripts use only the standard library. Add a failing numbered case to `tools/sync/test_links.py` before modifying link reconciliation; run the Python suite and the scratch-home integration tests.
 
 Use `TODO.md` for deferred work and `docs/rfc/` when a design needs a decision. The `todo` skill owns both formats.
 

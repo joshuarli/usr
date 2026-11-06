@@ -12,6 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dag import Graph, GraphError, Probe, Task
+from links import LinkError, discover
+from link_plan import plan_links
+from link_apply import LinkApplyError, apply as apply_link_plan
 from ownership import capture_new, records
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,43 +84,30 @@ def tool_list(ctx: Context) -> list[str]:
     return list(dict.fromkeys(result.stdout.split()))
 
 
+def _link_plan(ctx: Context):
+    return plan_links(discover(ctx.root, ctx.link_target, ctx.platform), ctx.state)
+
+
 def link_status(ctx: Context) -> Probe:
-    output = []
-    scratch = ctx.root / ".work/tmp"
-    scratch.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="sync-plan-", dir=scratch) as directory:
-        planned = Path(directory) / "planned-prunes"
-        planned.touch()
-        for layer in ["base", ctx.platform]:
-            source = ctx.root / "dotfiles" / layer
-            if not source.is_dir():
-                continue
-            response = command(ctx, "sh", str(ctx.root / "dotfiles/sym"),
-                               "--dry-run", "-t", str(ctx.link_target), str(source), capture=True,
-                               extra={"SYM_OWNED_FILE": str(ctx.state),
-                                      "SYM_PLANNED_PRUNES": str(planned)})
-            lines = response.stdout + response.stderr
-            output.extend(line for line in lines.splitlines() if line.startswith(("LINK:", "CONFLICT:", "PRUNE:")))
-            if response.returncode and not any(line.startswith("CONFLICT:") for line in lines.splitlines()):
-                return Probe(False, f"link planner failed: {lines.strip()}", True)
-    if any(line.startswith("CONFLICT:") for line in output):
-        return Probe(False, "; ".join(output), True)
-    return Probe(not output, "; ".join(output) if output else "links match")
+    try:
+        planned = _link_plan(ctx)
+    except (LinkError, OSError, ValueError) as exc:
+        return Probe(False, str(exc), True)
+    return Probe(planned.converged, "; ".join(planned.lines()) or "links match",
+                 bool(planned.conflicts))
+
 
 def apply_links(ctx: Context) -> None:
-    before = records(ctx.state)
+    # The retired pinact launcher is the only pre-link migration; do not run
+    # unrelated host setup from the filesystem link task.
     ctx.state.parent.mkdir(parents=True, exist_ok=True)
-    scratch = ctx.root / ".work/tmp"
-    scratch.mkdir(parents=True, exist_ok=True)
     required(command(ctx, "sh", str(ctx.root / "dotfiles/migrate-pinact.sh"),
                      str(ctx.link_target), str(ctx.state)), "pinact migration")
-    for layer in ["base", ctx.platform]:
-        source = ctx.root / "dotfiles" / layer
-        if source.is_dir():
-            required(command(ctx, "sh", str(ctx.root / "dotfiles/sym"), "-v",
-                             "-t", str(ctx.link_target), str(source),
-                             extra={"SYM_OWNED_FILE": str(ctx.state)}), f"{layer} links")
-    capture_new(ctx.state, before)
+    plan = _link_plan(ctx)
+    if plan.conflicts:
+        raise LinkApplyError("link conflicts: " + "; ".join(plan.conflicts))
+    for line in apply_link_plan(plan, ctx.state):
+        print(line)
 
 
 def installed(ctx: Context, tool: str) -> Probe:

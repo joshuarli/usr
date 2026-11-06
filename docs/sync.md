@@ -1,6 +1,6 @@
 # Home-directory sync
 
-`sh sync` selects `dotfiles/base` and the matching OS layer, then applies them to `$HOME` with `dotfiles/sym`. Each relative path belongs to one layer. `sh sync layers` rejects duplicate claims. See [`sym`](../dotfiles/sym) for link rules.
+`sh sync` selects `dotfiles/base` and the matching OS layer, discovers both with `tools/sync/links.py`, and reconciles the combined desired symlinks under `$HOME`. Each relative destination has one owner; duplicate and overlapping claims are rejected before any mutation.
 
 Run `sh sync plan` to preview the dependency graph, link repairs, and local installation state. Resolve each `CONFLICT` before syncing. `sh sync links` applies only the layer links, without tool installs or host setup, and `sh sync tools ish` installs or updates the named tool only. `sh sync` orders links, host prerequisites, tools, and the Claude MCP by explicit dependencies. A failed task blocks downstream tasks without undoing independent completed work. `TARGET` changes the symlink destination, but tools still install under `$HOME/.local/bin`.
 
@@ -32,7 +32,7 @@ The `host/macos/` directory is not part of the layer sync. `agent-learn` and its
 
 `sh sync tools shuck` installs the newest `release-*` prerelease of `joshuarli/shck` (discovered through `releases.atom`) for `aarch64-apple-darwin`, `x86_64-unknown-linux-musl-static`, or `aarch64-unknown-linux-musl-static`, and installs the binary as `~/.local/bin/shellcheck`; shuck runs its ShellCheck compatibility mode under that name. `shuck` is in the default target set on those three platforms and the Alpine server profile.
 
-Sync prunes a recorded link that points into a layer whose source is gone; `sh sync plan` lists these as `PRUNE`. A link copied from a layer symlink points elsewhere, so it stays, as do links `sh sync` did not create. Remove those yourself, or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.
+Sync prunes a recorded link whose old layer source is gone; `sh sync plan` lists these as `PRUNE`. Foreign links, still-present source links, and unrecorded links are preserved. To retire a managed link, remove its tracked declaration and run `sh sync links`. Test with an isolated `TARGET` scratch home; the old standalone `sym` command has been retired.
 
 ## Claude orchestration MCP
 
@@ -57,3 +57,9 @@ Newly installed objects are fingerprinted after the leaf installer confirms an a
 ### MCP checkout relocation
 
 `sync` persists a private fingerprint of its own Claude `usr-opencode-worker` registration under the sync state directory. A later checkout move updates this registered path without claiming other MCP servers; stale or foreign registrations with the same name are refused. Existing conventional `~/usr` registrations are accepted for migration, but unrelated similarly shaped entries are not.
+
+## Link reconciliation implementation
+
+The Python link manager comprises `links.py` (Git-aware discovery with `.sym-dir` directory ownership), `link_plan.py` (typed desired/observed state and an immutable global plan), and `link_apply.py` (no-overwrite filesystem operations and ownership recording). A single plan compares **all** sync layers at once, eliminating the old shell `SYM_PLANNED_PRUNES` handoff. The `links` DAG task re-plans and verifies convergence after applying changes.
+
+Before any mutation, the planner checks the complete set for duplicate or overlapping destinations, foreign content, symlink-parent escapes and safe ownership-based pruning. The applier checks the live filesystem snapshots again, operates with directory file descriptors under the physical target root, and uses exclusive symlink creation rather than overwriting a concurrently created foreign file. New links are fingerprinted into the existing sync ownership manifest; preexisting correct foreign links are never claimed. This is per-action crash-safe convergence, **not** a transactional rollback of an entire home. Test it with `python3 -I tools/sync/test_links.py` and `python3 -I tools/sync/test_integration.py` (scratch homes only).
