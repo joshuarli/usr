@@ -1,5 +1,23 @@
 Prefix: USR
-Next: 25
+Next: 33
+
+### USR-25 · P1 · Uninstall deletes user replacements of formerly managed paths
+
+- **Area:** Data
+- **Where:** `tools/sync/uninstall.py:27-47`, `tools/sync/install.sh:122-139`
+- **Problem:** Ownership is persisted as an F/D path, not the identity of the installed object. Sequence reproduced in a disposable home: record an owned executable and package directory, replace both with user content, then invoke uninstall. The F entry is unlinked and the D entry recursively removed, destroying the replacement contents. Path containment is checked, but current ownership is not.
+- **Recommendation:** Validate every recorded target against its current managed identity before deletion; preserve modified/foreign files and nonempty unmanaged directories. Make uninstall refuse ambiguous ownership and add fixture cases for replaced files/directories and interrupted upgrades.
+- **Fix with:** `durable-state`
+- **Effort:** M
+
+### USR-28 · P1 · Sync ignores TARGET and can modify the real home instead of the requested fixture
+
+- **Area:** Config
+- **Where:** `tools/sync/main.py:30-59`, `tools/sync/main.py:74-103`, `sync:13-35`, `docs/sync.md:5`
+- **Problem:** The previous public TARGET override is still documented, but Context always uses HOME. Reproduced with HOME and TARGET pointed at different disposable directories: the sym -t argument is HOME rather than TARGET. Running TARGET=/scratch sh sync links therefore applies links to the actual HOME, violating the caller's intended isolation.
+- **Recommendation:** Model the target home explicitly in Context, use it for link probes and apply, and forbid host/package mutations for an alternate target unless separately authorized. Test plan/links with HOME != TARGET and assert no writes in HOME.
+- **Fix with:** none
+- **Effort:** S
 
 ### USR-5 · P2 · Push rules do not require user approval
 
@@ -10,6 +28,60 @@ Next: 25
 - **Fix with:** none
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
+
+### USR-24 · P2 · Bootstrap pinned Python on minimal Alpine before the sync DAG
+
+- **Area:** Sync / portability
+- **Where:** `sync` POSIX bootstrap, `tools/sync/main.py`, `tools/sync/install.sh`, `host/setup-linux`
+- **Problem:** The Python DAG runner needs Python 3.9+ before it can execute. macOS can use the existing shell-based `python-build` installer to install the managed runtime, but Alpine currently needs an already runnable Python. Production `python-build` Linux artifacts still list `libgcc` in their runtime requirements; automatically fetching those binaries would introduce an unwanted system dependency. Alpine provisioning and fresh `sh sync` therefore do not yet have a self-contained bootstrap guarantee.
+- **Recommendation:** After `laputa-systems/python-build` removes the actual `libgcc_s.so.1` dependency from both Linux musl archives and proves it in minimal-container smoke tests, implement a minimal POSIX-shell bootstrap for Alpine x86_64 and aarch64. Pin the release artifact identity and SHA-256 independently of release metadata, verify before extraction, reject unsafe archive paths, stage and atomically switch the Python runtime, and smoke-test `sqlite3`/`ssl` before invoking the Python DAG. Avoid adding `libgcc`, a package-manager Python, or a second installer engine. Test fresh Alpine without Python or libgcc, interrupted download, existing installations, and second-run idempotency.
+- **Fix with:** `sync` bootstrap and python-build release qualification
+- **Effort:** M
+
+### USR-26 · P2 · Concurrent DeepSeek status/resume calls can double-spawn workers and lose session transitions
+
+- **Area:** Concurrency
+- **Where:** `tools/opencode-worker/src/hybrid.ts:16-20`, `tools/opencode-worker/src/hybrid.ts:78-89`, `tools/opencode-worker/src/hybrid.ts:120-132`, `tools/opencode-worker/src/hybrid.ts:178-240`, `tools/opencode-worker/src/server.ts:151-155`
+- **Problem:** A persisted Session uses backend plus optional opencode_id/command_run/attempts. The MCP server executes requests concurrently. Two status calls can both load the OpenCode state before awaiting API status, both observe the same terminal quota failure and untouched worktree, then each spawn a Command Code worker. Both write the same ID.json.tmp, and concurrent resumes can lose attempt-count updates. This is a source-grounded reachable interleaving; the existing tests exercise only sequential transitions.
+- **Recommendation:** Use a tagged persisted session lifecycle with a single transition owner; serialize each session's status/fallback/resume/cancel through a per-session lock or atomic claim/revision before external side effects. Re-read state under that guard, use unique temporary files and atomic persistence, and add Promise.all overlap tests.
+- **Fix with:** `lifecycle-concurrency`
+- **Effort:** M
+
+### USR-27 · P2 · DAG link preflight falsely blocks moves between sync layers
+
+- **Area:** Config
+- **Where:** `tools/sync/main.py:74-89`, `tools/sync/dag.py:88-98`, `dotfiles/sym:140-148`, `dotfiles/sym:259-260`, `dotfiles/sym-test.sh:459-475`
+- **Problem:** When an owned link moves from base to the OS layer, the first layer's dry run predicts a prune but does not remove the old link. The second layer needs that planned-prunes record to recognize the destination as reclaimable. The new link_status probes layers independently without SYM_PLANNED_PRUNES, so it flags CONFLICT and the DAG refuses to apply an otherwise valid layer migration. The existing sym test 31 proves the shared planned-prunes protocol.
+- **Recommendation:** Run all layer probes with one shared scratch planned-prunes file, preserving dry-run read-only semantics; feed earlier-layer prunes to later-layer probes. Add a two-layer DAG plan/apply fixture for a moved link.
+- **Fix with:** none
+- **Effort:** S
+
+### USR-29 · P2 · Claude MCP registration cannot follow a relocated usr checkout
+
+- **Area:** Operability
+- **Where:** `tools/sync/claude-worker.py:46-58`, `tools/sync/claude-worker.py:120-148`, `tools/opencode-worker/README.md:20-28`
+- **Problem:** owned_entry accepts only an MCP command whose server.ts argument matches the CURRENT checkout path. After moving a previously registered usr checkout, the original entry still points to the old path, so plan, install and remove all reject it as an unrelated server. Reproduced in an isolated configuration fixture: old owned server.ts path, new script location, plan exits 1 with 'already names a different MCP server'. This breaks documented resync-after-move recovery.
+- **Recommendation:** Separate stable ownership identity from a mutable checkout pathname (e.g., a managed stable launcher plus an explicit record) and update only entries verifiably owned by usr. Cover move/reinstall/uninstall and foreign same-name server cases.
+- **Fix with:** `durable-state`
+- **Effort:** S
+
+### USR-30 · P2 · Worker fallback treats ordinary assistant text as a quota error
+
+- **Area:** Errors
+- **Where:** `tools/opencode-worker/src/hybrid.ts:24`, `tools/opencode-worker/src/hybrid.ts:116-117`, `tools/opencode-worker/src/hybrid.ts:183-195`, `tools/opencode-worker/test/hybrid.test.ts:106-128`
+- **Problem:** On any terminal nonsuccess OpenCode state, quota(last_assistant_text) is sufficient to trigger Command Code fallback. A task that fails for an unrelated reason while describing a 'quota' code/test failure can therefore start a second paid executor on an untouched tree even though no provider quota was exceeded. The mock tests cover the positive keyword case, not a false positive.
+- **Recommendation:** Classify quota exhaustion from structured provider/API failures, never arbitrary assistant text; represent recognized failure reasons as explicit variants and test a failed worker whose text mentions quota without quota exhaustion.
+- **Fix with:** `make-invalid-states-unrepresentable`
+- **Effort:** S
+
+### USR-31 · P2 · A broken cmd executable can crash the entire Claude MCP bridge
+
+- **Area:** Errors
+- **Where:** `tools/opencode-worker/src/command.ts:36-49`, `tools/opencode-worker/src/hybrid.ts:91-96`, `tools/opencode-worker/test/command.test.ts:9-52`
+- **Problem:** cmdAvailable checks only X_OK, so an executable cmd with a missing shebang interpreter passes. spawn then returns a ChildProcess with pid undefined; startCommand throws BEFORE registering its error listener. Node emits an unhandled child 'error' on the next tick, terminating the MCP process rather than returning a normal failed worker result. Reproduced with a temporary executable using a nonexistent shebang (Node exits status 1).
+- **Recommendation:** Register spawn error/close handlers before inspecting pid; represent launch-admitted vs spawn-failed explicitly, return a terminal error instead of crashing the MCP server, and test ENOENT/invalid shebang under a fake cmd.
+- **Fix with:** `lifecycle-concurrency`
+- **Effort:** S
 
 ### USR-18 · P3 · Unsegmented scripts match only whole runs
 
@@ -47,12 +119,11 @@ Next: 25
 - **Fix with:** do
 - **Effort:** M
 
+### USR-32 · P3 · Concurrent campaign allowances can overwrite each other
 
-### USR-24 · P2 · Bootstrap pinned Python on minimal Alpine before the sync DAG
-
-- **Area:** Sync / portability
-- **Where:** `sync` POSIX bootstrap, `tools/sync/main.py`, `tools/sync/install.sh`, `host/setup-linux`
-- **Problem:** The Python DAG runner needs Python 3.9+ before it can execute. macOS can use the existing shell-based `python-build` installer to install the managed runtime, but Alpine currently needs an already runnable Python. Production `python-build` Linux artifacts still list `libgcc` in their runtime requirements; automatically fetching those binaries would introduce an unwanted system dependency. Alpine provisioning and fresh `sh sync` therefore do not yet have a self-contained bootstrap guarantee.
-- **Recommendation:** After `laputa-systems/python-build` removes the actual `libgcc_s.so.1` dependency from both Linux musl archives and proves it in minimal-container smoke tests, implement a minimal POSIX-shell bootstrap for Alpine x86_64 and aarch64. Pin the release artifact identity and SHA-256 independently of release metadata, verify before extraction, reject unsafe archive paths, stage and atomically switch the Python runtime, and smoke-test `sqlite3`/`ssl` before invoking the Python DAG. Avoid adding `libgcc`, a package-manager Python, or a second installer engine. Test fresh Alpine without Python or libgcc, interrupted download, existing installations, and second-run idempotency.
-- **Fix with:** `sync` bootstrap and python-build release qualification
-- **Effort:** M
+- **Area:** Concurrency
+- **Where:** `dotfiles/base/.local/bin/codex-campaign-closeout.py:132-168`, `dotfiles/base/.local/bin/codex-campaign-closeout.py:171-197`, `dotfiles/base/.local/bin/codex-campaign-closeout.py:252-274`, `dotfiles/base/.local/bin/codex-campaign-closeout.py:337-356`
+- **Problem:** Two concurrently invoked allow commands both load the current allowed dictionary, add different worktrees locally, then atomically replace the same state file without a lock or generation check. The last writer discards the other's allowance; the Stop hook later blocks on a worktree that was reported as allowed. This is a source-grounded concurrent interleaving, not yet exercised as a two-process fixture.
+- **Recommendation:** Serialize allow updates or use a compare-and-retry revision/lock around load-modify-save, and reproduce two processes adding disjoint allowances with a barrier. Keep the existing state validation.
+- **Fix with:** `durable-state`
+- **Effort:** S
