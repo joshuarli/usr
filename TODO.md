@@ -20,15 +20,6 @@ Next: 33
 - **Fix with:** `sync` bootstrap and python-build release qualification
 - **Effort:** M
 
-### USR-26 · P2 · Concurrent DeepSeek status/resume calls can double-spawn workers and lose session transitions
-
-- **Area:** Concurrency
-- **Where:** `tools/opencode-worker/src/hybrid.ts:16-20`, `tools/opencode-worker/src/hybrid.ts:78-89`, `tools/opencode-worker/src/hybrid.ts:120-132`, `tools/opencode-worker/src/hybrid.ts:178-240`, `tools/opencode-worker/src/server.ts:151-155`
-- **Problem:** A persisted Session uses backend plus optional opencode_id/command_run/attempts. The MCP server executes requests concurrently. Two status calls can both load the OpenCode state before awaiting API status, both observe the same terminal quota failure and untouched worktree, then each spawn a Command Code worker. Both write the same ID.json.tmp, and concurrent resumes can lose attempt-count updates. This is a source-grounded reachable interleaving; the existing tests exercise only sequential transitions.
-- **Recommendation:** Use a tagged persisted session lifecycle with a single transition owner; serialize each session's status/fallback/resume/cancel through a per-session lock or atomic claim/revision before external side effects. Re-read state under that guard, use unique temporary files and atomic persistence, and add Promise.all overlap tests.
-- **Fix with:** `lifecycle-concurrency`
-- **Effort:** M
-
 ### USR-18 · P3 · Unsegmented scripts match only whole runs
 
 - **Area:** Agent learning

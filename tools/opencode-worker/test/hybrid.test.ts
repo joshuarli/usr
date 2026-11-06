@@ -151,3 +151,74 @@ test("reject invalid scope, unapproved tier, and dirty worktree", async () => {
     await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
   } finally { f.close() }
 })
+
+test("two concurrent status calls cannot spawn duplicate Command Code fallbacks", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.fail("OpenCode usage allowance exhausted")
+    const results = await Promise.allSettled([
+      bridge.status(f.cwd, task.session_id),
+      bridge.status(f.cwd, task.session_id),
+    ])
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1)
+    const refused = results.find((r) => r.status === "rejected")
+    assert.ok(refused && refused.status === "rejected")
+    assert.match(String(refused.reason), /transition in progress/)
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 1)
+    assert.equal((await bridge.status(f.cwd, task.session_id)).backend, "command-code")
+  } finally { f.close() }
+})
+
+test("overlapping corrections can admit at most one new Command Code run", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    m.omitModels()
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.done()
+    const results = await Promise.allSettled([
+      bridge.resume(f.cwd, task.session_id, "first correction"),
+      bridge.resume(f.cwd, task.session_id, "second correction"),
+    ])
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1)
+    assert.equal(results.filter((r) => r.status === "rejected").length, 1)
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 2)
+  } finally { f.close() }
+})
+
+test("interrupted Command Code launch remains a persisted blocked transition", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    m.omitModels()
+    let launched = 0
+    const bridge = makeHybridBridge(m.api, {
+      ...m.command,
+      start: () => { launched++; throw new Error("could not spawn cmd") },
+    })
+    await assert.rejects(bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README"), /could not spawn/)
+    const stateDir = join(f.root, ".work", "worker-bridge")
+    const { readdirSync } = await import("node:fs")
+    const ids = readdirSync(stateDir).filter((name) => /^usrw_.*\.json$/.test(name))
+    assert.equal(ids.length, 1)
+    const sessionId = ids[0].replace(/\.json$/, "")
+    const status = await bridge.status(f.cwd, sessionId)
+    assert.equal(status.state, "blocked_transition")
+    assert.equal(status.backend, "command-transition")
+    assert.equal(launched, 1)
+    await assert.rejects(bridge.resume(f.cwd, sessionId, "retry"), /transition interrupted/)
+  } finally { f.close() }
+})
+
+test("ambiguous OpenCode prompt admission never launches a second paid worker", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const api = { ...m.api, prompt: async () => { throw new Error("quota exhausted") } }
+    const bridge = makeHybridBridge(api, m.command)
+    await assert.rejects(bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README"), /prompt admission failed/)
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
+  } finally { f.close() }
+})

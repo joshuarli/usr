@@ -36,6 +36,8 @@ Opus prepares a clean separate linked worktree at `<repo>/.work/wt/<slice>` and 
 
 The **one Opus review** uses `git diff --check` and `git diff <base_revision>` plus untracked files. Check the intended change, ownership, obvious breakage, and unrelated churn. One same-scope `worker_resume` correction may follow if the attempt limit permits; otherwise reject or park. Workers never commit, merge, push, or remove worktrees.
 
+Each bridge session serializes status, correction, cancellation and fallback using an exclusive per-session lock directory. A crash may leave a lock or persisted `command-transition` state: these deliberately block automatic retry until an operator checks whether a worker launched. Concurrent calls cannot initiate duplicate fallbacks. Ambiguous OpenCode prompt admission fails closed instead of starting another paid executor.
+
 Fallback requires an untouched tree. If OpenCode wrote anything before exhausting quota, the bridge returns `blocked_partial_work` instead of running Command Code over partial changes. Command Code failures do not fall back to a third provider. Bridge state and Command Code NDJSON logs persist under the ignored `<repo>/.work/worker-bridge/`, allowing completed sessions to be inspected after MCP restarts. Old child PIDs are never blindly signaled.
 
 **Isolation limitation:** this is a Git scope check, not an OS sandbox; ignored-file changes or host writes elsewhere might not be detected. Use `sbx` or a VM for stronger containment.
