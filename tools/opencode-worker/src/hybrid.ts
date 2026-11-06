@@ -4,6 +4,7 @@ import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, 
 import { dirname, join, resolve } from "node:path"
 import { checkedWorktree, GO_MODEL, makeWorkerBridge, type OpenCodePort } from "./bridge.ts"
 import { cancelCommand, COMMAND_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
+import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 export type Tier = "scout" | "mechanic" | "worker" | "expert" | "god"
 export type Scope = {
@@ -15,7 +16,7 @@ export type Scope = {
 }
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
-  backend: "opencode" | "command-code" | "command-transition"; attempts: number
+  backend: "opencode" | "opencode-admitting" | "command-code" | "command-transition"; attempts: number
   opencode_id?: string; command_run?: CommandRun; fallback_reason?: string
 }
 const EFFORT: Record<Tier, Effort> = {
@@ -92,7 +93,7 @@ function load(cwd: unknown, id: unknown): Session {
   if (!Number.isInteger(s.attempts) || s.attempts < 0 ||
     (s.backend === "opencode" && typeof s.opencode_id !== "string") ||
     (s.backend === "command-code" && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
-    !["opencode", "command-code", "command-transition"].includes(s.backend)) {
+    !["opencode", "opencode-admitting", "command-code", "command-transition"].includes(s.backend)) {
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   }
   return s
@@ -152,6 +153,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
   function fallback(s: Session, reason: string): Session {
     if (!command.available()) throw new Error("OpenCode " + reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
+    ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
     const dir = stateDir(s.cwd)
     s.backend = "command-transition"
     s.command_run = undefined
@@ -182,12 +184,23 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const task = required(brief, "brief", 32000)
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, backend: "opencode", attempts: 0 }
+        task, backend: "opencode-admitting", attempts: 0 }
+      const leaseDir = stateDir(dir)
+      claimWorktree(leaseDir, dir, s.id)
+      try { save(s) } catch (error) {
+        releaseWorktree(leaseDir, dir, s.id)
+        throw error
+      }
       const worker = makeWorkerBridge(api, modelFor(tierInput))
       let available: boolean
       try { available = (await worker.modelCheck(dir)).available }
       catch (e) {
-        if (!quota(e)) throw e
+        if (!quota(e)) {
+          // No executor is started by model discovery. Safe to end this admission.
+          rmSync(pathFor(dir, s.id), { force: true })
+          releaseWorktree(leaseDir, dir, s.id)
+          throw e
+        }
         fallback(s, "quota-limited model check")
         return { session_id: s.id, backend: s.backend, status: "admitted" }
       }
@@ -198,12 +211,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       try {
         const admitted = await worker.start(dir, s.title, prompt(s), tierInput === "scout")
         s.opencode_id = admitted.session_id
+        s.backend = "opencode"
         s.attempts = 1
         save(s)
         return { session_id: s.id, backend: s.backend, status: "admitted", model: modelFor(s.tier) }
       } catch (e) {
         // A created OpenCode session may still execute; never start a second worker without proving it did not.
-        if (String(e).includes("created but prompt admission failed")) throw e
+        if (String(e).includes("created but prompt admission failed"))
+          throw new Error(String(e) + "; worktree lease retained for session " + s.id)
         if (!quota(e)) throw e
         fallback(s, "OpenCode quota-limited admission")
         return { session_id: s.id, backend: s.backend, status: "admitted" }
@@ -212,7 +227,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async status(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       let state: string, last_assistant_text: string | null, error: unknown = null, usage: unknown = null
-      if (s.backend === "opencode") {
+      if (s.backend === "opencode-admitting") {
+        state = "blocked_admission"
+        last_assistant_text = null
+        error = "OpenCode admission interrupted or uncertain; inspect this session before recovery"
+      } else if (s.backend === "opencode") {
         if (!s.opencode_id) throw new Error("Missing OpenCode session")
         const response = await makeWorkerBridge(api, modelFor(s.tier)).status(s.cwd, s.opencode_id)
         state = typeof response.state === "string" ? response.state : "unknown"
@@ -243,9 +262,16 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const changed_paths = changes(s.cwd, s.scope.base_revision)
       const out_of_scope_paths = outside(changed_paths, s.scope.writable_paths)
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
+      // A verified terminal response releases worktree admission, not session history.
+      // Unknown/interrupted/queued work remains leased until explicitly inspected.
+      if (["succeeded", "failed", "cancelled", "canceled"].includes(state)) {
+        const directory = stateDir(s.cwd)
+        if (activeWorktreeOwner(directory, s.cwd) === s.id)
+          releaseWorktree(directory, s.cwd, s.id)
+      }
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
-        model: s.backend === "opencode" ? modelFor(s.tier) : COMMAND_MODEL,
+        model: s.backend === "opencode" || s.backend === "opencode-admitting" ? modelFor(s.tier) : COMMAND_MODEL,
         effort: EFFORT[s.tier], state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
@@ -261,9 +287,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
-      if (s.backend === "command-transition") throw new Error("Worker transition interrupted; inspect session before resuming")
+      if (s.backend === "command-transition" || s.backend === "opencode-admitting")
+        throw new Error("Worker transition interrupted; inspect session before resuming")
       if (s.backend === "opencode") {
         if (!s.opencode_id) throw new Error("Missing OpenCode session")
+        ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
         save(s)
         await makeWorkerBridge(api, modelFor(s.tier)).resume(s.cwd, s.opencode_id, "Same-scope correction only: " + correction)
@@ -273,6 +301,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         if (previous.state === "running" || previous.state === "unknown_or_interrupted")
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
+        ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
         s.backend = "command-transition"
         s.command_run = undefined

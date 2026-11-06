@@ -20,15 +20,6 @@ Next: 38
 - **Fix with:** `sync` bootstrap and python-build release qualification
 - **Effort:** M
 
-### USR-37 · P2 · Concurrent worker starts can claim the same clean worktree
-
-- **Area:** Concurrency
-- **Where:** `tools/opencode-worker/src/bridge.ts:58-76`, `tools/opencode-worker/src/hybrid.ts:101-117`, `tools/opencode-worker/src/hybrid.ts:178-211`, `tools/opencode-worker/test/hybrid.test.ts:74-235`
-- **Problem:** Source-grounded reachable interleaving (unproven against a live backend): two simultaneous `worker_start` calls pass `checkedWorktree(...,true)` and the clean `git status` guard (`hybrid.ts:178-185`) before either performs work. Both then await `modelCheck` (`:188`), create different session IDs and can admit concurrent OpenCode prompts to the same worktree (`:198-203`). The exclusive locks cover only later status/resume/cancel operations keyed by session ID (`:101-117`), so they do not exclude two starts on the same checkout. Both workers can write the same allowed paths and invalidate each other's acceptance proof. Current tests cover overlapping status/resume requests, not starts.
-- **Recommendation:** Introduce a per-worktree admission/active lease acquired before the first asynchronous model check; release or transition it explicitly when an executor reaches a verified terminal state. If concurrent scouts are allowed, encode that as a separate read-only admission mode. Add `Promise.all` tests that overlap two writer starts, plus restart/recovery and separate-worktree concurrency tests.
-- **Fix with:** `lifecycle-concurrency`
-- **Effort:** M
-
 ### USR-18 · P3 · Unsegmented scripts match only whole runs
 
 - **Area:** Agent learning

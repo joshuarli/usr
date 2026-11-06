@@ -222,3 +222,98 @@ test("ambiguous OpenCode prompt admission never launches a second paid worker", 
     assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
   } finally { f.close() }
 })
+
+test("overlapping worker starts admit at most one writer in the same worktree", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    let releaseModels: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { releaseModels = resolve })
+    const api: OpenCodePort = { ...m.api, models: async (input) => {
+      await gate
+      return m.api.models(input)
+    } }
+    const bridge = makeHybridBridge(api, m.command)
+    const first = bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
+    releaseModels()
+    const admitted = await first
+    assert.equal(admitted.backend, "opencode")
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"title"')).length, 1)
+  } finally { f.close() }
+})
+
+test("a verified terminal result releases the worktree; old resume cannot race a new owner", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const first = await bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
+    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "succeeded")
+    const second = await bridge.start(f.cwd, "second", "worker", f.scope, "Edit README")
+    assert.notEqual(second.session_id, first.session_id)
+    await assert.rejects(bridge.resume(f.cwd, first.session_id, "more feedback"), /active for worker/)
+  } finally { f.close() }
+})
+
+test("a restarted bridge preserves an active admission lease until terminal status", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const first = await makeHybridBridge(m.api, m.command).start(f.cwd, "first", "worker", f.scope, "Edit README")
+    const restarted = makeHybridBridge(m.api, m.command)
+    await assert.rejects(restarted.start(f.cwd, "another", "worker", f.scope, "Edit README"), /active worker/)
+    assert.equal((await restarted.status(f.cwd, first.session_id)).state, "succeeded")
+    const next = await restarted.start(f.cwd, "next", "worker", f.scope, "Edit README")
+    assert.notEqual(next.session_id, first.session_id)
+  } finally { f.close() }
+})
+
+test("independent worktrees remain independently admissible", async () => {
+  const f = fixture()
+  try {
+    const cwd2 = join(f.root, ".work", "wt", "b")
+    git(f.root, "worktree", "add", "-qb", "lane-b", cwd2)
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const scope2 = { ...f.scope, base_revision: git(cwd2, "rev-parse", "HEAD") }
+    const [first, second] = await Promise.all([
+      bridge.start(f.cwd, "one", "worker", f.scope, "Edit README"),
+      bridge.start(cwd2, "two", "worker", scope2, "Edit README"),
+    ])
+    assert.notEqual(first.session_id, second.session_id)
+  } finally { f.close() }
+})
+
+test("ambiguous admission retains its worktree lease and is inspectable after restart", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const api: OpenCodePort = { ...m.api, prompt: async () => { throw new Error("quota exhausted") } }
+    const bridge = makeHybridBridge(api, m.command)
+    await assert.rejects(bridge.start(f.cwd, "uncertain", "worker", f.scope, "Edit README"), /lease retained for session/)
+    const { readdirSync } = await import("node:fs")
+    const state = join(f.root, ".work", "worker-bridge")
+    const ids = readdirSync(state).filter((name) => /^usrw_.*\.json$/.test(name))
+    assert.equal(ids.length, 1)
+    const sessionID = ids[0].replace(/\.json$/, "")
+    const restarted = makeHybridBridge(m.api, m.command)
+    const status = await restarted.status(f.cwd, sessionID)
+    assert.equal(status.state, "blocked_admission")
+    await assert.rejects(restarted.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
+    await assert.rejects(restarted.resume(f.cwd, sessionID, "retry"), /transition interrupted/)
+  } finally { f.close() }
+})
+
+test("cancel acknowledgement does not release a worktree until the backend is terminal", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    assert.equal((await bridge.cancel(f.cwd, first.session_id)).interrupted, true)
+    await assert.rejects(bridge.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
+    m.fail("ordinary failure", false)
+    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "failed")
+    const second = await bridge.start(f.cwd, "two", "worker", f.scope, "Edit README")
+    assert.notEqual(second.session_id, first.session_id)
+  } finally { f.close() }
+})
