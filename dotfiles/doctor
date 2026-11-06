@@ -57,7 +57,7 @@ if sh "$root/dl" --list > "$scratch/tools" 2> "$scratch/tool-errors"; then
     tool_missing=0
     while IFS= read -r tool; do
         [ -n "$tool" ] || continue
-        case "$tool" in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; *) launchers=$tool ;; esac
+        case "$tool" in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; shuck) launchers=shellcheck ;; *) launchers=$tool ;; esac
         for launcher in $launchers; do
             if [ ! -x "$target/.local/bin/$launcher" ]; then
                 printf 'missing: %s (~/.local/bin/%s)\n' "$tool" "$launcher"

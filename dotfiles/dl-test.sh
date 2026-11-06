@@ -297,6 +297,34 @@ FEED
             exit 1
         fi
         ;;
+    https://github.com/joshuarli/shck/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-11-05T10:00:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/joshuarli/shck/releases/tag/release-shuck-test-1"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/joshuarli/shck/releases/download/release-shuck-test-1/shuck-aarch64-apple-darwin.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: shuck-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'shuck-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/joshuarli/shck/releases/download/release-shuck-test-1/shuck-x86_64-unknown-linux-musl-static.zip)
+        if [ "$headers" = - ]; then
+            printf '%s\n' 'ETag: shuck-static-test-etag'
+        elif [ -n "$output" ]; then
+            printf '%s' 'shuck-static-test-zip' > "$output"
+        else
+            exit 1
+        fi
+        ;;
     https://github.com/laputa-systems/zzz/releases.atom)
         cat <<'FEED'
 <feed>
@@ -608,6 +636,8 @@ case "$mode" in
             fz-x86_64-unknown-linux-musl-static) printf '%s' 'fz-static-test-binary' ;;
             soulseek-rs-aarch64-apple-darwin) printf '%s' 'soulseek-rs-test-binary' ;;
             soulseek-rs-x86_64-unknown-linux-musl-static) printf '%s' 'soulseek-rs-static-test-binary' ;;
+            shuck-aarch64-apple-darwin) printf '%s' 'shuck-test-binary' ;;
+            shuck-x86_64-unknown-linux-musl-static) printf '%s' 'shuck-static-test-binary' ;;
             *) exit 1 ;;
         esac
         ;;
@@ -1267,6 +1297,10 @@ case "$default_targets" in
     *' uv '*) ;;
     *) printf 'uv is missing from the default dl targets\n' >&2; exit 1 ;;
 esac
+case "$default_targets" in
+    *'set -- "$@" shuck'*) ;;
+    *) printf 'shuck is missing from the default dl targets\n' >&2; exit 1 ;;
+esac
 )
 end_case
 
@@ -1645,7 +1679,7 @@ DL_PROFILE=server
 export DL_PROFILE
 targets=$(HOME="$test_root/server-profile-home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
-for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 uv gh zzz; do
+for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 uv gh zzz shuck; do
     printf '%s\n' "$targets" | grep -qx "$expected" || {
         printf 'server profile is missing %s\n' "$expected" >&2
         exit 1
@@ -2269,6 +2303,50 @@ case "$output" in
 esac
 [ "$(cat "$fz_home/.local/bin/fz")" = 'fz-static-test-binary' ]
 [ "$(cat "$fz_home/.local/state/dl/fz")" = 'fz-static-test-etag' ]
+)
+end_case
+
+begin_case "shuck installs the release as shellcheck and stays current"
+( set -e
+shuck_home="$test_root/shuck-home"
+if output=$(HOME="$shuck_home" XDG_STATE_HOME="$shuck_home/.local/state" \
+    TMPDIR="$test_root/tmp" DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 \
+    run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" shuck 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'Installed '"$shuck_home"'/.local/bin/shellcheck'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+[ "$(cat "$shuck_home/.local/bin/shellcheck")" = 'shuck-test-binary' ]
+[ "$(cat "$shuck_home/.local/state/dl/shellcheck")" = 'shuck-test-etag' ]
+[ ! -e "$shuck_home/.local/bin/shuck" ]
+if output=$(HOME="$shuck_home" XDG_STATE_HOME="$shuck_home/.local/state" \
+    TMPDIR="$test_root/tmp" DL_TEST_OS=Darwin DL_TEST_ARCH=arm64 \
+    run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" shuck 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+case "$output" in
+    *'shellcheck is current (release-shuck-test-1)'*) ;;
+    *) printf '%s\n' "$output" >&2; exit 1 ;;
+esac
+shuck_linux_home="$test_root/shuck-linux-home"
+if output=$(HOME="$shuck_linux_home" XDG_STATE_HOME="$shuck_linux_home/.local/state" \
+    TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+    run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" shuck 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(cat "$shuck_linux_home/.local/bin/shellcheck")" = 'shuck-static-test-binary' ]
+[ "$(cat "$shuck_linux_home/.local/state/dl/shellcheck")" = 'shuck-static-test-etag' ]
 )
 end_case
 

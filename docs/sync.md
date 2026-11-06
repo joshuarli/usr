@@ -30,4 +30,6 @@ The `host/macos/` directory is not part of the layer sync. `agent-learn` and its
 
 `sh dl zzz` installs the `zzz` CLI from the newest `release-*` release of `laputa-systems/zzz` (discovered through `releases.atom`) as a raw static binary for Linux `x86_64` and `aarch64` musl static; the release publishes no `SHA256SUMS`. `zzz` is in the default target set on Linux and skipped on other platforms. `encode` needs macOS and exits early elsewhere.
 
+`sh dl shuck` installs the newest `release-*` prerelease of `joshuarli/shck` (discovered through `releases.atom`) for `aarch64-apple-darwin`, `x86_64-unknown-linux-musl-static`, or `aarch64-unknown-linux-musl-static`, and installs the binary as `~/.local/bin/shellcheck`; shuck runs its ShellCheck compatibility mode under that name. `shuck` is in the default target set on those three platforms and the Alpine server profile.
+
 Sync prunes a recorded link that points into a layer whose source is gone; `sh sync plan` lists these as `PRUNE`. A link copied from a layer symlink points elsewhere, so it stays, as do links `sh sync` did not create. Remove those yourself, or run `sh dotfiles/sym -d` on the layer before deleting the source. Test `sym` only with `-t <tmpdir>`; without it, `sym` targets `$HOME`.
