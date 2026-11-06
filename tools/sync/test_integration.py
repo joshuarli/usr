@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import sys
+import time
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +12,7 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parent
+sys.path.insert(0, str(SOURCE))
 SYNC = SOURCE.parents[1] / "sync"
 
 
@@ -27,6 +30,17 @@ class SyncIntegrationTests(unittest.TestCase):
         self._script("dotfiles/migrate-pinact.sh", "#!/bin/sh\nexit 0\n")
         self._script("tools/sync/install.sh", '''#!/bin/sh
 if [ "$1" = --list ]; then printf 'nodejs\\ncmd\\n'; exit 0; fi
+if [ "$1" = lease-tool ]; then
+  mkdir -p "$HOME/.local/bin" "$(dirname "$DL_OWNED_FILE")"
+  printf 'F\\t%s\\n' "$HOME/.local/bin/lease-tool" >> "$DL_OWNED_FILE"
+  touch "$HOME/installer-ready"
+  while [ ! -f "$HOME/installer-release" ]; do sleep 0.02; done
+  printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/lease-tool"
+  chmod +x "$HOME/.local/bin/lease-tool"
+  printf 'F\\t%s\\n' "$HOME/.local/bin/lease-tool" >> "$SYNC_OWNED_CLAIMS"
+  printf changed > "$SYNC_INSTALL_CHANGED_FILE"
+  exit 0
+fi
 printf '%s\\n' "$1" >> "$HOME/installed"
 mkdir -p "$HOME/.local/bin"
 case "$1" in nodejs) set -- node npm ;; esac
@@ -75,6 +89,53 @@ for name in "$@"; do printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$name"; 
         self.run_sync("links", success=False)
         self.assertEqual(self.root.joinpath("home/second").read_text(), "custom")
         self.assertFalse(self.root.joinpath("home/first").exists())
+
+    def test_link_and_tool_sync_share_one_interprocess_ownership_lease(self):
+        from ownership import records, read_manifest
+        source = self.root / "dotfiles/base/.profile"
+        source.write_text("source")
+        tool = subprocess.Popen(["sh", str(self.root / "sync"), "tools", "lease-tool"], env=self.env,
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ready = self.root / "home/installer-ready"
+        released = self.root / "home/installer-release"
+        link = None
+        try:
+            for _ in range(150):
+                if ready.exists(): break
+                self.assertIsNone(tool.poll(), "installer exited before readiness")
+                time.sleep(0.02)
+            self.assertTrue(ready.exists(), "installer did not reach locked state")
+            link = subprocess.Popen(["sh", str(self.root / "sync"), "links"], env=self.env,
+                                    text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(0.12)
+            self.assertIsNone(link.poll(), "link sync must block on tool's ownership lease")
+            self.assertFalse((self.root / "home/.profile").exists())
+        finally:
+            released.touch()
+            tool_out, tool_err = tool.communicate(timeout=12)
+            self.assertEqual(tool.returncode, 0, tool_out + tool_err)
+            if link is not None:
+                link_out, link_err = link.communicate(timeout=12)
+                self.assertEqual(link.returncode, 0, link_out + link_err)
+        ownership = self.root / "home/.local/state/sync/dl-owned"
+        found = records(ownership)
+        self.assertIn(("F", self.root / "home/.local/bin/lease-tool"), found)
+        self.assertIn(("F", self.root / "home/.profile"), found)
+        proofs = read_manifest(ownership)
+        self.assertIn(str(self.root / "home/.profile"), proofs)
+        self.assertIn(str(self.root / "home/.local/bin/lease-tool"), proofs)
+
+    def test_symlinked_ownership_lease_is_refused(self):
+        self.root.joinpath("dotfiles/base/.profile").write_text("source")
+        state = self.root / "home/.local/state/sync"
+        state.mkdir(parents=True)
+        outside = self.root / "foreign-lock"
+        outside.write_text("keep")
+        (state / "dl-owned.lock").symlink_to(outside)
+        result = self.run_sync("links", success=False)
+        self.assertIn("failed", result.stdout.lower())
+        self.assertEqual(outside.read_text(), "keep")
+        self.assertFalse((self.root / "home/.profile").exists())
 
     def test_plan_does_not_change_home(self):
         self.assertIn("nodejs", self.run_sync("list").stdout)

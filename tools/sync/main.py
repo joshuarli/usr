@@ -15,7 +15,7 @@ from dag import Graph, GraphError, Probe, Task
 from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
-from ownership import capture_new, records
+from ownership import capture_new, records, ownership_lock
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "tools/sync/install.sh"
@@ -100,14 +100,14 @@ def link_status(ctx: Context) -> Probe:
 def apply_links(ctx: Context) -> None:
     # The retired pinact launcher is the only pre-link migration; do not run
     # unrelated host setup from the filesystem link task.
-    ctx.state.parent.mkdir(parents=True, exist_ok=True)
-    required(command(ctx, "sh", str(ctx.root / "dotfiles/migrate-pinact.sh"),
-                     str(ctx.link_target), str(ctx.state)), "pinact migration")
-    plan = _link_plan(ctx)
-    if plan.conflicts:
-        raise LinkApplyError("link conflicts: " + "; ".join(plan.conflicts))
-    for line in apply_link_plan(plan, ctx.state):
-        print(line)
+    with ownership_lock(ctx.state):
+        required(command(ctx, "sh", str(ctx.root / "dotfiles/migrate-pinact.sh"),
+                         str(ctx.link_target), str(ctx.state)), "pinact migration")
+        plan = _link_plan(ctx)
+        if plan.conflicts:
+            raise LinkApplyError("link conflicts: " + "; ".join(plan.conflicts))
+        for line in apply_link_plan(plan, ctx.state):
+            print(line)
 
 
 def installed(ctx: Context, tool: str) -> Probe:
@@ -117,23 +117,23 @@ def installed(ctx: Context, tool: str) -> Probe:
 
 
 def apply_tool(ctx: Context, tool: str) -> None:
-    before = records(ctx.state)
-    ctx.state.parent.mkdir(parents=True, exist_ok=True)
     (ctx.root / ".work/tmp").mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="sync-claims-", dir=ctx.root / ".work/tmp") as scratch:
-        claims = Path(scratch) / "claims"
-        changed = Path(scratch) / "changed"
-        required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
-                         extra={"DL_OWNED_FILE": str(ctx.state),
-                                "SYNC_OWNED_CLAIMS": str(claims),
-                                "SYNC_INSTALL_CHANGED_FILE": str(changed)}), f"install {tool}")
-        if changed.is_file() and claims.is_file():
-            owned = set()
-            for line in claims.read_text().splitlines():
-                kind, _, name = line.partition("\t")
-                if kind in ("F", "D") and name:
-                    owned.add((kind, Path(name)))
-            capture_new(ctx.state, before, owned)
+    with ownership_lock(ctx.state):
+        before = records(ctx.state)
+        with tempfile.TemporaryDirectory(prefix="sync-claims-", dir=ctx.root / ".work/tmp") as scratch:
+            claims = Path(scratch) / "claims"
+            changed = Path(scratch) / "changed"
+            required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
+                             extra={"DL_OWNED_FILE": str(ctx.state),
+                                    "SYNC_OWNED_CLAIMS": str(claims),
+                                    "SYNC_INSTALL_CHANGED_FILE": str(changed)}), f"install {tool}")
+            if changed.is_file() and claims.is_file():
+                owned = set()
+                for line in claims.read_text().splitlines():
+                    kind, _, name = line.partition("\t")
+                    if kind in ("F", "D") and name:
+                        owned.add((kind, Path(name)))
+                capture_new(ctx.state, before, owned)
 
 
 def bridge_status(ctx: Context) -> Probe:

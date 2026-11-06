@@ -7,13 +7,18 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ownership import fingerprint, manifest_path, read_manifest, records
+from ownership import fingerprint, manifest_path, read_manifest, records, ownership_lock
 
 if TYPE_CHECKING:
     from main import Context
 
 
 def uninstall(ctx: Context) -> None:
+    with ownership_lock(ctx.state):
+        _uninstall_locked(ctx)
+
+
+def _uninstall_locked(ctx: Context) -> None:
     from main import BRIDGE, command, required
 
     owner = ctx.state

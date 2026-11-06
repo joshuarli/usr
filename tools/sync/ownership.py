@@ -3,11 +3,34 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
 import stat
 import tempfile
+
+
+@contextmanager
+def ownership_lock(ownership: Path):
+    """Cross-process writer lease for the legacy paths and verified manifest.
+
+    Acquire before *reading* records; hold through the last persist/installer
+    operation. Never unlink this lock file: unlinking can split the lease into
+    separate inodes and allow concurrent writers.
+    """
+    ownership.parent.mkdir(parents=True, exist_ok=True)
+    lockfile = Path(str(ownership) + ".lock")
+    fd = os.open(lockfile, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def records(path: Path) -> set[tuple[str, Path]]:

@@ -20,15 +20,6 @@ Next: 38
 - **Fix with:** `sync` bootstrap and python-build release qualification
 - **Effort:** M
 
-### USR-35 · P2 · Concurrent link and tool sync silently discard ownership claims
-
-- **Area:** Concurrency
-- **Where:** `tools/sync/link_apply.py:41-47`, `tools/sync/link_apply.py:66-73`, `tools/sync/link_apply.py:24-35`, `tools/sync/ownership.py:77-104`, `tools/sync/main.py:119-136`, `tools/sync/dag.py:81-128`
-- **Problem:** Reachable, reproduced by injecting a second writer's F-record append between the Python link manager's initial `records()` read and `_save_records()` atomic replacement. The link manager writes its earlier in-memory set and erases the new tool record, leaving the installed tool untracked. Two independent CLI invocations, `sync links` and `sync tools NAME`, have no common interprocess lock. The DAG's in-process resource exclusions do not serialize separate sync processes; the JSON fingerprint manifest has an analogous read/modify/replace race. The loss affects safe uninstall and repair after a later sync.
-- **Recommendation:** Use one interprocess ownership-state lock and a single transaction boundary around reading, updating and committing both the path records and fingerprint manifest (or migrate to per-object atomic records). Preserve old on-disk state and ensure shell leaf installers participate in the same locking protocol. Exercise two competing processes with a barrier and assert no claims disappear.
-- **Fix with:** `durable-state`
-- **Effort:** M
-
 ### USR-36 · P2 · Successful kache setup never transitions into managed ownership
 
 - **Area:** Operability

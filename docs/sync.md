@@ -67,3 +67,7 @@ Before any mutation, the planner checks the complete set for duplicate or overla
 ### Interrupted link installation recovery
 
 New link and replacement writes stage a uniquely identified symlink in the destination directory, persist a small inode-identified journal in the sync state directory, and create the destination via an exclusive hard link. Ownership records and their fingerprints are durably written before the staged inode and journal are retired. If interrupted after destination creation but before recording ownership, `sync plan` reports `RECOVER`, and `sync links` recovers only the same staged inode; a foreign replacement is never adopted. A crash before journaling may leave an inert temporary stage symlink requiring manual cleanup, but cannot create an untracked destination. Inspect journal or filesystem conflicts rather than deleting arbitrary pending files.
+
+### Ownership writer serialization
+
+Every public `sync links`, `sync tools NAME`, and `sync uninstall` writer acquires a blocking POSIX advisory `flock` on the stable `dl-owned.lock` file before reading ownership records. It holds the lease until the corresponding filesystem and manifest updates complete, including the legacy tool installer subprocess. The lease is deliberately never unlinked: deleting it while another process holds an open descriptor could split the lock into independent inodes. Plans and doctor remain read-only. Invoke the installer through the public `sync` entrypoint; bypassing it bypasses its ownership lease.
