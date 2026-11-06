@@ -71,3 +71,7 @@ New link and replacement writes stage a uniquely identified symlink in the desti
 ### Ownership writer serialization
 
 Every public `sync links`, `sync tools NAME`, and `sync uninstall` writer acquires a blocking POSIX advisory `flock` on the stable `dl-owned.lock` file before reading ownership records. It holds the lease until the corresponding filesystem and manifest updates complete, including the legacy tool installer subprocess. The lease is deliberately never unlinked: deleting it while another process holds an open descriptor could split the lock into independent inodes. Plans and doctor remain read-only. Invoke the installer through the public `sync` entrypoint; bypassing it bypasses its ownership lease.
+
+### Kache ownership
+
+A freshly installed kache binary under `CARGO_HOME/bin/kache` is now recorded as a managed `K` object with a content fingerprint. A pre-existing foreign kache is left in place and never adopted or uninstalled. The installer and ownership claim run under the shared sync writer lease; uninstall validates the live kache fingerprint before invoking the dedicated `setup-kache uninstall --purge` cleanup. An old path-only kache record remains untrusted until sync actually performs a verified install.

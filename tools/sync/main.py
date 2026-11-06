@@ -15,7 +15,7 @@ from dag import Graph, GraphError, Probe, Task
 from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
-from ownership import capture_new, records, ownership_lock
+from ownership import capture_new, records, ownership_lock, fingerprint, read_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "tools/sync/install.sh"
@@ -169,15 +169,46 @@ def alpine_apply(ctx: Context) -> None:
     required(command(ctx, "sh", str(ctx.root / "host/setup-linux")), "Alpine host setup")
 
 
+def kache_install_path(ctx: Context) -> Path:
+    cargo_home = Path(ctx.env.get("CARGO_HOME", str(ctx.home / ".cargo")))
+    if not cargo_home.is_absolute():
+        raise ValueError("CARGO_HOME must be an absolute path")
+    binary = cargo_home / "bin/kache"
+    if not binary.is_relative_to(ctx.home):
+        raise ValueError("managed kache must be installed beneath HOME")
+    return binary
+
+
 def kache_status(ctx: Context) -> Probe:
-    binary = Path(ctx.env.get("KACHE", str(ctx.home / ".cargo/bin/kache")))
+    binary = Path(ctx.env.get("KACHE", str(kache_install_path(ctx))))
     return Probe(os.access(binary, os.X_OK), "kache installed" if binary.is_file() else "kache missing")
 
 
 def kache_apply(ctx: Context) -> None:
     if ctx.platform == "linux" and not (shutil.which("rustup") or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK)):
         raise RuntimeError("rustup is required for kache; install it before enabling this task")
-    required(command(ctx, "sh", str(ctx.root / "dotfiles/base/.local/bin/setup-kache")), "kache setup")
+    binary = kache_install_path(ctx)
+    if "KACHE" in ctx.env and Path(ctx.env["KACHE"]) != binary:
+        raise RuntimeError("KACHE override differs from the managed kache install path")
+    with ownership_lock(ctx.state):
+        before = records(ctx.state)
+        existed = binary.exists() or binary.is_symlink()
+        if existed:
+            proof = read_manifest(ctx.state).get(str(binary))
+            identity = fingerprint(binary, "K")
+            if ("K", binary) not in before or identity is None or proof != {"kind": "K", "fingerprint": identity}:
+                raise RuntimeError(f"refusing to adopt pre-existing or modified kache: {binary}")
+        result = command(ctx, "sh", str(ctx.root / "dotfiles/base/.local/bin/setup-kache"))
+        required(result, "kache setup")
+        if not binary.is_file() or binary.is_symlink() or not os.access(binary, os.X_OK):
+            raise RuntimeError(f"kache setup did not install a regular executable: {binary}")
+        ctx.state.parent.mkdir(parents=True, exist_ok=True)
+        if ("K", binary) not in before:
+            with ctx.state.open("a") as stream:
+                stream.write(f"K\t{binary}\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        capture_new(ctx.state, before, {("K", binary)})
 
 
 def is_alpine() -> bool:

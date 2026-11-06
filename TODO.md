@@ -20,15 +20,6 @@ Next: 38
 - **Fix with:** `sync` bootstrap and python-build release qualification
 - **Effort:** M
 
-### USR-36 · P2 · Successful kache setup never transitions into managed ownership
-
-- **Area:** Operability
-- **Where:** `tools/sync/main.py:172-180`, `tools/sync/main.py:238-243`, `tools/sync/uninstall.py:19-38`, `tools/sync/uninstall.py:50-60`, `dotfiles/base/.local/bin/setup-kache:163-214`, `tools/sync/test_uninstall.py:36-101`
-- **Problem:** Reachable, reproduced with a stubbed setup-kache command and disposable HOME: `kache_apply` successfully installs a `~/.cargo/bin/kache` executable but does not write any K ownership record or verified provenance; `sync uninstall` sees no K entry, never invokes `setup-kache uninstall --purge`, and leaves the binary plus kache-managed Cargo state. The inverse case, an old path-only K record without a fingerprint, causes the uninstall preflight to refuse the entire operation. Neither state has a completed managed-install→managed-uninstall transition.
-- **Recommendation:** Treat kache as a first-class typed managed resource: record verifiable provenance on a new installation (never adopt a pre-existing foreign executable), and call the dedicated reversible setup-kache uninstaller only for a still-proven owned installation. Add fresh install, pre-existing kache, legacy K record and uninstall round-trip fixtures.
-- **Fix with:** `durable-state`
-- **Effort:** S
-
 ### USR-37 · P2 · Concurrent worker starts can claim the same clean worktree
 
 - **Area:** Concurrency

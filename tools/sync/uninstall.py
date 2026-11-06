@@ -25,6 +25,10 @@ def _uninstall_locked(ctx: Context) -> None:
     entries = read_manifest(owner)
     inventory = sorted(records(owner), key=lambda x: (x[0], str(x[1])))
     for kind, path in inventory:
+        if kind == "K":
+            from main import kache_install_path
+            if path != kache_install_path(ctx):
+                raise RuntimeError(f"unrecognized kache ownership path: {path}")
         allowed = path.is_absolute() and (
             path.is_relative_to(ctx.home) or path.is_relative_to(Path("/Applications"))
         )
