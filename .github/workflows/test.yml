@@ -21,6 +21,13 @@ jobs:
         with:
           enable-cache: false
 
+      - name: Install agent-memory
+        shell: bash
+        run: |
+          venv="$GITHUB_WORKSPACE/.work/ci-home/d/agent-memory/.venv"
+          uv venv --python '>=3.15' "$venv"
+          uv pip install --python "$venv/bin/python" 'agent-memory @ git+https://github.com/joshuarli/agent-memory@8e9d2016329bc2d98e3d83de59ba870a157ff2b4'
+
       - name: Run repository checks
         shell: bash
         run: |
