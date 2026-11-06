@@ -29,15 +29,6 @@ Next: 33
 - **Fix with:** `lifecycle-concurrency`
 - **Effort:** M
 
-### USR-30 · P2 · Worker fallback treats ordinary assistant text as a quota error
-
-- **Area:** Errors
-- **Where:** `tools/opencode-worker/src/hybrid.ts:24`, `tools/opencode-worker/src/hybrid.ts:116-117`, `tools/opencode-worker/src/hybrid.ts:183-195`, `tools/opencode-worker/test/hybrid.test.ts:106-128`
-- **Problem:** On any terminal nonsuccess OpenCode state, quota(last_assistant_text) is sufficient to trigger Command Code fallback. A task that fails for an unrelated reason while describing a 'quota' code/test failure can therefore start a second paid executor on an untouched tree even though no provider quota was exceeded. The mock tests cover the positive keyword case, not a false positive.
-- **Recommendation:** Classify quota exhaustion from structured provider/API failures, never arbitrary assistant text; represent recognized failure reasons as explicit variants and test a failed worker whose text mentions quota without quota exhaustion.
-- **Fix with:** `make-invalid-states-unrepresentable`
-- **Effort:** S
-
 ### USR-31 · P2 · A broken cmd executable can crash the entire Claude MCP bridge
 
 - **Area:** Errors

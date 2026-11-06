@@ -67,7 +67,7 @@ function fake(cwd: string) {
     cancel: () => true,
   }
   return { api, command, calls,
-    fail: (text: string) => { status = "failed"; assistant = text; error = null },
+    fail: (text: string, providerError = true) => { status = "failed"; assistant = text; error = providerError ? { code: 429, message: text } : null },
     omitModels: () => { variants = [] }, done: () => { commandDone = true } }
 }
 
@@ -114,6 +114,20 @@ test("terminal OpenCode quota failure falls back only when no changes exist", as
     assert.equal(status.fallback_reason, "OpenCode quota/usage failure")
   } finally { f.close() }
 })
+test("an ordinary failed task mentioning quota in its prose never triggers a fallback", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.fail("The project's quota test failed for a local assertion; no provider error", false)
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.backend, "opencode")
+    assert.equal(status.state, "failed")
+    assert.equal(status.fallback_reason, null)
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
+  } finally { f.close() }
+})
+
 test("quota does not silently restart a partially edited worktree", async () => {
   const f = fixture()
   try {

@@ -186,7 +186,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         error = response.error
         usage = { cost_reported_usd: response.cost_reported_usd, tokens: response.tokens }
         if (state !== "running" && state !== "queued" && state !== "succeeded" &&
-          (quota(error) || quota(last_assistant_text))) {
+          quota(error)) {
           if (!untouched(s)) state = "blocked_partial_work"
           else {
             fallback(s, "OpenCode quota/usage failure")
