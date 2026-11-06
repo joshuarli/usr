@@ -53,3 +53,7 @@ Examples: `sh sync tools cmd` resolves Node.js first; `sh sync tools python3` re
 ### Safe uninstall provenance
 
 Newly installed objects are fingerprinted after the leaf installer confirms an actual change and declares the paths it owns. `sync uninstall` preflights every recorded file and directory against those fingerprints before removing any object, including Claude MCP registration. Unknown legacy path-only records and modified objects cause a fail-closed refusal; sync never silently adopts older objects as owned. Reinstalling/upgrading a tool through sync can establish fresh provenance for it. This deliberately favors protecting user data over removing ambiguous historical installations.
+
+### MCP checkout relocation
+
+`sync` persists a private fingerprint of its own Claude `usr-opencode-worker` registration under the sync state directory. A later checkout move updates this registered path without claiming other MCP servers; stale or foreign registrations with the same name are refused. Existing conventional `~/usr` registrations are accepted for migration, but unrelated similarly shaped entries are not.

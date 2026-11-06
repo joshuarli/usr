@@ -109,6 +109,50 @@ client.mkdir(parents=True, exist_ok=True)
         self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
                          ["usr-opencode-worker"]["command"], str(self.bin / "node"))
 
+    def test_relocated_checkout_keeps_owned_registration_and_credentials(self):
+        self.config.write_text(json.dumps({"account": {"token": "keep"}, "mcpServers": {"other": {"command": "other"}}}))
+        self.run_helper("install")
+        initial = json.loads(self.config.read_text())["mcpServers"]["usr-opencode-worker"]
+        new_root = self.root / "moved-checkout"
+        moved_script = new_root / "tools/sync/claude-worker.py"
+        moved_script.parent.mkdir(parents=True)
+        shutil.copy2(HELPER, moved_script)
+        moved_project = new_root / "tools/opencode-worker"
+        (moved_project / "src").mkdir(parents=True)
+        (moved_project / "src/server.ts").write_text("export {}\n")
+        shutil.copy2(self.project / "package.json", moved_project / "package.json")
+        self.script = moved_script
+        self.project = moved_project
+        self.assertIn("MCP: register", self.run_helper("plan").stdout)
+        self.run_helper("install")
+        self.run_helper("check")
+        result = json.loads(self.config.read_text())
+        self.assertEqual(result["account"]["token"], "keep")
+        self.assertEqual(result["mcpServers"]["other"], {"command": "other"})
+        current = result["mcpServers"]["usr-opencode-worker"]
+        self.assertNotEqual(initial["args"], current["args"])
+        self.assertEqual(current["args"][-1], str(moved_project / "src/server.ts"))
+        self.run_helper("remove")
+        self.assertEqual(json.loads(self.config.read_text())["mcpServers"], {"other": {"command": "other"}})
+
+    def test_foreign_same_shape_without_ownership_is_preserved(self):
+        foreign = self.root / "foreign/tools/opencode-worker/src/server.ts"
+        self.config.write_text(json.dumps({"mcpServers": {"usr-opencode-worker": {
+            "type": "stdio", "command": "node",
+            "args": ["--experimental-strip-types", str(foreign)]}}}))
+        self.run_helper("install", success=False)
+        self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
+                         ["usr-opencode-worker"]["args"][-1], str(foreign))
+
+    def test_stale_ownership_fingerprint_does_not_adopt_foreign_server(self):
+        self.run_helper("install")
+        replacement = self.root / "foreign/tools/opencode-worker/src/server.ts"
+        data = json.loads(self.config.read_text())
+        data["mcpServers"]["usr-opencode-worker"]["args"][-1] = str(replacement)
+        self.config.write_text(json.dumps(data))
+        self.run_helper("install", success=False)
+        self.assertEqual(json.loads(self.config.read_text()), data)
+
     def test_failed_install_never_registers_mcp(self):
         self.env["MOCK_VERSION"] = "0.0.1"
         self.run_helper("install", success=False)

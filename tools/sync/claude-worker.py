@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Manage usr's Claude MCP bridge as part of sync; never touch Claude credentials."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,7 @@ PROJECT = ROOT / "tools" / "opencode-worker"
 SERVER = PROJECT / "src" / "server.ts"
 HOME = Path(os.environ["HOME"])
 CONFIG = HOME / ".claude.json"
+OWNER = Path(os.environ.get("XDG_STATE_HOME", str(HOME / ".local/state"))) / "sync/claude-mcp-owner.json"
 
 
 def die(message):
@@ -53,16 +55,59 @@ def expected_entry(node):
     }
 
 
+def entry_fingerprint(entry):
+    payload = json.dumps(entry, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def load_owner():
+    if OWNER.is_symlink():
+        die(f"refusing symlinked MCP ownership record: {OWNER}")
+    if not OWNER.exists():
+        return None
+    value = json.loads(OWNER.read_text())
+    if not isinstance(value, dict) or value.get("schema") != 1 or not re.fullmatch(
+        r"[0-9a-f]{64}", str(value.get("fingerprint", ""))
+    ):
+        die(f"invalid MCP ownership record: {OWNER}")
+    return value["fingerprint"]
+
+
+def save_owner(entry):
+    OWNER.parent.mkdir(parents=True, exist_ok=True)
+    if OWNER.is_symlink():
+        die(f"refusing symlinked MCP ownership record: {OWNER}")
+    payload = (json.dumps({"schema": 1, "fingerprint": entry_fingerprint(entry)}, sort_keys=True) + "\n").encode()
+    fd, temporary = tempfile.mkstemp(prefix=".claude-mcp-owner.", dir=OWNER.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as output:
+            output.write(payload)
+        os.replace(temporary, OWNER)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def owned_entry(entry):
     if not isinstance(entry, dict) or entry.get("type", "stdio") != "stdio":
         return False
     command = entry.get("command")
     if not isinstance(command, str) or Path(command).name != "node":
         return False
-    if entry.get("args") != ["--experimental-strip-types", str(SERVER)]:
+    args = entry.get("args")
+    if not isinstance(args, list) or len(args) != 2 or args[0] != "--experimental-strip-types":
         return False
-    return not entry.get("env") and set(entry).issubset({"type", "command", "args", "env"})
-
+    server = args[1]
+    if not isinstance(server, str) or not Path(server).is_absolute() or not server.endswith(
+        "/tools/opencode-worker/src/server.ts"
+    ):
+        return False
+    if entry.get("env") or not set(entry).issubset({"type", "command", "args", "env"}):
+        return False
+    old_default = HOME / "usr/tools/opencode-worker/src/server.ts"
+    return (server == str(SERVER) or server == str(old_default) or
+            load_owner() == entry_fingerprint(entry))
 
 def configuration():
     if CONFIG.is_symlink():
@@ -143,22 +188,24 @@ def run(action):
             print(f"NPM: install pinned @opencode/client {dependency_version()}")
         if previous != desired:
             print(f"MCP: register {NAME} with Claude user scope")
+        elif load_owner() != entry_fingerprint(desired):
+            print(f"MCP: record ownership of {NAME}")
         return
 
     if action == "check":
         if not dependency_current():
             die("OpenCode worker dependency is not installed")
-        if previous != desired:
-            die(f"{NAME} MCP registration is missing or outdated")
+        if previous != desired or load_owner() != entry_fingerprint(desired):
+            die(f"{NAME} MCP registration is missing, unowned, or outdated")
         print(f"ok: {NAME} MCP and dependency current")
         return
 
     if action == "remove":
-        if previous is None:
-            return
-        del servers[NAME]
-        update_configuration(data, original)
-        print(f"sync: unregistered {NAME}")
+        if previous is not None:
+            del servers[NAME]
+            update_configuration(data, original)
+            print(f"sync: unregistered {NAME}")
+        OWNER.unlink(missing_ok=True)
         return
 
     if action != "install":
@@ -173,6 +220,7 @@ def run(action):
         servers[NAME] = desired
         update_configuration(data, original)
         print(f"sync: registered {NAME} for Claude Code")
+    save_owner(desired)
 
 
 if __name__ == "__main__":

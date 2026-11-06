@@ -29,15 +29,6 @@ Next: 33
 - **Fix with:** `lifecycle-concurrency`
 - **Effort:** M
 
-### USR-29 · P2 · Claude MCP registration cannot follow a relocated usr checkout
-
-- **Area:** Operability
-- **Where:** `tools/sync/claude-worker.py:46-58`, `tools/sync/claude-worker.py:120-148`, `tools/opencode-worker/README.md:20-28`
-- **Problem:** owned_entry accepts only an MCP command whose server.ts argument matches the CURRENT checkout path. After moving a previously registered usr checkout, the original entry still points to the old path, so plan, install and remove all reject it as an unrelated server. Reproduced in an isolated configuration fixture: old owned server.ts path, new script location, plan exits 1 with 'already names a different MCP server'. This breaks documented resync-after-move recovery.
-- **Recommendation:** Separate stable ownership identity from a mutable checkout pathname (e.g., a managed stable launcher plus an explicit record) and update only entries verifiably owned by usr. Cover move/reinstall/uninstall and foreign same-name server cases.
-- **Fix with:** `durable-state`
-- **Effort:** S
-
 ### USR-30 · P2 · Worker fallback treats ordinary assistant text as a quota error
 
 - **Area:** Errors
