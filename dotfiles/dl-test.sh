@@ -32,6 +32,7 @@ run_dl() {
     unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \
         CLAUDE_INSTALL_FAIL DL_TEST_OS DL_TEST_ARCH DL_JAQ_MOCK FX_TAR FX_TEST_SHA \
         CODEX_TAR OPENCODE_TAR OPENCODE_ETAG \
+        UV_TEST_BAD_SHA UV_TEST_ETAG \
         GIT_ZIP GIT_SUMS GIT_ZIP_SHA256 GIT_UNZIP_LIST_FAIL GIT_UNZIP_EXTRACT_FAIL GIT_FEED_OLD \
         SSH_ZIP SSH_SUMS SSH_UNZIP_LIST_FAIL SSH_UNZIP_EXTRACT_FAIL SSH_FEED_OLD OXISH_ZIP OXISH_SUMS OXISH_UNZIP_EXTRACT_FAIL \
         DL_RECORD_OWNED DL_OWNED_FILE NPM_LOG DL_PROFILE \
@@ -313,6 +314,33 @@ FEED
             cp "$ZZZ_BIN" "$output"
         else
             exit 1
+        fi
+        ;;
+    https://github.com/astral-sh/uv/releases.atom)
+        cat <<'FEED'
+<feed>
+<entry>
+<updated>2026-11-02T18:26:00Z</updated>
+<link rel="alternate" type="text/html" href="https://github.com/astral-sh/uv/releases/tag/0.13.7"/>
+</entry>
+</feed>
+FEED
+        ;;
+    https://github.com/astral-sh/uv/releases/download/0.13.7/uv-x86_64-unknown-linux-musl.tar.gz)
+        if [ "$headers" = - ]; then
+            printf '%s\n' "ETag: ${UV_TEST_ETAG:-uv-test-etag}"
+        elif [ -n "$output" ]; then
+            cp "$UV_TAR" "$output"
+        else
+            exit 1
+        fi
+        ;;
+    https://github.com/astral-sh/uv/releases/download/0.13.7/uv-x86_64-unknown-linux-musl.tar.gz.sha256)
+        [ -n "$output" ] || exit 1
+        if [ "${UV_TEST_BAD_SHA:-false}" = true ]; then
+            printf '%s  %s\n' '0000000000000000000000000000000000000000000000000000000000000000' 'uv-x86_64-unknown-linux-musl.tar.gz' > "$output"
+        else
+            printf '%s  %s\n' "$UV_TAR_SHA256" 'uv-x86_64-unknown-linux-musl.tar.gz' > "$output"
         fi
         ;;
     https://github.com/joshuarli/ghostty/releases.atom)
@@ -825,6 +853,16 @@ test_sha256() {
     fi
 }
 
+mkdir -p "$test_root/uv-package/uv-x86_64-unknown-linux-musl"
+printf '%s' 'uv-test-0.13.7' > "$test_root/uv-package/uv-x86_64-unknown-linux-musl/uv"
+printf '%s' 'uvx-test-0.13.7' > "$test_root/uv-package/uv-x86_64-unknown-linux-musl/uvx"
+chmod +x "$test_root/uv-package/uv-x86_64-unknown-linux-musl/uv" \
+    "$test_root/uv-package/uv-x86_64-unknown-linux-musl/uvx"
+tar -czf "$test_root/uv.tar.gz" -C "$test_root/uv-package" uv-x86_64-unknown-linux-musl
+UV_TAR="$test_root/uv.tar.gz"
+UV_TAR_SHA256=$(test_sha256 "$UV_TAR")
+export UV_TAR UV_TAR_SHA256
+
 ff_triples="aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl"
 ff_zero_sha=0000000000000000000000000000000000000000000000000000000000000000
 
@@ -947,6 +985,7 @@ case "$1" in
             @deepseek-ai/dsh@next) printf '%s\n' '0.2.1-rc.2' ;;
             @deepseek-harness-tui/dsh-tui) printf '%s\n' '0.16.0' ;;
             command-code@latest) printf '%s\n' "${CMD_TEST_VERSION:-1.87.3}" ;;
+            pnpm@latest) printf '%s\n' '12.16.1' ;;
             *) exit 1 ;;
         esac
         ;;
@@ -1223,6 +1262,10 @@ esac
 case "$default_targets" in
     *'set -- "$@" mold'*) ;;
     *) printf 'mold is missing from the default dl targets\n' >&2; exit 1 ;;
+esac
+case "$default_targets" in
+    *' uv '*) ;;
+    *) printf 'uv is missing from the default dl targets\n' >&2; exit 1 ;;
 esac
 )
 end_case
@@ -1602,7 +1645,7 @@ DL_PROFILE=server
 export DL_PROFILE
 targets=$(HOME="$test_root/server-profile-home" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
     TMPDIR="$test_root/tmp" run_dl "$mock_bin:$PATH" "$repo_root" --list)
-for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 gh zzz; do
+for expected in fd rg jaq fastermod tm ish stuff e fz fdu fs srv git python3 uv gh zzz; do
     printf '%s\n' "$targets" | grep -qx "$expected" || {
         printf 'server profile is missing %s\n' "$expected" >&2
         exit 1
@@ -2286,6 +2329,71 @@ begin_case "zzz skips unsupported platforms"
     fi
     [ ! -e "$zzz_darwin_home/.local/bin/zzz" ]
     [ ! -e "$zzz_darwin_home/.local/state/dl/zzz" ]
+)
+end_case
+
+begin_case "uv installs both launchers, stays current, and records ownership"
+( set -e
+    uv_home="$test_root/uv-home"
+    if output=$(HOME="$uv_home" XDG_STATE_HOME="$uv_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" uv 2>&1); then
+        :
+    else
+        printf '%s\n' "$output" >&2; exit 1
+    fi
+    [ "$(cat "$uv_home/.local/bin/uv")" = 'uv-test-0.13.7' ]
+    [ "$(cat "$uv_home/.local/bin/uvx")" = 'uvx-test-0.13.7' ]
+    [ "$(cat "$uv_home/.local/state/dl/uv")" = 'uv-test-etag' ]
+    [ "$(cat "$uv_home/.local/state/dl/uvx")" = 'uv-test-etag' ]
+    if output=$(HOME="$uv_home" XDG_STATE_HOME="$uv_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" uv 2>&1); then
+        :
+    else
+        printf '%s\n' "$output" >&2; exit 1
+    fi
+    case "$output" in
+        *'uv is current (0.13.7)'*) ;;
+        *) printf '%s\n' "$output" >&2; exit 1 ;;
+    esac
+    uv_owned="$uv_home/.local/state/sync/dl-owned"
+    mkdir -p "$(dirname "$uv_owned")"
+    HOME="$uv_home" XDG_STATE_HOME="$uv_home/.local/state" DL_RECORD_OWNED=true \
+        DL_OWNED_FILE="$uv_owned" TMPDIR="$test_root/tmp" \
+        run_dl "$mock_bin:$PATH" "$repo_root"
+    for uv_path in "$uv_home/.local/bin/uv" "$uv_home/.local/bin/uvx" \
+        "$uv_home/.local/state/dl/uv" "$uv_home/.local/state/dl/uvx"; do
+        awk -F '\t' -v path="$uv_path" \
+            '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$uv_owned"
+    done
+)
+end_case
+
+begin_case "uv rejects a checksum mismatch and preserves the prior install"
+( set -e
+    uv_home="$test_root/uv-bad-home"
+    if output=$(HOME="$uv_home" XDG_STATE_HOME="$uv_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" uv 2>&1); then
+        :
+    else
+        printf '%s\n' "$output" >&2; exit 1
+    fi
+    if output=$(HOME="$uv_home" XDG_STATE_HOME="$uv_home/.local/state" \
+        TMPDIR="$test_root/tmp" DL_TEST_OS=Linux DL_TEST_ARCH=x86_64 \
+        UV_TEST_BAD_SHA=true UV_TEST_ETAG=uv-test-etag-2 \
+        run_dl "$mock_bin:/usr/bin:/bin" "$repo_root" uv 2>&1); then
+        printf 'uv accepted a bad checksum\n' >&2; exit 1
+    fi
+    case "$output" in
+        *'checksum mismatch'*) ;;
+        *) printf '%s\n' "$output" >&2; exit 1 ;;
+    esac
+    [ "$(cat "$uv_home/.local/bin/uv")" = 'uv-test-0.13.7' ]
+    [ "$(cat "$uv_home/.local/bin/uvx")" = 'uvx-test-0.13.7' ]
+    [ "$(cat "$uv_home/.local/state/dl/uv")" = 'uv-test-etag' ]
+    [ "$(cat "$uv_home/.local/state/dl/uvx")" = 'uv-test-etag' ]
 )
 end_case
 

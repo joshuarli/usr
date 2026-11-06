@@ -12,5 +12,6 @@ fs
 srv
 git
 python3
+uv
 gh
 zzz

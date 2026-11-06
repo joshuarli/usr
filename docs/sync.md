@@ -10,6 +10,8 @@ Run `sh sync plan` to preview links. Resolve each `CONFLICT` before syncing. `sh
 
 `cf` is installed by default from a pinned npm package under the managed Node.js runtime. `agent-browser` is installed the same way into `${XDG_DATA_HOME:-$HOME/.local/share}/agent-browser`; change `AGENT_BROWSER_VERSION` in `dl` to upgrade. It drives the system Chrome/Chromium, so no browser download is needed; run `agent-browser install` only if you want a managed Chrome for Testing instead. `stuff` is installed by default from its latest GitHub pre-release; `sh dl stuff` updates or reinstalls it.
 
+`sh dl uv` installs the latest `uv` and `uvx` from `astral-sh/uv` for macOS arm64/x86_64 and Linux arm64/x86_64 musl, verifies the release `.sha256`, and installs both into `~/.local/bin`. `uv` is in the default target set and the Alpine server profile; the user-local binary takes precedence over a package-manager `uv` in the login PATH.
+
 The base layer also links a `yt-dlp` shim. It downloads the upstream nightly on first use and checks for a newer nightly at most once a day; `vdl`, `mdl`, and `mpdl` run through it. Remove `${XDG_DATA_HOME:-$HOME/.local/share}/yt-dlp` and `${XDG_STATE_HOME:-$HOME/.local/state}/yt-dlp` to reclaim the download and its state.
 
 `sh sync` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID, macOS DNS, and Tailscale SSH setup are manual; the packages step installs Homebrew's `tailscale`, the only macOS variant that serves Tailscale SSH. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).

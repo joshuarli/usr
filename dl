@@ -71,6 +71,7 @@ failed=false
 changed=false
 tmpzip=
 tmpbin=
+tmpuvx=
 tmpoutput=
 tmpbundle=
 tmpmnt=
@@ -443,6 +444,10 @@ cleanup_temporary_files() {
     if [ -n "$tmpbin" ]; then
         rm -f "$tmpbin" || _dl_warn "Warning: could not remove $tmpbin"
         tmpbin=
+    fi
+    if [ -n "$tmpuvx" ]; then
+        rm -f "$tmpuvx" || _dl_warn "Warning: could not remove $tmpuvx"
+        tmpuvx=
     fi
     if [ -n "$tmpoutput" ]; then
         rm -f "$tmpoutput" || _dl_warn "Warning: could not remove $tmpoutput"
@@ -1934,6 +1939,100 @@ sha256_file() {
     else
         shasum -a 256 "$1" | awk '{print $1}'
     fi
+}
+
+install_uv() {
+    case "${OS}:${ARCH}" in
+        Darwin:x86_64|Darwin:aarch64) uv_target="${ARCH}-apple-darwin" ;;
+        Linux:x86_64|Linux:aarch64) uv_target="${ARCH}-unknown-linux-musl" ;;
+        *) skip uv "no upstream release for ${OS}/${ARCH}"; return ;;
+    esac
+    tag=$(curl -fsSL "https://github.com/astral-sh/uv/releases.atom" \
+        | awk '
+            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+            in_entry && /<updated>/ {
+                updated = $0
+                sub(/^.*<updated>/, "", updated)
+                sub(/<.*/, "", updated)
+            }
+            in_entry && /<link[^>]*releases\/tag\// {
+                tag = $0
+                sub(/^.*releases\/tag\//, "", tag)
+                sub(/".*/, "", tag)
+            }
+            /<\/entry>/ {
+                if (updated > newest_updated && tag != "") {
+                    newest_updated = updated
+                    newest_tag = tag
+                }
+                in_entry = 0
+            }
+            END { print newest_tag }
+        ') || tag=
+    if [ -z "$tag" ]; then
+        unchecked uv "no release found"
+        return
+    fi
+    asset="uv-${uv_target}"
+    url="https://github.com/astral-sh/uv/releases/download/${tag}/${asset}.tar.gz"
+    id=$(asset_id "$url")
+    if [ -z "$id" ]; then
+        unchecked uv "${asset}.tar.gz is not available in ${tag}"
+        return
+    fi
+    if is_current uv "$id" && is_current uvx "$id"; then
+        _dl_current "uv is current (${tag})"
+        return
+    fi
+    _dl_fetch "Downloading ${asset}.tar.gz ..."
+    tmpzip=$(mktemp)
+    if ! curl -fsSL -o "$tmpzip" "$url"; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip uv "download failed"
+        return
+    fi
+    tmpoutput=$(mktemp)
+    if ! curl -fsSL -o "$tmpoutput" "${url}.sha256"; then
+        rm -f "$tmpzip" "$tmpoutput"
+        tmpzip=
+        tmpoutput=
+        skip uv "checksum download failed"
+        return
+    fi
+    expected_sha256=$(awk -v asset="${asset}.tar.gz" '$2 == asset { print $1; exit }' "$tmpoutput")
+    rm -f "$tmpoutput"
+    tmpoutput=
+    if [ "${#expected_sha256}" -ne 64 ] || [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+        rm -f "$tmpzip"
+        tmpzip=
+        skip uv "checksum mismatch"
+        return
+    fi
+    tmpbin=$(mktemp "${DEST}/.uv.XXXXXX")
+    tmpuvx=$(mktemp "${DEST}/.uvx.XXXXXX")
+    if ! tar -xzOf "$tmpzip" "${asset}/uv" > "$tmpbin"; then
+        rm -f "$tmpzip" "$tmpbin" "$tmpuvx"
+        tmpzip=
+        tmpbin=
+        tmpuvx=
+        skip uv "${asset}.tar.gz does not contain uv"
+        return
+    fi
+    if ! tar -xzOf "$tmpzip" "${asset}/uvx" > "$tmpuvx"; then
+        rm -f "$tmpzip" "$tmpbin" "$tmpuvx"
+        tmpzip=
+        tmpbin=
+        tmpuvx=
+        skip uv "${asset}.tar.gz does not contain uvx"
+        return
+    fi
+    rm -f "$tmpzip"
+    tmpzip=
+    install_binary uv "$tmpbin" "$id"
+    tmpbin=
+    install_binary uvx "$tmpuvx" "$id"
+    tmpuvx=
 }
 
 install_fx() {
@@ -3869,7 +3968,7 @@ record_managed_binary() {
 }
 
 record_managed_installs() {
-    for record_prog in fd rg jaq fastermod tm ish stuff e fz fdu fs srv mactop vault gh bylaws mold cf player soulseek-rs zzz rage; do
+    for record_prog in fd rg jaq fastermod tm ish stuff e fz fdu fs srv mactop vault gh bylaws mold cf player soulseek-rs zzz uv uvx rage; do
         record_managed_binary "$record_prog"
     done
     if installed rage && [ -L "${DEST}/rage-keygen" ]; then own_file "${DEST}/rage-keygen"; fi
@@ -4073,7 +4172,7 @@ if [ $# -eq 0 ]; then
         Linux:aarch64) ;;
         *) set -- "$@" jaq ;;
     esac
-    set -- "$@" codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 cf agent-browser rage
+    set -- "$@" codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 uv cf agent-browser rage
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" ffmpeg ;;
     esac
@@ -4101,6 +4200,7 @@ if [ $# -eq 0 ]; then
                 filtered_tools="${filtered_tools}${filtered_tools:+ }${default_tool}"
             fi
         done
+        # shellcheck disable=SC2086
         set -- $filtered_tools
     fi
 fi
@@ -4165,6 +4265,7 @@ for prog in "$@"; do
         mold) install_mold ;;
         nodejs) install_nodejs ;;
         python3) install_python3 ;;
+        uv) install_uv ;;
         node-build) install_nodebuild ;;
         gh) install_release gh ;;
         git) install_git ;;
