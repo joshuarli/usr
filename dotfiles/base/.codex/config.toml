@@ -296,6 +296,13 @@ type = "command"
 command = '"$HOME/.local/bin/agent-learn" hook'
 timeout = 2
 
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = '"$HOME/.local/bin/agent-learn" hook --harness codex'
+timeout = 5
+
 [hooks.state]
 
 [hooks.state."/Users/josh/.codex/config.toml:stop:0:0"]
