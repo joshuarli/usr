@@ -1,6 +1,6 @@
 # Plan: extract agent-memory into an independently deployable Cloudflare project
 
-Status: **Gates A and B implemented; Gates C and D not started.** The standalone repository is `~/d/agent-memory` (local only, no remote yet). Its `chore: import agent-memory from usr@b16294d unchanged` commit has the same tree as `b16294d:agent-memory`; packaging, path, check, and documentation changes follow it. The `usr` consumer change is prepared on branch `agent-memory-consumer` and is not merged: the live launchers still run the in-tree source. Host activation, deployment ownership transfer, and the remote MCP adapter each need separate authorization.
+Status: **Gates A, B, and C implemented; Gate D (remote MCP) not started.** The standalone repository is `~/d/agent-memory`, pushed to the private `github.com/joshuarli/agent-memory`. Its `chore: import agent-memory from usr@b16294d unchanged` commit has the same tree as `b16294d:agent-memory`. The host launchers and both LaunchAgents run the package installed in `~/d/agent-memory/.venv`, and `usr` no longer carries the source. The Worker is deployed only by `make deploy` in the new repository (no Workers Builds trigger exists); the first such deploy replaced version `1f2964c0-c11e-4a1a-9241-6f7858775782`, the rollback target, with `290b2cb2-6f23-48bf-a0a2-14b41d2655ba`. The remote MCP adapter needs separate authorization.
 
 ## Summary
 
