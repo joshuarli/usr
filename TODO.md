@@ -20,15 +20,6 @@ Next: 38
 - **Fix with:** `sync` bootstrap and python-build release qualification
 - **Effort:** M
 
-### USR-34 · P2 · Link creation can converge without ever persisting ownership
-
-- **Area:** Data
-- **Where:** `tools/sync/link_apply.py:49-57`, `tools/sync/link_apply.py:118-161`, `tools/sync/link_plan.py:100-115`, `tools/sync/link_plan.py:122-163`, `tools/sync/main.py:84-107`, `dotfiles/doctor:35-53`
-- **Problem:** Reachable, reproduced by raising OSError during `_save_records` after `os.symlink` succeeds: (1) a new `LinkAction` is planned; (2) `link_apply.py:157` creates the symlink; (3) `Ownership.add` fails persisting ownership or its second fingerprint manifest; (4) the first run fails but leaves the symlink; (5) a retry sees `path.samefile(spec.source)` and returns a converged plan, so no code repairs the missing/incomplete F+fingerprint ownership. The doctor checks path presence, not the full owned-versus-verified lifecycle. The link is effectively orphaned, and uninstall cannot safely reclaim it. A process interruption in the same write window produces the same state.
-- **Recommendation:** Represent link creation as recoverable intent→exclusive create→record+verify with a narrowly scoped durable journal or equivalent restart reconciliation. On retry, repair a proven incomplete own operation without claiming a pre-existing foreign correct symlink. Add fault-injection tests after the link, after the path record and before the fingerprint write.
-- **Fix with:** `durable-state`
-- **Effort:** M
-
 ### USR-35 · P2 · Concurrent link and tool sync silently discard ownership claims
 
 - **Area:** Concurrency

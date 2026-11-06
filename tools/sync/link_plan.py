@@ -9,6 +9,7 @@ from typing import Literal
 
 from links import Discovery, LinkSpec
 from ownership import fingerprint, read_manifest, records
+from link_recovery import pending_paths
 
 
 @dataclass(frozen=True)
@@ -43,13 +44,15 @@ class LinkPlan:
     actions: tuple[LinkAction, ...]
     conflicts: tuple[str, ...]
     current: int
+    pending: tuple[Path, ...] = ()
 
     @property
     def converged(self) -> bool:
-        return not self.actions and not self.conflicts
+        return not self.actions and not self.conflicts and not self.pending
 
     def lines(self) -> list[str]:
         lines = [f"CONFLICT: {reason}" for reason in self.conflicts]
+        lines += [f"RECOVER: {path} (pending managed link)" for path in self.pending]
         for action in self.actions:
             if action.kind == "prune":
                 lines.append(f"PRUNE: {action.path}")
@@ -136,8 +139,14 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
     conflicts: list[str] = []
     correct = 0
     projected_dirs = {discovery.target / s.relative.as_posix() for s in discovery.desired if s.directory}
+    # Pending links are represented by their journal, never guessed from
+    # a symlink that merely appears correct.
+    pending = pending_paths(owned_file)
+    reserved = set(pending)
     # Extra check for a symlink directory ancestor not covered by desired links.
     for path, spec in desired.items():
+        if path in reserved:
+            continue
         if not _parent_safe(path, discovery):
             conflicts.append(f"{path} passes through an unsafe symlinked parent")
             continue
@@ -155,6 +164,8 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
             conflicts.append(f"{path} already exists and is not the declared link")
 
     for path in sorted(owned_records - desired.keys(), key=str):
+        if path in reserved:
+            continue
         before = snapshot(path)
         if before.kind == "absent":
             actions.append(LinkAction("forget", path, before))
@@ -169,4 +180,4 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
         # another deliberately retained link. Do not treat it as stale.
     order = {"prune": 0, "forget": 1, "replace": 2, "link": 3}
     actions.sort(key=lambda a: (order[a.kind], str(a.path)))
-    return LinkPlan(discovery.target, tuple(actions), tuple(sorted(set(conflicts))), correct)
+    return LinkPlan(discovery.target, tuple(actions), tuple(sorted(set(conflicts))), correct, pending)

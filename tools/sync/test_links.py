@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from links import LinkError, discover
 from link_plan import plan_links
-from link_apply import LinkApplyError, apply
+from link_apply import LinkApplyError, Ownership, apply
 from ownership import records, read_manifest
 
 
@@ -395,6 +396,66 @@ class LinkTests(unittest.TestCase):
         src.unlink()
         self.assertNotIn(dest, [a.path for a in self.plan().actions])
         self.assertTrue(dest.is_symlink())
+
+    def test_44_persistence_failure_after_symlink_is_recovered(self):
+        self.source(".tracked")
+        initial = self.plan()
+        with patch.object(Ownership, "_save_records", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                apply(initial, self.owned)
+        destination = self.home / ".tracked"
+        self.assertTrue(destination.is_symlink())
+        pending = self.plan()
+        self.assertEqual(list(pending.pending), [destination])
+        self.assertFalse(pending.converged)
+        self.assertEqual([a.kind for a in pending.actions], [])
+        apply(pending, self.owned)
+        self.assertTrue(self.plan().converged)
+        self.assertIn(str(destination), read_manifest(self.owned))
+        self.assertFalse(list(Path(str(self.owned) + ".pending-links").glob("*.json")))
+
+    def test_45_manifest_failure_after_record_is_recovered(self):
+        self.source(".tracked")
+        with patch.object(Ownership, "_save_proofs", side_effect=OSError("write failed")):
+            with self.assertRaisesRegex(OSError, "write failed"):
+                apply(self.plan(), self.owned)
+        self.assertIn(("F", self.home / ".tracked"), records(self.owned))
+        self.assertNotIn(str(self.home / ".tracked"), read_manifest(self.owned))
+        apply(self.plan(), self.owned)
+        self.assertTrue(self.plan().converged)
+        self.assertIn(str(self.home / ".tracked"), read_manifest(self.owned))
+
+    def test_46_recovery_never_adopts_foreign_replacement(self):
+        self.source(".tracked")
+        with patch.object(Ownership, "_save_records", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                apply(self.plan(), self.owned)
+        dest = self.home / ".tracked"
+        dest.unlink()
+        dest.symlink_to(self.root / "foreign")
+        with self.assertRaisesRegex(LinkApplyError, "pending link destination changed"):
+            apply(self.plan(), self.owned)
+        self.assertEqual(dest.resolve(), self.root / "foreign")
+
+    def test_47_retry_create_with_existing_stage_relinks_original_inode(self):
+        self.source(".tracked")
+        import link_apply
+        raw_link = link_apply.os.link
+        count = 0
+        def fail_once(*args, **kwargs):
+            nonlocal count
+            count += 1
+            if count == 1:
+                raise OSError("crash before install")
+            return raw_link(*args, **kwargs)
+        with patch.object(link_apply.os, "link", side_effect=fail_once):
+            with self.assertRaisesRegex(OSError, "crash before install"):
+                apply(self.plan(), self.owned)
+        self.assertFalse((self.home / ".tracked").exists())
+        self.assertFalse(self.plan().converged)
+        apply(self.plan(), self.owned)
+        self.assertTrue(self.plan().converged)
+        self.assertTrue((self.home / ".tracked").is_symlink())
 
     def test_40_internal_parent_symlink_stays_confined(self):
         self.source(".a/f")

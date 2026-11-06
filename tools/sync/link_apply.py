@@ -15,6 +15,7 @@ import tempfile
 
 from link_plan import LinkPlan, Snapshot, snapshot
 from ownership import fingerprint, manifest_path, read_manifest, records
+from link_recovery import PendingLink, finish, pending_links, stage_link
 
 
 class LinkApplyError(RuntimeError):
@@ -33,6 +34,11 @@ def _atomic_bytes(path: Path, payload: bytes) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
     finally:
         if os.path.lexists(temporary):
             os.unlink(temporary)
@@ -115,6 +121,33 @@ def _directory_fd(target: Path, parent: Path, owner: Ownership) -> int:
         raise
 
 
+def _recover_pending(plan: LinkPlan, owner: Ownership, owned_file: Path) -> list[str]:
+    results = []
+    for entry in pending_links(owned_file):
+        if entry.target != plan.target:
+            raise LinkApplyError(f"pending link targets a different home: {entry.path}")
+        fd = _directory_fd(plan.target, entry.path.parent, owner)
+        try:
+            stage = _observed(fd, entry.stage)
+            if (stage.kind != "symlink" or
+                stage.identity is None or stage.identity[:2] != (entry.device, entry.inode) or
+                stage.text != entry.text):
+                raise LinkApplyError(f"pending link stage changed: {entry.path}")
+            current = _observed(fd, entry.path.name)
+            if current.kind == "absent":
+                os.link(entry.stage, entry.path.name, src_dir_fd=fd, dst_dir_fd=fd,
+                        follow_symlinks=False)
+            elif (current.kind != "symlink" or current.identity is None or
+                  current.identity[:2] != (entry.device, entry.inode)):
+                raise LinkApplyError(f"pending link destination changed: {entry.path}")
+            owner.add("F", entry.path)
+            finish(entry, fd)
+            results.append(f"RECOVER: {entry.path}")
+        finally:
+            os.close(fd)
+    return results
+
+
 def apply(plan: LinkPlan, owned_file: Path) -> list[str]:
     if plan.conflicts:
         raise LinkApplyError("link conflicts:\n" + "\n".join(plan.conflicts))
@@ -124,10 +157,10 @@ def apply(plan: LinkPlan, owned_file: Path) -> list[str]:
             raise LinkApplyError(f"link changed since planning: {action.path}")
         if not action.path.parent.resolve(strict=False).is_relative_to(plan.target):
             raise LinkApplyError(f"link parent escaped the home: {action.path}")
-    if not plan.actions:
+    if not plan.actions and not plan.pending:
         return []
     owner = Ownership(owned_file)
-    performed: list[str] = []
+    performed: list[str] = _recover_pending(plan, owner, owned_file)
     for action in plan.actions:
         if action.kind == "forget":
             if snapshot(action.path) != action.before:
@@ -142,20 +175,27 @@ def apply(plan: LinkPlan, owned_file: Path) -> list[str]:
             observed = _observed(fd, action.path.name)
             if observed != action.before:
                 raise LinkApplyError(f"link changed since planning: {action.path}")
-            if action.kind in ("prune", "replace"):
+            if action.kind == "prune":
                 if observed.kind != "symlink":
                     raise LinkApplyError(f"refusing to remove non-symlink: {action.path}")
                 os.unlink(action.path.name, dir_fd=fd)
-                if action.kind == "prune":
-                    owner.remove("F", action.path)
-                    performed.append(f"PRUNE: {action.path}")
-                    continue
+                owner.remove("F", action.path)
+                performed.append(f"PRUNE: {action.path}")
+                continue
             if action.desired_text is None:
                 raise LinkApplyError(f"missing declared link target: {action.path}")
-            # symlink(2) has O_EXCL semantics: another process's new file is
-            # never overwritten even if one arrives after our precheck.
-            os.symlink(action.desired_text, action.path.name, dir_fd=fd)
+            # Make the exact symlink inode recoverable before touching the
+            # destination. A staged symlink hardlink is an O_EXCL creation,
+            # so a foreign file is never overwritten during recovery.
+            entry = stage_link(owned_file, plan.target, action.path, action.desired_text, fd)
+            if action.kind == "replace":
+                if observed.kind != "symlink":
+                    raise LinkApplyError(f"refusing to replace non-symlink: {action.path}")
+                os.unlink(action.path.name, dir_fd=fd)
+            os.link(entry.stage, action.path.name, src_dir_fd=fd, dst_dir_fd=fd,
+                    follow_symlinks=False)
             owner.add("F", action.path)
+            finish(entry, fd)
             performed.append(f"LINK: {action.path} -> {action.desired_text}")
         finally:
             os.close(fd)

@@ -20,7 +20,7 @@ class SyncIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         for relative in ("tools/sync", "dotfiles/base", "dotfiles/linux", "bin", "home"):
             (self.root / relative).mkdir(parents=True, exist_ok=True)
-        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py"):
+        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py"):
             shutil.copy2(SOURCE / name, self.root / "tools/sync" / name)
         shutil.copy2(SYNC, self.root / "sync")
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
