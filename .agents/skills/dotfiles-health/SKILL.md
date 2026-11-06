@@ -37,7 +37,6 @@ The layout, the commands, and where each piece of agent configuration lives are 
 - Check review claims against the files; a past claim here was wrong. Do not stack reviews that address the same uncertainty, repeat successful checks on unchanged relevant inputs, or create a process artifact just to report that checking is complete.
 - When compressing a prompt, diff its backticked tokens against the old version so no decision is lost.
 - Use `skill-eval` to judge whether an auto-triggered skill earns its place.
-- Never push.
 
 ## Known gaps
 
