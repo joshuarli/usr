@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
+import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
 export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
@@ -38,12 +38,18 @@ export function startCommand(directory: string, logDirectory: string, text: stri
       cwd: directory, detached: true,
       stdio: ["ignore", stdout, stderr],
     })
-    if (child.pid === undefined) throw new Error("Cannot start Command Code: cmd missing or not executable")
-    children.set(child.pid, child)
-    child.on("error", () => { children.delete(child.pid!) })
-    child.on("close", () => { children.delete(child.pid!) })
+    const pid = child.pid
+    child.on("error", (error: Error) => {
+      if (pid !== undefined) children.delete(pid)
+      appendFileSync(errors, "spawn error: " + error.message + "\n")
+    })
+    child.on("close", () => {
+      if (pid !== undefined) children.delete(pid)
+    })
+    if (pid === undefined) throw new Error("Cannot start Command Code: cmd missing or not executable")
+    children.set(pid, child)
     child.unref()
-    return { pid: child.pid, output, errors, started_at: new Date().toISOString() }
+    return { pid, output, errors, started_at: new Date().toISOString() }
   } finally {
     closeSync(stdout)
     closeSync(stderr)
@@ -80,6 +86,7 @@ export function commandResult(run: CommandRun): { state: string; result: Command
   }
   if (last) return { state: last.subtype === "success" ? "succeeded" : "failed", result: last, stderr }
   if (children.has(run.pid)) return { state: "running", result: null, stderr }
+  if (stderr?.includes("spawn error:")) return { state: "failed", result: null, stderr }
   return { state: "unknown_or_interrupted", result: null, stderr }
 }
 

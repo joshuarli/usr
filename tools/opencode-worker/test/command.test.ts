@@ -37,3 +37,21 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("spawn failure with an invalid cmd shebang is handled without crashing the MCP process", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cmd-broken-"))
+  const bin = join(root, "bin"), logs = join(root, "logs")
+  mkdirSync(bin); mkdirSync(logs)
+  const prior = process.env.PATH
+  try {
+    writeFileSync(join(bin, "cmd"), "#!/nonexistent/interpreter/for-cmd\n", { mode: 0o755 })
+    process.env.PATH = bin + ":" + prior
+    assert.throws(() => startCommand(root, logs, "test", "low", true), /Cannot start Command Code/)
+    await delay(30)
+    // An unhandled ChildProcess error would terminate the test process before this assertion.
+    assert.ok(true)
+  } finally {
+    process.env.PATH = prior
+    rmSync(root, { recursive: true, force: true })
+  }
+})

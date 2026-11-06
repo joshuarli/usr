@@ -29,15 +29,6 @@ Next: 33
 - **Fix with:** `lifecycle-concurrency`
 - **Effort:** M
 
-### USR-31 · P2 · A broken cmd executable can crash the entire Claude MCP bridge
-
-- **Area:** Errors
-- **Where:** `tools/opencode-worker/src/command.ts:36-49`, `tools/opencode-worker/src/hybrid.ts:91-96`, `tools/opencode-worker/test/command.test.ts:9-52`
-- **Problem:** cmdAvailable checks only X_OK, so an executable cmd with a missing shebang interpreter passes. spawn then returns a ChildProcess with pid undefined; startCommand throws BEFORE registering its error listener. Node emits an unhandled child 'error' on the next tick, terminating the MCP process rather than returning a normal failed worker result. Reproduced with a temporary executable using a nonexistent shebang (Node exits status 1).
-- **Recommendation:** Register spawn error/close handlers before inspecting pid; represent launch-admitted vs spawn-failed explicitly, return a terminal error instead of crashing the MCP server, and test ENOENT/invalid shebang under a fake cmd.
-- **Fix with:** `lifecycle-concurrency`
-- **Effort:** S
-
 ### USR-18 · P3 · Unsegmented scripts match only whole runs
 
 - **Area:** Agent learning
