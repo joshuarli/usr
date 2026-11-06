@@ -6,6 +6,7 @@ cd "$root"
 	python3 -I tools/sync/claude-worker-test.py
 	python3 -I tools/sync/test_dag.py
 	python3 -I tools/sync/test_main.py
+	python3 -I tools/sync/test_uninstall.py
 	python3 -I tools/sync/test_integration.py
 	sh dotfiles/doctor-test.sh
 	node dotfiles/pi-git-guard-test.mjs

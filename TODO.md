@@ -1,15 +1,6 @@
 Prefix: USR
 Next: 33
 
-### USR-25 · P1 · Uninstall deletes user replacements of formerly managed paths
-
-- **Area:** Data
-- **Where:** `tools/sync/uninstall.py:27-47`, `tools/sync/install.sh:122-139`
-- **Problem:** Ownership is persisted as an F/D path, not the identity of the installed object. Sequence reproduced in a disposable home: record an owned executable and package directory, replace both with user content, then invoke uninstall. The F entry is unlinked and the D entry recursively removed, destroying the replacement contents. Path containment is checked, but current ownership is not.
-- **Recommendation:** Validate every recorded target against its current managed identity before deletion; preserve modified/foreign files and nonempty unmanaged directories. Make uninstall refuse ambiguous ownership and add fixture cases for replaced files/directories and interrupted upgrades.
-- **Fix with:** `durable-state`
-- **Effort:** M
-
 ### USR-5 · P2 · Push rules do not require user approval
 
 - **Area:** Security

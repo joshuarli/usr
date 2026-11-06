@@ -119,12 +119,14 @@ _dl_warn() { printf '%s! %s%s\n' "$_dl_yellow" "$1" "$_dl_reset" >&2; }
 _dl_fail() { printf '%s✗ %s%s\n' "$_dl_red" "$1" "$_dl_reset" >&2; }
 skip() { _dl_fail "Skipping $1: $2"; failed=true; }
 own_file() {
+    if [ -n "${SYNC_OWNED_CLAIMS:-}" ]; then printf 'F\t%s\n' "$1" >> "$SYNC_OWNED_CLAIMS"; fi
     if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
         || ! awk -F '\t' -v path="$1" '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
         printf 'F\t%s\n' "$1" >> "$DL_OWNED_FILE"
     fi
 }
 own_dir() {
+    if [ -n "${SYNC_OWNED_CLAIMS:-}" ]; then printf 'D\t%s\n' "$1" >> "$SYNC_OWNED_CLAIMS"; fi
     if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
         || ! awk -F '\t' -v path="$1" '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
         printf 'D\t%s\n' "$1" >> "$DL_OWNED_FILE"
@@ -4291,4 +4293,5 @@ for prog in "$@"; do
 done
 
 if $failed; then exit 1; fi
+if [ -n "${SYNC_INSTALL_CHANGED_FILE:-}" ] && $changed; then printf 'changed\n' > "$SYNC_INSTALL_CHANGED_FILE"; fi
 if [ "$_dl_worker_mode" != true ]; then _dl_ok "Done."; fi

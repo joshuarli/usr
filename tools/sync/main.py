@@ -6,11 +6,13 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dag import Graph, GraphError, Probe, Task
+from ownership import capture_new, records
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "tools/sync/install.sh"
@@ -98,6 +100,7 @@ def link_status(ctx: Context) -> Probe:
 
 
 def apply_links(ctx: Context) -> None:
+    before = records(ctx.state)
     ctx.state.parent.mkdir(parents=True, exist_ok=True)
     scratch = ctx.root / ".work/tmp"
     scratch.mkdir(parents=True, exist_ok=True)
@@ -109,6 +112,7 @@ def apply_links(ctx: Context) -> None:
             required(command(ctx, "sh", str(ctx.root / "dotfiles/sym"), "-v",
                              "-t", str(ctx.link_target), str(source),
                              extra={"SYM_OWNED_FILE": str(ctx.state)}), f"{layer} links")
+    capture_new(ctx.state, before)
 
 
 def installed(ctx: Context, tool: str) -> Probe:
@@ -118,10 +122,23 @@ def installed(ctx: Context, tool: str) -> Probe:
 
 
 def apply_tool(ctx: Context, tool: str) -> None:
+    before = records(ctx.state)
     ctx.state.parent.mkdir(parents=True, exist_ok=True)
     (ctx.root / ".work/tmp").mkdir(parents=True, exist_ok=True)
-    required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
-                     extra={"DL_OWNED_FILE": str(ctx.state)}), f"install {tool}")
+    with tempfile.TemporaryDirectory(prefix="sync-claims-", dir=ctx.root / ".work/tmp") as scratch:
+        claims = Path(scratch) / "claims"
+        changed = Path(scratch) / "changed"
+        required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
+                         extra={"DL_OWNED_FILE": str(ctx.state),
+                                "SYNC_OWNED_CLAIMS": str(claims),
+                                "SYNC_INSTALL_CHANGED_FILE": str(changed)}), f"install {tool}")
+        if changed.is_file() and claims.is_file():
+            owned = set()
+            for line in claims.read_text().splitlines():
+                kind, _, name = line.partition("\t")
+                if kind in ("F", "D") and name:
+                    owned.add((kind, Path(name)))
+            capture_new(ctx.state, before, owned)
 
 
 def bridge_status(ctx: Context) -> Probe:
