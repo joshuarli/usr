@@ -57,7 +57,7 @@ else:
 
     def sync_tools(self, ok=True, *args):
         result = subprocess.run(
-            ["/bin/sh", str(ROOT / "sync"), "tools", *(args or ("pi",))],
+            ["/bin/sh", str(ROOT / "tools/sync/install.sh"), *(args or ("pi",))],
             cwd=ROOT, env=self.env, text=True, capture_output=True, timeout=20,
         )
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)

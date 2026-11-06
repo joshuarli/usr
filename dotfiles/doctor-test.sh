@@ -12,6 +12,7 @@ mkdir -p "$fixture/dotfiles/base/.config" "$fixture/dotfiles/base/.codex" \
     "$fixture/dotfiles/base/.agents/skills/example" "$fixture/dotfiles/linux/.config" \
     "$fixture/dotfiles" "$fixture/home/.local/bin" "$fixture/tmp" "$fixture/mock" "$fixture/tools/sync"
 cp "$repo/sync" "$fixture/sync"
+cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninstall.py" "$fixture/tools/sync/"
 cp "$repo/dotfiles/sym" "$fixture/dotfiles/sym"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
@@ -28,7 +29,7 @@ chmod +x "$fixture/tools/sync/install.sh" "$fixture/mock/uname" "$fixture/home/.
 git -C "$fixture" init -q
 git -C "$fixture" add dotfiles/base dotfiles/linux
 
-export HOME="$fixture/home" TARGET="$fixture/home" XDG_STATE_HOME="$fixture/state" TMPDIR="$fixture/tmp"
+export HOME="$fixture/home" TARGET="$fixture/home" XDG_STATE_HOME="$fixture/state" TMPDIR="$fixture/tmp" DL_PROFILE=server
 PATH="$fixture/mock:$PATH"; export PATH
 
 sh "$fixture/sync" links > "$fixture/link-output"

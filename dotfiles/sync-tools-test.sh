@@ -12,7 +12,7 @@ mock_bin="$test_root/bin"
 home="$test_root/home"
 mkdir -p "$mock_bin" "$home" "$test_root/tmp"
 
-# Run sync tools with the mocks first on PATH. Three macOS /bin/sh startup quirks
+# Test the private leaf tool installer with mocks first on PATH. Three macOS /bin/sh startup quirks
 # make a plain VAR=value prefix unreliable here: entries prepended to PATH
 # are silently dropped (bypassing mocks for npm/node), login-time
 # XDG_DATA_HOME is restored (bypassing per-scenario data dirs), and
@@ -26,7 +26,7 @@ run_tools() {
     _run_tools_path=$1
     _run_tools_root=$2
     shift 2
-    sh -c 'PATH=$1; export PATH; XDG_DATA_HOME=$2; export XDG_DATA_HOME; XDG_STATE_HOME=$3; export XDG_STATE_HOME; DL_PROFILE=${DL_PROFILE:-desktop}; export DL_PROFILE; _dl_root=$4; shift 4; if [ "${1:-}" = --list ]; then shift; exec /bin/sh "$_dl_root/sync" list "$@"; else exec /bin/sh "$_dl_root/sync" tools "$@"; fi' \
+    sh -c 'PATH=$1; export PATH; XDG_DATA_HOME=$2; export XDG_DATA_HOME; XDG_STATE_HOME=$3; export XDG_STATE_HOME; DL_PROFILE=${DL_PROFILE:-desktop}; export DL_PROFILE; _dl_root=$4; shift 4; exec /bin/sh "$_dl_root/tools/sync/install.sh" "$@"' \
         run_tools "$_run_tools_path" "${XDG_DATA_HOME-}" "${XDG_STATE_HOME-}" "$_run_tools_root" "$@"
     _run_tools_status=$?
     unset CMD_TEST_VERSION CMD_TEST_NODE_VERSION CMD_INSTALL_FAIL \

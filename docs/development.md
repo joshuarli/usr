@@ -14,7 +14,8 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | agent-memory package, Worker, evals, or benchmarks | Run the checks in `~/d/agent-memory/AGENTS.md` in that repository, then reinstall it into `$AGENT_MEMORY_VENV` |
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
-| `sync` tool installer | `sh dotfiles/sync-tools-test.sh` and `shellcheck -s sh sync tools/sync/install.sh dotfiles/sync-tools-test.sh` |
+| `sync` DAG/bootstrap | `python3 -I tools/sync/test_dag.py`, `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh -n sync`, and `sh dotfiles/doctor-test.sh` |
+| Private tool installer | `sh dotfiles/sync-tools-test.sh` and `shellcheck -s sh tools/sync/install.sh dotfiles/sync-tools-test.sh` |
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
