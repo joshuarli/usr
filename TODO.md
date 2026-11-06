@@ -29,15 +29,6 @@ Next: 33
 - **Fix with:** `lifecycle-concurrency`
 - **Effort:** M
 
-### USR-27 · P2 · DAG link preflight falsely blocks moves between sync layers
-
-- **Area:** Config
-- **Where:** `tools/sync/main.py:74-89`, `tools/sync/dag.py:88-98`, `dotfiles/sym:140-148`, `dotfiles/sym:259-260`, `dotfiles/sym-test.sh:459-475`
-- **Problem:** When an owned link moves from base to the OS layer, the first layer's dry run predicts a prune but does not remove the old link. The second layer needs that planned-prunes record to recognize the destination as reclaimable. The new link_status probes layers independently without SYM_PLANNED_PRUNES, so it flags CONFLICT and the DAG refuses to apply an otherwise valid layer migration. The existing sym test 31 proves the shared planned-prunes protocol.
-- **Recommendation:** Run all layer probes with one shared scratch planned-prunes file, preserving dry-run read-only semantics; feed earlier-layer prunes to later-layer probes. Add a two-layer DAG plan/apply fixture for a moved link.
-- **Fix with:** none
-- **Effort:** S
-
 ### USR-29 · P2 · Claude MCP registration cannot follow a relocated usr checkout
 
 - **Area:** Operability

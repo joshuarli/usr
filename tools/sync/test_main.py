@@ -60,6 +60,27 @@ class MainTests(unittest.TestCase):
                 with self.subTest(operation=operation), self.assertRaisesRegex(main.GraphError, "TARGET different from HOME"):
                     main.main(list(operation))
 
+    def test_link_preflight_shares_planned_prunes_across_layers(self):
+        (self.ctx.root / "dotfiles/base").mkdir(parents=True)
+        (self.ctx.root / "dotfiles/darwin").mkdir(parents=True)
+        paths = []
+        def run(_ctx, *args, **kwargs):
+            path = Path(kwargs["extra"]["SYM_PLANNED_PRUNES"])
+            paths.append(path)
+            if args[-1].endswith("base"):
+                path.write_text("planned-prune\n")
+                out = "PRUNE: old\n"
+            else:
+                self.assertEqual(path.read_text(), "planned-prune\n")
+                out = "LINK: new\n"
+            return type("Completed", (), {"returncode": 0, "stdout": out, "stderr": ""})()
+        with patch.object(main, "command", side_effect=run):
+            status = main.link_status(self.ctx)
+        self.assertFalse(status.conflict)
+        self.assertEqual(len(paths), 2)
+        self.assertEqual(paths[0], paths[1])
+        self.assertFalse(paths[0].exists())
+
     def test_server_profile_omits_claude_bridge(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "is_alpine", return_value=False):

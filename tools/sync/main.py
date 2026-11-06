@@ -83,21 +83,26 @@ def tool_list(ctx: Context) -> list[str]:
 
 def link_status(ctx: Context) -> Probe:
     output = []
-    for layer in ["base", ctx.platform]:
-        source = ctx.root / "dotfiles" / layer
-        if not source.is_dir():
-            continue
-        response = command(ctx, "sh", str(ctx.root / "dotfiles/sym"),
-                           "--dry-run", "-t", str(ctx.link_target), str(source), capture=True,
-                           extra={"SYM_OWNED_FILE": str(ctx.state)})
-        lines = response.stdout + response.stderr
-        output.extend(line for line in lines.splitlines() if line.startswith(("LINK:", "CONFLICT:", "PRUNE:")))
-        if response.returncode and not any(line.startswith("CONFLICT:") for line in lines.splitlines()):
-            return Probe(False, f"link planner failed: {lines.strip()}", True)
+    scratch = ctx.root / ".work/tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="sync-plan-", dir=scratch) as directory:
+        planned = Path(directory) / "planned-prunes"
+        planned.touch()
+        for layer in ["base", ctx.platform]:
+            source = ctx.root / "dotfiles" / layer
+            if not source.is_dir():
+                continue
+            response = command(ctx, "sh", str(ctx.root / "dotfiles/sym"),
+                               "--dry-run", "-t", str(ctx.link_target), str(source), capture=True,
+                               extra={"SYM_OWNED_FILE": str(ctx.state),
+                                      "SYM_PLANNED_PRUNES": str(planned)})
+            lines = response.stdout + response.stderr
+            output.extend(line for line in lines.splitlines() if line.startswith(("LINK:", "CONFLICT:", "PRUNE:")))
+            if response.returncode and not any(line.startswith("CONFLICT:") for line in lines.splitlines()):
+                return Probe(False, f"link planner failed: {lines.strip()}", True)
     if any(line.startswith("CONFLICT:") for line in output):
         return Probe(False, "; ".join(output), True)
     return Probe(not output, "; ".join(output) if output else "links match")
-
 
 def apply_links(ctx: Context) -> None:
     before = records(ctx.state)
