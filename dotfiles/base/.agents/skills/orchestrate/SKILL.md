@@ -5,13 +5,13 @@ description: "Delegate to subagents when parallel independent work, disposable c
 
 # Orchestrate
 
-The parent keeps tightly coupled investigation, design, and integration, and owns direction and final verification. Delegate only for a concrete advantage: parallel independent work, disposable context, independent scrutiny, a harness-enforced permission boundary, or execution cheaper after counting briefing, waiting, review, and integration. A cheaper child model alone is not enough.
+Except for Claude Code’s mandatory DeepSeek executor path below, the parent keeps tightly coupled investigation, design, and integration, and owns direction and final verification. Delegate only for a concrete advantage: parallel independent work, disposable context, independent scrutiny, a harness-enforced permission boundary, or execution cheaper after counting briefing, waiting, review, and integration. A cheaper child model alone is not enough.
 
 ## Routing
 
 Route by difficulty, uncertainty, and risk. Use the column for the harness you are running in.
 
-| Work | Codex | Claude and Grok | OpenCode | Command Code | Muse Code | Antigravity CLI | DeepSeek TUI | fx | Pi |
+| Work | Codex | Grok | OpenCode | Command Code | Muse Code | Antigravity CLI | DeepSeek TUI | fx | Pi |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/muse-spark-1.3-contributor`, `explore` | `deepseek/deepseek-v4.1-flash`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `low` | `opencode-go/muse-spark-1.3-contributor`, `scout`, `low` |
 | Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/muse-spark-1.3-contributor`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `medium` | `opencode-go/muse-spark-1.3-contributor`, `mechanic`, `medium` |
@@ -29,13 +29,37 @@ Assign each Codex child only the model and effort in the Codex column. This prof
 
 For V2, spawn children only from the root and explicitly forbid further spawning in every child brief. `agents.max_depth` limits only V1; V2 has a separate resident-thread cap, not a nesting limit.
 
-### Claude and Grok
+### Claude Code: Opus coordinates; DeepSeek executes
 
-Spawn only `scout`, `mechanic`, `worker`, `expert`, or `god`, ranked in that order. A caller spawns only a lower tier, and `scout` spawns nothing. `agent-tier-gate` enforces that: Claude matches `Agent`, Grok matches `spawn_subagent`. `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` caps Claude nesting at 3. Model and effort come from `~/.claude/agents` or `~/.grok/agents`, not from the call. Every Grok definition pins `grok-4.7`. Do not use another model or `xhigh`. Change a type's model or effort in its file. Reserve `expert` for the difficult row, and `god` for work an `expert` has failed, or a decision others build on. Add a definition when none of the five fit. Prefer a fresh agent; fork only when the child needs the conversation.
+**Default and exclusive path when Claude invokes `orchestrate`.** The main Opus session owns task framing, worker scheduling, evidence inspection, one bounded diff review, and integration. Opus does **not** perform substantive implementation, source investigation, debugging, or testing, even for a cheap task; it batches tiny tasks into one assignment. Delegate all such work through the `usr-opencode-worker` MCP bridge. Native Claude `Agent`/`Task` subagents, Sonnet/Haiku/Opus workers, free-model routes, or another provider are **not** fallback options. If the bridge and both approved DeepSeek backends are unavailable, stop and report the blocker. This Claude-specific rule overrides the general optional-delegation advice above.
+
+The bridge prefers **OpenCode Go DeepSeek V4.1 Flash** and automatically falls back to **Command Code `deepseek/deepseek-v4.1-flash`** when the selected OpenCode model/variant is unavailable or is explicitly quota/usage-limited. Command Code has independent credits. Do not switch on a generic test failure or after OpenCode has modified the tree. Never choose another model to escape a limit.
+
+| Tier | OpenCode Go | Command Code effort | Allowed task |
+| --- | --- | --- | --- |
+| `scout` | `deepseek-v4.1-flash#low` | `low` | Read-only evidence |
+| `mechanic` | `deepseek-v4.1-flash#low` | `low` | Precisely specified edits |
+| `worker` | `deepseek-v4.1-flash#high` | `high` | Ordinary coding, debugging, tests |
+| `expert` | `deepseek-v4.1-flash#max` | `max` | Evidenced difficult task |
+| `god` | `deepseek-v4.1-flash#max` | `max` | Fresh context after a failed expert |
+
+All OpenCode entries use provider `opencode-go`; all Command Code entries use model `deepseek/deepseek-v4.1-flash`. The tier is an effort budget and task contract, **not** permission to expand scope.
+
+**Before each launch:** create a clean dedicated linked worktree under `.work/wt/` and one contract. Call `worker_model_check(cwd, tier)` and `worker_start(cwd, title, tier, scope, brief)` with `scope` fields: exact `base_revision` matching HEAD, explicit `writable_paths` (an empty list for read-only scout; file paths or directory prefixes for a writer), `acceptance_proof` (one named check and expected observation, or source `file:line` proof), `attempt_limit` (1 normally; 2 for a justified targeted correction), and `stop_on` (ambiguity, new dependency, changed contract, expanded scope, or unavailable proof). State one outcome; forbid adjacent cleanup, unrelated refactors, new tasks, and downstream delegation. The worker cannot approve its own scope changes.
+
+**Proof, not a summary:** require the worker’s exact changed files, command lines and exit codes with decisive output, or read-only `file:line` references. Treat the final prose as a claim. `worker_status` exposes the actual backend, effort, changed paths, out-of-scope paths, and unchanged HEAD. Confirm evidence independently with the narrowest appropriate verifier. Reject out-of-scope edits, changed HEAD, or missing verification.
+
+**One-step Opus review:** after proof, check `git diff --check`, the diff against the base revision, and untracked files **once**. Confirm only the requested outcome, within the approved paths, with no glaring broken imports, regressions, altered invariants, or churn. No separate review agent or recursive review cycle. If clearly off, use at most one targeted `worker_resume` correction without expanding scope; otherwise reject/park. Opus integrates accepted work and owns worktree cleanup. The bridge may switch from OpenCode to Command Code only on a known availability/quota failure **before any edit**.
+
+The [bridge instructions](../../../../../tools/opencode-worker/README.md) explain one-time global MCP registration and live validation. The repository defaults to this routing immediately; until its MCP server is registered in Claude’s user configuration, stop rather than silently reverting to native agents.
+
+### Grok
+
+Use Grok’s native `scout`, `mechanic`, `worker`, `expert`, or `god` tiers, ranked in that order. A caller may spawn only lower tiers, and scout spawns none; `agent-tier-gate` enforces this on Grok’s `spawn_subagent` calls. Models and effort come from `~/.grok/agents`, all pinned to `grok-4.7`. Prefer fresh context. This rule does not authorize native Claude delegation.
 
 ### OpenCode
 
-Run every OpenCode lane on `opencode-go/muse-spark-1.3-contributor` (1017 snapshot). Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
+When OpenCode is itself the parent harness, run its lanes on `opencode-go/muse-spark-1.3-contributor` (1017 snapshot). Claude-triggered OpenCode workers instead follow the mandatory DeepSeek route above. Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
 
 ### Command Code
 
@@ -81,7 +105,7 @@ Carry forward findings and failed approaches. Every child gets:
 - A concrete deliverable with only the needed context.
 - Proportionate checks, an attempt limit, and a stopping condition.
 - The current campaign ruling, plus a duty to report misleading metrics, repeated gate failures, or shared blockers rather than work around them.
-- No further delegation unless the brief grants it; Claude and Grok may delegate to lower tiers within their depth cap. Codex V2 children never delegate because V1's `agents.max_depth` does not apply.
+- No further delegation unless the brief grants it; Grok may delegate to lower tiers within its depth cap. Claude-triggered DeepSeek executors never delegate. Codex V2 children never delegate because V1's `agents.max_depth` does not apply.
 
 ## Worktree lifecycle
 

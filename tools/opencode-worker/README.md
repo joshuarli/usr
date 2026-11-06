@@ -1,59 +1,59 @@
-# OpenCode workers for `usr/orchestrate`
+# Claude orchestration: OpenCode Go → Command Code (DeepSeek V4.1 Flash)
 
-A small, first-party Claude Code MCP bridge to the OpenCode **V2** TypeScript client. The Claude parent plans, creates Git worktrees, reviews the diff, runs integration checks, and merges; each normal `worker` implementation slice executes in an independent OpenCode session using **DeepSeek V4.1 Flash**.
+**Default Claude `orchestrate` execution path.** Opus scopes tasks, checks evidence, does one bounded diff review, and integrates. All substantive research, implementation, and testing goes to DeepSeek V4.1 Flash executors through this MCP bridge. Native Claude workers are **not** a fallback.
 
-**Status: disabled / opt-in.** Claude's `orchestrate` skill uses the native Claude `worker` tier by default. This bridge is retained for an explicitly requested experiment only; its presence in the repo or an existing MCP registration must not trigger automatic delegation. If you previously registered it and want to remove it, run `claude mcp remove --scope user usr-opencode-worker` and restart Claude.
+The bridge favors OpenCode Go. If the pinned OpenCode tier is unavailable or returns a recognized quota/usage error, it falls back to Command Code's exact model, `deepseek/deepseek-v4.1-flash`, without changing the task scope or worktree. No other model or provider is permitted.
 
-The bridge uses `@opencode/client` and its managed local service, not repeated `opencode run` subprocesses or CLI output scraping. Session IDs live in OpenCode and survive MCP process restarts. When explicitly invoked, it runs only the requested worker slice: no default Claude routing, no changes to the other tiers or harnesses.
+| Tier | OpenCode Go model | Command Code effort | Use |
+| --- | --- | --- | --- |
+| scout | `opencode-go/deepseek-v4.1-flash#low` | `low` | Read-only research |
+| mechanic | `opencode-go/deepseek-v4.1-flash#low` | `low` | Precisely specified edits |
+| worker | `opencode-go/deepseek-v4.1-flash#high` | `high` | Ordinary implementation/tests |
+| expert | `opencode-go/deepseek-v4.1-flash#max` | `max` | Demonstrably difficult work |
+| god | `opencode-go/deepseek-v4.1-flash#max` | `max` | Fresh context after a failed expert |
 
-## Install (manual on the machine running Claude)
+All Command Code tiers use `deepseek/deepseek-v4.1-flash` with the corresponding effort. OpenCode uses the pinned V2 client; Command Code uses documented headless `cmd -p --output-format json` NDJSON, explicit `--model`/`--effort`, `--resume`, and `--plan` for scouts or `--yolo` for writers. Neither model text nor successful exit proves correctness.
 
-Requires Node.js **26+**, Git, OpenCode **V2**, and Claude Code. The free model is cloud-hosted inside OpenCode; there are no local model weights to download. **Provider access depends on the installed OpenCode account/configuration**. Check `opencode models` and authenticate with OpenCode if necessary; the free offering is temporary and may disappear. `usr` already installs OpenCode and Node via its normal setup; run their existing installers if missing.
+## Install once on the Claude host
 
-```sh
+Requires Node.js 26+, OpenCode V2, Command Code CLI, and Git. Authenticate Command Code (`cmd status`, then `cmd login` if necessary). OpenCode Go uses its own allowance; Command Code has an independent account/allowance.
+
+~~~sh
 cd ~/usr/tools/opencode-worker
 npm install --ignore-scripts --no-package-lock --no-audit --no-fund
 npm test
 claude mcp add --scope user --transport stdio usr-opencode-worker -- \
   node --experimental-strip-types "$HOME/usr/tools/opencode-worker/src/server.ts"
 claude mcp list
-```
+~~~
 
-Restart Claude; `/mcp` should show **usr-opencode-worker** and five worker tools. Registration is a one-time user-local operation, not a tracked secret or an automatic `sh sync` side effect. Do not commit credentials or `node_modules`.
+Restart Claude and verify `/mcp`. **The tracked orchestration policy is on by default; global MCP registration is a one-time local action.** `sh sync` does not silently modify `~/.claude.json`, install untracked dependencies into the repo, or touch auth. Without the registered bridge, Claude stops and reports setup rather than implementing in Opus or native Claude children.
 
-**Model selection:** Default is `opencode/deepseek-v4.1-flash-free`, with a smaller context and output budget and temporary availability. If the free route is unavailable or its limits are insufficient, explicitly configure the existing OpenCode Go paid-allowance route instead (no automatic fallback):
+## Task protocol
 
-```sh
-claude mcp remove --scope user usr-opencode-worker
-claude mcp add --scope user --env USR_OPENCODE_WORKER_MODEL=go --transport stdio usr-opencode-worker -- \
-  node --experimental-strip-types "$HOME/usr/tools/opencode-worker/src/server.ts"
-```
+Opus prepares a clean separate linked worktree at `<repo>/.work/wt/<slice>` and calls `worker_model_check(cwd, tier)`. It creates one bounded assignment with `worker_start(cwd, title, tier, scope, brief)`:
 
-`go` pins `opencode-go/deepseek-v4.1-flash#max`. The only accepted values are `free` and `go`. Different provider or model IDs require a code change and tests; never silently fall back to Sonnet or other models. Costs reported for Go are informational and do not necessarily match subscription allowance accounting.
+- `scope.base_revision`: exact 40-character worktree HEAD.
+- `scope.writable_paths`: up to 20 explicit relative files or directory prefixes ending in `/`; **empty** for scout.
+- `scope.acceptance_proof`: exact verification command and expected result, or source `file:line` evidence for read-only investigation.
+- `scope.attempt_limit`: 1 normally; 2 for one targeted correction.
+- `scope.stop_on`: design ambiguity, dependencies, contract changes, blocked proof, or expanded scope.
 
-## Explicitly requested trial lane
+`worker_start` returns a stable `usrw_…` bridge ID and **admitted**, not completed. `worker_status(cwd, session_id)` reports actual backend, model/effort, result, errors, changed/out-of-scope paths, and unchanged HEAD. Opus checks claimed commands/output independently.
 
-1. **Parent** creates a clean linked worktree at `<repo>/.work/wt/<slice>` and its own branch, as already required by `orchestrate`. Do not use the primary checkout, a subdirectory, an untracked dirty tree, or an arbitrary temp directory.
-2. **Parent** calls `worker_model_check(cwd)`. If the exact pinned model/variant isn't available, report that blocker or seek authorization to change the configuration; don't silently change models.
-3. **Parent** calls `worker_start(cwd, title, brief)` with the base revision, owned and forbidden files, acceptance command, attempt limit, and stopping condition. The bridge pins model and `build` agent, records worktree ownership in session metadata, and disables subagent delegation by instruction. The returned `session_id` means the input was **durably admitted**, *not* that execution finished.
-4. **Parent** calls `worker_status(cwd, session_id)` to check `running`, `queued`, or the session outcome, the last assistant text, reported usage/cost, and Git status. The parent checks the diff and actual acceptance evidence; assistant text alone is not proof. Keep the session ID with its exact worktree.
-5. After diagnosing an incomplete slice, **parent** may call `worker_resume` with specific feedback only when the session is inactive and has no queued input. For a cancellation, `worker_cancel` requests OpenCode interruption; `interrupted:false` means no active execution was interrupted. Always review preserved work afterward.
-6. **Parent** integrates accepted work and handles worktree/branch cleanup under the existing `orchestrate` lifecycle. The worker must never commit, switch branches, merge, push, or remove a worktree.
+The **one Opus review** uses `git diff --check` and `git diff <base_revision>` plus untracked files. Check the intended change, ownership, obvious breakage, and unrelated churn. One same-scope `worker_resume` correction may follow if the attempt limit permits; otherwise reject or park. Workers never commit, merge, push, or remove worktrees.
 
-`agent-tier-gate` guards native Claude `Agent` calls, **not** these MCP tools. The bridge rejects unrelated sessions and worktrees and refuses to change model on resume, but is a **coordination boundary, not an OS sandbox or authenticated proof of a parent caller**. The agent's tools can still access other paths allowed by the host. Only install this MCP server in trusted Claude Code sessions; use `sbx` or a VM if stronger isolation is required.
+Fallback requires an untouched tree. If OpenCode wrote anything before exhausting quota, the bridge returns `blocked_partial_work` instead of running Command Code over partial changes. Command Code failures do not fall back to a third provider. Bridge state and Command Code NDJSON logs persist under the ignored `<repo>/.work/worker-bridge/`, allowing completed sessions to be inspected after MCP restarts. Old child PIDs are never blindly signaled.
 
-## Verification and handoff
+**Isolation limitation:** this is a Git scope check, not an OS sandbox; ignored-file changes or host writes elsewhere might not be detected. Use `sbx` or a VM for stronger containment.
 
-**Offline / without Claude:**
+## Verification
 
-```sh
+~~~sh
 cd ~/usr/tools/opencode-worker
 npm test
-node --experimental-strip-types src/server.ts
-```
+~~~
 
-The second command is the stdio MCP server and will wait for JSON-RPC messages. Tests use temporary Git repositories, a mock OpenCode port, and an actual MCP stdio handshake. They don't spend tokens or need any credentials. They cover worktree boundary enforcement, strict model selection, session ownership, start/status/resume/cancel, pending input, and admission failures. Node 22 may be used for these offline tests, but the tracked runtime target is Node 26+.
+Offline tests cover worktree/scope boundaries, tier pinning, quota fallback, partial edits, resume, and the MCP handshake using mocks, without inference credits. They do not prove live account access.
 
-**Live Claude + OpenCode smoke test remaining:** After `claude mcp add`, in a disposable test repo create `.work/wt/oc-smoke` and verify `worker_model_check`; assign a bounded one-file slice; record the returned session ID; observe a terminal outcome; check its actual model, resulting diff, and test output. Resume with one targeted correction, test cancellation of a running slice, then restart the MCP process and confirm the same session can still be inspected. Confirm two independent worktrees do not interfere. Only enable unattended multi-lane campaigns when these checks pass.
-
-If OpenCode V2's service cannot start, or the model isn't listed, do not auto-switch providers. Inspect the installed `opencode --version`, the local OpenCode login/status, and `worker_model_check`. `@opencode/client` is pinned to `2.2.5` to keep API expectations explicit. Authentication, real worker execution, and Claude behavior cannot be verified by this repository's offline tests.
+**Live gate before unattended work:** register MCP, use a disposable one-file worktree task, inspect the result diff and acceptance command, verify an OpenCode quota failure transitions to Command Code with the same scope, test one resume, then restart MCP and inspect the session again.

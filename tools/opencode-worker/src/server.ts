@@ -1,31 +1,47 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { createInterface } from "node:readline"
-import { makeWorkerBridge, type OpenCodePort } from "./bridge.ts"
+import { type OpenCodePort } from "./bridge.ts"
+import { makeHybridBridge } from "./hybrid.ts"
 
-const VERSION = "0.1.0"
+const VERSION = "0.2.0"
 const PROTOCOL = "2025-06-18"
 const MAX_LINE = 100_000
 
 const cwdSchema = { type: "string", description: "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it." }
-const idSchema = { type: "string", description: "OpenCode session_id returned by worker_start; never guess or substitute another session." }
+const tierSchema = { type: "string", enum: ["scout", "mechanic", "worker", "expert", "god"] }
+const scopeSchema = {
+  type: "object",
+  properties: {
+    base_revision: { type: "string", pattern: "^[a-f0-9]{40}$" },
+    writable_paths: { type: "array", maxItems: 20, items: { type: "string" }, description: "Exact files or directory prefixes ending in /; empty only for scout" },
+    acceptance_proof: { type: "string", minLength: 1, maxLength: 2000 },
+    attempt_limit: { type: "integer", minimum: 1, maximum: 2 },
+    stop_on: { type: "string", minLength: 1, maxLength: 2000 },
+  },
+  required: ["base_revision", "writable_paths", "acceptance_proof", "attempt_limit", "stop_on"],
+  additionalProperties: false,
+}
+const idSchema = { type: "string", description: "usrw_ session ID returned by worker_start; never guess another session." }
 const tools = [
   {
     name: "worker_model_check",
-    description: "Read-only: verify usr's pinned DeepSeek worker model is available in the configured OpenCode v2 location. Never fall back to another model.",
-    inputSchema: { type: "object", properties: { cwd: cwdSchema }, required: ["cwd"], additionalProperties: false },
+    description: "Read-only: inspect the exact pinned DeepSeek V4.1 Flash tier in OpenCode Go and availability of Command Code fallback.",
+    inputSchema: { type: "object", properties: { cwd: cwdSchema, tier: tierSchema }, required: ["cwd", "tier"], additionalProperties: false },
   },
   {
     name: "worker_start",
-    description: "Parent orchestrator ONLY: start ONE normal implementation worker in an existing, clean dedicated git worktree. Claude retains review/integration. Not for expert/god, not from a child. Prompt is durably admitted, not necessarily completed.",
+    description: "Claude Opus coordinator ONLY: delegate one strictly scoped task to OpenCode Go DeepSeek 4.1 Flash; fall back to the exact Command Code DeepSeek model on quota/model unavailability. Admission is NOT completion.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
-      title: { type: "string", maxLength: 100, description: "Short human-readable slice name" },
-      brief: { type: "string", maxLength: 32000, description: "Self-contained worker brief: exact write boundaries, deliverable, acceptance commands, attempt and stopping limits" },
-    }, required: ["cwd", "title", "brief"], additionalProperties: false },
+      title: { type: "string", maxLength: 100, description: "Short scoped task name" },
+      tier: tierSchema,
+      scope: scopeSchema,
+      brief: { type: "string", maxLength: 32000, description: "One bounded outcome and only the context needed" },
+    }, required: ["cwd", "title", "tier", "scope", "brief"], additionalProperties: false },
   },
   {
     name: "worker_status",
-    description: "Observe worker outcome, pending inputs, reported cost, last assistant result, and Git status. This does NOT prove correctness; parent reviews diff and checks.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Can trigger quota fallback only when the original worktree is untouched.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, session_id: idSchema }, required: ["cwd", "session_id"], additionalProperties: false },
   },
   {
@@ -43,7 +59,7 @@ const tools = [
   },
 ] as const
 
-type Bridge = ReturnType<typeof makeWorkerBridge>
+type Bridge = ReturnType<typeof makeHybridBridge>
 type Message = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: unknown }
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -51,22 +67,35 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /** Connect lazily: tools/list and unit tests need neither OpenCode nor credentials. */
 export async function connect(): Promise<Bridge> {
-  const [{ OpenCode }, { Service }] = await Promise.all([
-    import("@opencode/client"), import("@opencode/client/service"),
-  ])
-  const endpoint = await Service.ensure({ version: (version: string) => version.startsWith("2.") })
-  const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
+  let connection: Promise<OpenCodePort> | undefined
+  const get = () => connection ??= (async () => {
+    const [{ OpenCode }, { Service }] = await Promise.all([
+      import("@opencode/client"), import("@opencode/client/service"),
+    ])
+    const endpoint = await Service.ensure({ version: (version: string) => version.startsWith("2.") })
+    const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
+    return {
+      create: (input) => client.session.create(input),
+      prompt: (input) => client.session.prompt(input),
+      get: (input) => client.session.get(input),
+      active: () => client.session.active(),
+      inbox: (input) => client.session.inbox.list(input),
+      messages: (input) => client.session.message.list(input),
+      interrupt: (input) => client.session.interrupt(input),
+      models: (input) => client.model.list(input),
+    } satisfies OpenCodePort
+  })().catch((error: unknown) => { connection = undefined; throw error })
   const api: OpenCodePort = {
-    create: (input) => client.session.create(input),
-    prompt: (input) => client.session.prompt(input),
-    get: (input) => client.session.get(input),
-    active: () => client.session.active(),
-    inbox: (input) => client.session.inbox.list(input),
-    messages: (input) => client.session.message.list(input),
-    interrupt: (input) => client.session.interrupt(input),
-    models: (input) => client.model.list(input),
+    create: async (input) => (await get()).create(input),
+    prompt: async (input) => (await get()).prompt(input),
+    get: async (input) => (await get()).get(input),
+    active: async () => (await get()).active(),
+    inbox: async (input) => (await get()).inbox(input),
+    messages: async (input) => (await get()).messages(input),
+    interrupt: async (input) => (await get()).interrupt(input),
+    models: async (input) => (await get()).models(input),
   }
-  return makeWorkerBridge(api)
+  return makeHybridBridge(api)
 }
 
 export function serve(load: () => Promise<Bridge> = connect): void {
@@ -103,8 +132,8 @@ export function serve(load: () => Promise<Bridge> = connect): void {
       const worker = await bridge()
       let result: unknown
       switch (params.name) {
-        case "worker_model_check": result = await worker.modelCheck(args.cwd); break
-        case "worker_start": result = await worker.start(args.cwd, args.title, args.brief); break
+        case "worker_model_check": result = await worker.modelCheck(args.cwd, args.tier); break
+        case "worker_start": result = await worker.start(args.cwd, args.title, args.tier, args.scope, args.brief); break
         case "worker_status": result = await worker.status(args.cwd, args.session_id); break
         case "worker_resume": result = await worker.resume(args.cwd, args.session_id, args.feedback); break
         case "worker_cancel": result = await worker.cancel(args.cwd, args.session_id); break

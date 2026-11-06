@@ -5,7 +5,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
 export type ModelRef = { id: string; providerID: string; variant?: string }
 export type SessionArgs = { sessionID: string }
 export type OpenCodePort = {
-  create(input: { title: string; agent: "build"; model: ModelRef; location: { directory: string }; metadata: Record<string, unknown> }): Promise<unknown>
+  create(input: { title: string; agent: "build" | "plan"; model: ModelRef; location: { directory: string }; metadata: Record<string, unknown> }): Promise<unknown>
   prompt(input: SessionArgs & { text: string }): Promise<unknown>
   get(input: SessionArgs): Promise<unknown>
   active(): Promise<unknown>
@@ -117,12 +117,25 @@ function latestAssistant(value: unknown): string | null {
   for (const item of items) {
     if (!item || typeof item !== "object") continue
     const record = object(item)
-    if (record.type !== "assistant") continue
-    const parts = record.content
+    const info = isRecord(record.info) ? record.info : record
+    if (info.role !== "assistant" && record.type !== "assistant") continue
+    const parts = Array.isArray(record.parts) ? record.parts : record.content
     if (!Array.isArray(parts)) continue
     const text = parts.filter((p) => p && typeof p === "object" && field(p, "type") === "text")
       .map((p) => field(p, "text")).filter((s): s is string => typeof s === "string").join("\n")
     if (text) return text.slice(-5000)
+  }
+  return null
+}
+
+function latestAssistantError(value: unknown): unknown {
+  const response = unbox(value)
+  const items = Array.isArray(response) ? response : field(response, "items")
+  if (!Array.isArray(items)) return null
+  for (const item of items) {
+    if (!isRecord(item)) continue
+    const info = isRecord(item.info) ? item.info : item
+    if ((info.role === "assistant" || item.type === "assistant") && info.error) return info.error
   }
   return null
 }
@@ -150,7 +163,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       const directory = checkedWorktree(cwd)
       return { model, available: modelAvailable(await api.models({ location: { directory } }), model) }
     },
-    async start(cwd: unknown, title: unknown, brief: unknown) {
+    async start(cwd: unknown, title: unknown, brief: unknown, readOnly = false) {
       const directory = checkedWorktree(cwd, true)
       const name = requiredText(title, "title", 100)
       const text = requiredText(brief, "brief")
@@ -158,7 +171,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
         throw new Error(`Pinned model ${model.providerID}/${model.id}${model.variant ? "#" + model.variant : ""} unavailable. No fallback.`)
       }
       const result = object(unbox(await api.create({
-        title: SESSION_PREFIX + name, agent: "build", model, location: { directory },
+        title: SESSION_PREFIX + name, agent: readOnly ? "plan" : "build", model, location: { directory },
         metadata: { [SESSION_METADATA_KEY]: { directory, model } },
       })))
       const id = requiredText(result.id, "OpenCode session ID", 128)
@@ -187,7 +200,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       return {
         session_id: id, cwd: directory, model, state: running ? "running" : pending ? "queued" : (info.outcome ?? "idle_or_queued"),
         pending_inputs: pending,
-        cost_reported_usd: info.cost ?? null, tokens: info.tokens ?? null,
+        cost_reported_usd: info.cost ?? null, tokens: info.tokens ?? null, error: info.error ?? latestAssistantError(messages),
         last_assistant_text: latestAssistant(messages), git_status: statusLines(directory),
         note: "Status is observational; verify the diff and acceptance checks before integration.",
       }
