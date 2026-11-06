@@ -10,15 +10,6 @@ Next: 33
 - **Fix with:** `durable-state`
 - **Effort:** M
 
-### USR-28 · P1 · Sync ignores TARGET and can modify the real home instead of the requested fixture
-
-- **Area:** Config
-- **Where:** `tools/sync/main.py:30-59`, `tools/sync/main.py:74-103`, `sync:13-35`, `docs/sync.md:5`
-- **Problem:** The previous public TARGET override is still documented, but Context always uses HOME. Reproduced with HOME and TARGET pointed at different disposable directories: the sym -t argument is HOME rather than TARGET. Running TARGET=/scratch sh sync links therefore applies links to the actual HOME, violating the caller's intended isolation.
-- **Recommendation:** Model the target home explicitly in Context, use it for link probes and apply, and forbid host/package mutations for an alternate target unless separately authorized. Test plan/links with HOME != TARGET and assert no writes in HOME.
-- **Fix with:** none
-- **Effort:** S
-
 ### USR-5 · P2 · Push rules do not require user approval
 
 - **Area:** Security

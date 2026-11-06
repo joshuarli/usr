@@ -34,21 +34,29 @@ class Context:
     platform: str
     profile: str
     env: dict[str, str]
+    target: Path | None = None
+
+    @property
+    def link_target(self) -> Path:
+        return self.target or self.home
 
     @property
     def state(self) -> Path:
-        return Path(self.env.get("DL_OWNED_FILE", str(self.home / ".local/state/sync/dl-owned")))
+        return Path(self.env.get("DL_OWNED_FILE", str(self.link_target / ".local/state/sync/dl-owned")))
 
 
 def context() -> Context:
     home = Path(os.environ["HOME"])
+    target = Path(os.environ.get("TARGET", str(home)))
+    if not home.is_absolute() or not target.is_absolute():
+        raise GraphError("HOME and TARGET must be absolute paths")
     platform = subprocess.check_output(["uname", "-s"], text=True).strip().lower()
     profile = os.environ.get("DL_PROFILE", "")
     if not profile:
         mode = Path("/etc/home/install-mode")
         if mode.is_file():
             profile = mode.read_text().strip()
-    return Context(ROOT, home, platform, profile, dict(os.environ))
+    return Context(ROOT, home, platform, profile, dict(os.environ), target)
 
 
 def command(ctx: Context, *args: str, capture: bool = False, extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -78,7 +86,7 @@ def link_status(ctx: Context) -> Probe:
         if not source.is_dir():
             continue
         response = command(ctx, "sh", str(ctx.root / "dotfiles/sym"),
-                           "--dry-run", "-t", str(ctx.home), str(source), capture=True,
+                           "--dry-run", "-t", str(ctx.link_target), str(source), capture=True,
                            extra={"SYM_OWNED_FILE": str(ctx.state)})
         lines = response.stdout + response.stderr
         output.extend(line for line in lines.splitlines() if line.startswith(("LINK:", "CONFLICT:", "PRUNE:")))
@@ -94,12 +102,12 @@ def apply_links(ctx: Context) -> None:
     scratch = ctx.root / ".work/tmp"
     scratch.mkdir(parents=True, exist_ok=True)
     required(command(ctx, "sh", str(ctx.root / "dotfiles/migrate-pinact.sh"),
-                     str(ctx.home), str(ctx.state)), "pinact migration")
+                     str(ctx.link_target), str(ctx.state)), "pinact migration")
     for layer in ["base", ctx.platform]:
         source = ctx.root / "dotfiles" / layer
         if source.is_dir():
             required(command(ctx, "sh", str(ctx.root / "dotfiles/sym"), "-v",
-                             "-t", str(ctx.home), str(source),
+                             "-t", str(ctx.link_target), str(source),
                              extra={"SYM_OWNED_FILE": str(ctx.state)}), f"{layer} links")
 
 
@@ -227,6 +235,8 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
 def main(argv: list[str]) -> int:
     ctx = context()
     command_name = argv.pop(0) if argv else "apply"
+    if ctx.link_target.resolve() != ctx.home.resolve() and command_name in {"apply", "tools", "bridge", "uninstall"}:
+        raise GraphError(f"{command_name} cannot mutate host tools with TARGET different from HOME; use sync links")
     if command_name == "list":
         if argv:
             raise GraphError("sync list does not take arguments")

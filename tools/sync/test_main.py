@@ -36,6 +36,30 @@ class MainTests(unittest.TestCase):
         names = {task.name for task in dag.order()}
         self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:claude", "tool:opencode2", "claude-mcp"} <= names)
 
+    def test_alternate_target_links_never_touch_home(self):
+        target = self.ctx.root / "fixture-home"
+        target.mkdir()
+        ctx = main.Context(self.ctx.root, self.ctx.home, "darwin", "desktop", self.ctx.env, target)
+        seen = []
+        def run(_ctx, *args, **kwargs):
+            seen.append(args)
+            return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        with patch.object(main, "command", side_effect=run):
+            main.apply_links(ctx)
+            main.link_status(ctx)
+        self.assertEqual(ctx.state, target / ".local/state/sync/dl-owned")
+        self.assertTrue(all(str(target) in item for item in (args for args in seen if "-t" in args) for item in (args[args.index("-t")+1],)))
+        self.assertTrue(all(str(self.ctx.home) not in args for args in seen))
+
+    def test_alt_target_blocks_host_mutations(self):
+        target = self.ctx.root / "fixture-home"
+        target.mkdir()
+        ctx = main.Context(self.ctx.root, self.ctx.home, "darwin", "desktop", self.ctx.env, target)
+        with patch.object(main, "context", return_value=ctx):
+            for operation in ([], ["tools", "cmd"], ["bridge"], ["uninstall"]):
+                with self.subTest(operation=operation), self.assertRaisesRegex(main.GraphError, "TARGET different from HOME"):
+                    main.main(list(operation))
+
     def test_server_profile_omits_claude_bridge(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "is_alpine", return_value=False):
