@@ -28,8 +28,6 @@ Update every dependency and explicit version pin to its newest stable release, t
 4. **Verify.** Re-run checks after fixes. Confirm lockfiles are consistent and remove dependencies the project no longer uses. Follow any performance gate in AGENTS.md, including its readiness check.
 5. **Docs.** Update version mentions, install instructions, and examples made stale by the upgrades.
 
-Never push.
-
 **The test:** every dependency and pin is at its newest stable release or listed with the reason it stayed, and the focused checks match the baseline.
 
 **Report:** Say what changed and which pins stayed fixed. Report check results against the baseline. List checks not run and why. Report performance measurements required by repository gates.
