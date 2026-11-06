@@ -1,6 +1,6 @@
 # Plan: extract agent-memory into an independently deployable Cloudflare project
 
-Status: **Gates A, B, and C implemented; Gate D (remote MCP) not started.** The standalone repository is `~/d/agent-memory`, pushed to the public `github.com/joshuarli/agent-memory`. Its `chore: import agent-memory from usr@b16294d unchanged` commit has the same tree as `b16294d:agent-memory`. The host launchers and both LaunchAgents run the package installed in `~/d/agent-memory/.venv`, and `usr` no longer carries the source. The Worker is deployed only by `make deploy` in the new repository (no Workers Builds trigger exists); the first such deploy replaced version `1f2964c0-c11e-4a1a-9241-6f7858775782`, the rollback target, with `290b2cb2-6f23-48bf-a0a2-14b41d2655ba`. The remote MCP adapter needs separate authorization.
+Status: **Gates A–D implemented and deployed.** The standalone repository is `~/d/agent-memory`, pushed to the public `github.com/joshuarli/agent-memory`. Its `chore: import agent-memory from usr@b16294d unchanged` commit has the same tree as `b16294d:agent-memory`. The host launchers and both LaunchAgents run the package installed in `~/d/agent-memory/.venv`, and `usr` no longer carries the source. The Worker is deployed only by `make deploy` in the new repository (no Workers Builds trigger exists); the first such deploy replaced version `1f2964c0-c11e-4a1a-9241-6f7858775782` with `290b2cb2-6f23-48bf-a0a2-14b41d2655ba`. The MCP-enabled deploy is version `14048af3-6275-4311-879b-1ccf5124ae34`; `290b2cb2-6f23-48bf-a0a2-14b41d2655ba` is its rollback target. Gate D's live acceptance passed with Claude Code; see [Gate D evidence](#gate-d-evidence).
 
 ## Summary
 
@@ -285,6 +285,17 @@ Installation and Cloudflare deployment are independent actions; request/record t
 ### Gate D — optional remote MCP implementation
 
 Begin only after the extraction boundary is stable. Implement the thin Worker adapter and the security/build/client tests in section 8. Keep its changes and rollout independently revertible. Remote MCP completion requires a tested real client's authenticated calls against the intended endpoint; local stdio or a curl-only demonstration is not a substitute.
+
+### Gate D evidence
+
+Implemented in `~/d/agent-memory` as `5eaabb9` (`feat(worker): expose read-only MCP endpoint`), on top of the cross-origin search prerequisite `e1256db`. The adapter is `cloudflare/src/routes/mcp.ts`; the build bundles the official SDK with esbuild because the existing `tsrs` graph does not resolve its transitive imports.
+
+- **Verification:** `make worker-test` passed all 132 Worker tests, including the built module graph in workerd and an official SDK client. `make lint` and `make worker-check` passed. The production dry run reported 527.79 KiB total upload and 125.19 KiB gzip.
+- **Deployment:** `make deploy` built and tested bundle `3cca3896dc3f4b8ad7ce70cfc7f158d2ed13d7c769ca3a63d0a7eff29e24a69a`, then deployed version `14048af3-6275-4311-879b-1ccf5124ae34`. The read-only smoke probe passed, including the collector status and an unauthenticated Access redirect. No migration was pending or applied. The implementation commits (`e1256db`, `5eaabb9`, `4b2eaa6`) remain local; no push was performed.
+- **Real client:** Claude Code 2.1.318 loaded an HTTP MCP server from a strict temporary config with the existing collector Access service-token headers. It called `server_status` and `memory_search` with `limit=1`; both succeeded and returned collector scope, the bound origin, and one record. Codex CLI 0.166.0 parsed the equivalent `env_http_headers` config, but its live turn was refused by the account usage limit, so it did not supply the acceptance call.
+- **Security:** live `initialize` and tool calls returned `cache-control: no-store`; unauthenticated traffic was redirected by Access. The Worker applies explicit Host/Origin checks, a 32 KiB body limit, a 256 KiB result limit, and `maxSubscriptions: 0`. Tests cover collector isolation, reader scope, pagination, malformed and unsupported requests, schema errors, database failures, hostile origins, and oversized bodies.
+- **Cost:** the pre-MCP upload was 196.50 KiB (36.36 KiB gzip) versus 527.79 KiB (125.19 KiB gzip). Local Miniflare cold start was 74.5 ms baseline versus 124.7 ms MCP (median of five alternating samples; `perf-gate-ready` passed before and after each). The deploy reported a 35 ms Worker startup time. REST status and search kept identical D1 operation counts. `memory_search` and `memory_inspect` call the shared scoped operations and add no D1 work; `server_status` uses the existing status readers. The official SDK module graph accounts for the startup cost.
+- **Scope:** REST behavior, production resources, domain, Access configuration, and storage were unchanged.
 
 ## Rollback
 
