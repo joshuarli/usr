@@ -2,7 +2,7 @@
 
 Which meta skill to reach for, and why. Meta skills steer how the agent works: how it plans, delegates, reviews, and runs unattended. Language, stack, and engineering-method skills are left out. They live in `dotfiles/base/.agents/skills/`, and each one's `description` says when it applies.
 
-Opt-in project retrieval and review metrics live outside skill routing. See [agent learning](agent-memory/README.md).
+Opt-in project retrieval and review metrics live outside skill routing. See the agent-memory repository's README (`~/d/agent-memory/README.md`).
 
 **Auto** skills may be selected from an ordinary request. **Explicit** skills run only when you name them or their outcome (`/<name>`); the harness injects the body, and the model must not self-load one. A rejection there is the manual-only gate working. A requested workflow may reuse an explicit skill's documented procedure within its scope and authority. Read an explicit skill's references with normal file reads.
 

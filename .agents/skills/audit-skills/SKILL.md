@@ -37,7 +37,7 @@ Instructions drift as they grow: two skills give opposite orders, a rule is rest
 
 - **Lanes edit disjoint files and run no git writes.** Reuse the audit lanes, which already hold their findings. A fix that crosses into another lane's files is reported, not made.
 - **Preserve every decision.** Per file, compare backticked tokens with `git show HEAD:<file> | rg -o '\`[^\`]+\`' | sort -u`; every token removed must be named as moved or deliberately dropped.
-- **Find tests that pin instruction text before committing.** `rg -l 'SKILL\.md|AGENTS\.md|agents/skills' --glob '*test*'` lists them; run each. A lane once deleted a safety sentence that `tools/agent-memory/eval/test_live_recall.py` pins.
+- **Find tests that pin instruction text before committing.** `rg -l 'SKILL\.md|AGENTS\.md|agents/skills' --glob '*test*'` lists them; run each. A lane once deleted the `do` recall rule's safety sentence, which agent-memory's live recall evaluation reads; `dotfiles/skills-campaign-test.py` now pins it.
 - **Review each lane's diff, then commit it alone** with a body naming the contradictions it resolves. New rule owners go into the list in `dotfiles-health` in the same change.
 - **Run the shared checks once all lanes stop**, not while they edit: `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills`, `sh dotfiles/skills-check.sh .agents/skills`, and `python3 -I dotfiles/skills-campaign-test.py`. Concurrent runs collide on fixtures and fail spuriously.
 - **Expect modest savings.** Once contradictions and duplicates are gone, most remaining text is a specific rule. Stop there instead of compressing rules away.

@@ -1,6 +1,6 @@
 # Plan: extract agent-memory into an independently deployable Cloudflare project
 
-Status: **draft revision; planning only.** This replaces the extraction instructions introduced in `8fb804cd19f5f99f372410a5888f581e84b78f44`. It does not claim that extraction, installation, publication, deployment, or MCP implementation has happened. The repository and deployment boundary is decided below; live activation and MCP remain separate gates.
+Status: **Gates A and B implemented; Gates C and D not started.** The standalone repository is `~/d/agent-memory` (local only, no remote yet). Its `chore: import agent-memory from usr@b16294d unchanged` commit has the same tree as `b16294d:agent-memory`; packaging, path, check, and documentation changes follow it. The `usr` consumer change is prepared on branch `agent-memory-consumer` and is not merged: the live launchers still run the in-tree source. Host activation, deployment ownership transfer, and the remote MCP adapter each need separate authorization.
 
 ## Summary
 
@@ -34,7 +34,7 @@ Repository facts checked at `8fb804cd19f5f99f372410a5888f581e84b78f44`:
 
 The earlier report that `~/d/agent-memory` was partially populated, had no `.git`, and that a stray `~/usr/tools/agent-memory/src` existed is **historical host information, not a fresh observation**. Reinspect before acting. Likewise, a tracked plist or cost report does not prove which jobs are currently loaded or which revision is deployed.
 
-Relevant source documents: [agent-memory README](../../agent-memory/README.md), [cost analysis](../../agent-memory/docs/cost.md), [development checks](../development.md), and [repository rules](../../AGENTS.md). Update these links or replace this RFC with the destination documentation when extraction is implemented; do not leave links into a deleted tree.
+Relevant documents: `~/d/agent-memory/README.md`, `~/d/agent-memory/docs/install.md`, `~/d/agent-memory/docs/operations.md`, `~/d/agent-memory/docs/cost.md`, [development checks](../development.md), and [repository rules](../../AGENTS.md).
 
 ## Design
 

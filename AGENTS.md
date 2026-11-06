@@ -15,8 +15,6 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Home sync, layers, tools, doctor, uninstall | [docs/sync.md](docs/sync.md) |
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
-| Agent learning, session search, and archive | [agent-memory/README.md](agent-memory/README.md) |
-| usr-memories Cloudflare cost and what drives it | [agent-memory/docs/cost.md](agent-memory/docs/cost.md) |
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
@@ -26,6 +24,8 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Deferred work and RFCs | [TODO.md](TODO.md), [docs/rfc/](docs/rfc/) |
 | Agent archive campaign record | [docs/CAMPAIGN-AGENT-ARCHIVE.md](docs/CAMPAIGN-AGENT-ARCHIVE.md) |
 | Cloudflare memories campaign record | [docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md](docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md) |
+
+Agent learning, session search, the archive, and the usr-memories Worker live in the separate agent-memory repository, conventionally checked out at `~/d/agent-memory`. Read its README for behavior and its install, operations, and cost documents for setup and the Worker.
 
 ## Background work
 

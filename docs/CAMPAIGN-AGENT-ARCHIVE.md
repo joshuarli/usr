@@ -1,5 +1,7 @@
 # Campaign: Agent archive
 
+> Historical record. Paths under `agent-memory/` and root `Makefile` targets describe the layout before agent-memory moved to its own repository (`~/d/agent-memory`); its checks and operations are now in that repository's `AGENTS.md` and `docs/operations.md`.
+
 Durable, cross-machine preservation and search for coding-agent sessions, and first-class Command Code (`cmd`) and Antigravity CLI (`agy`) adapters.
 
 ## Status

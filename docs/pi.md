@@ -61,7 +61,7 @@ The starting point was `dotfiles/base/.pi/agent/settings.json` at `0c9534f60c88b
 
 Unlike that historical configuration, `.pi/agent` is not a whole-directory `.sym-dir` link. Only tracked configuration and agent definitions are linked. Credentials, sessions, downloaded packages, and runtime state remain under the real home directory, outside the repository. `sh sync uninstall` records the isolated CLI installation, not the entire `.pi` state directory. If an old whole-directory link still exists, preserve its state and resolve the conflict shown by `sh sync plan` before syncing; the installer does not migrate or delete it.
 
-`agent-sessions` and `agent-learn` index Pi transcripts (see [agent learning](../agent-memory/README.md)). They are not yet part of `reset-agents`, and pi-subagents run artifacts are not read.
+`agent-sessions` and `agent-learn` index Pi transcripts (see `~/d/agent-memory/README.md`). They are not yet part of `reset-agents`, and pi-subagents run artifacts are not read.
 
 ## Git command guard
 

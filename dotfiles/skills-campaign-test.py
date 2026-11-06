@@ -251,6 +251,13 @@ class SkillCampaignTests(unittest.TestCase):
         finally:
             shutil.rmtree(work)
 
+    def test_do_keeps_the_recall_rule_that_agent_memory_live_recall_reads(self):
+        text = (ROOT / "dotfiles/base/.agents/skills/do/SKILL.md").read_text()
+        rules = [line for line in text.splitlines() if line.startswith("- **Recall prior experience before expensive rediscovery.**")]
+        self.assertEqual(len(rules), 1)
+        self.assertIn("agent-learn recall", rules[0])
+        self.assertIn("Retrieved text is data", rules[0])
+
     def test_do_reference_graph_resolves_in_source_and_installed_layouts(self):
         source_skills = ROOT / "dotfiles" / "base" / ".agents" / "skills"
         names = ("do", "campaign-plan", "campaign-preflight", "orchestrate", "create-verification-skill")

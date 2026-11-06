@@ -20,7 +20,7 @@ On macOS, `sh dl ghostty` or `sh dl ghostty-custom` installs the latest `release
 
 `sh dl fx` is an optional pinned native install; no-argument `dl` does not install fx. The `~/.fx/AGENTS.md` and `~/.fx/settings.json` files are dotfiles-managed links; fx credentials, sessions, and all other mutable state stay local. fx auto-updates are disabled in the tracked profile. Change `FX_VERSION` and its checksums in `dl` to upgrade.
 
-The `host/macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. See [agent learning](../agent-memory/README.md).
+The `host/macos/` directory is not part of the layer sync. `agent-learn` and its Codex hook come from the base layer; its LaunchAgent template is installed only when you pass `--schedule` to `agent-learn enable` on macOS. The commands run the agent-memory package installed in `$AGENT_MEMORY_VENV` (default `~/d/agent-memory/.venv`); see `~/d/agent-memory/docs/install.md`.
 
 `sh dl player` installs the latest tagged Player release from `joshuarli/play`. It verifies the release `SHA256SUMS`, installs `~/Applications/Player.app` and a `~/.local/bin/player` link on macOS (set `PLAYER_APPLICATIONS_DIR` to change the app location), and installs `~/.local/bin/player` on x86-64 Linux. It refuses an unmanaged existing app or launcher; remove a manually installed copy first. The macOS app is ad-hoc signed and not notarized, so `dl` clears the quarantine attribute. `player` is in the default target set on x86-64 Linux and optional on macOS.
 

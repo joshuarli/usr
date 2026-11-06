@@ -1,5 +1,7 @@
 # Campaign: Cloudflare agent memories
 
+> Historical record. Paths under `agent-memory/` and root `Makefile` targets describe the layout before agent-memory moved to its own repository (`~/d/agent-memory`); its checks and operations are now in that repository's `AGENTS.md` and `docs/operations.md`.
+
 Durable, encrypted, cross-machine mirror of the agent-memory archive, a D1 learning
 projection with FTS5 search, and a private HTML browser at
 `https://memories.17166969.xyz` — with measured performance as a release gate.
