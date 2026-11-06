@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Audit Implicit State Machines
 
-An implicit state machine is a lifecycle that the code tracks through flags, nullable fields, loose strings, closure variables, or parallel collections instead of one explicit enum or union. This audit is useful only when it reports defects. A list of representations that could be tidier is not useful. Audit the requested scope, and make no code change.
+An implicit state machine is a lifecycle that the code tracks through flags, nullable fields, loose strings, closure variables, or parallel collections instead of one explicit enum or union. This audit is useful only when it reports defects. A list of representations that could be tidier is not useful. Audit the requested scope, and make no code change other than filing tickets.
 
 ## Find candidates
 
@@ -41,6 +41,6 @@ Group findings by root cause, not by file. Give each finding:
 - the evidence class, with the trigger sequence or the guard sites;
 - the smallest fix, and the skill that applies it: `make-invalid-states-unrepresentable` for types, `lifecycle-concurrency` for tasks, timers, and cancellation, `durable-state` for persisted state.
 
-Rank findings with the priority definitions in `todo`. A guard tax alone is P3 at most. Representation-only items get no ticket. File tickets only when asked, and then follow `todo`.
+Rank findings with the priority definitions in `todo`. A guard tax alone is P3 at most. Representation-only items get no ticket. File a ticket for every reachable defect and guard tax that survives, following `todo`, without waiting to be asked.
 
 **Report:** the scope, the findings ranked with their evidence class, the representation-only items you dropped (one line each), what you did not read or run, and any tickets filed.
