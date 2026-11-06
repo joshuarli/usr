@@ -51,7 +51,7 @@ After long-running or delegated work, add one line each for **Goal**, **Done**, 
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.
-- Commit as you go. Each commit is one coherent change that passes its checks; stage only your own changes and leave unrelated work out. Push only when asked. An agent-authored campaign plan does not authorize its own execution.
+- Commit as you go. Each commit is one coherent change that passes its checks; stage only your own changes and leave unrelated work out. Push completed, verified commits without waiting for a separate request; do not leave them unpushed. An agent-authored campaign plan does not authorize its own execution.
 - Every commit message is a Conventional Commit: `type(scope): subject`, with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert`. The subject is imperative, lowercase, and at most 72 characters, with no trailing period. The body says why, not what. A contract change takes `!` after the type or a `BREAKING CHANGE:` footer. This holds for lane and campaign commits too.
 - Reserve release builds for final verification, or when performance is the primary concern.
 
