@@ -371,6 +371,31 @@ class LinkTests(unittest.TestCase):
         self.assertNotIn(destination, [a.path for a in p.actions])
         self.assertEqual(destination.resolve(), outside)
 
+    def test_42_same_source_replacement_never_pruned_as_owned(self):
+        src = self.source(".gone")
+        self.sync()
+        dest = self.home / ".gone"
+        original = os.readlink(dest)
+        dest.unlink()
+        dest.symlink_to(src)
+        self.assertNotEqual(os.readlink(dest), original)
+        self.assertTrue(self.plan().converged)
+        src.unlink()
+        plan = self.plan()
+        self.assertNotIn(dest, [a.path for a in plan.actions])
+        apply(plan, self.owned)
+        self.assertTrue(dest.is_symlink())
+        self.assertEqual(os.readlink(dest), str(src))
+
+    def test_43_legacy_record_cannot_authorize_prune(self):
+        src = self.source(".old")
+        dest = self.home / ".old"
+        dest.symlink_to(src)
+        self.owned.write_text(f"F\t{dest}\n")
+        src.unlink()
+        self.assertNotIn(dest, [a.path for a in self.plan().actions])
+        self.assertTrue(dest.is_symlink())
+
     def test_40_internal_parent_symlink_stays_confined(self):
         self.source(".a/f")
         internal = self.home / "inside"

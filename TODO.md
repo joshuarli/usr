@@ -1,15 +1,6 @@
 Prefix: USR
 Next: 38
 
-### USR-33 · P1 · Link pruning deletes user-replaced symlinks despite conflicting provenance
-
-- **Area:** Data
-- **Where:** `tools/sync/link_plan.py:89-97`, `tools/sync/link_plan.py:100-115`, `tools/sync/link_plan.py:122-158`, `tools/sync/link_apply.py:145-151`, `tools/sync/ownership.py:28-56`, `tools/sync/test_links.py:360-373`
-- **Problem:** Reachable, reproduced with a disposable Git worktree: (1) sync creates and fingerprints a relative symlink (`link_apply.py:157-159`); (2) the user replaces it with an absolute symlink to the same source, which `_already_correct` accepts through `samefile` without updating ownership (`link_plan.py:104-108`); (3) the source is removed from the layer; (4) `_old_managed_link` accepts the replacement using only the path-only F record and its lexical target (`link_plan.py:89-97,148-158`); (5) the next sync unlinks the user's replacement (`link_apply.py:145-151`) although its fingerprint differs from the saved proof. Existing test 39 covers only a replacement pointing elsewhere, not the same-source replacement. The lost symlink is user state, even though its target has gone missing.
-- **Recommendation:** Before any prune or replace, require the recorded owned fingerprint to match the live `lstat`/`readlink` identity; reject ambiguous historical path-only F records and changed symlinks. Preserve legitimate same-source layer migrations by carrying verified provenance into the replacement transaction. Add the exact absolute-same-source replacement reproduction and verify no path is removed.
-- **Fix with:** `durable-state`
-- **Effort:** S
-
 ### USR-5 · P2 · Push rules do not require user approval
 
 - **Area:** Security

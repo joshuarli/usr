@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from links import Discovery, LinkSpec
-from ownership import records
+from ownership import fingerprint, read_manifest, records
 
 
 @dataclass(frozen=True)
@@ -122,7 +122,16 @@ def _already_correct(spec: LinkSpec, path: Path, text: str,
 def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
     desired = {discovery.target / spec.relative.as_posix(): spec for spec in discovery.desired}
     previous = records(owned_file)
-    owned_links = {path for kind, path in previous if kind == "F" and _inside(path, discovery.target)}
+    # A historical path claim does not authorize deleting a currently different
+    # link. Use the verified *live* identity before planning prune/replacement.
+    proofs = read_manifest(owned_file)
+    owned_records = {path for kind, path in previous
+                     if kind == "F" and _inside(path, discovery.target)}
+    owned_links = {
+        path for path in owned_records
+        if path.is_symlink()
+        and proofs.get(str(path)) == {"kind": "F", "fingerprint": fingerprint(path, "F")}
+    }
     actions: list[LinkAction] = []
     conflicts: list[str] = []
     correct = 0
@@ -145,11 +154,11 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
         else:
             conflicts.append(f"{path} already exists and is not the declared link")
 
-    for path in sorted(owned_links - desired.keys(), key=str):
+    for path in sorted(owned_records - desired.keys(), key=str):
         before = snapshot(path)
         if before.kind == "absent":
             actions.append(LinkAction("forget", path, before))
-        elif before.kind == "symlink" and _old_managed_link(
+        elif path in owned_links and before.kind == "symlink" and _old_managed_link(
             path, discovery.sources, path.relative_to(discovery.target)
         ):
             if not _parent_safe(path, discovery):
