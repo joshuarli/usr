@@ -5,8 +5,8 @@ cd "$root"
 
 cmd=${1:-sync}
 case $cmd in
-sync | links | plan | tools | layers | uninstall | check | check-parallel | doctor) ;;
-*) printf 'usage: sync [links|plan|tools|layers|uninstall|check|check-parallel] [TOOL...]\n' >&2; exit 1 ;;
+sync | links | plan | tools | list | bridge | layers | uninstall | check | check-parallel | doctor ;;
+*) printf 'usage: sync [links|plan|tools|list|bridge|layers|uninstall|check|check-parallel|doctor] [TOOL...]\n' >&2; exit 1 ;;
 esac
 if [ "$cmd" != tools ] && [ "$#" -gt 1 ]; then
 	printf 'usage: sync %s takes no arguments\n' "$cmd" >&2
@@ -33,6 +33,14 @@ check_layers() {
 	[ -z "$dup" ] || { printf 'in more than one layer:\n%s\n' "$dup" >&2; exit 1; }
 }
 
+bridge_enabled() {
+	bridge_profile=${DL_PROFILE:-}
+	if [ -z "$bridge_profile" ] && [ -r /etc/home/install-mode ]; then
+		IFS= read -r bridge_profile < /etc/home/install-mode || bridge_profile=
+	fi
+	[ "$bridge_profile" != server ]
+}
+
 do_links() {
 	check_layers
 	mkdir -p "$tmpdir" "$(dirname "$owned")"
@@ -54,13 +62,14 @@ do_plan() {
 		printf '%s\n' "$output"
 		case $output in *CONFLICT:*) status=1 ;; esac
 	done
-	exit "$status"
+	if bridge_enabled; then python3 -I "$root/tools/sync/claude-worker.py" plan || status=1; fi
+	return "$status"
 }
 
 do_tools() {
 	shift
 	mkdir -p "$tmpdir" "$(dirname "$owned")"
-	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/dl" "$@"
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/tools/sync/install.sh" "$@"
 }
 
 do_sync() {
@@ -72,7 +81,7 @@ do_sync() {
 			TMPDIR="$tmpdir" sh "$root/host/setup-linux" || { status=$?; printf 'sync: Alpine host setup failed\n' >&2; }
 		fi
 	fi
-	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/dl" || { dl_status=$?; [ "$status" -ne 0 ] || status=$dl_status; printf 'sync: dl step failed\n' >&2; }
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" sh "$root/tools/sync/install.sh" || { tools_status=$?; [ "$status" -ne 0 ] || status=$tools_status; printf 'sync: tools installation failed\n' >&2; }
 	brew_status=0
 	if [ "$os" = darwin ]; then TMPDIR="$tmpdir" sh "$root/host/macos/setup-macos" brew packages || { brew_status=$?; [ "$status" -ne 0 ] || status=$brew_status; }; fi
 	if [ ! -x "$kache" ]; then
@@ -84,12 +93,14 @@ do_sync() {
 			if [ -x "$kache" ] && { [ ! -f "$owned" ] || ! awk -F '\t' -v path="$kache" '$1 == "K" && $2 == path { found = 1 } END { exit !found }' "$owned"; }; then printf 'K\t%s\n' "$kache" >> "$owned" || status=$?; fi
 		fi
 	fi
+	if bridge_enabled; then python3 -I "$root/tools/sync/claude-worker.py" install || { bridge_status=$?; [ "$status" -ne 0 ] || status=$bridge_status; printf 'sync: Claude worker setup failed\n' >&2; }; fi
 	exit "$status"
 }
 
 do_uninstall() {
 	mkdir -p "$tmpdir" "$(dirname "$owned")"
-	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" DL_RECORD_OWNED=true sh "$root/dl" || exit 1
+	python3 -I "$root/tools/sync/claude-worker.py" remove || exit 1
+	TMPDIR="$tmpdir" DL_OWNED_FILE="$owned" DL_RECORD_OWNED=true sh "$root/tools/sync/install.sh" || exit 1
 	if [ -f "$owned" ]; then
 		while IFS="$(printf '\t')" read -r kind path; do
 			[ "$kind" = F ] || continue
@@ -119,6 +130,7 @@ do_uninstall() {
 
 do_check() {
 	python3 -I host/macos/sync-test.py
+	python3 -I tools/sync/claude-worker-test.py
 	sh dotfiles/doctor-test.sh
 	node dotfiles/pi-git-guard-test.mjs
 	mkdir -p "$tmpdir"
@@ -153,6 +165,8 @@ sync) do_sync ;;
 links) do_links ;;
 plan) do_plan ;;
 tools) do_tools "$@" ;;
+list) sh "$root/tools/sync/install.sh" --list ;;
+bridge) python3 -I "$root/tools/sync/claude-worker.py" install ;;
 layers) check_layers ;;
 uninstall) do_uninstall ;;
 check) do_check ;;

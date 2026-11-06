@@ -64,14 +64,14 @@ that checkout), and runs `install.sh` as root through `doas` or `sudo`.
   `tools-server.txt`. It installs no Wayland, graphics, or seatd packages.
 - `desktop` runs the server install first, then layers `packages-desktop.txt`,
   udev, dwl, ghostty-custom, seatd, and the tty1 session on top of it. It also
-  installs the full default `dl` tool set.
+  installs the full default `sync tools` tool set.
 
 The server profile installs `fd`, `rg`, `jaq`, `fastermod`, `tm`, `ish`,
 `stuff`, `e`, `fz`, `fdu`, `fs`, `srv`, `git`, `python3`, `gh`, and `zzz`. The heavy
 agent, media, sync, and build extras (`codex`, `claude`, `opencode2`, `pi`,
 `agent-browser`, `cf`, `ffmpeg`, `nodejs`, `pnpm`, `syncthing`, `player`, `mold`)
-are opt-in on a server with `sh dl TOOL...`. The full set is installed by default
-in desktop mode. `dl`, `sync`, and `doctor` follow the profile recorded in
+are opt-in on a server with `sh sync tools TOOL...`. The full set is installed by default
+in desktop mode. `sync tools`, `sync`, and `doctor` follow the profile recorded in
 `/etc/home/install-mode`.
 
 Answer the prompt, or skip it with `INSTALL_MODE=server` or
@@ -117,8 +117,8 @@ explanation if a check fails. The server install then:
   default through `/etc/clang<major>/clang.cfg` and `clang++.cfg`, so no gcc or
   binutils is needed (there is no `cc`; use `CC=clang`),
 - links the enclosing checkout's dotfiles and installs the server tool profile
-  as the user. It does not run the rest of `dl` or `host/setup-linux`; install
-  other tools later with `sh dl TOOL`, and makes interactive logins start ish.
+  as the user. It does not run the rest of `sync tools` or `host/setup-linux`; install
+  other tools later with `sh sync tools TOOL`, and makes interactive logins start ish.
 
 The server base grants the configured user passwordless root access through
 `doas` and installs Docker Engine and its CLI. It enables and starts the
@@ -229,7 +229,7 @@ only the headless base.
 Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
 `config/dwl.h` changes, ghostty-custom and helium are updated only when a newer
 matching prerelease appears, and each tool in the installed profile is
-installed only if missing (update it with `usr`'s own `dl`). `sh dl TOOL` adds
+installed only if missing (update it with `usr`'s own `sync tools`). `sh sync tools TOOL` adds
 an opt-in tool. A managed path holding something home did not install stops the
 run; move it aside or merge it, then rerun.
 

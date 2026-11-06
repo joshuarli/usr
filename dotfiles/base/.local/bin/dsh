@@ -42,7 +42,7 @@ if [ "$1" = update ]; then
         printf '%s\n' 'usage: dsh update' >&2
         exit 2
     fi
-    exec dl dsh
+    exec sh "$script_dir/../../../../sync" tools dsh
 fi
 
 case "$1" in

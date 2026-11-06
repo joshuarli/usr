@@ -15,7 +15,7 @@ Use this procedure for the `sym` command and repository-level Markdown and skill
 
 The `sym` journey runs in a disposable Git fixture and scratch home under `.work/tmp`. It never uses the real home directory. The Markdown checks read the repository and write nothing. You need `sh`, `git`, and Python 3.
 
-This procedure does not exercise `dl`, home sync, platform setup, installed system services, or applications outside this repository.
+This procedure does not exercise `sync tools`, home sync, platform setup, installed system services, or applications outside this repository.
 
 ## Launch and readiness
 

@@ -14,20 +14,13 @@ The bridge favors OpenCode Go. If the pinned OpenCode tier is unavailable or ret
 
 All Command Code tiers use `deepseek/deepseek-v4.1-flash` with the corresponding effort. OpenCode uses the pinned V2 client; Command Code uses documented headless `cmd -p --output-format json` NDJSON, explicit `--model`/`--effort`, `--resume`, and `--plan` for scouts or `--yolo` for writers. Neither model text nor successful exit proves correctness.
 
-## Install once on the Claude host
+## Installation and lifecycle
 
-Requires Node.js 26+, OpenCode V2, Command Code CLI, and Git. Authenticate Command Code (`cmd status`, then `cmd login` if necessary). OpenCode Go uses its own allowance; Command Code has an independent account/allowance.
+Run `sh sync` from the usr checkout. It installs Node.js, OpenCode, and Command Code, installs the bridge's pinned `@opencode/client` dependency, and idempotently registers `usr-opencode-worker` in Claude's user MCP configuration. This needs no manual `npm install` or `claude mcp add`.
 
-~~~sh
-cd ~/usr/tools/opencode-worker
-npm install --ignore-scripts --no-package-lock --no-audit --no-fund
-npm test
-claude mcp add --scope user --transport stdio usr-opencode-worker -- \
-  node --experimental-strip-types "$HOME/usr/tools/opencode-worker/src/server.ts"
-claude mcp list
-~~~
+Use `sh sync bridge` to repair just the bridge, `sh sync plan` to preview its setup, `sh sync doctor` to inspect it, and `sh sync uninstall` to unregister the owned MCP entry. Other MCP servers, Claude credentials and sessions remain untouched. Credentials are reused; if needed, run `cmd login` yourself. The dependency installation requires Node.js 26+, and the code remains in the tracked checkout.
 
-Restart Claude and verify `/mcp`. **The tracked orchestration policy is on by default; global MCP registration is a one-time local action.** `sh sync` does not silently modify `~/.claude.json`, install untracked dependencies into the repo, or touch auth. Without the registered bridge, Claude stops and reports setup rather than implementing in Opus or native Claude children.
+When the checkout path changes, re-run `sh sync` to update the MCP command. Headless Alpine server profiles skip the Claude integration.
 
 ## Task protocol
 

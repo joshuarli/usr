@@ -14,7 +14,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | agent-memory package, Worker, evals, or benchmarks | Run the checks in `~/d/agent-memory/AGENTS.md` in that repository, then reinstall it into `$AGENT_MEMORY_VENV` |
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
-| `dl` | `sh dotfiles/dl-test.sh` and `shellcheck -s sh dl dotfiles/dl-test.sh` |
+| `sync` tool installer | `sh dotfiles/sync-tools-test.sh` and `shellcheck -s sh sync tools/sync/install.sh dotfiles/sync-tools-test.sh` |
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
@@ -55,3 +55,5 @@ Keep shell scripts compatible with macOS `/bin/sh` and dash. Python scripts use 
 
 Use `TODO.md` for deferred work and `docs/rfc/` when a design needs a decision. The `todo` skill owns both formats.
 
+
+For automatic Claude MCP registration, run `python3 -I tools/sync/claude-worker-test.py` (offline fixtures), then `sh -n sync` and `sh -n tools/sync/install.sh`. A live smoke test requires locally authenticated Claude/OpenCode Go/Command Code and is not part of offline tests.

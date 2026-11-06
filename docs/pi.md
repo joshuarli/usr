@@ -4,7 +4,7 @@ Pi runs on OpenCode Go through the OpenCode account already authenticated on thi
 
 ## Install and authenticate
 
-Install Node.js 26.12.0+ and npm first. `sh sync` links the profile and includes Pi in the normal `dl` tools. `sh dl pi` installs or updates only Pi, resolving the latest `@earendil-works/pi-coding-agent` release (1.4.0 when this profile was updated on 2026-11-02). It installs with lifecycle scripts disabled under `${XDG_DATA_HOME:-~/.local/share}/pi` and links `~/.local/bin/pi`. Existing unmanaged launchers or install directories are not overwritten.
+Install Node.js 26.12.0+ and npm first. `sh sync` links the profile and includes Pi in its default tool set. `sh sync tools pi` installs or updates only Pi, resolving the latest `@earendil-works/pi-coding-agent` release (1.4.0 when this profile was updated on 2026-11-02). It installs with lifecycle scripts disabled under `${XDG_DATA_HOME:-~/.local/share}/pi` and links `~/.local/bin/pi`. Existing unmanaged launchers or install directories are not overwritten.
 
 The settings declare Nico Bailon's `pi-subagents` 0.84.0, the latest release checked on 2026-10-29, as `npm:pi-subagents@0.84.0`. Pi manages that package and its dependencies separately from the CLI. After reviewing `sh sync plan` and syncing with `sh sync`, reconcile the declared package without trusting the current project's configuration:
 
@@ -35,7 +35,7 @@ pi --list-models opencode-go
 pi -p 'Reply exactly OK.'
 ```
 
-Use `sh dl pi` for CLI upgrades; the subagents version remains explicitly pinned in `dotfiles/base/.pi/agent/settings.json` until reviewed and updated there. Pi can write its own settings, so inspect tracked changes after using its configuration commands.
+Use `sh sync tools pi` for CLI upgrades; the subagents version remains explicitly pinned in `dotfiles/base/.pi/agent/settings.json` until reviewed and updated there. Pi can write its own settings, so inspect tracked changes after using its configuration commands.
 
 ## Instructions and tiers
 

@@ -77,7 +77,7 @@ check 'no other passwordless doas rules' no_extra_nopass
 check 'passwordless doas works for user' su -s /bin/sh "$user" -c 'doas -n true'
 check 'unencrypted Ed25519 GitHub key matches user and modes' github_key_matches_user
 check "install profile is $mode" install_profile_matches
-default_tools=$(DL_PROFILE="$mode" sh "$usr_root/dl" --list) || fail 'cannot read the default dl tool list'
+default_tools=$(DL_PROFILE="$mode" sh "$usr_root/sync" list) || fail 'cannot read the default sync tool list'
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
 	case $tool in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; *) launchers=$tool ;; esac
@@ -127,6 +127,7 @@ check 'Docker CLI connects to engine as user' su -s /bin/sh "$user" -c 'docker i
 check 'interactive login hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
 
 if [ "$mode" = desktop ]; then
+	check 'Claude MCP bridge configured' su -s /bin/sh "$user" -c "python3 -I '$usr_root/tools/sync/claude-worker.py' check"
 	check 'volume helper matches config/volume, root 0755' managed config/volume /usr/local/bin/volume 755
 	check 'amixer installed' command -v amixer
 	check 'home-session matches config/home-session, root 0755' managed config/home-session /usr/local/bin/home-session 755

@@ -13,7 +13,7 @@ usage() {
         '' \
         '  pk never escalates, never signals every query match without a' \
         '  selection, and rechecks each process record before signaling.' \
-        '  Requires fz with --multi; sh dl fz installs it in ~/usr.'
+        '  Requires fz with --multi; sh sync tools fz installs it in ~/usr.'
 }
 
 port_pids() {

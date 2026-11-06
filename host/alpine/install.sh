@@ -245,7 +245,7 @@ for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh
 	sh -n "$script" || die "$script has a syntax error"
 done
 
-[ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ] && [ -f "$usr_root/dl" ] ||
+[ -f "$usr_root/sync" ] && [ -f "$usr_root/dotfiles/sym" ]  ||
 	die "$usr_root is not the usr checkout; clone $usr_url and run usr/host/alpine/install.sh from it"
 origin=$(as_user "git -C '$usr_root' remote get-url origin" 2>/dev/null) ||
 	die "$usr_root is not a git checkout"
@@ -323,7 +323,7 @@ fi
 chmod 0644 /etc/home/install-mode
 
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
-default_tools=$(as_user "DL_PROFILE='$mode' sh '$usr_root/dl' --list") || die "reading the default tool list from $usr_root failed"
+default_tools=$(as_user "DL_PROFILE='$mode' sh '$usr_root/sync' list") || die "reading the default tool list from $usr_root failed"
 missing_tools=
 for tool in $default_tools; do
 	[ "$tool" = agy ] && continue
@@ -336,6 +336,9 @@ done
 if [ -n "$missing_tools" ]; then
 	# shellcheck disable=SC2086
 	as_user "sh '$usr_root/sync' tools$missing_tools" >/dev/null || die "installing$missing_tools from $usr_root failed"
+fi
+if [ "$mode" = desktop ]; then
+	as_user "sh '$usr_root/sync' bridge" >/dev/null || die "configuring Claude DeepSeek bridge failed"
 fi
 install_managed config/profile.sh /etc/profile.d/home-session.sh 0644
 

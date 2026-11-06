@@ -2,7 +2,7 @@
 set -eu
 
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-sh "$repo/dl" --list | grep -qx rg
+sh "$repo/sync" list | grep -qx rg
 mkdir -p "$repo/.work/tmp"
 fixture=$(mktemp -d "$repo/.work/tmp/doctor-test.XXXXXX")
 trap 'rm -rf "$fixture"' EXIT
@@ -10,20 +10,21 @@ trap 'exit 130' HUP INT TERM
 
 mkdir -p "$fixture/dotfiles/base/.config" "$fixture/dotfiles/base/.codex" \
     "$fixture/dotfiles/base/.agents/skills/example" "$fixture/dotfiles/linux/.config" \
-    "$fixture/dotfiles" "$fixture/home/.local/bin" "$fixture/tmp" "$fixture/mock"
+    "$fixture/dotfiles" "$fixture/home/.local/bin" "$fixture/tmp" "$fixture/mock" "$fixture/tools/sync"
 cp "$repo/sync" "$fixture/sync"
 cp "$repo/dotfiles/sym" "$fixture/dotfiles/sym"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
 # shellcheck disable=SC2016
-printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "testtool\\n"\n' > "$fixture/dl"
+printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "testtool\\n"\n' > "$fixture/tools/sync/install.sh"
 printf '#!/bin/sh\nprintf "Linux\\n"\n' > "$fixture/mock/uname"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/testtool"
 printf 'configured\n' > "$fixture/dotfiles/base/.config/example.conf"
 printf 'instructions\n' > "$fixture/dotfiles/base/.codex/AGENTS.md"
 printf 'skills\n' > "$fixture/dotfiles/base/.agents/skills/example/SKILL.md"
 printf 'linux\n' > "$fixture/dotfiles/linux/.config/linux.conf"
-chmod +x "$fixture/dl" "$fixture/mock/uname" "$fixture/home/.local/bin/testtool"
+printf '#!/usr/bin/env python3\nimport sys\n' > "$fixture/tools/sync/claude-worker.py"
+chmod +x "$fixture/tools/sync/install.sh" "$fixture/mock/uname" "$fixture/home/.local/bin/testtool"
 git -C "$fixture" init -q
 git -C "$fixture" add dotfiles/base dotfiles/linux
 
@@ -67,7 +68,7 @@ grep -q 'canonical agent instructions are unavailable' "$fixture/missing-agent"
 
 sh "$fixture/sync" links > "$fixture/relink-agents"
 # shellcheck disable=SC2016
-printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "ffmpeg\\n"\n' > "$fixture/dl"
+printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "ffmpeg\\n"\n' > "$fixture/tools/sync/install.sh"
 printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/ffmpeg"
 chmod +x "$HOME/.local/bin/ffmpeg"
 if sh "$fixture/sync" doctor > "$fixture/half-pair"; then

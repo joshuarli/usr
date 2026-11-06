@@ -55,9 +55,9 @@ else:
         path.write_text(text)
         path.chmod(0o755)
 
-    def dl(self, ok=True, *args):
+    def sync_tools(self, ok=True, *args):
         result = subprocess.run(
-            ["/bin/sh", str(ROOT / "dl"), *(args or ("pi",))],
+            ["/bin/sh", str(ROOT / "sync"), "tools", *(args or ("pi",))],
             cwd=ROOT, env=self.env, text=True, capture_output=True, timeout=20,
         )
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
@@ -71,14 +71,14 @@ else:
         auth = self.home / ".pi/agent/auth.json"
         auth.parent.mkdir(parents=True)
         auth.write_text("private sentinel")
-        self.dl()
+        self.sync_tools()
         launcher = self.home / ".local/bin/pi"
         self.assertTrue(launcher.is_symlink())
         self.assertTrue(os.access(launcher, os.X_OK))
-        self.dl()
+        self.sync_tools()
         self.assertEqual(len(self.install_calls()), 1)
         self.env["MOCK_VERSION"] = "1.4.1"
-        self.dl()
+        self.sync_tools()
         self.assertEqual(len(self.install_calls()), 2)
         self.assertEqual((self.home / ".local/state/dl/pi").read_text(), "1.4.1\n")
         self.assertEqual(auth.read_text(), "private sentinel")
@@ -86,21 +86,21 @@ else:
 
     def test_failed_fresh_install_is_not_recorded(self):
         self.env["MOCK_FAIL"] = "1"
-        self.dl(False)
+        self.sync_tools(False)
         self.assertFalse((self.home / ".local/state/dl/pi").exists())
         self.assertFalse((self.home / ".local/share/pi").exists())
         self.assertEqual(list((self.home / ".local/share").glob("pi.*")), [])
 
     def test_missing_binary_is_failure(self):
         self.env["MOCK_NO_BIN"] = "1"
-        self.dl(False)
+        self.sync_tools(False)
         self.assertFalse((self.home / ".local/bin/pi").exists())
 
     def test_unmanaged_launcher_is_preserved(self):
         launcher = self.home / ".local/bin/pi"
         launcher.parent.mkdir(parents=True)
         launcher.write_text("do not replace")
-        self.dl(False)
+        self.sync_tools(False)
         self.assertEqual(launcher.read_text(), "do not replace")
         self.assertEqual(self.install_calls(), [])
 
@@ -108,7 +108,7 @@ else:
         prefix = self.home / ".local/share/pi"
         prefix.mkdir(parents=True)
         (prefix / "sentinel").touch()
-        self.dl(False)
+        self.sync_tools(False)
         self.assertTrue((prefix / "sentinel").exists())
         self.assertEqual(self.install_calls(), [])
 
@@ -116,26 +116,26 @@ else:
         prefix = self.home / ".local/share/pi"
         prefix.parent.mkdir(parents=True)
         prefix.symlink_to(self.root, target_is_directory=True)
-        self.dl(False)
+        self.sync_tools(False)
         self.assertEqual(self.install_calls(), [])
 
     def test_invalid_version_and_old_node(self):
         self.env["MOCK_VERSION"] = "not-a-version"
-        self.dl(False)
+        self.sync_tools(False)
         self.assertEqual(self.install_calls(), [])
         self.env["MOCK_NODE_VERSION"] = "26.11.0"
-        result = self.dl(False)
+        result = self.sync_tools(False)
         self.assertIn("26.12.0", result.stderr)
 
     def test_xdg_paths_and_ownership_recovery(self):
         self.env["XDG_DATA_HOME"] = str(self.home / "data with spaces")
         self.env["XDG_STATE_HOME"] = str(self.home / "state with spaces")
-        self.dl()
+        self.sync_tools()
         launcher = self.home / ".local/bin/pi"
         self.assertEqual(os.readlink(launcher), str(self.home / "data with spaces/pi/bin/pi"))
         (self.root / "owned").unlink()
         self.env["DL_RECORD_OWNED"] = "true"
-        self.dl()
+        self.sync_tools()
         owned = (self.root / "owned").read_text()
         self.assertIn(f"D\t{self.home}/data with spaces/pi\n", owned)
         self.assertIn(f"F\t{launcher}\n", owned)
@@ -175,7 +175,7 @@ else:
         self.assertNotIn("inferx", pi_section.lower())
         self.assertNotIn("google/gemini-3.8-flash", pi_section)
         self.assertIn("opencode2 auth export", (ROOT / "docs/pi.md").read_text())
-        default_tools = next(line for line in (ROOT / "dl").read_text().splitlines() if "codex claude opencode2" in line)
+        default_tools = next(line for line in (ROOT / "tools/sync/install.sh").read_text().splitlines() if "codex claude opencode2" in line)
         self.assertIn("pi", default_tools.split())
 
 

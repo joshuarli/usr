@@ -10,7 +10,7 @@ case "$script_path" in
     */*) ;;
     *) script_path=$(command -v "$script_path" || printf './%s\n' "$script_path") ;;
 esac
-repo_root=$(CDPATH='' cd -- "$(dirname -- "$script_path")" && pwd)
+repo_root=$(CDPATH='' cd -- "$(dirname -- "$script_path")/../.." && pwd)
 
 ARCH=$(uname -m | sed 's/arm64/aarch64/')
 OS=$(uname -s)
@@ -57,7 +57,7 @@ PLAYER_EXEC="${PLAYER_APP}/Contents/MacOS/player"
 
 # Prefer the dl-managed Node.js over whatever `node`/`npm` the inherited
 # PATH resolves to (shell configs reorder PATH). Fall back to PATH when the
-# managed runtime is absent, e.g. before `sh dl nodejs` bootstraps it.
+# managed runtime is absent, e.g. before `sh sync tools nodejs` bootstraps it.
 if [ -x "${NODEJS_INSTALL_ROOT}/current/bin/node" ]; then
     PATH="${NODEJS_INSTALL_ROOT}/current/bin:${PATH}"
     export PATH
@@ -3896,7 +3896,7 @@ run_parallel_wave() {
     worker_failed_progs=
     worker_count=0
     if [ ! -r "$script_path" ]; then
-        _dl_fail "dl: cannot start parallel workers: cannot read '$script_path' (invoked as '$0')"
+        _dl_fail "sync: cannot start parallel workers: cannot read '$script_path' (invoked as '$0')"
         _dl_fail "dl: check the invocation path and retry"
         return 1
     fi
@@ -3928,7 +3928,7 @@ run_parallel_wave() {
     fi
     if $parallel_failed; then
         if [ -n "$worker_failed_progs" ]; then
-            _dl_fail "dl: parallel install failed for: $worker_failed_progs"
+            _dl_fail "sync: parallel install failed for: $worker_failed_progs"
         fi
         return 1
     fi
@@ -4147,7 +4147,7 @@ report_unowned_launcher() {
 }
 
 if [ "${1:-}" = --list ]; then
-    [ "$#" -eq 1 ] || { _dl_fail 'usage: dl --list'; exit 2; }
+    [ "$#" -eq 1 ] || { _dl_fail 'usage: sync list'; exit 2; }
     DL_RECORD_OWNED=false
     list_only=true
     set --
@@ -4182,7 +4182,7 @@ if [ $# -eq 0 ]; then
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" ffmpeg ;;
     esac
     case "${OS}:${ARCH}" in
-        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs pnpm ;;
+        Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" nodejs pnpm cmd ;;
     esac
     case "${OS}:${ARCH}" in
         Darwin:aarch64|Linux:x86_64|Linux:aarch64) set -- "$@" syncthing ;;

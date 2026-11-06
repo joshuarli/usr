@@ -30,7 +30,7 @@ app=$apps_dir/Ghostty.app
 [ -d "$app" ] || app=$HOME/Applications/Ghostty.app
 [ -d "$app" ] || app=/Applications/Ghostty.app
 if [ ! -d "$app" ]; then
-    printf 'ghostty-fda-check: Ghostty.app is not installed; install it with `make` or `sh dl ghostty`\n' >&2
+    printf 'ghostty-fda-check: Ghostty.app is not installed; install it with `make` or `sh sync tools ghostty`\n' >&2
     exit 2
 fi
 

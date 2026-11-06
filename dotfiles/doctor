@@ -53,7 +53,7 @@ else
 fi
 
 printf 'default tools:\n'
-if sh "$root/dl" --list > "$scratch/tools" 2> "$scratch/tool-errors"; then
+if sh "$root/sync" list > "$scratch/tools" 2> "$scratch/tool-errors"; then
     tool_missing=0
     while IFS= read -r tool; do
         [ -n "$tool" ] || continue
@@ -68,11 +68,19 @@ if sh "$root/dl" --list > "$scratch/tools" 2> "$scratch/tool-errors"; then
     if [ "$tool_missing" -eq 0 ]; then ok 'default tool launchers exist';
     else problem "$tool_missing default tool launchers are missing"; fi
 else
-    problem 'could not read dl default tools'
+    problem 'could not read sync default tools'
     cat "$scratch/tool-errors"
 fi
 
 printf 'agent configuration:\n'
+if [ -x "$target/.local/bin/claude" ] && [ -f "$root/tools/sync/claude-worker.py" ]; then
+    if python3 -I "$root/tools/sync/claude-worker.py" check > "$scratch/bridge" 2>&1; then
+        ok 'Claude DeepSeek bridge is configured'
+    else
+        problem 'Claude DeepSeek MCP bridge is missing or stale'
+        cat "$scratch/bridge"
+    fi
+fi
 if [ -f "$root/dotfiles/base/.codex/AGENTS.md" ] && [ ! -r "$target/.codex/AGENTS.md" ]; then
     problem 'canonical agent instructions are unavailable at ~/.codex/AGENTS.md'
 else
