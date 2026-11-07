@@ -3,10 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=26.0.0" },
-  "dependencies": { "@opencode/client": "2.2.5" },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "dependencies": {
+    "@opencode/client": "2.2.5"
+  },
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
-    "test": "node --experimental-strip-types --test test/*.test.ts"
+    "test": "tsrs -p tsconfig.json --noEmit && node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsrs -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "tsrs": "0.22.0-ts7.1.0-beta"
   }
 }

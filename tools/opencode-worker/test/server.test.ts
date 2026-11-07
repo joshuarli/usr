@@ -24,7 +24,7 @@ test("stdio MCP handshake, tool discovery and malformed tool rejection need no O
   const replies = output.trim().split("\n").map((line: string) => JSON.parse(line))
   assert.equal(replies.length, 3)
   assert.equal(replies.find((r) => r.id === 1)?.result?.protocolVersion, "2025-06-18")
-  assert.deepEqual(replies.find((r) => r.id === 2)?.result?.tools?.map((t) => t.name), [
+  assert.deepEqual(replies.find((r) => r.id === 2)?.result?.tools?.map((t: { name: string }) => t.name), [
     "worker_model_check", "worker_start", "worker_status", "worker_resume", "worker_cancel",
   ])
   assert.equal(replies.find((r) => r.id === 3)?.error?.code, -32602)

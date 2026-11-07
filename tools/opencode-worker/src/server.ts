@@ -65,6 +65,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
+type OpenCodeClient = ReturnType<typeof import("@opencode/client").OpenCode.make>
+export function opencodePort(client: OpenCodeClient): OpenCodePort {
+  return {
+    create: (input) => client.session.create(input),
+    prompt: (input) => client.session.prompt(input),
+    get: (input) => client.session.get(input),
+    active: () => client.session.active(),
+    inbox: (input) => client.session.inbox.list(input),
+    messages: (input) => client.message.list(input),
+    interrupt: (input) => client.session.interrupt(input),
+    models: (input) => client.model.list(input),
+  }
+}
+
 /** Connect lazily: tools/list and unit tests need neither OpenCode nor credentials. */
 export async function connect(): Promise<Bridge> {
   let connection: Promise<OpenCodePort> | undefined
@@ -73,17 +87,7 @@ export async function connect(): Promise<Bridge> {
       import("@opencode/client"), import("@opencode/client/service"),
     ])
     const endpoint = await Service.ensure({ command: ["opencode2", "serve", "--service"], version: (version: string) => version.startsWith("2.") })
-    const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
-    return {
-      create: (input) => client.session.create(input),
-      prompt: (input) => client.session.prompt(input),
-      get: (input) => client.session.get(input),
-      active: () => client.session.active(),
-      inbox: (input) => client.session.inbox.list(input),
-      messages: (input) => client.session.message.list(input),
-      interrupt: (input) => client.session.interrupt(input),
-      models: (input) => client.model.list(input),
-    } satisfies OpenCodePort
+    return opencodePort(OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) }))
   })().catch((error: unknown) => { connection = undefined; throw error })
   const api: OpenCodePort = {
     create: async (input) => (await get()).create(input),

@@ -5,12 +5,12 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
 export type ModelRef = { id: string; providerID: string; variant?: string }
 export type SessionArgs = { sessionID: string }
 export type OpenCodePort = {
-  create(input: { title: string; agent: "build" | "plan"; model: ModelRef; location: { directory: string }; metadata: Record<string, unknown> }): Promise<unknown>
+  create(input: { title: string; agent: "build" | "plan"; model: ModelRef; location: { directory: string }; metadata: { usr_worker_v1: { directory: string; model: ModelRef } } }): Promise<unknown>
   prompt(input: SessionArgs & { text: string }): Promise<unknown>
   get(input: SessionArgs): Promise<unknown>
   active(): Promise<unknown>
   inbox(input: SessionArgs): Promise<unknown>
-  messages(input: SessionArgs & { order: "desc"; limit: string }): Promise<unknown>
+  messages(input: SessionArgs & { order: "desc"; limit: number }): Promise<unknown>
   interrupt(input: SessionArgs): Promise<unknown>
   models(input: { location: { directory: string } }): Promise<unknown>
 }
@@ -20,7 +20,7 @@ const MAX_BRIEF = 32_000
 export const FREE_MODEL: ModelRef = { providerID: "opencode", id: "deepseek-v4.1-flash-free" }
 export const GO_MODEL: ModelRef = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" }
 export const DEFAULT_MODEL = FREE_MODEL
-const SESSION_METADATA_KEY = "usr_worker_v1"
+const SESSION_METADATA_KEY = "usr_worker_v1" as const
 
 export function selectedModel(value = process.env.USR_OPENCODE_WORKER_MODEL): ModelRef {
   switch (value || "free") {
@@ -193,7 +193,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
     async status(cwd: unknown, sessionID: unknown) {
       const { id, directory, info } = await ownedSession(sessionID, cwd)
       const [active, inbox, messages] = await Promise.all([
-        api.active(), api.inbox({ sessionID: id }), api.messages({ sessionID: id, order: "desc", limit: "30" }),
+        api.active(), api.inbox({ sessionID: id }), api.messages({ sessionID: id, order: "desc", limit: 30 }),
       ])
       const running = activeSession(active, id)
       const pending = queuedInputs(inbox)
