@@ -35,6 +35,7 @@ Consumer repos call `stuff` from their `Makefile` publish-* targets with `STUFF 
 ## Auth and state
 
 - Minting goes through the `cf` profile named by `cf_profile` in `~/.config/stuff/config.json` (default `stuff`); `stuff` passes `--profile` itself, so publishing works from any repo without `cf auth activate`. If minting fails, log the profile in with `cf auth create stuff` and check with `cf --profile stuff auth whoami`; do not bind consumer directories.
+- Scripts that need `R2_S3_*` themselves (`deploy/r2-pull.py`, `make gc`, the OCI writer host) mint them with `eval "$(stuff credentials BUCKET)"`; the old `deploy/publish` and `r2-sync.sh` wrappers are gone.
 - Promotion uses the S3 transport with a conditional `If-Match` write, so a competing publisher gets exit `3`. It reads `R2_S3_ENDPOINT`, `R2_S3_ACCESS_KEY_ID`, and `R2_S3_SECRET_ACCESS_KEY`; when those are unset the CLI mints short-lived bucket-scoped values itself and stops before building if minting fails.
 - Publication state lives in `${XDG_STATE_HOME:-$HOME/.local/state}/stuff/<registry>/` and is the source of truth outside any checkout; never treat a fresh checkout as enough. Back it up.
 
