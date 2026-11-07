@@ -230,11 +230,23 @@ def mac_packages_apply(ctx: Context) -> None:
     required(command(ctx, "sh", str(ctx.root / "host/macos/setup-macos"), "brew", "packages"), "Homebrew setup")
 
 
+def _unbound_validator() -> Path | None:
+    found = shutil.which("unbound-checkconf")
+    if found:
+        return Path(found)
+    for candidate in (Path("/usr/sbin/unbound-checkconf"), Path("/sbin/unbound-checkconf"),
+                      Path("/usr/local/sbin/unbound-checkconf")):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def alpine_status(ctx: Context) -> Probe:
     file = Path("/etc/unbound/unbound.conf")
-    if not file.is_file() or not shutil.which("unbound-checkconf"):
+    validator = _unbound_validator()
+    if not file.is_file() or validator is None:
         return Probe(False, "Alpine Unbound not configured")
-    r = command(ctx, "unbound-checkconf", str(file), capture=True)
+    r = command(ctx, str(validator), str(file), capture=True)
     return Probe(r.returncode == 0, "Unbound config valid" if r.returncode == 0 else "Unbound config invalid")
 
 

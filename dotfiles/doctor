@@ -125,6 +125,8 @@ case $(uname -s) in
             os_id=$( ( . /etc/os-release; printf '%s' "${ID:-}" ) )
             if [ "$os_id" = alpine ]; then
                 printf 'Alpine DNS:\n'
+                PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
+                export PATH
                 if command -v unbound-checkconf >/dev/null 2>&1 && [ -f /etc/unbound/unbound.conf ]; then
                     if unbound-checkconf /etc/unbound/unbound.conf > "$scratch/unbound" 2>&1; then
                         ok 'Unbound configuration parses'

@@ -1456,7 +1456,20 @@ install_nodejs() {
         own_file "${DEST}/${nodejs_command}"
     done
     if [ -n "$previous_release" ] && [ "$previous_release" != "$release_name" ]; then
-        rm -rf "${NODEJS_INSTALL_ROOT:?}/${previous_release:?}"
+        previous_dir="${NODEJS_INSTALL_ROOT:?}/${previous_release:?}"
+        rm -rf "$previous_dir"
+        if [ -n "$DL_OWNED_FILE" ] && [ -f "$DL_OWNED_FILE" ]; then
+            previous_tmp=$(mktemp "$(dirname -- "$DL_OWNED_FILE")/.dl-owned.XXXXXX") || _dl_warn "Warning: could not clean Node.js ownership record"
+            if [ -n "$previous_tmp" ] && awk -F '\t' -v path="$previous_dir" \
+                '!($1 == "D" && $2 == path)' "$DL_OWNED_FILE" >"$previous_tmp"; then
+                mv -f "$previous_tmp" "$DL_OWNED_FILE"
+            else
+                [ -z "$previous_tmp" ] || rm -f "$previous_tmp"
+                previous_tmp=
+                _dl_warn "Warning: could not clean Node.js ownership record"
+            fi
+            previous_tmp=
+        fi
     fi
     changed=true
     _dl_ok "Installed ${DEST}/node (${NODEJS_VERSION}, npm ${npm_latest})"
