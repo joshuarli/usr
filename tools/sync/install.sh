@@ -2424,20 +2424,6 @@ install_pnpm() {
     version=$(npm view "pnpm@latest" version 2>/dev/null) || version=
     printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$' \
         || { unchecked pnpm "could not resolve the latest pnpm version"; return; }
-    if [ -e "${DEST}/pnpm" ] || [ -L "${DEST}/pnpm" ]; then
-        if [ "$(readlink "${DEST}/pnpm" 2>/dev/null || :)" != "${PNPM_INSTALL_ROOT}/bin/pnpm" ] \
-            || [ ! -s "${STATE}/pnpm" ]; then
-            skip pnpm "${DEST}/pnpm already exists outside dl management"
-            return
-        fi
-    fi
-    if [ -e "$PNPM_INSTALL_ROOT" ] || [ -L "$PNPM_INSTALL_ROOT" ]; then
-        if [ ! -d "$PNPM_INSTALL_ROOT" ] || [ -L "$PNPM_INSTALL_ROOT" ] \
-            || [ ! -s "${STATE}/pnpm" ]; then
-            skip pnpm "$PNPM_INSTALL_ROOT already exists without dl install records"
-            return
-        fi
-    fi
     if [ "$(cat "${STATE}/pnpm" 2>/dev/null)" = "$version" ] \
         && [ -x "${PNPM_INSTALL_ROOT}/bin/pnpm" ] \
         && [ "$(readlink "${DEST}/pnpm" 2>/dev/null || :)" = "${PNPM_INSTALL_ROOT}/bin/pnpm" ]; then
@@ -2446,6 +2432,13 @@ install_pnpm() {
         own_file "${STATE}/pnpm"
         _dl_current "pnpm is current (${version})"
         return
+    fi
+    if [ -L "$PNPM_INSTALL_ROOT" ] \
+        || { [ -e "$PNPM_INSTALL_ROOT" ] && [ ! -d "$PNPM_INSTALL_ROOT" ]; }; then
+        rm -f "$PNPM_INSTALL_ROOT"
+    fi
+    if [ -d "${DEST}/pnpm" ] && [ ! -L "${DEST}/pnpm" ]; then
+        rm -rf "${DEST}/pnpm"
     fi
     own_parent=${PNPM_INSTALL_ROOT%/*}
     own_missing_dirs "$own_parent"
