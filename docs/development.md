@@ -11,7 +11,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
 | `agent-learn`, `agent-sessions`, `agent-sessions-serve`, or `skill-usage` launchers, or the agent LaunchAgent templates | `cd dotfiles && sh agent-memory-launchers-test.sh` (also under `dash`) and `shellcheck -s sh` on the changed launchers |
 | `tools/skill-usage` | `TMPDIR="$PWD/.work/tmp" skill-usage selftest`, `uvx ruff check tools/skill-usage/src/skill_usage.py`, and `uvx ty check --python "${AGENT_MEMORY_VENV:-$HOME/d/agent-memory/.venv}" tools/skill-usage/src/skill_usage.py` |
-| agent-memory package, Worker, evals, or benchmarks | Run the checks in `~/d/agent-memory/AGENTS.md` in that repository, then reinstall it into `$AGENT_MEMORY_VENV` |
+| agent-memory package, Worker, evals, or benchmarks | Run the checks in `~/d/agent-memory/AGENTS.md` in that repository. `sync` keeps `$AGENT_MEMORY_VENV` as an editable install, so source edits apply directly; run `sh sync tools agent-memory` after changing entry points or dependencies |
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
 | `sync` DAG/bootstrap | `python3 -I tools/sync/test_dag.py`, `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh -n sync`, and `sh dotfiles/doctor-test.sh` |

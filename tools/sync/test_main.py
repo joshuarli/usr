@@ -1,4 +1,5 @@
 """Graph construction and scoped action selection without real installs."""
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -83,6 +84,65 @@ class MainTests(unittest.TestCase):
         self.assertEqual([item.kind for item in plan.actions], ["replace"])
         apply(plan, ctx.state)
         self.assertEqual((ctx.home / ".moved").resolve(), new)
+
+    def agent_memory_fixture(self):
+        source = self.ctx.home / "d/agent-memory"
+        source.mkdir(parents=True)
+        (source / "pyproject.toml").write_text("[project]\nname = 'agent-memory'\n")
+        venv = source / ".venv"
+        for command in main.AGENT_MEMORY_COMMANDS:
+            script = venv / "bin" / command
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text("#!/bin/sh\n")
+            script.chmod(0o755)
+        return source, venv
+
+    def write_metadata(self, source, venv, editable):
+        metadata = venv / "lib/python3.15/site-packages/agent_memory-0.1.0.dist-info"
+        metadata.mkdir(parents=True, exist_ok=True)
+        (metadata / "direct_url.json").write_text(json.dumps({
+            "url": source.as_uri(), "dir_info": {"editable": True} if editable else {},
+        }))
+
+    def test_agent_memory_requires_uv(self):
+        dag = main.graph(self.ctx, ["agent-memory"], setup=True).select(["tool:agent-memory"])
+        self.assertEqual([task.name for task in dag.order()], ["links", "tool:uv", "tool:agent-memory"])
+
+    def test_agent_memory_probe_requires_editable_install(self):
+        source, venv = self.agent_memory_fixture()
+        self.assertFalse(main.agent_memory_status(self.ctx).current)
+        self.write_metadata(source, venv, editable=False)
+        probe = main.agent_memory_status(self.ctx)
+        self.assertFalse(probe.current)
+        self.assertIn("not an editable install", probe.detail)
+        self.write_metadata(source, venv, editable=True)
+        self.assertTrue(main.agent_memory_status(self.ctx).current)
+        (venv / "bin/agent-sessions-serve").unlink()
+        self.assertFalse(main.agent_memory_status(self.ctx).current)
+
+    def test_agent_memory_missing_checkout_is_a_conflict(self):
+        probe = main.agent_memory_status(self.ctx)
+        self.assertTrue(probe.conflict)
+        self.assertIn("checkout missing", probe.detail)
+
+    def test_agent_memory_apply_installs_editable_environment(self):
+        source, venv = self.agent_memory_fixture()
+        uv = self.ctx.home / ".local/bin/uv"
+        uv.parent.mkdir(parents=True)
+        uv.write_text("#!/bin/sh\n")
+        uv.chmod(0o755)
+        calls = []
+
+        def run(_ctx, *args, **_kwargs):
+            calls.append(args)
+            return type("Completed", (), {"returncode": 0})()
+
+        with patch.object(main, "command", side_effect=run):
+            main.agent_memory_apply(self.ctx)
+        self.assertEqual(calls, [
+            (str(uv), "venv", "--allow-existing", "--python", ">=3.15", str(venv)),
+            (str(uv), "pip", "install", "--python", str(venv / "bin/python"), "-e", str(source)),
+        ])
 
     def test_server_profile_omits_mcp_bridges(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
