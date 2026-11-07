@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import ffmpeg_runtime
 from ffmpeg_runtime import RuntimeArchiveError
 from installer import SkipInstall
-from test_installer import FakeInstaller, atom
+from test_installer import FakeInstaller, atom, make_tar, make_zip
 
 MAJORS = {"libavcodec": 63, "libavfilter": 12, "libavformat": 63, "libavutil": 61,
           "libswresample": 7, "libswscale": 10}
@@ -174,7 +174,7 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(list(target.iterdir()), [])
 
 
-class RuntimeInstallTests(unittest.TestCase):
+class RuntimeFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -210,6 +210,8 @@ class RuntimeInstallTests(unittest.TestCase):
     def releases(self):
         return sorted(path.name for path in (self.home / ".local/share/ffmpeg/releases").iterdir())
 
+
+class RuntimeInstallTests(RuntimeFixture):
     def assert_untouched(self, spec, previous_names):
         self.assertEqual(self.current(), self.release(spec))
         self.assertEqual(self.releases(), previous_names)
@@ -380,6 +382,151 @@ class RuntimeInstallTests(unittest.TestCase):
             self.installer([spec]).ensure_ffmpeg_runtime("player", "20240101")
         with self.assertRaises(SkipInstall):
             self.installer([spec]).ensure_ffmpeg_runtime("player", "../x")
+
+
+PLAYER_REPO = "https://github.com/joshuarli/play"
+PLAYER_SCRIPT = (b'#!/bin/sh\ndir=$(dirname "$(readlink -f "$0")")\n'
+                 b'[ -f "$dir/../lib/libavcodec.so.63" ] || exit 9\necho player\n')
+
+
+class PlayerInstallTests(RuntimeFixture):
+    def player_installer(self, specs, os_name="linux", player_tags=(), runtime="9.0.2+20250101",
+                         readme=True, player_script=PLAYER_SCRIPT):
+        inst = self.installer(specs, os_name=os_name)
+        for name in ("install_name_tool", "xattr"):
+            script = self.bin / name
+            script.write_text(f"#!/bin/sh\necho \"$@\" >> {self.root}/{name}.log\nexit 0\n")
+            script.chmod(0o755)
+        tags = player_tags or ("v1",)
+        inst.routes[f"{PLAYER_REPO}/releases.atom"] = atom([(f"2024-02-0{index + 1}", tag) for index, tag in enumerate(tags)])
+        tag = tags[-1]
+        base = f"{PLAYER_REPO}/releases/download/{tag}"
+        if os_name == "linux":
+            name = "player-x86_64-linux-musl.tar.gz"
+            members = {"player": player_script}
+            if readme:
+                members["README"] = f"Player\n\nFFmpeg runtime: {runtime}\n".encode()
+            payload = make_tar(members)
+        else:
+            name = "Player-aarch64-apple-darwin.zip"
+            plist = ("<?xml version='1.0'?><plist version='1.0'><dict><key>PlayerFFmpegRuntime</key>"
+                     f"<string>{runtime}</string></dict></plist>").encode()
+            payload = make_zip({"Player.app/Contents/MacOS/player": player_script,
+                                "Player.app/Contents/Info.plist": plist},
+                               executable={"Player.app/Contents/MacOS/player"})
+        inst.routes[f"{base}/{name}"] = (payload, {"ETag": f"e-{tag}"})
+        inst.routes[f"{base}/SHA256SUMS"] = f"{hashlib.sha256(payload).hexdigest()}  {name}\n".encode()
+        return inst
+
+    def run_player(self, launcher):
+        import subprocess
+        return subprocess.run([str(launcher)], capture_output=True, text=True).stdout.strip()
+
+    def player_current(self):
+        return self.home / ".local/share/player/current"
+
+    def pins(self):
+        return (self.home / ".local/share/ffmpeg/pins/player").read_text().split()
+
+    def test_linux_player_links_its_pinned_runtime(self):
+        runtime = Spec("linux", "20250101")
+        inst = self.player_installer([runtime])
+        inst.install_player()
+        release = self.release(runtime)
+        launcher = self.home / ".local/bin/player"
+        self.assertEqual(os.readlink(launcher), str(self.player_current() / "bin/player"))
+        self.assertEqual(os.readlink(self.player_current() / "lib"), str(release / "lib"))
+        self.assertEqual(self.pins(), ["20250101"])
+        self.assertEqual(self.run_player(launcher), "player")
+        self.assertIn(("D", release), inst.claims)
+        again = self.player_installer([runtime])
+        again.install_player()
+        self.assertFalse(again.changed)
+
+    def test_player_upgrade_switches_runtime_after_the_player(self):
+        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        self.player_installer([old, new]).install_player()
+        first = os.path.realpath(self.player_current())
+        failing = self.player_installer([old, new], player_tags=("v1", "v2"), runtime="9.0.2+20250202")
+        with patch.object(failing, "switch_symlink", return_value=False):
+            with self.assertRaisesRegex(SkipInstall, "could not switch"):
+                failing.install_player()
+        self.assertEqual(os.path.realpath(self.player_current()), first)
+        self.assertEqual(self.pins(), ["20250101"])
+        self.assertEqual(self.run_player(self.home / ".local/bin/player"), "player")
+        self.player_installer([old, new], player_tags=("v1", "v2"), runtime="9.0.2+20250202").install_player()
+        self.assertNotEqual(os.path.realpath(self.player_current()), first)
+        self.assertEqual(self.pins(), ["20250202"])
+        self.assertFalse(self.release(old).exists())
+        self.assertEqual(self.run_player(self.home / ".local/bin/player"), "player")
+        self.assertEqual(len(list((self.home / ".local/share/player/releases").iterdir())), 1)
+
+    def test_player_install_failures_keep_the_previous_player_and_runtime(self):
+        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        self.player_installer([old, new]).install_player()
+        launcher = self.home / ".local/bin/player"
+        cases = {
+            "runtime not published": dict(runtime="9.0.2+20250303"),
+            "runtime from another ffmpeg": dict(runtime="8.0.0+20250202"),
+            "undeclared runtime": dict(readme=False),
+            "malformed declaration": dict(runtime="20250202"),
+            "player cannot load the runtime": dict(runtime="9.0.2+20250202", player_script=b"#!/bin/sh\nexit 9\n"),
+        }
+        for label, options in cases.items():
+            with self.subTest(label):
+                inst = self.player_installer([old, new], player_tags=("v1", "v2"), **options)
+                with self.assertRaises(SkipInstall):
+                    inst.install_player()
+                self.assertEqual(self.pins(), ["20250101"])
+                self.assertEqual(self.run_player(launcher), "player")
+                self.assertEqual(len(list((self.home / ".local/share/player/releases").iterdir())), 1)
+
+    def test_legacy_player_binary_is_replaced_by_the_layout(self):
+        runtime = Spec("linux", "20250101")
+        launcher = self.home / ".local/bin/player"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_bytes(b"old")
+        (self.home / ".local/state/dl").mkdir(parents=True)
+        (self.home / ".local/state/dl/player").write_text("old\n")
+        self.player_installer([runtime]).install_player()
+        self.assertTrue(launcher.is_symlink())
+
+    def test_macos_player_gets_the_pinned_runtime_rpath(self):
+        runtime = Spec("darwin", "20250101")
+        env_apps = self.root / "apps"
+        inst = self.player_installer([runtime], os_name="darwin", player_script=b"#!/bin/sh\necho player\n")
+        inst.player_apps = env_apps
+        inst.player_app = env_apps / "Player.app"
+        inst.player_exec = inst.player_app / "Contents/MacOS/player"
+        inst.install_player()
+        log = (self.root / "install_name_tool.log").read_text()
+        self.assertEqual(log.split()[:2], ["-add_rpath", str(self.release(runtime) / "lib")])
+        self.assertTrue(inst.player_exec.is_file())
+        self.assertEqual(self.pins(), ["20250101"])
+        again = self.player_installer([runtime], os_name="darwin", player_script=b"#!/bin/sh\necho player\n")
+        again.player_apps, again.player_app, again.player_exec = inst.player_apps, inst.player_app, inst.player_exec
+        again.install_player()
+        self.assertFalse(again.changed)
+
+    def test_macos_resign_failure_keeps_the_previous_app(self):
+        runtime = Spec("darwin", "20250101")
+        script = b"#!/bin/sh\necho player\n"
+        inst = self.player_installer([runtime], os_name="darwin", player_script=script)
+        apps = self.root / "apps"
+        inst.player_apps, inst.player_app = apps, apps / "Player.app"
+        inst.player_exec = inst.player_app / "Contents/MacOS/player"
+        inst.install_player()
+        before = inst.player_exec.read_bytes()
+        signer = self.bin / "codesign"
+        signer.write_text('#!/bin/sh\ncase "$*" in *--force*) exit 1;; esac\nexit 0\n')
+        signer.chmod(0o755)
+        failing = self.player_installer([runtime], os_name="darwin", player_tags=("v1", "v2"),
+                                        player_script=b"#!/bin/sh\necho new\n")
+        signer.write_text('#!/bin/sh\ncase "$*" in *--force*) exit 1;; esac\nexit 0\n')
+        failing.player_apps, failing.player_app, failing.player_exec = inst.player_apps, inst.player_app, inst.player_exec
+        with self.assertRaisesRegex(SkipInstall, "signing"):
+            failing.install_player()
+        self.assertEqual(inst.player_exec.read_bytes(), before)
 
 
 if __name__ == "__main__":

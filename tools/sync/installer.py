@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -136,6 +137,7 @@ class Installer:
         self.ghostty_exec = self.ghostty_app / "Contents/MacOS/ghostty"
         self.player_apps = Path(self.env.get("PLAYER_APPLICATIONS_DIR") or self.home / "Applications")
         self.player_app = self.player_apps / "Player.app"
+        self.player_home = Path(self.env.get("PLAYER_HOME") or self.data_home / "player")
         self.player_exec = self.player_app / "Contents/MacOS/player"
         self.claims: list[tuple[str, Path]] = []
         self.removed: set[Path] = set()
@@ -1926,7 +1928,7 @@ class Installer:
                 return f"{program.name} does not run: {detail}{hint}"
         return ""
 
-    def ffmpeg_runtime_asset(self, tag: str, triple: str) -> tuple[str, str, str]:
+    def ffmpeg_runtime_asset(self, tag: str, triple: str, upstream: str = "") -> tuple[str, str, str]:
         base = f"https://github.com/{FFMPEG_REPO}/releases/download/{tag}"
         sums_path = Path(tempfile.mkstemp()[1])
         try:
@@ -1944,12 +1946,13 @@ class Installer:
         if len(listed) != 1:
             raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
         expected, asset = listed[0]
-        if not re.match(rf"^ffmpeg-.*\+{re.escape(tag)}-{re.escape(triple)}-runtime\.tar\.gz$", asset) \
+        name = re.escape(upstream) if upstream else ".*"
+        if not re.match(rf"^ffmpeg-{name}\+{re.escape(tag)}-{re.escape(triple)}-runtime\.tar\.gz$", asset) \
                 or re.search(r"[^A-Za-z0-9._+\-]", asset):
             raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
         return asset, f"{base}/{asset.replace('+', '%2B')}", expected
 
-    def install_ffmpeg_release(self, tool: str, tag: str, triple: str) -> Path:
+    def install_ffmpeg_release(self, tool: str, tag: str, triple: str, upstream: str = "") -> Path:
         releases = self.ffmpeg_home / "releases"
         if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
             self.skip(tool, f"{releases} is not a directory")
@@ -1959,7 +1962,7 @@ class Installer:
             return release_dir
         if release_dir.is_symlink() or (exists and not release_dir.is_dir()):
             self.skip(tool, f"{release_dir} is not a release directory")
-        asset, url, expected = self.ffmpeg_runtime_asset(tag, triple)
+        asset, url, expected = self.ffmpeg_runtime_asset(tag, triple, upstream)
         self.own_missing_dirs(releases)
         releases.mkdir(parents=True, exist_ok=True)
         self.fetch_msg(f"Downloading {asset} ...")
@@ -1979,22 +1982,7 @@ class Installer:
             problem = self.ffmpeg_runtime_problem(staged)
             if problem:
                 self.skip(tool, f"{asset}: {problem}")
-            old_release = None
-            if exists:
-                old_release = releases / f".ffmpeg-old.{os.getpid()}"
-                shutil.rmtree(old_release, ignore_errors=True)
-                try:
-                    os.replace(release_dir, old_release)
-                except OSError:
-                    self.skip(tool, f"could not replace {release_dir}")
-            try:
-                os.replace(staged, release_dir)
-            except OSError:
-                if old_release is not None:
-                    os.replace(old_release, release_dir)
-                self.skip(tool, f"could not install {release_dir}")
-            if old_release is not None:
-                shutil.rmtree(old_release, ignore_errors=True)
+            self.replace_dir(tool, staged, release_dir)
         finally:
             archive_path.unlink(missing_ok=True)
             shutil.rmtree(staged, ignore_errors=True)
@@ -2014,10 +2002,8 @@ class Installer:
         pins = home / "pins"
         if pins.is_dir():
             for pin in pins.iterdir():
-                tag = pin.read_text().strip()
-                if not _FFMPEG_TAG.match(tag):
-                    self.skip("ffmpeg", f"{pin} does not name a release")
-                keep.add(f"{tag}-{triple}-runtime")
+                for tag in self.ffmpeg_pinned_tags(pin):
+                    keep.add(f"{tag}-{triple}-runtime")
                 self.own_file(pin)
         retired = re.compile(rf"^\d{{8}}(?:-r\d+)?-{re.escape(triple)}(?:-runtime)?$")
         for entry in sorted(releases.iterdir()):
@@ -2084,31 +2070,48 @@ class Installer:
         self.activate_ffmpeg_release(release_dir, tag)
         self.prune_ffmpeg_releases(triple)
 
-    def ensure_ffmpeg_runtime(self, tool: str, tag: str) -> Path:
+    def ffmpeg_pinned_tags(self, pin: Path) -> list[str]:
+        tags = pin.read_text().split() if pin.is_file() else []
+        for tag in tags:
+            if not _FFMPEG_TAG.match(tag):
+                self.skip("ffmpeg", f"{pin} does not name a release")
+        return tags
+
+    def write_ffmpeg_pin(self, tool: str, tags: list[str]) -> None:
+        pins = self.ffmpeg_home / "pins"
+        if pins.is_symlink() or (pins.exists() and not pins.is_dir()):
+            self.skip(tool, f"{pins} is not a directory")
+        pin = pins / tool
+        if self.ffmpeg_pinned_tags(pin) != tags:
+            self.own_missing_dirs(pins)
+            pins.mkdir(parents=True, exist_ok=True)
+            staged = self.stage_file(pins, ".pin.")
+            staged.write_text("".join(f"{tag}\n" for tag in tags))
+            os.replace(staged, pin)
+            self.changed = True
+        self.own_file(pin)
+
+    def ensure_ffmpeg_runtime(self, tool: str, tag: str, *, upstream: str = "",
+                              keep_previous: bool = False) -> Path:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", tool):
             self.skip(tool, "not a valid tool name for a runtime pin")
         if not _FFMPEG_TAG.match(tag):
             self.skip(tool, f"{tag!r} is not an ffmpeg-build release tag")
         triple = self.ffmpeg_triple(tool)
         try:
-            release_dir = self.install_ffmpeg_release(tool, tag, triple)
+            release_dir = self.install_ffmpeg_release(tool, tag, triple, upstream)
         except FfmpegReleaseUnavailable as exc:
             self.skip(tool, str(exc))
-        pins = self.ffmpeg_home / "pins"
-        pin = pins / tool
-        if pins.is_symlink() or (pins.exists() and not pins.is_dir()):
-            self.skip(tool, f"{pins} is not a directory")
-        if not pin.is_file() or pin.read_text().strip() != tag:
-            self.own_missing_dirs(pins)
-            pins.mkdir(parents=True, exist_ok=True)
-            staged = self.stage_file(pins, ".pin.")
-            staged.write_text(tag + "\n")
-            os.replace(staged, pin)
-            self.changed = True
-        self.own_file(pin)
+        previous = self.ffmpeg_pinned_tags(self.ffmpeg_home / "pins" / tool) if keep_previous else []
+        self.write_ffmpeg_pin(tool, [*[old for old in previous if old != tag], tag])
         self.own_dir(release_dir)
-        self.prune_ffmpeg_releases(triple)
+        if not keep_previous:
+            self.prune_ffmpeg_releases(triple)
         return release_dir
+
+    def release_previous_ffmpeg_runtimes(self, tool: str, tag: str) -> None:
+        self.write_ffmpeg_pin(tool, [tag])
+        self.prune_ffmpeg_releases(self.ffmpeg_triple(tool))
 
     def write_opencode2_shim(self, target: Path) -> None:
         staged = self.stage_file(target.parent, ".opencode2-shim.")
@@ -2216,6 +2219,44 @@ class Installer:
         self.changed = True
         self.ok(f"Installed {self.dest}/opencode2")
 
+    def replace_dir(self, tool: str, staged: Path, target: Path) -> None:
+        old = None
+        if target.exists() or target.is_symlink():
+            old = target.parent / f".{tool}-old.{os.getpid()}"
+            shutil.rmtree(old, ignore_errors=True)
+            try:
+                os.replace(target, old)
+            except OSError:
+                self.skip(tool, f"could not replace {target}")
+        try:
+            os.replace(staged, target)
+        except OSError:
+            if old is not None:
+                os.replace(old, target)
+            self.skip(tool, f"could not install {target}")
+        if old is not None:
+            shutil.rmtree(old, ignore_errors=True)
+
+    def player_runtime_pin(self, declared: object) -> tuple[str, str]:
+        match = re.fullmatch(r"(\d+(?:\.\d+)*)\+(\d{8}(?:-r\d+)?)", declared.strip()) \
+            if isinstance(declared, str) else None
+        if match is None:
+            self.skip("player", "the release does not declare its FFmpeg runtime as <ffmpeg>+<tag>")
+        return match.group(1), match.group(2)
+
+    def pinned_player_runtime(self) -> Path | None:
+        tags = self.ffmpeg_pinned_tags(self.ffmpeg_home / "pins" / "player")
+        if len(tags) != 1:
+            return None
+        release = self.ffmpeg_release_dir(tags[0], self.ffmpeg_triple("player"))
+        return None if self.ffmpeg_runtime_problem(release) else release
+
+    def player_smoke(self, executable: Path) -> None:
+        result = self.run([str(executable), "--version"], capture=True)
+        if result.returncode:
+            lines = ((result.stderr or "") + (result.stdout or "")).strip().splitlines()
+            self.skip("player", f"the release does not run: {lines[0] if lines else result.returncode}")
+
     def install_player(self) -> None:
         assets = {("darwin", "aarch64"): "Player-aarch64-apple-darwin.zip",
                   ("linux", "x86_64"): "player-x86_64-linux-musl.tar.gz"}
@@ -2226,6 +2267,8 @@ class Installer:
         if not tag:
             self.unchecked("player", "no release found")
             return
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", tag):
+            self.skip("player", f"{tag!r} is not a usable release tag")
         base = f"https://github.com/{PLAYER_REPO}/releases/download/{tag}"
         url = f"{base}/{asset_name}"
         record_id = self.asset_id(url)
@@ -2235,14 +2278,19 @@ class Installer:
         record = f"{tag}:{record_id}"
         launcher = self.dest / "player"
         launcher_target = os.readlink(launcher) if launcher.is_symlink() else ""
+        runtime = self.pinned_player_runtime()
+        current_link = self.player_home / "current"
+        linux_target = str(current_link / "bin/player")
         if self.os_name == "darwin":
-            if self._state_text("player") == record and self.player_app.is_dir() \
+            if self._state_text("player") == record and runtime is not None and self.player_app.is_dir() \
                     and not self.player_app.is_symlink() and (self.player_exec).is_file() \
                     and os.access(self.player_exec, os.X_OK):
                 if launcher_target != str(self.player_exec):
                     self.link_symlink(launcher, str(self.player_exec))
                     self.changed = True
                 self.own_dir(self.player_app)
+                self.own_dir(runtime)
+                self.own_file(self.ffmpeg_home / "pins/player")
                 self.own_file(launcher)
                 self.own_file(self.state / "player")
                 self.current(f"player is current ({tag})")
@@ -2252,13 +2300,22 @@ class Installer:
             if (launcher.exists() or launcher.is_symlink()) and launcher_target != str(self.player_exec):
                 self.skip("player", f"existing {launcher} is not managed by dl")
         else:
-            if self._state_text("player") == record and launcher.is_file() and not launcher.is_symlink() \
+            if current_link.exists() and not current_link.is_symlink():
+                self.skip("player", f"{current_link} is not a dl-managed symlink")
+            lib = current_link / "lib"
+            if self._state_text("player") == record and runtime is not None and lib.is_symlink() \
+                    and Path(os.readlink(lib)) == runtime / "lib" and launcher_target == linux_target \
                     and os.access(launcher, os.X_OK):
+                self.own_dir(runtime)
+                self.own_dir(Path(os.path.realpath(current_link)))
+                self.own_file(current_link)
+                self.own_file(self.ffmpeg_home / "pins/player")
                 self.own_file(launcher)
                 self.own_file(self.state / "player")
                 self.current(f"player is current ({tag})")
                 return
-            if (launcher.exists() or launcher.is_symlink()) and not (self.state / "player").is_file():
+            legacy = launcher.is_file() and not launcher.is_symlink() and (self.state / "player").is_file()
+            if (launcher.exists() or launcher.is_symlink()) and not legacy and launcher_target != linux_target:
                 self.skip("player", f"existing {launcher} is not managed by dl")
         self.fetch_msg(f"Downloading {asset_name} ...")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
@@ -2276,19 +2333,44 @@ class Installer:
         if len(expected) != 64 or self.sha256_file(archive_path) != expected:
             archive_path.unlink(missing_ok=True)
             self.skip("player", f"{asset_name} checksum mismatch")
-        if self.os_name == "darwin":
-            self.own_missing_dirs(self.player_apps)
-            self.player_apps.mkdir(parents=True, exist_ok=True)
-            staged = self.stage_dir(self.player_apps, ".player.")
+        pinned_before = self.ffmpeg_pinned_tags(self.ffmpeg_home / "pins/player")
+        try:
+            if self.os_name == "darwin":
+                self.install_player_app(archive_path, tag, record)
+            else:
+                self.install_player_tarball(archive_path, asset_name, tag, record, expected)
+        except SkipInstall:
+            self.write_ffmpeg_pin("player", pinned_before)
+            raise
+
+    def install_player_app(self, archive_path: Path, tag: str, record: str) -> None:
+        launcher = self.dest / "player"
+        launcher_target = os.readlink(launcher) if launcher.is_symlink() else ""
+        self.own_missing_dirs(self.player_apps)
+        self.player_apps.mkdir(parents=True, exist_ok=True)
+        staged = self.stage_dir(self.player_apps, ".player.")
+        try:
             if not self.extract_zip(archive_path, staged):
-                archive_path.unlink(missing_ok=True)
                 self.skip("player", "release archive is invalid")
-            archive_path.unlink(missing_ok=True)
-            if not (staged / "Player.app/Contents/MacOS/player").is_file():
+            app = staged / "Player.app"
+            executable = app / "Contents/MacOS/player"
+            if not executable.is_file():
                 self.skip("player", "release archive is invalid")
-            if self.run(["codesign", "--verify", "--deep", "--strict", str(staged / "Player.app")]).returncode:
+            if self.run(["codesign", "--verify", "--deep", "--strict", str(app)]).returncode:
                 self.skip("player", "signature verification failed")
-            self.run(["xattr", "-dr", "com.apple.quarantine", str(staged / "Player.app")])
+            self.run(["xattr", "-dr", "com.apple.quarantine", str(app)])
+            try:
+                info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                self.skip("player", "Info.plist is unreadable")
+            upstream, runtime_tag = self.player_runtime_pin(info.get("PlayerFFmpegRuntime"))
+            runtime = self.ensure_ffmpeg_runtime("player", runtime_tag, upstream=upstream, keep_previous=True)
+            if self.run(["install_name_tool", "-add_rpath", str(runtime / "lib"), str(executable)]).returncode:
+                self.skip("player", "could not add the FFmpeg runtime to the app's library path")
+            if self.run(["codesign", "--force", "--deep", "--sign", "-", str(app)]).returncode \
+                    or self.run(["codesign", "--verify", "--deep", "--strict", str(app)]).returncode:
+                self.skip("player", "signing the app with the FFmpeg runtime path failed")
+            self.player_smoke(executable)
             previous = None
             if self.player_app.is_dir():
                 previous = Path(tempfile.mkdtemp(prefix=".player-previous.", dir=self.player_apps))
@@ -2298,34 +2380,74 @@ class Installer:
                 except OSError:
                     self.skip("player", "cannot move previous application")
             try:
-                os.replace(staged / "Player.app", self.player_app)
+                os.replace(app, self.player_app)
             except OSError:
                 if previous is not None:
                     os.replace(previous, self.player_app)
                 self.skip("player", "cannot install application")
-            shutil.rmtree(staged, ignore_errors=True)
-            if previous is not None:
-                shutil.rmtree(previous, ignore_errors=True)
-            if launcher_target != str(self.player_exec):
-                self.link_symlink(launcher, str(self.player_exec))
-            self.own_dir(self.player_app)
-            self.own_file(launcher)
-            self.write_state("player", record)
-            self.changed = True
-            self.ok(f"Installed {self.player_app} ({tag})")
-            return
-        names = self.tar_names(archive_path)
-        if names is None or names.count("player") != 1:
+        finally:
             archive_path.unlink(missing_ok=True)
-            self.skip("player", f"{asset_name} does not contain exactly one player binary")
-        staged = self.stage_file(self.dest, ".player.")
-        member = self.tar_member(archive_path, "player")
-        archive_path.unlink(missing_ok=True)
-        if not member:
-            staged.unlink(missing_ok=True)
+            shutil.rmtree(staged, ignore_errors=True)
+        if previous is not None:
+            shutil.rmtree(previous, ignore_errors=True)
+        if launcher_target != str(self.player_exec):
+            self.link_symlink(launcher, str(self.player_exec))
+        self.own_dir(self.player_app)
+        self.own_file(launcher)
+        self.write_state("player", record)
+        self.release_previous_ffmpeg_runtimes("player", runtime_tag)
+        self.changed = True
+        self.ok(f"Installed {self.player_app} ({tag})")
+
+    def install_player_tarball(self, archive_path: Path, asset_name: str, tag: str, record: str,
+                               digest: str) -> None:
+        launcher = self.dest / "player"
+        try:
+            names = self.tar_names(archive_path)
+            if names is None or names.count("player") != 1 or names.count("README") != 1:
+                self.skip("player", f"{asset_name} must contain exactly one player binary and one README")
+            binary = self.tar_member(archive_path, "player")
+            readme = self.tar_member(archive_path, "README")
+        finally:
+            archive_path.unlink(missing_ok=True)
+        if not binary or readme is None:
             self.skip("player", f"{asset_name} could not extract player")
-        staged.write_bytes(member)
-        self.install_binary("player", staged, record)
+        declared = re.findall(r"^FFmpeg runtime: (\S+)$", readme.decode("utf-8", "replace"), re.M)
+        if len(declared) != 1:
+            self.skip("player", f"{asset_name} README must declare exactly one FFmpeg runtime")
+        upstream, runtime_tag = self.player_runtime_pin(declared[0])
+        runtime = self.ensure_ffmpeg_runtime("player", runtime_tag, upstream=upstream, keep_previous=True)
+        releases = self.player_home / "releases"
+        if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
+            self.skip("player", f"{releases} is not a directory")
+        self.own_missing_dirs(releases)
+        releases.mkdir(parents=True, exist_ok=True)
+        release_dir = releases / f"{tag}-{digest[:12]}"
+        staged = self.stage_dir(releases, ".player.")
+        try:
+            (staged / "bin").mkdir()
+            (staged / "bin/player").write_bytes(binary)
+            (staged / "bin/player").chmod(0o755)
+            os.symlink(runtime / "lib", staged / "lib")
+            staged.chmod(0o755)
+            self.player_smoke(staged / "bin/player")
+            self.replace_dir("player", staged, release_dir)
+        finally:
+            shutil.rmtree(staged, ignore_errors=True)
+        self.own_dir(release_dir)
+        current_link = self.player_home / "current"
+        if not self.switch_symlink(release_dir, current_link):
+            self.skip("player", f"could not switch {current_link}")
+        self.own_file(current_link)
+        self.link_symlink(launcher, str(current_link / "bin/player"))
+        self.write_state("player", record)
+        for entry in sorted(releases.iterdir()):
+            if entry != release_dir and entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+                self.removed.add(entry)
+        self.release_previous_ffmpeg_runtimes("player", runtime_tag)
+        self.changed = True
+        self.ok(f"Installed {launcher} ({tag})")
 
     def install_ghostty_custom(self) -> None:
         if self.os_name != "darwin":
@@ -2605,6 +2727,12 @@ class Installer:
         if (self.state / "player").is_file() and (self.state / "player").stat().st_size > 0 \
                 and self.os_name == "darwin" and self.player_app.is_dir() and not self.player_app.is_symlink():
             self.own_dir(self.player_app)
+        player_current = self.player_home / "current"
+        if (self.state / "player").is_file() and self.os_name == "linux" and player_current.is_symlink():
+            self.own_file(player_current)
+            self.own_dir(Path(os.path.realpath(player_current)))
+            if (self.dest / "player").is_symlink() and os.readlink(self.dest / "player") == str(player_current / "bin/player"):
+                self.own_file(self.dest / "player")
 
     def report_unowned_launcher(self, prog: str) -> None:
         launcher = self.dest / prog
