@@ -29,11 +29,11 @@ Judge the tests in a bounded scope, one test at a time, with evidence. The prefe
 Fix by calling the subject with one concrete input and asserting the literal output or effect: for a mock, the payload received; for an absence, also the presence on another input; for a constant, the mechanism that reads it.
 
 **Execution drag and isolation hazards** (investigate and repair, never delete to speed up):
-- *Idle timeout sleeps:* negative or fault paths that wait out production default timeouts (e.g. 15s external API timeouts) instead of overriding with a short test timeout (50-200ms) or injecting a virtual clock;
-- *False serialization:* monolithic tests executing sequential loops over independent seeds, cases, or process spawns that could run concurrently or as separate parameterized cases;
-- *Global-state collisions:* assertions that inspect global directory listings (e.g. `readdir` over `.work/tmp`) or shared process counts rather than asserting directly on the test's own allocated path or handle, causing flakes when test files run in parallel;
-- *Redundant per-test setup I/O:* harnesses re-reading immutable disk files (migrations, queries, schemas) and re-computing crypto digests on every `beforeEach` instead of caching parsed assets in memory per worker process;
-- *Leaked handles:* unclosed servers, child processes, or RPC stubs that linger after completion and exhaust ports or file descriptors under concurrency.
+- *Idle timeout sleeps:* negative or fault paths that wait out production default timeouts (e.g. 15s external API or backoff delays) instead of injecting a virtual clock or overriding with a short test timeout (50-200ms);
+- *False serialization:* monolithic tests executing sequential loops over independent seeds, parameter matrix rows, or process invocations that could run concurrently or as separate parameterized test cases;
+- *Global-state collisions:* assertions that inspect shared directory listings, global process counts, or shared databases rather than asserting directly on the test's own allocated path, port, or handle, causing flakes when test runners execute in parallel;
+- *Redundant per-test setup I/O:* test fixtures re-reading immutable disk files (migrations, queries, schemas, static payloads) and re-computing crypto digests on every test setup instead of caching parsed assets in memory across tests within the process;
+- *Leaked handles:* unclosed servers, child processes, open sockets, or connections that survive the test and exhaust ports or file descriptors under concurrency.
 
 **Other junk leads** (investigate, never delete automatically): coverage probes with no assertion, copied fixtures or export lists, exact source or string greps, private-predicate tests duplicated at real boundaries, duplicate invocations of one contract, provider-local replays of shared helpers, tests that only preserve test-only exports or wrappers, and production code whose only callers are tests.
 
