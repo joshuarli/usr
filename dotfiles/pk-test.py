@@ -155,6 +155,17 @@ done
         self.assertIn("--query=sleep", self.calls()[0])
         self.assertEqual(proc.wait(timeout=5), -signal.SIGTERM)
 
+    def test_candidate_leads_with_process_title(self):
+        if not Path("/bin/sleep").exists():
+            self.skipTest("/bin/sleep unavailable")
+        proc = subprocess.Popen(["/bin/sleep", "60"])
+        self.procs.append(proc)
+        result = self.run_pk("sleep", PK_TEST_SELECTION=str(proc.pid))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        offered = (self.path / "candidates").read_text()
+        self.assertIn(f"{proc.pid}  sleep  /bin/sleep 60", offered)
+        self.assertEqual(proc.wait(timeout=5), -signal.SIGTERM)
+
     def test_marked_multiple_processes_killed_in_one_picker(self):
         a, b = self.sleep(), self.sleep()
         result = self.run_pk("sleep", PK_TEST_SELECTION=f"{b.pid} {a.pid}")

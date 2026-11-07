@@ -122,7 +122,16 @@ candidates=$(printf '%s\n' "$snapshot" | LC_ALL=C awk \
         for (i = 1; i <= 7; i++)
             sub(/^[[:space:]]*[^[:space:]]+[[:space:]]*/, "", command)
         gsub(/[[:cntrl:]]/, "?", command)
-        if (command != "") printf "%s  %s\n", $1, command
+        if (command != "") {
+            if (match(command, /[^[:space:]]+/)) {
+                exe = substr(command, RSTART, RLENGTH)
+                title = exe
+                sub(/.*\//, "", title)
+                if (title != exe && title != "" && substr(exe, 1, 1) != "[")
+                    printf "%s  %s  %s\n", $1, title, command
+                else printf "%s  %s\n", $1, command
+            }
+        }
     }')
 if [ -z "$candidates" ]; then
     if [ -n "$port" ]; then
