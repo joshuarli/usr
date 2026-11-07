@@ -1184,5 +1184,44 @@ class DecideTests(unittest.TestCase):
         self.assertNotIn("Sanitized task summary", skill)
 
 
+    def test_all_coding_harnesses_share_one_routing_policy(self):
+        canonical = (ROOT / "dotfiles/base/.codex/AGENTS.md").resolve(strict=True)
+        aliases = (
+            "dotfiles/base/.claude/CLAUDE.md",
+            "dotfiles/base/.commandcode/AGENTS.md",
+            "dotfiles/base/.config/muse/AGENTS.md",
+            "dotfiles/base/.config/opencode/AGENTS.md",
+            "dotfiles/base/.dsh/AGENTS.md",
+            "dotfiles/base/.fx/AGENTS.md",
+            "dotfiles/base/.gemini/config/AGENTS.md",
+            "dotfiles/base/.grok/AGENTS.md",
+            "dotfiles/base/.pi/agent/AGENTS.md",
+        )
+        for path in aliases:
+            link = ROOT / path
+            self.assertTrue(link.is_symlink(), path)
+            self.assertEqual(link.resolve(strict=True), canonical, path)
+        instructions = canonical.read_text()
+        self.assertIn("Before assigning nontrivial work to any coding subagent", instructions)
+        self.assertIn("decide route --guide", instructions)
+        self.assertIn("pinned model/provider", instructions)
+        orchestrate = ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md"
+        self.assertTrue(orchestrate.is_file())
+        self.assertTrue((ROOT / "dotfiles/base/.agents/skills/.sym-dir").is_file())
+        for path in (
+            "dotfiles/base/.claude/skills",
+            "dotfiles/base/.gemini/antigravity-cli/skills",
+        ):
+            link = ROOT / path
+            self.assertTrue(link.is_symlink(), path)
+            self.assertEqual(link.resolve(strict=True), orchestrate.parent.parent, path)
+        pi_settings = json.loads((ROOT / "dotfiles/base/.pi/agent/settings.json").read_text())
+        self.assertIn("~/.agents/skills", pi_settings["skills"])
+        do = (ROOT / "dotfiles/base/.agents/skills/do/SKILL.md").read_text()
+        self.assertIn("apply `orchestrate`'s common tier", do)
+        self.assertIn("decide route", do)
+        self.assertTrue((ROOT / "dotfiles/base/.local/bin/decide").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
