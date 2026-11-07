@@ -35,6 +35,11 @@ class MainTests(unittest.TestCase):
         names = {task.name for task in dag.order()}
         self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:claude", "tool:opencode2", "claude-mcp"} <= names)
 
+    def test_pi_bridge_requires_node_command_and_pi(self):
+        dag = main.graph(self.ctx, [], setup=True).select(["pi-mcp"])
+        names = {task.name for task in dag.order()}
+        self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:pi", "tool:opencode2", "pi-mcp"} <= names)
+
     def test_alternate_target_links_never_touch_home(self):
         target = self.ctx.root / "fixture-home"
         target.mkdir()
@@ -79,11 +84,12 @@ class MainTests(unittest.TestCase):
         apply(plan, ctx.state)
         self.assertEqual((ctx.home / ".moved").resolve(), new)
 
-    def test_server_profile_omits_claude_bridge(self):
+    def test_server_profile_omits_mcp_bridges(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "is_alpine", return_value=False):
             tasks = main.graph(server, ["python3"], setup=True).tasks
         self.assertNotIn("claude-mcp", tasks)
+        self.assertNotIn("pi-mcp", tasks)
         self.assertIn("tool:python3", tasks)
 
 

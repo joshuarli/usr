@@ -36,7 +36,7 @@ Sync prunes a recorded link whose old layer source is gone; `sh sync plan` lists
 
 ## Claude orchestration MCP
 
-Desktop `sh sync` installs Command Code alongside the default tools, installs the pinned `@opencode/client` dependency for `tools/opencode-worker`, and registers `usr-opencode-worker` in Claude's user MCP configuration. `sh sync plan` previews missing bridge components and `sh sync doctor` verifies them. The operation is idempotent; it preserves other user MCP entries, credentials, and sessions. `sh sync uninstall` unregisters only the owned bridge entry. Headless server profiles skip this step. Sign in separately with `cmd login` if Command Code credentials are missing.
+Desktop `sh sync` installs Command Code alongside the default tools, installs the pinned `@opencode/client` dependency for `tools/opencode-worker`, and registers `usr-opencode-worker` in Claude's user MCP configuration and Pi's `~/.pi/agent/mcp.json`. Codex reads the same server from the tracked `~/.codex/config.toml` (`[mcp_servers.usr-opencode-worker]`). `sh sync plan` previews missing bridge components and `sh sync doctor` verifies them. The operation is idempotent; it preserves other user MCP entries, credentials, and sessions. `sh sync uninstall` unregisters only the owned bridge entries. Headless server profiles skip this step. Sign in separately with `cmd login` if Command Code credentials are missing.
 
 The former top-level tool installer has moved to `tools/sync/install.sh` and is private. Use `sh sync` for the full setup, `sh sync tools NAME` for an individual tool, and `sh sync list` to see default tools. Historical installation records under `~/.local/state/dl` are retained to recognize existing installs, not as a separate command.
 

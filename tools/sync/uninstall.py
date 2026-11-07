@@ -19,7 +19,7 @@ def uninstall(ctx: Context) -> None:
 
 
 def _uninstall_locked(ctx: Context) -> None:
-    from main import BRIDGE, command, required
+    from main import BRIDGE, PI_BRIDGE, command, required
 
     owner = ctx.state
     entries = read_manifest(owner)
@@ -46,6 +46,7 @@ def _uninstall_locked(ctx: Context) -> None:
 
     # Preflight every managed object before the first destructive operation.
     required(command(ctx, os.sys.executable, "-I", str(BRIDGE), "remove"), "Claude MCP removal")
+    required(command(ctx, os.sys.executable, "-I", str(PI_BRIDGE), "remove"), "Pi MCP removal")
     removed_directories: list[Path] = []
     directories = sorted((path for kind, path in inventory if kind == "D"), key=lambda p: len(p.parts))
     for path in directories:

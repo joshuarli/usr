@@ -20,6 +20,7 @@ from ownership import capture_new, records, ownership_lock, fingerprint, read_ma
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "tools/sync/install.sh"
 BRIDGE = ROOT / "tools/sync/claude-worker.py"
+PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 
 NPM_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
 JQ_TOOLS = frozenset({"python3", "codex", "node-build"})
@@ -145,6 +146,15 @@ def bridge_apply(ctx: Context) -> None:
     required(command(ctx, sys.executable, "-I", str(BRIDGE), "install"), "Claude MCP registration")
 
 
+def pi_bridge_status(ctx: Context) -> Probe:
+    r = command(ctx, sys.executable, "-I", str(PI_BRIDGE), "check", capture=True)
+    return Probe(r.returncode == 0, "bridge registered" if r.returncode == 0 else (r.stderr.strip() or "bridge missing"))
+
+
+def pi_bridge_apply(ctx: Context) -> None:
+    required(command(ctx, sys.executable, "-I", str(PI_BRIDGE), "install"), "Pi MCP registration")
+
+
 def mac_packages_status(ctx: Context) -> Probe:
     brew = next((str(path) for path in (Path("/opt/homebrew/bin/brew"), Path("/usr/local/bin/brew")) if path.is_file()), None) or shutil.which("brew")
     if brew is None:
@@ -232,7 +242,7 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
 
     all_tools = set(names)
     if ctx.profile != "server":
-        all_tools.update({"nodejs", "claude", "opencode2", "cmd"})
+        all_tools.update({"nodejs", "claude", "opencode2", "cmd", "pi"})
     pending = list(all_tools)
     while pending:
         tool = pending.pop()
@@ -266,6 +276,9 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
         nodes.append(Task("claude-mcp", ("links", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2"),
                           lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
                           lambda: bridge_status(ctx), frozenset({"claude-config"})))
+        nodes.append(Task("pi-mcp", ("links", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
+                          lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
+                          lambda: pi_bridge_status(ctx), frozenset({"pi-config"})))
     deps = ("links",)
     if ctx.platform == "darwin":
         deps = ("links", "host:mac-packages")
@@ -316,7 +329,7 @@ def main(argv: list[str]) -> int:
     if command_name == "links":
         selected = full.select(["links"])
     elif command_name == "bridge":
-        selected = full.select(["claude-mcp"])
+        selected = full.select(["claude-mcp", "pi-mcp"])
     elif command_name == "tools":
         selected = full.select(["tool:" + name for name in chosen])
     elif command_name in {"apply", "plan", "doctor"}:
@@ -324,7 +337,7 @@ def main(argv: list[str]) -> int:
         if ctx.platform == "darwin":
             goals.append("host:mac-packages")
         if ctx.profile != "server":
-            goals.append("claude-mcp")
+            goals.extend(["claude-mcp", "pi-mcp"])
         if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
             goals.append("kache")
         selected = full.select(goals)

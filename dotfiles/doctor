@@ -81,6 +81,21 @@ if [ -x "$target/.local/bin/claude" ] && [ -f "$root/tools/sync/claude-worker.py
         cat "$scratch/bridge"
     fi
 fi
+if [ -f "$target/.codex/config.toml" ]; then
+    if grep -q '^\[mcp_servers.usr-opencode-worker\]' "$target/.codex/config.toml"; then
+        ok 'Codex DeepSeek bridge is configured'
+    else
+        problem 'Codex DeepSeek MCP bridge is missing from config.toml'
+    fi
+fi
+if [ -x "$target/.local/bin/pi" ] && [ -f "$root/tools/sync/pi-worker.py" ]; then
+    if python3 -I "$root/tools/sync/pi-worker.py" check > "$scratch/pi-bridge" 2>&1; then
+        ok 'Pi DeepSeek bridge is configured'
+    else
+        problem 'Pi DeepSeek MCP bridge is missing or stale'
+        cat "$scratch/pi-bridge"
+    fi
+fi
 if [ -f "$root/dotfiles/base/.codex/AGENTS.md" ] && [ ! -r "$target/.codex/AGENTS.md" ]; then
     problem 'canonical agent instructions are unavailable at ~/.codex/AGENTS.md'
 else

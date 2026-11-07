@@ -7,6 +7,7 @@ mkdir -p "$tmpdir"
 tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	python3 -I host/macos/sync-test.py
 	python3 -I tools/sync/claude-worker-test.py
+	python3 -I tools/sync/pi-worker-test.py
 	python3 -I tools/sync/test_dag.py
 	python3 -I tools/sync/test_main.py
 	python3 -I tools/sync/test_links.py
