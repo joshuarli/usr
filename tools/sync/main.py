@@ -358,4 +358,4 @@ if __name__ == "__main__":
         raise SystemExit(main(sys.argv[1:]))
     except (GraphError, OSError, RuntimeError, ValueError) as exc:
         print(f"sync: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

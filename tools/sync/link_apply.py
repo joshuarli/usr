@@ -15,7 +15,7 @@ import tempfile
 
 from link_plan import LinkPlan, Snapshot, snapshot
 from ownership import fingerprint, manifest_path, read_manifest, records
-from link_recovery import PendingLink, finish, pending_links, stage_link
+from link_recovery import finish, pending_links, stage_link
 
 
 class LinkApplyError(RuntimeError):

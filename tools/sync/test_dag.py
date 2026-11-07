@@ -49,8 +49,9 @@ class DagTests(unittest.TestCase):
             time.sleep(0.02)
             with lock:
                 active -= 1
-        t = lambda name: Task(name, (), lambda: Probe(True), apply, lambda: Probe(True),
-                              frozenset({"installer"}), reconcile=True)
+        def t(name):
+            return Task(name, (), lambda: Probe(True), apply, lambda: Probe(True),
+                        frozenset({"installer"}), reconcile=True)
         values = Graph([t("a"), t("b"), t("c")]).run(jobs=3)
         self.assertEqual(maximum, 1)
         self.assertTrue(all(r.state == "applied" for r in values))
