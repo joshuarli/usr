@@ -88,13 +88,16 @@ class MainTests(unittest.TestCase):
         installed.write_text("binary")
         installed.chmod(0o755)
 
-        def run(_ctx, *args, extra=None, **_kwargs):
-            Path(extra["SYNC_OWNED_CLAIMS"]).write_text(
-                f"F\t{installed}\n!\t/home/old-release\n")
-            Path(extra["SYNC_INSTALL_CHANGED_FILE"]).write_text("changed")
-            return type("Completed", (), {"returncode": 0})()
+        class FakeInstaller:
+            def __init__(self, *args, **kwargs):
+                self.claims = [("F", installed)]
+                self.removed = {Path("/home/old-release")}
+                self.changed = True
 
-        with patch.object(main, "command", side_effect=run):
+            def install(self, tool):
+                pass
+
+        with patch.object(main, "Installer", FakeInstaller):
             main.apply_tool(self.ctx, "fd")
         self.assertEqual(records(ownership), {("F", installed)})
         self.assertIn(str(installed), read_manifest(ownership))

@@ -484,8 +484,8 @@ class Installer:
         result = self.run(["npm", "view", spec, "version"], capture=True)
         return result.stdout.strip() if result.returncode == 0 else ""
 
-    def npm_install(self, prefix: Path, *args: str) -> bool:
-        result = self.run(["npm", "install", "--global", "--prefix", str(prefix), *args])
+    def npm_install(self, prefix: Path, spec: str, *flags: str) -> bool:
+        result = self.run(["npm", "install", "--global", *flags, "--prefix", str(prefix), spec])
         return result.returncode == 0
 
     def valid_version(self, version: str) -> bool:
@@ -993,13 +993,18 @@ class Installer:
             staged = self.stage_dir(root.parent, f"{root.name}.")
             prefix = staged
         self.fetch_msg(fetch_msg or f"Installing {tool} ({version}) ...")
-        if not self.npm_install(prefix, *extra, f"{package}@{version}"):
+        if not self.npm_install(prefix, f"{package}@{version}", *extra):
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
             self.skip(tool, "npm install failed")
         binary = prefix / "bin" / bin_name
         if not binary.is_file() or not os.access(binary, os.X_OK):
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
             self.skip(tool, f"npm did not install {binary}")
         if staged is not None:
             if root.exists() or root.is_symlink():
+                shutil.rmtree(staged, ignore_errors=True)
                 self.skip(tool, f"{root} appeared during install")
             os.replace(staged, root)
         self.own_dir(root)
@@ -1051,13 +1056,18 @@ class Installer:
             staged = self.stage_dir(extra_root.parent, f"{extra_root.name}.")
             prefix = staged
         self.fetch_msg(f"Installing pnpm ({version}) ...")
-        if not self.npm_install(prefix, "--allow-scripts=pnpm", f"pnpm@{version}"):
+        if not self.npm_install(prefix, f"pnpm@{version}", "--allow-scripts=pnpm"):
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
             self.skip("pnpm", "npm install failed")
         binary = prefix / "bin/pnpm"
         if not binary.is_file() or not os.access(binary, os.X_OK):
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
             self.skip("pnpm", f"npm did not install {binary}")
         if staged is not None:
             if extra_root.exists() or extra_root.is_symlink():
+                shutil.rmtree(staged, ignore_errors=True)
                 self.skip("pnpm", f"{extra_root} appeared during install")
             os.replace(staged, extra_root)
         self.own_dir(extra_root)

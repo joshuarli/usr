@@ -3,7 +3,6 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$root"
 case ${1:-} in
-  list) exec sh "$root/tools/sync/install.sh" --list ;;
   help|--help|-h) printf '%s\n' 'usage: sh sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|check|check-parallel|layers]'; exit 0 ;;
 esac
 
@@ -27,12 +26,12 @@ fi
 case $(uname -s) in
   Darwin)
     case ${1:-} in
-      plan|doctor|check|check-parallel|layers|uninstall|links) ;;
+      plan|doctor|check|check-parallel|layers|uninstall|links|list) ;;
       *)
         if [ ! -x "$home/.local/bin/python3" ]; then
           mkdir -p "$(dirname -- "$state")" "$root/.work/tmp"
-          DL_OWNED_FILE="$state" sh "$root/tools/sync/install.sh" jaq
-          DL_OWNED_FILE="$state" sh "$root/tools/sync/install.sh" python3
+          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" jaq
+          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" python3
           python=$home/.local/bin/python3
         fi
         ;;

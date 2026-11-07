@@ -17,16 +17,25 @@ cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninst
    "$repo/tools/sync/link_plan.py" "$repo/tools/sync/link_apply.py" "$repo/tools/sync/link_recovery.py" "$fixture/tools/sync/"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
-# shellcheck disable=SC2016
-printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "testtool\\n"\n' > "$fixture/tools/sync/install.sh"
+printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["testtool"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
 printf '#!/bin/sh\nprintf "Linux\\n"\n' > "$fixture/mock/uname"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/testtool"
+printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/uv"
+mkdir -p "$fixture/home/d/agent-memory" "$fixture/home/.local/share/agent-memory/venv/bin" \
+    "$fixture/home/.local/share/agent-memory/venv/lib/python3.15/site-packages/agent_memory-0.1.0.dist-info"
+printf '[project]\nname = "agent-memory"\n' > "$fixture/home/d/agent-memory/pyproject.toml"
+for agent_memory_command in agent-learn agent-sessions agent-sessions-serve python; do
+    printf '#!/bin/sh\n' > "$fixture/home/.local/share/agent-memory/venv/bin/$agent_memory_command"
+done
+printf '{"url": "file://%s/d/agent-memory", "dir_info": {"editable": true}}\n' "$fixture/home" \
+    > "$fixture/home/.local/share/agent-memory/venv/lib/python3.15/site-packages/agent_memory-0.1.0.dist-info/direct_url.json"
+chmod +x "$fixture/home/.local/bin/uv" "$fixture/home/.local/share/agent-memory/venv/bin/"* "$fixture/home/.local/bin/testtool"
 printf 'configured\n' > "$fixture/dotfiles/base/.config/example.conf"
 printf 'instructions\n' > "$fixture/dotfiles/base/.codex/AGENTS.md"
 printf 'skills\n' > "$fixture/dotfiles/base/.agents/skills/example/SKILL.md"
 printf 'linux\n' > "$fixture/dotfiles/linux/.config/linux.conf"
 printf '#!/usr/bin/env python3\nimport sys\n' > "$fixture/tools/sync/claude-worker.py"
-chmod +x "$fixture/tools/sync/install.sh" "$fixture/mock/uname" "$fixture/home/.local/bin/testtool"
+chmod +x "$fixture/mock/uname"
 git -C "$fixture" init -q
 git -C "$fixture" add dotfiles/base dotfiles/linux
 
@@ -69,8 +78,7 @@ fi
 grep -q 'canonical agent instructions are unavailable' "$fixture/missing-agent"
 
 sh "$fixture/sync" links > "$fixture/relink-agents"
-# shellcheck disable=SC2016
-printf '#!/bin/sh\n[ "${1:-}" = --list ] || exit 2\nprintf "ffmpeg\\n"\n' > "$fixture/tools/sync/install.sh"
+printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["ffmpeg"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
 printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/ffmpeg"
 chmod +x "$HOME/.local/bin/ffmpeg"
 if sh "$fixture/sync" doctor > "$fixture/half-pair"; then

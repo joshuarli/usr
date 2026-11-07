@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -17,10 +16,10 @@ from dag import Graph, GraphError, Probe, Result, Task, default_jobs
 from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
-from ownership import capture_new, merge_claims, records, ownership_lock, fingerprint, read_manifest
+from installer import Installer, SkipInstall, default_tools
+from ownership import capture_new, claims_lock, merge_claims, records, ownership_lock, fingerprint, read_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTALLER = ROOT / "tools/sync/install.sh"
 BRIDGE = ROOT / "tools/sync/claude-worker.py"
 PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 
@@ -84,10 +83,11 @@ def required(result: subprocess.CompletedProcess[str], what: str) -> None:
 
 
 def tool_list(ctx: Context) -> list[str]:
-    result = command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), "--list", capture=True)
-    if result.returncode:
-        raise RuntimeError(f"unable to list default tools: {result.stderr.strip()}")
-    return list(dict.fromkeys(result.stdout.split()))
+    arch = subprocess.check_output(["uname", "-m"], text=True).strip()
+    if arch == "arm64":
+        arch = "aarch64"
+    return default_tools(ctx.platform, arch, ctx.profile,
+                         ctx.root / "host/alpine/tools-server.txt")
 
 
 def _link_plan(ctx: Context):
@@ -106,7 +106,7 @@ def link_status(ctx: Context) -> Probe:
 def apply_links(ctx: Context) -> None:
     # The retired pinact launcher is the only pre-link migration; do not run
     # unrelated host setup from the filesystem link task.
-    with ownership_lock(ctx.state):
+    with ownership_lock(ctx.state), claims_lock():
         required(command(ctx, "sh", str(ctx.root / "dotfiles/migrate-pinact.sh"),
                          str(ctx.link_target), str(ctx.state)), "pinact migration")
         plan = _link_plan(ctx)
@@ -126,25 +126,15 @@ def apply_tool(ctx: Context, tool: str) -> None:
     (ctx.root / ".work/tmp").mkdir(parents=True, exist_ok=True)
     with ownership_lock(ctx.state):
         before = records(ctx.state)
-    with tempfile.TemporaryDirectory(prefix="sync-claims-", dir=ctx.root / ".work/tmp") as scratch:
-        claims = Path(scratch) / "claims"
-        changed = Path(scratch) / "changed"
-        required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
-                         extra={"DL_OWNED_FILE": "",
-                                "SYNC_OWNED_CLAIMS": str(claims),
-                                "SYNC_INSTALL_CHANGED_FILE": str(changed)}), f"install {tool}")
-        if changed.is_file() and claims.is_file():
-            owned = set()
-            removed = set()
-            for line in claims.read_text().splitlines():
-                kind, _, name = line.partition("\t")
-                if kind in ("F", "D", "E", "K") and name:
-                    owned.add((kind, Path(name)))
-                elif kind == "!" and name:
-                    removed.add(Path(name))
-            with ownership_lock(ctx.state):
-                merge_claims(ctx.state, owned, removed)
-                capture_new(ctx.state, before, owned)
+    leaf = Installer(ctx.home, env=ctx.env)
+    try:
+        leaf.install(tool)
+    except SkipInstall as exc:
+        raise RuntimeError(f"install {tool} skipped: {exc.reason}") from exc
+    if leaf.changed:
+        with ownership_lock(ctx.state), claims_lock():
+            merge_claims(ctx.state, set(leaf.claims), set(leaf.removed))
+            capture_new(ctx.state, before, set(leaf.claims))
 
 
 def agent_memory_source(ctx: Context) -> Path:
@@ -306,7 +296,7 @@ def kache_apply(ctx: Context) -> None:
     binary = kache_install_path(ctx)
     if "KACHE" in ctx.env and Path(ctx.env["KACHE"]) != binary:
         raise RuntimeError("KACHE override differs from the managed kache install path")
-    with ownership_lock(ctx.state):
+    with ownership_lock(ctx.state), claims_lock():
         before = records(ctx.state)
         existed = binary.exists() or binary.is_symlink()
         if existed:
@@ -314,10 +304,11 @@ def kache_apply(ctx: Context) -> None:
             identity = fingerprint(binary, "K")
             if ("K", binary) not in before or identity is None or proof != {"kind": "K", "fingerprint": identity}:
                 raise RuntimeError(f"refusing to adopt pre-existing or modified kache: {binary}")
-        result = command(ctx, "sh", str(ctx.root / "dotfiles/base/.local/bin/setup-kache"))
-        required(result, "kache setup")
-        if not binary.is_file() or binary.is_symlink() or not os.access(binary, os.X_OK):
-            raise RuntimeError(f"kache setup did not install a regular executable: {binary}")
+    result = command(ctx, "sh", str(ctx.root / "dotfiles/base/.local/bin/setup-kache"))
+    required(result, "kache setup")
+    if not binary.is_file() or binary.is_symlink() or not os.access(binary, os.X_OK):
+        raise RuntimeError(f"kache setup did not install a regular executable: {binary}")
+    with ownership_lock(ctx.state), claims_lock():
         ctx.state.parent.mkdir(parents=True, exist_ok=True)
         if ("K", binary) not in before:
             with ctx.state.open("a") as stream:

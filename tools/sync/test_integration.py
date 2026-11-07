@@ -28,36 +28,65 @@ class SyncIntegrationTests(unittest.TestCase):
         shutil.copy2(SYNC, self.root / "sync")
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
         self._script("dotfiles/migrate-pinact.sh", "#!/bin/sh\nexit 0\n")
-        self._script("tools/sync/install.sh", '''#!/bin/sh
-if [ "$1" = --list ]; then printf 'nodejs\\ncmd\\nparallel-a\\nparallel-b\\n'; exit 0; fi
-if [ "$1" = lease-tool ]; then
-  mkdir -p "$HOME/.local/bin"
-  touch "$HOME/installer-ready"
-  while [ ! -f "$HOME/installer-release" ]; do sleep 0.02; done
-  printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/lease-tool"
-  chmod +x "$HOME/.local/bin/lease-tool"
-  printf 'F\\t%s\\n' "$HOME/.local/bin/lease-tool" >> "$SYNC_OWNED_CLAIMS"
-  printf changed > "$SYNC_INSTALL_CHANGED_FILE"
-  exit 0
-fi
-if [ "$1" = parallel-a ] || [ "$1" = parallel-b ]; then
-  touch "$HOME/started-$1"
-  other=parallel-b; [ "$1" = parallel-b ] && other=parallel-a
-  count=0
-  while [ ! -f "$HOME/started-$other" ] && [ "$count" -lt 250 ]; do sleep 0.02; count=$((count + 1)); done
-  [ -f "$HOME/started-$other" ] || exit 1
-  mkdir -p "$HOME/.local/bin"
-  printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$1"
-  chmod +x "$HOME/.local/bin/$1"
-  printf 'F\\t%s\\n' "$HOME/.local/bin/$1" >> "$SYNC_OWNED_CLAIMS"
-  printf changed > "$SYNC_INSTALL_CHANGED_FILE"
-  printf '%s\\n' "$1" >> "$HOME/installed"
-  exit 0
-fi
-printf '%s\\n' "$1" >> "$HOME/installed"
-mkdir -p "$HOME/.local/bin"
-case "$1" in nodejs) set -- node npm ;; esac
-for name in "$@"; do printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$name"; chmod +x "$HOME/.local/bin/$name"; done
+        (self.root / "tools/sync/installer.py").write_text('''from pathlib import Path
+import time
+
+
+class SkipInstall(Exception):
+    def __init__(self, tool, reason):
+        super().__init__(f"{tool}: {reason}")
+        self.tool = tool
+        self.reason = reason
+
+
+def default_tools(os_name, arch, profile, server_tools=None):
+    return ["nodejs", "cmd", "parallel-a", "parallel-b"]
+
+
+class Installer:
+    def __init__(self, home, env=None):
+        self.home = Path(home)
+        self.env = env or {}
+        self.claims = []
+        self.removed = set()
+        self.changed = False
+
+    def _write(self, name):
+        path = self.home / ".local/bin" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\\nexit 0\\n")
+        path.chmod(0o755)
+        return path
+
+    def install(self, tool):
+        home = self.home
+        if tool == "lease-tool":
+            (home / "installer-ready").touch()
+            while not (home / "installer-release").exists():
+                time.sleep(0.02)
+            path = self._write("lease-tool")
+            self.claims.append(("F", path))
+            self.changed = True
+            return
+        if tool in ("parallel-a", "parallel-b"):
+            (home / f"started-{tool}").touch()
+            other = "parallel-b" if tool == "parallel-a" else "parallel-a"
+            for _ in range(250):
+                if (home / f"started-{other}").exists():
+                    break
+                time.sleep(0.02)
+            else:
+                raise SkipInstall(tool, "barrier timeout")
+            path = self._write(tool)
+            self.claims.append(("F", path))
+            self.changed = True
+            with (home / "installed").open("a") as stream:
+                stream.write(tool + "\\n")
+            return
+        with (home / "installed").open("a") as stream:
+            stream.write(tool + "\\n")
+        for name in (["node", "npm"] if tool == "nodejs" else [tool]):
+            self._write(name)
 ''')
         self.env = dict(os.environ, HOME=str(self.root / "home"),
                         PATH=str(self.root / "bin") + os.pathsep + os.environ.get("PATH", ""),

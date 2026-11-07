@@ -14,6 +14,19 @@ import threading
 
 _lock_mutex = threading.Lock()
 _lock_entries: dict[str, list] = {}
+_thread_lock = threading.Lock()
+
+
+@contextmanager
+def claims_lock():
+    """In-process exclusion for records/manifest writes.
+
+    The flock lease is shared across threads of one run, so writer threads
+    must serialize their actual file mutations with this lock. The flock
+    still excludes other processes.
+    """
+    with _thread_lock:
+        yield
 
 
 @contextmanager

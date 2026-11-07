@@ -57,7 +57,7 @@ else:
 
     def sync_tools(self, ok=True, *args):
         result = subprocess.run(
-            ["/bin/sh", str(ROOT / "tools/sync/install.sh"), *(args or ("pi",))],
+            [sys.executable, "-I", str(ROOT / "tools/sync/installer.py"), *(args or ("pi",))],
             cwd=ROOT, env=self.env, text=True, capture_output=True, timeout=20,
         )
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
@@ -175,7 +175,7 @@ else:
         self.assertNotIn("inferx", pi_section.lower())
         self.assertNotIn("google/gemini-3.8-flash", pi_section)
         self.assertIn("opencode2 auth export", (ROOT / "docs/pi.md").read_text())
-        default_tools = next(line for line in (ROOT / "tools/sync/install.sh").read_text().splitlines() if "codex claude opencode2" in line)
+        default_tools = next(line for line in (ROOT / "tools/sync/installer.py").read_text().splitlines() if "codex claude opencode2" in line)
         self.assertIn("pi", default_tools.split())
 
 
