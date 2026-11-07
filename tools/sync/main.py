@@ -24,7 +24,7 @@ BRIDGE = ROOT / "tools/sync/claude-worker.py"
 PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 
 NPM_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
-JQ_TOOLS = frozenset({"python3", "codex", "node-build"})
+JQ_TOOLS = frozenset({"codex", "node-build"})
 AGENT_MEMORY = "agent-memory"
 AGENT_MEMORY_COMMANDS = ("agent-learn", "agent-sessions", "agent-sessions-serve", "python")
 AGENT_MEMORY_REPO = "git+ssh://git@github.com/joshuarli/agent-memory"

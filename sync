@@ -37,9 +37,22 @@ case $(uname -s) in
         ;;
     esac
     ;;
+  Linux)
+    case ${1:-} in
+      plan|doctor|check|check-parallel|layers|uninstall|links|list) ;;
+      *)
+        if [ ! -x "$home/.local/bin/python3" ] && [ -z "$python" ] \
+          && awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release 2>/dev/null | grep -qx alpine; then
+          mkdir -p "$(dirname -- "$state")" "$root/.work/tmp"
+          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" python3
+          python=$home/.local/bin/python3
+        fi
+        ;;
+    esac
+    ;;
 esac
 [ -n "$python" ] && [ -x "$python" ] || {
-  printf '%s\n' 'sync: Python 3.9+ is required. macOS bootstraps python-build automatically; Alpine bootstrap is deferred (USR-24).' >&2
+  printf '%s\n' 'sync: Python 3.9+ is required. macOS and Alpine bootstrap the pinned python-build automatically; other platforms need an existing Python 3.9+.' >&2
   exit 1
 }
 exec "$python" -I "$root/tools/sync/main.py" "$@"

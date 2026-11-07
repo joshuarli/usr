@@ -188,6 +188,21 @@ run_jaq() {
     fi
 }
 
+switch_python_links() {
+    tmpbinlink=$(mktemp "${DEST}/.python3.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "$1/python/bin/python3.15" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/python3"
+    own_file "${DEST}/python3"
+    tmpbinlink=$(mktemp "${DEST}/.python3.15.XXXXXX")
+    rm -f "$tmpbinlink"
+    ln -s "$1/python/bin/python3.15" "$tmpbinlink"
+    mv -f "$tmpbinlink" "${DEST}/python3.15"
+    own_file "${DEST}/python3.15"
+    printf '%s\n' "$2" > "${STATE}/python3"
+    own_file "${STATE}/python3"
+}
+
 install_python3() {
     case "$OS:$ARCH" in
         Darwin:aarch64) triple=aarch64-apple-darwin ;;
@@ -195,61 +210,34 @@ install_python3() {
         Linux:aarch64) triple=aarch64-unknown-linux-musl ;;
         *) skip python3 "no python-build release for ${OS}/${ARCH}"; return ;;
     esac
-    if ! jaq_available; then
-        install_jaq
-        if ! jaq_available; then
-            unchecked python3 "jaq is required to find the python-build release"
-            return
-        fi
-    fi
-    tag=$(curl -fsSL "https://github.com/joshuarli/python-build/releases.atom" \
-        | awk '
-            /<entry>/ { in_entry = 1; updated = ""; tag = "" }
-            in_entry && /<updated>/ {
-                updated = $0
-                sub(/^.*<updated>/, "", updated)
-                sub(/<.*/, "", updated)
-            }
-            in_entry && /<link[^>]*releases\/tag\// {
-                tag = $0
-                sub(/^.*releases\/tag\//, "", tag)
-                sub(/".*/, "", tag)
-                if (tag ~ /^research-/) tag = ""
-            }
-            /<\/entry>/ {
-                if (updated > newest_updated && tag != "") {
-                    newest_updated = updated
-                    newest_tag = tag
-                }
-                in_entry = 0
-            }
-            END { print newest_tag }
-        ') || tag=
-    if [ -z "$tag" ]; then
-        unchecked python3 "no release found"
+    pin_file="$(dirname -- "$0")/python-build.pin"
+    if [ ! -f "$pin_file" ]; then
+        unchecked python3 "pinned python-build release is missing: $pin_file"
         return
     fi
-    release_json=$(curl -fsSL "https://api.github.com/repos/joshuarli/python-build/releases/tags/${tag}") || release_json=
-    asset_url=$(printf '%s\n' "$release_json" \
-        | run_jaq -r --arg triple "$triple" \
-            '[.assets[] | select(.name | endswith("-\($triple)-install_only_stripped.tar.gz"))][0].browser_download_url // empty' 2>/dev/null) || asset_url=
-    sums_url=$(printf '%s\n' "$release_json" \
-        | run_jaq -r '[.assets[] | select(.name == "SHA256SUMS")][0].browser_download_url // empty' 2>/dev/null) || sums_url=
-    if [ -z "$asset_url" ] || [ -z "$sums_url" ]; then
-        unchecked python3 "${tag} has no ${triple} release asset"
+    pin_header=$(awk '!/^#/ && NF { print; exit }' "$pin_file")
+    tag=$(printf '%s\n' "$pin_header" | awk '{print $1}')
+    repo=$(printf '%s\n' "$pin_header" | awk '{print $2}')
+    pinned=$(awk -v triple="$triple" '!/^#/ && NF && $1 == triple { print $2 " " $3; exit }' "$pin_file")
+    asset_name=$(printf '%s\n' "$pinned" | awk '{print $1}')
+    expected_sha256=$(printf '%s\n' "$pinned" | awk '{print $2}')
+    if [ -z "$tag" ] || [ -z "$repo" ] || [ -z "$asset_name" ] || [ "${#expected_sha256}" -ne 64 ]; then
+        unchecked python3 "pinned python-build release has no ${triple} artifact"
         return
     fi
-    id=$(asset_id "$asset_url")
-    if [ -z "$id" ]; then
-        unchecked python3 "release asset is unreachable"
-        return
-    fi
-    if is_current python3 "$id"; then
+    asset_url="https://github.com/${repo}/releases/download/${tag}/$(printf '%s' "$asset_name" | sed 's/+/%2B/g')"
+    if is_current python3 "$expected_sha256"; then
         _dl_current "python3 is current (${tag})"
         return
     fi
     release_dir="${PYTHON_BUILD_ROOT}/${tag}"
     if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
+        if [ -x "${release_dir}/python/bin/python3.15" ] \
+            && "${release_dir}/python/bin/python3.15" -c 'import sqlite3, ssl' >/dev/null 2>&1; then
+            switch_python_links "$release_dir" "$expected_sha256"
+            _dl_ok "Installed ${DEST}/python3"
+            return
+        fi
         skip python3 "$release_dir already exists"
         return
     fi
@@ -261,20 +249,7 @@ install_python3() {
         skip python3 "download failed"
         return
     fi
-    tmpoutput=$(mktemp)
-    if ! curl -fsSL -o "$tmpoutput" "$sums_url"; then
-        rm -f "$tmpzip" "$tmpoutput"
-        tmpzip=
-        tmpoutput=
-        skip python3 "SHA256SUMS download failed"
-        return
-    fi
-    asset_name=${asset_url##*/}
-    asset_name=$(printf '%s\n' "$asset_name" | sed 's/%2B/+/g; s/%2b/+/g')
-    expected_sha256=$(grep -F "  ${asset_name}" "$tmpoutput" | awk '{print $1}')
-    rm -f "$tmpoutput"
-    tmpoutput=
-    if [ "${#expected_sha256}" -ne 64 ] || [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
+    if [ "$(sha256_file "$tmpzip")" != "$expected_sha256" ]; then
         rm -f "$tmpzip"
         tmpzip=
         skip python3 "checksum mismatch"
@@ -311,26 +286,15 @@ install_python3() {
         skip python3 "archive is missing python/bin/python3.15"
         return
     fi
+    if ! "${tmpbundle}/python/bin/python3.15" -c 'import sqlite3, ssl' >/dev/null 2>&1; then
+        skip python3 "sqlite3/ssl imports failed in staged python"
+        return
+    fi
     mv "$tmpbundle" "$release_dir"
     tmpbundle=
     own_dir "$release_dir"
-    tmpbinlink=$(mktemp "${DEST}/.python3.XXXXXX")
-    rm -f "$tmpbinlink"
-    ln -s "${release_dir}/python/bin/python3.15" "$tmpbinlink"
-    mv -f "$tmpbinlink" "${DEST}/python3"
-    own_file "${DEST}/python3"
-    tmpbinlink=$(mktemp "${DEST}/.python3.15.XXXXXX")
-    rm -f "$tmpbinlink"
-    ln -s "${release_dir}/python/bin/python3.15" "$tmpbinlink"
-    mv -f "$tmpbinlink" "${DEST}/python3.15"
-    own_file "${DEST}/python3.15"
-    printf '%s\n' "$id" > "${STATE}/python3"
-    own_file "${STATE}/python3"
+    switch_python_links "$release_dir" "$expected_sha256"
     _dl_ok "Installed ${DEST}/python3"
-    if ! "${DEST}/python3" -c 'import sqlite3, ssl' >/dev/null 2>&1; then
-        _dl_warn "Python is installed but sqlite3/ssl imports failed; install libgcc or inspect ${release_dir}"
-        failed=true
-    fi
 }
 
 if ! command -v curl >/dev/null 2>&1; then

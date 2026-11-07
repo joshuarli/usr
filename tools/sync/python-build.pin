@@ -1,0 +1,7 @@
+# Pinned python-build release, verified independently of release metadata.
+# First line: <tag> <repository>
+# Remaining lines: <triple> <asset> <sha256>
+20261107 laputa-systems/python-build
+aarch64-apple-darwin cpython-3.15.1+20261107-aarch64-apple-darwin-install_only_stripped.tar.gz d6c1622eac8354ac64ae0bf0f38ad06e6b0f71c3b64aac5dfcddff67472548bd
+x86_64-unknown-linux-musl cpython-3.15.1+20261107-x86_64-unknown-linux-musl-install_only_stripped.tar.gz f8ecf313bb4b8f9e95dca30e9b3a098c564b691124f9c3f29a7ea9d71ffb5ea3
+aarch64-unknown-linux-musl cpython-3.15.1+20261107-aarch64-unknown-linux-musl-install_only_stripped.tar.gz d166d0e08f423e2d71b767e9c15a402ea7af1896605b87fe3e09dda56a50d7ae

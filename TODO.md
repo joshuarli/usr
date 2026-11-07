@@ -11,15 +11,6 @@ Next: 38
 - **Effort:** M
 - **Design:** [USR-5 RFC](docs/rfc/USR-5-push-approval.md)
 
-### USR-24 · P2 · Bootstrap pinned Python on minimal Alpine before the sync DAG
-
-- **Area:** Sync / portability
-- **Where:** `sync` POSIX bootstrap, `tools/sync/main.py`, `tools/sync/bootstrap.sh`, `host/setup-linux`
-- **Problem:** The Python DAG runner needs Python 3.9+ before it can execute. macOS can use the existing shell-based `python-build` installer to install the managed runtime, but Alpine currently needs an already runnable Python. Production `python-build` Linux artifacts still list `libgcc` in their runtime requirements; automatically fetching those binaries would introduce an unwanted system dependency. Alpine provisioning and fresh `sh sync` therefore do not yet have a self-contained bootstrap guarantee.
-- **Recommendation:** After `laputa-systems/python-build` removes the actual `libgcc_s.so.1` dependency from both Linux musl archives and proves it in minimal-container smoke tests, implement a minimal POSIX-shell bootstrap for Alpine x86_64 and aarch64. Pin the release artifact identity and SHA-256 independently of release metadata, verify before extraction, reject unsafe archive paths, stage and atomically switch the Python runtime, and smoke-test `sqlite3`/`ssl` before invoking the Python DAG. Avoid adding `libgcc`, a package-manager Python, or a second installer engine. Test fresh Alpine without Python or libgcc, interrupted download, existing installations, and second-run idempotency.
-- **Fix with:** `sync` bootstrap and python-build release qualification
-- **Effort:** M
-
 ### USR-32 · P3 · Concurrent campaign allowances can overwrite each other
 
 - **Area:** Concurrency

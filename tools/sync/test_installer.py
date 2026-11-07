@@ -12,6 +12,7 @@ from urllib.error import URLError
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).parent))
+import installer
 from installer import Installer, SkipInstall, default_tools
 
 
@@ -260,23 +261,41 @@ sys.exit(1)
                   "https://example.invalid/sums": f"{digest}  {asset}\n".encode()}
         return routes, url, asset
 
+    def _pinned_python(self, routes):
+        import hashlib
+        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"})
+        digest = hashlib.sha256(payload).hexdigest()
+        asset = "cpython-3.15.1+20261107-x86_64-unknown-linux-musl-install_only_stripped.tar.gz"
+        url = f"https://github.com/laputa-systems/python-build/releases/download/20261107/{asset.replace('+', '%2B')}"
+        routes[url] = (payload, {"ETag": "e"})
+        pin = ("20261107", "laputa-systems/python-build",
+               {"x86_64-unknown-linux-musl": (asset, digest)})
+        return routes, url, asset, digest, pin
+
     def test_python3_install_and_checksum_mismatch(self):
-        routes, url, asset = self._python_build_routes("python3", "python/bin/python3.15", "joshuarli/python-build")
+        routes, url, asset, digest, pin = self._pinned_python({})
         inst = self.make(routes)
-        inst.install_python3()
+        with patch.object(installer, "python_build_pin", return_value=pin):
+            inst.install_python3()
         self.assertTrue(self.dest_path("python3").is_symlink())
         self.assertTrue(self.dest_path("python3.15").is_symlink())
-        self.assertEqual(self.state("python3"), "e")
-        bad = dict(routes)
-        bad["https://example.invalid/sums"] = ("0" * 64 + f"  {asset}\n").encode()
-        inst = self.make(bad)
+        self.assertEqual(self.state("python3"), digest)
+        inst = self.make({})
+        with patch.object(installer, "python_build_pin", return_value=pin):
+            inst.install_python3()
+        self.assertFalse(inst.changed)
+        bad_pin = ("20261107", "laputa-systems/python-build",
+                   {"x86_64-unknown-linux-musl": (asset, "0" * 64)})
+        inst = self.make(routes)
         self.dest_path("python3").unlink(missing_ok=True)
         self.dest_path("python3.15").unlink(missing_ok=True)
         (self.home / ".local/state/dl/python3").unlink(missing_ok=True)
         import shutil as _shutil
         _shutil.rmtree(self.home / ".local/share/python-build", ignore_errors=True)
-        with self.assertRaises(SkipInstall):
-            inst.install_python3()
+        with patch.object(installer, "python_build_pin", return_value=bad_pin):
+            with self.assertRaises(SkipInstall):
+                inst.install_python3()
+        self.assertFalse(self.dest_path("python3").exists())
 
     def test_nodebuild_install(self):
         routes, url, asset = self._python_build_routes("node-build", "node/bin/node", "laputa-systems/node-build")

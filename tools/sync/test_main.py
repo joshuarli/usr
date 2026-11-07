@@ -40,9 +40,9 @@ class MainTests(unittest.TestCase):
             for second in resources[index + 1:]:
                 self.assertFalse(first & second)
 
-    def test_python_update_requires_jaq(self):
+    def test_python_update_does_not_require_jaq(self):
         dag = main.graph(self.ctx, ["python3"], setup=False).select(["tool:python3"])
-        self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:python3"])
+        self.assertEqual([t.name for t in dag.order()], ["tool:python3"])
 
     def test_bridge_requires_node_command_and_claude(self):
         dag = main.graph(self.ctx, [], setup=True).select(["claude-mcp"])

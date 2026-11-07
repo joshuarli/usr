@@ -73,6 +73,21 @@ def version_at_least(have: str, need: str) -> bool:
     return have_parts >= need_parts
 
 
+def python_build_pin(pin_path: Path | None = None) -> tuple[str, str, dict[str, tuple[str, str]]]:
+    path = pin_path or Path(__file__).with_name("python-build.pin")
+    tag = repo = ""
+    triples: dict[str, tuple[str, str]] = {}
+    for line in path.read_text().splitlines():
+        fields = line.split()
+        if not fields or line.startswith("#"):
+            continue
+        if not tag:
+            tag, repo = fields[0], fields[1] if len(fields) > 1 else ""
+        elif len(fields) == 3:
+            triples[fields[0]] = (fields[1], fields[2])
+    return tag, repo, triples
+
+
 _ENTRY = re.compile(r"<entry>(.*?)</entry>", re.S)
 _UPDATED = re.compile(r"<updated>([^<]+)</updated>")
 _TAG_LINK = re.compile(r"releases/tag/([^\"']+)\"")
@@ -863,43 +878,67 @@ class Installer:
 
     def _install_python_build(self, tool: str, root: Path, triples: dict[tuple[str, str], str],
                               repo: str, inner: str, links: list[tuple[str, str]],
-                              *, exclude_prefix: str = "", run_staged: bool = False) -> None:
+                              *, exclude_prefix: str = "", run_staged: bool = False,
+                              pin: tuple[str, str, dict[str, tuple[str, str]]] | None = None) -> None:
         if (self.os_name, self.arch) not in triples:
             self.skip(tool, f"no {tool} release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        if not self.jaq_available():
-            self.install_jaq()
-            if not self.jaq_available():
-                self.unchecked(tool, f"jaq is required to find the {tool} release")
+        expected = ""
+        if pin is not None:
+            tag, repo, pinned = pin
+            pinned_asset = pinned.get(triple)
+            if not pinned_asset or len(pinned_asset[1]) != 64:
+                self.unchecked(tool, f"pinned python-build release has no {triple} artifact")
                 return
-        tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", exclude_prefix=exclude_prefix)
-        if not tag:
-            self.unchecked(tool, "no release found")
-            return
-        release = self.fetch_json(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
-        assets = release.get("assets", [])
-        asset_url = ""
-        sums_url = ""
-        for entry in assets if isinstance(assets, list) else []:
-            if not isinstance(entry, dict):
-                continue
-            name = str(entry.get("name", ""))
-            if name.endswith(f"-{triple}-install_only_stripped.tar.gz"):
-                asset_url = str(entry.get("browser_download_url", ""))
-            if name == "SHA256SUMS":
-                sums_url = str(entry.get("browser_download_url", ""))
-        if not asset_url or not sums_url:
-            self.unchecked(tool, f"{tag} has no {triple} release asset")
-            return
-        record = self.asset_id(asset_url)
-        if not record:
-            self.unchecked(tool, "release asset is unreachable")
-            return
+            asset_name, expected = pinned_asset
+            asset_url = f"https://github.com/{repo}/releases/download/{tag}/" + asset_name.replace("+", "%2B")
+            record = expected
+            sums_url = ""
+        else:
+            if not self.jaq_available():
+                self.install_jaq()
+                if not self.jaq_available():
+                    self.unchecked(tool, f"jaq is required to find the {tool} release")
+                    return
+            tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", exclude_prefix=exclude_prefix)
+            if not tag:
+                self.unchecked(tool, "no release found")
+                return
+            release = self.fetch_json(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
+            assets = release.get("assets", [])
+            asset_url = ""
+            sums_url = ""
+            for entry in assets if isinstance(assets, list) else []:
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", ""))
+                if name.endswith(f"-{triple}-install_only_stripped.tar.gz"):
+                    asset_url = str(entry.get("browser_download_url", ""))
+                if name == "SHA256SUMS":
+                    sums_url = str(entry.get("browser_download_url", ""))
+            if not asset_url or not sums_url:
+                self.unchecked(tool, f"{tag} has no {triple} release asset")
+                return
+            record = self.asset_id(asset_url)
+            if not record:
+                self.unchecked(tool, "release asset is unreachable")
+                return
         if self.is_current(tool, record):
             self.current(f"{tool} is current ({tag})")
             return
         release_dir = root / tag
         if release_dir.exists() or release_dir.is_symlink():
+            existing = release_dir / inner
+            smoke = ([str(existing), "-c", "import sqlite3, ssl"] if tool == "python3"
+                     else [str(existing), "--version"])
+            if existing.is_file() and os.access(existing, os.X_OK) \
+                    and self.run(smoke, capture=True).returncode == 0:
+                for link_name, inner_name in links:
+                    self.link_symlink(self.dest / link_name, str(release_dir / inner_name))
+                self.write_state(tool, record)
+                self.changed = True
+                self.ok(f"Installed {self.dest}/{tool}")
+                return
             self.skip(tool, f"{release_dir} already exists")
         self.fetch_msg(f"Downloading {tool} {tag} ({triple}) ...")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
@@ -907,14 +946,15 @@ class Installer:
         if not self.download(asset_url, archive_path):
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "download failed")
-        sums_path = Path(tempfile.mkstemp()[1])
-        if not self.download(sums_url, sums_path):
-            archive_path.unlink(missing_ok=True)
+        if pin is None:
+            sums_path = Path(tempfile.mkstemp()[1])
+            if not self.download(sums_url, sums_path):
+                archive_path.unlink(missing_ok=True)
+                sums_path.unlink(missing_ok=True)
+                self.skip(tool, "SHA256SUMS download failed")
+            asset_name = Path(asset_url).name.replace("%2B", "+").replace("%2b", "+")
+            expected = self.sums_for(sums_path.read_text(), asset_name)
             sums_path.unlink(missing_ok=True)
-            self.skip(tool, "SHA256SUMS download failed")
-        asset_name = Path(asset_url).name.replace("%2B", "+").replace("%2b", "+")
-        expected = self.sums_for(sums_path.read_text(), asset_name)
-        sums_path.unlink(missing_ok=True)
         if len(expected) != 64 or self.sha256_file(archive_path) != expected:
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "checksum mismatch")
@@ -934,6 +974,9 @@ class Installer:
             self.skip(tool, f"archive is missing {inner}")
         if run_staged and self.run([str(inner_path), "--version"], capture=True).returncode:
             self.skip(tool, "staged node binary does not run")
+        if tool == "python3" and pin is not None and self.run(
+                [str(inner_path), "-c", "import sqlite3, ssl"], capture=True).returncode:
+            self.skip(tool, "sqlite3/ssl imports failed in staged python")
         os.replace(staged_bundle, release_dir)
         self.own_dir(release_dir)
         for link_name, inner_name in links:
@@ -941,7 +984,7 @@ class Installer:
         self.write_state(tool, record)
         self.changed = True
         self.ok(f"Installed {self.dest}/{tool}")
-        if tool == "python3" and self.run([str(self.dest / "python3"), "-c", "import sqlite3, ssl"],
+        if tool == "python3" and pin is None and self.run([str(self.dest / "python3"), "-c", "import sqlite3, ssl"],
                                          capture=True).returncode:
             self.warn(f"Python is installed but sqlite3/ssl imports failed; install libgcc or inspect {release_dir}")
             raise SkipInstall(tool, "sqlite3/ssl imports failed")
@@ -952,9 +995,9 @@ class Installer:
             {("darwin", "aarch64"): "aarch64-apple-darwin",
              ("linux", "x86_64"): "x86_64-unknown-linux-musl",
              ("linux", "aarch64"): "aarch64-unknown-linux-musl"},
-            "joshuarli/python-build", "python/bin/python3.15",
+            "laputa-systems/python-build", "python/bin/python3.15",
             [("python3", "python/bin/python3.15"), ("python3.15", "python/bin/python3.15")],
-            exclude_prefix="research-")
+            pin=python_build_pin())
 
     def install_nodebuild(self) -> None:
         self._install_python_build(
