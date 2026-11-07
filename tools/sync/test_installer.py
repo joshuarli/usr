@@ -55,8 +55,10 @@ class FakeInstaller(Installer):
     def __init__(self, *args, routes=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.routes = routes or {}
+        self.fetched = []
 
     def fetch(self, url, *, ranged=False):
+        self.fetched.append(url)
         if url not in self.routes:
             raise URLError(f"no route for {url}")
         route = self.routes[url]
@@ -197,6 +199,55 @@ sys.exit(1)
         with patch.object(inst, "zip_member", return_value=b"binary"):
             inst.install_release("shuck")
         self.assertTrue(self.dest_path("shellcheck").is_file())
+
+    def _stuff_routes(self, payload, target="x86_64-unknown-linux-musl", digest=None, sums_asset=None):
+        import hashlib
+        digest = digest or hashlib.sha256(payload).hexdigest()
+        asset = f"stuff-{target}"
+        base = "https://github.com/joshuarli/stuff/releases/download/v1"
+        routes = {"https://github.com/joshuarli/stuff/releases.atom": atom([("2024-01-01", "v1")]),
+                  f"{base}/{asset}": (payload, {"ETag": "e"}),
+                  f"{base}/SHA256SUMS": f"{digest}  {sums_asset or asset}\n".encode()}
+        return routes, base, asset
+
+    def test_stuff_installs_raw_asset_with_sha256sums(self):
+        payload = b"#!/bin/sh\nexit 0\n"
+        routes, base, asset = self._stuff_routes(payload)
+        inst = self.make(routes)
+        inst.install_release("stuff")
+        self.assertEqual(self.dest_path("stuff").read_bytes(), payload)
+        self.assertTrue(os.access(self.dest_path("stuff"), os.X_OK))
+        self.assertEqual(self.state("stuff"), "e")
+        self.assertIn(("F", self.dest_path("stuff")), inst.claims)
+        self.assertEqual({url for url in inst.fetched if "/releases/download/" in url},
+                         {f"{base}/{asset}", f"{base}/SHA256SUMS"})
+        self.assertFalse(any(url.endswith(".zip") for url in inst.fetched))
+
+    def test_stuff_rejects_checksum_mismatch_and_keeps_existing_binary(self):
+        payload = b"#!/bin/sh\nexit 0\n"
+        routes, base, asset = self._stuff_routes(payload, digest="0" * 64)
+        inst = self.make(routes)
+        dest = self.dest_path("stuff")
+        dest.write_bytes(b"old")
+        (self.home / ".local/state/dl/stuff").write_text("old-etag\n")
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_release("stuff")
+        self.assertIn("checksum mismatch", str(ctx.exception))
+        self.assertEqual(dest.read_bytes(), b"old")
+        self.assertEqual(self.state("stuff"), "old-etag")
+
+    def test_stuff_rejects_missing_sha256sums_entry_and_keeps_existing_binary(self):
+        payload = b"#!/bin/sh\nexit 0\n"
+        routes, base, asset = self._stuff_routes(payload, sums_asset="stuff-aarch64-apple-darwin")
+        inst = self.make(routes)
+        dest = self.dest_path("stuff")
+        dest.write_bytes(b"old")
+        (self.home / ".local/state/dl/stuff").write_text("old-etag\n")
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_release("stuff")
+        self.assertIn("SHA256SUMS", str(ctx.exception))
+        self.assertEqual(dest.read_bytes(), b"old")
+        self.assertEqual(self.state("stuff"), "old-etag")
 
     def test_fd_and_zzz_platforms(self):
         inst = self.make({}, os_name="darwin", arch="aarch64")

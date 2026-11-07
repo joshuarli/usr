@@ -550,6 +550,9 @@ class Installer:
         else:
             artifact_target = f"{self.arch}-apple-darwin"
         asset_base = f"{prog}-{artifact_target}"
+        if prog == "stuff":
+            self._install_raw_release(prog, install_name, owner, repo, tag, asset_base)
+            return
         candidates = [asset_base]
         if self.os_name == "linux" and artifact_target.endswith("musl") \
                 and prog not in ("ish", "soulseek-rs", "shuck"):
@@ -590,6 +593,37 @@ class Installer:
                 rage_keygen.unlink()
             rage_keygen.symlink_to("rage")
             self.own_file(rage_keygen)
+
+    def _install_raw_release(self, prog: str, install_name: str, owner: str, repo: str,
+                             tag: str, asset: str) -> None:
+        base = f"https://github.com/{owner}/{repo}/releases/download/{tag}"
+        url = f"{base}/{asset}"
+        record = self.asset_id(url)
+        if not record:
+            self.unchecked(prog, f"{asset} is not available in {tag}")
+            return
+        if self.is_current(install_name, record):
+            self.current(f"{install_name} is current ({tag})")
+            return
+        self.fetch_msg(f"Downloading {asset} ...")
+        staged = self.stage_file(self.dest, f".{install_name}.")
+        if not self.download(url, staged):
+            staged.unlink(missing_ok=True)
+            self.skip(prog, f"{asset} is not available in {tag}")
+        sums_path = Path(tempfile.mkstemp()[1])
+        if not self.download(f"{base}/SHA256SUMS", sums_path):
+            staged.unlink(missing_ok=True)
+            sums_path.unlink(missing_ok=True)
+            self.skip(prog, "SHA256SUMS download failed")
+        expected = self.sums_for(sums_path.read_text(), asset)
+        sums_path.unlink(missing_ok=True)
+        if len(expected) != 64:
+            staged.unlink(missing_ok=True)
+            self.skip(prog, f"{asset} is not listed in SHA256SUMS")
+        if self.sha256_file(staged) != expected:
+            staged.unlink(missing_ok=True)
+            self.skip(prog, f"{asset} checksum mismatch")
+        self.install_binary(install_name, staged, record)
 
     def install_zzz(self) -> None:
         if (self.os_name, self.arch) not in (("linux", "x86_64"), ("linux", "aarch64")):
