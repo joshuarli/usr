@@ -1337,6 +1337,15 @@ esac
 )
 end_case
 
+begin_case "parallel wave defaults to the CPU count and honors SYNC_JOBS"
+( set -e
+grep -q 'sysctl -n hw.ncpu' "$repo_root/tools/sync/install.sh"
+grep -q 'getconf _NPROCESSORS_ONLN' "$repo_root/tools/sync/install.sh"
+grep -q 'wave_jobs=$(_dl_jobs)' "$repo_root/tools/sync/install.sh"
+grep -q 'if \[ "$wave_jobs" -lt "$max_workers" \]' "$repo_root/tools/sync/install.sh"
+)
+end_case
+
 begin_case "npm installers are dispatched in the npm wave"
 ( set -e
 npm_installers=$(awk '

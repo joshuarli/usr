@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dag import Graph, GraphError, Probe, Result, Task
+from dag import Graph, GraphError, Probe, Result, Task, default_jobs
 from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
@@ -474,9 +474,10 @@ def main(argv: list[str]) -> int:
             legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"))
             failures += int(legacy.returncode != 0)
         return 1 if failures else 0
+    jobs = int(ctx.env["SYNC_JOBS"]) if "SYNC_JOBS" in ctx.env else default_jobs()
     try:
         with ownership_lock(ctx.state):
-            results = selected.run(jobs=int(ctx.env.get("SYNC_JOBS", "4")))
+            results = selected.run(jobs=jobs)
     except OSError as exc:
         results = [Result(task.name, "failed", f"{type(exc).__name__}: {exc}")
                    for task in selected.order()]

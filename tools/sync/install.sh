@@ -3926,8 +3926,21 @@ wait_for_workers() {
     return 0
 }
 
+_dl_jobs() {
+    case "${SYNC_JOBS:-}" in ''|*[!0-9]*|0) ;; *) printf '%s\n' "$SYNC_JOBS"; return ;; esac
+    if [ "$OS" = Darwin ]; then
+        _dl_jobs=$(sysctl -n hw.ncpu 2>/dev/null || printf '4')
+    else
+        _dl_jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4')
+    fi
+    case "$_dl_jobs" in ''|*[!0-9]*|0) _dl_jobs=4 ;; esac
+    printf '%s\n' "$_dl_jobs"
+}
+
 run_parallel_wave() {
     max_workers=$#
+    wave_jobs=$(_dl_jobs)
+    if [ "$wave_jobs" -lt "$max_workers" ]; then max_workers=$wave_jobs; fi
     parallel_failed=false
     worker_pids=
     worker_progs=

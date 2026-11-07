@@ -7,7 +7,7 @@ import threading
 import time
 import unittest
 
-from dag import Graph, GraphError, Probe, Task
+from dag import Graph, GraphError, Probe, Task, default_jobs
 
 
 class DagTests(unittest.TestCase):
@@ -21,6 +21,14 @@ class DagTests(unittest.TestCase):
         self.assertEqual(set(names), {"bridge", "node", "claude"})
         self.assertGreater(names.index("bridge"), names.index("node"))
         self.assertGreater(names.index("bridge"), names.index("claude"))
+
+    def test_default_jobs_is_the_cpu_count(self):
+        from unittest.mock import patch
+        import dag
+        with patch.object(dag.os, "cpu_count", return_value=7):
+            self.assertEqual(default_jobs(), 7)
+        with patch.object(dag.os, "cpu_count", return_value=None):
+            self.assertEqual(default_jobs(), 4)
 
     def test_cycle_and_undeclared_dependencies(self):
         with self.assertRaisesRegex(GraphError, "cycle"):

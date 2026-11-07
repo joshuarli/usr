@@ -5,7 +5,12 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
+import os
 from typing import Callable, Literal
+
+
+def default_jobs() -> int:
+    return os.cpu_count() or 4
 
 
 @dataclass(frozen=True)
@@ -87,7 +92,9 @@ class Graph:
 
         return {name: measure(name) for name in self.tasks}
 
-    def run(self, jobs: int = 4) -> list[Result]:
+    def run(self, jobs: int | None = None) -> list[Result]:
+        if jobs is None:
+            jobs = default_jobs()
         if jobs < 1:
             raise GraphError("jobs must be positive")
         priority = self._priority()
