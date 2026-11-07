@@ -202,6 +202,26 @@ own_git_current_target() {
     [ -d "$git_pointed" ] || return 1
 }
 
+GIT_EXCLUDE_TEMPLATE='# git ls-files --others --exclude-from=.git/info/exclude
+# Lines that start with '"'"'#'"'"' are comments.'
+
+ensure_git_templates() {
+    git_templates="${DEST%/bin}/share/git-core/templates"
+    git_exclude="${git_templates}/info/exclude"
+    if [ -L "$git_exclude" ] || { [ -e "$git_exclude" ] && [ ! -f "$git_exclude" ]; }; then
+        skip git "${git_exclude} is not a regular file"
+        return 1
+    fi
+    if [ ! -e "$git_exclude" ]; then
+        own_missing_dirs "${git_templates}/info"
+        mkdir -p "${git_templates}/info"
+        printf '%s\n' "$GIT_EXCLUDE_TEMPLATE" > "$git_exclude"
+    fi
+    if [ "$(cat "$git_exclude")" = "$GIT_EXCLUDE_TEMPLATE" ]; then
+        own_file "$git_exclude"
+    fi
+}
+
 ensure_git_link() {
     git_dest_link="${DEST}/$1"
     git_want=$2
@@ -3071,6 +3091,7 @@ install_git() {
             fi
         done
         if $current_ok && own_git_release_target "${git_pointed}/git" && [ -d "$git_pointed" ]; then
+            ensure_git_templates || return
             _dl_current "git is current (${tag})"
             return
         fi
@@ -3083,6 +3104,7 @@ install_git() {
             for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
                 ensure_git_link "$git_command" "${GIT_HOME}/current/${git_command}" || return
             done
+            ensure_git_templates || return
             _dl_current "git is current (${tag})"
             return
         fi
@@ -3164,6 +3186,7 @@ install_git() {
     for git_command in git git-shell git-upload-archive git-upload-pack git-receive-pack; do
         ensure_git_link "$git_command" "${GIT_HOME}/current/${git_command}" || return
     done
+    ensure_git_templates || return
     printf '%s\n' "$id" > "${STATE}/git"
     own_file "${STATE}/git"
     changed=true

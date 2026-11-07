@@ -2506,6 +2506,10 @@ for git_helper in git-upload-archive git-upload-pack git-receive-pack; do
     [ "$(readlink "$git_release/$git_helper")" = git ]
 done
 [ "$(cat "$git_home/.local/state/dl/git")" = 'git-test-etag' ]
+git_exclude="$git_home/.local/share/git-core/templates/info/exclude"
+[ -f "$git_exclude" ] && [ ! -L "$git_exclude" ]
+grep -q 'exclude-from=.git/info/exclude' "$git_exclude"
+rm -r "$git_home/.local/share/git-core"
 if output=$(HOME="$git_home" XDG_STATE_HOME="$git_home/.local/state" \
     TMPDIR="$test_root/tmp" GIT_ZIP="$test_root/git.zip" GIT_SUMS="$test_root/git.SHA256SUMS" \
     run_tools "$mock_bin:$PATH" "$repo_root" git 2>&1); then
@@ -2518,6 +2522,7 @@ case "$output" in
     *'git is current ('"$git_tag"')'*) ;;
     *) printf '%s\n' "$output" >&2; exit 1 ;;
 esac
+[ -f "$git_exclude" ]
 )
 end_case
 
