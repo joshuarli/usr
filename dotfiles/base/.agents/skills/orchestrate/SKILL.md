@@ -58,11 +58,11 @@ Use Grok’s native `scout`, `mechanic`, `worker`, `expert`, or `god` tiers, ran
 
 ### OpenCode
 
-When OpenCode is itself the parent harness, run its lanes on `opencode-go/muse-spark-1.3-contributor` (1017 snapshot). Claude-triggered OpenCode workers instead follow the mandatory DeepSeek route above. Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
+When OpenCode is itself the parent harness, run its lanes on `opencode-go/muse-spark-1.3-contributor` (1017 snapshot). Claude-triggered OpenCode workers instead follow the mandatory DeepSeek route above. OpenCode parents use regular `orchestrate` routing with OpenCode-native subagents and the table model; do not call the `usr-opencode-worker` bridge tools. Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
 
 ### Command Code
 
-Run Command Code sessions with `deepseek/deepseek-v4.1-flash` at `max` effort. Built-in `Explore` (read-only) and `General` (other work) inherit the session model. Do not delegate `god` work in Command Code; keep it local. Never use another model. Children may run in parallel or background but cannot nest.
+Run Command Code sessions with `deepseek/deepseek-v4.1-flash` at `max` effort. Built-in `Explore` (read-only) and `General` (other work) inherit the session model. Command Code parents use regular `orchestrate` routing with `Explore`/`General` and the table model; do not call the `usr-opencode-worker` bridge tools. Do not delegate `god` work in Command Code; keep it local. Never use another model. Children may run in parallel or background but cannot nest.
 
 ### Pi
 

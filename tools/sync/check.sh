@@ -24,6 +24,7 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_fix.py
 	python3 -I dotfiles/base/.local/bin/pinact --check
 	python3 -I dotfiles/pi-test.py
+	python3 -I dotfiles/orchestrate-test.py
 	TMPDIR="$tmpdir" python3 -I dotfiles/sbx-test.py
 	(cd dotfiles && sh agent-tier-gate-test.sh)
 	sh dotfiles/reset-agents-test.sh
