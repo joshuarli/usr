@@ -22,6 +22,7 @@ from ownership import capture_new, claims_lock, merge_claims, records, ownership
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = ROOT / "tools/sync/claude-worker.py"
 PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
+OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 
 NPM_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
 JQ_TOOLS = frozenset({"codex", "node-build"})
@@ -239,6 +240,15 @@ def pi_bridge_apply(ctx: Context) -> None:
     required(command(ctx, sys.executable, "-I", str(PI_BRIDGE), "install"), "Pi MCP registration")
 
 
+def opencode_bridge_status(ctx: Context) -> Probe:
+    r = command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "check", capture=True)
+    return Probe(r.returncode == 0, "bridge registered" if r.returncode == 0 else (r.stderr.strip() or "bridge missing"))
+
+
+def opencode_bridge_apply(ctx: Context) -> None:
+    required(command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "install"), "OpenCode MCP registration")
+
+
 def mac_packages_status(ctx: Context) -> Probe:
     brew = next((str(path) for path in (Path("/opt/homebrew/bin/brew"), Path("/usr/local/bin/brew")) if path.is_file()), None) or shutil.which("brew")
     if brew is None:
@@ -383,6 +393,9 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
         nodes.append(Task("pi-mcp", ("links", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
                           lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
                           lambda: pi_bridge_status(ctx), frozenset({"pi-config"})))
+        nodes.append(Task("opencode-mcp", ("links", "tool:nodejs", "tool:cmd", "tool:opencode2"),
+                          lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
+                          lambda: opencode_bridge_status(ctx), frozenset({"opencode-config"})))
     deps = ("links",)
     if ctx.platform == "darwin":
         deps = ("links", "host:mac-packages")
@@ -433,7 +446,7 @@ def main(argv: list[str]) -> int:
     if command_name == "links":
         selected = full.select(["links"])
     elif command_name == "bridge":
-        selected = full.select(["claude-mcp", "pi-mcp"])
+        selected = full.select(["claude-mcp", "pi-mcp", "opencode-mcp"])
     elif command_name == "tools":
         selected = full.select(["tool:" + name for name in chosen])
     elif command_name in {"apply", "plan", "doctor"}:
@@ -441,7 +454,7 @@ def main(argv: list[str]) -> int:
         if ctx.platform == "darwin":
             goals.append("host:mac-packages")
         if ctx.profile != "server":
-            goals.extend(["claude-mcp", "pi-mcp"])
+            goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp"])
         if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
             goals.append("kache")
         goals.append("tool:" + AGENT_MEMORY)

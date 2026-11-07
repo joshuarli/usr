@@ -54,6 +54,11 @@ class MainTests(unittest.TestCase):
         names = {task.name for task in dag.order()}
         self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:pi", "tool:opencode2", "pi-mcp"} <= names)
 
+    def test_opencode_bridge_requires_node_command_and_opencode2(self):
+        dag = main.graph(self.ctx, [], setup=True).select(["opencode-mcp"])
+        names = {task.name for task in dag.order()}
+        self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:opencode2", "opencode-mcp"} <= names)
+
     def test_alternate_target_links_never_touch_home(self):
         target = self.ctx.root / "fixture-home"
         target.mkdir()
@@ -228,6 +233,7 @@ class MainTests(unittest.TestCase):
             tasks = main.graph(server, ["python3"], setup=True).tasks
         self.assertNotIn("claude-mcp", tasks)
         self.assertNotIn("pi-mcp", tasks)
+        self.assertNotIn("opencode-mcp", tasks)
         self.assertIn("tool:python3", tasks)
 
 

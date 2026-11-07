@@ -62,7 +62,7 @@ Use Grok’s native `scout`, `mechanic`, `worker`, `expert`, or `god` tiers, ran
 
 ### OpenCode
 
-When OpenCode is itself the parent harness, run its lanes on `opencode-go/muse-spark-1.3-contributor` (1017 snapshot). Claude-triggered OpenCode workers instead follow the mandatory DeepSeek route above. OpenCode parents use regular `orchestrate` routing with OpenCode-native subagents and the table model; do not call the `usr-opencode-worker` bridge tools. Do not delegate `god` work in OpenCode; keep it local. Pass the model and effort from the table to every child. Use `explore` read-only for scouting, `general` otherwise. Keep briefs self-contained.
+When OpenCode is itself the parent harness, run its lanes through the `usr-opencode-worker` bridge exactly as in the Claude section above: the parent scopes tasks, checks evidence, does one bounded diff review, and integrates; substantive research, implementation, and testing go through `worker_model_check(cwd, tier)` and `worker_start(cwd, title, tier, scope, brief)` on a clean worktree with the same scope contract (`base_revision`, `writable_paths`, `acceptance_proof`, `attempt_limit`, `stop_on`), then `worker_status` and at most one same-scope `worker_resume` correction. The bridge falls back from OpenCode Go to Command Code's `deepseek/deepseek-v4.1-flash` on verified model/usage unavailability before any edit, without changing scope; quota fallback is forbidden after partial edits. Never switch to another provider or model. Do not delegate `god` work in OpenCode; keep it local.
 
 ### Command Code
 

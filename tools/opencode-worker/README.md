@@ -1,6 +1,6 @@
-# Claude orchestration: OpenCode Go → Command Code (DeepSeek V4.1 Flash)
+# DeepSeek executor bridge: OpenCode Go → Command Code (DeepSeek V4.1 Flash)
 
-**Default Claude `orchestrate` execution path.** Opus scopes tasks, checks evidence, does one bounded diff review, and integrates. All substantive research, implementation, and testing goes to DeepSeek V4.1 Flash executors through this MCP bridge. Native Claude workers are **not** a fallback.
+**Default Claude and OpenCode `orchestrate` execution path.** The parent harness scopes tasks, checks evidence, does one bounded diff review, and integrates. All substantive research, implementation, and testing goes to DeepSeek V4.1 Flash executors through this MCP bridge. Native workers are **not** a fallback.
 
 The bridge favors OpenCode Go. If the pinned OpenCode tier is unavailable or returns a recognized quota/usage error, it falls back to Command Code's exact model, `deepseek/deepseek-v4.1-flash`, without changing the task scope or worktree. No other model or provider is permitted.
 
@@ -17,7 +17,7 @@ There is no `god` tier. If an `expert` worker fails, the Opus coordinator takes 
 
 ## Installation and lifecycle
 
-Run `sh sync` from the usr checkout. It installs Node.js, OpenCode, and Command Code, installs the bridge's pinned `@opencode/client` dependency, and idempotently registers `usr-opencode-worker` in Claude's user MCP configuration and Pi's `~/.pi/agent/mcp.json`. Codex reads the same server from the tracked `~/.codex/config.toml` (`[mcp_servers.usr-opencode-worker]`) via `sh sync` links. This needs no manual `npm install` or `claude mcp add`.
+Run `sh sync` from the usr checkout. It installs Node.js, OpenCode, and Command Code, installs the bridge's pinned `@opencode/client` dependency, and idempotently registers `usr-opencode-worker` in Claude's user MCP configuration, Pi's `~/.pi/agent/mcp.json`, and OpenCode's global config (`~/.config/opencode/opencode.json`). Codex reads the same server from the tracked `~/.codex/config.toml` (`[mcp_servers.usr-opencode-worker]`) via `sh sync` links. This needs no manual `npm install` or `claude mcp add`.
 
 Use `sh sync bridge` to repair just the bridge (Claude and Pi), `sh sync plan` to preview its setup, `sh sync doctor` to inspect it, and `sh sync uninstall` to unregister the owned MCP entries. Other MCP servers, credentials and sessions remain untouched. Credentials are reused; if needed, run `cmd login` yourself. The dependency installation requires Node.js 26+, and the code remains in the tracked checkout.
 

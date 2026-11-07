@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Pin orchestrate routing: bridge is Claude-only; OpenCode and Command Code
-parents use regular orchestrate with harness-native models."""
+"""Pin orchestrate routing: the bridge is the Claude, OpenCode, Codex and Pi
+execution path; only the Command Code parent uses harness-native models."""
 import json
 import unittest
 from pathlib import Path
@@ -22,19 +22,19 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("when Claude invokes `orchestrate`", self.text)
         self.assertIn("usr-opencode-worker", self.text)
 
-    def test_opencode_parent_uses_native_models_not_bridge(self):
+    def test_opencode_parent_uses_bridge(self):
         sec = section(self.text, "OpenCode", "Command Code")
-        self.assertIn("opencode-go/muse-spark-1.3-contributor", sec)
-        self.assertIn("do not call the `usr-opencode-worker` bridge tools", sec.lower())
+        self.assertIn("usr-opencode-worker", sec)
+        self.assertIn("Do not delegate `god` work in OpenCode", sec)
 
     def test_command_code_parent_uses_native_models_not_bridge(self):
         sec = section(self.text, "Command Code", "Pi")
         self.assertIn("deepseek/deepseek-v4.1-flash", sec)
         self.assertIn("do not call the `usr-opencode-worker` bridge tools", sec.lower())
 
-    def test_opencode_and_cmd_configs_have_no_bridge_mcp(self):
+    def test_opencode_config_registers_bridge_and_cmd_does_not(self):
         opencode = (ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text(encoding="utf-8")
-        self.assertNotIn("usr-opencode-worker", opencode)
+        self.assertIn("usr-opencode-worker", opencode)
         cmd = (ROOT / "dotfiles/base/.commandcode/settings.json").read_text(encoding="utf-8")
         self.assertNotIn("usr-opencode-worker", cmd)
         json.loads(opencode)

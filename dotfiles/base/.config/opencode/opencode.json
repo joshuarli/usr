@@ -11,5 +11,18 @@
       "resource": "*",
       "effect": "allow"
     }
-  ]
+  ],
+  "mcp": {
+    "servers": {
+      "usr-opencode-worker": {
+        "type": "local",
+        "command": [
+          "/Users/josh/.local/share/nodejs/current/bin/node",
+          "--experimental-strip-types",
+          "/Users/josh/usr/tools/opencode-worker/src/server.ts"
+        ],
+        "codemode": false
+      }
+    }
+  }
 }
