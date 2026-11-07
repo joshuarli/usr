@@ -42,7 +42,11 @@ NODE_BUILD_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/node-build"
 NODE_MINIMUM=26.12.0
 NODEJS_VERSION=26.12.1
 NODEJS_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/nodejs"
-PNPM_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pnpm"
+# pnpm's own home is ${XDG_DATA_HOME:-$HOME/.local/share}/pnpm (its store,
+# global packages, and bin shims). The npm prefix must not be that directory:
+# pnpm writes regular-file shims such as bin/pn there, and npm then refuses
+# to link its own bin/pn into the same directory (EEXIST) on reinstall.
+PNPM_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/pnpm-npm"
 CF_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/cf"
 AGENT_BROWSER_INSTALL_ROOT="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-browser"
 GHOSTTY_APPLICATIONS_DIR="${GHOSTTY_APPLICATIONS_DIR:-/Applications}"

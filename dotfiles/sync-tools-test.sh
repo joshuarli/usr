@@ -1046,6 +1046,10 @@ case "$1" in
                 exit 0
                 ;;
             *" pnpm@12.16.1 "*)
+                if [ -e "$prefix/bin/pn" ] && [ ! -L "$prefix/bin/pn" ]; then
+                    printf '%s\n' 'npm error EEXIST: file already exists' >&2
+                    exit 1
+                fi
                 mkdir -p "$prefix/bin" "$prefix/lib/node_modules/pnpm"
                 printf '%s\n' '#!/bin/sh' 'exit 0' > "$prefix/bin/pnpm"
                 chmod +x "$prefix/bin/pnpm"
@@ -1254,7 +1258,7 @@ for run in 1 2; do
         esac
     fi
 done
-[ "$(readlink "$pnpm_home/.local/bin/pnpm")" = "$pnpm_home/.local/share/pnpm/bin/pnpm" ]
+[ "$(readlink "$pnpm_home/.local/bin/pnpm")" = "$pnpm_home/.local/share/pnpm-npm/bin/pnpm" ]
 [ "$(cat "$pnpm_home/.local/state/dl/pnpm")" = 12.16.1 ]
 [ "$(wc -l < "$pnpm_log")" -eq 1 ]
 pnpm_owned="$pnpm_home/.local/state/sync/dl-owned"
@@ -1265,8 +1269,33 @@ for pnpm_path in "$pnpm_home/.local/bin/pnpm" "$pnpm_home/.local/state/dl/pnpm";
     awk -F '\t' -v path="$pnpm_path" \
         '$1 == "F" && $2 == path { found = 1 } END { exit !found }' "$pnpm_owned"
 done
-awk -F '\t' -v path="$pnpm_home/.local/share/pnpm" \
+awk -F '\t' -v path="$pnpm_home/.local/share/pnpm-npm" \
     '$1 == "D" && $2 == path { found = 1 } END { exit !found }' "$pnpm_owned"
+)
+end_case
+
+begin_case "pnpm installs beside a polluted pnpm home without touching it"
+( set -e
+pnpm_polluted_home="$test_root/pnpm-polluted-home"
+mkdir -p "$pnpm_polluted_home/.local/share/pnpm/bin" \
+    "$pnpm_polluted_home/.local/share/pnpm/store" \
+    "$pnpm_polluted_home/.local/share/pnpm/global"
+printf '%s\n' '#!/bin/sh' 'exec pnpm "$@"' > "$pnpm_polluted_home/.local/share/pnpm/bin/pn"
+printf '%s\n' '#!/bin/sh' 'exec pnpm dlx "$@"' > "$pnpm_polluted_home/.local/share/pnpm/bin/pnpx"
+chmod +x "$pnpm_polluted_home/.local/share/pnpm/bin/pn" "$pnpm_polluted_home/.local/share/pnpm/bin/pnpx"
+printf '%s\n' keep > "$pnpm_polluted_home/.local/share/pnpm/store/keep"
+if output=$(HOME="$pnpm_polluted_home" TMPDIR="$test_root/tmp" NPM_LOG="$test_root/pnpm-polluted.log" \
+    run_tools "$mock_bin:$PATH" "$repo_root" pnpm 2>&1); then
+    :
+else
+    printf '%s\n' "$output" >&2
+    exit 1
+fi
+[ "$(readlink "$pnpm_polluted_home/.local/bin/pnpm")" = "$pnpm_polluted_home/.local/share/pnpm-npm/bin/pnpm" ]
+[ -x "$pnpm_polluted_home/.local/share/pnpm-npm/bin/pnpm" ]
+[ "$(cat "$pnpm_polluted_home/.local/share/pnpm/bin/pn")" = '#!/bin/sh
+exec pnpm "$@"' ]
+[ "$(cat "$pnpm_polluted_home/.local/share/pnpm/store/keep")" = keep ]
 )
 end_case
 
