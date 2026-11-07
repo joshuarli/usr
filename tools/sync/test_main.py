@@ -1,5 +1,6 @@
 """Graph construction and scoped action selection without real installs."""
 import json
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -89,7 +90,7 @@ class MainTests(unittest.TestCase):
         source = self.ctx.home / "d/agent-memory"
         source.mkdir(parents=True)
         (source / "pyproject.toml").write_text("[project]\nname = 'agent-memory'\n")
-        venv = source / ".venv"
+        venv = self.ctx.home / ".local/share/agent-memory/venv"
         for command in main.AGENT_MEMORY_COMMANDS:
             script = venv / "bin" / command
             script.parent.mkdir(parents=True, exist_ok=True)
@@ -97,18 +98,27 @@ class MainTests(unittest.TestCase):
             script.chmod(0o755)
         return source, venv
 
-    def write_metadata(self, source, venv, editable):
+    def write_pin(self, sha="abc1234"):
+        path = self.ctx.root / "tools/sync/agent-memory.pin"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(sha + "\n")
+        return sha
+
+    def write_metadata(self, source, venv, editable, commit=None):
         metadata = venv / "lib/python3.15/site-packages/agent_memory-0.1.0.dist-info"
         metadata.mkdir(parents=True, exist_ok=True)
-        (metadata / "direct_url.json").write_text(json.dumps({
+        record = {
             "url": source.as_uri(), "dir_info": {"editable": True} if editable else {},
-        }))
+        }
+        if commit is not None:
+            record["vcs_info"] = {"vcs": "git", "commit_id": commit}
+        (metadata / "direct_url.json").write_text(json.dumps(record))
 
     def test_agent_memory_requires_uv(self):
         dag = main.graph(self.ctx, ["agent-memory"], setup=True).select(["tool:agent-memory"])
         self.assertEqual([task.name for task in dag.order()], ["links", "tool:uv", "tool:agent-memory"])
 
-    def test_agent_memory_probe_requires_editable_install(self):
+    def test_agent_memory_probe_requires_editable_install_when_checkout_present(self):
         source, venv = self.agent_memory_fixture()
         self.assertFalse(main.agent_memory_status(self.ctx).current)
         self.write_metadata(source, venv, editable=False)
@@ -120,10 +130,21 @@ class MainTests(unittest.TestCase):
         (venv / "bin/agent-sessions-serve").unlink()
         self.assertFalse(main.agent_memory_status(self.ctx).current)
 
-    def test_agent_memory_missing_checkout_is_a_conflict(self):
+    def test_agent_memory_probe_requires_pinned_install_without_checkout(self):
+        self.write_pin("abc1234")
         probe = main.agent_memory_status(self.ctx)
-        self.assertTrue(probe.conflict)
-        self.assertIn("checkout missing", probe.detail)
+        self.assertFalse(probe.current)
+        self.assertFalse(probe.conflict)
+        self.assertIn("environment missing", probe.detail)
+
+    def test_agent_memory_probe_accepts_pinned_install(self):
+        source, venv = self.agent_memory_fixture()
+        shutil.rmtree(self.ctx.home / "d/agent-memory")
+        sha = self.write_pin("abc1234")
+        self.write_metadata(source, venv, editable=False, commit=sha)
+        probe = main.agent_memory_status(self.ctx)
+        self.assertTrue(probe.current)
+        self.assertIn("pinned install", probe.detail)
 
     def test_agent_memory_apply_installs_editable_environment(self):
         source, venv = self.agent_memory_fixture()
@@ -141,7 +162,28 @@ class MainTests(unittest.TestCase):
             main.agent_memory_apply(self.ctx)
         self.assertEqual(calls, [
             (str(uv), "venv", "--allow-existing", "--python", ">=3.15", str(venv)),
-            (str(uv), "pip", "install", "--python", str(venv / "bin/python"), "-e", str(source)),
+            (str(uv), "pip", "install", "--python", str(venv / "bin/python"), "-e " + str(source)),
+        ])
+
+    def test_agent_memory_apply_installs_pinned_commit_without_checkout(self):
+        sha = self.write_pin("abc1234")
+        uv = self.ctx.home / ".local/bin/uv"
+        uv.parent.mkdir(parents=True)
+        uv.write_text("#!/bin/sh\n")
+        uv.chmod(0o755)
+        venv = self.ctx.home / ".local/share/agent-memory/venv"
+        calls = []
+
+        def run(_ctx, *args, **_kwargs):
+            calls.append(args)
+            return type("Completed", (), {"returncode": 0})()
+
+        with patch.object(main, "command", side_effect=run):
+            main.agent_memory_apply(self.ctx)
+        self.assertEqual(calls, [
+            (str(uv), "venv", "--allow-existing", "--python", ">=3.15", str(venv)),
+            (str(uv), "pip", "install", "--python", str(venv / "bin/python"),
+             "agent-memory @ git+ssh://git@github.com/joshuarli/agent-memory@" + sha),
         ])
 
     def test_server_profile_omits_mcp_bridges(self):

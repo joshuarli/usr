@@ -1,8 +1,8 @@
 #!/bin/sh
-venv=${AGENT_MEMORY_VENV:-$HOME/d/agent-memory/.venv}
+venv=${AGENT_MEMORY_VENV:-$HOME/.local/share/agent-memory/venv}
 command="$venv/bin/agent-sessions"
 if [ ! -x "$command" ]; then
-	>&2 printf 'agent-sessions: %s is not installed; install agent-memory into %s (see its docs/install.md) or set AGENT_MEMORY_VENV\n' "$command" "$venv"
+	>&2 printf 'agent-sessions: %s is not installed; run `sh sync tools agent-memory` or set AGENT_MEMORY_VENV\n' "$command"
 	exit 127
 fi
 exec "$command" "$@"
