@@ -8,22 +8,68 @@ Sign in once using `cf auth login`, then simply invoke `decide route` or `decide
 
 Check login with `cf auth whoami`. `decide doctor` only checks local configuration or cf's presence; it cannot verify OAuth is currently valid. If several accounts are accessible, select the intended account through cf first. Explicit `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` still take precedence and retain the direct REST path. Missing or failing cf authentication returns an unavailable advisory result and never blocks your existing deterministic router.
 
-## Route delegated work (enabled by default in orchestrate)
+## Routing tasks (default in orchestrate)
 
-Send **only a short, sanitized task summary** on stdin, not code, credentials, complete prompts, logs, transcripts, or private customer information. One task means at most one remote decision; do not put this in an inner tool loop.
+`decide route` is an **agent-facing advisory tool**: it accepts a bounded, typed
+`TaskBrief` rather than a task title. The self-describing local contract is the
+single entry point for agents learning how to call it:
 
 ```sh
-printf '%s\n' 'Update known schema fixtures; acceptance test is specified.' |
-  decide route --baseline worker
-
-# Include scout only for read-only work, or restrict tiers for a harness ceiling.
-printf '%s\n' 'Find the source of the failed assertion; no edits.' |
-  decide route --baseline scout --tiers scout,mechanic,worker,expert
+decide route --guide
 ```
 
-A successful response includes `recommended_tier`, `selected_tier`, `baseline_tier`, confidence, margin, and usage. `selected_tier` differs from the baseline only if confidence is at least 0.80, the lead over the runner-up is at least 0.20, and the recommendation passes hard safeguards: no down-tier from expert, no downgrade by more than one tier, no automatic `god`. These are conservative, **uncalibrated** adoption heuristics; use `decide eval` against held-out cases to measure whether Clef actually improves routing. The selected tier is advisory: `orchestrate` owns all harness-specific model, effort, permissions, escalation, and execution decisions.
+The guide explains when to call or skip, the exact JSON fields and limits, an
+example that passes the validator, and what the output means. The caller first
+builds the brief from **existing, verified facts**; do not invent evidence or
+perform extra expensive research merely to justify another inference call.
 
-The default eligible tiers are `mechanic,worker,expert` and baseline is `worker`. An unavailable response (missing credentials, quota, timeout, etc.) returns `selected_tier=baseline_tier` with exit 0 and no sensitive echo. Invalid local input exits 2. Opt out for a session with `DECIDE_ROUTING=off`. Never send a sensitive task to external inference just to get a routing suggestion.
+Example using a **synthetic** CI scenario (not an observed Niceforge incident):
+
+```sh
+decide route --baseline worker <<'JSON'
+{
+  "objective": "Fix an intermittent runner join timeout without weakening tests.",
+  "mode": "write",
+  "scope": ["runner lifecycle", "runner integration tests"],
+  "evidence": [
+    {
+      "observation": "The synthetic regression test intermittently times out on join.",
+      "source": "synthetic-fixture:test_runner_join"
+    }
+  ],
+  "unknowns": ["Is the underlying cause a race or environment instability?"],
+  "method": "unknown",
+  "acceptance": ["Reproduce the failure, implement a fix, and pass a regression test."],
+  "constraints": ["Do not silence failures or simply increase the timeout."],
+  "risk": "moderate"
+}
+JSON
+```
+
+The `mode` reflects **existing permission scope**, not requested permissions.
+`scope`, `evidence`, and `acceptance` may be empty when unknown; that yields a
+local `skipped / insufficient_context` result without sending anything to
+Cloudflare. An evidence entry has an `observation` and a `source` anchor (e.g.
+test name, run ID, source file reference); a source anchor does not prove the
+fact by itself. Risk `high` also abstains locally. Never include credentials,
+source code, private logs, complete prompts, personal data, or transcripts.
+
+`--baseline` overrides the tier selected by the deterministic policy. With
+no override, read-only briefs use `scout` and write briefs `worker`. `--tiers`
+can restrict choices: `scout` is allowed only when the brief is read-only,
+and `god` is never eligible. A valid model request includes an
+`abstain` option. An unavailable, abstaining, or low-confidence answer leaves
+the baseline untouched. A recommendation changes the tier only at confidence
+>= 0.80, margin >= 0.20, and within additional protections (no down-tier from
+expert, no downgrade by more than one tier). These gates are **uncalibrated**,
+not assurances; compare against labeled historic routing cases before expanding
+influence.
+
+Calls are limited to one per distinct, meaningful delegated task. Never place
+`decide route` in a tool-loop or retry it to seek a different decision. A
+plain-text input such as `echo "Fix tests" | decide route` is now rejected
+rather than assigned an arbitrary tier. On errors, or with `DECIDE_ROUTING=off`,
+use the existing deterministic policy.
 
 ## Generic decision and offline evaluation
 

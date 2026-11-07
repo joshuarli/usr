@@ -52,6 +52,26 @@ def sample_request() -> dict[str, Any]:
     }
 
 
+
+def sample_route_brief(**changes):
+    brief = {
+        "objective": "Repair a synthetic flaky runner test without weakening its assertions.",
+        "mode": "write",
+        "scope": ["runner integration tests", "runner lifecycle"],
+        "evidence": [{
+            "observation": "The synthetic test times out on a runner join intermittently.",
+            "source": "synthetic-fixture:test_runner_join",
+        }],
+        "unknowns": ["Whether the timeout is a race or environment instability."],
+        "method": "partial",
+        "acceptance": ["Reproduce the failure and pass the exact regression after the fix."],
+        "constraints": ["Do not silence failures or increase the test timeout."],
+        "risk": "moderate",
+    }
+    brief.update(changes)
+    return brief
+
+
 def sample_result(request, model="clef-flash") -> dict[str, Any]:
     answers = {}
     for question_id, question in request["questions"].items():
@@ -896,49 +916,78 @@ class DecideTests(unittest.TestCase):
         )
         self.assertEqual(result, {"status": "invalid", "reason": "invalid_model"})
 
-    def test_route_selects_confident_flash_advice_without_changing_permissions(self):
+    def test_route_guide_is_offline_self_describing_and_its_example_validates(self):
+        guide = DECIDE.route_guide()
+        self.assertEqual(guide["command"], "decide route")
+        self.assertEqual(guide["routing"]["model"], "clef-flash")
+        self.assertEqual(set(guide["input"]["required_fields"]), set(guide["input"]["fields"]))
+        self.assertEqual(
+            set(guide["input"]["required_fields"]),
+            set(guide["input"]["json_schema"]["properties"]),
+        )
+        self.assertFalse(guide["input"]["json_schema"]["additionalProperties"])
+        self.assertEqual(guide["input"]["json_schema"]["properties"]["mode"]["enum"], ["read_only", "write"])
+        self.assertEqual(DECIDE.validate_route_brief(guide["input"]["example"]), guide["input"]["example"])
+        self.assertEqual(guide["input"]["max_bytes"], DECIDE.MAX_ROUTE_BYTES)
+        env = dict(os.environ)
+        env["PATH"] = ""
+        process = subprocess.run(
+            [sys.executable, "-I", str(SHIM), "route", "--guide"],
+            input="", env=env, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(json.loads(process.stdout), guide)
+        self.assertEqual(process.stderr, "")
+
+    def test_route_structured_brief_is_forwarded_to_flash_not_task_title(self):
         calls = []
+        brief = sample_route_brief()
 
         def transport(url, headers, body, timeout):
             sent = json.loads(body)
             calls.append((url, sent, timeout))
+            self.assertEqual(sent["state"], brief)
             options = sent["questions"]["tier"]["criteria"]
-            self.assertEqual(list(options), ["mechanic", "worker", "expert"])
+            self.assertEqual(list(options), ["mechanic", "worker", "expert", "abstain"])
+            self.assertIn("Do not infer missing", sent["questions"]["tier"]["instructions"])
             result = {
                 "model": "clef-flash",
                 "answers": {"tier": {
-                    "type": "choice", "choice": "mechanic", "confidence": 0.9,
-                    "probabilities": {"mechanic": 0.9, "worker": 0.08, "expert": 0.02},
+                    "type": "choice", "choice": "mechanic", "confidence": 0.90,
+                    "probabilities": {
+                        "mechanic": 0.90, "worker": 0.07, "expert": 0.02, "abstain": 0.01,
+                    },
                 }},
-                "usage": {"input_tokens": 53, "output_tokens": 0},
+                "usage": {"input_tokens": 57, "output_tokens": 0},
             }
             return DECIDE.HttpResponse(200, envelope(result))
 
-        result = DECIDE.route_task(
-            "Update the test fixture for the already specified schema.",
-            env=self.env, transport=transport, clock=lambda: 1.0,
+        outcome = DECIDE.route_task(
+            brief, env=self.env, transport=transport, clock=lambda: 1.0,
         )
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][0].endswith("/ai/run/@cf/cloudflare/clef-flash"))
         self.assertEqual(calls[0][1]["model"], "clef-flash")
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["selected_tier"], "mechanic")
-        self.assertEqual(result["baseline_tier"], "worker")
-        self.assertEqual(result["recommended_tier"], "mechanic")
-        self.assertEqual(result["reason"], "clef_advice")
-        self.assertNotIn("test fixture", json.dumps(result))
+        self.assertEqual(outcome["status"], "ok")
+        self.assertEqual(outcome["baseline_tier"], "worker")
+        self.assertEqual(outcome["selected_tier"], "mechanic")
+        self.assertEqual(outcome["recommended_tier"], "mechanic")
+        self.assertEqual(outcome["reason"], "clef_advice")
+        self.assertNotIn("runner join", json.dumps(outcome))
 
-    def test_route_uncertainty_and_hard_policy_preserve_baseline(self):
+    def test_route_uncertainty_abstention_and_hard_policy_preserve_baseline(self):
         cases = [
-            ("worker", {"mechanic": 0.42, "worker": 0.38, "expert": 0.20}, "mechanic", "uncertain"),
-            ("expert", {"mechanic": 0.91, "worker": 0.06, "expert": 0.03}, "mechanic", "preserve_expert"),
-            ("worker", {"scout": 0.90, "mechanic": 0.05, "worker": 0.03, "expert": 0.02}, "scout", "unsafe_downgrade"),
+            ("worker", {"mechanic": 0.42, "worker": 0.36, "expert": 0.20, "abstain": 0.02}, "mechanic", "uncertain"),
+            ("expert", {"mechanic": 0.91, "worker": 0.06, "expert": 0.02, "abstain": 0.01}, "mechanic", "preserve_expert"),
+            ("worker", {"scout": 0.90, "mechanic": 0.05, "worker": 0.03, "expert": 0.01, "abstain": 0.01}, "scout", "unsafe_downgrade"),
+            ("worker", {"mechanic": 0.02, "worker": 0.02, "expert": 0.02, "abstain": 0.94}, "abstain", "model_abstained"),
         ]
         for baseline, distribution, recommended, reason in cases:
-            tiers = tuple(distribution)
+            tiers = tuple(tier for tier in distribution if tier != "abstain")
+            mode = "read_only" if "scout" in tiers else "write"
             result = DECIDE.route_task(
-                "Sanitized task brief", baseline_tier=baseline, eligible_tiers=tiers,
-                env=self.env,
+                sample_route_brief(mode=mode),
+                baseline_tier=baseline, eligible_tiers=tiers, env=self.env,
                 transport=lambda *args, distribution=distribution, recommended=recommended: (
                     DECIDE.HttpResponse(200, envelope({
                         "model": "clef-flash",
@@ -954,67 +1003,100 @@ class DecideTests(unittest.TestCase):
             self.assertEqual(result["selected_tier"], baseline)
             self.assertEqual(result["reason"], reason)
 
-    def test_route_fail_open_and_opt_out_never_invoke_transport(self):
-        never = lambda *args: self.fail("unexpected network request")
-        off = DECIDE.route_task(
-            "Sanitized brief", env={**self.env, "DECIDE_ROUTING": "off"},
+    def test_route_insufficient_evidence_high_risk_and_opt_out_never_infer(self):
+        never = lambda *args: self.fail("network used")
+        for changes, reason in [
+            ({"scope": []}, "insufficient_context"),
+            ({"evidence": []}, "insufficient_context"),
+            ({"acceptance": []}, "insufficient_context"),
+            ({"risk": "high"}, "high_risk"),
+        ]:
+            outcome = DECIDE.route_task(
+                sample_route_brief(**changes), env=self.env, transport=never,
+            )
+            self.assertEqual(outcome["status"], "skipped")
+            self.assertEqual(outcome["selected_tier"], "worker")
+            self.assertEqual(outcome["reason"], reason)
+        disabled = DECIDE.route_task(
+            sample_route_brief(), env={**self.env, "DECIDE_ROUTING": "off"},
             transport=never,
         )
-        self.assertEqual(off["selected_tier"], "worker")
-        self.assertEqual(off["status"], "skipped")
-        only = DECIDE.route_task(
-            "Sanitized brief", eligible_tiers=("worker",), env=self.env,
+        self.assertEqual(disabled["status"], "skipped")
+        self.assertEqual(disabled["reason"], "disabled")
+        single = DECIDE.route_task(
+            sample_route_brief(), eligible_tiers=("worker",), env=self.env,
             transport=never,
         )
-        self.assertEqual(only["reason"], "single_eligible_tier")
-        missing = DECIDE.route_task("Sanitized brief", env={}, transport=never)
+        self.assertEqual(single["reason"], "single_eligible_tier")
+
+    def test_route_mode_controls_scout_eligibility_and_baseline(self):
+        never = lambda *args: self.fail("network used")
+        for bad in [
+            DECIDE.route_task(sample_route_brief(), eligible_tiers=("scout", "worker"), env=self.env, transport=never),
+            DECIDE.route_task(sample_route_brief(), baseline_tier="scout", env=self.env, transport=never),
+            DECIDE.route_task(sample_route_brief(), eligible_tiers=("worker", "worker"), env=self.env, transport=never),
+            DECIDE.route_task(sample_route_brief(), eligible_tiers=("worker", "god"), env=self.env, transport=never),
+        ]:
+            self.assertEqual(bad["reason"], "invalid_routing_tiers")
+        read_only = DECIDE.route_task(
+            sample_route_brief(mode="read_only", evidence=[]), env=self.env, transport=never,
+        )
+        self.assertEqual(read_only["status"], "skipped")
+        self.assertEqual(read_only["baseline_tier"], "scout")
+        self.assertEqual(read_only["selected_tier"], "scout")
+
+    def test_route_rejects_arbitrary_text_unknown_fields_and_oversize(self):
+        never = lambda *args: self.fail("network used")
+        bad_inputs = [
+            "",
+            "Fix the flaky Niceforge tests",
+            sample_route_brief(objective=""),
+            sample_route_brief(method="unlisted"),
+            sample_route_brief(risk=True),
+            sample_route_brief(unexpected="secret"),
+            sample_route_brief(evidence=[{"observation": "unverified"}]),
+            sample_route_brief(unknowns=["\ud800"]),
+            sample_route_brief(scope=["runner\nsecret note"]),
+            sample_route_brief(evidence=[{"observation": "valid observation", "source": "line\n2"}]),
+            sample_route_brief(objective="x" * (DECIDE.MAX_ROUTE_BYTES + 1)),
+        ]
+        for value in bad_inputs:
+            result = DECIDE.route_task(value, env=self.env, transport=never)
+            self.assertEqual(result["status"], "invalid")
+            self.assertNotIn("secret", json.dumps(result))
+
+    def test_route_fail_open_and_cli_rejects_plaintext_without_leakage(self):
+        missing = DECIDE.route_task(sample_route_brief(), env={}, transport=lambda *args: self.fail("network used"))
         self.assertEqual(missing["status"], "unavailable")
         self.assertEqual(missing["selected_tier"], "worker")
         failed = DECIDE.route_task(
-            "Sanitized brief", env=self.env,
+            sample_route_brief(), env=self.env,
             transport=lambda *args: DECIDE.HttpResponse(503, b"private log"),
         )
-        self.assertEqual(failed["selected_tier"], "worker")
         self.assertEqual(failed["reason"], "provider_failure")
+        self.assertEqual(failed["selected_tier"], "worker")
         self.assertNotIn("private", json.dumps(failed))
-
-    def test_route_rejects_invalid_inputs_without_network(self):
-        never = lambda *args: self.fail("unexpected network request")
-        invalid = [
-            DECIDE.route_task("", env=self.env, transport=never),
-            DECIDE.route_task("\ud800", env=self.env, transport=never),
-            DECIDE.route_task("x" * (DECIDE.MAX_ROUTE_BYTES + 1), env=self.env, transport=never),
-            DECIDE.route_task("text", eligible_tiers=("god", "worker"), env=self.env, transport=never),
-            DECIDE.route_task("text", eligible_tiers=("worker", "worker"), env=self.env, transport=never),
-            DECIDE.route_task("text", baseline_tier="scout", env=self.env, transport=never),
-        ]
-        self.assertTrue(all(item["status"] == "invalid" for item in invalid))
-
-    def test_route_cli_default_on_but_falls_back_without_credentials(self):
         env = dict(os.environ)
-        env.pop("CLOUDFLARE_ACCOUNT_ID", None)
-        env.pop("CLOUDFLARE_API_TOKEN", None)
+        for name in ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN", "DECIDE_ROUTING"):
+            env.pop(name, None)
         env["PATH"] = ""
-        env.pop("DECIDE_ROUTING", None)
-        private_brief = "Sensitive task brief should not be echoed"
         process = subprocess.run(
             [sys.executable, "-I", str(SHIM), "route"],
-            input=private_brief, env=env, text=True, capture_output=True, check=False,
+            input=json.dumps(sample_route_brief()), env=env,
+            text=True, capture_output=True, check=False,
         )
         self.assertEqual(process.returncode, 0)
-        result = json.loads(process.stdout)
-        self.assertEqual(result["status"], "unavailable")
-        self.assertEqual(result["selected_tier"], "worker")
-        self.assertEqual(result["reason"], "missing_configuration")
-        self.assertNotIn(private_brief, process.stdout + process.stderr)
-        self.assertEqual(process.stderr, "")
+        self.assertEqual(json.loads(process.stdout)["reason"], "missing_configuration")
+        self.assertEqual(json.loads(process.stdout)["selected_tier"], "worker")
+        self.assertNotIn("runner", process.stdout + process.stderr)
         bad = subprocess.run(
-            [sys.executable, "-I", str(SHIM), "route", "--tiers", "scout,god"],
-            input=private_brief, env=env, text=True, capture_output=True, check=False,
+            [sys.executable, "-I", str(SHIM), "route"],
+            input="Fix the flaky Niceforge tests", env=env,
+            text=True, capture_output=True, check=False,
         )
         self.assertEqual(bad.returncode, 2)
-        self.assertEqual(json.loads(bad.stdout)["reason"], "invalid_routing_tiers")
-
+        self.assertEqual(json.loads(bad.stdout)["reason"], "invalid_route_brief")
+        self.assertEqual(bad.stderr, "")
 
     def test_cf_cli_uses_authenticated_profile_with_payload_on_stdin(self):
         calls = []
@@ -1075,14 +1157,14 @@ class DecideTests(unittest.TestCase):
             "model": "clef-flash",
             "answers": {"tier": {
                 "type": "choice", "choice": "mechanic", "confidence": 0.90,
-                "probabilities": {"mechanic": 0.90, "worker": 0.08, "expert": 0.02},
+                "probabilities": {"mechanic": 0.90, "worker": 0.07, "expert": 0.02, "abstain": 0.01},
             }},
             "usage": {"input_tokens": 18, "output_tokens": 0},
         }
         with mock.patch.object(DECIDE, "run_cf_decision", return_value={
             "status": "ok", "result": request, "elapsed_ms": 6,
         }) as call:
-            result = DECIDE.route_task("Fix specified fixtures", env={})
+            result = DECIDE.route_task(sample_route_brief(), env={})
         self.assertEqual(result["selected_tier"], "mechanic")
         self.assertEqual(result["reason"], "clef_advice")
         call.assert_called_once()
@@ -1093,6 +1175,13 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(status, {
             "status": "ok", "mode": "cf_cli", "authenticated": "unverified"
         })
+
+    def test_orchestrate_skill_uses_the_structured_route_tool_contract(self):
+        skill = (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text()
+        self.assertIn("decide route --guide", skill)
+        self.assertIn("JSON on stdin", skill)
+        self.assertIn("Never invent measurements or findings", skill)
+        self.assertNotIn("Sanitized task summary", skill)
 
 
 if __name__ == "__main__":
