@@ -166,6 +166,27 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_release("nope")
 
+    def test_release_missing_asset_keeps_installed_and_skips_uninstalled(self):
+        routes = {"https://github.com/laputa-systems/srv/releases.atom": atom([("2024-01-01", "release-1")])}
+        inst = self.make(routes, os_name="darwin", arch="aarch64")
+        with self.assertRaises(SkipInstall):
+            inst.install_release("srv")
+        dest = self.dest_path("srv")
+        dest.write_bytes(b"old")
+        (self.home / ".local/state/dl/srv").write_text("old-etag\n")
+        inst = self.make(routes, os_name="darwin", arch="aarch64")
+        inst.install_release("srv")
+        self.assertEqual(dest.read_bytes(), b"old")
+        self.assertEqual(self.state("srv"), "old-etag")
+
+    def test_empty_url_is_a_failed_fetch_not_a_value_error(self):
+        inst = Installer(self.home, os_name="darwin", arch="aarch64",
+                         env={"HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin"})
+        self.assertEqual(inst.asset_id(""), "")
+        self.assertEqual(inst.fetch_text(""), "")
+        self.assertEqual(inst.effective_url(""), "")
+        self.assertFalse(inst.download("", self.root / "out"))
+
     def test_release_shuck_installs_as_shellcheck(self):
         asset = "shuck-aarch64-apple-darwin"
         url = f"https://github.com/joshuarli/shck/releases/download/release-1/{asset}.zip"

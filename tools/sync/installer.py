@@ -239,20 +239,20 @@ class Installer:
         try:
             with urlopen(Request(url, headers={"User-Agent": "usr-sync"})) as response:
                 return response.geturl()
-        except (URLError, OSError):
+        except (URLError, OSError, ValueError):
             return ""
 
     def fetch_text(self, url: str) -> str:
         try:
             body, _ = self.fetch(url)
-        except (URLError, OSError):
+        except (URLError, OSError, ValueError):
             return ""
         return body.decode("utf-8", "replace")
 
     def download(self, url: str, target: Path) -> bool:
         try:
             body, _ = self.fetch(url)
-        except (URLError, OSError):
+        except (URLError, OSError, ValueError):
             return False
         Path(target).write_bytes(body)
         return True
@@ -260,7 +260,7 @@ class Installer:
     def download_text(self, url: str, target: Path) -> bool:
         try:
             body, _ = self.fetch(url)
-        except (URLError, OSError):
+        except (URLError, OSError, ValueError):
             return False
         Path(target).write_bytes(body)
         return True
@@ -268,7 +268,7 @@ class Installer:
     def asset_id(self, url: str) -> str:
         try:
             _, headers = self.fetch(url, ranged=True)
-        except (URLError, OSError):
+        except (URLError, OSError, ValueError):
             return ""
         for key, value in headers.items():
             if key.lower() == "etag":
@@ -523,6 +523,7 @@ class Installer:
         tag = self.latest_tag(f"https://github.com/{owner}/{repo}/releases.atom", prefix=tag_prefix)
         if not tag:
             self.unchecked(prog, "no release found")
+            return
         if self.os_name == "linux" and prog in ("ish", "rage", "soulseek-rs", "shuck"):
             artifact_target = f"{self.arch}-unknown-linux-musl-static"
         elif self.os_name == "linux" and prog in (
@@ -549,6 +550,7 @@ class Installer:
                 break
         if not asset:
             self.unchecked(prog, f"{asset_base}.zip is not available in {tag}")
+            return
         asset_inner = prog if prog == "bylaws" else asset
         if self.is_current(install_name, record):
             self.current(f"{install_name} is current ({tag})")
@@ -580,11 +582,13 @@ class Installer:
         tag = self.latest_tag("https://github.com/laputa-systems/zzz/releases.atom", prefix="release-")
         if not tag:
             self.unchecked("zzz", "no release found")
+            return
         asset = f"zzz-linux-musl-static-{self.arch}"
         url = f"https://github.com/laputa-systems/zzz/releases/download/{tag}/{asset}"
         record = self.asset_id(url)
         if not record:
             self.unchecked("zzz", f"{asset} is unavailable")
+            return
         if self.is_current("zzz", record):
             self.current(f"zzz is current ({tag})")
             return
@@ -608,11 +612,13 @@ class Installer:
         tag = tag_match.group(1) if tag_match else ""
         if not tag:
             self.unchecked(prog, "no upstream release found")
+            return
         asset = f"{project}-{tag}-{artifact_target}"
         url = f"https://github.com/{owner}/{project}/releases/download/{tag}/{asset}.tar.gz"
         record = self.asset_id(url)
         if not record:
             self.unchecked(prog, f"{asset}.tar.gz is not available in {tag}")
+            return
         if self.is_current(prog, record):
             self.current(f"{prog} is current ({tag})")
             return
@@ -642,12 +648,14 @@ class Installer:
                 break
         if not tag:
             self.unchecked("mold", "no release found")
+            return
         version = tag.removeprefix("mold-musl-").rsplit("-", 1)[0]
         asset = f"mold-{version}-{self.arch}-linux-musl"
         url = f"https://github.com/joshuarli/mold/releases/download/{tag}/{asset}.tar.gz"
         record = self.asset_id(url)
         if not record:
             self.unchecked("mold", f"{asset}.tar.gz is not available in {tag}")
+            return
         ld_mold = self.dest / "ld.mold"
         if self.is_current("mold", record) and ld_mold.is_symlink() \
                 and os.readlink(ld_mold) == "mold":
@@ -694,11 +702,13 @@ class Installer:
         tag = self.latest_tag("https://github.com/astral-sh/uv/releases.atom")
         if not tag:
             self.unchecked("uv", "no release found")
+            return
         asset = f"uv-{target}"
         url = f"https://github.com/astral-sh/uv/releases/download/{tag}/{asset}.tar.gz"
         record = self.asset_id(url)
         if not record:
             self.unchecked("uv", f"{asset}.tar.gz is not available in {tag}")
+            return
         if self.is_current("uv", record) and self.is_current("uvx", record):
             self.current(f"uv is current ({tag})")
             return
@@ -742,16 +752,19 @@ class Installer:
         tag = self.latest_tag("https://github.com/vercel-labs/fx/releases.atom")
         if not tag:
             self.unchecked("fx", "no release found")
+            return
         asset = f"fx-{fx_platform}.tar.gz"
         base = f"https://github.com/vercel-labs/fx/releases/download/{tag}"
         sums_path = Path(tempfile.mkstemp()[1])
         if not self.download(f"{base}/{asset}.sha256", sums_path):
             sums_path.unlink(missing_ok=True)
             self.unchecked("fx", f"{asset}.sha256 is unavailable")
+            return
         expected = sums_path.read_text().split()[0] if sums_path.read_text().split() else ""
         sums_path.unlink(missing_ok=True)
         if len(expected) != 64 or re.search(r"[^0-9a-fA-F]", expected):
             self.unchecked("fx", f"{asset}.sha256 is invalid")
+            return
         record = f"{tag}:{expected}"
         if self.is_current("fx", record):
             self.current(f"fx is current ({tag})")
@@ -804,10 +817,12 @@ class Installer:
                 version = line.strip()
         if not version:
             self.unchecked("grok", "no stable release found")
+            return
         url = f"https://x.ai/cli/grok-{version}-{platform_name}"
         record = self.asset_id(url)
         if not record:
             self.unchecked("grok", f"{url} is unreachable")
+            return
         bin_dir = self.grok_home / "bin"
         downloads = self.grok_home / "downloads"
         binary = downloads / f"grok-{platform_name}"
@@ -856,9 +871,11 @@ class Installer:
             self.install_jaq()
             if not self.jaq_available():
                 self.unchecked(tool, f"jaq is required to find the {tool} release")
+                return
         tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", exclude_prefix=exclude_prefix)
         if not tag:
             self.unchecked(tool, "no release found")
+            return
         release = self.fetch_json(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
         assets = release.get("assets", [])
         asset_url = ""
@@ -873,9 +890,11 @@ class Installer:
                 sums_url = str(entry.get("browser_download_url", ""))
         if not asset_url or not sums_url:
             self.unchecked(tool, f"{tag} has no {triple} release asset")
+            return
         record = self.asset_id(asset_url)
         if not record:
             self.unchecked(tool, "release asset is unreachable")
+            return
         if self.is_current(tool, record):
             self.current(f"{tool} is current ({tag})")
             return
@@ -964,11 +983,14 @@ class Installer:
                   extra: tuple[str, ...] = (), fetch_msg: str = "", no_release: str = "") -> None:
         if not self.which("npm"):
             self.unchecked(tool, "npm is required")
+            return
         if not self.node_meets_minimum():
             self.unchecked(tool, f"Node.js {NODE_MINIMUM} or newer is required")
+            return
         version = self.npm_view(f"{package}@latest")
         if not self.valid_version(version):
             self.unchecked(tool, no_release or "no npm release found")
+            return
         launcher = self.dest / bin_name
         if launcher.exists() or launcher.is_symlink():
             actual = os.readlink(launcher) if launcher.is_symlink() else ""
@@ -1030,11 +1052,14 @@ class Installer:
         extra_root = self.pnpm_root
         if not self.which("npm"):
             self.unchecked("pnpm", "npm is required")
+            return
         if not self.node_meets_minimum():
             self.unchecked("pnpm", f"Node.js {NODE_MINIMUM} or newer is required")
+            return
         version = self.npm_view("pnpm@latest")
         if not self.valid_version(version):
             self.unchecked("pnpm", "could not resolve the latest pnpm version")
+            return
         launcher = self.dest / "pnpm"
         if self._state_text("pnpm") == version and (extra_root / "bin/pnpm").is_file() \
                 and os.access(extra_root / "bin/pnpm", os.X_OK) \
@@ -1154,14 +1179,18 @@ class Installer:
     def install_dsh(self) -> None:
         if not self.which("npm"):
             self.unchecked("dsh", "npm is required")
+            return
         if not self.node_meets_minimum():
             self.unchecked("dsh", f"Node.js {NODE_MINIMUM} or newer is required")
+            return
         version = self.npm_view("@deepseek-ai/dsh@next")
         if not self.valid_version(version):
             self.unchecked("dsh", "no npm release found")
+            return
         tui_version = self.npm_view("@deepseek-harness-tui/dsh-tui")
         if not self.valid_version(tui_version):
             self.unchecked("dsh", "no dsh-tui release found")
+            return
         if not self.which("pnpm"):
             self.skip("dsh", "pnpm is required by dsh-tui")
         if self._state_text("dsh") == version and self._state_text("dsh-tui") == tui_version \
@@ -1252,6 +1281,7 @@ class Installer:
                                   capture=True, extra_env={"PATH": current_bin + os.pathsep + self._path}).stdout.strip()
             if not self.valid_version(npm_latest):
                 self.unchecked("nodejs", "could not resolve the latest npm version")
+                return
             installed_npm = self.run([str(self.nodejs_root / "current/bin/npm"), "--version"], capture=True).stdout.strip()
             installed_node = self.run([str(self.nodejs_root / "current/bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip()
             if installed_npm == npm_latest and installed_node == NODEJS_VERSION:
@@ -1465,6 +1495,7 @@ class Installer:
         tag = str(release.get("tag_name", ""))
         if not tag.startswith("rust-v") or not self.valid_version(tag.removeprefix("rust-v")):
             self.unchecked("codex", "no release found")
+            return
         version = tag.removeprefix("rust-v")
         asset = f"codex-package-{target}.tar.gz"
         asset_entry = {}
@@ -1477,6 +1508,7 @@ class Installer:
         if len(digest) != 64 or re.search(r"[^0-9a-f]", digest) or not url.startswith(
                 ("https://releases.openai.com/codex/releases/", "https://github.com/openai/codex/releases/download/")):
             self.unchecked("codex", f"{asset} is missing a SHA-256 digest")
+            return
         codex_root = self.codex_home / "packages/standalone"
         if (self.dest / "codex").is_dir() and not (self.dest / "codex").is_symlink():
             self.skip("codex", f"{self.dest}/codex is a directory")
@@ -1486,6 +1518,7 @@ class Installer:
         record = self.asset_id(url)
         if not record:
             self.unchecked("codex", f"{asset} is unavailable")
+            return
         if not self.codex_legacy() and self.is_current("codex", record):
             target_path = os.readlink(self.dest / "codex") if (self.dest / "codex").is_symlink() else ""
             if self.own_codex_release_target(target_path):
@@ -1600,6 +1633,7 @@ class Installer:
         record = self.asset_id(url)
         if not record:
             self.unchecked(tool, f"{asset} is unavailable")
+            return
         if self.is_current(state_name, record) and current.is_symlink():
             pointed = os.readlink(current)
             current_ok = Path(pointed).is_dir()
@@ -1695,6 +1729,7 @@ class Installer:
         tag = self.latest_tag("https://github.com/laputa-systems/git-build/releases.atom")
         if not tag:
             self.unchecked("git", "no release found")
+            return
         asset = f"git-{triple}.zip"
         base = f"https://github.com/laputa-systems/git-build/releases/download/{tag}"
         def validate(staged: Path) -> bool:
@@ -1726,6 +1761,7 @@ class Installer:
         tag = self.latest_tag("https://github.com/laputa-systems/ssh-build/releases.atom")
         if not tag:
             self.unchecked("ssh", "no release found")
+            return
         asset = f"ssh-{triple}.zip"
         base = f"https://github.com/laputa-systems/ssh-build/releases/download/{tag}"
         def validate(staged: Path) -> bool:
@@ -1747,6 +1783,7 @@ class Installer:
         tag = self.latest_tag("https://github.com/laputa-systems/ssh-build/releases.atom")
         if not tag:
             self.unchecked("oxish", "no release found")
+            return
         asset = f"oxish-{triple}.zip"
         base = f"https://github.com/laputa-systems/ssh-build/releases/download/{tag}"
         def validate(staged: Path) -> bool:
@@ -1777,6 +1814,7 @@ class Installer:
         tag = self.latest_date_tag(f"https://github.com/{FFMPEG_REPO}/releases.atom")
         if not tag:
             self.unchecked("ffmpeg", "no release found")
+            return
         home = self.ffmpeg_home
         for command in FFMPEG_COMMANDS:
             existing = self.dest / command
@@ -1797,6 +1835,7 @@ class Installer:
         if not self.download(f"{release_base}/SHA256SUMS", sums_path):
             sums_path.unlink(missing_ok=True)
             self.unchecked("ffmpeg", f"SHA256SUMS is unavailable in {tag}")
+            return
         suffix = f"-{triple}-tools.tar.gz"
         listed = []
         for line in sums_path.read_text().splitlines():
@@ -1807,14 +1846,17 @@ class Installer:
         sums_path.unlink(missing_ok=True)
         if len(listed) != 1:
             self.unchecked("ffmpeg", f"the {triple} tools archive is not listed in {tag}")
+            return
         expected, asset = listed[0]
         if not re.match(rf"^ffmpeg-.*\+{re.escape(tag)}-{re.escape(triple)}-tools\.tar\.gz$", asset) \
                 or re.search(r"[^A-Za-z0-9._+\-]", asset):
             self.unchecked("ffmpeg", f"the {triple} tools archive is not listed in {tag}")
+            return
         url = f"{release_base}/{asset.replace('+', '%2B')}"
         record_id = self.asset_id(url)
         if not record_id:
             self.unchecked("ffmpeg", f"{asset} is unavailable")
+            return
         record = f"{tag}:{record_id}"
         release_dir = releases / f"{tag}-{triple}"
         if self.is_current("ffmpeg", record) and current.is_symlink() \
@@ -1947,6 +1989,7 @@ class Installer:
         record = self.asset_id(url)
         if not record:
             self.unchecked("opencode2", f"{asset} is unavailable")
+            return
         bin_dir = self.opencode2_home / "bin"
         if not self.opencode2_legacy() and self.is_current("opencode2", record):
             self.write_opencode2_shim(bin_dir / "opencode2")
@@ -1997,11 +2040,13 @@ class Installer:
         tag = self.latest_tag(f"https://github.com/{PLAYER_REPO}/releases.atom")
         if not tag:
             self.unchecked("player", "no release found")
+            return
         base = f"https://github.com/{PLAYER_REPO}/releases/download/{tag}"
         url = f"{base}/{asset_name}"
         record_id = self.asset_id(url)
         if not record_id:
             self.unchecked("player", f"{asset_name} is unavailable")
+            return
         record = f"{tag}:{record_id}"
         launcher = self.dest / "player"
         launcher_target = os.readlink(launcher) if launcher.is_symlink() else ""
@@ -2105,11 +2150,13 @@ class Installer:
         tag = self.latest_tag("https://github.com/joshuarli/ghostty/releases.atom", prefix="release-")
         if not tag:
             self.unchecked("ghostty-custom", "no prerelease found")
+            return
         base = f"https://github.com/joshuarli/ghostty/releases/download/{tag}"
         url = f"{base}/{GHOSTTY_CUSTOM_ASSET}"
         record = self.asset_id(url)
         if not record:
             self.unchecked("ghostty-custom", f"{GHOSTTY_CUSTOM_ASSET} is not available in {tag}")
+            return
         installed_id = self._state_text("ghostty-custom")
         launcher = self.dest / "ghostty-custom"
         launcher_target = os.readlink(launcher) if launcher.is_symlink() else ""
