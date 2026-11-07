@@ -564,6 +564,7 @@ class DecideTests(unittest.TestCase):
         missing_env = dict(os.environ)
         missing_env.pop("CLOUDFLARE_ACCOUNT_ID", None)
         missing_env.pop("CLOUDFLARE_API_TOKEN", None)
+        missing_env["PATH"] = ""
         missing = subprocess.run(
             [sys.executable, "-I", str(SHIM), "doctor"],
             env=missing_env,
@@ -578,6 +579,7 @@ class DecideTests(unittest.TestCase):
         env = dict(os.environ)
         env.pop("CLOUDFLARE_ACCOUNT_ID", None)
         env.pop("CLOUDFLARE_API_TOKEN", None)
+        env["PATH"] = ""
         valid = subprocess.run(
             [sys.executable, "-I", str(SHIM)],
             env=env,
@@ -992,6 +994,7 @@ class DecideTests(unittest.TestCase):
         env = dict(os.environ)
         env.pop("CLOUDFLARE_ACCOUNT_ID", None)
         env.pop("CLOUDFLARE_API_TOKEN", None)
+        env["PATH"] = ""
         env.pop("DECIDE_ROUTING", None)
         private_brief = "Sensitive task brief should not be echoed"
         process = subprocess.run(
@@ -1011,6 +1014,85 @@ class DecideTests(unittest.TestCase):
         )
         self.assertEqual(bad.returncode, 2)
         self.assertEqual(json.loads(bad.stdout)["reason"], "invalid_routing_tiers")
+
+
+    def test_cf_cli_uses_authenticated_profile_with_payload_on_stdin(self):
+        calls = []
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps(sample_result(self.request)).encode("utf-8"),
+            )
+        outcome = DECIDE.run_decision_auto(
+            self.request, env={}, cf_executable="/usr/local/bin/cf",
+            cf_runner=fake_run, clock=lambda: 1.0,
+        )
+        self.assertEqual(outcome["status"], "ok")
+        self.assertEqual(len(calls), 1)
+        argv, kwargs = calls[0]
+        self.assertEqual(argv, [
+            "/usr/local/bin/cf", "ai", "run", "@cf/cloudflare/clef-flash",
+            "--body", "@/dev/stdin",
+        ])
+        self.assertEqual(json.loads(kwargs["input"]), {"model": "clef-flash", **self.request})
+        self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+        self.assertEqual(kwargs["timeout"], DECIDE.CF_REQUEST_TIMEOUT_SECONDS)
+        self.assertNotIn("checkout errors", repr(argv))
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", repr(argv))
+
+    def test_cf_cli_unavailable_errors_and_invalid_output_never_leak(self):
+        cases = [
+            (subprocess.CompletedProcess([], 1, b"private credential error"), "cf_cli_failure"),
+            (subprocess.CompletedProcess([], 0, b"bad-json"), "invalid_provider_response"),
+            (subprocess.CompletedProcess([], 0, b"x" * (DECIDE.MAX_RESPONSE_BYTES + 1)), "invalid_provider_response"),
+        ]
+        for process, reason in cases:
+            got = DECIDE.run_cf_decision(
+                self.request, executable="/usr/local/bin/cf",
+                runner=lambda *args, process=process, **kwargs: process,
+            )
+            self.assertEqual(got, {"status": "unavailable", "reason": reason})
+            self.assertNotIn("private", json.dumps(got))
+        got = DECIDE.run_cf_decision(
+            self.request, executable="/usr/local/bin/cf",
+            runner=lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.TimeoutExpired("cf", 15)),
+        )
+        self.assertEqual(got["reason"], "timeout")
+        with mock.patch.object(DECIDE.shutil, "which", return_value=None):
+            self.assertEqual(
+                DECIDE.run_cf_decision(self.request)["reason"], "missing_configuration"
+            )
+
+    def test_cf_cli_does_not_process_invalid_requests(self):
+        outcome = DECIDE.run_cf_decision(
+            {"state": "private", "questions": {}}, executable="/usr/local/bin/cf",
+            runner=lambda *args, **kwargs: self.fail("subprocess invoked"),
+        )
+        self.assertEqual(outcome["status"], "invalid")
+
+    def test_cf_cli_routes_without_env_and_preserves_advisory_gates(self):
+        request = {
+            "model": "clef-flash",
+            "answers": {"tier": {
+                "type": "choice", "choice": "mechanic", "confidence": 0.90,
+                "probabilities": {"mechanic": 0.90, "worker": 0.08, "expert": 0.02},
+            }},
+            "usage": {"input_tokens": 18, "output_tokens": 0},
+        }
+        with mock.patch.object(DECIDE, "run_cf_decision", return_value={
+            "status": "ok", "result": request, "elapsed_ms": 6,
+        }) as call:
+            result = DECIDE.route_task("Fix specified fixtures", env={})
+        self.assertEqual(result["selected_tier"], "mechanic")
+        self.assertEqual(result["reason"], "clef_advice")
+        call.assert_called_once()
+
+    def test_doctor_identifies_cli_without_claiming_verified_oauth(self):
+        with mock.patch.object(DECIDE.shutil, "which", return_value="/usr/local/bin/cf"):
+            status = DECIDE.doctor({})
+        self.assertEqual(status, {
+            "status": "ok", "mode": "cf_cli", "authenticated": "unverified"
+        })
 
 
 if __name__ == "__main__":

@@ -5,7 +5,9 @@ import json
 import math
 import os
 import re
+import shutil
 import socket
+import subprocess
 import ssl
 import sys
 import time
@@ -20,6 +22,7 @@ MAX_REQUEST_BYTES = 12_288
 MAX_RESPONSE_BYTES = 65_536
 MAX_JSON_DEPTH = 32
 REQUEST_TIMEOUT_SECONDS = 10
+CF_REQUEST_TIMEOUT_SECONDS = 15
 CONTEXT_WINDOW_TOKENS = 24_576
 ModelName = Literal["clef-flash"]
 MODELS: Final[dict[ModelName, str]] = {
@@ -439,6 +442,64 @@ def run_decision(request, model="clef-flash", env=None, transport=http_post, clo
         return {"status": "unavailable", "reason": "invalid_provider_response"}
 
 
+def run_cf_decision(request, model="clef-flash", runner=None, executable=None, clock=time.monotonic):
+    """Invoke authenticated cf, keeping request data off argv and the filesystem."""
+    try:
+        validate_request(request)
+        model = parse_model(model)
+        body = json.dumps(
+            {"model": model, **request},
+            ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+        ).encode("utf-8")
+        if len(body) > MAX_REQUEST_BYTES:
+            raise InvalidInput("request_too_large")
+    except (InvalidInput, TypeError, ValueError) as error:
+        return {"status": "invalid", "reason": error.reason if isinstance(error, InvalidInput) else "invalid_input"}
+
+    if executable is None:
+        executable = shutil.which("cf")
+    if executable is None:
+        return {"status": "unavailable", "reason": "missing_configuration"}
+    if runner is None:
+        runner = subprocess.run
+    start = clock()
+    try:
+        process = runner(
+            [executable, "ai", "run", MODELS[model], "--body", "@/dev/stdin"],
+            input=body, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=CF_REQUEST_TIMEOUT_SECONDS, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"status": "unavailable", "reason": "timeout"}
+    except (OSError, ValueError):
+        return {"status": "unavailable", "reason": "cf_cli_unavailable"}
+    if process.returncode != 0:
+        return {"status": "unavailable", "reason": "cf_cli_failure"}
+    if not isinstance(process.stdout, bytes) or len(process.stdout) > MAX_RESPONSE_BYTES:
+        return {"status": "unavailable", "reason": "invalid_provider_response"}
+    try:
+        # cf ai run prints the unwrapped Workers AI result on stdout.
+        result = validate_result(request, model, parse_json_bytes(process.stdout))
+        tokens = result["usage"]["input_tokens"] + result["usage"]["output_tokens"]
+        if tokens >= CONTEXT_WINDOW_TOKENS:
+            return {"status": "unavailable", "reason": "context_limit"}
+        return {"status": "ok", "result": result, "elapsed_ms": round((clock() - start) * 1000, 3)}
+    except (InvalidInput, InvalidProviderResponse, TypeError, ValueError, RecursionError):
+        return {"status": "unavailable", "reason": "invalid_provider_response"}
+
+
+def run_decision_auto(
+    request, model="clef-flash", env=None, transport=http_post, clock=time.monotonic,
+    cf_runner=None, cf_executable=None,
+):
+    """Explicit REST credentials take precedence over the authenticated cf CLI."""
+    if env is None:
+        env = os.environ
+    status = config_status(env)
+    if status["status"] == "ok" or status.get("reason") != "missing_configuration" or transport is not http_post:
+        return run_decision(request, model, env=env, transport=transport, clock=clock)
+    return run_cf_decision(request, model, runner=cf_runner, executable=cf_executable, clock=clock)
+
 
 def route_task(
     task,
@@ -498,7 +559,7 @@ def route_task(
             }
         },
     }
-    result = run_decision(request, "clef-flash", env=env, transport=transport, clock=clock)
+    result = run_decision_auto(request, "clef-flash", env=env, transport=transport, clock=clock)
     if result["status"] != "ok":
         return {**fallback, "status": result["status"], "reason": result["reason"]}
 
@@ -535,7 +596,10 @@ def route_task(
 def doctor(env=None):
     if env is None:
         env = os.environ
-    return config_status(env)
+    status = config_status(env)
+    if status.get("reason") == "missing_configuration" and shutil.which("cf"):
+        return {"status": "ok", "mode": "cf_cli", "authenticated": "unverified"}
+    return status
 
 
 def validate_eval_options(live, max_calls):
@@ -1031,7 +1095,7 @@ def build_parser():
     setup = root / "docs" / "agent-setup.md"
     parser = argparse.ArgumentParser(
         prog="decide",
-        description="Ask a bounded advisory decision question using Cloudflare Workers AI. It does not deploy a Worker. Credentials come from the environment (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID), usually via vault.",
+        description="Ask a bounded advisory decision question using Cloudflare Workers AI. It does not deploy a Worker. Uses an existing cf auth login session by default, or explicit CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.",
         epilog="Examples:\n"
         "  decide doctor\n"
         "  printf '%s' 'Sanitized task summary' | decide route --baseline worker\n"
@@ -1039,7 +1103,7 @@ def build_parser():
         "  decide eval cases.jsonl\n"
         "  decide eval --live --max-calls 5 cases.jsonl\n"
         "\n"
-        f"Full setup (token permissions, vault, budgets): {readme}\n"
+        f"Full setup (cf login, optional REST credentials, budgets): {readme}\n"
         f"and {setup}.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1126,7 +1190,7 @@ def main(argv=None, env=None, stdin=None, stdout=None):
     except InvalidInput as error:
         print_json({"status": "invalid", "reason": error.reason}, stdout)
         return 2
-    outcome = run_decision(request, args.model, env)
+    outcome = run_decision_auto(request, args.model, env)
     print_json(outcome, stdout)
     return 2 if outcome["status"] == "invalid" else 0
 
