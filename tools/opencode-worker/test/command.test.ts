@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from "node:fs"
+import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { commandResult, startCommand } from "../src/command.ts"
@@ -59,6 +60,23 @@ test("spawn failure with an invalid cmd shebang is handled without crashing the 
     }
   } finally {
     process.env.PATH = prior
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("a live Command Code process spawned by another bridge process reports running", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-foreign-")))
+  const output = join(root, "out.ndjson"), errors = join(root, "err.stderr")
+  writeFileSync(output, ""); writeFileSync(errors, "")
+  const child = spawn("sleep", ["30"], { stdio: "ignore" })
+  try {
+    const run = { pid: child.pid!, output, errors, started_at: new Date().toISOString() }
+    assert.equal(commandResult(run).state, "running")
+    child.kill("SIGKILL")
+    await new Promise((resolve) => child.on("exit", resolve))
+    assert.equal(commandResult(run).state, "unknown_or_interrupted")
+  } finally {
+    child.kill("SIGKILL")
     rmSync(root, { recursive: true, force: true })
   }
 })

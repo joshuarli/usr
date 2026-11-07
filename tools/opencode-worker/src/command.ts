@@ -85,9 +85,18 @@ export function commandResult(run: CommandRun): { state: string; result: Command
     try { stderr = readFileSync(run.errors, "utf8").slice(-2000) || null } catch { /* No stderr yet. */ }
   }
   if (last) return { state: last.subtype === "success" ? "succeeded" : "failed", result: last, stderr }
-  if (children.has(run.pid)) return { state: "running", result: null, stderr }
+  if (children.has(run.pid) || processAlive(run.pid)) return { state: "running", result: null, stderr }
   if (stderr?.includes("spawn error:")) return { state: "failed", result: null, stderr }
   return { state: "unknown_or_interrupted", result: null, stderr }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
 }
 
 export function cancelCommand(run: CommandRun): boolean {
