@@ -1,13 +1,13 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { commandResult, startCommand } from "../src/command.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session", async () => {
-  const root = mkdtempSync(join(tmpdir(), "cmd-worker-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-worker-")))
   const bin = join(root, "bin"), logs = join(root, "logs")
   mkdirSync(bin); mkdirSync(logs)
   const oldPath = process.env.PATH
@@ -39,17 +39,24 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
 })
 
 test("spawn failure with an invalid cmd shebang is handled without crashing the MCP process", async () => {
-  const root = mkdtempSync(join(tmpdir(), "cmd-broken-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-broken-")))
   const bin = join(root, "bin"), logs = join(root, "logs")
   mkdirSync(bin); mkdirSync(logs)
   const prior = process.env.PATH
   try {
     writeFileSync(join(bin, "cmd"), "#!/nonexistent/interpreter/for-cmd\n", { mode: 0o755 })
-    process.env.PATH = bin + ":" + prior
-    assert.throws(() => startCommand(root, logs, "test", "low", true), /Cannot start Command Code/)
-    await delay(30)
-    // An unhandled ChildProcess error would terminate the test process before this assertion.
-    assert.ok(true)
+    process.env.PATH = bin
+    let run: ReturnType<typeof startCommand> | null = null
+    try { run = startCommand(root, logs, "test", "low", true) }
+    catch (error) { assert.match(String(error), /Cannot start Command Code/) }
+    if (run) {
+      let state = commandResult(run).state
+      for (let i = 0; state === "running" && i < 250; i++) { await delay(20); state = commandResult(run).state }
+      assert.notEqual(state, "running")
+      assert.notEqual(state, "succeeded")
+    } else {
+      await delay(30)
+    }
   } finally {
     process.env.PATH = prior
     rmSync(root, { recursive: true, force: true })

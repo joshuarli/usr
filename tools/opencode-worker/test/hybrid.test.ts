@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
@@ -11,7 +11,7 @@ import { type CommandRun } from "../src/command.ts"
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim()
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "usr-hybrid-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "usr-hybrid-")))
   git(root, "init", "-q")
   git(root, "config", "user.email", "test@example.com")
   git(root, "config", "user.name", "Test")
@@ -101,6 +101,17 @@ test("missing OpenCode variant starts read-only Command Code scout; resume is pi
     await bridge.resume(f.cwd, task.session_id, "Give file:line evidence")
     assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"resume":"cmd-session"')))
     await assert.rejects(bridge.resume(f.cwd, task.session_id, "third attempt"), /attempt limit/)
+  } finally { f.close() }
+})
+test("an OpenCode server that cannot start admits the task on Command Code", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const api: OpenCodePort = { ...m.api, models: async () => { throw new Error("Failed to start server") } }
+    const task = await makeHybridBridge(api, m.command).start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    assert.equal(task.backend, "command-code")
+    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"high"')))
+    assert.ok(!m.calls.some((c) => JSON.stringify(c).includes("ses_fixture")))
   } finally { f.close() }
 })
 test("terminal OpenCode quota failure falls back only when no changes exist", async () => {

@@ -1,14 +1,14 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { randomUUID } from "node:crypto"
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree, worktreeLeasePath } from "../src/worktree-lease.ts"
 
 const id = () => "usrw_" + randomUUID()
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "usr-lease-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "usr-lease-")))
   const cwd = join(root, "wt-a")
   const state = join(root, "state")
   mkdirSync(cwd); mkdirSync(state)

@@ -195,13 +195,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let available: boolean
       try { available = (await worker.modelCheck(dir)).available }
       catch (e) {
-        if (!quota(e)) {
-          // No executor is started by model discovery. Safe to end this admission.
-          rmSync(pathFor(dir, s.id), { force: true })
-          releaseWorktree(leaseDir, dir, s.id)
-          throw e
-        }
-        fallback(s, "quota-limited model check")
+        fallback(s, quota(e) ? "quota-limited model check" : "OpenCode unavailable: " + String(e))
         return { session_id: s.id, backend: s.backend, status: "admitted" }
       }
       if (!available) {

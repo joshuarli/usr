@@ -72,7 +72,7 @@ export async function connect(): Promise<Bridge> {
     const [{ OpenCode }, { Service }] = await Promise.all([
       import("@opencode/client"), import("@opencode/client/service"),
     ])
-    const endpoint = await Service.ensure({ version: (version: string) => version.startsWith("2.") })
+    const endpoint = await Service.ensure({ command: ["opencode2", "serve", "--service"], version: (version: string) => version.startsWith("2.") })
     const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
     return {
       create: (input) => client.session.create(input),

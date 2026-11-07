@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_MODEL, FREE_MODEL, GO_MODEL, checkedWorktree, makeWorkerBridge, selectedModel, type OpenCodePort } from "../src/bridge.ts"
@@ -10,7 +10,7 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim()
 }
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "usr-oc-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "usr-oc-")))
   git(root, "init", "-q")
   git(root, "config", "user.email", "test@example.com")
   git(root, "config", "user.name", "Test")
