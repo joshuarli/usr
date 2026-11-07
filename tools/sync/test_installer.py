@@ -554,9 +554,21 @@ sys.exit(1)
         inst.install_opencode2()
         self.assertEqual((self.home / ".opencode/bin/opencode").read_bytes(), b"binary")
         self.assertTrue(self.dest_path("opencode2").is_file())
+        self.assertEqual(self.dest_path("opencode").read_text(), '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"\n')
         inst = self.make({url: (payload, {"ETag": "e"})})
         inst.install_opencode2()
         self.assertFalse(inst.changed)
+
+    def test_opencode2_alias_keeps_foreign_file(self):
+        asset = "opencode-linux-x64.tar.gz"
+        url = f"https://opencode.ai/update/api/latest/cli/opencode/{asset}"
+        payload = make_tar({"opencode": b"binary"})
+        inst = self.make({url: (payload, {"ETag": "e"})})
+        foreign = self.dest_path("opencode")
+        foreign.write_text("#!/bin/sh\necho foreign\n")
+        foreign.chmod(0o755)
+        inst.install_opencode2()
+        self.assertEqual(foreign.read_text(), "#!/bin/sh\necho foreign\n")
 
     def test_player_linux_and_ghostty_rejections(self):
         inst = self.make({}, os_name="darwin", arch="x86_64")

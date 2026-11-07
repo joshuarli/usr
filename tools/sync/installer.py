@@ -37,6 +37,7 @@ GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
 SSH_COMMANDS = "ssh ssh-keygen ssh-agent ssh-add sftp scp".split()
 OXISH_COMMANDS = "oxish-server oxish-session".split()
 FFMPEG_COMMANDS = "ffmpeg ffprobe".split()
+OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pack git-submodule git-submodule--helper git-sh-setup git-sh-i18n git-sh-i18n--envsubst".split()
 
 
@@ -2036,10 +2037,29 @@ class Installer:
 
     def write_opencode2_shim(self, target: Path) -> None:
         staged = self.stage_file(target.parent, ".opencode2-shim.")
-        staged.write_text('#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"\n')
+        staged.write_text(OPENCODE2_SHIM + "\n")
         staged.chmod(0o755)
         os.replace(staged, target)
         self.own_file(target)
+
+    def write_opencode_alias(self) -> None:
+        alias = self.dest / "opencode"
+        if alias.exists() or alias.is_symlink():
+            if not self.opencode_alias_managed():
+                self.warn(f"Warning: {alias} is not the compat shim; keeping it")
+                return
+        self.write_opencode2_shim(alias)
+
+    def opencode_alias_managed(self) -> bool:
+        alias = self.dest / "opencode"
+        if alias.is_symlink():
+            return os.readlink(alias) == str(self.opencode2_home / "bin/opencode2")
+        if not alias.is_file() or not os.access(alias, os.X_OK):
+            return False
+        try:
+            return alias.read_text().rstrip("\n") == OPENCODE2_SHIM
+        except OSError:
+            return False
 
     def opencode2_managed(self) -> bool:
         launcher = self.dest / "opencode2"
@@ -2048,7 +2068,7 @@ class Installer:
         if not launcher.is_file() or not os.access(launcher, os.X_OK):
             return False
         try:
-            return launcher.read_text().rstrip("\n") == '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
+            return launcher.read_text().rstrip("\n") == OPENCODE2_SHIM
         except OSError:
             return False
 
@@ -2082,6 +2102,7 @@ class Installer:
         if not self.opencode2_legacy() and self.is_current("opencode2", record):
             self.write_opencode2_shim(bin_dir / "opencode2")
             self.write_opencode2_shim(self.dest / "opencode2")
+            self.write_opencode_alias()
             self.own_file(bin_dir / "opencode")
             self.current("opencode2 is current")
             return
@@ -2115,6 +2136,7 @@ class Installer:
         self.own_file(binary)
         self.write_opencode2_shim(bin_dir / "opencode2")
         self.write_opencode2_shim(self.dest / "opencode2")
+        self.write_opencode_alias()
         self.write_state("opencode2", record)
         self.changed = True
         self.ok(f"Installed {self.dest}/opencode2")
