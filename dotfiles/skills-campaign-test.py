@@ -68,6 +68,8 @@ def install_journey(repo: Path) -> Path:
 def git_init(repo: Path) -> None:
     repo.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    for name in ("info", "hooks"):
+        (repo / ".git" / name).mkdir(exist_ok=True)
 
 
 def scoring_repo(parent: Path) -> tuple[Path, str]:
@@ -388,7 +390,7 @@ class SkillCampaignTests(unittest.TestCase):
             try:
                 repo = work / "repo"
                 helper = install_journey(repo)
-                subprocess.run(["git", "init", "-q", str(repo)], check=True)
+                git_init(repo)
                 exclude = repo / ".git" / "info" / "exclude"
                 exclude.write_text(".work/\n", encoding="utf-8")
                 outside = work / "outside"
@@ -411,7 +413,7 @@ class SkillCampaignTests(unittest.TestCase):
         try:
             repo = work / "repo"
             helper = install_journey(repo)
-            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            git_init(repo)
             (repo / ".gitignore").write_text(".work/\n", encoding="utf-8")
             result = run(str(helper))
             self.assertNotEqual(0, result.returncode)
@@ -430,7 +432,7 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertIn(signal_trap, script)
             helper.write_text(script.replace(signal_trap, signal_trap + 'kill -TERM "$$"\n', 1), encoding="utf-8")
             helper.chmod(0o755)
-            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            git_init(repo)
             exclude = repo / ".git" / "info" / "exclude"
             exclude.write_text(".work/\n", encoding="utf-8")
             interrupted = run(str(helper))

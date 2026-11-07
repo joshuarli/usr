@@ -16,7 +16,7 @@ class KacheTests(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.root = Path(tmp.name)
+        self.root = Path(tmp.name).resolve()
         self.home = self.root / "home"
         self.home.mkdir()
         self.binary = self.home / ".cargo/bin/kache"

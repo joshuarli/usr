@@ -25,7 +25,7 @@ class LinkTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="usr-links-")
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         (self.root / "dotfiles/base").mkdir(parents=True)
         (self.root / "dotfiles/linux").mkdir(parents=True)
         self.home = self.root / "home"

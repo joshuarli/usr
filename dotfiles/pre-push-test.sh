@@ -8,6 +8,7 @@ nfailed=0
 expect () {
     repo=$(mktemp -d "${PWD}/../.work/tmp/pre-push.XXXXXX") || exit 1
     git -C "$repo" init -q
+    mkdir -p "$repo/.git/hooks"
     if [ "$4" != none ]; then
         printf '#!/bin/sh\nexit %s\n' "$4" > "$repo/.git/hooks/pre-push"
         chmod +x "$repo/.git/hooks/pre-push"

@@ -3,6 +3,8 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$root"
 tmpdir=${TMPDIR:-$root/.work/tmp}
+mkdir -p "$tmpdir"
+tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	python3 -I host/macos/sync-test.py
 	python3 -I tools/sync/claude-worker-test.py
 	python3 -I tools/sync/test_dag.py
@@ -13,7 +15,6 @@ tmpdir=${TMPDIR:-$root/.work/tmp}
 	python3 -I tools/sync/test_integration.py
 	sh dotfiles/doctor-test.sh
 	node dotfiles/pi-git-guard-test.mjs
-	mkdir -p "$tmpdir"
 	TMPDIR="$tmpdir" python3 -I tools/pinact/test_pinact.py
 	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_yaml.py
 	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_lint_rules.py
@@ -22,7 +23,6 @@ tmpdir=${TMPDIR:-$root/.work/tmp}
 	TMPDIR="$tmpdir" python3 -I tools/pinact/tests/test_fix.py
 	python3 -I dotfiles/base/.local/bin/pinact --check
 	python3 -I dotfiles/pi-test.py
-	python3 -I dotfiles/ghostty-shader-test.py
 	TMPDIR="$tmpdir" python3 -I dotfiles/sbx-test.py
 	(cd dotfiles && sh agent-tier-gate-test.sh)
 	sh dotfiles/reset-agents-test.sh

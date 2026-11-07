@@ -13,7 +13,7 @@ class MainTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        root = Path(self.tmp.name)
+        root = Path(self.tmp.name).resolve()
         self.ctx = main.Context(root, root / "home", "darwin", "desktop", {"HOME": str(root / "home")})
         self.ctx.home.mkdir()
 

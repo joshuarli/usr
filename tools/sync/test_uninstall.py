@@ -15,7 +15,7 @@ class UninstallTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.home = self.root / "home"
         self.home.mkdir()
         self.ctx = main.Context(self.root, self.home, "linux", "desktop", {"HOME": str(self.home)})

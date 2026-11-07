@@ -20,7 +20,7 @@ class SyncIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         for relative in ("tools/sync", "dotfiles/base", "dotfiles/linux", "bin", "home"):
             (self.root / relative).mkdir(parents=True, exist_ok=True)
         for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py"):
