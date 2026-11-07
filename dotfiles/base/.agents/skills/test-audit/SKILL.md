@@ -1,6 +1,6 @@
 ---
 name: test-audit
-description: "Apply when asked to review existing tests in a bounded scope for weak, redundant, or implementation-coupled coverage and unnecessary test-only production seams. Skip writing new tests."
+description: "Apply when asked to review existing tests in a bounded scope for weak, redundant, or implementation-coupled coverage, execution drag, and unnecessary test-only production seams. Skip writing new tests."
 ---
 
 # Test Audit
@@ -28,13 +28,20 @@ Judge the tests in a bounded scope, one test at a time, with evidence. The prefe
 
 Fix by calling the subject with one concrete input and asserting the literal output or effect: for a mock, the payload received; for an absence, also the presence on another input; for a constant, the mechanism that reads it.
 
+**Execution drag and isolation hazards** (investigate and repair, never delete to speed up):
+- *Idle timeout sleeps:* negative or fault paths that wait out production default timeouts (e.g. 15s external API timeouts) instead of overriding with a short test timeout (50-200ms) or injecting a virtual clock;
+- *False serialization:* monolithic tests executing sequential loops over independent seeds, cases, or process spawns that could run concurrently or as separate parameterized cases;
+- *Global-state collisions:* assertions that inspect global directory listings (e.g. `readdir` over `.work/tmp`) or shared process counts rather than asserting directly on the test's own allocated path or handle, causing flakes when test files run in parallel;
+- *Redundant per-test setup I/O:* harnesses re-reading immutable disk files (migrations, queries, schemas) and re-computing crypto digests on every `beforeEach` instead of caching parsed assets in memory per worker process;
+- *Leaked handles:* unclosed servers, child processes, or RPC stubs that linger after completion and exhaust ports or file descriptors under concurrency.
+
 **Other junk leads** (investigate, never delete automatically): coverage probes with no assertion, copied fixtures or export lists, exact source or string greps, private-predicate tests duplicated at real boundaries, duplicate invocations of one contract, provider-local replays of shared helpers, tests that only preserve test-only exports or wrappers, and production code whose only callers are tests.
 
 ## Decisions
 
 For each candidate, say in a line: the failure it can detect, the stronger proof that remains, and the focused command. One disposition each:
 - **Retain:** name the contract and failure caught.
-- **Fix:** keep the contract, repair the vacuous assertion.
+- **Fix:** keep the contract, repair the vacuous assertion, idle timeout, global collision, or leaked handle.
 - **Consolidate:** name the suite that absorbs it, preferring the wider boundary test.
 - **Delete:** name the remaining proof, or explain why no independent contract exists.
 
@@ -42,6 +49,6 @@ Judge assertions, not names; inspect parameterized rows. Missing evidence means 
 
 ## Editing
 
-Make one coherent owner-boundary change. Remove test-only exports, globals, and wrappers and dead production paths after checking callers. Move valuable regressions to their owners. Add no replacement test that restates the implementation or preserves an alias for tests. Inspect the final diff and separate production changes from test changes.
+Make one coherent owner-boundary change. Remove test-only exports, globals, and wrappers and dead production paths after checking callers. Move valuable regressions to their owners. Add no replacement test that restates the implementation or preserves an alias for tests. Isolate per-test mutable state (ephemeral ports, unique temp directories) while caching immutable parsed assets across runs. Inspect the final diff and separate production changes from test changes.
 
 **Report:** scope reviewed, strongest findings with evidence, changes made, checks run, suspicious tests kept and why, open defects.
