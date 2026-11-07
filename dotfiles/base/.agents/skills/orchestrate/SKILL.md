@@ -51,7 +51,7 @@ All OpenCode entries use provider `opencode-go`; all Command Code entries use mo
 
 **One-step Opus review:** after proof, check `git diff --check`, the diff against the base revision, and untracked files **once**. Confirm only the requested outcome, within the approved paths, with no glaring broken imports, regressions, altered invariants, or churn. No separate review agent or recursive review cycle. If clearly off, use at most one targeted `worker_resume` correction without expanding scope; otherwise reject/park. Opus integrates accepted work and owns worktree cleanup. The bridge may switch from OpenCode to Command Code only on a known availability/quota failure **before any edit**.
 
-The [bridge instructions](../../../../../tools/opencode-worker/README.md) explain one-time global MCP registration and live validation. The repository defaults to this routing immediately; until its MCP server is registered in Claude’s user configuration, stop rather than silently reverting to native agents.
+The bridge instructions in `tools/opencode-worker/README.md` explain one-time global MCP registration and live validation. The repository defaults to this routing immediately; until its MCP server is registered in Claude’s user configuration, stop rather than silently reverting to native agents.
 
 ### Grok
 

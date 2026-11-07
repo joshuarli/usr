@@ -1,6 +1,6 @@
 ---
 name: typing-audit
-description: "Apply when asked to audit or tighten types, remove typing escape hatches, or make type contracts match runtime behavior. Keep the review within the requested scope; skip routine type errors unrelated to an audit."
+description: "Apply when asked to audit or tighten types, remove typing escape hatches, or make type contracts match runtime behavior. Keep the review within the requested scope. Skip routine type errors unrelated to an audit."
 ---
 
 # Typing Audit

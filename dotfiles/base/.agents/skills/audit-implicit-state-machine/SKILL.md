@@ -2,6 +2,8 @@
 name: audit-implicit-state-machine
 description: "Use for /audit-implicit-state-machine: inventory lifecycles a codebase or path manages through flags, nullable fields, loose strings, or parallel collections, and report only those whose invalid states are reachable or force guards on every caller. Skip fixing them (use make-invalid-states-unrepresentable, lifecycle-concurrency, or durable-state) and single-type reviews."
 disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Audit Implicit State Machines
