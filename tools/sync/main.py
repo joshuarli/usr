@@ -13,11 +13,11 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from dag import Graph, GraphError, Probe, Task
+from dag import Graph, GraphError, Probe, Result, Task
 from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
-from ownership import capture_new, records, ownership_lock, fingerprint, read_manifest
+from ownership import capture_new, merge_claims, records, ownership_lock, fingerprint, read_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = ROOT / "tools/sync/install.sh"
@@ -126,19 +126,24 @@ def apply_tool(ctx: Context, tool: str) -> None:
     (ctx.root / ".work/tmp").mkdir(parents=True, exist_ok=True)
     with ownership_lock(ctx.state):
         before = records(ctx.state)
-        with tempfile.TemporaryDirectory(prefix="sync-claims-", dir=ctx.root / ".work/tmp") as scratch:
-            claims = Path(scratch) / "claims"
-            changed = Path(scratch) / "changed"
-            required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
-                             extra={"DL_OWNED_FILE": str(ctx.state),
-                                    "SYNC_OWNED_CLAIMS": str(claims),
-                                    "SYNC_INSTALL_CHANGED_FILE": str(changed)}), f"install {tool}")
-            if changed.is_file() and claims.is_file():
-                owned = set()
-                for line in claims.read_text().splitlines():
-                    kind, _, name = line.partition("\t")
-                    if kind in ("F", "D") and name:
-                        owned.add((kind, Path(name)))
+    with tempfile.TemporaryDirectory(prefix="sync-claims-", dir=ctx.root / ".work/tmp") as scratch:
+        claims = Path(scratch) / "claims"
+        changed = Path(scratch) / "changed"
+        required(command(ctx, "sh", str(ctx.root / "tools/sync/install.sh"), tool,
+                         extra={"DL_OWNED_FILE": "",
+                                "SYNC_OWNED_CLAIMS": str(claims),
+                                "SYNC_INSTALL_CHANGED_FILE": str(changed)}), f"install {tool}")
+        if changed.is_file() and claims.is_file():
+            owned = set()
+            removed = set()
+            for line in claims.read_text().splitlines():
+                kind, _, name = line.partition("\t")
+                if kind in ("F", "D", "E", "K") and name:
+                    owned.add((kind, Path(name)))
+                elif kind == "!" and name:
+                    removed.add(Path(name))
+            with ownership_lock(ctx.state):
+                merge_claims(ctx.state, owned, removed)
                 capture_new(ctx.state, before, owned)
 
 
@@ -372,14 +377,14 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda t=tool: installed(ctx, t),
                           lambda t=tool: apply_tool(ctx, t),
                           lambda t=tool: installed(ctx, t),
-                          frozenset({"legacy-installer"}), reconcile=True))
+                          frozenset({f"tool:{tool}"}), reconcile=True))
     agent_memory_dependencies = ["links"] if setup else []
     if has_alpine and setup:
         agent_memory_dependencies.append("host:alpine")
     agent_memory_dependencies.append("tool:uv")
     nodes.append(Task("tool:" + AGENT_MEMORY, tuple(agent_memory_dependencies),
                       lambda: agent_memory_status(ctx), lambda: agent_memory_apply(ctx),
-                      lambda: agent_memory_status(ctx), frozenset({"legacy-installer"})))
+                      lambda: agent_memory_status(ctx), frozenset({f"tool:{AGENT_MEMORY}"})))
     if ctx.profile != "server":
         nodes.append(Task("claude-mcp", ("links", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2"),
                           lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
@@ -469,7 +474,12 @@ def main(argv: list[str]) -> int:
             legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"))
             failures += int(legacy.returncode != 0)
         return 1 if failures else 0
-    results = selected.run(jobs=int(ctx.env.get("SYNC_JOBS", "4")))
+    try:
+        with ownership_lock(ctx.state):
+            results = selected.run(jobs=int(ctx.env.get("SYNC_JOBS", "4")))
+    except OSError as exc:
+        results = [Result(task.name, "failed", f"{type(exc).__name__}: {exc}")
+                   for task in selected.order()]
     for result in results:
         print(f"{result.state.upper():8} {result.name}: {result.detail}")
     return 1 if any(r.state in ("failed", "blocked") for r in results) else 0

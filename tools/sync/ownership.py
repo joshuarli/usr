@@ -10,27 +10,47 @@ import os
 from pathlib import Path
 import stat
 import tempfile
+import threading
+
+_lock_mutex = threading.Lock()
+_lock_entries: dict[str, list] = {}
 
 
 @contextmanager
 def ownership_lock(ownership: Path):
     """Cross-process writer lease for the legacy paths and verified manifest.
 
-    Acquire before *reading* records; hold through the last persist/installer
-    operation. Never unlink this lock file: unlinking can split the lease into
-    separate inodes and allow concurrent writers.
+    Threads in one process share a single flock, reference counted until the
+    last holder exits, so parallel tasks in one sync run do not block each
+    other. A separate process still blocks until every holder in this process
+    has exited. Never unlink this lock file: unlinking can split the lease
+    into separate inodes and allow concurrent writers.
     """
-    ownership.parent.mkdir(parents=True, exist_ok=True)
-    lockfile = Path(str(ownership) + ".lock")
-    fd = os.open(lockfile, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    key = str(ownership)
+    with _lock_mutex:
+        entry = _lock_entries.get(key)
+        if entry is None:
+            ownership.parent.mkdir(parents=True, exist_ok=True)
+            lockfile = Path(str(ownership) + ".lock")
+            fd = os.open(lockfile, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            except BaseException:
+                os.close(fd)
+                raise
+            entry = [fd, 0]
+            _lock_entries[key] = entry
+        entry[1] += 1
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+        yield
     finally:
-        os.close(fd)
+        with _lock_mutex:
+            entry[1] -= 1
+            if entry[1] == 0:
+                fd = entry[0]
+                del _lock_entries[key]
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
 
 
 def records(path: Path) -> set[tuple[str, Path]]:
@@ -42,6 +62,49 @@ def records(path: Path) -> set[tuple[str, Path]]:
         if tab and kind in ("F", "D", "E", "K") and raw:
             result.add((kind, Path(raw)))
     return result
+
+
+def merge_claims(ownership: Path, claimed: set[tuple[str, Path]],
+                 removed: set[Path] | None = None) -> None:
+    """Persist one installer's claims; the caller must hold ownership_lock.
+
+    Leaf installers write claims to a per-task file rather than appending to
+    the shared records file, so parallel installs cannot interleave or lose
+    records. Removed paths are a superseded install (for example a previous
+    Node.js release directory) whose records must not survive the merge.
+    """
+    claimed = {(kind, path) for kind, path in claimed if kind in ("F", "D", "E", "K")}
+    removed = set(removed or ())
+    lines = ownership.read_text().splitlines() if ownership.is_file() else []
+    existing: set[tuple[str, Path]] = set()
+    kept: list[str] = []
+    changed = False
+    for line in lines:
+        kind, tab, raw = line.partition("\t")
+        if tab and kind in ("F", "D", "E", "K") and raw:
+            existing.add((kind, Path(raw)))
+            if Path(raw) in removed:
+                changed = True
+                continue
+        kept.append(line)
+    additions = sorted(claimed - existing, key=lambda item: (item[0], str(item[1])))
+    for kind, path in additions:
+        kept.append(f"{kind}\t{path}")
+    if additions:
+        changed = True
+    if not changed:
+        return
+    ownership.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(ownership.stat().st_mode) if ownership.exists() else 0o644
+    fd, tmp = tempfile.mkstemp(prefix=".dl-owned-", dir=ownership.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w") as stream:
+            stream.write("".join(line + "\n" for line in kept))
+        os.replace(tmp, ownership)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def manifest_path(ownership: Path) -> Path:

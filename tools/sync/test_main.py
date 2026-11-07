@@ -28,6 +28,18 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, ["dsh"], setup=False).select(["tool:dsh"])
         self.assertEqual([t.name for t in dag.order()], ["tool:nodejs", "tool:pnpm", "tool:dsh"])
 
+    def test_codex_requires_jaq(self):
+        dag = main.graph(self.ctx, ["codex"], setup=False).select(["tool:codex"])
+        self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:codex"])
+
+    def test_tool_tasks_have_disjoint_resources(self):
+        tasks = main.graph(self.ctx, ["cmd", "pnpm", "fd"], setup=False).tasks
+        resources = [tasks[name].resources for name in ("tool:cmd", "tool:pnpm", "tool:fd", "tool:nodejs")]
+        self.assertTrue(all(resources))
+        for index, first in enumerate(resources):
+            for second in resources[index + 1:]:
+                self.assertFalse(first & second)
+
     def test_python_update_requires_jaq(self):
         dag = main.graph(self.ctx, ["python3"], setup=False).select(["tool:python3"])
         self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:python3"])
@@ -65,6 +77,27 @@ class MainTests(unittest.TestCase):
             for operation in ([], ["tools", "cmd"], ["bridge"], ["uninstall"]):
                 with self.subTest(operation=operation), self.assertRaisesRegex(main.GraphError, "TARGET different from HOME"):
                     main.main(list(operation))
+
+    def test_apply_tool_merges_claims_and_removals(self):
+        from ownership import read_manifest, records
+        ownership = self.ctx.state
+        ownership.parent.mkdir(parents=True, exist_ok=True)
+        ownership.write_text("D\t/home/old-release\n")
+        installed = self.ctx.home / ".local/bin/fd"
+        installed.parent.mkdir(parents=True, exist_ok=True)
+        installed.write_text("binary")
+        installed.chmod(0o755)
+
+        def run(_ctx, *args, extra=None, **_kwargs):
+            Path(extra["SYNC_OWNED_CLAIMS"]).write_text(
+                f"F\t{installed}\n!\t/home/old-release\n")
+            Path(extra["SYNC_INSTALL_CHANGED_FILE"]).write_text("changed")
+            return type("Completed", (), {"returncode": 0})()
+
+        with patch.object(main, "command", side_effect=run):
+            main.apply_tool(self.ctx, "fd")
+        self.assertEqual(records(ownership), {("F", installed)})
+        self.assertIn(str(installed), read_manifest(ownership))
 
     def test_global_link_plan_replaces_stale_other_layer(self):
         from links import discover

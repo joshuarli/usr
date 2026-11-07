@@ -29,16 +29,29 @@ class SyncIntegrationTests(unittest.TestCase):
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
         self._script("dotfiles/migrate-pinact.sh", "#!/bin/sh\nexit 0\n")
         self._script("tools/sync/install.sh", '''#!/bin/sh
-if [ "$1" = --list ]; then printf 'nodejs\\ncmd\\n'; exit 0; fi
+if [ "$1" = --list ]; then printf 'nodejs\\ncmd\\nparallel-a\\nparallel-b\\n'; exit 0; fi
 if [ "$1" = lease-tool ]; then
-  mkdir -p "$HOME/.local/bin" "$(dirname "$DL_OWNED_FILE")"
-  printf 'F\\t%s\\n' "$HOME/.local/bin/lease-tool" >> "$DL_OWNED_FILE"
+  mkdir -p "$HOME/.local/bin"
   touch "$HOME/installer-ready"
   while [ ! -f "$HOME/installer-release" ]; do sleep 0.02; done
   printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/lease-tool"
   chmod +x "$HOME/.local/bin/lease-tool"
   printf 'F\\t%s\\n' "$HOME/.local/bin/lease-tool" >> "$SYNC_OWNED_CLAIMS"
   printf changed > "$SYNC_INSTALL_CHANGED_FILE"
+  exit 0
+fi
+if [ "$1" = parallel-a ] || [ "$1" = parallel-b ]; then
+  touch "$HOME/started-$1"
+  other=parallel-b; [ "$1" = parallel-b ] && other=parallel-a
+  count=0
+  while [ ! -f "$HOME/started-$other" ] && [ "$count" -lt 250 ]; do sleep 0.02; count=$((count + 1)); done
+  [ -f "$HOME/started-$other" ] || exit 1
+  mkdir -p "$HOME/.local/bin"
+  printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$1"
+  chmod +x "$HOME/.local/bin/$1"
+  printf 'F\\t%s\\n' "$HOME/.local/bin/$1" >> "$SYNC_OWNED_CLAIMS"
+  printf changed > "$SYNC_INSTALL_CHANGED_FILE"
+  printf '%s\\n' "$1" >> "$HOME/installed"
   exit 0
 fi
 printf '%s\\n' "$1" >> "$HOME/installed"
@@ -136,6 +149,28 @@ for name in "$@"; do printf '#!/bin/sh\\nexit 0\\n' > "$HOME/.local/bin/$name"; 
         self.assertIn("failed", result.stdout.lower())
         self.assertEqual(outside.read_text(), "keep")
         self.assertFalse((self.root / "home/.profile").exists())
+
+    def test_parallel_tools_meet_at_barrier(self):
+        self.run_sync("tools", "parallel-a", "parallel-b")
+        self.assertEqual(sorted((self.root / "home/installed").read_text().splitlines()),
+                         ["parallel-a", "parallel-b"])
+        from ownership import records
+        found = records(self.root / "home/.local/state/sync/dl-owned")
+        self.assertIn(("F", self.root / "home/.local/bin/parallel-a"), found)
+        self.assertIn(("F", self.root / "home/.local/bin/parallel-b"), found)
+
+    def test_merge_claims_dedupes_and_removes_superseded_records(self):
+        from ownership import merge_claims, records
+        ownership = self.root / "home/.local/state/sync/dl-owned"
+        ownership.parent.mkdir(parents=True, exist_ok=True)
+        ownership.write_text("F\t/home/old\nD\t/home/old-dir\nE\t/home/empty\n")
+        merge_claims(ownership, {("F", Path("/home/old")), ("F", Path("/home/new")),
+                                 ("E", Path("/home/empty"))}, {Path("/home/old-dir")})
+        self.assertEqual(records(ownership), {("F", Path("/home/old")),
+                                              ("F", Path("/home/new")),
+                                              ("E", Path("/home/empty"))})
+        merge_claims(ownership, {("F", Path("/home/new"))})
+        self.assertEqual(len(ownership.read_text().splitlines()), 3)
 
     def test_plan_does_not_change_home(self):
         self.assertIn("nodejs", self.run_sync("list").stdout)

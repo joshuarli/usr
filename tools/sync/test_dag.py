@@ -66,6 +66,34 @@ class DagTests(unittest.TestCase):
         self.assertEqual(result.state, "failed")
         self.assertIn("still missing", result.detail)
 
+    def test_disjoint_tasks_run_concurrently(self):
+        active = 0
+        maximum = 0
+        lock = threading.Lock()
+        def apply():
+            nonlocal active, maximum
+            with lock:
+                active += 1
+                maximum = max(maximum, active)
+            time.sleep(0.05)
+            with lock:
+                active -= 1
+        def t(name):
+            return Task(name, (), lambda: Probe(False), apply, lambda: Probe(True),
+                        frozenset({name}), reconcile=True)
+        values = Graph([t("a"), t("b"), t("c")]).run(jobs=3)
+        self.assertEqual(maximum, 3)
+        self.assertTrue(all(r.state == "applied" for r in values))
+
+    def test_critical_path_tasks_start_before_leaves(self):
+        started = []
+        def t(name, needs=()):
+            return Task(name, needs, lambda: Probe(False),
+                        lambda: started.append(name), lambda: Probe(True), reconcile=True)
+        graph = Graph([t("leaf-a"), t("leaf-b"), t("leaf-c"), t("chain"), t("chain-child", ("chain",))])
+        graph.run(jobs=1)
+        self.assertEqual(started[0], "chain")
+
     def test_current_task_is_not_reapplied(self):
         called = []
         task = Task("ok", (), lambda: Probe(True), lambda: called.append(1), lambda: Probe(True))

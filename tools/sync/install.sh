@@ -137,6 +137,7 @@ own_dir() {
     fi
 }
 own_empty_dir() {
+    if [ -n "${SYNC_OWNED_CLAIMS:-}" ]; then printf 'E\t%s\n' "$1" >> "$SYNC_OWNED_CLAIMS"; fi
     if [ -n "$DL_OWNED_FILE" ] && { [ ! -f "$DL_OWNED_FILE" ] \
         || ! awk -F '\t' -v path="$1" '$1 == "E" && $2 == path { found = 1 } END { exit !found }' "$DL_OWNED_FILE"; }; then
         printf 'E\t%s\n' "$1" >> "$DL_OWNED_FILE"
@@ -1462,7 +1463,9 @@ install_nodejs() {
     if [ -n "$previous_release" ] && [ "$previous_release" != "$release_name" ]; then
         previous_dir="${NODEJS_INSTALL_ROOT:?}/${previous_release:?}"
         rm -rf "$previous_dir"
-        if [ -n "$DL_OWNED_FILE" ] && [ -f "$DL_OWNED_FILE" ]; then
+        if [ -n "${SYNC_OWNED_CLAIMS:-}" ]; then
+            printf '!\t%s\n' "$previous_dir" >> "$SYNC_OWNED_CLAIMS"
+        elif [ -n "$DL_OWNED_FILE" ] && [ -f "$DL_OWNED_FILE" ]; then
             previous_tmp=$(mktemp "$(dirname -- "$DL_OWNED_FILE")/.dl-owned.XXXXXX") || _dl_warn "Warning: could not clean Node.js ownership record"
             if [ -n "$previous_tmp" ] && awk -F '\t' -v path="$previous_dir" \
                 '!($1 == "D" && $2 == path)' "$DL_OWNED_FILE" >"$previous_tmp"; then

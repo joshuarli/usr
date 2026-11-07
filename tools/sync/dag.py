@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
@@ -74,12 +73,27 @@ class Graph:
     def inspect(self) -> list[tuple[Task, Probe]]:
         return [(task, task.probe()) for task in self.order()]
 
+    def _priority(self) -> dict[str, int]:
+        dependents: dict[str, list[str]] = {name: [] for name in self.tasks}
+        for name, task in self.tasks.items():
+            for dependency in task.needs:
+                dependents[dependency].append(name)
+        height: dict[str, int] = {}
+
+        def measure(name: str) -> int:
+            if name not in height:
+                height[name] = 1 + max((measure(child) for child in dependents[name]), default=-1)
+            return height[name]
+
+        return {name: measure(name) for name in self.tasks}
+
     def run(self, jobs: int = 4) -> list[Result]:
         if jobs < 1:
             raise GraphError("jobs must be positive")
+        priority = self._priority()
         sorter = TopologicalSorter({name: task.needs for name, task in self.tasks.items()})
         sorter.prepare()
-        ready: deque[str] = deque(sorter.get_ready())
+        ready: list[str] = sorted(sorter.get_ready(), key=lambda name: (-priority[name], name))
         running: dict[Future[Result], Task] = {}
         busy: set[str] = set()
         finished: dict[str, Result] = {}
@@ -110,6 +124,7 @@ class Graph:
                         finished[name] = Result(name, "blocked", "failed prerequisites: " + ", ".join(bad))
                         sorter.done(name)
                         ready.extend(sorter.get_ready())
+                        ready.sort(key=lambda item: (-priority[item], item))
                         made_progress = True
                         continue
                     if len(running) < jobs and not (busy & task.resources):
@@ -125,6 +140,7 @@ class Graph:
                         finished[task.name] = future.result()
                         sorter.done(task.name)
                         ready.extend(sorter.get_ready())
+                        ready.sort(key=lambda item: (-priority[item], item))
                 elif ready and not made_progress:
                     raise GraphError("scheduler cannot make progress")
         return [finished[task.name] for task in self.order()]
