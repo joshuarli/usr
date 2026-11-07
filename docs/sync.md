@@ -18,7 +18,7 @@ The base layer also links a `yt-dlp` shim. It downloads the upstream nightly on 
 
 On macOS, `sh sync tools ghostty` or `sh sync tools ghostty-custom` installs the latest `release-*` prerelease from `joshuarli/ghostty`. It verifies `SHA256SUMS`, installs `Ghostty Custom.app` with a `~/.local/bin/ghostty-custom` symlink, and records the release asset identity. Set `GHOSTTY_APPLICATIONS_DIR="$HOME/Applications"` if `/Applications` is not writable. It will not overwrite an existing unmanaged app or launcher; `sh sync uninstall` removes a sync-managed installation.
 
-**Ghostty shader reload:** After `git pull`, run `sh sync links` to link any new shader file. Ghostty only rebuilds a shader on config reload when the configured shader path changes; editing GLSL at the same path alone may leave an existing terminal using cached code. Open a new Ghostty window or fully quit and relaunch for source-only changes. Run `python3 -I dotfiles/ghostty-shader-test.py --demo` in Ghostty to verify the animation.
+**Ghostty shader reload:** After `git pull`, run `sh sync links` to link any new shader file. Ghostty only rebuilds a shader on config reload when the configured shader path changes; editing GLSL at the same path alone may leave an existing terminal using cached code. Open a new Ghostty window or fully quit and relaunch for source-only changes.
 
 `sh sync tools fx` is an optional pinned native install; the default `sh sync` run does not install fx. The `~/.fx/AGENTS.md` and `~/.fx/settings.json` files are dotfiles-managed links; fx credentials, sessions, and all other mutable state stay local. fx auto-updates are disabled in the tracked profile. Change `FX_VERSION` and its checksums in `tools/sync/install.sh` to upgrade.
 
