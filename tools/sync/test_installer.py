@@ -361,6 +361,46 @@ sys.exit(1)
             inst.install_nodejs()
         self.assertIn("checksum mismatch", str(ctx.exception))
 
+    def test_nodejs_managed_upgrade_preserves_npm_symlink_and_cleans_staged(self):
+        release = self.home / ".local/share/nodejs/26.12.1-npm12.2.0-darwin-arm64"
+        cli_js = release / "lib/node_modules/npm/bin/npm-cli.js"
+        cli_js.parent.mkdir(parents=True)
+        cli_js.write_text(f"#!/bin/sh\nexec {self.bin / 'npm'} \"$@\"\n")
+        cli_js.chmod(0o755)
+        (release / "lib/node_modules/npm/lib").mkdir(parents=True)
+        (release / "lib/node_modules/npm/lib/cli.js").write_text("")
+        bin_dir = release / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / "node").chmod(0o755)
+        (bin_dir / "npm").symlink_to("../lib/node_modules/npm/bin/npm-cli.js")
+        (bin_dir / "npx").symlink_to("../lib/node_modules/npm/bin/npx-cli.js")
+        (release / "lib/node_modules/npm/bin/npx-cli.js").write_text("")
+        current = self.home / ".local/share/nodejs/current"
+        current.symlink_to(release, target_is_directory=True)
+        inst = self.make(os_name="darwin", arch="aarch64")
+        for command in ("node", "npm", "npx"):
+            self.dest_path(command).symlink_to(str(current / "bin" / command))
+        inst.env["MOCK_NPM_FAIL"] = "1"
+        seen = {}
+        original_run = inst.run
+        def recording_run(argv, **kwargs):
+            if "install" in argv and "--global" in argv:
+                staged_npm = Path(argv[argv.index("--prefix") + 1]) / "bin/npm"
+                seen["is_symlink"] = staged_npm.is_symlink()
+                seen["target"] = os.readlink(staged_npm) if staged_npm.is_symlink() else ""
+            return original_run(argv, **kwargs)
+        inst.run = recording_run
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_nodejs()
+        self.assertIn("npm 11.9.0 install failed", str(ctx.exception))
+        self.assertTrue(seen.get("is_symlink"))
+        self.assertEqual(seen.get("target"), "../lib/node_modules/npm/bin/npm-cli.js")
+        root = self.home / ".local/share/nodejs"
+        self.assertEqual([p.name for p in root.iterdir() if p.name.startswith(".nodejs.")], [])
+        for command in ("node", "npm", "npx"):
+            self.assertEqual(os.readlink(self.dest_path(command)), str(current / "bin" / command))
+
     def test_npm_tool_install_current_unmanaged_and_failed(self):
         inst = self.make()
         inst.install_cmd()
@@ -440,12 +480,17 @@ sys.exit(1)
     def test_git_bundle_install_current_and_unmanaged(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
-            for name in ("git", "git-shell"):
+            for name in ("git", "git-shell", "git-submodule", "git-sh-i18n--envsubst"):
                 info = zipfile.ZipInfo(name)
                 info.create_system = 3
                 info.external_attr = 0o100755 << 16
                 archive.writestr(info, b"g")
-            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack"):
+            for name in ("git-sh-setup", "git-sh-i18n"):
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = 0o100644 << 16
+                archive.writestr(info, b"s")
+            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule--helper"):
                 info = zipfile.ZipInfo(helper)
                 info.create_system = 3
                 info.external_attr = 0o120777 << 16

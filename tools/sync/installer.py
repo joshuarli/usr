@@ -37,7 +37,7 @@ GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
 SSH_COMMANDS = "ssh ssh-keygen ssh-agent ssh-add sftp scp".split()
 OXISH_COMMANDS = "oxish-server oxish-session".split()
 FFMPEG_COMMANDS = "ffmpeg ffprobe".split()
-GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pack".split()
+GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pack git-submodule git-submodule--helper git-sh-setup git-sh-i18n git-sh-i18n--envsubst".split()
 
 
 class InstallError(Exception):
@@ -1377,58 +1377,62 @@ class Installer:
         self.own_missing_dirs(self.nodejs_root)
         self.nodejs_root.mkdir(parents=True, exist_ok=True)
         staged_bundle = self.stage_dir(self.nodejs_root, ".nodejs.")
-        if managed:
-            try:
-                shutil.copytree(self.nodejs_root / "current", staged_bundle, dirs_exist_ok=True)
-            except OSError:
-                self.skip("nodejs", "could not stage the existing Node.js installation")
-        else:
-            self.fetch_msg(f"Downloading Node.js {NODEJS_VERSION} ({target}) ...")
-            with tempfile.NamedTemporaryFile(delete=False) as stream:
-                archive_path = Path(stream.name)
-            if not self.download(url, archive_path):
+        try:
+            if managed:
+                try:
+                    shutil.copytree(self.nodejs_root / "current", staged_bundle, dirs_exist_ok=True, symlinks=True)
+                except OSError:
+                    self.skip("nodejs", "could not stage the existing Node.js installation")
+            else:
+                self.fetch_msg(f"Downloading Node.js {NODEJS_VERSION} ({target}) ...")
+                with tempfile.NamedTemporaryFile(delete=False) as stream:
+                    archive_path = Path(stream.name)
+                if not self.download(url, archive_path):
+                    archive_path.unlink(missing_ok=True)
+                    self.skip("nodejs", f"{asset} download failed")
+                if self.sha256_file(archive_path) != sha256:
+                    archive_path.unlink(missing_ok=True)
+                    self.skip("nodejs", f"{asset} checksum mismatch")
+                names = self.tar_names(archive_path)
+                if names is None or self.archive_paths_bad(names):
+                    archive_path.unlink(missing_ok=True)
+                    self.skip("nodejs", f"{asset} contains an invalid path")
+                if not self.extract_tar(archive_path, staged_bundle, strip=1):
+                    archive_path.unlink(missing_ok=True)
+                    self.skip("nodejs", f"{asset} could not be extracted")
                 archive_path.unlink(missing_ok=True)
-                self.skip("nodejs", f"{asset} download failed")
-            if self.sha256_file(archive_path) != sha256:
-                archive_path.unlink(missing_ok=True)
-                self.skip("nodejs", f"{asset} checksum mismatch")
-            names = self.tar_names(archive_path)
-            if names is None or self.archive_paths_bad(names):
-                archive_path.unlink(missing_ok=True)
-                self.skip("nodejs", f"{asset} contains an invalid path")
-            if not self.extract_tar(archive_path, staged_bundle, strip=1):
-                archive_path.unlink(missing_ok=True)
-                self.skip("nodejs", f"{asset} could not be extracted")
-            archive_path.unlink(missing_ok=True)
-        if not (staged_bundle / "bin/node").is_file() or not (staged_bundle / "bin/npm").is_file():
-            self.skip("nodejs", "Node.js archive is missing node or npm")
-        if not npm_latest:
-            npm_latest = self.run([str(staged_bundle / "bin/npm"), "view", "npm@latest", "version"],
-                                  capture=True, extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}).stdout.strip()
-        if not self.valid_version(npm_latest):
-            self.skip("nodejs", "could not resolve the latest npm version")
-        self.fetch_msg(f"Installing npm {npm_latest} ...")
-        npm_result = self.run([str(staged_bundle / "bin/npm"), "install", "--global", "--prefix", str(staged_bundle),
-                               f"npm@{npm_latest}"], extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path})
-        if npm_result.returncode:
-            self.skip("nodejs", f"npm {npm_latest} install failed")
-        staged_node = self.run([str(staged_bundle / "bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip()
-        staged_npm = self.run([str(staged_bundle / "bin/npm"), "--version"], capture=True,
-                              extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}).stdout.strip()
-        if staged_node != NODEJS_VERSION or staged_npm != npm_latest:
-            self.skip("nodejs", "staged Node.js or npm version does not match the requested version")
-        release_name = f"{NODEJS_VERSION}-npm{npm_latest}-{target}"
-        release_dir = self.nodejs_root / release_name
-        if release_dir.exists() or release_dir.is_symlink():
-            release_node = self.run([str(release_dir / "bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip() \
-                if (release_dir / "bin/node").is_file() else ""
-            release_npm = self.run([str(release_dir / "bin/npm"), "--version"], capture=True).stdout.strip() \
-                if (release_dir / "bin/npm").is_file() else ""
-            if release_dir.is_symlink() or not release_dir.is_dir() or release_node != NODEJS_VERSION or release_npm != npm_latest:
-                self.skip("nodejs", f"{release_dir} already exists without a matching Node.js install")
-            shutil.rmtree(staged_bundle)
-        else:
-            os.replace(staged_bundle, release_dir)
+            if not (staged_bundle / "bin/node").is_file() or not (staged_bundle / "bin/npm").is_file():
+                self.skip("nodejs", "Node.js archive is missing node or npm")
+            if not npm_latest:
+                npm_latest = self.run([str(staged_bundle / "bin/npm"), "view", "npm@latest", "version"],
+                                      capture=True, extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}).stdout.strip()
+            if not self.valid_version(npm_latest):
+                self.skip("nodejs", "could not resolve the latest npm version")
+            self.fetch_msg(f"Installing npm {npm_latest} ...")
+            npm_result = self.run([str(staged_bundle / "bin/npm"), "install", "--global", "--prefix", str(staged_bundle),
+                                   f"npm@{npm_latest}"], extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path})
+            if npm_result.returncode:
+                self.skip("nodejs", f"npm {npm_latest} install failed")
+            staged_node = self.run([str(staged_bundle / "bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip()
+            staged_npm = self.run([str(staged_bundle / "bin/npm"), "--version"], capture=True,
+                                  extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}).stdout.strip()
+            if staged_node != NODEJS_VERSION or staged_npm != npm_latest:
+                self.skip("nodejs", "staged Node.js or npm version does not match the requested version")
+            release_name = f"{NODEJS_VERSION}-npm{npm_latest}-{target}"
+            release_dir = self.nodejs_root / release_name
+            if release_dir.exists() or release_dir.is_symlink():
+                release_node = self.run([str(release_dir / "bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip() \
+                    if (release_dir / "bin/node").is_file() else ""
+                release_npm = self.run([str(release_dir / "bin/npm"), "--version"], capture=True).stdout.strip() \
+                    if (release_dir / "bin/npm").is_file() else ""
+                if release_dir.is_symlink() or not release_dir.is_dir() or release_node != NODEJS_VERSION or release_npm != npm_latest:
+                    self.skip("nodejs", f"{release_dir} already exists without a matching Node.js install")
+                shutil.rmtree(staged_bundle)
+            else:
+                os.replace(staged_bundle, release_dir)
+        except SkipInstall:
+            shutil.rmtree(staged_bundle, ignore_errors=True)
+            raise
         self.own_dir(release_dir)
         if not self.switch_symlink(release_dir, self.nodejs_root / "current"):
             self.skip("nodejs", f"could not switch {self.nodejs_root}/current")
@@ -1814,10 +1818,17 @@ class Installer:
                 return False
             if not (staged / "git-shell").is_file() or not os.access(staged / "git-shell", os.X_OK):
                 return False
-            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack"):
+            for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule--helper"):
                 link = staged / helper
                 if not link.is_symlink() or os.readlink(link) != "git":
                     return False
+            if not (staged / "git-submodule").is_file() or not os.access(staged / "git-submodule", os.X_OK):
+                return False
+            for lib in ("git-sh-setup", "git-sh-i18n"):
+                if not (staged / lib).is_file():
+                    return False
+            if not (staged / "git-sh-i18n--envsubst").is_file() or not os.access(staged / "git-sh-i18n--envsubst", os.X_OK):
+                return False
             return True
         self._zip_bundle("git", self.git_home, GIT_COMMANDS, "git", in_bin=False,
                          asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
