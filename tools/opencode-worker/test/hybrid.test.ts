@@ -158,6 +158,7 @@ test("reject invalid scope, unapproved tier, and dirty worktree", async () => {
     await assert.rejects(bridge.start(f.cwd, "x", "worker", { ...f.scope, writable_paths: ["../secret"] }, "x"), /Invalid writable path/)
     await assert.rejects(bridge.start(f.cwd, "x", "scout", f.scope, "x"), /scouts are read-only/)
     await assert.rejects(bridge.start(f.cwd, "x", "opus", f.scope, "x"), /Unknown DeepSeek tier/)
+    await assert.rejects(bridge.start(f.cwd, "x", "god", f.scope, "x"), /Unknown DeepSeek tier/)
     writeFileSync(join(f.cwd, "stray"), "x")
     await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
   } finally { f.close() }

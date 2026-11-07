@@ -41,9 +41,8 @@ The bridge prefers **OpenCode Go DeepSeek V4.1 Flash** and automatically falls b
 | `mechanic` | `deepseek-v4.1-flash#low` | `low` | Precisely specified edits |
 | `worker` | `deepseek-v4.1-flash#high` | `high` | Ordinary coding, debugging, tests |
 | `expert` | `deepseek-v4.1-flash#max` | `max` | Evidenced difficult task |
-| `god` | `deepseek-v4.1-flash#max` | `max` | Fresh context after a failed expert |
 
-All OpenCode entries use provider `opencode-go`; all Command Code entries use model `deepseek/deepseek-v4.1-flash`. The tier is an effort budget and task contract, **not** permission to expand scope.
+All OpenCode entries use provider `opencode-go`; all Command Code entries use model `deepseek/deepseek-v4.1-flash`. The tier is an effort budget and task contract, **not** permission to expand scope. There is no `god` tier here. If an `expert` worker fails, the Opus coordinator takes the work on themselves rather than delegating again.
 
 **Before each launch:** create a clean dedicated linked worktree under `.work/wt/` and one contract. Call `worker_model_check(cwd, tier)` and `worker_start(cwd, title, tier, scope, brief)` with `scope` fields: exact `base_revision` matching HEAD, explicit `writable_paths` (an empty list for read-only scout; file paths or directory prefixes for a writer), `acceptance_proof` (one named check and expected observation, or source `file:line` proof), `attempt_limit` (1 normally; 2 for a justified targeted correction), and `stop_on` (ambiguity, new dependency, changed contract, expanded scope, or unavailable proof). State one outcome; forbid adjacent cleanup, unrelated refactors, new tasks, and downstream delegation. The worker cannot approve its own scope changes.
 

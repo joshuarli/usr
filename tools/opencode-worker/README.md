@@ -10,9 +10,10 @@ The bridge favors OpenCode Go. If the pinned OpenCode tier is unavailable or ret
 | mechanic | `opencode-go/deepseek-v4.1-flash#low` | `low` | Precisely specified edits |
 | worker | `opencode-go/deepseek-v4.1-flash#high` | `high` | Ordinary implementation/tests |
 | expert | `opencode-go/deepseek-v4.1-flash#max` | `max` | Demonstrably difficult work |
-| god | `opencode-go/deepseek-v4.1-flash#max` | `max` | Fresh context after a failed expert |
 
 All Command Code tiers use `deepseek/deepseek-v4.1-flash` with the corresponding effort. OpenCode uses the pinned V2 client; Command Code uses documented headless `cmd -p --output-format json` NDJSON, explicit `--model`/`--effort`, `--resume`, and `--plan` for scouts or `--yolo` for writers. Neither model text nor successful exit proves correctness.
+
+There is no `god` tier. If an `expert` worker fails, the Opus coordinator takes the work on themselves rather than delegating to a fresh higher-tier worker.
 
 ## Installation and lifecycle
 

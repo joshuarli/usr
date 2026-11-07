@@ -8,7 +8,7 @@ const PROTOCOL = "2025-06-18"
 const MAX_LINE = 100_000
 
 const cwdSchema = { type: "string", description: "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it." }
-const tierSchema = { type: "string", enum: ["scout", "mechanic", "worker", "expert", "god"] }
+const tierSchema = { type: "string", enum: ["scout", "mechanic", "worker", "expert"] }
 const scopeSchema = {
   type: "object",
   properties: {

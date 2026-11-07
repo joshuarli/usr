@@ -6,7 +6,7 @@ import { checkedWorktree, GO_MODEL, makeWorkerBridge, type OpenCodePort } from "
 import { cancelCommand, COMMAND_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
-export type Tier = "scout" | "mechanic" | "worker" | "expert" | "god"
+export type Tier = "scout" | "mechanic" | "worker" | "expert"
 export type Scope = {
   base_revision: string
   writable_paths: string[]
@@ -20,7 +20,7 @@ type Session = {
   opencode_id?: string; command_run?: CommandRun; fallback_reason?: string
 }
 const EFFORT: Record<Tier, Effort> = {
-  scout: "low", mechanic: "low", worker: "high", expert: "max", god: "max",
+  scout: "low", mechanic: "low", worker: "high", expert: "max",
 }
 const QUOTA = /\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
 
