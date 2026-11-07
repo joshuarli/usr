@@ -27,6 +27,7 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.match(args, /deepseek\/deepseek-v4\.1-flash/)
     assert.match(args, /--effort\nhigh/)
     assert.match(args, /--yolo/)
+    assert.match(args, /--max-turns\n160\n/)
     const second = startCommand(root, logs, "cite lines", "low", true, output.result?.sessionId)
     let next = commandResult(second)
     for (let i = 0; i < 100 && !next.result; i++) { await delay(10); next = commandResult(second) }
@@ -35,6 +36,21 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.match(readFileSync(argsFile, "utf8"), /--resume\ncmd-session/)
   } finally {
     process.env.PATH = oldPath
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("a Command Code run stopped at its turn cap reports turn_limit, not a task failure", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-turns-")))
+  const output = join(root, "out.ndjson"), errors = join(root, "err.stderr")
+  writeFileSync(output, '{"type":"result","subtype":"max_turns","sessionId":"cmd-session","finalText":"partial"}\n')
+  writeFileSync(errors, "")
+  try {
+    const run = { pid: 2 ** 22 + 7, output, errors, started_at: new Date().toISOString() }
+    const status = commandResult(run)
+    assert.equal(status.state, "turn_limit")
+    assert.equal(status.result?.sessionId, "cmd-session")
+  } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })

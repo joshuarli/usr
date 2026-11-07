@@ -124,6 +124,23 @@ test("a prompt rejected for quota right after admission starts on Command Code w
     assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 1)
   } finally { f.close() }
 })
+test("a Command Code turn cap continues the task without spending its single attempt", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    m.omitModels()
+    const command = { ...m.command, status: () =>
+      ({ state: "turn_limit", result: { subtype: "max_turns" as const, sessionId: "cmd-session", finalText: "partial" }, stderr: null }) }
+    const bridge = makeHybridBridge(m.api, command)
+    const task = await bridge.start(f.cwd, "fix", "worker", { ...f.scope, attempt_limit: 1 }, "Edit README")
+    await bridge.resume(f.cwd, task.session_id, "continue")
+    await bridge.resume(f.cwd, task.session_id, "continue")
+    const continued = m.calls.filter((c) => JSON.stringify(c).includes("CONTINUE THE SAME TASK"))
+    assert.equal(continued.length, 2)
+    assert.ok(continued.every((c) => JSON.stringify(c).includes('"resume":"cmd-session"')))
+    await assert.rejects(bridge.resume(f.cwd, task.session_id, "continue"), /continuation limit/)
+  } finally { f.close() }
+})
 test("terminal OpenCode quota failure falls back only when no changes exist", async () => {
   const f = fixture()
   try {

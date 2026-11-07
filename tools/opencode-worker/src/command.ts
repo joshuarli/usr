@@ -15,6 +15,8 @@ export type CommandResult = {
 }
 
 const children = new Map<number, ChildProcess>()
+const MAX_TURNS: Record<Effort, number> = { low: 48, high: 160, max: 256 }
+const READ_ONLY_MAX_TURNS = 32
 
 export function startCommand(directory: string, logDirectory: string, text: string,
   effort: Effort, readOnly: boolean, resume?: string): CommandRun {
@@ -28,7 +30,7 @@ export function startCommand(directory: string, logDirectory: string, text: stri
     "--model", COMMAND_MODEL,
     "--effort", effort,
     "--output-format", "json",
-    "--max-turns", readOnly ? "24" : "64",
+    "--max-turns", String(readOnly ? READ_ONLY_MAX_TURNS : MAX_TURNS[effort]),
     "--skip-onboarding", "--no-auto-update", "--trust", "--no-skills",
     ...(readOnly ? ["--plan"] : ["--yolo"]),
     ...(resume ? ["--resume", resume] : []),
@@ -84,7 +86,10 @@ export function commandResult(run: CommandRun): { state: string; result: Command
   if (last === null) {
     try { stderr = readFileSync(run.errors, "utf8").slice(-2000) || null } catch { /* No stderr yet. */ }
   }
-  if (last) return { state: last.subtype === "success" ? "succeeded" : "failed", result: last, stderr }
+  if (last) {
+    const state = last.subtype === "success" ? "succeeded" : last.subtype === "max_turns" ? "turn_limit" : "failed"
+    return { state, result: last, stderr }
+  }
   if (children.has(run.pid) || processAlive(run.pid)) return { state: "running", result: null, stderr }
   if (stderr?.includes("spawn error:")) return { state: "failed", result: null, stderr }
   return { state: "unknown_or_interrupted", result: null, stderr }

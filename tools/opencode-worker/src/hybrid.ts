@@ -17,11 +17,12 @@ export type Scope = {
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
   backend: "opencode" | "opencode-admitting" | "command-code" | "command-transition"; attempts: number
-  opencode_id?: string; command_run?: CommandRun; fallback_reason?: string
+  opencode_id?: string; command_run?: CommandRun; fallback_reason?: string; continuations?: number
 }
 const EFFORT: Record<Tier, Effort> = {
   scout: "low", mechanic: "low", worker: "high", expert: "max",
 }
+const TURN_LIMIT_CONTINUATIONS = 2
 const ADMISSION_POLLS = 10
 const ADMISSION_POLL_MS = 500
 const QUOTA =/\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
@@ -273,7 +274,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
       // A verified terminal response releases worktree admission, not session history.
       // Unknown/interrupted/queued work remains leased until explicitly inspected.
-      if (["succeeded", "failed", "cancelled", "canceled"].includes(state)) {
+      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled"].includes(state)) {
         const directory = stateDir(s.cwd)
         if (activeWorktreeOwner(directory, s.cwd) === s.id)
           releaseWorktree(directory, s.cwd, s.id)
@@ -292,7 +293,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async resume(cwd: unknown, id: unknown, feedback: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       const correction = required(feedback, "feedback", 32000)
-      if (s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
+      const continuation = s.backend === "command-code" && !!s.command_run &&
+        command.status(s.command_run).state === "turn_limit"
+      if (continuation && (s.continuations ?? 0) >= TURN_LIMIT_CONTINUATIONS)
+        throw new Error("Turn-limit continuation limit reached")
+      if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
@@ -311,12 +316,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-        s.attempts++
+        if (continuation) s.continuations = (s.continuations ?? 0) + 1
+        else s.attempts++
         s.backend = "command-transition"
         s.command_run = undefined
         save(s)
         s.command_run = command.start(s.cwd, stateDir(s.cwd),
-          prompt(s) + "\nSAME-SCOPE CORRECTION ONLY: " + correction,
+          prompt(s) + (continuation ? "\nCONTINUE THE SAME TASK FROM WHERE THE TURN LIMIT STOPPED IT: " :
+            "\nSAME-SCOPE CORRECTION ONLY: ") + correction,
           EFFORT[s.tier], s.tier === "scout", previous.result.sessionId)
         s.backend = "command-code"
         save(s)
