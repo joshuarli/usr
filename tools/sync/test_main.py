@@ -28,6 +28,10 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, ["dsh"], setup=False).select(["tool:dsh"])
         self.assertEqual([t.name for t in dag.order()], ["tool:nodejs", "tool:pnpm", "tool:dsh"])
 
+    def test_player_requires_ffmpeg_runtime(self):
+        dag = main.graph(self.ctx, ["player"], setup=False).select(["tool:player"])
+        self.assertEqual([t.name for t in dag.order()], ["tool:ffmpeg", "tool:player"])
+
     def test_codex_requires_jaq(self):
         dag = main.graph(self.ctx, ["codex"], setup=False).select(["tool:codex"])
         self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:codex"])

@@ -529,23 +529,6 @@ sys.exit(1)
         self.assertTrue(self.dest_path("oxish-server").is_symlink())
         self.assertEqual(self.state("oxish-server"), "e")
 
-    def test_ffmpeg_install_and_pair_check(self):
-        import hashlib
-        tag, triple = "20250101", "x86_64-unknown-linux-musl"
-        asset = f"ffmpeg-6.1+{tag}-{triple}-tools.tar.gz"
-        ffmpeg = b"#!/bin/sh\nexit 0\n"
-        payload = make_tar({f"{asset.removesuffix('.tar.gz')}/bin/ffmpeg": ffmpeg, f"{asset.removesuffix('.tar.gz')}/bin/ffprobe": ffmpeg})
-        digest = hashlib.sha256(payload).hexdigest()
-        base = f"https://github.com/laputa-systems/ffmpeg-build/releases/download/{tag}"
-        routes = {"https://github.com/laputa-systems/ffmpeg-build/releases.atom": atom([("2024-01-01", tag)]),
-                  f"{base}/SHA256SUMS": f"{digest}  {asset}\n".encode(),
-                  f"{base}/{asset.replace('+', '%2B')}": (payload, {"ETag": "e"})}
-        inst = self.make(routes)
-        inst.install_ffmpeg()
-        self.assertTrue(self.dest_path("ffmpeg").is_symlink())
-        self.assertTrue(self.dest_path("ffprobe").is_symlink())
-        self.assertEqual(self.state("ffmpeg"), f"{tag}:e")
-
     def test_opencode2_zip_shim_and_current(self):
         asset = "opencode-linux-x64.tar.gz"
         url = f"https://opencode.ai/update/api/latest/cli/opencode/{asset}"

@@ -360,6 +360,8 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
             prerequisites.add("jaq")
         if tool == "dsh":
             prerequisites.add("pnpm")
+        if tool == "player":
+            prerequisites.add("ffmpeg")
         for dependency in prerequisites - all_tools:
             all_tools.add(dependency)
             pending.append(dependency)
@@ -374,6 +376,8 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
             dependencies.append("tool:jaq")
         if tool == "dsh":
             dependencies.append("tool:pnpm")
+        if tool == "player":
+            dependencies.append("tool:ffmpeg")
         nodes.append(Task("tool:" + tool, tuple(dependencies),
                           lambda t=tool: installed(ctx, t),
                           lambda t=tool: apply_tool(ctx, t),

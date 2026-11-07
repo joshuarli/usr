@@ -14,6 +14,7 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	python3 -I tools/sync/test_uninstall.py
 	python3 -I tools/sync/test_kache.py
 	python3 -I tools/sync/test_installer.py
+	python3 -I tools/sync/test_ffmpeg_runtime.py
 	sh tools/sync/bootstrap-test.sh
 	python3 -I tools/sync/test_integration.py
 	sh dotfiles/doctor-test.sh

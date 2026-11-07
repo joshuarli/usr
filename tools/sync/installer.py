@@ -27,6 +27,9 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 import zipfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ffmpeg_runtime  # noqa: E402
+
 NODE_MINIMUM = "26.12.0"
 NODEJS_VERSION = "26.12.1"
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
@@ -42,6 +45,10 @@ GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pac
 
 
 class InstallError(Exception):
+    pass
+
+
+class FfmpegReleaseUnavailable(InstallError):
     pass
 
 
@@ -1884,22 +1891,175 @@ class Installer:
                          validate=validate, ok_message=f"oxish is current ({tag})",
                          install_message=f"Installed {self.dest}/oxish-server")
 
-    def ffmpeg_pair_runs(self, release: Path) -> bool:
-        for command in FFMPEG_COMMANDS:
-            binary = release / "bin" / command
-            if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
-                return False
-            if self.run([str(binary), "-version"], capture=True).returncode:
-                return False
-        return True
-
-    def install_ffmpeg(self) -> None:
+    def ffmpeg_triple(self, tool: str) -> str:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
                    ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in triples:
-            self.skip("ffmpeg", f"no ffmpeg-build release for {self.os_name}/{self.arch}")
-        triple = triples[(self.os_name, self.arch)]
+            self.skip(tool, f"no ffmpeg-build release for {self.os_name}/{self.arch}")
+        return triples[(self.os_name, self.arch)]
+
+    def ffmpeg_release_dir(self, tag: str, triple: str) -> Path:
+        return self.ffmpeg_home / "releases" / f"{tag}-{triple}-runtime"
+
+    def ffmpeg_runtime_problem(self, release: Path) -> str:
+        if release.is_symlink() or not release.is_dir():
+            return f"{release} is not a release directory"
+        try:
+            libraries = ffmpeg_runtime.verified_libraries(release, self.os_name)
+            programs = ffmpeg_runtime.verified_programs(release)
+        except (ffmpeg_runtime.RuntimeArchiveError, OSError) as exc:
+            return str(exc)
+        if self.os_name == "darwin":
+            for path in [*programs, *libraries.values()]:
+                if self.run(["codesign", "--verify", "--strict", str(path)], capture=True).returncode:
+                    return f"code signature check failed for {path.relative_to(release)}"
+        for program in programs:
+            result = self.run([str(program), "-version"], capture=True)
+            if result.returncode:
+                output = (result.stderr or "") + (result.stdout or "")
+                lines = output.strip().splitlines()
+                detail = lines[0] if lines else f"exit status {result.returncode}"
+                hint = ""
+                if self.os_name == "linux" and "libva" in output:
+                    hint = "; ffmpeg needs the system libva and libva-drm (Alpine: apk add libva)"
+                return f"{program.name} does not run: {detail}{hint}"
+        return ""
+
+    def ffmpeg_runtime_asset(self, tag: str, triple: str) -> tuple[str, str, str]:
+        base = f"https://github.com/{FFMPEG_REPO}/releases/download/{tag}"
+        sums_path = Path(tempfile.mkstemp()[1])
+        try:
+            if not self.download(f"{base}/SHA256SUMS", sums_path):
+                raise FfmpegReleaseUnavailable(f"SHA256SUMS is unavailable in {tag}")
+            suffix = f"-{triple}-runtime.tar.gz"
+            listed = []
+            for line in sums_path.read_text().splitlines():
+                fields = line.split()
+                if len(fields) == 2 and len(fields[0]) == 64 and fields[1].startswith("ffmpeg-") \
+                        and fields[1].endswith(suffix):
+                    listed.append((fields[0], fields[1]))
+        finally:
+            sums_path.unlink(missing_ok=True)
+        if len(listed) != 1:
+            raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
+        expected, asset = listed[0]
+        if not re.match(rf"^ffmpeg-.*\+{re.escape(tag)}-{re.escape(triple)}-runtime\.tar\.gz$", asset) \
+                or re.search(r"[^A-Za-z0-9._+\-]", asset):
+            raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
+        return asset, f"{base}/{asset.replace('+', '%2B')}", expected
+
+    def install_ffmpeg_release(self, tool: str, tag: str, triple: str) -> Path:
+        releases = self.ffmpeg_home / "releases"
+        if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
+            self.skip(tool, f"{releases} is not a directory")
+        release_dir = self.ffmpeg_release_dir(tag, triple)
+        exists = release_dir.exists() or release_dir.is_symlink()
+        if exists and not self.ffmpeg_runtime_problem(release_dir):
+            return release_dir
+        if release_dir.is_symlink() or (exists and not release_dir.is_dir()):
+            self.skip(tool, f"{release_dir} is not a release directory")
+        asset, url, expected = self.ffmpeg_runtime_asset(tag, triple)
+        self.own_missing_dirs(releases)
+        releases.mkdir(parents=True, exist_ok=True)
+        self.fetch_msg(f"Downloading {asset} ...")
+        with tempfile.NamedTemporaryFile(delete=False) as stream:
+            archive_path = Path(stream.name)
+        staged = self.stage_dir(releases, ".ffmpeg.")
+        try:
+            if not self.download(url, archive_path):
+                self.skip(tool, f"{asset} download failed")
+            if self.sha256_file(archive_path) != expected:
+                self.skip(tool, f"{asset} checksum mismatch")
+            try:
+                ffmpeg_runtime.extract(archive_path, asset.removesuffix(".tar.gz"), staged)
+            except ffmpeg_runtime.RuntimeArchiveError as exc:
+                self.skip(tool, f"{asset}: {exc}")
+            staged.chmod(0o755)
+            problem = self.ffmpeg_runtime_problem(staged)
+            if problem:
+                self.skip(tool, f"{asset}: {problem}")
+            old_release = None
+            if exists:
+                old_release = releases / f".ffmpeg-old.{os.getpid()}"
+                shutil.rmtree(old_release, ignore_errors=True)
+                try:
+                    os.replace(release_dir, old_release)
+                except OSError:
+                    self.skip(tool, f"could not replace {release_dir}")
+            try:
+                os.replace(staged, release_dir)
+            except OSError:
+                if old_release is not None:
+                    os.replace(old_release, release_dir)
+                self.skip(tool, f"could not install {release_dir}")
+            if old_release is not None:
+                shutil.rmtree(old_release, ignore_errors=True)
+        finally:
+            archive_path.unlink(missing_ok=True)
+            shutil.rmtree(staged, ignore_errors=True)
+        self.own_dir(release_dir)
+        self.changed = True
+        return release_dir
+
+    def prune_ffmpeg_releases(self, triple: str) -> None:
+        home = self.ffmpeg_home
+        releases = home / "releases"
+        if not releases.is_dir() or releases.is_symlink():
+            return
+        keep = set()
+        current = home / "current"
+        if current.is_symlink():
+            keep.add(Path(os.readlink(current)).name)
+        pins = home / "pins"
+        if pins.is_dir():
+            for pin in pins.iterdir():
+                tag = pin.read_text().strip()
+                if not _FFMPEG_TAG.match(tag):
+                    self.skip("ffmpeg", f"{pin} does not name a release")
+                keep.add(f"{tag}-{triple}-runtime")
+                self.own_file(pin)
+        retired = re.compile(rf"^\d{{8}}(?:-r\d+)?-{re.escape(triple)}(?:-runtime)?$")
+        for entry in sorted(releases.iterdir()):
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            if entry.name in keep:
+                self.own_dir(entry)
+            elif entry.name.startswith(".ffmpeg.") or retired.match(entry.name):
+                shutil.rmtree(entry, ignore_errors=True)
+                self.removed.add(entry)
+                self.changed = True
+
+    def activate_ffmpeg_release(self, release_dir: Path, tag: str) -> None:
+        home = self.ffmpeg_home
+        current = home / "current"
+        pointed = os.readlink(current) if current.is_symlink() else ""
+        linked = True
+        for command in FFMPEG_COMMANDS:
+            launcher = self.dest / command
+            if not launcher.is_symlink() or os.readlink(launcher) != str(home / "current/bin" / command) \
+                    or not launcher.exists():
+                linked = False
+        if pointed == str(release_dir) and linked and self._state_text("ffmpeg") == tag:
+            for command in FFMPEG_COMMANDS:
+                self.own_file(self.dest / command)
+            self.own_dir(release_dir)
+            self.own_file(current)
+            self.own_file(self.state / "ffmpeg")
+            self.current(f"ffmpeg is current ({tag})")
+            return
+        if pointed != str(release_dir) and not self.switch_symlink(release_dir, current):
+            self.skip("ffmpeg", f"could not switch {current}")
+        self.own_dir(release_dir)
+        self.own_file(current)
+        self.write_state("ffmpeg", tag)
+        for command in FFMPEG_COMMANDS:
+            self._ensure_bundle_link("ffmpeg", home, FFMPEG_COMMANDS, in_bin=True, command=command)
+        self.changed = True
+        self.ok(f"Installed {self.dest}/ffmpeg and {self.dest}/ffprobe ({tag})")
+
+    def install_ffmpeg(self) -> None:
+        triple = self.ffmpeg_triple("ffmpeg")
         tag = self.latest_date_tag(f"https://github.com/{FFMPEG_REPO}/releases.atom")
         if not tag:
             self.unchecked("ffmpeg", "no release found")
@@ -1913,127 +2073,42 @@ class Installer:
                         or self._own_current_target(home, FFMPEG_COMMANDS, target, in_bin=True)
                         or target == str(home / "current/bin" / command)):
                     self.skip("ffmpeg", f"{existing} is not a dl-managed symlink")
-        releases = home / "releases"
-        if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
-            self.skip("ffmpeg", f"{releases} is not a directory")
         current = home / "current"
         if current.exists() and not current.is_symlink():
             self.skip("ffmpeg", f"{current} is not a dl-managed symlink")
-        release_base = f"https://github.com/{FFMPEG_REPO}/releases/download/{tag}"
-        sums_path = Path(tempfile.mkstemp()[1])
-        if not self.download(f"{release_base}/SHA256SUMS", sums_path):
-            sums_path.unlink(missing_ok=True)
-            self.unchecked("ffmpeg", f"SHA256SUMS is unavailable in {tag}")
-            return
-        suffix = f"-{triple}-tools.tar.gz"
-        listed = []
-        for line in sums_path.read_text().splitlines():
-            fields = line.split()
-            if len(fields) == 2 and len(fields[0]) == 64 and fields[1].startswith("ffmpeg-") \
-                    and fields[1].endswith(suffix):
-                listed.append((fields[0], fields[1]))
-        sums_path.unlink(missing_ok=True)
-        if len(listed) != 1:
-            self.unchecked("ffmpeg", f"the {triple} tools archive is not listed in {tag}")
-            return
-        expected, asset = listed[0]
-        if not re.match(rf"^ffmpeg-.*\+{re.escape(tag)}-{re.escape(triple)}-tools\.tar\.gz$", asset) \
-                or re.search(r"[^A-Za-z0-9._+\-]", asset):
-            self.unchecked("ffmpeg", f"the {triple} tools archive is not listed in {tag}")
-            return
-        url = f"{release_base}/{asset.replace('+', '%2B')}"
-        record_id = self.asset_id(url)
-        if not record_id:
-            self.unchecked("ffmpeg", f"{asset} is unavailable")
-            return
-        record = f"{tag}:{record_id}"
-        release_dir = releases / f"{tag}-{triple}"
-        if self.is_current("ffmpeg", record) and current.is_symlink() \
-                and os.readlink(current) == str(release_dir) and release_dir.is_dir() \
-                and self.ffmpeg_pair_runs(release_dir):
-            current_ok = True
-            for command in FFMPEG_COMMANDS:
-                have = os.readlink(self.dest / command) if (self.dest / command).is_symlink() else ""
-                if have != str(home / "current/bin" / command) or not (self.dest / command).exists():
-                    current_ok = False
-                else:
-                    self.own_file(self.dest / command)
-            if current_ok and self._own_release_target(home, FFMPEG_COMMANDS, str(release_dir / "bin/ffmpeg"), in_bin=True):
-                self.current(f"ffmpeg is current ({tag})")
-                return
-        replacing = False
-        if release_dir.exists() or release_dir.is_symlink():
-            if release_dir.is_symlink() or not release_dir.is_dir():
-                self.skip("ffmpeg", f"{release_dir} is not a release directory")
-            if self._state_text("ffmpeg") == record and self.ffmpeg_pair_runs(release_dir):
-                if (os.readlink(current) if current.is_symlink() else "") != str(release_dir) \
-                        and not self.switch_symlink(release_dir, current):
-                    self.skip("ffmpeg", f"could not switch {current}")
-                for command in FFMPEG_COMMANDS:
-                    self._ensure_bundle_link("ffmpeg", home, FFMPEG_COMMANDS, in_bin=True, command=command)
-                self.own_dir(release_dir)
-                self.own_file(current)
-                self.own_file(self.state / "ffmpeg")
-                self.changed = True
-                self.ok(f"Repaired {self.dest}/ffmpeg and {self.dest}/ffprobe")
-                return
-            replacing = True
-        self.own_missing_dirs(releases)
-        releases.mkdir(parents=True, exist_ok=True)
-        self.fetch_msg(f"Downloading {asset} ...")
-        with tempfile.NamedTemporaryFile(delete=False) as stream:
-            archive_path = Path(stream.name)
-        if not self.download(url, archive_path):
-            archive_path.unlink(missing_ok=True)
-            self.skip("ffmpeg", f"{asset} download failed")
-        if self.sha256_file(archive_path) != expected:
-            archive_path.unlink(missing_ok=True)
-            self.skip("ffmpeg", f"{asset} checksum mismatch")
-        members = self.tar_members(archive_path)
-        if members is None or any(not (member.isreg() or member.isdir()) for member in members):
-            archive_path.unlink(missing_ok=True)
-            self.skip("ffmpeg", f"{asset} contains an unsupported member type")
-        top = asset.removesuffix(".tar.gz")
-        names = [member.name for member in members]
-        if self.archive_paths_bad(names) or any(
-                name not in (top, top + "/") and not name.startswith(top + "/") for name in names):
-            archive_path.unlink(missing_ok=True)
-            self.skip("ffmpeg", f"{asset} contains an invalid path")
-        staged = self.stage_dir(releases, ".ffmpeg.")
-        if not self.extract_tar(archive_path, staged, strip=1):
-            archive_path.unlink(missing_ok=True)
-            self.skip("ffmpeg", f"{asset} could not be extracted")
-        archive_path.unlink(missing_ok=True)
-        if not self.ffmpeg_pair_runs(staged):
-            self.skip("ffmpeg", f"{asset} does not contain a working ffmpeg and ffprobe")
-        old_release = None
-        if replacing:
-            old_release = releases / f".ffmpeg-old.{os.getpid()}"
-            shutil.rmtree(old_release, ignore_errors=True)
-            try:
-                os.replace(release_dir, old_release)
-            except OSError:
-                self.skip("ffmpeg", f"could not replace {release_dir}")
         try:
-            os.replace(staged, release_dir)
-        except OSError:
-            if old_release is not None:
-                os.replace(old_release, release_dir)
-            self.skip("ffmpeg", f"could not install {release_dir}")
+            release_dir = self.install_ffmpeg_release("ffmpeg", tag, triple)
+        except FfmpegReleaseUnavailable as exc:
+            self.unchecked("ffmpeg", str(exc))
+            return
+        self.activate_ffmpeg_release(release_dir, tag)
+        self.prune_ffmpeg_releases(triple)
+
+    def ensure_ffmpeg_runtime(self, tool: str, tag: str) -> Path:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", tool):
+            self.skip(tool, "not a valid tool name for a runtime pin")
+        if not _FFMPEG_TAG.match(tag):
+            self.skip(tool, f"{tag!r} is not an ffmpeg-build release tag")
+        triple = self.ffmpeg_triple(tool)
+        try:
+            release_dir = self.install_ffmpeg_release(tool, tag, triple)
+        except FfmpegReleaseUnavailable as exc:
+            self.skip(tool, str(exc))
+        pins = self.ffmpeg_home / "pins"
+        pin = pins / tool
+        if pins.is_symlink() or (pins.exists() and not pins.is_dir()):
+            self.skip(tool, f"{pins} is not a directory")
+        if not pin.is_file() or pin.read_text().strip() != tag:
+            self.own_missing_dirs(pins)
+            pins.mkdir(parents=True, exist_ok=True)
+            staged = self.stage_file(pins, ".pin.")
+            staged.write_text(tag + "\n")
+            os.replace(staged, pin)
+            self.changed = True
+        self.own_file(pin)
         self.own_dir(release_dir)
-        if not self.switch_symlink(release_dir, current):
-            shutil.rmtree(release_dir, ignore_errors=True)
-            if old_release is not None:
-                os.replace(old_release, release_dir)
-            self.skip("ffmpeg", f"could not switch {current}")
-        if old_release is not None:
-            shutil.rmtree(old_release, ignore_errors=True)
-        self.own_file(current)
-        self.write_state("ffmpeg", record)
-        for command in FFMPEG_COMMANDS:
-            self._ensure_bundle_link("ffmpeg", home, FFMPEG_COMMANDS, in_bin=True, command=command)
-        self.changed = True
-        self.ok(f"Installed {self.dest}/ffmpeg and {self.dest}/ffprobe")
+        self.prune_ffmpeg_releases(triple)
+        return release_dir
 
     def write_opencode2_shim(self, target: Path) -> None:
         staged = self.stage_file(target.parent, ".opencode2-shim.")
@@ -2522,6 +2597,11 @@ class Installer:
                 for command in FFMPEG_COMMANDS:
                     if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.ffmpeg_home / "current/bin" / command):
                         self.own_file(self.dest / command)
+        pins = self.ffmpeg_home / "pins"
+        if pins.is_dir() and not pins.is_symlink():
+            for pin in sorted(pins.iterdir()):
+                if pin.is_file() and not pin.is_symlink():
+                    self.own_file(pin)
         if (self.state / "player").is_file() and (self.state / "player").stat().st_size > 0 \
                 and self.os_name == "darwin" and self.player_app.is_dir() and not self.player_app.is_symlink():
             self.own_dir(self.player_app)

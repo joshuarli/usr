@@ -15,7 +15,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
 | `sync` DAG/bootstrap | `python3 -I tools/sync/test_dag.py`, `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh -n sync`, and `sh dotfiles/doctor-test.sh` |
-| Private tool installer | `python3 -I tools/sync/test_installer.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
+| Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
