@@ -4,3 +4,4 @@
 !/.gitignore
 !/.sym-dir
 !/[!.]*/
+!/**/SKILL.md

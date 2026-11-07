@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: Apply when a campaign leaves worktrees or scratch behind, or the user asks to merge useful lane work and clean up: retire completed worktrees after confirming integration and reclaim campaign scratch. Skip in-flight or parked worktrees, live fixtures, and generic disk cleanup.
+description: "Apply when a campaign leaves worktrees or scratch behind, or the user asks to merge useful lane work and clean up: retire completed worktrees after confirming integration and reclaim campaign scratch. Skip in-flight or parked worktrees, live fixtures, and generic disk cleanup."
 ---
 
 # Cleanup
