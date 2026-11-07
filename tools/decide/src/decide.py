@@ -21,13 +21,23 @@ MAX_RESPONSE_BYTES = 65_536
 MAX_JSON_DEPTH = 32
 REQUEST_TIMEOUT_SECONDS = 10
 CONTEXT_WINDOW_TOKENS = 24_576
-ModelName = Literal["clef-flash", "clef"]
+ModelName = Literal["clef-flash"]
 MODELS: Final[dict[ModelName, str]] = {
     "clef-flash": "@cf/cloudflare/clef-flash",
-    "clef": "@cf/cloudflare/clef",
 }
 EVAL_TIERS = ("scout", "mechanic", "worker", "expert", "god")
 LIVE_EVAL_TIERS = ("mechanic", "worker", "expert")
+ROUTABLE_TIERS = EVAL_TIERS[:-1]  # "god" requires independent evidence, never a model suggestion.
+DEFAULT_ROUTE_TIERS = LIVE_EVAL_TIERS
+MAX_ROUTE_BYTES = 2_048
+ROUTE_MIN_CONFIDENCE = 0.80  # Conservative initial heuristics; evaluate before changing.
+ROUTE_MIN_MARGIN = 0.20
+ROUTE_CRITERIA = {
+    "scout": "Read-only search, inspection, inventory, documentation, or evidence gathering; no edits.",
+    "mechanic": "Precisely specified, straightforward edits with known acceptance criteria.",
+    "worker": "Ordinary implementation, debugging, tests, and bounded review with a known approach.",
+    "expert": "Evidence of unfamiliar failure modes, uncertain architecture, costly wrong turns, or cross-cutting integration.",
+}
 EVAL_SPLITS = ("development", "held-out")
 QUESTION_ID = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
 ACCOUNT_ID = re.compile(r"[A-Fa-f0-9]{32}\Z")
@@ -427,6 +437,99 @@ def run_decision(request, model="clef-flash", env=None, transport=http_post, clo
         return {"status": "ok", "result": result, "elapsed_ms": elapsed_ms}
     except (InvalidInput, InvalidProviderResponse, TypeError, ValueError, RecursionError):
         return {"status": "unavailable", "reason": "invalid_provider_response"}
+
+
+
+def route_task(
+    task,
+    baseline_tier="worker",
+    eligible_tiers=DEFAULT_ROUTE_TIERS,
+    env=None,
+    transport=http_post,
+    clock=time.monotonic,
+):
+    """Advise on one delegation tier without changing any agent's permissions or models."""
+    if (
+        not isinstance(task, str)
+        or not task.strip()
+        or "\x00" in task
+        or has_unpaired_surrogate(task)
+    ):
+        return {"status": "invalid", "reason": "invalid_task"}
+    try:
+        size = len(task.encode("utf-8"))
+    except UnicodeEncodeError:
+        return {"status": "invalid", "reason": "invalid_task"}
+    if size > MAX_ROUTE_BYTES:
+        return {"status": "invalid", "reason": "task_too_large"}
+    if (
+        not isinstance(baseline_tier, str)
+        or baseline_tier not in ROUTABLE_TIERS
+        or not isinstance(eligible_tiers, (tuple, list))
+        or not eligible_tiers
+        or any(
+            not isinstance(tier, str) or tier not in ROUTABLE_TIERS
+            for tier in eligible_tiers
+        )
+        or len(set(eligible_tiers)) != len(eligible_tiers)
+        or baseline_tier not in eligible_tiers
+    ):
+        return {"status": "invalid", "reason": "invalid_routing_tiers"}
+
+    fallback = {"selected_tier": baseline_tier, "baseline_tier": baseline_tier}
+    if env is None:
+        env = os.environ
+    if env.get("DECIDE_ROUTING", "").lower() == "off":
+        return {"status": "skipped", **fallback, "reason": "disabled"}
+    if len(eligible_tiers) == 1:
+        return {"status": "skipped", **fallback, "reason": "single_eligible_tier"}
+    request = {
+        "state": {"task": task.strip()},
+        "questions": {
+            "tier": {
+                "type": "choice",
+                "instructions": (
+                    "Choose the least costly tier that can safely complete this delegated task. "
+                    "Use demonstrated difficulty, uncertainty, risk and verification demands, "
+                    "not task length. Clear mechanical work is mechanic; ordinary coding is worker; "
+                    "reserve expert for evidence of hard or unknown paths. The choice is advisory."
+                ),
+                "criteria": {tier: ROUTE_CRITERIA[tier] for tier in eligible_tiers},
+            }
+        },
+    }
+    result = run_decision(request, "clef-flash", env=env, transport=transport, clock=clock)
+    if result["status"] != "ok":
+        return {**fallback, "status": result["status"], "reason": result["reason"]}
+
+    answer = result["result"]["answers"]["tier"]
+    recommended = answer["choice"]
+    probabilities = answer["probabilities"]
+    confidence = float(probabilities[recommended])
+    other = max(float(probability) for tier, probability in probabilities.items() if tier != recommended)
+    margin = round(confidence - other, 6)
+    if confidence < ROUTE_MIN_CONFIDENCE or margin < ROUTE_MIN_MARGIN:
+        selected, reason = baseline_tier, "uncertain"
+    elif baseline_tier == "expert" and recommended != "expert":
+        selected, reason = baseline_tier, "preserve_expert"
+    elif ROUTABLE_TIERS.index(baseline_tier) - ROUTABLE_TIERS.index(recommended) > 1:
+        selected, reason = baseline_tier, "unsafe_downgrade"
+    else:
+        selected = recommended
+        reason = "clef_advice" if selected != baseline_tier else "model_agrees"
+    return {
+        "status": "ok",
+        "model": "clef-flash",
+        **fallback,
+        "recommended_tier": recommended,
+        "selected_tier": selected,
+        "reason": reason,
+        "confidence": confidence,
+        "margin": margin,
+        "probabilities": probabilities,
+        "usage": result["result"]["usage"],
+        "elapsed_ms": result["elapsed_ms"],
+    }
 
 
 def doctor(env=None):
@@ -931,6 +1034,7 @@ def build_parser():
         description="Ask a bounded advisory decision question using Cloudflare Workers AI. It does not deploy a Worker. Credentials come from the environment (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID), usually via vault.",
         epilog="Examples:\n"
         "  decide doctor\n"
+        "  printf '%s' 'Sanitized task summary' | decide route --baseline worker\n"
         "  echo '{\"state\":\"...\",\"questions\":{...}}' | decide\n"
         "  decide eval cases.jsonl\n"
         "  decide eval --live --max-calls 5 cases.jsonl\n"
@@ -942,6 +1046,13 @@ def build_parser():
     parser.add_argument("--model", choices=tuple(MODELS), default="clef-flash", help="model to ask (default %(default)s)")
     subcommands = parser.add_subparsers(dest="command", metavar="command")
     subcommands.add_parser("doctor", help="check local configuration without a request")
+    route_parser = subcommands.add_parser("route", help="advise on a delegated task tier (Clef-flash only)")
+    route_parser.add_argument("--baseline", choices=ROUTABLE_TIERS, default="worker")
+    route_parser.add_argument(
+        "--tiers",
+        default=",".join(DEFAULT_ROUTE_TIERS),
+        help="comma-separated eligible tiers, excluding god (default %(default)s)",
+    )
     eval_parser = subcommands.add_parser("eval", help="evaluate supplied labeled JSONL cases")
     eval_parser.add_argument("--live", action="store_true", help="make live model requests (refuses without --live)")
     eval_parser.add_argument("--max-calls", type=int, help="live request budget, 1 to 50")
@@ -975,6 +1086,22 @@ def main(argv=None, env=None, stdin=None, stdout=None):
         outcome = doctor(env)
         print_json(outcome, stdout)
         return 0 if outcome["status"] == "ok" else 1
+    if args.command == "route":
+        data = stdin.read(MAX_ROUTE_BYTES + 1)
+        if len(data) > MAX_ROUTE_BYTES:
+            outcome = {"status": "invalid", "reason": "task_too_large"}
+        else:
+            try:
+                task = data.decode("utf-8")
+            except UnicodeDecodeError:
+                outcome = {"status": "invalid", "reason": "invalid_task"}
+            else:
+                outcome = route_task(
+                    task, baseline_tier=args.baseline,
+                    eligible_tiers=args.tiers.split(","), env=env,
+                )
+        print_json(outcome, stdout)
+        return 2 if outcome["status"] == "invalid" else 0
     if args.command == "eval":
         try:
             with open(args.path, "rb") as source:

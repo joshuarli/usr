@@ -440,17 +440,17 @@ class DecideTests(unittest.TestCase):
 
         def transport(url, headers, body, timeout):
             calls.append((url, headers, json.loads(body), timeout))
-            return self.response(result=sample_result(self.request, "clef"))
+            return self.response(result=sample_result(self.request, "clef-flash"))
 
         outcome = DECIDE.run_decision(
-            self.request, "clef", self.env, transport=transport, clock=lambda: next(ticks)
+            self.request, "clef-flash", self.env, transport=transport, clock=lambda: next(ticks)
         )
         self.assertEqual(outcome["status"], "ok")
         self.assertEqual(outcome["elapsed_ms"], 25.0)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0], DECIDE.endpoint(self.env["CLOUDFLARE_ACCOUNT_ID"], "clef"))
+        self.assertEqual(calls[0][0], DECIDE.endpoint(self.env["CLOUDFLARE_ACCOUNT_ID"], "clef-flash"))
         self.assertEqual(calls[0][1]["Authorization"], "Bearer test-secret-value")
-        self.assertEqual(calls[0][2]["model"], "clef")
+        self.assertEqual(calls[0][2]["model"], "clef-flash")
         self.assertEqual(calls[0][3], DECIDE.REQUEST_TIMEOUT_SECONDS)
 
     def test_invalid_input_never_calls_transport(self):
@@ -637,7 +637,7 @@ class DecideTests(unittest.TestCase):
                 "synthetic-source-b",
                 expected_tier="expert",
                 prediction=recorded_prediction(
-                    "ok", "mechanic", 0.3, input_tokens=8, model="clef"
+                    "ok", "mechanic", 0.3, input_tokens=8, model="clef-flash"
                 ),
                 existing_choice="expert",
             ),
@@ -646,7 +646,7 @@ class DecideTests(unittest.TestCase):
                 "synthetic-source-c",
                 expected_tier="mechanic",
                 prediction=recorded_prediction(
-                    "ok", "god", 0.8, input_tokens=4, model="clef"
+                    "ok", "god", 0.8, input_tokens=4, model="clef-flash"
                 ),
                 existing_choice="mechanic",
             ),
@@ -689,7 +689,7 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(report["input_tokens"]["known_total"], 32)
         self.assertEqual(report["input_tokens"]["total"], "unknown")
         self.assertEqual(report["cost"], "unknown")
-        self.assertEqual(report["models"], ["clef", "clef-flash"])
+        self.assertEqual(report["models"], ["clef-flash"])
         self.assertEqual(report["latency"]["median_ms"], "unknown")
         self.assertEqual(report["existing_choice_comparison"]["higher"], 3)
         policy = report["policy_comparison"]
@@ -883,6 +883,134 @@ class DecideTests(unittest.TestCase):
         short_report = DECIDE.evaluate_jsonl(eval_jsonl(*cases[:19]))
         self.assertEqual(short_report["latency"]["median_ms"], "unknown")
         self.assertEqual(short_report["latency"]["p95_ms"], "unknown")
+
+
+    def test_clef_flash_is_the_only_callable_model(self):
+        with self.assertRaises(DECIDE.InvalidInput):
+            DECIDE.parse_model("clef")
+        result = DECIDE.run_decision(
+            self.request, "clef", self.env,
+            transport=lambda *args: self.fail("non-Flash model invoked"),
+        )
+        self.assertEqual(result, {"status": "invalid", "reason": "invalid_model"})
+
+    def test_route_selects_confident_flash_advice_without_changing_permissions(self):
+        calls = []
+
+        def transport(url, headers, body, timeout):
+            sent = json.loads(body)
+            calls.append((url, sent, timeout))
+            options = sent["questions"]["tier"]["criteria"]
+            self.assertEqual(list(options), ["mechanic", "worker", "expert"])
+            result = {
+                "model": "clef-flash",
+                "answers": {"tier": {
+                    "type": "choice", "choice": "mechanic", "confidence": 0.9,
+                    "probabilities": {"mechanic": 0.9, "worker": 0.08, "expert": 0.02},
+                }},
+                "usage": {"input_tokens": 53, "output_tokens": 0},
+            }
+            return DECIDE.HttpResponse(200, envelope(result))
+
+        result = DECIDE.route_task(
+            "Update the test fixture for the already specified schema.",
+            env=self.env, transport=transport, clock=lambda: 1.0,
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][0].endswith("/ai/run/@cf/cloudflare/clef-flash"))
+        self.assertEqual(calls[0][1]["model"], "clef-flash")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["selected_tier"], "mechanic")
+        self.assertEqual(result["baseline_tier"], "worker")
+        self.assertEqual(result["recommended_tier"], "mechanic")
+        self.assertEqual(result["reason"], "clef_advice")
+        self.assertNotIn("test fixture", json.dumps(result))
+
+    def test_route_uncertainty_and_hard_policy_preserve_baseline(self):
+        cases = [
+            ("worker", {"mechanic": 0.42, "worker": 0.38, "expert": 0.20}, "mechanic", "uncertain"),
+            ("expert", {"mechanic": 0.91, "worker": 0.06, "expert": 0.03}, "mechanic", "preserve_expert"),
+            ("worker", {"scout": 0.90, "mechanic": 0.05, "worker": 0.03, "expert": 0.02}, "scout", "unsafe_downgrade"),
+        ]
+        for baseline, distribution, recommended, reason in cases:
+            tiers = tuple(distribution)
+            result = DECIDE.route_task(
+                "Sanitized task brief", baseline_tier=baseline, eligible_tiers=tiers,
+                env=self.env,
+                transport=lambda *args, distribution=distribution, recommended=recommended: (
+                    DECIDE.HttpResponse(200, envelope({
+                        "model": "clef-flash",
+                        "answers": {"tier": {
+                            "type": "choice", "choice": recommended,
+                            "probabilities": distribution, "confidence": distribution[recommended],
+                        }},
+                        "usage": {"input_tokens": 10, "output_tokens": 0},
+                    }))
+                ),
+            )
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["selected_tier"], baseline)
+            self.assertEqual(result["reason"], reason)
+
+    def test_route_fail_open_and_opt_out_never_invoke_transport(self):
+        never = lambda *args: self.fail("unexpected network request")
+        off = DECIDE.route_task(
+            "Sanitized brief", env={**self.env, "DECIDE_ROUTING": "off"},
+            transport=never,
+        )
+        self.assertEqual(off["selected_tier"], "worker")
+        self.assertEqual(off["status"], "skipped")
+        only = DECIDE.route_task(
+            "Sanitized brief", eligible_tiers=("worker",), env=self.env,
+            transport=never,
+        )
+        self.assertEqual(only["reason"], "single_eligible_tier")
+        missing = DECIDE.route_task("Sanitized brief", env={}, transport=never)
+        self.assertEqual(missing["status"], "unavailable")
+        self.assertEqual(missing["selected_tier"], "worker")
+        failed = DECIDE.route_task(
+            "Sanitized brief", env=self.env,
+            transport=lambda *args: DECIDE.HttpResponse(503, b"private log"),
+        )
+        self.assertEqual(failed["selected_tier"], "worker")
+        self.assertEqual(failed["reason"], "provider_failure")
+        self.assertNotIn("private", json.dumps(failed))
+
+    def test_route_rejects_invalid_inputs_without_network(self):
+        never = lambda *args: self.fail("unexpected network request")
+        invalid = [
+            DECIDE.route_task("", env=self.env, transport=never),
+            DECIDE.route_task("\ud800", env=self.env, transport=never),
+            DECIDE.route_task("x" * (DECIDE.MAX_ROUTE_BYTES + 1), env=self.env, transport=never),
+            DECIDE.route_task("text", eligible_tiers=("god", "worker"), env=self.env, transport=never),
+            DECIDE.route_task("text", eligible_tiers=("worker", "worker"), env=self.env, transport=never),
+            DECIDE.route_task("text", baseline_tier="scout", env=self.env, transport=never),
+        ]
+        self.assertTrue(all(item["status"] == "invalid" for item in invalid))
+
+    def test_route_cli_default_on_but_falls_back_without_credentials(self):
+        env = dict(os.environ)
+        env.pop("CLOUDFLARE_ACCOUNT_ID", None)
+        env.pop("CLOUDFLARE_API_TOKEN", None)
+        env.pop("DECIDE_ROUTING", None)
+        private_brief = "Sensitive task brief should not be echoed"
+        process = subprocess.run(
+            [sys.executable, "-I", str(SHIM), "route"],
+            input=private_brief, env=env, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(process.returncode, 0)
+        result = json.loads(process.stdout)
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["selected_tier"], "worker")
+        self.assertEqual(result["reason"], "missing_configuration")
+        self.assertNotIn(private_brief, process.stdout + process.stderr)
+        self.assertEqual(process.stderr, "")
+        bad = subprocess.run(
+            [sys.executable, "-I", str(SHIM), "route", "--tiers", "scout,god"],
+            input=private_brief, env=env, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(bad.returncode, 2)
+        self.assertEqual(json.loads(bad.stdout)["reason"], "invalid_routing_tiers")
 
 
 if __name__ == "__main__":

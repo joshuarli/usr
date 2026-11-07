@@ -2,6 +2,12 @@
 
 Use [`sbx`](sbx-spec.md) when running coding agents in a native macOS Seatbelt process sandbox; Linux sandboxing is out of scope. It exposes the current directory read/write and makes the tracked global skills/instructions available read-only without importing host agent authentication state. This is weaker than a VM; review the security specification and run its platform integration checks before using it for sensitive projects.
 
+## Advisory decision routing
+
+`orchestrate` consults the local `decide route` CLI by default for one sanitized brief per meaningful delegated task. It calls **Clef-flash only** through Cloudflare's Workers AI REST endpoint and requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`; normally inject them with `vault CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID -- decide route --baseline worker`. `decide doctor` checks local environment configuration without network access. This does not provision a token or change the Cloudflare account. Grant the token only the Workers AI inference permission needed to invoke a model.
+
+Do not send repository source, credentials, full transcripts, sensitive internal logs, or customer data. The route command accepts only a short sanitized plain-text task summary on stdin. It never prints the prompt. Missing credentials, quota, provider errors, or an explicit `DECIDE_ROUTING=off` cause the existing deterministic router to remain in control; they do not block coding work. The CLI's tier advice never grants extra tools or model/provider changes. See [decide CLI](../tools/decide/README.md) and [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md) for limitations, confidence heuristics, and evaluation.
+
 ## Instructions and skills
 
 [`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) is the canonical global instruction file. The adapters under `dotfiles/base/` point each harness to it.
