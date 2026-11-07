@@ -22,7 +22,9 @@ type Session = {
 const EFFORT: Record<Tier, Effort> = {
   scout: "low", mechanic: "low", worker: "high", expert: "max",
 }
-const QUOTA = /\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
+const ADMISSION_POLLS = 10
+const ADMISSION_POLL_MS = 500
+const QUOTA =/\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10000 }).trim()
@@ -208,6 +210,19 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         s.backend = "opencode"
         s.attempts = 1
         save(s)
+        for (let poll = 0; poll < ADMISSION_POLLS; poll++) {
+          const early = await worker.status(dir, admitted.session_id).catch(() => null)
+          if (!early) break
+          if (early.state === "running" || early.state === "queued") {
+            await new Promise((done) => setTimeout(done, ADMISSION_POLL_MS))
+            continue
+          }
+          if (early.state !== "succeeded" && quota(early.error) && untouched(s)) {
+            fallback(s, "OpenCode quota-limited admission")
+            return { session_id: s.id, backend: s.backend, status: "admitted" }
+          }
+          break
+        }
         return { session_id: s.id, backend: s.backend, status: "admitted", model: modelFor(s.tier) }
       } catch (e) {
         // A created OpenCode session may still execute; never start a second worker without proving it did not.

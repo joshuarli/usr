@@ -114,6 +114,16 @@ test("an OpenCode server that cannot start admits the task on Command Code", asy
     assert.ok(!m.calls.some((c) => JSON.stringify(c).includes("ses_fixture")))
   } finally { f.close() }
 })
+test("a prompt rejected for quota right after admission starts on Command Code without a status poll", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const api: OpenCodePort = { ...m.api, prompt: async (input) => { m.calls.push(input); m.fail("weekly usage limit reached"); return {} } }
+    const task = await makeHybridBridge(api, m.command).start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    assert.equal(task.backend, "command-code")
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 1)
+  } finally { f.close() }
+})
 test("terminal OpenCode quota failure falls back only when no changes exist", async () => {
   const f = fixture()
   try {
