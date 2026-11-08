@@ -17,7 +17,7 @@ from ffmpeg_runtime import RuntimeArchiveError
 from installer import SkipInstall
 from test_installer import FakeInstaller, atom, make_tar, make_zip
 
-MAJORS = {"libavcodec": 63, "libavfilter": 12, "libavformat": 63, "libavutil": 61,
+MAJORS = {"libavcodec": 63, "libavdevice": 63, "libavfilter": 12, "libavformat": 63, "libavutil": 61,
           "libswresample": 7, "libswscale": 10}
 WORKING = b"#!/bin/sh\nexit 0\n"
 TRIPLES = {"linux": "x86_64-unknown-linux-musl", "darwin": "aarch64-apple-darwin"}

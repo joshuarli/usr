@@ -16,7 +16,7 @@ import shutil
 import struct
 import tarfile
 
-LIBRARIES = ("libavcodec", "libavfilter", "libavformat", "libavutil", "libswresample", "libswscale")
+LIBRARIES = ("libavcodec", "libavdevice", "libavfilter", "libavformat", "libavutil", "libswresample", "libswscale")
 PROGRAMS = ("ffmpeg", "ffprobe")
 MANIFEST = "share/ffmpeg-build/manifest.json"
 MAX_EXTRACTED_BYTES = 1 << 30
