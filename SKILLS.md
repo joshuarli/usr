@@ -63,6 +63,7 @@ Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-t
 | Skill | Mode | Use it to |
 | --- | --- | --- |
 | `test-pyramid` | Explicit | Audit and improve a project's testing layers, smallest relevant correctness/performance/memory gates, host-aware measurements and concise reports. Also supports audit-only and campaign-planning requests. Full stays manual-only. |
+| `refactor-benchmarks` | Auto | Restructure benchmarks around representative user workflows, realistic multi-tier fixtures, macro user journeys, and allocation tracking instead of synthetic micro-loops. |
 
 ## Campaigns
 
