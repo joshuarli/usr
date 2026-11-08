@@ -112,5 +112,26 @@ else
     nfailed=$((nfailed + 1))
 fi
 
+if [ "$(uname -s)" = Darwin ]; then
+    out=$(env PATH=/usr/bin:/bin PERF_GATE_MIN_MEM_PCT=0 PERF_GATE_MAX_SWAP_PCT=100 PERF_GATE_MIN_DISK_GIB=0 sh "$script" -s "$scratch" 2>&1)
+    got=$?
+    case "$out" in
+        *'sysctl: command not found'*|*'cannot read load average'*|*'cannot read memory size'*|*'cannot read memory pressure'*|*'cannot find sysctl'*) broken=yes ;;
+        *) broken=no ;;
+    esac
+    case "$out" in
+        *'load='*'mem_free='*'swap='*) reported=yes ;;
+        *) reported=no ;;
+    esac
+    if [ "$got" = 0 ] && [ "$broken" = no ] && [ "$reported" = yes ]; then
+        printf 'ok: sysctl is found with /usr/sbin off PATH\n'
+    else
+        printf 'FAIL: sysctl off PATH (wanted exit 0 with load, memory and swap, got exit %s: %s)\n' "$got" "$out"
+        nfailed=$((nfailed + 1))
+    fi
+else
+    printf 'ok: sysctl off PATH case skipped (not Darwin)\n'
+fi
+
 echo "testing finished."
 [ "$nfailed" -eq 0 ]

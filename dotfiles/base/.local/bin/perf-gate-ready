@@ -28,12 +28,28 @@ die () { >&2 printf '%s\n' "$1"; exit 1; }
 
 proc="${PERF_GATE_PROC:-/proc}"
 
+sysctl_bin=
+sysctl_ () {
+	if [ -z "$sysctl_bin" ]; then
+		if sysctl_bin="$(command -v sysctl 2>/dev/null)" && [ -n "$sysctl_bin" ]; then
+			:
+		elif [ -x /usr/sbin/sysctl ]; then
+			sysctl_bin=/usr/sbin/sysctl
+		elif [ -x /sbin/sysctl ]; then
+			sysctl_bin=/sbin/sysctl
+		else
+			die 'cannot find sysctl (looked on PATH, /usr/sbin and /sbin)'
+		fi
+	fi
+	"$sysctl_bin" "$@"
+}
+
 load1 () {
 	if [ -r "$proc/loadavg" ]; then
 		read -r l _ < "$proc/loadavg"
 	else
 		# "{ 1.23 1.50 1.60 }"
-		l="$(sysctl -n vm.loadavg)" || return 1
+		l="$(sysctl_ -n vm.loadavg)" || return 1
 		l="${l#\{ }"; l="${l%% *}"
 	fi
 	[ -n "$l" ] || return 1
@@ -55,14 +71,14 @@ EOF
 	elif [ -r "$proc/loadavg" ]; then
 		die "no meminfo under $proc"
 	else
-		total_kib="$(( $(sysctl -n hw.memsize) / 1024 ))" || die 'cannot read memory size'
+		total_kib="$(( $(sysctl_ -n hw.memsize) / 1024 ))" || die 'cannot read memory size'
 		# memory_pressure counts reclaimable pages as free, which is the figure that matters here.
 		pct="$(memory_pressure 2>/dev/null | awk '/free percentage/ { sub(/%/, "", $NF); print $NF }')"
 		[ -n "$pct" ] || die 'cannot read memory pressure'
 		avail_kib="$(( total_kib * pct / 100 ))"
 		# "total = 1024.00M  used = 219.94M  free = 804.06M  (encrypted)"
 		read -r swap_total_kib swap_free_kib <<EOF
-$(sysctl -n vm.swapusage | awk '{ gsub(/M/, ""); printf "%d %d\n", $3 * 1024, $9 * 1024 }')
+$(sysctl_ -n vm.swapusage | awk '{ gsub(/M/, ""); printf "%d %d\n", $3 * 1024, $9 * 1024 }')
 EOF
 	fi
 }
