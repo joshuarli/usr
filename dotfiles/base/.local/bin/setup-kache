@@ -1,13 +1,16 @@
 #!/bin/sh
-# setup-kache - install kache v1.0.0 from GitHub releases and set it up.
+# setup-kache - install Kache from the joshuarli/kache GitHub releases and set it up.
 #
 # Usage:
-#   setup-kache [--version 1.0.0] [--nightly nightly-2026-09-15] [--force]
+#   setup-kache [--version release-70c22925abc6a194006fb5ce85c9a195150a1401] [--nightly nightly-2026-09-15] [--force]
 #   setup-kache uninstall [--purge]
 #
-# Detects macOS/Linux on aarch64/x86_64, downloads the matching
-# kache-*.tar.gz plus its .sha256, verifies the checksum, installs to
-# ${CARGO_HOME:-~/.cargo}/bin/kache, idempotently ensures
+# Detects macOS/Linux on aarch64/x86_64, resolves the newest release-*
+# GitHub release through releases.atom (like the other tools), downloads
+# the matching kache-<triple>.zip and kache-engine-<triple>.zip plus
+# SHA256SUMS, verifies both checksums, installs them as
+# ${CARGO_HOME:-~/.cargo}/bin/kache and ${CARGO_HOME:-~/.cargo}/bin/kache-engine,
+# idempotently ensures
 # ~/.cargo/config.toml carries the kache-managed keys, then runs kache init,
 # installs compiler shims, verifies the setup under the preferred nightly
 # toolchain (rust-toolchain.toml style: nightly-2026-09-15), and finally
@@ -15,15 +18,24 @@
 #
 # `setup-kache uninstall` reverses it: stops the daemon, removes the login
 # service, empties the cache with --purge, removes the shims, strips the
-# kache-managed keys from ~/.cargo/config.toml, and deletes the binary.
+# kache-managed keys from ~/.cargo/config.toml, and deletes both
+# binaries and the release tag file.
 #
-# Env overrides: KACHE_VERSION, KACHE_NIGHTLY.
-# Only linux and macos on aarch64/x86_64 are supported.
+# Env overrides: KACHE_VERSION (release tag; empty means newest release-*),
+# KACHE_NIGHTLY.
+# Only linux and macos on aarch64/x86_64 are supported. Published triples are
+# aarch64-apple-darwin, aarch64-unknown-linux-musl-static, and
+# x86_64-unknown-linux-musl-static; other combinations fail at the
+# SHA256SUMS lookup.
+#
+# The kache binary reports its own version (e.g. kache 2.0.0-rc.2), which
+# differs from the release-* tag. Currency is tracked in
+# ${CARGO_HOME:-~/.cargo}/bin/.kache-release, not by comparing versions.
 
 set -eu
 
 prog=${0##*/}
-version="${KACHE_VERSION:-1.0.0}"
+version="${KACHE_VERSION:-}"
 nightly="${KACHE_NIGHTLY:-nightly-2026-09-15}"
 force=0
 mode=install
@@ -31,13 +43,50 @@ purge=0
 
 die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
 usage() {
-    printf 'usage: %s [--version 1.0.0] [--nightly nightly-2026-09-15] [--force]\n' "$prog" >&2
+    printf 'usage: %s [--version release-<sha>] [--nightly nightly-2026-09-15] [--force]\n' "$prog" >&2
     printf '       %s uninstall [--purge]\n' "$prog" >&2
     exit 2
 }
 log() { printf '%s: %s\n' "$prog" "$*"; }
 quiet() {
     quiet_out=$("$@" 2>&1) || { printf '%s\n' "$quiet_out" >&2; die "failed: $*"; }
+}
+
+repo=https://github.com/joshuarli/kache
+
+latest_tag() {
+    curl -fsSL "$repo/releases.atom" | awk '
+        /<entry>/ { in_entry = 1; updated = ""; tag = "" }
+        in_entry && /<updated>/ {
+            updated = $0
+            sub(/^.*<updated>/, "", updated)
+            sub(/<.*/, "", updated)
+        }
+        in_entry && /<link[^>]*releases\/tag\// {
+            tag = $0
+            sub(/^.*releases\/tag\//, "", tag)
+            sub(/".*/, "", tag)
+            if (index(tag, "release-") != 1) tag = ""
+        }
+        /\/entry>/ {
+            if (updated > newest_updated && tag != "") {
+                newest_updated = updated
+                newest_tag = tag
+            }
+            in_entry = 0
+        }
+        END { print newest_tag }
+    '
+}
+
+checksum_of() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        die "no shasum or sha256sum found"
+    fi
 }
 
 # Ensure a `key = value` line exists under a [section] header in a TOML file.
@@ -194,6 +243,22 @@ if [ "$mode" = "uninstall" ]; then
     else
         log "no binary at $dest"
     fi
+    engine="${cargo_bin}/kache-engine"
+    if [ -e "$engine" ]; then
+        if [ -x "$engine" ] && "$engine" --version 2>/dev/null | grep -q "kache "; then
+            rm -f "$engine"
+            log "removed $engine"
+        else
+            die "refusing: $engine does not look like kache-engine"
+        fi
+    else
+        log "no engine at $engine"
+    fi
+    tagfile="${cargo_bin}/.kache-release"
+    if [ -f "$tagfile" ]; then
+        rm -f "$tagfile"
+        log "removed $tagfile"
+    fi
     # NB: this shell hashed kache's path while stopping the daemon, so clear
     # the hash before asking where kache is now.
     hash -r 2>/dev/null || true
@@ -217,18 +282,29 @@ if [ "$mode" = "uninstall" ]; then
     exit 0
 fi
 
-[ -n "$version" ] || die "empty version"
 [ -n "$nightly" ] || die "empty nightly toolchain"
-case "$version" in
-    *[!0-9A-Za-z.-]*) die "invalid version: $version" ;;
-esac
+if [ -n "$version" ]; then
+    case "$version" in
+        release-*) ;;
+        *) die "invalid version: $version (expected a release-<sha> tag)" ;;
+    esac
+    case "$version" in
+        *[!0-9A-Za-z.-]*) die "invalid version: $version" ;;
+    esac
+    tag=$version
+else
+    command -v curl >/dev/null 2>&1 || die "curl not found"
+    tag=$(latest_tag)
+    [ -n "$tag" ] || die "no kache release found"
+fi
+log "kache release $tag"
 
 # Detect platform. Linux and macOS on aarch64/x86_64 only.
 os=$(uname -s)
 arch=$(uname -m)
 case "$os" in
     Darwin) os_tag="apple-darwin" ;;
-    Linux) os_tag="unknown-linux-musl" ;;
+    Linux) os_tag="unknown-linux-musl-static" ;;
     *) die "unsupported OS: $os (linux and macos only)" ;;
 esac
 case "$arch" in
@@ -237,51 +313,61 @@ case "$arch" in
     *) die "unsupported arch: $arch (aarch64 and x86-64 only)" ;;
 esac
 triple="${arch_tag}-${os_tag}"
-asset="kache-${triple}.tar.gz"
-base_url="https://github.com/kunobi-ninja/kache/releases/download/v${version}"
+asset="kache-${triple}.zip"
+engine_asset="kache-engine-${triple}.zip"
+base_url="$repo/releases/download/$tag"
 
 cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
 dest="${cargo_bin}/kache"
+engine="${cargo_bin}/kache-engine"
+tagfile="${cargo_bin}/.kache-release"
 
-# Skip re-download when the installed binary already reports the version.
-if [ "$force" -eq 0 ] && [ -x "$dest" ]; then
-    if "$dest" --version 2>/dev/null | grep -q "kache ${version}"; then
-        log "$dest already at kache $version, continuing to setup"
-        asset=""
-    fi
+# Skip re-download when the release tag file matches and both binaries run.
+if [ "$force" -eq 0 ] && [ -f "$tagfile" ] && [ "$(cat "$tagfile")" = "$tag" ] \
+    && [ -x "$dest" ] && [ -x "$engine" ] \
+    && "$dest" --version 2>/dev/null | grep -q "kache "; then
+    log "$dest already at $tag, continuing to setup"
+    asset=""
+    engine_asset=""
 fi
 
 if [ -n "$asset" ]; then
     command -v curl >/dev/null 2>&1 || die "curl not found"
-    command -v tar >/dev/null 2>&1 || die "tar not found"
+    command -v unzip >/dev/null 2>&1 || die "unzip not found"
     tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/setup-kache.XXXXXX")
     trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
+    curl -fsSL -o "$tmpdir/SHA256SUMS" "$base_url/SHA256SUMS"
     curl -fsSL -o "$tmpdir/$asset" "$base_url/$asset"
-    curl -fsSL -o "$tmpdir/$asset.sha256" "$base_url/$asset.sha256"
+    curl -fsSL -o "$tmpdir/$engine_asset" "$base_url/$engine_asset"
 
-    # Verify checksum. The .sha256 file holds "<hash>  <filename>".
-    want=$(awk '{print $1}' "$tmpdir/$asset.sha256")
-    [ -n "$want" ] || die "could not read checksum from $asset.sha256"
-    if command -v shasum >/dev/null 2>&1; then
-        got=$(shasum -a 256 "$tmpdir/$asset" | awk '{print $1}')
-    elif command -v sha256sum >/dev/null 2>&1; then
-        got=$(sha256sum "$tmpdir/$asset" | awk '{print $1}')
-    else
-        die "no shasum or sha256sum found"
-    fi
-    [ "$got" = "$want" ] || die "checksum mismatch for $asset"
+    for zip in "$asset" "$engine_asset"; do
+        want=$(grep -F "  $zip" "$tmpdir/SHA256SUMS" | awk '{print $1}')
+        [ "${#want}" -eq 64 ] || die "$zip is not available in $tag"
+        got=$(checksum_of "$tmpdir/$zip")
+        [ "$got" = "$want" ] || die "checksum mismatch for $zip"
+    done
 
-    tar -xzf "$tmpdir/$asset" -C "$tmpdir"
-    [ -f "$tmpdir/kache" ] || die "tarball did not contain kache binary"
+    rm -rf "$tmpdir/unpack"
+    mkdir -p "$tmpdir/unpack"
+    unzip -q "$tmpdir/$asset" -d "$tmpdir/unpack"
+    unzip -q "$tmpdir/$engine_asset" -d "$tmpdir/unpack"
+    [ -f "$tmpdir/unpack/kache-${triple}" ] && [ ! -L "$tmpdir/unpack/kache-${triple}" ] \
+        || die "$asset did not contain the kache binary"
+    [ -f "$tmpdir/unpack/kache-engine-${triple}" ] && [ ! -L "$tmpdir/unpack/kache-engine-${triple}" ] \
+        || die "$engine_asset did not contain the kache-engine binary"
     mkdir -p "$cargo_bin"
-    install -m 755 "$tmpdir/kache" "$dest"
+    install -m 755 "$tmpdir/unpack/kache-engine-${triple}" "$engine"
+    install -m 755 "$tmpdir/unpack/kache-${triple}" "$dest"
     rm -rf "$tmpdir"
     trap - EXIT INT TERM
 
-    "$dest" --version 2>/dev/null | grep -q "kache ${version}" \
-        || die "installed binary does not report kache $version"
-    log "installed $("$dest" --version)"
+    "$dest" --version 2>/dev/null | grep -q "kache " \
+        || die "installed binary does not report kache"
+    printf '%s\n' "$tag" > "${tagfile}.tmp"
+    install -m 644 "${tagfile}.tmp" "$tagfile"
+    rm -f "${tagfile}.tmp"
+    log "installed $("$dest" --version) ($tag)"
 else
     command -v kache >/dev/null 2>&1 || [ -x "$dest" ] || die "kache not found"
 fi
@@ -360,4 +446,4 @@ case ":$PATH:" in
     *":$HOME/.local/lib/kache/shims:"*) ;;
     *) log "optional: add shims to PATH for C/C++ caching:"; log "  export PATH=\"\$HOME/.local/lib/kache/shims:\$PATH\"" ;;
 esac
-log "done: kache $version ready, verified under $nightly"
+log "done: $("$dest" --version) ($tag) ready, verified under $nightly"
