@@ -27,9 +27,23 @@ Read `~/d/stats/cloudflare/src/client/pages/` (start with `FleetPage.tsx` and `P
 - **Color means state.** Green, amber, and red appear only for state, always with a text label. Everything else stays in text tokens.
 - **Empty states say what happens next.** Distinguish "nothing to do" from "not checked" and "could not read".
 
+## Show only actionable signal
+
+Show something only if it tells the reader what to change or decide. For each element, ask what the reader would do differently after seeing it. If the answer is nothing, delete it. Collapsing it behind a disclosure is not a fix.
+
+Counters are the exception. A number or a small chart puts the work in perspective and costs little visual noise, so keep those.
+
+- List only the entities that must change. Name the repositories off the preferred option, and count the compliant ones.
+- Turn healthy, settled, accepted, and known-limit states into counts.
+- Show only what will change the outcome. Drop an item when acting on it would achieve nothing, such as a dependency whose removal drops no packages.
+- Name who must act in visible text, not only in a tooltip.
+- Remove full inventories and metadata from working pages. If a lookup is still needed, keep one surface for it behind search.
+- Keep the difference between "nothing to do" and "not checked".
+- Audit every page against this rule, not only the page someone complained about.
+
 ## Group and visualize
 
-Tables are the last resort. Use one only for reference data a reader looks up, such as file paths, evidence, or full version lists. If a working page is mostly a table, redo it.
+Tables are the last resort. Use one only on a lookup surface the reader searched for. If a working page is mostly a table, redo it.
 
 Group first. Give each group a heading, a count, and a one-line note, and name it for the decision or outcome, such as "Fix now" or "Decide". Do not name groups after the analysis that produced them.
 
@@ -42,8 +56,8 @@ Then pick the form from the data's job. Follow the `dataviz` skill for marks, la
 | One task across many entities | One wide card with the command |
 | Ranked impact or weight | Horizontal bars with the value at the tip |
 | Parts of a whole across entities | Stacked bars on one shared scale, with one legend |
-| Fleet health | Cards grouped into severity tiers, with quiet entities as chips |
-| Adoption of competing options | One bar per option, emphasizing the preferred one |
+| Fleet health | Cards grouped into severity tiers, with healthy entities as a count |
+| Adoption of competing options | One bar per option, then the names of only those who must move |
 | Spread across an ordered scale, such as versions | Dots along a lane, sized by count, with the target marked |
 
 Keep the page easy on the eyes:
@@ -56,7 +70,7 @@ Keep the page easy on the eyes:
 ## Method
 
 1. **Measure the overload.** Render real data and screenshot the main pages at 1440×900 and 390×844. Record page heights, table rows, and the number of items in each category. These numbers are the baseline for the final report.
-2. **Name the reader's decisions.** List the few decisions the dashboard exists to support. For each element, name the decision it changes. Delete it or move it behind a drill-down if it changes none.
+2. **Name the reader's decisions.** List the few decisions the dashboard exists to support. For each element, name the decision it changes. Delete it if it changes none, unless it is a counter.
 3. **Fix accuracy before layout.** Find labels the data cannot support, such as "critical" with no severity field. Find exclusions the page claims but does not apply, and advice the data does not prove. Overload often hides these defects, and a cleaner page makes them more believable.
 4. **Model actions as data.** In a pure, tested module separate from rendering, produce one record per action: what to do, why, where, and how. Merge duplicates so one change is one row. Rank by urgency, then by how much one change fixes. If the project has a command that performs the action, show that exact command.
 5. **Organize by the reader's work.** Make the landing page the ranked action list under a status strip. Add an entity view ranked worst first, such as repositories or hosts. Group analysis pages under a quieter heading. Keep existing URLs when you can.
@@ -69,6 +83,7 @@ Keep the page easy on the eyes:
 Run the project's type, lint, and test commands, then rebuild the assets and confirm the staleness check passes. Open the real output in `agent-browser` at both viewports and confirm:
 
 - The landing page's first screen shows the status strip and where the work is.
+- Every listed item names a change or a decision, and healthy items appear only as counts.
 - No working page is mostly tabular, and you have looked at every page as a full-page screenshot.
 - The console has no errors, and the page does not overflow horizontally.
 - Search, "Show N more", and deep links work, and the page also works from `file://` if the project promises that.
