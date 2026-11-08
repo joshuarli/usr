@@ -1,4 +1,9 @@
 #!/usr/bin/env -S node --experimental-strip-types
+for (const p of ["/opt/homebrew/opt/rustup/bin", "/opt/homebrew/bin", "/Users/josh/.local/bin"]) {
+  if (!process.env.PATH?.split(":").includes(p)) {
+    process.env.PATH = `${p}:${process.env.PATH ?? ""}`
+  }
+}
 import { createInterface } from "node:readline"
 import { type OpenCodePort } from "./bridge.ts"
 import { makeHybridBridge } from "./hybrid.ts"
