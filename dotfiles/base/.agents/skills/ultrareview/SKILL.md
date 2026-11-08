@@ -39,6 +39,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 | Errors | `error-model` | Are failures typed, propagated, and mapped consistently, or swallowed? |
 | Concurrency, lifecycle | `lifecycle-concurrency` | Leaked tasks or processes, unbounded queues, retries, shutdown? |
 | Persisted state | `durable-state` | Can the schema or wire format evolve safely? Who writes concurrently? |
+| Implicit state machines | `audit-implicit-state-machine` | Which lifecycles hide in flags, nullables, loose strings, or parallel collections with reachable invalid states or repeated guards? |
 | Untrusted input, OS | `os-boundaries` | Paths, symlinks, temp files, platform code, `unsafe`? |
 | Tests | `test-audit`, `renovate-tests` | Judge the strategy and sample the riskiest areas; do not audit every test. Judge against the suite shape `renovate-tests` defines. |
 | Performance | `make-it-fast` | Is there removable work on the hot paths? |
