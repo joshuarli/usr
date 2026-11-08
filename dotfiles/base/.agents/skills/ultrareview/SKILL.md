@@ -33,14 +33,15 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 | Aspect | Skill | Ask at repo scale |
 | --- | --- | --- |
 | Boundaries and public API | `api-surface-and-module-boundaries` | Is the surface wider than the contract? Do dependencies run one way? |
-| Domain model | `make-invalid-states-unrepresentable` | Do the core types admit states the domain forbids? |
-| Duplicated facts, config | `single-source-of-truth` | Which facts, defaults, and limits live in several places? |
+| Domain model | `make-invalid-states-unrepresentable`, `typing-audit` | Do the core types admit states the domain forbids, and do declared types match runtime behavior? |
+| Duplicated facts, config | `single-source-of-truth`, `deduplicate` | Which facts, defaults, limits, and repeated logic live in several places? |
 | Effects and testability | `isolate-effects` | Is decision logic tangled with I/O, clocks, and environment? |
 | Errors | `error-model` | Are failures typed, propagated, and mapped consistently, or swallowed? |
 | Concurrency, lifecycle | `lifecycle-concurrency` | Leaked tasks or processes, unbounded queues, retries, shutdown? |
 | Persisted state | `durable-state` | Can the schema or wire format evolve safely? Who writes concurrently? |
 | Implicit state machines | `audit-implicit-state-machine` | Which lifecycles hide in flags, nullables, loose strings, or parallel collections with reachable invalid states or repeated guards? |
 | Untrusted input, OS | `os-boundaries` | Paths, symlinks, temp files, platform code, `unsafe`? |
+| Security | `security` | What can a hostile input or unauthorized caller do that the owner did not intend, and where do secrets, weak crypto, or disabled verification leave that reachable? |
 | Tests | `test-audit`, `renovate-tests` | Judge the strategy and sample the riskiest areas; do not audit every test. Judge against the suite shape `renovate-tests` defines. |
 | Performance | `make-it-fast` | Is there removable work on the hot paths? |
 | Dead weight | `dead-code-archaeology` | Dead code, finished flags, legacy paths: prove liveness. |
@@ -50,7 +51,6 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 
 No skill covers these, so ask directly:
 
-- **Security beyond input handling** (authn and authz, secrets in the tree or history, injection): a short pass, and a hard look when the repo has auth, secrets, multi-tenant data, or network exposure.
 - **Build and release:** reproducible, pinned, can it ship and roll back. Read CI config only to learn this; propose no new CI.
 - **Dependencies:** abandoned, duplicated, unpinned, heavy.
 - **Operability:** can an operator see a failure, configure the system, and recover.
