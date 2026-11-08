@@ -42,7 +42,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 | Implicit state machines | `audit-implicit-state-machine` | Which lifecycles hide in flags, nullables, loose strings, or parallel collections with reachable invalid states or repeated guards? |
 | Untrusted input, OS | `os-boundaries` | Paths, symlinks, temp files, platform code, `unsafe`? |
 | Security | `security` | What can a hostile input or unauthorized caller do that the owner did not intend, and where do secrets, weak crypto, or disabled verification leave that reachable? |
-| Tests | `test-audit`, `renovate-tests` | Judge the strategy and sample the riskiest areas; do not audit every test. Judge against the suite shape `renovate-tests` defines. |
+| Tests | `test-audit` | Judge the strategy and sample the riskiest areas; do not audit every test. Judge against the suite shape `test-audit` defines. |
 | Performance | `make-it-fast` | Is there removable work on the hot paths? |
 | Dead weight | `dead-code-archaeology` | Dead code, finished flags, legacy paths: prove liveness. |
 | Navigability | `make-code-search-a-reliable-navigation-boundary` | Does text search reach definitions, callers, tests, and docs? |

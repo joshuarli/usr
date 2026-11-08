@@ -9,7 +9,7 @@ metadata:
 
 # Test Pyramid
 
-Make cheap, relevant verification trustworthy and expensive verification deliberate. Choose layers by what defects they catch, how strong the assertions are, isolation and cost, not unit-test quotas or a prescribed framework. Per-test judgment and the Oracle Test live in `test-audit`; suite shape lives in `renovate-tests`.
+Make cheap, relevant verification trustworthy and expensive verification deliberate. Choose layers by what defects they catch, how strong the assertions are, isolation and cost, not unit-test quotas or a prescribed framework. Per-test judgment, the Oracle Test, and suite shape live in `test-audit`.
 
 ## Scope and authority
 

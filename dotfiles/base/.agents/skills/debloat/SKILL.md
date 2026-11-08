@@ -41,7 +41,7 @@ For every structural lens, ask what it buys, who needs it now, and what simpler 
 | **Machinery** (structural) | none | Which caches, queues, recovery systems, state machines, protocols, or derived pipelines cost more than the failures they prevent? Would inline work, recomputing, or failing loudly suffice? |
 | **Features** (structural) | none | Which behavior has no user, product-doc, test, or recent-history evidence? |
 | Dependencies | none | Can a small standard-library or local implementation replace a dependency? What transitive cost disappears? |
-| **Tests** (structural) | `test-audit`, `renovate-tests` | Which tests are redundant, trivia, smoke tests, or coupled to implementation? Can tests or test-only seams be removed? |
+| **Tests** (structural) | `test-audit` | Which tests are redundant, trivia, smoke tests, or coupled to implementation? Can tests or test-only seams be removed? |
 | **Tooling and process** (structural) | none | Which tools, records, docs, and gates are unreachable, duplicated, or costlier than the failure they catch? Declared gates stay. |
 | CI | none | Which jobs repeat local checks or guard nothing? Report candidates; do not edit CI. |
 | Comments | `comment-cleanup` | Which comments excuse code that should be fixed or removed? |
