@@ -534,7 +534,7 @@ class Installer:
     def install_release(self, prog: str) -> None:
         owners = {
             **{name: "laputa-systems" for name in
-               ("e", "fz", "fdu", "fastermod", "tm", "fs", "srv", "diff-pretty", "vault", "rage")},
+               ("e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty", "vault", "rage")},
             **{name: "joshuarli" for name in ("ish", "stuff", "mactop", "gh", "syncthing", "soulseek-rs")},
             "bylaws": "joshuarli",
             "shuck": "joshuarli",
@@ -552,7 +552,7 @@ class Installer:
         if self.os_name == "linux" and prog in ("ish", "rage", "soulseek-rs", "shuck"):
             artifact_target = f"{self.arch}-unknown-linux-musl-static"
         elif self.os_name == "linux" and prog in (
-                "e", "fz", "fdu", "fastermod", "tm", "fs", "srv", "diff-pretty",
+                "e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty",
                 "vault", "syncthing", "stuff", "gh"):
             artifact_target = f"{self.arch}-unknown-linux-musl"
         elif self.os_name == "linux":
@@ -2615,7 +2615,7 @@ class Installer:
                 self.own_file(self.dest / prog)
 
     def record_managed_installs(self) -> None:
-        for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "stuff", "e", "fz", "fdu", "fs",
+        for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "stuff", "e", "fz", "fs",
                      "srv", "mactop", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
                      "zzz", "uv", "uvx", "rage", "shellcheck"):
             self.record_managed_binary(prog)
@@ -2748,7 +2748,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
-    tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fdu fs srv git python3 uv cf agent-browser rage".split()
+    tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fs srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):

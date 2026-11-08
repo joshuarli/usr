@@ -7,7 +7,6 @@ ish
 stuff
 e
 fz
-fdu
 fs
 srv
 git

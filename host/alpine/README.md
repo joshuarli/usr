@@ -67,7 +67,7 @@ that checkout), and runs `install.sh` as root through `doas` or `sudo`.
   installs the full default `sync tools` tool set.
 
 The server profile installs `fd`, `rg`, `jaq`, `fastermod`, `tm`, `ish`,
-`stuff`, `e`, `fz`, `fdu`, `fs`, `srv`, `git`, `python3`, `gh`, and `zzz`. The heavy
+`stuff`, `e`, `fz`, `fs`, `srv`, `git`, `python3`, `gh`, and `zzz`. The heavy
 agent, media, sync, and build extras (`codex`, `claude`, `opencode2`, `pi`,
 `agent-browser`, `cf`, `ffmpeg`, `nodejs`, `pnpm`, `syncthing`, `player`, `mold`)
 are opt-in on a server with `sh sync tools TOOL...`. The full set is installed by default
