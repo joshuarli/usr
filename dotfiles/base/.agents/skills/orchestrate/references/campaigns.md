@@ -39,7 +39,7 @@ Run this after each accepted slice, on resume, and whenever a slice fails twice.
 
 ## Run a slice
 
-1. **Brief.** Give the item ID, base revision, owned and forbidden files, expected outcome, acceptance command, attempt limit, and known failed approaches. Include any `agent-learn recall` results you verified.
+1. **Brief.** Give the item ID, base revision, owned and forbidden files, expected outcome, acceptance command, attempt limit, and known failed approaches.
 2. **Launch.** A parallel writer gets a parent-owned worktree under `.work/wt/`. Run `perf-gate-ready -s` before adding width.
 3. **Integrate only green work.** Review the diff, merge it, and run the slice's acceptance command and the narrowest affected suite on the integrated tree. Reuse a child's evidence only when integration changed none of its inputs. Red work stays on its branch. It never lands on the integration branch as "provisional".
 4. **Validate in groups when it is cheaper.** Compatible accepted slices can share one wider-suite run at a milestone. If the group fails, bisect, fix or revert the culprit, and rerun.

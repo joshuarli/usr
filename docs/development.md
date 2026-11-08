@@ -9,9 +9,6 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `dotfiles/base/.local/bin/sbx` or its policy spec | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py`; on macOS also run `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py --live` |
 | Python link discovery, planning or apply | `python3 -I tools/sync/test_links.py`, `python3 -I tools/sync/test_main.py`, and `python3 -I tools/sync/test_integration.py` |
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
-| `agent-learn`, `agent-sessions`, `agent-sessions-serve`, or `skill-usage` launchers, or the agent LaunchAgent templates | `cd dotfiles && sh agent-memory-launchers-test.sh` (also under `dash`) and `shellcheck -s sh` on the changed launchers |
-| `tools/skill-usage` | `TMPDIR="$PWD/.work/tmp" skill-usage selftest`, `uvx ruff check tools/skill-usage/src/skill_usage.py`, and `uvx ty check --python "${AGENT_MEMORY_VENV:-$HOME/d/agent-memory/.venv}" tools/skill-usage/src/skill_usage.py` |
-| agent-memory package, Worker, evals, or benchmarks | Run the checks in `~/d/agent-memory/AGENTS.md` in that repository. `sync` keeps `$AGENT_MEMORY_VENV` as an editable install, so source edits apply directly; run `sh sync tools agent-memory` after changing entry points or dependencies |
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
 | `sync` DAG/bootstrap | `python3 -I tools/sync/test_dag.py`, `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh -n sync`, and `sh dotfiles/doctor-test.sh` |
@@ -24,7 +21,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | a skill or agent definition | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` (or `.agents/skills` for repo-only skills); use the focused check for other agent configuration |
 | local workflow composition | Read the directly composed procedures and applicable global rules; check the affected transitions and effects. A short composition instruction is a behavior change, not wording-only. |
 | skill invocation or discovery metadata, global instruction adapters, checker behavior, or fixture behavior | Run the named `SkillCampaignTests` cases that cover the changed mechanism, plus relevant metadata and link checks. Do not run the full suite only because a campaign skill changed. |
-| a hook or `mdtool` | the matching `tools/mdtool/tests/*-test.sh`, or `python3 -I tools/mdtool/src/mdtool.py selftest` and `skill-usage selftest` |
+| a hook or `mdtool` | the matching `tools/mdtool/tests/*-test.sh`, or `python3 -I tools/mdtool/src/mdtool.py selftest` |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh`, and `dash dotfiles/perf-gate-ready-test.sh` |
 | `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I host/macos/sync-test.py` |

@@ -8,7 +8,6 @@ Executables that `usr` uses, invokes, or configures, but does not set up. Standa
 
 | Executable | Used By | Context | Suggested Action |
 | --- | --- | --- | --- |
-| **`age`** / **`rage`** | [`mirror_crypto`](file:///Users/josh/d/agent-memory/src/agent_memory/mirror_crypto.py#L30-L47) | Encrypts agent session mirror objects (`rage`/`age` and `rage-keygen`/`age-keygen`). | Packaged in [dl](file:///Users/josh/usr/dl) from https://github.com/laputa-systems/rage. |
 | **`mpv`** | [`stream`](file:///Users/josh/usr/dotfiles/base/.local/bin/stream#L10-L19) | Launches media player to stream video (`command -v mpv` or `/Applications/mpv.app`). | Add `brew "mpv"` to [Brewfile](file:///Users/josh/usr/host/macos/Brewfile) or install MPV cask. |
 
 ---

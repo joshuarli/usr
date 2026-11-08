@@ -22,10 +22,6 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Alpine provisioner | [host/alpine/README.md](host/alpine/README.md) |
 | Skills guide | [SKILLS.md](SKILLS.md) |
 | Deferred work and RFCs | [TODO.md](TODO.md), [docs/rfc/](docs/rfc/) |
-| Agent archive campaign record | [docs/CAMPAIGN-AGENT-ARCHIVE.md](docs/CAMPAIGN-AGENT-ARCHIVE.md) |
-| Cloudflare memories campaign record | [docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md](docs/CAMPAIGN-AGENT-MEMORIES-CLOUDFLARE.md) |
-
-Agent learning, session search, the archive, and the usr-memories Worker live in the separate agent-memory repository, conventionally checked out at `~/d/agent-memory`. Read its README for behavior and its install, operations, and cost documents for setup and the Worker.
 
 ## Background work
 

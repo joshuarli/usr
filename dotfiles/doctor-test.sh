@@ -21,15 +21,7 @@ printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' ' 
 printf '#!/bin/sh\nprintf "Linux\\n"\n' > "$fixture/mock/uname"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/testtool"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/home/.local/bin/uv"
-mkdir -p "$fixture/home/d/agent-memory" "$fixture/home/.local/share/agent-memory/venv/bin" \
-    "$fixture/home/.local/share/agent-memory/venv/lib/python3.15/site-packages/agent_memory-0.1.0.dist-info"
-printf '[project]\nname = "agent-memory"\n' > "$fixture/home/d/agent-memory/pyproject.toml"
-for agent_memory_command in agent-learn agent-sessions agent-sessions-serve python; do
-    printf '#!/bin/sh\n' > "$fixture/home/.local/share/agent-memory/venv/bin/$agent_memory_command"
-done
-printf '{"url": "file://%s/d/agent-memory", "dir_info": {"editable": true}}\n' "$fixture/home" \
-    > "$fixture/home/.local/share/agent-memory/venv/lib/python3.15/site-packages/agent_memory-0.1.0.dist-info/direct_url.json"
-chmod +x "$fixture/home/.local/bin/uv" "$fixture/home/.local/share/agent-memory/venv/bin/"* "$fixture/home/.local/bin/testtool"
+chmod +x "$fixture/home/.local/bin/uv" "$fixture/home/.local/bin/testtool"
 printf 'configured\n' > "$fixture/dotfiles/base/.config/example.conf"
 printf 'instructions\n' > "$fixture/dotfiles/base/.codex/AGENTS.md"
 printf 'skills\n' > "$fixture/dotfiles/base/.agents/skills/example/SKILL.md"

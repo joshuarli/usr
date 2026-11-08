@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from dag import Graph, GraphError, Probe, Result, Task, default_jobs
@@ -26,9 +24,6 @@ OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 
 NPM_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
 JQ_TOOLS = frozenset({"codex", "node-build"})
-AGENT_MEMORY = "agent-memory"
-AGENT_MEMORY_COMMANDS = ("agent-learn", "agent-sessions", "agent-sessions-serve", "python")
-AGENT_MEMORY_REPO = "git+ssh://git@github.com/joshuarli/agent-memory"
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
     "shuck": ("shellcheck",), "opencode2": ("opencode2",),
@@ -136,90 +131,6 @@ def apply_tool(ctx: Context, tool: str) -> None:
         with ownership_lock(ctx.state), claims_lock():
             merge_claims(ctx.state, set(leaf.claims), set(leaf.removed))
             capture_new(ctx.state, before, set(leaf.claims))
-
-
-def agent_memory_source(ctx: Context) -> Path:
-    return ctx.home / "d/agent-memory"
-
-
-def agent_memory_checkout(ctx: Context) -> bool:
-    return (agent_memory_source(ctx) / "pyproject.toml").is_file()
-
-
-def agent_memory_venv(ctx: Context) -> Path:
-    venv = Path(ctx.env.get("AGENT_MEMORY_VENV", str(ctx.home / ".local/share/agent-memory/venv")))
-    if not venv.is_absolute():
-        raise ValueError("AGENT_MEMORY_VENV must be an absolute path")
-    return venv
-
-
-def agent_memory_pin(ctx: Context) -> str:
-    path = ctx.root / "tools/sync/agent-memory.pin"
-    try:
-        pin = path.read_text().strip().split()
-    except OSError as exc:
-        raise RuntimeError(f"agent-memory pin unreadable: {path}") from exc
-    if not pin or any(not character in "0123456789abcdef" for character in pin[0].lower()):
-        raise RuntimeError(f"agent-memory pin invalid: {path}")
-    return pin[0].lower()
-
-
-def agent_memory_editable(source: Path, venv: Path) -> bool:
-    for metadata in venv.glob("lib/python*/site-packages/agent_memory-*.dist-info/direct_url.json"):
-        try:
-            record = json.loads(metadata.read_text())
-        except (OSError, ValueError):
-            continue
-        url = urlparse(str(record.get("url", "")))
-        if record.get("dir_info", {}).get("editable") is True and url.scheme == "file" \
-                and Path(unquote(url.path)).resolve() == source.resolve():
-            return True
-    return False
-
-
-def agent_memory_pinned(venv: Path, pin: str) -> bool:
-    for metadata in venv.glob("lib/python*/site-packages/agent_memory-*.dist-info/direct_url.json"):
-        try:
-            record = json.loads(metadata.read_text())
-        except (OSError, ValueError):
-            continue
-        if record.get("vcs_info", {}).get("commit_id") == pin:
-            return True
-    return False
-
-
-def agent_memory_status(ctx: Context) -> Probe:
-    venv = agent_memory_venv(ctx)
-    missing = [name for name in AGENT_MEMORY_COMMANDS if not os.access(venv / "bin" / name, os.X_OK)]
-    if missing:
-        return Probe(False, f"agent-memory environment missing {', '.join(missing)}: {venv}")
-    if agent_memory_checkout(ctx):
-        source = agent_memory_source(ctx)
-        if not agent_memory_editable(source, venv):
-            return Probe(False, f"agent-memory environment is not an editable install of {source}")
-        return Probe(True, f"agent-memory editable install in {venv}")
-    if not agent_memory_pinned(venv, agent_memory_pin(ctx)):
-        return Probe(False, "agent-memory environment is not the pinned install from agent-memory.pin")
-    return Probe(True, f"agent-memory pinned install in {venv}")
-
-
-def agent_memory_apply(ctx: Context) -> None:
-    venv = agent_memory_venv(ctx)
-    if agent_memory_checkout(ctx):
-        install = "-e " + str(agent_memory_source(ctx))
-    else:
-        install = "agent-memory @ " + AGENT_MEMORY_REPO + "@" + agent_memory_pin(ctx)
-    uv = ctx.home / ".local/bin/uv"
-    if not os.access(uv, os.X_OK):
-        found = shutil.which("uv")
-        if found is None:
-            raise RuntimeError("uv is required to install agent-memory")
-        uv = Path(found)
-    with ownership_lock(ctx.state):
-        required(command(ctx, str(uv), "venv", "--allow-existing", "--python", ">=3.15", str(venv)),
-                 "create agent-memory environment")
-        required(command(ctx, str(uv), "pip", "install", "--python", str(venv / "bin/python"), install),
-                 "install agent-memory")
 
 
 def bridge_status(ctx: Context) -> Probe:
@@ -366,7 +277,7 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
             all_tools.add(dependency)
             pending.append(dependency)
 
-    for tool in sorted(all_tools - {AGENT_MEMORY}):
+    for tool in sorted(all_tools):
         dependencies = ["links"] if setup else []
         if has_alpine and setup:
             dependencies.append("host:alpine")
@@ -383,13 +294,6 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda t=tool: apply_tool(ctx, t),
                           lambda t=tool: installed(ctx, t),
                           frozenset({f"tool:{tool}"}), reconcile=True))
-    agent_memory_dependencies = ["links"] if setup else []
-    if has_alpine and setup:
-        agent_memory_dependencies.append("host:alpine")
-    agent_memory_dependencies.append("tool:uv")
-    nodes.append(Task("tool:" + AGENT_MEMORY, tuple(agent_memory_dependencies),
-                      lambda: agent_memory_status(ctx), lambda: agent_memory_apply(ctx),
-                      lambda: agent_memory_status(ctx), frozenset({f"tool:{AGENT_MEMORY}"})))
     if ctx.profile != "server":
         nodes.append(Task("claude-mcp", ("links", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2"),
                           lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
@@ -461,7 +365,6 @@ def main(argv: list[str]) -> int:
             goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp"])
         if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
             goals.append("kache")
-        goals.append("tool:" + AGENT_MEMORY)
         selected = full.select(goals)
     else:
         raise AssertionError(command_name)

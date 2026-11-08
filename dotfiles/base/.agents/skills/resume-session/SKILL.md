@@ -15,31 +15,23 @@ metadata:
 
 Both arguments are required. Normalize the agent name, but never guess the session ID:
 
-| Agent | Names accepted | Evidence |
+| Agent | Names accepted | Transcript files and ID |
 | --- | --- | --- |
-| Codex | `codex` | `agent-sessions` |
-| Claude Code | `claude`, `claude-code` | `agent-sessions` |
-| Muse Code | `muse`, `muse-code` | `agent-sessions` |
-| Grok Code | `grok`, `grok-code` | `agent-sessions` |
-| OpenCode | `opencode` | `agent-sessions` |
-| Pi | `pi` | `agent-sessions` |
-| Command Code | `cmd`, `command`, `command-code` | `agent-sessions` |
-| Antigravity CLI | `agy`, `antigravity` | `agent-sessions` |
-| DeepSeek Harness TUI | `dsh`, `deepseek` | Local session log, if readable |
-| Vercel fx | `fx` | Local session snapshot, if readable (not indexed) |
+| Codex | `codex` | `$CODEX_HOME/sessions` and `$CODEX_HOME/archived_sessions` (default `~/.codex/`). The session is `rollout-*.jsonl`; its ID is the first record's `payload.id` or `payload.session_id`, written bare. |
+| Claude Code | `claude`, `claude-code` | `$CLAUDE_CONFIG_DIR/projects` (default `~/.claude/projects`). The ID is `sessionId` in the transcript records; a subagent sidechain under `subagents` uses its file stem. |
+| Muse Code | `muse`, `muse-code` | `$XDG_DATA_HOME/muse/sessions` (default `~/.local/share/muse/sessions`). Each session is a directory holding `session.jsonl`; the ID is the directory name. |
+| Grok Code | `grok`, `grok-code` | `$GROK_HOME/sessions` (default `~/.grok/sessions`). Each session directory holds `chat_history.jsonl`; the ID is the directory name. |
+| OpenCode | `opencode` | `$XDG_DATA_HOME/opencode` (default `~/.local/share/opencode`) holds the SQLite database `opencode.db`. The session is a `session_v2` row, its ID is that row's `id`, and its messages are `session_message` rows ordered by `seq`. |
+| Pi | `pi` | `$PI_CODING_AGENT_SESSION_DIR` (default under `$PI_CODING_AGENT_DIR/sessions`, then `~/.pi/agent/sessions`). Files are `<timestamp>_<id>.jsonl`; the ID is the first session record's `id`, or the filename suffix. |
+| Command Code | `cmd`, `command`, `command-code` | `$COMMANDCODE_HOME/projects` (default `~/.commandcode/projects`). Session files are `.jsonl`, excluding `.checkpoints.jsonl`; the ID is the first record's `session.id`, falling back to the file stem. |
+| Antigravity CLI | `agy`, `antigravity` | `$ANTIGRAVITY_HOME/brain` (default `~/.gemini/antigravity-cli/brain`). A conversation's transcript is `transcript.jsonl` or `transcript_full.jsonl`; the ID is the conversation directory three levels above the file. |
 
-For the indexed harnesses above, use the source-verifying index. Codex IDs are bare; the others use `harness:ID`. A session received from another machine is `harness:ID@ORIGIN`, and `--central` reads it from the central archive when the source host is gone. Accept an already qualified ID only when its prefix agrees with the requested agent. From the intended project, run (substituting the **single literal** session identifier):
+Accept an ID only when it matches the requested harness and the exact file. Codex IDs are bare; the others may be written `harness:ID`, and the prefix must agree with the requested agent. A missing or mismatched ID is a failure, not permission to substitute a similarly named session.
 
-```sh
-agent-sessions show 'harness:ID' --all-projects --before 40 --after 0 --max-chars 4000
-```
-
-For Codex, substitute `'ID'` instead. The `--all-projects` flag allows retrieval when the session belongs to another worktree or repository; it does **not** authorize editing another project. Inspect the printed `session`, `project`, `file`, `kind`, and `byte` fields. If the relevant context predates the window, page backward with `--position <earlier-byte> --before 40 --after 0`; do not dump an entire long transcript by default. The source is digest-verified, and archived sessions can still be read when their original transcript is gone. A missing or mismatched ID is a failure, not permission to substitute a similarly named session. If the index is unavailable, check `agent-sessions doctor` and report the limit instead of inventing history.
-
-For the harnesses not indexed by `agent-sessions`, inspect only the exact local session's files, read-only:
+For DeepSeek TUI and fx, inspect only the exact local session's files, read-only:
 
 - **DeepSeek TUI:** look for the exact ID under `~/.dsh/sessions/` (or `DSH_HOME` when set; commonly compressed JSONL). Decode with an already installed reader, if available, and inspect the event structure before deriving any conclusion. Do not treat binary or compressed bytes as text.
-- **fx:** read the exact `~/.fx/sessions/<ID>/session.json` manifest and its `events.jsonl` append-only log, read-only. Validate the manifest's session ID, workspace and committed log extent; treat `history_turn_committed` records as conversation evidence and ignore uncommitted trailing events. fx's log envelope differs from indexed harnesses. Do not attribute a subagent's turns to the parent without explicit lineage. If the session or its committed history is missing, report the gap.
+- **fx:** read the exact `~/.fx/sessions/<ID>/session.json` manifest and its `events.jsonl` append-only log, read-only. Validate the manifest's session ID, workspace and committed log extent; treat `history_turn_committed` records as conversation evidence and ignore uncommitted trailing events. fx's log envelope differs from the other harnesses. Do not attribute a subagent's turns to the parent without explicit lineage. If the session or its committed history is missing, report the gap.
 
 Do not run a source CLI or install a new decoder just to extract context. For a missing log, an ambiguous prefix, a corrupted or unsupported event format, or inaccessible data, report precisely what could not be recovered and offer the native command below. Never claim a complete handoff from only a title or summary.
 

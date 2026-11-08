@@ -52,17 +52,6 @@
           }
         ]
       }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$HOME/.local/bin/agent-learn\" hook --harness claude",
-            "timeout": 5
-          }
-        ]
-      }
     ]
   },
   "disableRemoteControl": true,
