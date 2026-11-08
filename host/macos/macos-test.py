@@ -189,3 +189,79 @@ class PreferenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_scrub_snapshot_drops_sensitive_domains_and_keys(self):
+        snapshot = {
+            "formatVersion": 1,
+            "capturedAt": "t",
+            "macOSVersion": "27.0.1",
+            "macOSBuild": "26A434",
+            "user": {
+                "com.apple.dock": {"autohide": True, "persistent-apps": []},
+                "ai.perplexity.macv3": {"token": "secret", "KeyboardShortcuts_toggleVisor": "x"},
+                "com.apple.suggestions": {"UserAccountsPersistedState": ["x", "person@example.com"]},
+                "com.apple.cmfsyncagent": {"mail": "a@b.example"},
+                "TokenBucketRateLimiter": {"SKDUserDefaultsRoot": {}},
+                "io.tailscale.ipn.macsys": {"com.tailscale.cached.profiles": b"data"},
+            },
+            "currentHost": {
+                "-g": {"com.apple.trackpad.scaling": 1.5},
+                "com.apple.imservice.SMS": {"Accounts": {"A": {"DisplayName": "+15555550100"}}},
+                "com.apple.sharingd": {"StreamID": "abc", "ok": 1},
+                "com.apple.AOSKit.RegInfo": {"lastComputerName": "SERIAL"},
+                "com.apple.controlcenter": {"Bluetooth": 2, "LastSelectedDisplayUUID": "u", "IRServiceToken": b"t"},
+            },
+        }
+        cleaned = macos.scrub_snapshot(snapshot)
+        self.assertEqual(cleaned["user"], {"com.apple.dock": {"autohide": True, "persistent-apps": []}})
+        self.assertEqual(
+            cleaned["currentHost"],
+            {"-g": {"com.apple.trackpad.scaling": 1.5}, "com.apple.controlcenter": {"Bluetooth": 2}},
+        )
+
+    def test_scrub_snapshot_redacts_tokens_emails_and_phone_values(self):
+        snapshot = {
+            "formatVersion": 1, "user": {
+                "com.example.app": {
+                    "access_token": "eyJaaa.bbb.ccc",
+                    "apiKey": "secret",
+                    "contact": "person@example.com",
+                    "smsLogin": "P:+15555550100",
+                    "name": "ok",
+                    "count": 3,
+                },
+            }, "currentHost": {},
+        }
+        cleaned = macos.scrub_snapshot(snapshot)
+        app = cleaned["user"]["com.example.app"]
+        self.assertEqual(app["access_token"], macos.REDACTED)
+        self.assertEqual(app["apiKey"], macos.REDACTED)
+        self.assertNotIn("person@example.com", app["contact"])
+        self.assertNotIn("+15555550100", app["smsLogin"])
+        self.assertEqual(app["name"], "ok")
+        self.assertEqual(app["count"], 3)
+
+    def test_scrub_snapshot_redacts_jwt_in_utf8_blob(self):
+        jwt = b'{"token":"eyJ' + b'a' * 20 + b'.' + b'b' * 20 + b'.' + b'c' * 20 + b'"}'
+        snapshot = {"formatVersion": 1, "user": {"com.example.app": {"payload": jwt}}, "currentHost": {}}
+        cleaned = macos.scrub_snapshot(snapshot)
+        self.assertNotIn(b"eyJ", cleaned["user"]["com.example.app"]["payload"])
+        self.assertIn(macos.REDACTED.encode(), cleaned["user"]["com.example.app"]["payload"])
+
+    def test_snapshot_command_writes_scrubbed_output(self):
+        class Result:
+            def __init__(self, text):
+                self.stdout = text.encode()
+                self.returncode = 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "snap.plist"
+            with patch.object(macos.subprocess, "run", side_effect=[Result("27.0.1\n"), Result("26A434\n")]), \
+                    patch.object(macos, "capture_scope", side_effect=[
+                        {"ai.perplexity.macv3": {"token": "x"}, "com.apple.dock": {"autohide": True}},
+                        {"com.apple.imservice.SMS": {"Accounts": {"A": {"DisplayName": "+15555550100"}}}},
+                    ]):
+                self.assertEqual(macos.main(["snapshot", str(out)]), 0)
+            saved = plistlib.loads(out.read_bytes())
+            self.assertEqual(saved["user"], {"com.apple.dock": {"autohide": True}})
+            self.assertEqual(saved["currentHost"], {})

@@ -46,6 +46,133 @@ def defaults(scope: str, *arguments: str, input_data: bytes | None = None) -> by
     return process.stdout
 
 
+import re
+
+
+REDACTED = "<redacted>"
+
+DROP_DOMAINS = {
+    "ContextStoreAgent",
+    "MiniLauncher",
+    "MobileMeAccounts",
+    "TokenBucketRateLimiter",
+    "ai.perplexity.macv3",
+    "com.apple.AOSKit.RegInfo",
+    "com.apple.AOSPushRelay.TopicInfo",
+    "com.apple.AMPLibraryAgent",
+    "com.apple.AppleMediaServices",
+    "com.apple.AppleMediaServices.notbackedup",
+    "com.apple.AOSKit",
+    "com.apple.AuthKit",
+    "com.apple.AuthKit.AgeRangeSettingsCache",
+    "com.apple.AuthKitUI.AKAuthorizationRemoteViewService",
+    "com.apple.CallHistorySyncHelper",
+    "com.apple.CloudSubscriptionFeatures.cache",
+    "com.apple.ManagedClient",
+    "com.apple.QuickLookDaemon",
+    "com.apple.SafariBookmarksSyncAgent",
+    "com.apple.SafariCloudHistoryPushAgent",
+    "com.apple.ServicesMenu.Services",
+    "com.apple.StocksKitService",
+    "com.apple.accountsd",
+    "com.apple.accounts.suggestions",
+    "com.apple.amp.mediasharingd",
+    "com.apple.amsaccountsd",
+    "com.apple.amsengagementd",
+    "com.apple.appleaccount",
+    "com.apple.appleaccount.informationcache",
+    "com.apple.appleaccountd",
+    "com.apple.appstorecomponentsd",
+    "com.apple.appstored",
+    "com.apple.assistant.support",
+    "com.apple.bird",
+    "com.apple.cloud.quota",
+    "com.apple.cmfsyncagent",
+    "com.apple.commerce.knownclients",
+    "com.apple.commcenter.csidata",
+    "com.apple.configurationprofiles.user",
+    "com.apple.controlcenter.bentoboxes",
+    "com.apple.controlcenter.displayablemenuextras",
+    "com.apple.facetime.bag",
+    "com.apple.facetimemessagestored",
+    "com.apple.filevault",
+    "com.apple.iCloudNotificationAgent",
+    "com.apple.icloud.findmydeviced.findmydevice-user-agent",
+    "com.apple.icloud.searchpartyuseragent",
+    "com.apple.icloudmailagent",
+    "com.apple.identityservicesd",
+    "com.apple.ids",
+    "com.apple.ids.deviceproperties",
+    "com.apple.ids.subservices",
+    "com.apple.imessage.bag",
+    "com.apple.imservice.SMS",
+    "com.apple.imservice.ids.FaceTime",
+    "com.apple.imservice.ids.iMessage",
+    "com.apple.itunescloud",
+    "com.apple.itunescloud.daemon",
+    "com.apple.itunescloudd",
+    "com.apple.itunesstored",
+    "com.apple.messages.nicknames",
+    "com.apple.metrickitd",
+    "com.apple.networkserviceproxy",
+    "com.apple.photos.shareddefaults",
+    "com.apple.protectedcloudstorage.protectedcloudkeysyncing",
+    "com.apple.rapport",
+    "com.apple.security.cloudkeychainproxy3.keysToRegister",
+    "com.apple.security.sosaccount",
+    "com.apple.seserviced",
+    "com.apple.settings.storage",
+    "com.apple.sharingd",
+    "com.apple.spotlightknowledged.pipeline",
+    "com.apple.suggestions",
+    "com.apple.systemsettings.extensions",
+    "com.apple.xpc.activity2",
+    "com.openai.sky.CUAService",
+    "io.tailscale.ipn.macsys",
+    "systemgroup.com.apple.icloud.searchpartyd.sharedsettings",
+}
+
+DROP_KEYS = {
+    "AAAccountFullName",
+    "AMSMetricsIdentifierUserRecordName",
+    "AppleIDAgentMetaInfo",
+    "ArcadeDeviceGUID",
+    "ArcadeDeviceID",
+    "ArcadePayoutDeviceID",
+    "DSID",
+    "ICDefaultsKeyAuthServiceClientTokenCache",
+    "IRServiceToken",
+    "KeyAccountUUID",
+    "LastSelectedDisplayUUID",
+    "LocalDeviceID",
+    "StreamID",
+    "SyncBackupPeerIDs",
+    "SyncPeerIDs",
+    "dsid",
+    "familySyncedName",
+    "iCloudPhotoLibraryHasBeenEnabledAccountIdentifiers",
+    "lastComputerName",
+    "lastRegAllTime",
+    "pref:200:Machine Preferences",
+    "sessionUUID",
+    "shared-library-id",
+    "shared-library-machine-id",
+    "shared-library-name",
+}
+DROP_KEY_SUBSTRINGS = (
+    "accountidentifier", "appleid", "bootsessionuuid", "dsid", "fullname",
+    "phonenumber", "phone_number", "primaryemail", "serialnumber",
+)
+DROP_KEY_SUFFIXES = ("Token", "token", "Secret", "secret", "Password", "password",
+                     "Credential", "credential")
+DROP_KEY_EXACT_CASEFOLD = {"apikey", "api_key", "accesstoken", "access_token",
+                           "refreshtoken", "refresh_token", "bearertoken", "bearer_token"}
+
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-. ]?)?(?:\(?\d{3}\)?[-. ]?)\d{3}[-. ]?\d{4}(?!\d)")
+JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+
+
 def domains(scope: str) -> list[str]:
     output = defaults(scope, "domains").decode()
     found = {item.strip() for item in output.split(",") if item.strip()}
@@ -66,17 +193,104 @@ def capture_scope(scope: str) -> dict[str, dict[str, Any]]:
     return {domain: export_domain(scope, domain) for domain in domains(scope)}
 
 
+def _sensitive_key(key: str) -> bool:
+    if key in DROP_KEYS:
+        return True
+    folded = key.casefold().replace("-", "_").replace(".", "_")
+    if folded in DROP_KEY_EXACT_CASEFOLD:
+        return True
+    if any(part in folded for part in DROP_KEY_SUBSTRINGS):
+        return True
+    return any(key.endswith(suffix) or key == suffix.rstrip("s") for suffix in DROP_KEY_SUFFIXES)
+
+
+def _redact_text(text: str) -> str:
+    changed = JWT_RE.sub(REDACTED, text)
+    changed = EMAIL_RE.sub(REDACTED, changed)
+    # Only redact phone-like numbers when the original clearly looks like a phone/contact value;
+    # bare 10-digit sequences appear in harmless timestamps/ids, so keep this conservative.
+    if PHONE_RE.search(text) and ("+" in text or "(" in text or text.count("-") + text.count(" ") >= 2):
+        changed = PHONE_RE.sub(REDACTED, changed)
+    return changed
+
+
+def _scrub_blob(value: bytes) -> bytes:
+    if len(value) > 1_000_000:
+        return value
+    try:
+        text = value.decode("utf-8")
+    except UnicodeDecodeError:
+        return value
+    redacted = _redact_text(text)
+    if redacted == text:
+        return value
+    try:
+        return redacted.encode("utf-8")
+    except UnicodeEncodeError:
+        return value
+
+
+SENSITIVE_ID_IN_KEY_RE = re.compile(r"(?<!\d)\d{10,12}(?!\d)")
+
+
+def _sensitive_key_name(key: str) -> bool:
+    if key in DROP_KEYS or _sensitive_key(key):
+        return True
+    # Account DSIDs/IDs are often embedded in key names (e.g. migration markers).
+    if SENSITIVE_ID_IN_KEY_RE.search(key):
+        folded = key.casefold()
+        if any(tag in folded for tag in ("icloud", "account", "dsid", "aoskit", "migration")):
+            return True
+    return False
+
+
+def scrub_value(value: Any, key: str | None = None) -> Any:
+    if key is not None and _sensitive_key(key):
+        return REDACTED
+    if isinstance(value, dict):
+        cleaned = {}
+        for k, v in value.items():
+            if _sensitive_key_name(k):
+                continue
+            cleaned[k] = scrub_value(v, k)
+        return cleaned
+    if isinstance(value, list):
+        return [scrub_value(item) for item in value]
+    if isinstance(value, str):
+        redacted = _redact_text(value)
+        if key is not None and _sensitive_key(key):
+            return REDACTED
+        return redacted
+    if isinstance(value, bytes):
+        return _scrub_blob(value)
+    return value
+
+
+def scrub_snapshot(value: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(value)
+    for scope in SCOPES:
+        domains = value.get(scope)
+        if not isinstance(domains, dict):
+            continue
+        cleaned[scope] = {
+            domain: scrub_value(settings)
+            for domain, settings in domains.items()
+            if domain not in DROP_DOMAINS
+        }
+    return cleaned
+
+
 def snapshot() -> dict[str, Any]:
     version = subprocess.run(["sw_vers", "-productVersion"], capture_output=True, check=True)
     build = subprocess.run(["sw_vers", "-buildVersion"], capture_output=True, check=True)
-    return {
+    return scrub_snapshot({
         "formatVersion": FORMAT_VERSION,
         "capturedAt": dt.datetime.now(dt.timezone.utc),
         "macOSVersion": version.stdout.decode().strip(),
         "macOSBuild": build.stdout.decode().strip(),
         "user": capture_scope("user"),
         "currentHost": capture_scope("currentHost"),
-    }
+    })
 
 
 def load_plist(path: Path, description: str) -> dict[str, Any]:
