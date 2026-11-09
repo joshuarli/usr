@@ -32,6 +32,8 @@ The `host/macos/` directory is not part of the layer sync.
 
 `sh sync tools shuck` installs the newest `release-*` prerelease of `joshuarli/shck` (discovered through `releases.atom`) for `aarch64-apple-darwin`, `x86_64-unknown-linux-musl-static`, or `aarch64-unknown-linux-musl-static`, and installs the binary as `~/.local/bin/shellcheck`; shuck runs its ShellCheck compatibility mode under that name. `shuck` is in the default target set on those three platforms and the Alpine server profile.
 
+`sh sync tools gluon` installs the newest `release-*` prerelease of `joshuarli/gluon` (discovered through `releases.atom`) for `aarch64-apple-darwin` or `x86_64-unknown-linux-musl`. The archive holds the `meson`, `ninja`, and `gluon-build` binaries; the release tree lives under `~/.local/share/gluon/releases/<tag>-<triple>/` (set `GLUON_HOME` to move it) with `~/.local/share/gluon/current` selecting it and `~/.local/bin/meson`, `~/.local/bin/ninja`, and `~/.local/bin/gluon-build` linking through `current`. The archive is verified against `SHA256SUMS`, older gluon releases are pruned, and an unmanaged launcher is refused. `gluon` is in the default target set for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`.
+
 Sync prunes a recorded link whose old layer source is gone; `sh sync plan` lists these as `PRUNE`. Foreign links, still-present source links, and unrecorded links are preserved. To retire a managed link, remove its tracked declaration and run `sh sync links`. Test with an isolated `TARGET` scratch home; the old standalone `sym` command has been retired.
 
 ## Cross-harness Pi SDK subagent bridge

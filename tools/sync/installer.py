@@ -40,6 +40,7 @@ GHOSTTY_CUSTOM_ASSET = "Ghostty-Custom-aarch64-apple-darwin.dmg"
 GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
 SSH_COMMANDS = "ssh ssh-keygen ssh-agent ssh-add sftp scp".split()
 OXISH_COMMANDS = "oxish-server oxish-session".split()
+GLUON_COMMANDS = "meson ninja gluon-build".split()
 FFMPEG_COMMANDS = "ffmpeg ffprobe".split()
 OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pack git-submodule git-submodule--helper git-sh-setup git-sh-i18n git-sh-i18n--envsubst".split()
@@ -122,6 +123,7 @@ class Installer:
         self.ssh_home = Path(self.env.get("SSH_HOME") or self.data_home / "ssh")
         self.ffmpeg_home = Path(self.env.get("FFMPEG_HOME") or self.data_home / "ffmpeg")
         self.oxish_home = Path(self.env.get("OXISH_HOME") or self.data_home / "oxish")
+        self.gluon_home = Path(self.env.get("GLUON_HOME") or self.data_home / "gluon")
         self.grok_home = Path(self.env.get("GROK_HOME") or self.home / ".grok")
         self.opencode2_home = Path(self.env.get("OPENCODE2_HOME") or self.home / ".opencode")
         self.cmd_root = self.data_home / "command-code"
@@ -535,7 +537,7 @@ class Installer:
         owners = {
             **{name: "laputa-systems" for name in
                ("e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty", "vault", "rage")},
-            **{name: "joshuarli" for name in ("ish", "stuff", "mactop", "gh", "syncthing", "soulseek-rs")},
+            **{name: "joshuarli" for name in ("ish", "stuff", "mactop", "view", "gh", "syncthing", "soulseek-rs")},
             "bylaws": "joshuarli",
             "shuck": "joshuarli",
         }
@@ -1881,6 +1883,49 @@ class Installer:
                          validate=validate, ok_message=f"ssh is current ({tag})",
                          install_message=f"Installed {self.dest}/ssh")
 
+    def prune_gluon_releases(self) -> None:
+        home = self.gluon_home
+        releases = home / "releases"
+        if not releases.is_dir() or releases.is_symlink():
+            return
+        keep = set()
+        current = home / "current"
+        if current.is_symlink():
+            keep.add(Path(os.readlink(current)).name)
+        for entry in sorted(releases.iterdir()):
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            if entry.name in keep:
+                self.own_dir(entry)
+            elif entry.name.startswith(".gluon.") or entry.name.startswith("release-"):
+                shutil.rmtree(entry, ignore_errors=True)
+                self.removed.add(entry)
+                self.changed = True
+
+    def install_gluon(self) -> None:
+        if not self.which("zipinfo"):
+            self.skip("gluon", "zipinfo is required to validate the archive")
+        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
+                   ("linux", "x86_64"): "x86_64-unknown-linux-musl"}
+        if (self.os_name, self.arch) not in triples:
+            self.skip("gluon", f"no gluon release for {self.os_name}/{self.arch}")
+        triple = triples[(self.os_name, self.arch)]
+        tag = self.latest_tag("https://github.com/joshuarli/gluon/releases.atom", prefix="release-")
+        if not tag:
+            self.unchecked("gluon", "no release found")
+            return
+        asset = f"gluon-{triple}.zip"
+        base = f"https://github.com/joshuarli/gluon/releases/download/{tag}"
+        def validate(staged: Path) -> bool:
+            return all((staged / command).is_file() and os.access(staged / command, os.X_OK)
+                       for command in GLUON_COMMANDS)
+        self._zip_bundle("gluon", self.gluon_home, GLUON_COMMANDS, "gluon", in_bin=False,
+                         asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
+                         release_dir=self.gluon_home / "releases" / f"{tag}-{triple}",
+                         validate=validate, ok_message=f"gluon is current ({tag})",
+                         install_message=f"Installed meson, ninja, and gluon-build ({tag})")
+        self.prune_gluon_releases()
+
     def install_oxish(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
@@ -2594,6 +2639,37 @@ class Installer:
         self.run(["launchctl", "kickstart", "-k", f"gui/{uid}/com.mactop"], check=True)
         self.ok(f"Loaded {agent}")
 
+    def install_view_app(self) -> None:
+        app = Path("/Applications/View.app")
+        self.fetch_msg(f"Installing {app} ...")
+        staged = self.stage_dir(app.parent, ".view.")
+        (staged / "Contents/MacOS").mkdir(parents=True)
+        shutil.copy2(self.dest / "view", staged / "Contents/MacOS/view")
+        (staged / "Contents/Info.plist").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0">\n<dict>\n'
+            '\t<key>CFBundleName</key><string>View</string>\n'
+            '\t<key>CFBundleDisplayName</key><string>View</string>\n'
+            '\t<key>CFBundleIdentifier</key><string>com.view</string>\n'
+            '\t<key>CFBundleExecutable</key><string>view</string>\n'
+            '\t<key>CFBundlePackageType</key><string>APPL</string>\n'
+            '\t<key>CFBundleVersion</key><string>0.1.0</string>\n'
+            '\t<key>CFBundleShortVersionString</key><string>0.1.0</string>\n'
+            '\t<key>LSMinimumSystemVersion</key><string>27.0</string>\n'
+            '\t<key>NSPrincipalClass</key><string>NSApplication</string>\n'
+            '\t<key>NSHighResolutionCapable</key><true/>\n'
+            '\t<key>NSQuitAlwaysKeepsWindows</key><false/>\n'
+            '\t<key>NSSupportsAutomaticTermination</key><false/>\n'
+            '\t<key>NSSupportsSuddenTermination</key><false/>\n'
+            '</dict>\n</plist>\n')
+        self.run(["codesign", "--force", "--sign", "-", str(staged)], check=True)
+        self.run(["xattr", "-dr", "com.apple.quarantine", str(staged)])
+        shutil.rmtree(app, ignore_errors=True)
+        os.replace(staged, app)
+        self.ok(f"Installed {app}")
+        self.own_dir(app)
+
     def install(self, tool: str) -> None:
         handlers = {
             "fd": lambda: self.install_fd_or_rg("fd"), "rg": lambda: self.install_fd_or_rg("rg"),
@@ -2608,7 +2684,7 @@ class Installer:
             "jaq": self.install_jaq, "mold": self.install_mold, "nodejs": self.install_nodejs,
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
-            "oxish": self.install_oxish, "zzz": self.install_zzz,
+            "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon,
         }
         if tool in handlers:
             handlers[tool]()
@@ -2617,6 +2693,9 @@ class Installer:
             if tool == "mactop" and self.os_name == "darwin" and (self.dest / "mactop").exists() \
                     and (self.changed or not Path("/Applications/mactop.app").is_dir()):
                 self.install_mactop_app()
+            if tool == "view" and self.os_name == "darwin" and (self.dest / "view").exists() \
+                    and (self.changed or not Path("/Applications/View.app").is_dir()):
+                self.install_view_app()
 
     def record_managed_binary(self, prog: str) -> None:
         if (self.state / prog).is_file():
@@ -2626,7 +2705,7 @@ class Installer:
 
     def record_managed_installs(self) -> None:
         for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "stuff", "e", "fz", "fs",
-                     "srv", "mactop", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
+                     "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
                      "zzz", "uv", "uvx", "rage", "shellcheck"):
             self.record_managed_binary(prog)
         if self.installed("rage") and (self.dest / "rage-keygen").is_symlink():
@@ -2731,6 +2810,14 @@ class Installer:
                 for command in FFMPEG_COMMANDS:
                     if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.ffmpeg_home / "current/bin" / command):
                         self.own_file(self.dest / command)
+        if (self.state / "gluon").is_file() and (self.state / "gluon").stat().st_size > 0:
+            target = os.readlink(self.gluon_home / "current") if (self.gluon_home / "current").is_symlink() else ""
+            if self._own_release_target(self.gluon_home, GLUON_COMMANDS, f"{target}/meson", in_bin=False) and Path(target).is_dir():
+                self.own_file(self.state / "gluon")
+                self.own_file(self.gluon_home / "current")
+                for command in GLUON_COMMANDS:
+                    if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.gluon_home / "current" / command):
+                        self.own_file(self.dest / command)
         pins = self.ffmpeg_home / "pins"
         if pins.is_dir() and not pins.is_symlink():
             for pin in sorted(pins.iterdir()):
@@ -2763,10 +2850,12 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
     tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fs srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck"]
+    if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64")):
+        tools.append("gluon")
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("zzz")
     if os_name == "darwin":
-        tools += ["mactop", "vault", "ghostty-custom"]
+        tools += ["mactop", "view", "vault", "ghostty-custom"]
     tools.append("gh")
     if (os_name, arch) == ("linux", "x86_64"):
         tools += ["mold", "player"]

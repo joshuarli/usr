@@ -584,6 +584,17 @@ sys.exit(1)
         self.assertTrue(self.dest_path("oxish-server").is_symlink())
         self.assertEqual(self.state("oxish-server"), "e")
 
+    def test_gluon_bundle(self):
+        members = {"meson": b"m", "ninja": b"n", "gluon-build": b"b"}
+        payload = make_zip(members, executable=set(members))
+        routes, base = self._bundle_routes("joshuarli/gluon", "release-abc123", "gluon-x86_64-unknown-linux-musl.zip", payload)
+        inst = self.make(routes)
+        inst.install_gluon()
+        for command in ("meson", "ninja", "gluon-build"):
+            self.assertTrue(self.dest_path(command).is_symlink())
+        self.assertTrue((self.home / ".local/share/gluon/current").is_symlink())
+        self.assertEqual(self.state("gluon"), "e")
+
     def test_opencode2_zip_shim_and_current(self):
         asset = "opencode-linux-x64.tar.gz"
         url = f"https://opencode.ai/update/api/latest/cli/opencode/{asset}"
