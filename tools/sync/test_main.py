@@ -134,14 +134,26 @@ class MainTests(unittest.TestCase):
         apply(plan, ctx.state)
         self.assertEqual((ctx.home / ".moved").resolve(), new)
 
-    def test_server_profile_omits_mcp_bridges(self):
+    def test_server_profile_can_select_bridges_on_demand(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "is_alpine", return_value=False):
-            tasks = main.graph(server, ["python3"], setup=True).tasks
-        self.assertNotIn("claude-mcp", tasks)
-        self.assertNotIn("pi-mcp", tasks)
-        self.assertNotIn("opencode-mcp", tasks)
-        self.assertIn("tool:python3", tasks)
+            dag = main.graph(server, ["python3"], setup=True).select(["claude-mcp"])
+        names = {task.name for task in dag.order()}
+        self.assertTrue({"links", "tool:nodejs", "claude-mcp"} <= names)
+        with patch.object(main, "tool_list", return_value=["python3"]):
+            defaults = main.default_goals(server)
+        self.assertNotIn("claude-mcp", defaults)
+        self.assertNotIn("pi-mcp", defaults)
+        self.assertNotIn("opencode-mcp", defaults)
+
+    def test_server_profile_omits_mcp_bridges_from_default_sync(self):
+        server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
+        with patch.object(main, "tool_list", return_value=["python3"]):
+            defaults = main.default_goals(server)
+        self.assertNotIn("claude-mcp", defaults)
+        self.assertNotIn("pi-mcp", defaults)
+        self.assertNotIn("opencode-mcp", defaults)
+        self.assertIn("tool:python3", defaults)
 
 
 if __name__ == "__main__":

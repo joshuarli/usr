@@ -285,9 +285,7 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda: mac_packages_apply(ctx), lambda: mac_packages_status(ctx),
                           frozenset({"host:packages"})))
 
-    all_tools = set(names) | {"uv"}
-    if ctx.profile != "server":
-        all_tools.update({"nodejs", "claude", "opencode2", "cmd", "pi"})
+    all_tools = set(names) | {"uv", "nodejs", "claude", "opencode2", "cmd", "pi"}
     pending = list(all_tools)
     while pending:
         tool = pending.pop()
@@ -321,19 +319,18 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda t=tool: apply_tool(ctx, t),
                           lambda t=tool: installed(ctx, t),
                           frozenset({f"tool:{tool}"}), reconcile=True))
-    if ctx.profile != "server":
-        nodes.append(Task("pi-extensions", ("links", "tool:pi"),
-                          lambda: pi_extensions_status(ctx), lambda: pi_extensions_apply(ctx),
-                          lambda: pi_extensions_status(ctx), frozenset({"pi-config"}), reconcile=True))
-        nodes.append(Task("claude-mcp", ("pi-extensions", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2", "tool:pi"),
-                          lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
-                          lambda: bridge_status(ctx), frozenset({"claude-config", "pi-sdk-install"})))
-        nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
-                          lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
-                          lambda: pi_bridge_status(ctx), frozenset({"pi-config", "pi-sdk-install"})))
-        nodes.append(Task("opencode-mcp", ("pi-extensions", "tool:nodejs", "tool:cmd", "tool:opencode2", "tool:pi"),
-                          lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
-                          lambda: opencode_bridge_status(ctx), frozenset({"opencode-config", "pi-sdk-install"})))
+    nodes.append(Task("pi-extensions", ("links", "tool:pi"),
+                      lambda: pi_extensions_status(ctx), lambda: pi_extensions_apply(ctx),
+                      lambda: pi_extensions_status(ctx), frozenset({"pi-config"}), reconcile=True))
+    nodes.append(Task("claude-mcp", ("pi-extensions", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2", "tool:pi"),
+                      lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
+                      lambda: bridge_status(ctx), frozenset({"claude-config", "pi-sdk-install"})))
+    nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
+                      lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
+                      lambda: pi_bridge_status(ctx), frozenset({"pi-config", "pi-sdk-install"})))
+    nodes.append(Task("opencode-mcp", ("pi-extensions", "tool:nodejs", "tool:cmd", "tool:opencode2", "tool:pi"),
+                      lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
+                      lambda: opencode_bridge_status(ctx), frozenset({"opencode-config", "pi-sdk-install"})))
     deps = ("links",)
     if ctx.platform == "darwin":
         deps = ("links", "host:mac-packages")
@@ -341,6 +338,17 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                       lambda: kache_apply(ctx), lambda: kache_status(ctx),
                       frozenset({"toolchain"})))
     return Graph(nodes)
+
+
+def default_goals(ctx: Context) -> list[str]:
+    goals = ["links"] + ["tool:" + name for name in tool_list(ctx)]
+    if ctx.platform == "darwin":
+        goals.append("host:mac-packages")
+    if ctx.profile != "server":
+        goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp"])
+    if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
+        goals.append("kache")
+    return goals
 
 
 def main(argv: list[str]) -> int:
@@ -388,14 +396,7 @@ def main(argv: list[str]) -> int:
     elif command_name == "tools":
         selected = full.select(["tool:" + name for name in chosen])
     elif command_name in {"apply", "plan", "doctor"}:
-        goals = ["links"] + ["tool:" + name for name in defaults]
-        if ctx.platform == "darwin":
-            goals.append("host:mac-packages")
-        if ctx.profile != "server":
-            goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp"])
-        if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
-            goals.append("kache")
-        selected = full.select(goals)
+        selected = full.select(default_goals(ctx))
     else:
         raise AssertionError(command_name)
     if command_name in {"plan", "doctor"}:

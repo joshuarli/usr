@@ -86,7 +86,10 @@ class PiExtensionsTests(unittest.TestCase):
             self.assertIn("pi-extensions", tasks[name].needs)
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
         with patch.object(main, "is_alpine", return_value=False):
-            self.assertNotIn("pi-extensions", main.graph(server, [], setup=True).tasks)
+            server_tasks = main.graph(server, [], setup=True).tasks
+        self.assertIn("pi-extensions", server_tasks)
+        with patch.object(main, "tool_list", return_value=["python3"]):
+            self.assertNotIn("pi-extensions", main.default_goals(server))
 
 
 if __name__ == "__main__":
