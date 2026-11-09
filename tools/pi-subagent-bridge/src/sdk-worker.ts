@@ -61,6 +61,9 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
   })
   try {
     await session.bindExtensions({})
+    if (session.model?.provider !== job.model.providerID || session.model.id !== job.model.id ||
+        session.thinkingLevel !== job.model.variant)
+      throw new Error("Pi SDK changed or clamped the pinned model/effort")
     const rpc = api.send
     if (!rpc) throw new Error("Pi extension RPC is unavailable")
     const ping = unwrap(await rpc("ping", {}))
