@@ -1,182 +1,182 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, statSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import {
+  appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readdirSync,
+  renameSync, rmSync, writeFileSync,
+} from "node:fs"
+import { dirname, isAbsolute, join, relative } from "node:path"
+import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 
-type StoredRun = { pid: number; output: string; errors: string }
-type Stored = {
-  id: string; title: string; model: ModelRef; directory: string
-  metadata: { usr_worker_v1: { directory: string; model: ModelRef } }
-  readOnly: boolean; run?: StoredRun
+type Result = {
+  state: "succeeded" | "failed" | "cancelled"
+  text: string | null; error: string | null; usage: unknown; sessionFile: string | null
 }
-type Outcome = { state: string; text: string | null; error: unknown; usage: unknown }
-
+type Run = { pid: number; output: string; errors: string }
+type Stored = {
+  id: string; title: string; model: ModelRef; cwd: string
+  metadata: { usr_worker_v1: { directory: string; model: ModelRef } }
+  readOnly: boolean; run?: Run
+}
+const SESSION = /^ses_[a-f0-9]{32}$/
 const children = new Map<number, ChildProcess>()
-const supported: Record<string, string[]> = {
+const worker = fileURLToPath(new URL("./sdk-worker.ts", import.meta.url))
+const VARIANTS: Record<string, string[]> = {
   "deepseek-v4.1-flash": ["high", "max"],
   "muse-spark-1.3-contributor": ["medium", "high"],
 }
-function stateDirectory(cwd: string): string {
+
+function stateDir(cwd: string): string {
   const common = execFileSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
     { encoding: "utf8", timeout: 10000 }).trim()
-  const directory = join(dirname(common), ".work", "worker-bridge")
-  execFileSync("git", ["-C", dirname(common), "check-ignore", "-q", ".work/worker-bridge/state"],
-    { timeout: 10000, stdio: "ignore" })
-  mkdirSync(directory, { recursive: true, mode: 0o700 })
-  return directory
+  const root = dirname(common)
+  execFileSync("git", ["-C", root, "check-ignore", "-q", ".work/worker-bridge/state"],
+    { stdio: "ignore", timeout: 10000 })
+  const dir = join(root, ".work", "worker-bridge")
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  return dir
 }
-function recordPath(cwd: string, id: string): string {
-  if (!/^ses_[a-z0-9]{32}$/.test(id)) throw new Error("Invalid Pi worker session ID")
-  return join(stateDirectory(cwd), id + ".pi.json")
+function statePath(cwd: string, id: string): string {
+  if (!SESSION.test(id)) throw new Error("Invalid Pi session ID")
+  return join(stateDir(cwd), id + ".pi.json")
 }
 function load(cwd: string | undefined, id: string): Stored {
-  if (!cwd) throw new Error("Pi worker needs an explicit worktree path")
-  const s: Stored = JSON.parse(readFileSync(recordPath(cwd, id), "utf8"))
-  if (s.id !== id || s.directory !== cwd) throw new Error("Pi worker session ownership mismatch")
+  if (!cwd) throw new Error("Pi worker operations require the worktree path")
+  const s: Stored = JSON.parse(readFileSync(statePath(cwd, id), "utf8"))
+  if (s.id !== id || s.cwd !== cwd || !SESSION.test(s.id))
+    throw new Error("Pi worker session/worktree mismatch")
   return s
 }
 function save(s: Stored): void {
-  writeFileSync(recordPath(s.directory, s.id), JSON.stringify(s), { mode: 0o600 })
-}
-function tail(path: string): string {
+  const path = statePath(s.cwd, s.id), temporary = path + "." + randomUUID() + ".tmp"
   try {
-    const size = statSync(path).size, count = Math.min(size, 2_000_000)
-    const fd = openSync(path, "r")
-    try {
-      const bytes = Buffer.alloc(count), got = readSync(fd, bytes, 0, count, size - count)
-      return bytes.subarray(0, got).toString("utf8")
-    } finally { closeSync(fd) }
-  } catch { return "" }
+    writeFileSync(temporary, JSON.stringify(s), { mode: 0o600, flag: "wx" })
+    renameSync(temporary, path)
+  } finally {
+    rmSync(temporary, { force: true })
+  }
 }
 function alive(pid: number): boolean {
   if (children.has(pid)) return true
   try { process.kill(pid, 0); return true }
   catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM" }
 }
-function observe(s: Stored): Outcome {
-  if (!s.run) return { state: "queued", text: null, error: null, usage: null }
-  let settled: boolean | null = null, text: string | null = null, error: unknown = null, usage: unknown = null
-  for (const line of tail(s.run.output).split("\n")) {
-    if (!line.startsWith("{")) continue
-    let event: Record<string, unknown>
-    try {
-      const parsed: unknown = JSON.parse(line)
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue
-      event = parsed as Record<string, unknown>
-    } catch { continue }
-    if (event.type === "message_end" && event.message && typeof event.message === "object") {
-      const message = event.message as Record<string, unknown>
-      if (message.role !== "assistant") continue
-      if (Array.isArray(message.content)) {
-        const blocks = message.content as Array<{ type?: string; text?: string }>
-        const combined = blocks.filter((part) => part?.type === "text" && typeof part.text === "string")
-          .map((part) => part.text).join("")
-        if (combined) text = combined.slice(-5000)
-      }
-      if (message.usage) usage = message.usage
-      error = message.errorMessage ?? message.error ??
-        (message.stopReason === "error" ? "Pi provider error" : null)
-    }
-    if (event.type === "auto_retry_end" && event.success === false)
-      error = event.finalError ?? "Pi provider retry exhausted"
-    if (event.type === "agent_settled") settled = event.aborted === true
-  }
-  if (settled !== null) {
-    if (settled) return { state: "cancelled", text, error: error ?? "Pi aborted", usage }
-    if (error) return { state: "failed", text, error, usage }
-    return text ? { state: "succeeded", text, error: null, usage } :
-      { state: "failed", text, error: "Pi settled without assistant text", usage }
-  }
-  if (alive(s.run.pid)) return { state: "running", text, error: null, usage }
-  return { state: "unknown_or_interrupted", text, error: tail(s.run.errors) || "Pi stopped without agent_settled", usage }
-}
-function start(s: Stored, prompt: string): StoredRun {
-  const { model } = s, directory = stateDirectory(s.directory)
-  const name = randomUUID(), output = join(directory, name + ".pi.jsonl")
-  const errors = join(directory, name + ".pi.stderr")
-  const stdout = openSync(output, "wx", 0o600), stderr = openSync(errors, "wx", 0o600)
-  const args = [
-    "--mode", "json", "--no-extensions", "--no-mcp", "--no-skills",
-    "--no-context-files", "--no-prompt-templates", "--no-themes", "--no-approve",
-    "--provider", model.providerID, "--model", model.providerID + "/" + model.id,
-    "--thinking", model.variant ?? "high", "--session-id", s.id,
-    "--tools", s.readOnly ? "read,grep,find,ls" : "read,bash,edit,write,grep,find,ls",
-    "--", prompt,
-  ]
+function observe(s: Stored): { state: string; result: Result | null } {
+  if (!s.run) return { state: "blocked_admission", result: null }
   try {
-    const child = spawn("pi", args, { cwd: s.directory, detached: true, stdio: ["ignore", stdout, stderr] })
+    const result: Result = JSON.parse(readFileSync(s.run.output, "utf8"))
+    if (!["succeeded", "failed", "cancelled"].includes(result.state))
+      throw new Error("Invalid Pi result state")
+    return { state: result.state, result }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
+      return { state: "unknown_or_interrupted", result: null }
+  }
+  return { state: alive(s.run.pid) ? "running" : "unknown_or_interrupted", result: null }
+}
+function run(s: Stored, prompt: string, priorSessionFile?: string): Run {
+  const dir = stateDir(s.cwd), id = randomUUID()
+  const output = join(dir, id + ".result.json"), errors = join(dir, id + ".stderr")
+  const jobPath = join(dir, id + ".job.json")
+  const sessionDir = join(dir, "pi-sessions")
+  mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
+  const job = {
+    cwd: s.cwd, model: s.model, readOnly: s.readOnly, prompt,
+    sessionDir, priorSessionFile, resultPath: output,
+  }
+  writeFileSync(jobPath, JSON.stringify(job), { mode: 0o600, flag: "wx" })
+  const fd = openSync(errors, "wx", 0o600)
+  try {
+    const child = spawn(process.execPath, ["--experimental-strip-types", worker, jobPath], {
+      cwd: s.cwd, stdio: ["ignore", "ignore", fd],
+    })
     const pid = child.pid
     child.on("error", (error) => {
       if (pid !== undefined) children.delete(pid)
       try { appendFileSync(errors, "spawn error: " + error.message + "\n") } catch { /* preserve admission error */ }
     })
     child.on("close", () => { if (pid !== undefined) children.delete(pid) })
-    if (pid === undefined) throw new Error("Cannot launch pi")
+    if (pid === undefined) throw new Error("Cannot launch Pi SDK worker")
     children.set(pid, child)
     child.unref()
     return { pid, output, errors }
-  } finally { closeSync(stdout); closeSync(stderr) }
+  } finally { closeSync(fd) }
 }
-function catalog(): string {
-  return execFileSync("pi", ["--list-models", "opencode-go"],
-    { encoding: "utf8", timeout: 15000, maxBuffer: 4_000_000 })
+function verifiedSessionPath(s: Stored, value: string | null): string {
+  if (!value || !isAbsolute(value)) throw new Error("No durable Pi session to resume")
+  const dir = join(stateDir(s.cwd), "pi-sessions")
+  const name = relative(dir, value)
+  if (!name || name === ".." || name.startsWith("../") || isAbsolute(name) || !name.endsWith(".jsonl"))
+    throw new Error("Pi session file is outside the owned state directory")
+  return value
 }
-function modelsAvailable(): { id: string; providerID: string; variants: { id: string }[] }[] {
-  const output = catalog()
-  return Object.entries(supported).filter(([id]) => output.includes(id)).map(([id, variants]) =>
-    ({ id, providerID: "opencode-go", variants: variants.map((variant) => ({ id: variant })) }))
-}
+
 export function piPort(): OpenCodePort {
   return {
     async models() {
-      return { data: modelsAvailable() }
+      const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
+      const runtime = await ModelRuntime.create()
+      const available = Object.entries(VARIANTS)
+        .filter(([id]) => runtime.getModel("opencode-go", id) && runtime.hasConfiguredAuth("opencode-go"))
+        .map(([id, variants]) => ({
+          id, providerID: "opencode-go", enabled: true, status: "active",
+          variants: variants.map((variant) => ({ id: variant })),
+        }))
+      return { data: available }
     },
     async create(input) {
       const id = "ses_" + randomUUID().replaceAll("-", "")
       const s: Stored = {
-        id, title: input.title, model: input.model, directory: input.location.directory,
-        metadata: input.metadata, readOnly: input.agent === "plan",
+        id, cwd: input.location.directory, title: input.title,
+        model: input.model, metadata: input.metadata, readOnly: input.agent === "plan",
       }
       save(s)
       return { data: { id } }
     },
     async prompt(input) {
       const s = load(input.cwd, input.sessionID)
+      let prior: string | undefined
       if (s.run) {
-        const result = observe(s)
-        if (!["succeeded", "failed", "cancelled"].includes(result.state))
-          throw new Error("Pi worker is not terminal; refusing overlapping prompt")
+        const previous = observe(s)
+        if (!previous.result || !["succeeded", "failed", "cancelled"].includes(previous.state))
+          throw new Error("Pi session is not known terminal; no overlapping run")
+        prior = verifiedSessionPath(s, previous.result.sessionFile)
       }
-      s.run = start(s, input.text)
+      const launched = run(s, input.text, prior)
+      s.run = launched
       save(s)
       return { data: { admitted: true } }
     },
     async get(input) {
-      const s = load(input.cwd, input.sessionID), result = observe(s)
+      const s = load(input.cwd, input.sessionID), status = observe(s)
       return { data: {
-        id: s.id, title: s.title, model: s.model, location: { directory: s.directory },
-        metadata: s.metadata, outcome: result.state, error: result.error, tokens: result.usage,
+        id: s.id, title: s.title, model: s.model,
+        location: { directory: s.cwd }, metadata: s.metadata,
+        outcome: status.state, error: status.result?.error ?? null,
+        tokens: status.result?.usage ?? null,
       } }
     },
     async active(input) {
       if (!input?.cwd) return { data: {} }
-      const directory = stateDirectory(input.cwd), sessions: Record<string, boolean> = {}
-      for (const name of readdirSync(directory)) {
-        if (!/^ses_[a-z0-9]{32}\.pi\.json$/.test(name)) continue
-        const id = name.slice(0, -8), s = load(input.cwd, id)
+      const dir = stateDir(input.cwd), sessions: Record<string, boolean> = {}
+      for (const filename of readdirSync(dir)) {
+        if (!/^ses_[a-f0-9]{32}\.pi\.json$/.test(filename)) continue
+        const id = filename.slice(0, -8), s = load(input.cwd, id)
         if (observe(s).state === "running") sessions[id] = true
       }
       return { data: sessions }
     },
     async inbox() { return { data: [] } },
     async messages(input) {
-      const result = observe(load(input.cwd, input.sessionID))
-      return { data: [{ info: { role: "assistant", error: result.error },
-        parts: result.text ? [{ type: "text", text: result.text }] : [] }] }
+      const status = observe(load(input.cwd, input.sessionID))
+      return { data: [{
+        info: { role: "assistant", error: status.result?.error ?? null },
+        parts: status.result?.text ? [{ type: "text", text: status.result.text }] : [],
+      }] }
     },
     async interrupt(input) {
-      const s = load(input.cwd, input.sessionID), child = s.run && children.get(s.run.pid)
+      const s = load(input.cwd, input.sessionID)
+      const child = s.run && children.get(s.run.pid)
       return { data: { interrupted: child ? child.kill("SIGTERM") : false } }
     },
   }
