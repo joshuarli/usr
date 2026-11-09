@@ -30,7 +30,7 @@ Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untr
 
 Pi resolves the command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. The fallback uses a separate interactive `cmd login`. No credentials are committed.
 
-After syncing, install the declared package in interactive Pi with `pi update --extensions --no-approve`. The bridge has its own pinned SDK extension dependency and does not depend on this extra interactive installation. The four user agent profiles in `~/.pi/agent/agents/` enforce the same model/tool contract for native interactive Pi.
+`sh sync` now reconciles interactive Pi packages automatically: it repairs missing or mismatched exact pins with `pi install`, then runs `pi update --extensions --no-approve`. The updater alone skips exact-pinned packages, which is why both steps are needed. `sh sync plan` and `sh sync doctor` inspect installed versions without modifying anything. The bridge has its own pinned SDK dependency and does not require a second manual Pi package installation. The four user agent profiles in `~/.pi/agent/agents/` enforce the same role contract for interactive Pi.
 
 ## Worker runtime
 
