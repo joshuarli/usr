@@ -71,6 +71,34 @@ def entry_fingerprint(entry):
     return hashlib.sha256(payload).hexdigest()
 
 
+def service_is_running(opencode):
+    result = subprocess.run(
+        [opencode, "service", "status"], capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        die("cannot check OpenCode service status: " + (result.stderr.strip() or "command failed"))
+    return result.stdout.strip().lower() != "stopped"
+
+
+def restart_opencode_service():
+    if os.environ.get("OPENCODE"):
+        print("sync: OpenCode registration changed; not restarting the service from inside an OpenCode session; run `opencode service restart`")
+        return
+    opencode = shutil.which("opencode")
+    if opencode is None:
+        return
+    if not service_is_running(opencode):
+        print("sync: OpenCode service not running; MCP registration takes effect when opencode next starts")
+        return
+    result = subprocess.run(
+        [opencode, "service", "restart"], capture_output=True, text=True, timeout=120,
+    )
+    if result.returncode != 0:
+        die("OpenCode service restart failed: " + (result.stderr.strip() or "command failed")
+            + "; run `opencode service restart` manually")
+    print("sync: restarted opencode service to pick up the new MCP registration")
+
+
 def load_owner():
     if OWNER.is_symlink():
         die(f"refusing symlinked MCP ownership record: {OWNER}")
@@ -240,6 +268,7 @@ def run(action):
         if previous is not None or legacy is not None:
             update_configuration(data, original)
             print(f"sync: unregistered {NAME}")
+            restart_opencode_service()
         OWNER.unlink(missing_ok=True)
         return
 
@@ -254,7 +283,10 @@ def run(action):
         servers[NAME] = desired
         update_configuration(data, original)
         print(f"sync: registered {NAME} for OpenCode")
-    save_owner(desired)
+        save_owner(desired)
+        restart_opencode_service()
+    else:
+        save_owner(desired)
 
 
 if __name__ == "__main__":

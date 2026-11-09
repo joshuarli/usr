@@ -58,7 +58,7 @@ Newly installed objects are fingerprinted after the leaf installer confirms an a
 
 ### MCP host-independent registration
 
-`sync` persists a private fingerprint of its own shared `pi-subagent-bridge` registration under the sync state directory. The OpenCode registration and the tracked Codex entry invoke the `pi-subagent-bridge` CLI shim by name, so they contain no home or checkout paths and stay identical on every host; checkout moves and other-OS prefixes leave them unchanged. A stale or foreign registration with the same name is still refused. Existing legacy absolute-path registrations, including the old `/Users` and `/home` node invocations, and legacy `usr-opencode-worker` entries owned by sync are migrated to the shim form, but unrelated similarly shaped entries are not.
+`sync` persists a private fingerprint of its own shared `pi-subagent-bridge` registration under the sync state directory. When registration actually changes, sync restarts the running OpenCode service so its cached config picks up the new registration right away; sync run inside an OpenCode session instead skips the restart (it would kill the session driving it) and prints the manual command. The OpenCode registration and the tracked Codex entry invoke the `pi-subagent-bridge` CLI shim by name, so they contain no home or checkout paths and stay identical on every host; checkout moves and other-OS prefixes leave them unchanged. A stale or foreign registration with the same name is still refused. Existing legacy absolute-path registrations, including the old `/Users` and `/home` node invocations, and legacy `usr-opencode-worker` entries owned by sync are migrated to the shim form, but unrelated similarly shaped entries are not.
 
 ## Link reconciliation implementation
 

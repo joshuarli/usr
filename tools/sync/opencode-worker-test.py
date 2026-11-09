@@ -49,9 +49,25 @@ extension.mkdir(parents=True, exist_ok=True)
         (self.bin / "npm").write_text(npm)
         (self.bin / "npm").chmod(0o755)
         self.log = self.root / "npm.log"
+        self.opencode_log = self.root / "opencode.log"
+        opencode = f"""#!{sys.executable}
+import json, os, sys
+args = sys.argv[1:]
+if args == ["service", "status"]:
+    print("http://127.0.0.1:49374" if os.environ.get("MOCK_SERVICE", "running") == "running" else "stopped")
+    raise SystemExit(0)
+if args == ["service", "restart"]:
+    with open(os.environ["MOCK_OPENCODE_LOG"], "a") as f:
+        f.write(json.dumps(args) + "\\n")
+    raise SystemExit(int(os.environ.get("MOCK_RESTART_RC", "0")))
+raise SystemExit(2)
+"""
+        (self.bin / "opencode").write_text(opencode)
+        (self.bin / "opencode").chmod(0o755)
         self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"),
                         PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""),
-                        MOCK_NPM_LOG=str(self.log))
+                        MOCK_NPM_LOG=str(self.log), MOCK_OPENCODE_LOG=str(self.opencode_log))
+        self.env.pop("OPENCODE", None)
         self.config = self.home / ".config/opencode/opencode.json"
         self.config.parent.mkdir(parents=True)
         self.script = self.root / "tools/sync/opencode-worker.py"
@@ -61,6 +77,11 @@ extension.mkdir(parents=True, exist_ok=True)
                                 env=self.env, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
+
+    def restarts(self):
+        if not self.opencode_log.exists():
+            return 0
+        return len(self.opencode_log.read_text().splitlines())
 
     def test_install_is_idempotent_and_preserves_unrelated_credentials(self):
         original = {
@@ -183,6 +204,41 @@ extension.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(data))
         self.run_helper("install", success=False)
         self.assertEqual(json.loads(self.config.read_text()), data)
+
+    def test_install_restarts_running_service_once(self):
+        self.run_helper("install")
+        self.assertEqual(self.restarts(), 1)
+        self.run_helper("check")
+        self.assertEqual(self.restarts(), 1)
+        self.run_helper("install")
+        self.assertEqual(self.restarts(), 1)
+
+    def test_no_restart_when_service_not_running(self):
+        self.env["MOCK_SERVICE"] = "stopped"
+        self.run_helper("install")
+        self.assertEqual(self.restarts(), 0)
+        self.run_helper("check")
+
+    def test_no_restart_inside_opencode_session(self):
+        self.env["OPENCODE"] = "1"
+        self.run_helper("install")
+        self.assertEqual(self.restarts(), 0)
+        self.run_helper("check")
+
+    def test_failed_restart_fails_install(self):
+        self.env["MOCK_RESTART_RC"] = "1"
+        self.run_helper("install", success=False)
+        data = json.loads(self.config.read_text())
+        self.assertEqual(data["mcp"]["servers"]["pi-subagent-bridge"]["command"],
+                         ["pi-subagent-bridge", "mcp"])
+
+    def test_remove_restarts_running_service(self):
+        self.run_helper("install")
+        self.assertEqual(self.restarts(), 1)
+        self.run_helper("remove")
+        self.assertEqual(self.restarts(), 2)
+        self.run_helper("remove")
+        self.assertEqual(self.restarts(), 2)
 
     def test_failed_install_never_registers_mcp(self):
         self.env["MOCK_VERSION"] = "0.0.1"
