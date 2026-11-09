@@ -1,79 +1,57 @@
 # Pi
 
-Pi runs on OpenCode Go through the OpenCode account already authenticated on this machine. The parent defaults to `opencode-go/muse-spark-1.3-contributor` at `high` thinking and every orchestration tier pins the same provider/model. Pi 1.4.0 ships the `opencode-go` provider in its built-in catalog, including that model: 1M context, 131k output tokens, the OpenAI Responses API, and thinking levels through `xhigh`. Billing is $0.10 per million input and $0.20 per million output tokens against the workspace's Go monthly allowance. The third-party `pi-opencode-provider` package is not required; it adds runtime model discovery but still requires its own login.
+Pi is the canonical worker runtime for subagents launched from any coding harness. Use the shared `pi-subagent-bridge` MCP server or its CLI shim; do not invoke native Pi `pi-subagents`. The bridge uses `@earendil-works/pi-coding-agent` directly, rather than shelling out to `pi -p`. Independent SDK subprocesses preserve worktree and process isolation.
 
-## Install and authenticate
+## Pinned models
 
-Install Node.js 26.12.0+ and npm first. `sh sync` links the profile and includes Pi in its default tool set. `sh sync tools pi` installs or updates only Pi, resolving the latest `@earendil-works/pi-coding-agent` release (1.4.0 when this profile was updated on 2026-11-02). It installs with lifecycle scripts disabled under `${XDG_DATA_HOME:-~/.local/share}/pi` and links `~/.local/bin/pi`. Existing unmanaged launchers or install directories are not overwritten.
+| Role | OpenCode Go via Pi SDK | Thinking | Command Code fallback |
+| --- | --- | --- | --- |
+| scout | `muse-spark-1.3-contributor` | medium | DeepSeek V4.1 Flash low |
+| mechanic | `muse-spark-1.3-contributor` | high | DeepSeek V4.1 Flash high |
+| worker | `deepseek-v4.1-flash` | high | DeepSeek V4.1 Flash high |
+| expert | `deepseek-v4.1-flash` | max | DeepSeek V4.1 Flash max |
 
-The settings declare Nico Bailon's `pi-subagents` 0.84.0, the latest release checked on 2026-10-29, as `npm:pi-subagents@0.84.0`. Pi manages that package and its dependencies separately from the CLI. After reviewing `sh sync plan` and syncing with `sh sync`, reconcile the declared package without trusting the current project's configuration:
+Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its global `subagents.modelScope` allows exactly those two OpenCode Go models. No Pi `god` role exists. Claude Code and Codex alone may invoke their existing native `god` models. The SDK bridge independently enforces the role pins and the effective model, effort, and tool allowlists, so Pi settings or a project override cannot silently select another model for bridge workers.
 
-```sh
-pi update --extensions --no-approve
-pi --version
-pi list
-```
+## Install
 
-Pi reads OpenCode credentials from `OPENCODE_API_KEY` or a stored credential in `~/.pi/agent/auth.json`. This profile reuses the existing OpenCode login instead of storing a second key. Put the following in `~/.pi/agent/auth.json`; the file is untracked and must stay private:
+Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned SDK dependency is installed within `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
 
-```json
-{
+Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untracked and private** ``/.pi/agent/auth.json`:
+
+`{
   "opencode-go": {
     "type": "api_key",
     "key": "!opencode2 auth export opencode | jaq -r '.[] | select(.active) | .value.access'"
   }
-}
+}`
+
+Pi resolves the command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. The fallback uses a separate interactive `cmd login`. No credentials are committed.
+
+## Worker runtime
+
+Each assignment gets a clean linked worktree under `.work/wt/` and an explicit scope (base HEAD, writable paths, acceptance proof, bounded attempts, stop conditions). `pi-subagent-bridge` starts a dedicated Node process running `createAgentSession` from the Pi SDK. It selects the exact model, sets the effort, permits only the role's tools and disables ambient extensions and skill-triggered child launches. Conversation state persists in the ignored `.work/worker-bridge/pi-sessions` directory; corrections reopen that exact session. The worker writes a terminal JSON outcome atomically after the SDK prompt finishes. An absent or malformed outcome stays blocked.
+
+Only an unavailable exact model/provider or a recognized quota/usage failure can fall back to the pinned Command Code runner, and **only when the worktree is untouched and admission is unambiguous**. A task/test failure or an interrupted process does not warrant a retry with another provider. A runner report is not verification: the parent independently checks proof, changed paths, HEAD and the diff.
+
+This is a Git write-scope check, not an OS sandbox. Ignored paths and host-side effects require additional containment such as `sbx` or a VM.
+
+## CLI entrypoint
+
+The `pi-subagent-bridge` executable in ``/.local/bin` invokes the same SDK bridge when a harness cannot speak MCP:
+
+```
+pi-subagent-bridge model-check /absolute/repo/.work/wt/task worker
+pi-subagent-bridge start /absolute/repo/.work/wt/task "Fix one bug" worker /path/scope.json /path/brief.txt
+pi-subagent-bridge status /absolute/repo/.work/wt/task usrw_SESSION_ID
+pi-subagent-bridge resume /absolute/repo/.work/wt/task usrw_SESSION_ID /path/feedback.txt
+pi-subagent-bridge cancel /absolute/repo/.work/wt/task usrw_SESSION_ID
 ```
 
-Pi runs the command when it first needs the key and caches its standard output for the process lifetime. The command prints the active access token from `opencode2`'s credential store, so Pi shares the credential already used by `opencode2` rather than duplicating it. The token is an OAuth session credential and expires; OpenCode refreshes it as it is used. If Pi reports `credentials_not_configured` or an expired token, open `opencode2` once to refresh the session and retry. A Console personal API key exported as `OPENCODE_API_KEY` also works, but a stored `auth.json` credential takes precedence.
+It also exposes `pi-subagent-bridge mcp` for JSON-RPC. See `tools/pi-subagent-bridge/README.md` for schema and live acceptance checks.
 
-Verify the setup without relying on the default model resolution:
+## Verification
 
-```sh
-pi auth check --provider opencode-go --json
-pi --list-models opencode-go
-pi -p 'Reply exactly OK.'
-```
+Offline: `cd tools/pi-subagent-bridge && npm test`, `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, and `sh dotfiles/worker-watch-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
 
-Use `sh sync tools pi` for CLI upgrades; the subagents version remains explicitly pinned in `dotfiles/base/.pi/agent/settings.json` until reviewed and updated there. Pi can write its own settings, so inspect tracked changes after using its configuration commands.
-
-## Instructions and tiers
-
-`~/.pi/agent/AGENTS.md` points to the canonical `~/.codex/AGENTS.md`; skills load from `~/.agents/skills`. Invoke shared skills with `/skill:<name>`, for example `/skill:orchestrate`. The five definitions under `~/.pi/agent/agents/` match the Pi column in the shared orchestration skill:
-
-| Tier | Model | Thinking |
-| --- | --- | --- |
-| scout | `opencode-go/muse-spark-1.3-contributor` | low |
-| mechanic | `opencode-go/muse-spark-1.3-contributor` | medium |
-| worker | `opencode-go/muse-spark-1.3-contributor` | high |
-| expert | `opencode-go/muse-spark-1.3-contributor` | xhigh |
-| god | `opencode-go/muse-spark-1.3-contributor` | xhigh |
-
-The parent defaults to the same model at `high`. Pi's catalog maps `max` thinking to unsupported for this model, so `xhigh` is the ceiling and the settings reject higher requests with `maxThinking: xhigh`. `subagents.defaultModel` also covers unpinned built-in roles. The strict enforced `subagents.modelScope` rejects any other resolved provider/model, including per-run model overrides. There is no fallback to other providers. Expert and god are different assignments, not stronger models; god gets a fresh adversarial brief.
-
-Scout has only `read`, `grep`, `find`, and `ls`. The other tiers additionally have `bash`, `edit`, and `write`. These explicit tool lists omit delegation tools; the parent owns all delegation and worktree lifecycle. OpenCode Go bills usage against per-model monthly dollar allowances, so keep concurrency conservative and report limit failures instead of starting retry storms.
-
-`/subagents-models` displays the loaded role mapping. Reload Pi after changing definitions or settings. The user profile is not an immutable sandbox: trusted project settings and an operator's explicit model/config changes can override it. Do not add project overrides that weaken this profile.
-
-## Restored history and state
-
-The starting point was `dotfiles/base/.pi/agent/settings.json` at `0c9534f60c88b28210cbb3a6fbbdd2333b591b6c`. The dark theme, quiet startup, hidden thinking, cache notices, disabled install telemetry, and always-trust preference are retained. The former InferX Basic endpoint and its tracked `models.json` provider definition are removed; the built-in OpenCode Go catalog supplies the model metadata. The old OpenRouter default, generated changelog marker, and custom goal/cache extensions are not restored.
-
-Unlike that historical configuration, `.pi/agent` is not a whole-directory `.sym-dir` link. Only tracked configuration and agent definitions are linked. Credentials, sessions, downloaded packages, and runtime state remain under the real home directory, outside the repository. `sh sync uninstall` records the isolated CLI installation, not the entire `.pi` state directory. If an old whole-directory link still exists, preserve its state and resolve the conflict shown by `sh sync plan` before syncing; the installer does not migrate or delete it.
-
-## Git command guard
-
-The shared profile syncs `~/.pi/agent/extensions/git-execution-guard.js`. For Pi `bash` tool calls that visibly invoke Git, it supplies noninteractive `GIT_EDITOR`, `GIT_SEQUENCE_EDITOR`, and `GIT_MERGE_AUTOEDIT` settings to avoid hanging on an editor, and rejects obvious `git --no-verify` hook bypass attempts. This is a convenience guard, **not a security boundary**: indirect shell commands and other agents are outside its scope. The Git pre-push hook remains the independent push control. Check the behavior offline with `node dotfiles/pi-git-guard-test.mjs`.
-
-## Checks and upstream references
-
-Run `python3 -I dotfiles/pi-test.py` for offline installer and profile checks (also included in `sh sync check`). These use a scratch home under `.work/` and mock npm; they validate the static provider/model/routing contract but do not prove live provider access or run a real Pi/subagents session. The `pi auth check` and short prompt above exercise the stored credential without changing the tracked profile. If the endpoint rejects tool calls or streaming, treat the integration as blocked, not permission to fall back.
-
-- [OpenCode Go](https://opencode.ai/v2/docs/console/go)
-- [OpenCode Go endpoints and Pi setup](https://opencode.ai/v2/docs/console/harnesses/pi/)
-- [Pi custom models configuration](https://pi.dev/docs/latest/models-configuration)
-- [Pi installation](https://github.com/earendil-works/pi/tree/v1.4.0/packages/coding-agent)
-- [Pi package configuration](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/packages.md)
-- [pi-subagents 0.84.0](https://github.com/nicobailon/pi-subagents/releases/tag/v0.84.0)
-- [Subagent models and enforcement](https://github.com/nicobailon/pi-subagents/blob/v0.84.0/docs/models.md)
-- [pi-opencode-provider](https://pi.dev/packages/pi-opencode-provider) (optional runtime discovery; not used here)
+Pi SDK upstream reference: https://pi.dev/docs/latest/sdk
