@@ -181,6 +181,17 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let available = false, issue: string | null = null
       try { available = (await makeWorkerBridge(api, modelFor(tierInput)).modelCheck(dir)).available }
       catch (e) { issue = String(e) }
+      if (!available && !issue) {
+        try {
+          const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
+          const runtime = await ModelRuntime.create()
+          const model = modelFor(tierInput)
+          if (!runtime.getModel(model.providerID, model.id))
+            issue = `Pinned model ${model.providerID}/${model.id} not found in Pi SDK runtime`
+          else if (!runtime.hasConfiguredAuth(model.providerID))
+            issue = `No configured auth for ${model.providerID} in Pi SDK (set OPENCODE_API_KEY for OpenCode Go, or configure Pi auth)`
+        } catch { /* keep issue null if diagnosis unavailable */ }
+      }
       return {
         primary: { backend: "pi", model: modelFor(tierInput), available, issue },
         fallback: { backend: "command-code", model: COMMAND_MODEL, effort: EFFORT[tierInput], installed: command.available() },
