@@ -11,7 +11,7 @@ import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 
 type Result = {
   state: "succeeded" | "failed" | "cancelled"
-  text: string | null; error: string | null; usage: unknown; sessionFile: string | null
+  text: string | null; error: string | null; usage: unknown; sessionFile: string | null; runId: string | null
 }
 type Run = { pid: number; output: string; errors: string }
 type Stored = {
@@ -82,9 +82,10 @@ function run(s: Stored, prompt: string, priorSessionFile?: string): Run {
   const jobPath = join(dir, id + ".job.json")
   const sessionDir = join(dir, "pi-sessions")
   mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
+  const priorRunId = s.run && priorSessionFile ? observe(s).result?.runId : undefined
   const job = {
     cwd: s.cwd, model: s.model, readOnly: s.readOnly, prompt,
-    sessionDir, priorSessionFile, resultPath: output,
+    sessionDir, priorSessionFile, priorRunId, resultPath: output,
   }
   writeFileSync(jobPath, JSON.stringify(job), { mode: 0o600, flag: "wx" })
   const fd = openSync(errors, "wx", 0o600)
@@ -144,6 +145,7 @@ export function piPort(): OpenCodePort {
         if (!previous.result || !["succeeded", "failed", "cancelled"].includes(previous.state))
           throw new Error("Pi session is not known terminal; no overlapping run")
         prior = verifiedSessionPath(s, previous.result.sessionFile)
+        if (!previous.result.runId) throw new Error("No native subagent run identity for same-session correction")
       }
       s.admitting = true
       save(s)

@@ -9,7 +9,9 @@
   "enableInstallTelemetry": false,
   "hideThinkingBlock": true,
   "defaultProjectTrust": "always",
-  "packages": [],
+  "packages": [
+    "npm:pi-subagents@0.87.0"
+  ],
   "skills": [
     "~/.agents/skills"
   ],

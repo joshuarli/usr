@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto"
 import { readFileSync, renameSync, writeFileSync } from "node:fs"
 import {
-  createAgentSession, createExtensionRuntime, ModelRuntime, SessionManager, SettingsManager,
-  type ResourceLoader,
+  createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime,
+  SessionManager, SettingsManager, type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent"
-import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
+import registerSubagents from "pi-subagents"
 
 type Job = {
   cwd: string
@@ -12,6 +13,7 @@ type Job = {
   prompt: string
   sessionDir: string
   priorSessionFile?: string
+  priorRunId?: string
   resultPath: string
 }
 type Result = {
@@ -19,85 +21,135 @@ type Result = {
   error: string | null
   text: string | null
   sessionFile: string | null
+  runId: string | null
   usage: unknown
 }
+type Reply = { success: boolean; data?: unknown; error?: { message?: string } }
+type Rpc = (method: string, params: Record<string, unknown>) => Promise<Reply>
 
+const REQUEST = "subagents:rpc:v1:request"
+const REPLY = "subagents:rpc:v1:reply:"
+const COMPLETE = "subagent:async-complete"
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+function string(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+function role(job: Job): string {
+  const identity = job.model.providerID + "/" + job.model.id + ":" + job.model.variant
+  const tiers: Record<string, string> = {
+    "opencode-go/muse-spark-1.3-contributor:medium": "scout",
+    "opencode-go/muse-spark-1.3-contributor:high": "mechanic",
+    "opencode-go/deepseek-v4.1-flash:high": "worker",
+    "opencode-go/deepseek-v4.1-flash:max": "expert",
+  }
+  const tier = tiers[identity]
+  if (!tier || (job.readOnly !== (tier === "scout"))) throw new Error("Unapproved Pi tier or tool scope")
+  return tier
+}
 function persist(path: string, result: Result): void {
   const temporary = path + "." + process.pid + ".tmp"
   writeFileSync(temporary, JSON.stringify(result), { mode: 0o600, flag: "wx" })
   renameSync(temporary, path)
 }
-
-function resourceLoader(): ResourceLoader {
-  return {
-    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-    getSkills: () => ({ skills: [], diagnostics: [] }),
-    getPrompts: () => ({ prompts: [], diagnostics: [] }),
-    getThemes: () => ({ themes: [], diagnostics: [] }),
-    getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () =>
-      "You are a single-purpose coding subagent. Follow the assigned scope exactly. " +
-      "Never delegate, create or switch branches, commit, push, or extend the write boundary. " +
-      "Stop and report any blocker. Return verifiable evidence, not unsupported claims.",
-    getSystemPromptSource: () => undefined,
-    getAppendSystemPrompt: () => [],
-    getAppendSystemPromptSources: () => [],
-    extendResources: () => {},
-    reload: async () => {},
-  }
+function unwrap(reply: Reply): Record<string, unknown> {
+  if (!reply.success) throw new Error("pi-subagents RPC rejected request: " + (reply.error?.message ?? "unknown error"))
+  const data = record(reply.data)
+  if (!data) throw new Error("pi-subagents RPC returned no data")
+  return data
+}
+function runId(reply: Reply): string {
+  const data = unwrap(reply), details = record(data.details)
+  const id = string(details?.asyncId) ?? string(details?.runId)
+  if (!id || id.length > 128 || !/^[a-zA-Z0-9._-]+$/.test(id))
+    throw new Error("pi-subagents RPC returned no trustworthy async run identity")
+  return id
+}
+function terminal(event: Record<string, unknown>, id: string, sessionFile: string): Result {
+  const results = Array.isArray(event.results) ? event.results : []
+  const child = results.length === 1 ? record(results[0]) : null
+  const text = string(child?.output)
+  const cancelled = event.state === "stopped" || event.state === "paused" || child?.stopped === true
+  if (cancelled)
+    return { state: "cancelled", error: string(child?.error) ?? "Native subagent stopped", text, sessionFile, runId: id, usage: null }
+  if (event.success !== true || child?.success !== true)
+    return { state: "failed", error: string(child?.error) ?? "Native subagent failed", text, sessionFile, runId: id, usage: null }
+  if (!text)
+    return { state: "failed", error: "Native subagent completed without a proof record", text, sessionFile, runId: id, usage: null }
+  return { state: "succeeded", error: null, text, sessionFile, runId: id, usage: null }
 }
 
-async function run(job: Job): Promise<Result> {
-  ensureOpenCodeApiKey()
+async function run(job: Job, started: (id: string) => void): Promise<Result> {
+  const tier = role(job)
   const runtime = await ModelRuntime.create()
   const model = runtime.getModel(job.model.providerID, job.model.id)
   if (!model || !runtime.hasConfiguredAuth(job.model.providerID))
-    throw new Error("Pinned Pi provider/model is unavailable or has no configured credentials")
-  const thinking = job.model.variant
-  if (thinking !== "medium" && thinking !== "high" && thinking !== "max")
-    throw new Error("Unsupported Pi thinking tier")
+    throw new Error("Pinned Pi provider/model unavailable or credentials not configured")
   const manager = job.priorSessionFile
     ? SessionManager.open(job.priorSessionFile, job.sessionDir, job.cwd)
     : SessionManager.create(job.cwd, job.sessionDir)
-  const tools = job.readOnly
-    ? ["read", "grep", "find", "ls"]
-    : ["read", "bash", "edit", "write", "grep", "find", "ls"]
+  const agentDir = getAgentDir()
+  const settings = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } })
+  const completions = new Map<string, Record<string, unknown>>()
+  const waiters = new Map<string, (event: Record<string, unknown>) => void>()
+  let rpc: Rpc | undefined
+  const rpcExtension = (pi: ExtensionAPI): void => {
+    rpc = (method, params) => new Promise<Reply>((resolve) => {
+      const requestId = randomUUID()
+      const unsubscribe = pi.events.on(REPLY + requestId, (value: unknown) => {
+        unsubscribe()
+        const data = record(value)
+        if (data && typeof data.success === "boolean")
+          resolve({ success: data.success, data: data.data, error: record(data.error) ?? undefined })
+        else resolve({ success: false, error: { message: "Malformed pi-subagents RPC response" } })
+      })
+      pi.events.emit(REQUEST, { version: 1, requestId, method, params })
+    })
+    pi.events.on(COMPLETE, (value: unknown) => {
+      const event = record(value)
+      const id = string(event?.runId) ?? string(event?.id)
+      if (!id || !event) return
+      completions.set(id, event)
+      const resolve = waiters.get(id)
+      if (resolve) { waiters.delete(id); resolve(event) }
+    })
+  }
+  const loader = new DefaultResourceLoader({
+    cwd: job.cwd, agentDir, settingsManager: settings,
+    noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    extensionFactories: [registerSubagents, rpcExtension],
+  })
+  await loader.reload()
+  const errors = loader.getExtensions().errors
+  if (errors.length > 0) throw new Error("Pi extension initialization failed: " + errors.map((e) => e.error).join("; "))
   const { session } = await createAgentSession({
-    cwd: job.cwd, modelRuntime: runtime, model, thinkingLevel: thinking,
-    sessionManager: manager,
-    settingsManager: SettingsManager.inMemory({
-      compaction: { enabled: false }, retry: { enabled: false },
-    }),
-    resourceLoader: resourceLoader(),
-    tools,
+    cwd: job.cwd, agentDir, modelRuntime: runtime, model, thinkingLevel: job.model.variant === "max" ? "max" :
+      job.model.variant === "medium" ? "medium" : "high",
+    sessionManager: manager, settingsManager: settings, resourceLoader: loader, noTools: "builtin",
   })
   try {
-    if (session.model?.provider !== job.model.providerID || session.model.id !== job.model.id ||
-        session.thinkingLevel !== thinking ||
-        !session.getAvailableThinkingLevels().includes(thinking))
-      throw new Error("Pi silently replaced or clamped the pinned model/effort")
-    const active = session.getActiveToolNames().slice().sort()
-    if (active.join("\0") !== tools.slice().sort().join("\0"))
-      throw new Error("Pi effective tool list does not match the approved allowlist")
-    const previousMessages = session.messages.length
-    await session.prompt(job.prompt)
-    const last = session.messages.slice(previousMessages).reverse().find((m) => m.role === "assistant")
-    const text = last?.role === "assistant"
-      ? last.content.filter((part) => part.type === "text").map((part) => part.text).join("").trim() || null
-      : null
-    const sessionFile = session.sessionFile ?? null
-    if (!last || last.role !== "assistant")
-      return { state: "failed", text, sessionFile, error: "Pi returned no assistant message", usage: null }
-    const usage = last.usage ?? null
-    if (last.stopReason === "aborted")
-      return { state: "cancelled", text, sessionFile, error: "Pi aborted", usage }
-    if (last.stopReason === "error")
-      return { state: "failed", text, sessionFile, error: last.errorMessage ?? "Pi provider error", usage }
-    if (last.stopReason !== "stop")
-      return { state: "failed", text, sessionFile, error: "Pi stopped with " + last.stopReason, usage }
-    if (!text)
-      return { state: "failed", text, sessionFile, error: "Pi finished without text proof", usage }
-    return { state: "succeeded", text, sessionFile, error: null, usage }
+    await session.bindExtensions({})
+    if (!rpc) throw new Error("Pi extension RPC is unavailable")
+    const ping = unwrap(await rpc("ping", {}))
+    if (ping.version !== 1) throw new Error("Unsupported pi-subagents RPC version")
+    const sessionFile = session.sessionFile
+    if (!sessionFile) throw new Error("Pi host session is not durable")
+    const params: Record<string, unknown> = job.priorRunId
+      ? { id: job.priorRunId, message: job.prompt }
+      : {
+          agent: tier, task: job.prompt, async: true, cwd: job.cwd, worktree: false,
+          model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,
+          options: { agentScope: "user" },
+        }
+    const reply = await rpc(job.priorRunId ? "resume" : "spawn", params)
+    const id = runId(reply)
+    started(id)
+    const event = completions.get(id) ?? await new Promise<Record<string, unknown>>((resolve) => {
+      waiters.set(id, resolve)
+    })
+    return terminal(event, id, sessionFile)
   } finally {
     session.dispose()
   }
@@ -108,19 +160,22 @@ async function main(): Promise<void> {
   const job = JSON.parse(readFileSync(process.argv[2], "utf8")) as Job
   if (!job || typeof job.cwd !== "string" || typeof job.prompt !== "string" ||
       typeof job.resultPath !== "string" || typeof job.sessionDir !== "string")
-    throw new Error("Malformed SDK job")
+    throw new Error("Malformed Pi delegation job")
+  let admitted = false
   try {
-    persist(job.resultPath, await run(job))
+    const result = await run(job, () => { admitted = true })
+    persist(job.resultPath, result)
   } catch (error) {
+    if (admitted) throw error
     persist(job.resultPath, {
-      state: "failed", text: null, sessionFile: job.priorSessionFile ?? null,
+      state: "failed", text: null, sessionFile: job.priorSessionFile ?? null, runId: null,
       error: error instanceof Error ? error.message : String(error), usage: null,
     })
     process.exitCode = 1
   }
 }
 
-void main().catch((error) => {
-  process.stderr.write(String(error) + "\n")
-  process.exitCode = 1
+void main().then(() => { process.exit(process.exitCode ?? 0) }, (error) => {
+  process.stderr.write("pi-subagent-bridge: " + String(error) + "\n")
+  process.exit(1)
 })
