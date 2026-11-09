@@ -74,8 +74,7 @@ extension.mkdir(parents=True, exist_ok=True)
         self.assertEqual(result["mcp"]["servers"]["other"], original["mcp"]["servers"]["other"])
         worker = result["mcp"]["servers"]["pi-subagent-bridge"]
         self.assertEqual(worker["type"], "local")
-        self.assertEqual(worker["command"], [str(self.bin / "node"), "--experimental-strip-types",
-                         str(self.project / "src/server.ts")])
+        self.assertEqual(worker["command"], ["pi-subagent-bridge", "mcp"])
         self.assertIs(worker["codemode"], False)
         self.assertEqual(len(self.log.read_text().splitlines()), 1)
         self.run_helper("check")
@@ -124,7 +123,7 @@ extension.mkdir(parents=True, exist_ok=True)
         self.config.write_text(json.dumps(old))
         self.run_helper("install")
         self.assertEqual(json.loads(self.config.read_text())["mcp"]["servers"]
-                         ["pi-subagent-bridge"]["command"][0], str(self.bin / "node"))
+                         ["pi-subagent-bridge"]["command"], ["pi-subagent-bridge", "mcp"])
 
     def test_other_platform_home_registration_is_adopted(self):
         other = Path("/Users") / self.home.name
@@ -137,8 +136,7 @@ extension.mkdir(parents=True, exist_ok=True)
         self.run_helper("install")
         self.assertEqual(json.loads(self.config.read_text())["mcp"]["servers"]
                          ["pi-subagent-bridge"]["command"],
-                         [str(self.bin / "node"), "--experimental-strip-types",
-                          str(self.project / "src/server.ts")])
+                         ["pi-subagent-bridge", "mcp"])
         self.run_helper("check")
 
     def test_relocated_checkout_keeps_owned_registration_and_credentials(self):
@@ -156,7 +154,6 @@ extension.mkdir(parents=True, exist_ok=True)
         shutil.copy2(self.project / "package.json", moved_project / "package.json")
         self.script = moved_script
         self.project = moved_project
-        self.assertIn("MCP: register", self.run_helper("plan").stdout)
         self.run_helper("install")
         self.run_helper("check")
         result = json.loads(self.config.read_text())
@@ -164,8 +161,8 @@ extension.mkdir(parents=True, exist_ok=True)
         self.assertEqual(result["mcp"]["servers"]["other"],
                          {"type": "remote", "url": "https://example.com/mcp"})
         current = result["mcp"]["servers"]["pi-subagent-bridge"]
-        self.assertNotEqual(initial["command"], current["command"])
-        self.assertEqual(current["command"][-1], str(moved_project / "src/server.ts"))
+        self.assertEqual(initial, current)
+        self.assertEqual(current["command"], ["pi-subagent-bridge", "mcp"])
         self.run_helper("remove")
         self.assertEqual(json.loads(self.config.read_text())["mcp"]["servers"],
                          {"other": {"type": "remote", "url": "https://example.com/mcp"}})
@@ -201,7 +198,7 @@ extension.mkdir(parents=True, exist_ok=True)
         result = json.loads(tracked.read_text())
         self.assertEqual(result["theme"], "keep")
         worker = result["mcp"]["servers"]["pi-subagent-bridge"]
-        self.assertEqual(worker["command"][0], str(self.bin / "node"))
+        self.assertEqual(worker["command"], ["pi-subagent-bridge", "mcp"])
         self.assertTrue(self.config.is_symlink())
         self.run_helper("remove")
         result = json.loads(tracked.read_text())

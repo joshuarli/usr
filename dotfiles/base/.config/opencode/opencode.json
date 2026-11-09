@@ -17,9 +17,8 @@
       "pi-subagent-bridge": {
         "type": "local",
         "command": [
-          "/Users/josh/.local/share/nodejs/current/bin/node",
-          "--experimental-strip-types",
-          "/Users/josh/usr/tools/pi-subagent-bridge/src/server.ts"
+          "pi-subagent-bridge",
+          "mcp"
         ],
         "codemode": false
       }

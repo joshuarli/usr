@@ -58,10 +58,10 @@ def managed_binary(name):
     return shutil.which(name)
 
 
-def expected_entry(node):
+def expected_entry():
     return {
         "type": "local",
-        "command": [node, "--experimental-strip-types", str(SERVER)],
+        "command": ["pi-subagent-bridge", "mcp"],
         "codemode": False,
     }
 
@@ -101,6 +101,8 @@ def save_owner(entry):
 
 
 def owned_entry(entry):
+    if entry == expected_entry():
+        return True
     if not isinstance(entry, dict) or entry.get("type", "local") != "local":
         return False
     command = entry.get("command")
@@ -203,8 +205,7 @@ def run(action):
     _, servers = servers_in(data)
     previous = servers.get(NAME)
     legacy = servers.get(LEGACY_NAME)
-    node = managed_binary("node")
-    desired = expected_entry(node or "node")
+    desired = expected_entry()
     if previous is not None and not owned_entry(previous):
         die(f"{NAME} already names a different MCP server; leaving it unchanged")
     if legacy is not None and not owned_entry(legacy):
@@ -245,10 +246,7 @@ def run(action):
     if action != "install":
         die("usage: opencode-worker.py {plan|check|install|remove}")
     install_dependency()
-    node = managed_binary("node")
-    if not node:
-        die("Node.js is missing")
-    desired = expected_entry(node)
+    desired = expected_entry()
     if previous != desired or legacy is not None:
         mcp = data.setdefault("mcp", {})
         servers = mcp.setdefault("servers", {})
