@@ -238,7 +238,7 @@ def run(action):
     if not node:
         die("Node.js is missing")
     desired = expected_entry(node)
-    if previous != desired:
+    if previous != desired or legacy is not None:
         mcp = data.setdefault("mcp", {})
         servers = mcp.setdefault("servers", {})
         servers.pop(LEGACY_NAME, None)
