@@ -54,13 +54,14 @@ export function unwrap(reply: Reply): Record<string, unknown> {
   if (!data) throw new Error("pi-subagents RPC returned no data")
   return data
 }
-export function runId(reply: Reply): string {
+export function runDetails(reply: Reply): { runId: string; asyncDir: string | null } {
   const data = unwrap(reply), details = record(data.details)
-  const id = string(details?.asyncId) ?? string(details?.runId)
-  if (!id || id.length > 128 || !/^[a-zA-Z0-9._-]+$/.test(id))
+  const runId = string(details?.asyncId) ?? string(details?.runId)
+  if (!runId || runId.length > 128 || !/^[a-zA-Z0-9._-]+$/.test(runId))
     throw new Error("pi-subagents RPC returned no trustworthy async run identity")
-  return id
+  return { runId, asyncDir: string(details?.asyncDir) }
 }
+export function runId(reply: Reply): string { return runDetails(reply).runId }
 export function terminal(event: Record<string, unknown>, id: string, sessionFile: string): Result {
   const results = Array.isArray(event.results) ? event.results : []
   const child = results.length === 1 ? record(results[0]) : null
