@@ -3,12 +3,12 @@ import { realpathSync } from "node:fs"
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
 
 export type ModelRef = { id: string; providerID: string; variant?: string }
-export type SessionArgs = { sessionID: string }
+export type SessionArgs = { sessionID: string; cwd?: string }
 export type OpenCodePort = {
   create(input: { title: string; agent: "build" | "plan"; model: ModelRef; location: { directory: string }; metadata: { usr_worker_v1: { directory: string; model: ModelRef } } }): Promise<unknown>
   prompt(input: SessionArgs & { text: string }): Promise<unknown>
   get(input: SessionArgs): Promise<unknown>
-  active(): Promise<unknown>
+  active(input?: { cwd?: string }): Promise<unknown>
   inbox(input: SessionArgs): Promise<unknown>
   messages(input: SessionArgs & { order: "desc"; limit: number }): Promise<unknown>
   interrupt(input: SessionArgs): Promise<unknown>
@@ -145,7 +145,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
     const id = requiredText(sessionID, "session_id", 128)
     if (!/^ses_[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid OpenCode session ID")
     const directory = checkedWorktree(cwd)
-    const info = object(unbox(await api.get({ sessionID: id })))
+    const info = object(unbox(await api.get({ sessionID: id, cwd: directory })))
     const location = object(info.location)
     const metadata = object(info.metadata)
     const ownership = object(metadata[SESSION_METADATA_KEY])
@@ -184,7 +184,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
         "", text,
       ].join("\n")
       try {
-        await api.prompt({ sessionID: id, text: prompt })
+        await api.prompt({ sessionID: id, cwd: directory, text: prompt })
       } catch (error) {
         throw new Error(`OpenCode session ${id} created but prompt admission failed: ${String(error)}. Inspect before retrying.`)
       }
@@ -193,7 +193,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
     async status(cwd: unknown, sessionID: unknown) {
       const { id, directory, info } = await ownedSession(sessionID, cwd)
       const [active, inbox, messages] = await Promise.all([
-        api.active(), api.inbox({ sessionID: id }), api.messages({ sessionID: id, order: "desc", limit: 30 }),
+        api.active({ cwd: directory }), api.inbox({ sessionID: id, cwd: directory }), api.messages({ sessionID: id, cwd: directory, order: "desc", limit: 30 }),
       ])
       const running = activeSession(active, id)
       const pending = queuedInputs(inbox)
@@ -208,14 +208,14 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
     async resume(cwd: unknown, sessionID: unknown, feedback: unknown) {
       const { id, directory } = await ownedSession(sessionID, cwd)
       requiredText(feedback, "feedback")
-      const [active, inbox] = await Promise.all([api.active(), api.inbox({ sessionID: id })])
+      const [active, inbox] = await Promise.all([api.active({ cwd: directory }), api.inbox({ sessionID: id, cwd: directory })])
       if (activeSession(active, id) || queuedInputs(inbox)) throw new Error("Worker is running or has queued input; do not enqueue competing feedback")
-      await api.prompt({ sessionID: id, text: `Parent feedback (same scope and write boundaries):\n${feedback}` })
+      await api.prompt({ sessionID: id, cwd: directory, text: `Parent feedback (same scope and write boundaries):\n${feedback}` })
       return { session_id: id, cwd: directory, status: "admitted" }
     },
     async cancel(cwd: unknown, sessionID: unknown) {
-      const { id } = await ownedSession(sessionID, cwd)
-      const reply = object(unbox(await api.interrupt({ sessionID: id })))
+      const { id, directory } = await ownedSession(sessionID, cwd)
+      const reply = object(unbox(await api.interrupt({ sessionID: id, cwd: directory })))
       return { session_id: id, interrupted: reply.interrupted === true, note: "Inspect status and worktree; do not delete it." }
     },
   }

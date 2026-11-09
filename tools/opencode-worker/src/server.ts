@@ -5,10 +5,10 @@ for (const p of ["/opt/homebrew/opt/rustup/bin", "/opt/homebrew/bin", "/Users/jo
   }
 }
 import { createInterface } from "node:readline"
-import { type OpenCodePort } from "./bridge.ts"
+import { piPort } from "./pi-port.ts"
 import { makeHybridBridge } from "./hybrid.ts"
 
-const VERSION = "0.2.0"
+const VERSION = "0.3.0"
 const PROTOCOL = "2025-06-18"
 const MAX_LINE = 100_000
 
@@ -30,12 +30,12 @@ const idSchema = { type: "string", description: "usrw_ session ID returned by wo
 const tools = [
   {
     name: "worker_model_check",
-    description: "Read-only: inspect the exact pinned DeepSeek V4.1 Flash tier in OpenCode Go and availability of Command Code fallback.",
+    description: "Read-only: inspect the pinned Pi/OpenCode Go model for this tier and Command Code fallback availability.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, tier: tierSchema }, required: ["cwd", "tier"], additionalProperties: false },
   },
   {
     name: "worker_start",
-    description: "Claude Opus coordinator ONLY: delegate one strictly scoped task to OpenCode Go DeepSeek 4.1 Flash; fall back to the exact Command Code DeepSeek model on quota/model unavailability. Admission is NOT completion.",
+    description: "Any parent harness: delegate a scoped task to a headless Pi worker; fall back to Command Code DeepSeek 4.1 Flash only before edits on model/quota failure. Admission is NOT completion.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },
@@ -70,42 +70,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
-type OpenCodeClient = ReturnType<typeof import("@opencode/client").OpenCode.make>
-export function opencodePort(client: OpenCodeClient): OpenCodePort {
-  return {
-    create: (input) => client.session.create(input),
-    prompt: (input) => client.session.prompt(input),
-    get: (input) => client.session.get(input),
-    active: () => client.session.active(),
-    inbox: (input) => client.session.inbox.list(input),
-    messages: (input) => client.message.list(input),
-    interrupt: (input) => client.session.interrupt(input),
-    models: (input) => client.model.list(input),
-  }
-}
-
-/** Connect lazily: tools/list and unit tests need neither OpenCode nor credentials. */
-export async function connect(): Promise<Bridge> {
-  let connection: Promise<OpenCodePort> | undefined
-  const get = () => connection ??= (async () => {
-    const [{ OpenCode }, { Service }] = await Promise.all([
-      import("@opencode/client"), import("@opencode/client/service"),
-    ])
-    const endpoint = await Service.ensure({ command: ["opencode2", "serve", "--service"], version: (version: string) => version.startsWith("2.") })
-    return opencodePort(OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) }))
-  })().catch((error: unknown) => { connection = undefined; throw error })
-  const api: OpenCodePort = {
-    create: async (input) => (await get()).create(input),
-    prompt: async (input) => (await get()).prompt(input),
-    get: async (input) => (await get()).get(input),
-    active: async () => (await get()).active(),
-    inbox: async (input) => (await get()).inbox(input),
-    messages: async (input) => (await get()).messages(input),
-    interrupt: async (input) => (await get()).interrupt(input),
-    models: async (input) => (await get()).models(input),
-  }
-  return makeHybridBridge(api)
-}
+export async function connect(): Promise<Bridge> { return makeHybridBridge(piPort()) }
 
 export function serve(load: () => Promise<Bridge> = connect): void {
   let cached: Promise<Bridge> | undefined

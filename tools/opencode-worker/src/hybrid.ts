@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { checkedWorktree, GO_MODEL, makeWorkerBridge, type OpenCodePort } from "./bridge.ts"
+import { checkedWorktree, makeWorkerBridge, type PiPort, type ModelRef } from "./bridge.ts"
 import { cancelCommand, COMMAND_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
@@ -16,11 +16,11 @@ export type Scope = {
 }
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
-  backend: "opencode" | "opencode-admitting" | "command-code" | "command-transition"; attempts: number
-  opencode_id?: string; command_run?: CommandRun; fallback_reason?: string; continuations?: number
+  backend: "pi" | "pi-admitting" | "command-code" | "command-transition"; attempts: number
+  pi_id?: string; command_run?: CommandRun; fallback_reason?: string; continuations?: number
 }
 const EFFORT: Record<Tier, Effort> = {
-  scout: "low", mechanic: "low", worker: "high", expert: "max",
+  scout: "low", mechanic: "high", worker: "high", expert: "max",
 }
 const TURN_LIMIT_CONTINUATIONS = 2
 const ADMISSION_POLLS = 10
@@ -94,9 +94,9 @@ function load(cwd: unknown, id: unknown): Session {
   if (s.cwd !== dir || !isTier(s.tier)) throw new Error("Session/worktree mismatch")
   scopeFor(s.scope, s.tier, dir, false)
   if (!Number.isInteger(s.attempts) || s.attempts < 0 ||
-    (s.backend === "opencode" && typeof s.opencode_id !== "string") ||
+    (s.backend === "pi" && typeof s.pi_id !== "string") ||
     (s.backend === "command-code" && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
-    !["opencode", "opencode-admitting", "command-code", "command-transition"].includes(s.backend)) {
+    !["pi", "pi-admitting", "command-code", "command-transition"].includes(s.backend)) {
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   }
   return s
@@ -120,7 +120,13 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
-function modelFor(tier: Tier) { return { ...GO_MODEL, variant: EFFORT[tier] } }
+const PI_MODELS: Record<Tier, ModelRef> = {
+  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
+  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
+  worker: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
+  expert: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" },
+}
+function modelFor(tier: Tier) { return PI_MODELS[tier] }
 function cmdAvailable(): boolean {
   for (const part of (process.env.PATH || "").split(":")) {
     if (!part) continue
@@ -130,7 +136,7 @@ function cmdAvailable(): boolean {
 }
 function prompt(s: Session): string {
   return [
-    "You execute a single scoped task on DeepSeek V4.1 Flash. Claude Opus only coordinates.",
+    "You execute a single scoped task using the pinned Pi tier model. The parent harness coordinates.",
     "Tier: " + s.tier + ". Task: " + s.task,
     "Use only worktree " + s.cwd + " at base revision " + s.scope.base_revision,
     "Writable paths: " + (s.scope.writable_paths.join(", ") || "NONE: READ ONLY"),
@@ -150,11 +156,11 @@ function quota(value: unknown): boolean {
   return QUOTA.test(typeof value === "string" ? value : JSON.stringify(value ?? ""))
 }
 
-export function makeHybridBridge(api: OpenCodePort, command = {
+export function makeHybridBridge(api: PiPort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }) {
   function fallback(s: Session, reason: string): Session {
-    if (!command.available()) throw new Error("OpenCode " + reason + "; Command Code cmd unavailable")
+    if (!command.available()) throw new Error("Pi " + reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
     const dir = stateDir(s.cwd)
@@ -171,23 +177,23 @@ export function makeHybridBridge(api: OpenCodePort, command = {
   return {
     async modelCheck(cwd: unknown, tierInput: unknown) {
       const dir = checkedWorktree(cwd)
-      if (!isTier(tierInput)) throw new Error("Unknown DeepSeek tier")
+      if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       let available = false, issue: string | null = null
       try { available = (await makeWorkerBridge(api, modelFor(tierInput)).modelCheck(dir)).available }
       catch (e) { issue = String(e) }
       return {
-        primary: { backend: "opencode", model: modelFor(tierInput), available, issue },
+        primary: { backend: "pi", model: modelFor(tierInput), available, issue },
         fallback: { backend: "command-code", model: COMMAND_MODEL, effort: EFFORT[tierInput], installed: command.available() },
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {
       const dir = checkedWorktree(cwd, true)
-      if (!isTier(tierInput)) throw new Error("Unknown DeepSeek tier")
+      if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       if (git(dir, "status", "--porcelain", "--untracked-files=all")) throw new Error("Worker worktree must start clean")
       const task = required(brief, "brief", 32000)
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, backend: "opencode-admitting", attempts: 0 }
+        task, backend: "pi-admitting", attempts: 0 }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
       try { save(s) } catch (error) {
@@ -198,17 +204,17 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let available: boolean
       try { available = (await worker.modelCheck(dir)).available }
       catch (e) {
-        fallback(s, quota(e) ? "quota-limited model check" : "OpenCode unavailable: " + String(e))
+        fallback(s, quota(e) ? "quota-limited model check" : "Pi unavailable: " + String(e))
         return { session_id: s.id, backend: s.backend, status: "admitted" }
       }
       if (!available) {
-        fallback(s, "pinned OpenCode model unavailable")
+        fallback(s, "pinned Pi model unavailable")
         return { session_id: s.id, backend: s.backend, status: "admitted" }
       }
       try {
         const admitted = await worker.start(dir, s.title, prompt(s), tierInput === "scout")
-        s.opencode_id = admitted.session_id
-        s.backend = "opencode"
+        s.pi_id = admitted.session_id
+        s.backend = "pi"
         s.attempts = 1
         save(s)
         for (let poll = 0; poll < ADMISSION_POLLS; poll++) {
@@ -219,31 +225,31 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             continue
           }
           if (early.state !== "succeeded" && quota(early.error) && untouched(s)) {
-            fallback(s, "OpenCode quota-limited admission")
+            fallback(s, "Pi quota-limited admission")
             return { session_id: s.id, backend: s.backend, status: "admitted" }
           }
           break
         }
         return { session_id: s.id, backend: s.backend, status: "admitted", model: modelFor(s.tier) }
       } catch (e) {
-        // A created OpenCode session may still execute; never start a second worker without proving it did not.
+        // A created Pi session may still execute; never start a second worker without proving it did not.
         if (String(e).includes("created but prompt admission failed"))
           throw new Error(String(e) + "; worktree lease retained for session " + s.id)
         if (!quota(e)) throw e
-        fallback(s, "OpenCode quota-limited admission")
+        fallback(s, "Pi quota-limited admission")
         return { session_id: s.id, backend: s.backend, status: "admitted" }
       }
     },
     async status(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       let state: string, last_assistant_text: string | null, error: unknown = null, usage: unknown = null
-      if (s.backend === "opencode-admitting") {
+      if (s.backend === "pi-admitting") {
         state = "blocked_admission"
         last_assistant_text = null
-        error = "OpenCode admission interrupted or uncertain; inspect this session before recovery"
-      } else if (s.backend === "opencode") {
-        if (!s.opencode_id) throw new Error("Missing OpenCode session")
-        const response = await makeWorkerBridge(api, modelFor(s.tier)).status(s.cwd, s.opencode_id)
+        error = "Pi admission interrupted or uncertain; inspect this session before recovery"
+      } else if (s.backend === "pi") {
+        if (!s.pi_id) throw new Error("Missing Pi session")
+        const response = await makeWorkerBridge(api, modelFor(s.tier)).status(s.cwd, s.pi_id)
         state = typeof response.state === "string" ? response.state : "unknown"
         last_assistant_text = response.last_assistant_text
         error = response.error
@@ -252,7 +258,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           quota(error)) {
           if (!untouched(s)) state = "blocked_partial_work"
           else {
-            fallback(s, "OpenCode quota/usage failure")
+            fallback(s, "Pi quota/usage failure")
             state = "running"
             last_assistant_text = null
           }
@@ -281,8 +287,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       }
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
-        model: s.backend === "opencode" || s.backend === "opencode-admitting" ? modelFor(s.tier) : COMMAND_MODEL,
-        effort: EFFORT[s.tier], state, last_assistant_text, error, usage,
+        model: s.backend === "pi" || s.backend === "pi-admitting" ? modelFor(s.tier) : COMMAND_MODEL,
+        effort: s.backend === "pi" || s.backend === "pi-admitting" ? modelFor(s.tier).variant : EFFORT[s.tier], state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
         fallback_reason: s.fallback_reason ?? null,
@@ -301,14 +307,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
-      if (s.backend === "command-transition" || s.backend === "opencode-admitting")
+      if (s.backend === "command-transition" || s.backend === "pi-admitting")
         throw new Error("Worker transition interrupted; inspect session before resuming")
-      if (s.backend === "opencode") {
-        if (!s.opencode_id) throw new Error("Missing OpenCode session")
+      if (s.backend === "pi") {
+        if (!s.pi_id) throw new Error("Missing Pi session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
         save(s)
-        await makeWorkerBridge(api, modelFor(s.tier)).resume(s.cwd, s.opencode_id, "Same-scope correction only: " + correction)
+        await makeWorkerBridge(api, modelFor(s.tier)).resume(s.cwd, s.pi_id, "Same-scope correction only: " + correction)
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
         const previous = command.status(s.command_run)
@@ -334,9 +340,9 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async cancel(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       let interrupted = false
-      if (s.backend === "opencode") {
-        if (!s.opencode_id) throw new Error("Missing OpenCode session")
-        interrupted = (await makeWorkerBridge(api, modelFor(s.tier)).cancel(s.cwd, s.opencode_id)).interrupted
+      if (s.backend === "pi") {
+        if (!s.pi_id) throw new Error("Missing Pi session")
+        interrupted = (await makeWorkerBridge(api, modelFor(s.tier)).cancel(s.cwd, s.pi_id)).interrupted
       } else if (s.command_run) interrupted = command.cancel(s.command_run)
       return { session_id: s.id, interrupted,
         note: "Never signal a Command Code PID left by an earlier MCP process; it may have been reused." }
