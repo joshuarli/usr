@@ -30,12 +30,12 @@ const idSchema = { type: "string", description: "usrw_ session ID returned by wo
 const tools = [
   {
     name: "worker_model_check",
-    description: "Read-only: inspect the pinned Pi/OpenCode Go model for this tier and Command Code fallback availability.",
+    description: "Read-only: inspect the pinned Pi SDK model for this tier and Command Code fallback availability.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, tier: tierSchema }, required: ["cwd", "tier"], additionalProperties: false },
   },
   {
     name: "worker_start",
-    description: "Any parent harness: delegate a scoped task to a headless Pi worker; fall back to Command Code DeepSeek 4.1 Flash only before edits on model/quota failure. Admission is NOT completion.",
+    description: "Any parent harness: delegate a scoped task to a Pi SDK worker; fall back to Command Code DeepSeek 4.1 Flash only before edits on model/quota failure. Admission is NOT completion.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },
@@ -51,7 +51,7 @@ const tools = [
   },
   {
     name: "worker_resume",
-    description: "Parent ONLY: enqueue targeted feedback in the SAME inactive, unqueued usr worker session. Cannot change model, worktree, or ownership boundaries. Never retry unchanged failures.",
+    description: "Parent ONLY: enqueue targeted feedback in the SAME inactive, unqueued Pi worker session. Cannot change model, worktree, or ownership boundaries. Never retry unchanged failures.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema, session_id: idSchema,
       feedback: { type: "string", maxLength: 32000 },

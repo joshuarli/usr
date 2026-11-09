@@ -19,12 +19,14 @@ Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The
 
 Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untracked and private** ``/.pi/agent/auth.json`:
 
-`{
+```json
+{
   "opencode-go": {
     "type": "api_key",
     "key": "!opencode2 auth export opencode | jaq -r '.[] | select(.active) | .value.access'"
   }
-}`
+}
+```
 
 Pi resolves the command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. The fallback uses a separate interactive `cmd login`. No credentials are committed.
 
