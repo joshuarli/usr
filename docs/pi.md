@@ -17,7 +17,7 @@ Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its glob
 
 Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned SDK dependency is installed within `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
 
-Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untracked and private** ``/.pi/agent/auth.json`:
+Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untracked and private** `~/.pi/agent/auth.json`:
 
 ```json
 {
@@ -40,7 +40,7 @@ This is a Git write-scope check, not an OS sandbox. Ignored paths and host-side 
 
 ## CLI entrypoint
 
-The `pi-subagent-bridge` executable in ``/.local/bin` invokes the same SDK bridge when a harness cannot speak MCP:
+The `pi-subagent-bridge` executable in `~/.local/bin` invokes the same SDK bridge when a harness cannot speak MCP:
 
 ```
 pi-subagent-bridge model-check /absolute/repo/.work/wt/task worker

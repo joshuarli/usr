@@ -287,8 +287,8 @@ export function makeHybridBridge(api: PiPort, command = {
       }
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
-        model: s.backend === "pi" || s.backend === "pi-admitting" ? modelFor(s.tier) : COMMAND_MODEL,
-        effort: s.backend === "pi" || s.backend === "pi-admitting" ? modelFor(s.tier).variant : EFFORT[s.tier], state, last_assistant_text, error, usage,
+        model: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? modelFor(s.tier) : COMMAND_MODEL,
+        effort: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? modelFor(s.tier).variant : EFFORT[s.tier], state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
         fallback_reason: s.fallback_reason ?? null,

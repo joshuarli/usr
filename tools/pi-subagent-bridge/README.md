@@ -18,7 +18,7 @@ No `god` tier. Claude Code and Codex alone use their pinned native `god` agents.
 `sh sync plan`
 `sh sync doctor`
 
-The explicit CLI shim is installed at ``/.local/bin/pi-subagent-bridge`. No extra long-running OpenCode service or native Pi subagent extension is required. The worker SDK subprocess starts only when a task is admitted.
+The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No extra long-running OpenCode service or native Pi subagent extension is required. The worker SDK subprocess starts only when a task is admitted.
 
 ## MCP tools
 
