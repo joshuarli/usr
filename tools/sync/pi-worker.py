@@ -25,20 +25,30 @@ def die(message):
     raise ValueError(message)
 
 
+def dependency_versions():
+    dependencies = json.loads((PROJECT / "package.json").read_text())["dependencies"]
+    versions = {}
+    for name in ("@earendil-works/pi-coding-agent", "pi-subagents"):
+        version = dependencies[name]
+        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+            die(f"{name} must be pinned to an exact version")
+        versions[name] = version
+    return versions
+
+
 def dependency_version():
-    package = json.loads((PROJECT / "package.json").read_text())
-    version = package["dependencies"]["@earendil-works/pi-coding-agent"]
-    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-        die("Pi SDK must be pinned to an exact version")
-    return version
+    return dependency_versions()["@earendil-works/pi-coding-agent"]
 
 
 def dependency_current():
-    path = PROJECT / "node_modules" / "@earendil-works" / "pi-coding-agent" / "package.json"
-    try:
-        return json.loads(path.read_text())["version"] == dependency_version()
-    except (OSError, KeyError, ValueError, TypeError):
-        return False
+    for name, version in dependency_versions().items():
+        path = PROJECT / "node_modules" / name / "package.json"
+        try:
+            if json.loads(path.read_text())["version"] != version:
+                return False
+        except (OSError, KeyError, ValueError, TypeError):
+            return False
+    return True
 
 
 def managed_binary(name):
