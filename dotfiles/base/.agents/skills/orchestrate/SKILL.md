@@ -1,96 +1,53 @@
 ---
 name: orchestrate
-description: "Delegate to subagents when parallel independent work, disposable context, independent scrutiny, or lower cost clearly beats the main loop, and run a multi-lane campaign over a backlog. Skip tightly coupled work and any task cheaper to do directly."
+description: "Route all coding subagents through the shared Pi SDK bridge, scope and verify delegated work, and run multi-lane campaigns only when useful. Skip work cheaper to do directly."
 ---
 
 # Orchestrate
 
-Except for Claude Code’s mandatory DeepSeek executor path below, the parent keeps tightly coupled investigation, design, and integration, and owns direction and final verification. Delegate only for a concrete advantage: parallel independent work, disposable context, independent scrutiny, a harness-enforced permission boundary, or execution cheaper after counting briefing, waiting, review, and integration. A cheaper child model alone is not enough.
+**All coding subagents from any harness use `pi-subagent-bridge`**, regardless of which skill initiated delegation. This includes non-orchestrate tools and ordinary review tasks. The only native exception is `god` in Claude Code or Codex, using the existing pinned native model. Never use native Claude `Agent`/`Task`, Codex `spawn_agent`, OpenCode child agents, Command Code `Explore`/`General`, Pi `pi-subagents`, or another harness's native child launcher for `scout`, `mechanic`, `worker`, or `expert`.
 
-## Routing
+The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. A worker may not delegate or broaden its task.
 
-Route by difficulty, uncertainty, and risk. Use the column for the harness you are running in.
+## Pinned tiers
 
-| Work | Codex | Grok | OpenCode | Command Code | Muse Code | Antigravity CLI | DeepSeek TUI | fx | Pi |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Read-only scouting, searches, inventories, documentation lookup, log triage, straightforward fact gathering | `gpt-6-luna`, `medium` | `scout` | `opencode-go/muse-spark-1.3-contributor`, `explore` | `deepseek/deepseek-v4.1-flash`, `Explore` | `muse-spark-1.3`, `low` | `gemini-3.8-flash-medium` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `low` | `opencode-go/muse-spark-1.3-contributor`, `scout`, `low` |
-| Mechanical edits, routine implementation, straightforward documentation, crisp acceptance criteria | `gpt-6-luna`, `high` | `mechanic` | `opencode-go/muse-spark-1.3-contributor`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `medium` | `gemini-3.8-flash-high` | `deepseek-flash`, `low` | `meta/muse-spark-1.3-contributor`, `medium` | `opencode-go/muse-spark-1.3-contributor`, `mechanic`, `medium` |
-| Normal implementation, debugging, tests, ordinary review | `gpt-6.1-terra`, `medium` | `worker` | `opencode-go/muse-spark-1.3-contributor`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `high` | `gemini-3.8-flash-high` | `deepseek-flash`, `high` | `meta/muse-spark-1.3-contributor`, `high` | `opencode-go/muse-spark-1.3-contributor`, `worker`, `high` |
-| Difficult debugging, cross-cutting implementation, architecture, integration, demanding review | `gpt-6.1-terra`, `high` | `expert` | `opencode-go/muse-spark-1.3-contributor`, `general` | `deepseek/deepseek-v4.1-flash`, `General` | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `meta/muse-spark-1.3-contributor`, `xhigh` | `opencode-go/muse-spark-1.3-contributor`, `expert`, `xhigh` |
-| The hardest work: a failure an `expert` could not explain, a design others will build on, the final adversarial review before landing | `gpt-6.1-sol`, `high` | `god` | unavailable — keep local; do not delegate | unavailable — keep local; do not delegate | `muse-spark-1.3`, `xhigh` | `gemini-4-argon-high` | `deepseek-flash`, `max` | `meta/muse-spark-1.3-contributor`, `xhigh` | `opencode-go/muse-spark-1.3-contributor`, `god`, `xhigh` |
+| Tier | Pi SDK primary on OpenCode Go | Thinking | Command Code fallback | Purpose |
+| --- | --- | --- | --- | --- |
+| scout | `opencode-go/muse-spark-1.3-contributor` | `medium` | `deepseek/deepseek-v4.1-flash`, `low` | Read-only exploration |
+| mechanic | `opencode-go/muse-spark-1.3-contributor` | `high` | `deepseek/deepseek-v4.1-flash`, `high` | Mechanical scoped edits |
+| worker | `opencode-go/deepseek-v4.1-flash` | `high` | `deepseek/deepseek-v4.1-flash`, `high` | Implementation, debugging, testing |
+| expert | `opencode-go/deepseek-v4.1-flash` | `max` | `deepseek/deepseek-v4.1-flash`, `max` | Difficult architectural or cross-cutting work |
 
-**Default to `worker`.** Size is not difficulty: a large lane with a known method and acceptance is still worker work. Use `expert` only for unknown paths with costly wrong turns (cross-cutting designs, unexplained failures, multi-owner integration).
+No Pi god tier is available. **Only Claude Code** may spawn a native `god` on `claude-opus-5-5` at `xhigh`; **only Codex** may spawn a native `god` on `gpt-6.1-sol` at `high`. Other harnesses do not have `god`; do not silently substitute another model or map it to `expert`.
 
-**Clef-flash advisory routing is enabled by default across every coding parent harness** for each distinct, nontrivial delegated task **when its evidence is already available and its sanitized summary is safe to disclose**. This is a shared agent-instruction contract, not a guaranteed host-level launch interceptor; do not claim the CLI ran without an observed call. First establish the baseline from the table, the current harness policy, task contract and observed facts. Build the typed `TaskBrief` described by `decide route --guide`: objective, `mode` (read-only or write), affected scope, verified evidence with source anchors, known/unknown method, unresolved questions, acceptance checks, constraints, and risk. Provide JSON on stdin to `decide route --baseline <tier>` (not a one-line task title). Use existing task-contract evidence rather than launching an agent or investigation just to feed the router. If evidence, scope, or acceptance is unavailable, leave that field empty: the tool abstains locally. Never invent measurements or findings. Never send private code, credentials, complete prompts, transcripts, sensitive logs, or customer data.
+**Default to worker** for substantial well-specified tasks; size alone does not justify `expert`. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
-Consume `selected_tier` as advisory only. The CLI calls **Clef-flash only**, offers an explicit `abstain` choice, defaults conservatively on incomplete input or model errors, and never routes `god`. Read-only tasks may include `scout`; write tasks cannot. High-risk tasks abstain. Treat probability thresholds as uncalibrated, not proof. Do not allow it to override harness ceilings, pinned models/effort, permissions, read-only boundaries, security constraints, evidence-backed expert selection, or owner scope. On missing CLI/authentication, quota, invalid input, uncertain results or a sensitive brief, use the deterministic baseline without retry or provider switching. `DECIDE_ROUTING=off` disables calls. See [decide](../../../../../tools/decide/README.md) for complete guidance and examples.
+## The one bridge, everywhere
 
-If work exceeds the parent's delegation ceiling, keep it local at the highest suitable effort, except where a harness section below pins the model and effort. If a pinned model or effort is unavailable, report it; never substitute.
+Prefer MCP `pi-subagent-bridge`: `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`. Every configured host uses the same server implementation. If a harness cannot expose MCP, invoke the `pi-subagent-bridge` CLI shim with the same contract. Neither route uses a native host subagent. See `tools/pi-subagent-bridge/README.md`.
 
-### Codex
+The parent creates a clean, dedicated linked worktree under `.work/wt/<slice>`. Before `worker_start(cwd,title,tier,scope,brief)`, call `worker_model_check(cwd,tier)`. Supply a complete contract:
 
-Assign each Codex child only the model and effort in the Codex column. This profile overrides the parent's effort ceiling. Always specify `model`, `reasoning_effort`, and `fork_turns`. Prefer `fork_turns: "none"` with a self-contained brief; otherwise use the smallest positive turn count needed.
+- `scope.base_revision`: exact 40-character HEAD.
+- `scope.writable_paths`: up to 20 specific relative files or directory prefixes; empty for scout.
+- `scope.acceptance_proof`: named command with expected result, or a source file:line for research.
+- `scope.attempt_limit`: 1 normally; 2 only for one justified same-scope correction.
+- `scope.stop_on`: ambiguity, scope expansion, new dependencies, contract changes, unavailable proof.
+- `brief`: one outcome, relevant facts, prohibited changes, and no downstream delegation.
 
-For V2, spawn children only from the root and explicitly forbid further spawning in every child brief. `agents.max_depth` limits only V1; V2 has a separate resident-thread cap, not a nesting limit.
+**Admission is not completion.** Observe the returned ID using `worker_status` or wait with `worker-watch`, then read its terminal result. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
 
-### Claude Code: Opus coordinates; DeepSeek executes
+The parent independently reviews `git diff --check`, the diff against `base_revision` and untracked paths once. Verify requested behavior, permitted scope, imports and obvious regressions before integrating. An optional single `worker_resume` correction may touch only the same files, without increasing the attempt budget. Otherwise park or reject. Workers never commit, merge, push, switch branches, or clean worktrees.
 
-**Default and exclusive path when Claude invokes `orchestrate`.** The main Opus session owns task framing, worker scheduling, evidence inspection, one bounded diff review, and integration. Opus does **not** perform substantive implementation, source investigation, debugging, or testing, even for a cheap task; it batches tiny tasks into one assignment. Delegate all such work through the `usr-opencode-worker` MCP bridge. Native Claude `Agent`/`Task` subagents, Sonnet/Haiku/Opus workers, free-model routes, or another provider are **not** fallback options. If the bridge and both approved DeepSeek backends are unavailable, stop and report the blocker. This Claude-specific rule overrides the general optional-delegation advice above.
+## Provider fallback and ambiguous runs
 
-The bridge prefers **OpenCode Go DeepSeek V4.1 Flash** and automatically falls back to **Command Code `deepseek/deepseek-v4.1-flash`** when the selected OpenCode model/variant is unavailable or is explicitly quota/usage-limited. Command Code has independent credits. Do not switch on a generic test failure or after OpenCode has modified the tree. Never choose another model to escape a limit.
+The primary executor is an isolated Node process using the **Pi SDK**, pinned to the model above and reusing OpenCode Go credentials. It does not invoke the Pi CLI or start the OpenCode agent/server. Only an unavailable approved model/provider or a recognized quota/usage failure permits a fallback to the separate authenticated Command Code CLI, pinned to DeepSeek V4.1 Flash and effort above.
 
-| Tier | OpenCode Go | Command Code effort | Allowed task |
-| --- | --- | --- | --- |
-| `scout` | `deepseek-v4.1-flash#low` | `low` | Read-only evidence |
-| `mechanic` | `deepseek-v4.1-flash#low` | `low` | Precisely specified edits |
-| `worker` | `deepseek-v4.1-flash#high` | `high` | Ordinary coding, debugging, tests |
-| `expert` | `deepseek-v4.1-flash#max` | `max` | Evidenced difficult task |
+**Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Command Code has no third fallback. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 
-All OpenCode entries use provider `opencode-go`; all Command Code entries use model `deepseek/deepseek-v4.1-flash`. The tier is an effort budget and task contract, **not** permission to expand scope. There is no `god` tier here. If an `expert` worker fails, the Opus coordinator takes the work on themselves rather than delegating again.
+## Clef-flash advisory routing
 
-**Before each launch:** create a clean dedicated linked worktree under `.work/wt/` and one contract. Call `worker_model_check(cwd, tier)` and `worker_start(cwd, title, tier, scope, brief)` with `scope` fields: exact `base_revision` matching HEAD, explicit `writable_paths` (an empty list for read-only scout; file paths or directory prefixes for a writer), `acceptance_proof` (one named check and expected observation, or source `file:line` proof), `attempt_limit` (1 normally; 2 for a justified targeted correction), and `stop_on` (ambiguity, new dependency, changed contract, expanded scope, or unavailable proof). State one outcome; forbid adjacent cleanup, unrelated refactors, new tasks, and downstream delegation. The worker cannot approve its own scope changes.
-
-**Proof, not a summary:** require the worker’s exact changed files, command lines and exit codes with decisive output, or read-only `file:line` references. Treat the final prose as a claim. `worker_status` exposes the actual backend, effort, changed paths, out-of-scope paths, and unchanged HEAD. Confirm evidence independently with the narrowest appropriate verifier. Reject out-of-scope edits, changed HEAD, or missing verification.
-
-**One-step Opus review:** after proof, check `git diff --check`, the diff against the base revision, and untracked files **once**. Confirm only the requested outcome, within the approved paths, with no glaring broken imports, regressions, altered invariants, or churn. No separate review agent or recursive review cycle. If clearly off, use at most one targeted `worker_resume` correction without expanding scope; otherwise reject/park. Opus integrates accepted work and owns worktree cleanup. The bridge may switch from OpenCode to Command Code only on a known availability/quota failure **before any edit**.
-
-The bridge instructions in `tools/opencode-worker/README.md` explain one-time global MCP registration and live validation. The repository defaults to this routing immediately; until its MCP server is registered in Claude’s user configuration, stop rather than silently reverting to native agents.
-
-### Grok
-
-Use Grok’s native `scout`, `mechanic`, `worker`, `expert`, or `god` tiers, ranked in that order. A caller may spawn only lower tiers, and scout spawns none; `agent-tier-gate` enforces this on Grok’s `spawn_subagent` calls. Models and effort come from `~/.grok/agents`, all pinned to `grok-4.7`. Prefer fresh context. This rule does not authorize native Claude delegation.
-
-### OpenCode
-
-When OpenCode is itself the parent harness, run its lanes through the `usr-opencode-worker` bridge exactly as in the Claude section above: the parent scopes tasks, checks evidence, does one bounded diff review, and integrates; substantive research, implementation, and testing go through `worker_model_check(cwd, tier)` and `worker_start(cwd, title, tier, scope, brief)` on a clean worktree with the same scope contract (`base_revision`, `writable_paths`, `acceptance_proof`, `attempt_limit`, `stop_on`), then `worker_status` and at most one same-scope `worker_resume` correction. The bridge falls back from OpenCode Go to Command Code's `deepseek/deepseek-v4.1-flash` on verified model/usage unavailability before any edit, without changing scope; quota fallback is forbidden after partial edits. Never switch to another provider or model. Do not delegate `god` work in OpenCode; keep it local.
-
-### Command Code
-
-Run Command Code sessions with `deepseek/deepseek-v4.1-flash` at `max` effort. Built-in `Explore` (read-only) and `General` (other work) inherit the session model. Command Code parents use regular `orchestrate` routing with `Explore`/`General` and the table model; do not call the `usr-opencode-worker` bridge tools. Do not delegate `god` work in Command Code; keep it local. Never use another model. Children may run in parallel or background but cannot nest.
-
-### Pi
-
-Run Pi with `opencode-go/muse-spark-1.3-contributor` and use pi-subagents' native `scout`, `mechanic`, `worker`, `expert`, or `god` definitions in `~/.pi/agent/agents/`. The parent and every tier pin this exact OpenCode Go provider/model. Take the thinking level from the Pi column: `low` for scout, `medium` for mechanic, `high` for worker, and `xhigh` for expert and god. Pi's catalog maps `max` to unsupported, so `xhigh` is the ceiling; never request `max`. Expert and god change the brief and scrutiny, not the model; give god a fresh context with the earlier failures.
-
-The tracked `subagents.modelScope` strictly rejects other models, including per-run overrides; do not weaken it, switch providers, or use external-runner agents. If OpenCode Go is unavailable or over its usage limit, stop and report the blocker instead of switching providers or spawning retry storms. These children have explicit tool allowlists and do not delegate. Scout has only read/search tools, not bash. Give parallel writers separate worktrees under `.work/wt/`, set each child's `cwd` to its worktree, and keep concurrency conservative because Go usage is billed against monthly allowances. See `~/usr/docs/pi.md` for authentication and verification.
-
-### Muse Code
-
-Pass `model: muse-spark-1.3` and the row's `effort` on every child. Never use another model or `none`, `minimal`, `max`, or `ultra`. `god` repeats `xhigh` with a fresh child: brief the earlier failures, review adversarially. A child spawns only when the brief grants it, and only at lower efforts. Give parallel writers disjoint worktrees under `.work/wt/`.
-
-### Antigravity CLI
-
-Select the model from the Antigravity CLI column with `agy --model <model>`. Use only Gemini models, even though the CLI also lists other providers. Antigravity custom agents accept only `inherit`, `flash`, or `pro` in their `model` field, not exact model IDs. Set each child to `inherit` and select the row's model for the parent session.
-
-### DeepSeek TUI
-
-Use only the DeepSeek TUI table route for DSH work. DSH has `off`, `low`, `high`, and `max`, not `medium`: use `high` for workers and `max` for experts and gods. Do not switch providers.
-
-### fx
-
-Keep the parent and every child on Vercel AI Gateway `meta/muse-spark-1.3-contributor`; explicitly choose the fx column's reasoning effort when launching a child. The named tiers are roles in the brief, not built-in fx agent types. Never silently use a stronger, more expensive model. A `god` child repeats `xhigh` in fresh context with evidence of previous failures.
-
-fx children cannot spawn further children. They inherit the parent's workspace and permission limits, so subagent naming does not isolate writes. Default to serial writers. When independent writers justify parallelism, the parent first creates separate `.work/wt/` worktrees, grants additional workspace access as needed, and tells each child to write only its assigned path; do not assume fx changes the child's working directory. Parent owns diff review, integration, and cleanup.
+Before a nontrivial delegated task with meaningful tier uncertainty, build a bounded, evidence-backed `TaskBrief` from available verified facts and consult `decide route --guide` then `decide route --baseline worker` once, if disclosure is safe. Use Clef-flash advice only to choose among permitted tiers; it cannot override exact provider/model pins, tools, read-only scope, risk, permissions or the `god` rule. On missing evidence, sensitive contents, auth/quota failures, or one obvious tier, choose the deterministic table without retry storms.
 
 ## Delegation
 
@@ -100,7 +57,7 @@ Size concurrency for accepted progress. Serial is the default for work that shar
 
 When a child reports, a merge lands, or a check fails, reassess ready work and the limiting stage. **Procedural escalation:** diagnose briefing, environment, or verification failures; fix the cause and retry at most once at the same tier with a materially changed approach. **Capability escalation:** use a stronger pinned model only for evidenced reasoning limits. Where tiers reuse a model, use fresh context and independent scrutiny, never a provider switch. Never repeat an unchanged failure. The parent resolves shared prerequisites and obstructive tactics. Owner intent, public contracts, required proof, and permissions stay fixed unless the owner changes them.
 
-Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Background children notify on completion, so do not poll them, and send a running child a message when the rules change instead of restarting it.
+Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. `isolation: "worktree"` also lands in `.work/wt/` through the WorktreeCreate hook, but its branch name is generated and the tree outlives the child, so campaigns create their own. A child's final report is not shown to the user: relay what matters. Bridge workers do not deliver native harness notifications; use `worker-watch` where available and inspect `worker_status` when complete. Never restart a worker merely because the parent lost its notification.
 
 Carry forward findings and failed approaches. Every child gets:
 
