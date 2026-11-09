@@ -183,6 +183,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       catch (e) { issue = String(e) }
       if (!available && !issue) {
         try {
+          const { ensureOpenCodeApiKey } = await import("./opencode-auth.ts")
+          ensureOpenCodeApiKey()
           const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
           const runtime = await ModelRuntime.create()
           const model = modelFor(tierInput)

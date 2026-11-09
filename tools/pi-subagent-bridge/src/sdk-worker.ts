@@ -3,6 +3,7 @@ import {
   createAgentSession, createExtensionRuntime, ModelRuntime, SessionManager, SettingsManager,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent"
+import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 
 type Job = {
   cwd: string
@@ -47,6 +48,7 @@ function resourceLoader(): ResourceLoader {
 }
 
 async function run(job: Job): Promise<Result> {
+  ensureOpenCodeApiKey()
   const runtime = await ModelRuntime.create()
   const model = runtime.getModel(job.model.providerID, job.model.id)
   if (!model || !runtime.hasConfiguredAuth(job.model.providerID))

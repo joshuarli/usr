@@ -7,6 +7,7 @@ import {
 import { dirname, isAbsolute, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
+import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 
 type Result = {
   state: "succeeded" | "failed" | "cancelled"
@@ -115,6 +116,7 @@ function verifiedSessionPath(s: Stored, value: string | null): string {
 export function piPort(): OpenCodePort {
   return {
     async models() {
+      ensureOpenCodeApiKey()
       const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
       const runtime = await ModelRuntime.create()
       const available = Object.entries(VARIANTS)
