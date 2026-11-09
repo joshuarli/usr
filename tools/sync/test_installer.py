@@ -401,7 +401,62 @@ sys.exit(1)
         for command in ("node", "npm", "npx"):
             self.assertEqual(os.readlink(self.dest_path(command)), str(current / "bin" / command))
 
-    def test_npm_tool_install_current_unmanaged_and_failed(self):
+    def test_nodejs_relative_current_is_healed_to_absolute(self):
+        release = self.home / ".local/share/nodejs/26.12.1-npm11.9.0-darwin-arm64"
+        cli_js = release / "lib/node_modules/npm/bin/npm-cli.js"
+        cli_js.parent.mkdir(parents=True)
+        cli_js.write_text(f"#!/bin/sh\nexec {self.bin / 'npm'} \"$@\"\n")
+        cli_js.chmod(0o755)
+        (release / "lib/node_modules/npm/lib").mkdir(parents=True)
+        (release / "lib/node_modules/npm/lib/cli.js").write_text("")
+        bin_dir = release / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "node").write_text("#!/bin/sh\nprintf '26.12.1\\n'\n")
+        (bin_dir / "node").chmod(0o755)
+        (bin_dir / "npm").symlink_to("../lib/node_modules/npm/bin/npm-cli.js")
+        (bin_dir / "npx").symlink_to("../lib/node_modules/npm/bin/npx-cli.js")
+        (release / "lib/node_modules/npm/bin/npx-cli.js").write_text("")
+        current = self.home / ".local/share/nodejs/current"
+        current.symlink_to(release.name, target_is_directory=True)
+        inst = self.make(os_name="darwin", arch="aarch64")
+        inst.env["MOCK_NPM_VERSION"] = "11.9.0"
+        for command in ("node", "npm", "npx"):
+            self.dest_path(command).symlink_to(str(current / "bin" / command))
+        inst.install_nodejs()
+        self.assertEqual(os.readlink(current), str(release))
+        self.assertTrue((current / "bin/node").is_file())
+
+    def test_nodejs_relative_foreign_current_is_replaced(self):
+        foreign = self.home / ".local/share/nodejs/26.13.0-darwin-arm64"
+        foreign.mkdir(parents=True)
+        (foreign / "marker").write_text("keep\n")
+        current = self.home / ".local/share/nodejs/current"
+        current.symlink_to(foreign.name, target_is_directory=True)
+        routes = {"https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.xz": b"not-the-pinned-build"}
+        inst = self.make(routes, os_name="darwin", arch="aarch64")
+        for command in ("node", "npm", "npx"):
+            self.dest_path(command).symlink_to(str(current / "bin" / command))
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_nodejs()
+        self.assertIn("checksum mismatch", str(ctx.exception))
+        self.assertFalse(current.is_symlink())
+        self.assertTrue((foreign / "marker").is_file())
+
+    def test_nodejs_absolute_outside_current_still_skips(self):
+        outside = self.root / "outside-node"
+        outside.mkdir(parents=True)
+        (outside / "marker").write_text("keep\n")
+        current = self.home / ".local/share/nodejs/current"
+        current.parent.mkdir(parents=True)
+        current.symlink_to(outside, target_is_directory=True)
+        inst = self.make(os_name="darwin", arch="aarch64")
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_nodejs()
+        self.assertIn("points outside", str(ctx.exception))
+        self.assertEqual(os.readlink(current), str(outside))
+        self.assertTrue((outside / "marker").is_file())
+
+
         inst = self.make()
         inst.install_cmd()
         self.assertTrue(self.dest_path("cmd").is_symlink())

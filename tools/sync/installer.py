@@ -1339,19 +1339,29 @@ class Installer:
         if self.nodejs_root.is_symlink():
             self.skip("nodejs", f"{self.nodejs_root} is a symlink")
         managed = False
+        healed = False
         previous_release = ""
-        current_target = os.readlink(self.nodejs_root / "current") if (self.nodejs_root / "current").is_symlink() else ""
+        current_path = self.nodejs_root / "current"
+        current_target = os.readlink(current_path) if current_path.is_symlink() else ""
         if current_target:
-            if not current_target.startswith(str(self.nodejs_root) + os.sep):
+            root_str = os.path.normpath(str(self.nodejs_root))
+            resolved = os.path.normpath(os.path.join(root_str, current_target)) if not os.path.isabs(current_target) else os.path.normpath(current_target)
+            if resolved != root_str and not resolved.startswith(root_str + os.sep):
                 self.skip("nodejs", f"{self.nodejs_root}/current points outside its install directory")
-            previous_release = Path(current_target).name
-            if not re.match(rf"^{re.escape(NODEJS_VERSION)}-npm\d+\.\d+\.\d+([.-][A-Za-z0-9.-]+)?-{re.escape(target)}$",
-                            previous_release):
-                self.skip("nodejs", "invalid install record")
-            previous_dir = self.nodejs_root / previous_release
-            if previous_dir.is_symlink() or not previous_dir.is_dir():
-                self.skip("nodejs", f"{self.nodejs_root}/current target is missing")
-            managed = True
+            release_candidate = Path(resolved).name
+            previous_dir = self.nodejs_root / release_candidate
+            if os.path.dirname(resolved) == root_str and re.match(rf"^{re.escape(NODEJS_VERSION)}-npm\d+\.\d+\.\d+([.-][A-Za-z0-9.-]+)?-{re.escape(target)}$", release_candidate) and not previous_dir.is_symlink() and previous_dir.is_dir():
+                previous_release = release_candidate
+                managed = True
+                if current_target != str(previous_dir):
+                    self.warn(f"Warning: healing Node.js current link to {previous_dir}")
+                    if not self.switch_symlink(previous_dir, current_path):
+                        self.skip("nodejs", f"could not switch {self.nodejs_root}/current")
+                    self.own_file(current_path)
+            else:
+                self.warn(f"Warning: replacing stale Node.js current link {current_target} with a managed install")
+                current_path.unlink()
+                healed = True
         elif self.nodejs_root.exists() or self.nodejs_root.is_symlink():
             if self.nodejs_root.is_symlink() or not self.nodejs_root.is_dir() or any(self.nodejs_root.iterdir()):
                 self.skip("nodejs", f"{self.nodejs_root} already exists outside dl management")
@@ -1359,7 +1369,7 @@ class Installer:
             launcher = self.dest / command
             if launcher.exists() or launcher.is_symlink():
                 actual = os.readlink(launcher) if launcher.is_symlink() else ""
-                if not managed or actual != str(self.nodejs_root / "current/bin" / command):
+                if actual != str(self.nodejs_root / "current/bin" / command) or (not managed and not healed):
                     self.skip("nodejs", f"{launcher} already exists outside dl management")
         npm_latest = ""
         if managed:
@@ -2626,8 +2636,10 @@ class Installer:
         nodejs_current = self.nodejs_root / "current"
         if nodejs_current.is_symlink():
             target = os.readlink(nodejs_current)
-            if target.startswith(str(self.nodejs_root) + os.sep):
-                release = Path(target).name
+            root_str = os.path.normpath(str(self.nodejs_root))
+            resolved = os.path.normpath(os.path.join(root_str, target)) if not os.path.isabs(target) else os.path.normpath(target)
+            if (resolved == root_str or resolved.startswith(root_str + os.sep)) and os.path.dirname(resolved) == root_str:
+                release = Path(resolved).name
                 if re.match(rf"^{re.escape(NODEJS_VERSION)}-npm\d+\.\d+\.\d+([.-][A-Za-z0-9.-]+)?-"
                             r"(darwin-arm64|linux-x64|linux-arm64|linux-x64-musl|linux-arm64-musl)$", release):
                     release_dir = self.nodejs_root / release
