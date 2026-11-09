@@ -1,0 +1,57 @@
+#!/bin/sh
+# Tests for worker-watch: each way a bridge session can end maps to its own exit status.
+
+watch="${PWD}/base/.local/bin/worker-watch"
+nfailed=0
+
+mkdir -p "${PWD}/../.work/tmp"
+scratch=$(mktemp -d "${PWD}/../.work/tmp/worker-watch.XXXXXX") || exit 1
+trap 'rm -rf "$scratch"' 0
+bridge="$scratch/.work/worker-bridge"
+mkdir -p "$bridge"
+
+# session <id> <pid or empty> <log lines>
+session () {
+    if [ -n "$2" ]; then
+        printf '{"id":"%s","command_run":{"pid":%s,"output":"%s/%s.ndjson"}}' "$1" "$2" "$bridge" "$1" > "$bridge/$1.json"
+    else
+        printf '{"id":"%s"}' "$1" > "$bridge/$1.json"
+    fi
+    printf '%s\n' "$3" > "$bridge/$1.ndjson"
+}
+
+# expect <wanted exit> <description> <id> <idle minutes> <text the output must contain>
+expect () {
+    out=$(sh "$watch" "$scratch" "$3" "$4" 2>&1)
+    got=$?
+    case $out in *"$5"*) ;; *) got="$got-without-$5" ;; esac
+    if [ "$got" = "$1" ]; then
+        printf 'ok: %s\n' "$2"
+    else
+        printf 'FAIL: %s (wanted %s, got %s): %s\n' "$2" "$1" "$got" "$out"
+        nfailed=$((nfailed + 1))
+    fi
+}
+
+queued='{"type":"event","event":{"type":"tool_queued","toolName":"shell_command","input":{"description":"Download kernel"}}}'
+sleep 600 &
+alive=$!
+trap 'kill "$alive" 2>/dev/null; rm -rf "$scratch"' 0
+sh -c 'exit 0' &
+gone=$!
+wait "$gone"
+
+session done "$alive" "$queued
+{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"report written\"}"
+expect 0 "a final result record ends the wait" done 10 "report written"
+
+session crashed "$gone" "$queued"
+expect 3 "an executor gone without a result is reported" crashed 10 "Download kernel"
+
+session quiet "$alive" "$queued"
+expect 2 "a quiet log reports the last queued tool" quiet 0 "shell_command: Download kernel"
+
+session remote "" ""
+expect 4 "an OpenCode-backend session is refused" remote 10 "OpenCode backend"
+
+[ "$nfailed" -eq 0 ]

@@ -32,6 +32,7 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	(cd dotfiles && sh agent-tier-gate-test.sh)
 	sh dotfiles/reset-agents-test.sh
 	(cd dotfiles && sh pre-push-test.sh)
+	(cd dotfiles && sh worker-watch-test.sh)
 	(cd dotfiles && sh worktree-remove-test.sh)
 	(cd dotfiles && sh zsh-shim-test.sh)
 	sh tools/mdtool/tests/mdtool-test.sh
