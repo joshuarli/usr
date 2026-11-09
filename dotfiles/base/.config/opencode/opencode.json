@@ -17,9 +17,9 @@
       "pi-subagent-bridge": {
         "type": "local",
         "command": [
-          "/home/josh/.local/share/nodejs/current/bin/node",
+          "/Users/josh/.local/share/nodejs/current/bin/node",
           "--experimental-strip-types",
-          "/home/josh/usr/tools/pi-subagent-bridge/src/server.ts"
+          "/Users/josh/usr/tools/pi-subagent-bridge/src/server.ts"
         ],
         "codemode": false
       }
