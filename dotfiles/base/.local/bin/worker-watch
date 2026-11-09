@@ -1,5 +1,5 @@
 #!/bin/sh
-# worker-watch - block until a usr-opencode-worker session finishes or stalls.
+# worker-watch - observe a pi-subagent-bridge SDK/Command Code session.
 #
 # Usage:
 #   worker-watch <repo-root> <usrw_session_id> [idle-minutes]
@@ -9,8 +9,7 @@
 # Command Code executor writes its final `result` record (exit 0), when the
 # executor process is gone without one (exit 3), or when its NDJSON log has
 # been quiet for idle-minutes (default 10; exit 2), printing the last event
-# so the coordinator can tell a long download from a stuck worker. Sessions on
-# the OpenCode backend have no local log; it reports that and exits 4.
+# so the coordinator can tell a long download from a stuck worker. SDK workers report an atomic result; unknown states require manual inspection.
 
 set -u
 
@@ -29,34 +28,61 @@ command -v jaq >/dev/null 2>&1 || die "jaq is required"
 record="$root/.work/worker-bridge/$session.json"
 [ -f "$record" ] || die "no session record at $record"
 
-pid=$(jaq -r '.command_run.pid // empty' "$record")
-log=$(jaq -r '.command_run.output // empty' "$record")
-if [ -z "$pid" ] || [ -z "$log" ]; then
-    printf '%s: %s runs on the OpenCode backend; use worker_status\n' "$prog" "$session"
-    exit 4
-fi
+backend=$(jaq -r '.backend // (if .command_run then "command-code" else "" end)' "$record")
+case $backend in
+    pi)
+        pi_id=$(jaq -r '.pi_id // empty' "$record")
+        [ -n "$pi_id" ] || die "Pi session has no SDK child ID"
+        child_record="$root/.work/worker-bridge/$pi_id.pi.json"
+        [ -f "$child_record" ] || die "Pi SDK session record not found: $child_record"
+        pid=$(jaq -r '.run.pid // empty' "$child_record")
+        log=$(jaq -r '.run.output // empty' "$child_record")
+        errors=$(jaq -r '.run.errors // empty' "$child_record")
+        [ -n "$pid" ] && [ -n "$log" ] || die "Pi SDK worker admission is incomplete"
+        ;;
+    command-code)
+        pid=$(jaq -r '.command_run.pid // empty' "$record")
+        log=$(jaq -r '.command_run.output // empty' "$record")
+        [ -n "$pid" ] && [ -n "$log" ] || die "Command Code session has no active runner"
+        ;;
+    *)
+        printf '%s: %s has no known terminal-output backend; inspect worker_status\n' "$prog" "$session"
+        exit 4
+        ;;
+esac
 
 last_event() {
-    tail -n 50 "$log" 2>/dev/null |
-        jaq -r 'select(.type == "event") | .event | select(.type == "tool_queued") | "\(.toolName): \((.input | objects | .description // .command) // "" | tostring | .[0:160])"' 2>/dev/null |
-        tail -n 1
+    if [ "$backend" = pi ]; then
+        if [ -n "$errors" ]; then tail -c 500 "$errors" 2>/dev/null; fi
+    else
+        tail -n 50 "$log" 2>/dev/null |
+            jaq -r 'select(.type == "event") | .event | select(.type == "tool_queued") | "\(.toolName): \((.input | objects | .description // .command) // "" | tostring | .[0:160])"' 2>/dev/null |
+            tail -n 1
+    fi
 }
-
-result_line() {
-    grep '"type":"result"' "$log" 2>/dev/null | tail -n 1
+terminal_result() {
+    if [ "$backend" = pi ]; then
+        if [ -s "$log" ] && jaq -e '.state == "succeeded" or .state == "failed" or .state == "cancelled"' "$log" >/dev/null 2>&1; then
+            jaq -r '"finished: \(.state)\n\(.text // .error // "" | tostring | .[0:2000])"' "$log"
+            return 0
+        fi
+        return 1
+    fi
+    result=$(grep '"type":"result"' "$log" 2>/dev/null | tail -n 1)
+    [ -n "$result" ] || return 1
+    printf '%s\n' "$result" | jaq -r '"finished: \(.subtype)\n\(.result // "" | tostring | .[0:2000])"'
 }
 
 while :; do
-    result=$(result_line)
-    if [ -n "$result" ]; then
-        printf '%s\n' "$result" | jaq -r '"finished: \(.subtype)\n\(.result // "" | tostring | .[0:2000])"'
-        exit 0
-    fi
+    if terminal_result; then exit 0; fi
     if ! kill -0 "$pid" 2>/dev/null; then
-        printf 'exited without a result (pid %s); last event: %s\n' "$pid" "$(last_event)"
+        printf 'exited without terminal result (pid %s); last event: %s\n' "$pid" "$(last_event)"
         exit 3
     fi
-    modified=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log")
+    observed=$log
+    [ -f "$observed" ] || observed=$errors
+    [ -f "$observed" ] || observed=$record
+    modified=$(stat -f %m "$observed" 2>/dev/null || stat -c %Y "$observed" 2>/dev/null || date +%s)
     quiet=$(( $(date +%s) - modified ))
     if [ "$quiet" -ge $(( idle_minutes * 60 )) ]; then
         printf 'stalled: no executor output for %s min; last event: %s\n' "$(( quiet / 60 ))" "$(last_event)"

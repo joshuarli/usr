@@ -52,6 +52,11 @@ session quiet "$alive" "$queued"
 expect 2 "a quiet log reports the last queued tool" quiet 0 "shell_command: Download kernel"
 
 session remote "" ""
-expect 4 "an OpenCode-backend session is refused" remote 10 "OpenCode backend"
+expect 4 "a missing backend is refused" remote 10 "no known terminal-output backend"
 
+pi_id=ses_0123456789abcdef0123456789abcdef
+printf '{"backend":"pi","pi_id":"%s"}\n' "$pi_id" > "$bridge/pi-done.json"
+printf '{"id":"%s","cwd":"%s","run":{"pid":%s,"output":"%s/pi-result.json","errors":"%s/pi-err"}}\n' "$pi_id" "$scratch" "$alive" "$bridge" "$bridge" > "$bridge/$pi_id.pi.json"
+printf '{"state":"succeeded","text":"SDK proof"}\n' > "$bridge/pi-result.json"
+expect 0 "Pi SDK terminal result is observed" pi-done 10 "SDK proof"
 [ "$nfailed" -eq 0 ]
