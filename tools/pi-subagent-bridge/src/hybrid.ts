@@ -16,7 +16,7 @@ export type Scope = {
 }
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
-  backend: "pi" | "pi-admitting" | "command-code" | "command-transition"; attempts: number
+  backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition"; attempts: number
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; continuations?: number
 }
 const EFFORT: Record<Tier, Effort> = {
@@ -96,7 +96,7 @@ function load(cwd: unknown, id: unknown): Session {
   if (!Number.isInteger(s.attempts) || s.attempts < 0 ||
     (s.backend === "pi" && typeof s.pi_id !== "string") ||
     (s.backend === "command-code" && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
-    !["pi", "pi-admitting", "command-code", "command-transition"].includes(s.backend)) {
+    !["pi", "pi-admitting", "pi-transition", "command-code", "command-transition"].includes(s.backend)) {
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   }
   return s
@@ -243,7 +243,7 @@ export function makeHybridBridge(api: PiPort, command = {
     async status(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       let state: string, last_assistant_text: string | null, error: unknown = null, usage: unknown = null
-      if (s.backend === "pi-admitting") {
+      if (s.backend === "pi-admitting" || s.backend === "pi-transition") {
         state = "blocked_admission"
         last_assistant_text = null
         error = "Pi admission interrupted or uncertain; inspect this session before recovery"
@@ -307,14 +307,17 @@ export function makeHybridBridge(api: PiPort, command = {
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
-      if (s.backend === "command-transition" || s.backend === "pi-admitting")
+      if (s.backend === "command-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition")
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (s.backend === "pi") {
         if (!s.pi_id) throw new Error("Missing Pi session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
+        s.backend = "pi-transition"
         save(s)
         await makeWorkerBridge(api, modelFor(s.tier)).resume(s.cwd, s.pi_id, "Same-scope correction only: " + correction)
+        s.backend = "pi"
+        save(s)
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
         const previous = command.status(s.command_run)

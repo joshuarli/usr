@@ -16,7 +16,7 @@ type Run = { pid: number; output: string; errors: string }
 type Stored = {
   id: string; title: string; model: ModelRef; cwd: string
   metadata: { usr_worker_v1: { directory: string; model: ModelRef } }
-  readOnly: boolean; run?: Run
+  readOnly: boolean; run?: Run; admitting?: boolean
 }
 const SESSION = /^ses_[a-f0-9]{32}$/
 const children = new Map<number, ChildProcess>()
@@ -62,6 +62,7 @@ function alive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM" }
 }
 function observe(s: Stored): { state: string; result: Result | null } {
+  if (s.admitting) return { state: "blocked_transition", result: null }
   if (!s.run) return { state: "blocked_admission", result: null }
   try {
     const result: Result = JSON.parse(readFileSync(s.run.output, "utf8"))
@@ -142,8 +143,11 @@ export function piPort(): OpenCodePort {
           throw new Error("Pi session is not known terminal; no overlapping run")
         prior = verifiedSessionPath(s, previous.result.sessionFile)
       }
+      s.admitting = true
+      save(s)
       const launched = run(s, input.text, prior)
       s.run = launched
+      s.admitting = false
       save(s)
       return { data: { admitted: true } }
     },
