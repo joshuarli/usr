@@ -17,7 +17,7 @@ export type Scope = {
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
   backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition"; attempts: number
-  pi_id?: string; command_run?: CommandRun; fallback_reason?: string; continuations?: number
+  pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string; continuations?: number
 }
 const EFFORT: Record<Tier, Effort> = {
   scout: "low", mechanic: "high", worker: "high", expert: "max",
@@ -155,11 +155,26 @@ function untouched(s: Session): boolean {
 function quota(value: unknown): boolean {
   return QUOTA.test(typeof value === "string" ? value : JSON.stringify(value ?? ""))
 }
+function fallbackNotice(reason: string): string {
+  return [
+    reason,
+    "Automatic fallback is expected and needs no parent action.",
+    "The worktree was verified untouched before switching, so no work was lost or replayed.",
+    "The task continues on Command Code with the same scope, model and effort; verify it normally with worker_status.",
+    "Do not retry and do not start a duplicate worker.",
+  ].join(" ")
+}
+function blockedPartialNotice(): string {
+  return [
+    "The primary runner hit a provider usage limit, but the worktree already has edits, so no automatic switch happened.",
+    "Inspect the worktree and decide manually; do not start a duplicate worker.",
+  ].join(" ")
+}
 
 export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }) {
-  function fallback(s: Session, reason: string): Session {
+  function fallback(s: Session, reason: string, detail?: unknown): Session {
     if (!command.available()) throw new Error("Pi " + reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
@@ -167,12 +182,20 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     s.backend = "command-transition"
     s.command_run = undefined
     s.fallback_reason = reason
+    if (detail !== undefined) s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
     s.attempts = 1
     save(s)
     s.command_run = command.start(s.cwd, dir, prompt(s), EFFORT[s.tier], s.tier === "scout")
     s.backend = "command-code"
     save(s)
     return s
+  }
+  function admission(s: Session) {
+    return {
+      session_id: s.id, backend: s.backend, status: "admitted",
+      fallback_reason: s.fallback_reason ?? null,
+      fallback_notice: s.fallback_reason ? fallbackNotice(s.fallback_reason) : null,
+    }
   }
   return {
     async modelCheck(cwd: unknown, tierInput: unknown) {
@@ -189,11 +212,13 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           const runtime = await ModelRuntime.create()
           const model = modelFor(tierInput)
           if (!runtime.getModel(model.providerID, model.id))
-            issue = `Pinned model ${model.providerID}/${model.id} not found in Pi SDK runtime`
+            issue = `Pinned primary model ${model.providerID}/${model.id} is not in the Pi SDK catalog`
           else if (!runtime.hasConfiguredAuth(model.providerID))
-            issue = `No configured auth for ${model.providerID} in Pi SDK (set OPENCODE_API_KEY for OpenCode Go, or configure Pi auth)`
+            issue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
+      if (!available && issue)
+        issue = `Primary ${modelFor(tierInput).providerID}/${modelFor(tierInput).id} is temporarily unavailable: ${issue}. Fallback ${COMMAND_MODEL} is installed and ready.`
       return {
         primary: { backend: "pi", model: modelFor(tierInput), available, issue },
         fallback: { backend: "command-code", model: COMMAND_MODEL, effort: EFFORT[tierInput], installed: command.available() },
@@ -217,12 +242,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let available: boolean
       try { available = (await worker.modelCheck(dir)).available }
       catch (e) {
-        fallback(s, quota(e) ? "quota-limited model check" : "Pi unavailable: " + String(e))
-        return { session_id: s.id, backend: s.backend, status: "admitted" }
+        fallback(s, "Primary Pi runner unavailable at model check; continued on Command Code.", e)
+        return admission(s)
       }
       if (!available) {
-        fallback(s, "pinned Pi model unavailable")
-        return { session_id: s.id, backend: s.backend, status: "admitted" }
+        fallback(s, "Pinned primary model unavailable; continued on Command Code.")
+        return admission(s)
       }
       try {
         const admitted = await worker.start(dir, s.title, prompt(s), tierInput === "scout")
@@ -238,24 +263,25 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             continue
           }
           if (early.state !== "succeeded" && quota(early.error) && untouched(s)) {
-            fallback(s, "Pi quota-limited admission")
-            return { session_id: s.id, backend: s.backend, status: "admitted" }
+            fallback(s, "Primary Pi runner unavailable at admission (provider usage limit); continued on Command Code.", early.error)
+            return admission(s)
           }
           break
         }
-        return { session_id: s.id, backend: s.backend, status: "admitted", model: modelFor(s.tier) }
+        return { ...admission(s), model: modelFor(s.tier) }
       } catch (e) {
         // A created Pi session may still execute; never start a second worker without proving it did not.
         if (String(e).includes("created but prompt admission failed"))
           throw new Error(String(e) + "; worktree lease retained for session " + s.id)
         if (!quota(e)) throw e
-        fallback(s, "Pi quota-limited admission")
-        return { session_id: s.id, backend: s.backend, status: "admitted" }
+        fallback(s, "Primary Pi runner unavailable at admission (provider usage limit); continued on Command Code.", e)
+        return admission(s)
       }
     },
     async status(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       let state: string, last_assistant_text: string | null, error: unknown = null, usage: unknown = null
+      let notice: string | null = null
       if (s.backend === "pi-admitting" || s.backend === "pi-transition") {
         state = "blocked_admission"
         last_assistant_text = null
@@ -269,11 +295,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         usage = { cost_reported_usd: response.cost_reported_usd, tokens: response.tokens }
         if (state !== "running" && state !== "queued" && state !== "succeeded" &&
           quota(error)) {
-          if (!untouched(s)) state = "blocked_partial_work"
-          else {
-            fallback(s, "Pi quota/usage failure")
+          if (!untouched(s)) {
+            state = "blocked_partial_work"
+            notice = blockedPartialNotice()
+          } else {
+            fallback(s, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", error)
             state = "running"
             last_assistant_text = null
+            error = null
           }
         }
       } else if (s.backend === "command-transition") {
@@ -285,12 +314,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         const response = command.status(s.command_run)
         state = response.state
         last_assistant_text = response.result?.finalText?.slice(-5000) ?? null
-        error = response.result?.error ?? response.stderr
+        error = response.state === "failed" || response.state === "unknown_or_interrupted"
+          ? response.result?.error ?? response.stderr : null
         usage = response.result?.usage ?? null
       }
       const changed_paths = changes(s.cwd, s.scope.base_revision)
       const out_of_scope_paths = outside(changed_paths, s.scope.writable_paths)
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
+      if (s.fallback_reason && !notice) notice = fallbackNotice(s.fallback_reason)
       // A verified terminal response releases worktree admission, not session history.
       // Unknown/interrupted/queued work remains leased until explicitly inspected.
       if (["succeeded", "failed", "turn_limit", "cancelled", "canceled"].includes(state)) {
@@ -305,6 +336,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
         fallback_reason: s.fallback_reason ?? null,
+        fallback_notice: notice,
+        fallback_detail: s.fallback_detail ?? null,
         note: "Proof must be checked independently. Review the diff once before integration.",
       }
       })

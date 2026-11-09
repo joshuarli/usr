@@ -117,6 +117,7 @@ test("missing OpenCode variant starts read-only Command Code scout; resume is pi
     const scope = { ...f.scope, writable_paths: [] }
     const task = await bridge.start(f.cwd, "research", "scout", scope, "Locate relevant code")
     assert.equal(task.backend, "command-code")
+    assert.match(task.fallback_notice ?? "", /needs no parent action/)
     assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"readOnly":true')))
     assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"low"')))
     m.done()
@@ -144,6 +145,8 @@ test("a prompt rejected for quota right after admission starts on Command Code w
     const api: OpenCodePort = { ...m.api, prompt: async (input) => { m.calls.push(input); m.fail("weekly usage limit reached"); return {} } }
     const task = await makeHybridBridge(api, m.command).start(f.cwd, "fix", "worker", f.scope, "Edit README")
     assert.equal(task.backend, "command-code")
+    assert.match(task.fallback_reason ?? "", /continued on Command Code/)
+    assert.match(task.fallback_notice ?? "", /needs no parent action/)
     assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 1)
   } finally { f.close() }
 })
@@ -172,7 +175,11 @@ test("terminal OpenCode quota failure falls back only when no changes exist", as
     m.fail("quota exceeded, monthly allowance exhausted")
     const status = await bridge.status(f.cwd, task.session_id)
     assert.equal(status.backend, "command-code")
-    assert.equal(status.fallback_reason, "Pi quota/usage failure")
+    assert.equal(status.fallback_reason, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.")
+    assert.equal(status.error, null)
+    assert.match(status.fallback_notice ?? "", /needs no parent action/)
+    assert.match(status.fallback_notice ?? "", /Do not retry/)
+    assert.match(status.fallback_detail ?? "", /quota exceeded/)
   } finally { f.close() }
 })
 test("an ordinary failed task mentioning quota in its prose never triggers a fallback", async () => {
@@ -185,6 +192,7 @@ test("an ordinary failed task mentioning quota in its prose never triggers a fal
     assert.equal(status.backend, "pi")
     assert.equal(status.state, "failed")
     assert.equal(status.fallback_reason, null)
+    assert.equal(status.fallback_notice, null)
     assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
   } finally { f.close() }
 })
@@ -199,6 +207,8 @@ test("quota does not silently restart a partially edited worktree", async () => 
     const status = await bridge.status(f.cwd, task.session_id)
     assert.equal(status.backend, "pi")
     assert.equal(status.state, "blocked_partial_work")
+    assert.equal(status.fallback_reason, null)
+    assert.match(status.fallback_notice ?? "", /decide manually/)
   } finally { f.close() }
 })
 test("reject invalid scope, unapproved tier, and dirty worktree", async () => {

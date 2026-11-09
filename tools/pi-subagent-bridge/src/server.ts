@@ -35,7 +35,7 @@ const tools = [
   },
   {
     name: "worker_start",
-    description: "Any parent harness: delegate a scoped task to a Pi SDK worker; fall back to Command Code DeepSeek 4.1 Flash only before edits on model/quota failure. Admission is NOT completion.",
+    description: "Any parent harness: delegate a scoped task to a Pi SDK worker; if the primary runner is temporarily unavailable before any edits, the task continues automatically on Command Code DeepSeek 4.1 Flash with the same scope and model. This fallback is expected and needs no parent action; never start a duplicate. Admission is NOT completion.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },
@@ -46,7 +46,7 @@ const tools = [
   },
   {
     name: "worker_status",
-    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Can trigger quota fallback only when the original worktree is untouched.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. When fallback_reason is set, fallback_notice explains the automatic switch: it is expected, needs no action, and the task continues on Command Code. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, session_id: idSchema }, required: ["cwd", "session_id"], additionalProperties: false },
   },
   {
