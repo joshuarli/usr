@@ -1,0 +1,6 @@
+# This directory is linked into ~/.claude/agents, so harnesses can write into it.
+# Track agent definitions and the two markers, nothing else.
+/*
+!/.gitignore
+!/.sym-dir
+!/*.md
