@@ -146,7 +146,7 @@ else:
         settings = json.loads((PROFILE / "settings.json").read_text())
         self.assertEqual(settings["defaultProvider"] + "/" + settings["defaultModel"], "opencode-go/deepseek-v4.1-flash")
         self.assertEqual(settings["defaultThinkingLevel"], "high")
-        self.assertEqual(settings["packages"], [])
+        self.assertEqual(settings["packages"], ["npm:pi-subagents@0.87.0"])
         self.assertEqual(settings["skills"], ["~/.agents/skills"])
         sub = settings["subagents"]
         self.assertEqual(sub["maxThinking"], "max")
@@ -159,6 +159,11 @@ else:
                     "expert": ("deepseek-v4.1-flash", "max")}
         for tier, (model, effort) in expected.items():
             self.assertEqual(sub["agentOverrides"][tier], {"model": "opencode-go/" + model, "thinking": effort})
+            agent = (PROFILE / "agents" / (tier + ".md")).read_text()
+            self.assertIn("name: " + tier, agent)
+            self.assertIn("model: opencode-go/" + model, agent)
+            self.assertIn("thinking: " + effort, agent)
+            self.assertNotIn("tools: subagent", agent)
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")
