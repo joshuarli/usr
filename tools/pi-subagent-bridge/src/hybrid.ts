@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { checkedWorktree, makeWorkerBridge, type PiPort, type ModelRef } from "./bridge.ts"
+import { checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
 import { cancelCommand, COMMAND_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
@@ -156,7 +156,7 @@ function quota(value: unknown): boolean {
   return QUOTA.test(typeof value === "string" ? value : JSON.stringify(value ?? ""))
 }
 
-export function makeHybridBridge(api: PiPort, command = {
+export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }) {
   function fallback(s: Session, reason: string): Session {
@@ -303,12 +303,12 @@ export function makeHybridBridge(api: PiPort, command = {
         command.status(s.command_run).state === "turn_limit"
       if (continuation && (s.continuations ?? 0) >= TURN_LIMIT_CONTINUATIONS)
         throw new Error("Turn-limit continuation limit reached")
-      if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
       if (s.backend === "command-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition")
         throw new Error("Worker transition interrupted; inspect session before resuming")
+      if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.backend === "pi") {
         if (!s.pi_id) throw new Error("Missing Pi session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
