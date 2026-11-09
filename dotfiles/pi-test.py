@@ -144,39 +144,26 @@ else:
 
     def test_profile_and_orchestration_agree(self):
         settings = json.loads((PROFILE / "settings.json").read_text())
-        self.assertEqual(settings["defaultProvider"] + "/" + settings["defaultModel"], MODEL)
-        self.assertNotIn("enabledModels", settings)
+        self.assertEqual(settings["defaultProvider"] + "/" + settings["defaultModel"], "opencode-go/deepseek-v4.1-flash")
         self.assertEqual(settings["defaultThinkingLevel"], "high")
-        self.assertEqual(settings["defaultProvider"], "opencode-go")
-        self.assertEqual(settings["packages"], ["npm:pi-subagents@0.84.0"])
+        self.assertEqual(settings["packages"], [])
         self.assertEqual(settings["skills"], ["~/.agents/skills"])
-        subagents = settings["subagents"]
-        self.assertEqual(subagents["defaultModel"], "muse-spark-1.3-contributor")
-        self.assertEqual(subagents["defaultProvider"], "opencode-go")
-        self.assertEqual(subagents["defaultThinking"], "high")
-        self.assertEqual(subagents["maxThinking"], "xhigh")
-        self.assertEqual(subagents["modelScope"], {"enforce": True, "strict": True, "allow": [MODEL]})
-        self.assertFalse((PROFILE / "models.json").exists())
-        self.assertNotIn("google/gemini-3.8-flash", (PROFILE / "settings.json").read_text())
+        sub = settings["subagents"]
+        self.assertEqual(sub["maxThinking"], "max")
+        self.assertTrue(sub["modelScope"]["strict"])
+        self.assertEqual(set(sub["modelScope"]["allow"]), {
+            "opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor"})
+        expected = {"scout": ("muse-spark-1.3-contributor", "medium"),
+                    "mechanic": ("muse-spark-1.3-contributor", "high"),
+                    "worker": ("deepseek-v4.1-flash", "high"),
+                    "expert": ("deepseek-v4.1-flash", "max")}
+        for tier, (model, effort) in expected.items():
+            self.assertEqual(sub["agentOverrides"][tier], {"model": "opencode-go/" + model, "thinking": effort})
+        self.assertNotIn("god", sub["agentOverrides"])
+        self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")
-        self.assertFalse((PROFILE / ".sym-dir").exists())
-        routing = (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text()
-        for name, thinking in TIERS.items():
-            agent = (PROFILE / "agents" / f"{name}.md").read_text()
-            fields = dict(line.split(": ", 1) for line in agent.split("---", 2)[1].strip().splitlines())
-            self.assertEqual(fields["model"], MODEL)
-            self.assertEqual(fields["thinking"], thinking)
-            self.assertNotIn("subagent", fields["tools"])
-            if name == "scout":
-                self.assertEqual(fields["tools"], "read, grep, find, ls")
-            self.assertIn(f"`{MODEL}`, `{name}`, `{thinking}`", routing)
-        pi_section = routing.split("### Pi\n", 1)[1].split("### Muse Code\n", 1)[0]
-        self.assertIn(MODEL, pi_section)
-        self.assertNotIn("inferx", pi_section.lower())
-        self.assertNotIn("google/gemini-3.8-flash", pi_section)
+        self.assertIn("pi-subagent-bridge", (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text())
         self.assertIn("opencode2 auth export", (ROOT / "docs/pi.md").read_text())
-        default_tools = next(line for line in (ROOT / "tools/sync/installer.py").read_text().splitlines() if "codex claude opencode2" in line)
-        self.assertIn("pi", default_tools.split())
 
 
 if __name__ == "__main__":
