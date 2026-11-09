@@ -1917,8 +1917,12 @@ class Installer:
         asset = f"gluon-{triple}.zip"
         base = f"https://github.com/joshuarli/gluon/releases/download/{tag}"
         def validate(staged: Path) -> bool:
-            return all((staged / command).is_file() and os.access(staged / command, os.X_OK)
-                       for command in GLUON_COMMANDS)
+            for command in GLUON_COMMANDS:
+                path = staged / command
+                if not path.is_file():
+                    return False
+                path.chmod(0o755)
+            return True
         self._zip_bundle("gluon", self.gluon_home, GLUON_COMMANDS, "gluon", in_bin=False,
                          asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
                          release_dir=self.gluon_home / "releases" / f"{tag}-{triple}",
