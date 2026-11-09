@@ -81,7 +81,7 @@ function terminal(event: Record<string, unknown>, id: string, sessionFile: strin
   return { state: "succeeded", error: null, text, sessionFile, runId: id, usage: null }
 }
 
-async function run(job: Job, started: (id: string) => void): Promise<Result> {
+async function run(job: Job, started: (id: string) => void, dispatching: () => void): Promise<Result> {
   const tier = role(job)
   const runtime = await ModelRuntime.create()
   const model = runtime.getModel(job.model.providerID, job.model.id)
@@ -94,15 +94,15 @@ async function run(job: Job, started: (id: string) => void): Promise<Result> {
   const settings = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } })
   const completions = new Map<string, Record<string, unknown>>()
   const waiters = new Map<string, (event: Record<string, unknown>) => void>()
-  let rpc: Rpc | undefined
+  const api: { send?: Rpc } = {}
   const rpcExtension = (pi: ExtensionAPI): void => {
-    rpc = (method, params) => new Promise<Reply>((resolve) => {
+    api.send = (method, params) => new Promise<Reply>((resolve) => {
       const requestId = randomUUID()
       const unsubscribe = pi.events.on(REPLY + requestId, (value: unknown) => {
         unsubscribe()
         const data = record(value)
         if (data && typeof data.success === "boolean")
-          resolve({ success: data.success, data: data.data, error: record(data.error) ?? undefined })
+          resolve({ success: data.success, data: data.data, error: record(data.error) ? { message: string(record(data.error)?.message) ?? undefined } : undefined })
         else resolve({ success: false, error: { message: "Malformed pi-subagents RPC response" } })
       })
       pi.events.emit(REQUEST, { version: 1, requestId, method, params })
@@ -131,6 +131,7 @@ async function run(job: Job, started: (id: string) => void): Promise<Result> {
   })
   try {
     await session.bindExtensions({})
+    const rpc = api.send
     if (!rpc) throw new Error("Pi extension RPC is unavailable")
     const ping = unwrap(await rpc("ping", {}))
     if (ping.version !== 1) throw new Error("Unsupported pi-subagents RPC version")
@@ -143,6 +144,7 @@ async function run(job: Job, started: (id: string) => void): Promise<Result> {
           model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,
           options: { agentScope: "user" },
         }
+    dispatching()
     const reply = await rpc(job.priorRunId ? "resume" : "spawn", params)
     const id = runId(reply)
     started(id)
@@ -162,11 +164,12 @@ async function main(): Promise<void> {
       typeof job.resultPath !== "string" || typeof job.sessionDir !== "string")
     throw new Error("Malformed Pi delegation job")
   let admitted = false
+  let dispatchAttempted = false
   try {
-    const result = await run(job, () => { admitted = true })
+    const result = await run(job, () => { admitted = true }, () => { dispatchAttempted = true })
     persist(job.resultPath, result)
   } catch (error) {
-    if (admitted) throw error
+    if (admitted || dispatchAttempted) throw error
     persist(job.resultPath, {
       state: "failed", text: null, sessionFile: job.priorSessionFile ?? null, runId: null,
       error: error instanceof Error ? error.message : String(error), usage: null,

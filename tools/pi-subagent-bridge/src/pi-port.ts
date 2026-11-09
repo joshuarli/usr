@@ -76,13 +76,12 @@ function observe(s: Stored): { state: string; result: Result | null } {
   }
   return { state: alive(s.run.pid) ? "running" : "unknown_or_interrupted", result: null }
 }
-function run(s: Stored, prompt: string, priorSessionFile?: string): Run {
+function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: string): Run {
   const dir = stateDir(s.cwd), id = randomUUID()
   const output = join(dir, id + ".result.json"), errors = join(dir, id + ".stderr")
   const jobPath = join(dir, id + ".job.json")
   const sessionDir = join(dir, "pi-sessions")
   mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
-  const priorRunId = s.run && priorSessionFile ? observe(s).result?.runId : undefined
   const job = {
     cwd: s.cwd, model: s.model, readOnly: s.readOnly, prompt,
     sessionDir, priorSessionFile, priorRunId, resultPath: output,
@@ -140,16 +139,18 @@ export function piPort(): OpenCodePort {
     async prompt(input) {
       const s = load(input.cwd, input.sessionID)
       let prior: string | undefined
+      let priorRunId: string | undefined
       if (s.run) {
         const previous = observe(s)
         if (!previous.result || !["succeeded", "failed", "cancelled"].includes(previous.state))
           throw new Error("Pi session is not known terminal; no overlapping run")
         prior = verifiedSessionPath(s, previous.result.sessionFile)
         if (!previous.result.runId) throw new Error("No native subagent run identity for same-session correction")
+        priorRunId = previous.result.runId
       }
       s.admitting = true
       save(s)
-      const launched = run(s, input.text, prior)
+      const launched = run(s, input.text, prior, priorRunId)
       s.run = launched
       s.admitting = false
       save(s)
