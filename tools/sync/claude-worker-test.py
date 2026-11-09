@@ -132,6 +132,19 @@ extension.mkdir(parents=True, exist_ok=True)
         self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
                          ["pi-subagent-bridge"]["command"], str(self.bin / "node"))
 
+    def test_other_platform_home_registration_is_adopted(self):
+        other = Path("/Users") / self.home.name
+        old = {"mcpServers": {"pi-subagent-bridge": {
+            "type": "stdio", "command": str(other / ".local/share/nodejs/current/bin/node"),
+            "args": ["--experimental-strip-types",
+                     str(other / "usr/tools/pi-subagent-bridge/src/server.ts")]}}}
+        self.config.write_text(json.dumps(old))
+        self.run_helper("install")
+        current = json.loads(self.config.read_text())["mcpServers"]["pi-subagent-bridge"]
+        self.assertEqual(current["command"], str(self.bin / "node"))
+        self.assertEqual(current["args"][-1], str(self.project / "src/server.ts"))
+        self.run_helper("check")
+
     def test_relocated_checkout_keeps_owned_registration_and_credentials(self):
         self.config.write_text(json.dumps({"account": {"token": "keep"}, "mcpServers": {"other": {"command": "other"}}}))
         self.run_helper("install")

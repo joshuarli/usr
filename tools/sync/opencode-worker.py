@@ -118,10 +118,11 @@ def owned_entry(entry):
         return False
     if not set(entry).issubset({"type", "command", "codemode"}):
         return False
-    old_default = HOME / "usr/tools/pi-subagent-bridge/src/server.ts"
-    legacy_default = HOME / "usr/tools/opencode-worker/src/server.ts"
-    return (server == str(SERVER) or server == str(old_default) or server == str(legacy_default) or
-            load_owner() == entry_fingerprint(entry))
+    username = HOME.name
+    home_roots = {HOME, Path("/Users") / username, Path("/home") / username}
+    known_servers = {str(root / "usr/tools/pi-subagent-bridge/src/server.ts") for root in home_roots}
+    known_servers.update(str(root / "usr/tools/opencode-worker/src/server.ts") for root in home_roots)
+    return server == str(SERVER) or server in known_servers or load_owner() == entry_fingerprint(entry)
 
 
 def servers_in(data):
