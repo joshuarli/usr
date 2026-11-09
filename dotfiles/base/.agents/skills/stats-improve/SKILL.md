@@ -73,6 +73,8 @@ Before treating a number as a finding, cross-check any total against a second so
 
 Pick the line with the largest attainable effect and name its mechanism, for example "two serial R2 GETs, ~55 ms each" or "a 2.4 MB render at 188 ms CPU per miss". Reproduce it locally on production inputs: pull the real objects (`cf r2 objects get --bucket-name B KEY --text`) into `.work/tmp`, and time the built artifact with CPU time (`process.cpuUsage`), warm and cold.
 
+Keep the reproduction as a durable benchmark in the repository's harness, not a scratch script. Use the production inputs as a committed fixture, run them at small, production, and heavy (about ten times production) scale, and track allocations; follow [refactor-benchmarks](../refactor-benchmarks/SKILL.md). The heavy tier is how superlinear work shows up before production grows into it.
+
 Write the failing test first in the repository's own harness. A cache or memo must state its authority and its invalidation. Key it on immutable inputs (generation ids, the Worker version via `bindings.versionMetadata()`) instead of on time, and keep every documented freshness promise. A speculative read is used only when the authoritative read confirms it.
 
 ## 4. Validate locally, then deploy
