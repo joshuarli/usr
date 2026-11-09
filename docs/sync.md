@@ -34,9 +34,9 @@ The `host/macos/` directory is not part of the layer sync.
 
 Sync prunes a recorded link whose old layer source is gone; `sh sync plan` lists these as `PRUNE`. Foreign links, still-present source links, and unrecorded links are preserved. To retire a managed link, remove its tracked declaration and run `sh sync links`. Test with an isolated `TARGET` scratch home; the old standalone `sym` command has been retired.
 
-## Claude orchestration MCP
+## Cross-harness Pi SDK subagent bridge
 
-Desktop `sh sync` installs Command Code alongside the default tools, installs the pinned `@opencode/client` dependency for `tools/opencode-worker`, and registers `usr-opencode-worker` in Claude's user MCP configuration and Pi's `~/.pi/agent/mcp.json`. Codex reads the same server from the tracked `~/.codex/config.toml` (`[mcp_servers.usr-opencode-worker]`). `sh sync plan` previews missing bridge components and `sh sync doctor` verifies them. The operation is idempotent; it preserves other user MCP entries, credentials, and sessions. `sh sync uninstall` unregisters only the owned bridge entries. Headless server profiles skip this step. Sign in separately with `cmd login` if Command Code credentials are missing.
+Desktop `sh sync` installs Command Code alongside the default tools, installs the pinned `@earendil-works/pi-coding-agent` SDK dependency for `tools/pi-subagent-bridge`, and registers `pi-subagent-bridge` in Claude's user MCP configuration and Pi's `~/.pi/agent/mcp.json`. Codex reads the same server from the tracked `~/.codex/config.toml` (`[mcp_servers.pi-subagent-bridge]`). `sh sync plan` previews missing bridge components and `sh sync doctor` verifies them. The operation is idempotent; it preserves other user MCP entries, credentials, and sessions. `sh sync uninstall` unregisters only the owned bridge entries. Headless server profiles skip this step. Sign in separately with `cmd login` if Command Code credentials are missing.
 
 The former top-level tool installer has moved to `tools/sync/installer.py` and is private. Use `sh sync` for the full setup, `sh sync tools NAME` for an individual tool, and `sh sync list` to see default tools. Historical installation records under `~/.local/state/dl` are retained to recognize existing installs, not as a separate command.
 
@@ -48,7 +48,7 @@ Each task declares prerequisites, an observation of current state, an apply oper
 
 The private `tools/sync/installer.py` remains a **leaf adapter** for platform-specific downloads, checksum checks, and legacy ownership records. Python invokes it with one tool per task and runs disjoint tasks in parallel up to `SYNC_JOBS` (default: the number of CPUs), starting tasks on the critical path (Node.js, `jaq`, `uv`) first so their dependents are not starved. Each tool owns a disjoint install prefix, launcher, and state file, and the DAG declares every shared prerequisite: Node.js before the npm tools, `jaq` before `codex` and `node-build`, `pnpm` before `dsh`, and links before tools. Tool output from parallel installs may interleave. The `sync uninstall` compatibility adapter reads existing ownership records and unregisters only the managed Claude MCP entry. No YAML DSL, third-party DAG framework, or persistent scheduler state is required. `tools/sync/bootstrap.sh` is the only remaining installer shell: it installs just `jaq` and the managed `python3` on machines where no Python interpreter exists yet, which is the one place Python cannot run.
 
-Examples: `sh sync tools cmd` resolves Node.js first; `sh sync tools python3` installs the pinned python-build release directly; `sh sync bridge` resolves the full Claude/Node.js/Command Code/OpenCode chain. Set `SYNC_JOBS` to bound concurrency (default: the number of CPUs).
+Examples: `sh sync tools cmd` resolves Node.js first; `sh sync tools python3` installs the pinned python-build release directly; `sh sync bridge` resolves the shared Node.js/Pi/Command Code/OpenCode bridge. Set `SYNC_JOBS` to bound concurrency (default: the number of CPUs).
 
 ### Safe uninstall provenance
 
@@ -56,7 +56,7 @@ Newly installed objects are fingerprinted after the leaf installer confirms an a
 
 ### MCP checkout relocation
 
-`sync` persists a private fingerprint of its own Claude `usr-opencode-worker` registration under the sync state directory. A later checkout move updates this registered path without claiming other MCP servers; stale or foreign registrations with the same name are refused. Existing conventional `~/usr` registrations are accepted for migration, but unrelated similarly shaped entries are not.
+`sync` persists a private fingerprint of its own shared `pi-subagent-bridge` registration under the sync state directory. A later checkout move updates this registered path without claiming other MCP servers; stale or foreign registrations with the same name are refused. Existing legacy `usr-opencode-worker` registrations owned by sync are migrated, but unrelated similarly shaped entries are not.
 
 ## Link reconciliation implementation
 
