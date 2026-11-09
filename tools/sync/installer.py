@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ffmpeg_runtime  # noqa: E402
 
 NODE_MINIMUM = "26.12.0"
-NODEJS_VERSION = "26.12.1"
+NODEJS_VERSION = "26.13.0"
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
 PLAYER_REPO = "joshuarli/play"
 MUSE_LAUNCHER_URL = "https://dev.meta.ai/install.sh"
@@ -1313,7 +1313,7 @@ class Installer:
         targets = {
             ("darwin", "aarch64"): ("node-v" + NODEJS_VERSION + "-darwin-arm64.tar.xz",
                                    "https://nodejs.org/dist/v" + NODEJS_VERSION + "/node-v" + NODEJS_VERSION + "-darwin-arm64.tar.xz",
-                                   "18830bf448fe187c650dc28c98aa8c968ed1d40b6dd032c081e70a384a1bf660",
+                                   "6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e",
                                    "darwin-arm64"),
         }
         if (self.os_name, self.arch) == ("darwin", "aarch64"):
@@ -1322,16 +1322,16 @@ class Installer:
             glibc = self.run(["getconf", "GNU_LIBC_VERSION"], capture=True).returncode == 0
             if glibc:
                 target = "linux-x64" if self.arch == "x86_64" else "linux-arm64"
-                sha256 = "6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd" \
-                    if self.arch == "x86_64" else "42aa04922591ee5d4dbc7740d452621acf28508239daa512f5ee8c47ee224fdb"
+                sha256 = "d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997" \
+                    if self.arch == "x86_64" else "406fe3fbde1c054adff8b297c16fdb5af6659db327c1ac8acd46b56ef1af9a92"
                 url = f"https://nodejs.org/dist/v{NODEJS_VERSION}/node-v{NODEJS_VERSION}-{target}.tar.xz"
             elif self.arch == "x86_64":
                 target = "linux-x64-musl"
-                sha256 = "4fd7c15fdc930ea48cf144bb302ce30a76c81920e36473d087720d0810efe1cd"
+                sha256 = "1cae5273e14d36ddb0e605bbcde602bbad9f72301c66afbc94fa764220d9d9f5"
                 url = f"https://nodejs.org/dist/v{NODEJS_VERSION}/node-v{NODEJS_VERSION}-{target}.tar.xz"
             else:
                 target = "linux-arm64-musl"
-                sha256 = "87d822005776f222f2964c93df055f926d80595a63442b891d3aafe1f0a1dc67"
+                sha256 = "846b6ac7330a6ca4b89bc53e8540a0b13c0ab513c2cdad4b7e184503bf83c0db"
                 url = f"https://unofficial-builds.nodejs.org/download/release/v{NODEJS_VERSION}/node-v{NODEJS_VERSION}-{target}.tar.xz"
             asset = f"node-v{NODEJS_VERSION}-{target}.tar.xz"
         else:

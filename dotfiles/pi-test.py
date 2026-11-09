@@ -30,7 +30,7 @@ class PiTests(unittest.TestCase):
             "TMPDIR": str(self.root), "DL_OWNED_FILE": str(self.root / "owned"),
             "MOCK_LOG": str(self.root / "npm.log"), "MOCK_VERSION": "1.4.0",
         }
-        self.script("node", '#!/bin/sh\nprintf "%s\\n" "${MOCK_NODE_VERSION:-26.12.0}"\nexit "${MOCK_NODE_STATUS:-0}"\n')
+        self.script("node", '#!/bin/sh\nprintf "%s\\n" "${MOCK_NODE_VERSION:-26.13.0}"\nexit "${MOCK_NODE_STATUS:-0}"\n')
         self.script("npm", f"#!{sys.executable}\n" + '''import json, os, pathlib, sys
 args = sys.argv[1:]
 with open(os.environ["MOCK_LOG"], "a") as log:

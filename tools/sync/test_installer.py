@@ -84,7 +84,7 @@ class InstallerTests(unittest.TestCase):
         self.script("pnpm", "#!/bin/sh\nexit 0\n")
         self.script("zipinfo", "#!/bin/sh\nexit 0\n")
         self.script("getconf", "#!/bin/sh\nif [ \"$1\" = GNU_LIBC_VERSION ]; then exit ${MOCK_GETCONF_STATUS:-1}; fi\nexit 1\n")
-        self.script("node", "#!/bin/sh\nprintf '%s\\n' \"${MOCK_NODE_VERSION:-26.12.0}\"\n")
+        self.script("node", "#!/bin/sh\nprintf '%s\\n' \"${MOCK_NODE_VERSION:-26.13.0}\"\n")
         self.script("npm", f"#!{sys.executable}\n" + '''import json, os, pathlib, sys
 args = sys.argv[1:]
 log = os.environ.get("NPM_LOG")
@@ -355,14 +355,14 @@ sys.exit(1)
         self.assertTrue(self.dest_path("node-build").is_symlink())
 
     def test_nodejs_checksum_mismatch_is_a_skip(self):
-        inst = self.make({"https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.xz": b"not-the-pinned-build"},
+        inst = self.make({"https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz": b"not-the-pinned-build"},
                          os_name="darwin", arch="aarch64")
         with self.assertRaises(SkipInstall) as ctx:
             inst.install_nodejs()
         self.assertIn("checksum mismatch", str(ctx.exception))
 
     def test_nodejs_managed_upgrade_preserves_npm_symlink_and_cleans_staged(self):
-        release = self.home / ".local/share/nodejs/26.12.1-npm12.2.0-darwin-arm64"
+        release = self.home / ".local/share/nodejs/26.13.0-npm12.2.0-darwin-arm64"
         cli_js = release / "lib/node_modules/npm/bin/npm-cli.js"
         cli_js.parent.mkdir(parents=True)
         cli_js.write_text(f"#!/bin/sh\nexec {self.bin / 'npm'} \"$@\"\n")
@@ -402,7 +402,7 @@ sys.exit(1)
             self.assertEqual(os.readlink(self.dest_path(command)), str(current / "bin" / command))
 
     def test_nodejs_relative_current_is_healed_to_absolute(self):
-        release = self.home / ".local/share/nodejs/26.12.1-npm11.9.0-darwin-arm64"
+        release = self.home / ".local/share/nodejs/26.13.0-npm11.9.0-darwin-arm64"
         cli_js = release / "lib/node_modules/npm/bin/npm-cli.js"
         cli_js.parent.mkdir(parents=True)
         cli_js.write_text(f"#!/bin/sh\nexec {self.bin / 'npm'} \"$@\"\n")
@@ -411,7 +411,7 @@ sys.exit(1)
         (release / "lib/node_modules/npm/lib/cli.js").write_text("")
         bin_dir = release / "bin"
         bin_dir.mkdir()
-        (bin_dir / "node").write_text("#!/bin/sh\nprintf '26.12.1\\n'\n")
+        (bin_dir / "node").write_text("#!/bin/sh\nprintf '26.13.0\\n'\n")
         (bin_dir / "node").chmod(0o755)
         (bin_dir / "npm").symlink_to("../lib/node_modules/npm/bin/npm-cli.js")
         (bin_dir / "npx").symlink_to("../lib/node_modules/npm/bin/npx-cli.js")
@@ -427,12 +427,12 @@ sys.exit(1)
         self.assertTrue((current / "bin/node").is_file())
 
     def test_nodejs_relative_foreign_current_is_replaced(self):
-        foreign = self.home / ".local/share/nodejs/26.13.0-darwin-arm64"
+        foreign = self.home / ".local/share/nodejs/26.14.0-darwin-arm64"
         foreign.mkdir(parents=True)
         (foreign / "marker").write_text("keep\n")
         current = self.home / ".local/share/nodejs/current"
         current.symlink_to(foreign.name, target_is_directory=True)
-        routes = {"https://nodejs.org/dist/v26.12.1/node-v26.12.1-darwin-arm64.tar.xz": b"not-the-pinned-build"}
+        routes = {"https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz": b"not-the-pinned-build"}
         inst = self.make(routes, os_name="darwin", arch="aarch64")
         for command in ("node", "npm", "npx"):
             self.dest_path(command).symlink_to(str(current / "bin" / command))

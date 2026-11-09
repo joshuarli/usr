@@ -30,7 +30,7 @@ class PiWorkerSyncTests(unittest.TestCase):
         (self.project / "package.json").write_text(json.dumps({
             "dependencies": {"@earendil-works/pi-coding-agent": "1.5.0", "pi-subagents": "0.87.0"},
         }))
-        (self.bin / "node").write_text("#!/bin/sh\nprintf 'v26.12.1\\n'\n")
+        (self.bin / "node").write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
         (self.bin / "node").chmod(0o755)
         npm = f"""#!{sys.executable}
 import json, pathlib, sys, os
