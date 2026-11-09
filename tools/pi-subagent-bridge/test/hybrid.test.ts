@@ -73,6 +73,27 @@ function fake(cwd: string) {
     omitModels: () => { variants = [] }, done: () => { commandDone = true } }
 }
 
+test("every Pi tier pins exactly the requested provider, model, and effort", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const expected = [
+      ["scout", "muse-spark-1.3-contributor", "medium", "low"],
+      ["mechanic", "muse-spark-1.3-contributor", "high", "high"],
+      ["worker", "deepseek-v4.1-flash", "high", "high"],
+      ["expert", "deepseek-v4.1-flash", "max", "max"],
+    ] as const
+    for (const [tier, id, variant, fallbackEffort] of expected) {
+      const found = await bridge.modelCheck(f.cwd, tier)
+      assert.deepEqual(found.primary.model, { providerID: "opencode-go", id, variant })
+      assert.equal(found.primary.available, true)
+      assert.equal(found.fallback.effort, fallbackEffort)
+      assert.equal(found.fallback.model, "deepseek/deepseek-v4.1-flash")
+    }
+    await assert.rejects(bridge.modelCheck(f.cwd, "god"), /Unknown Pi tier/)
+  } finally { f.close() }
+})
+
 test("OpenCode Go high runs a scoped worker; out-of-scope edits block acceptance", async () => {
   const f = fixture()
   try {
@@ -186,8 +207,8 @@ test("reject invalid scope, unapproved tier, and dirty worktree", async () => {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     await assert.rejects(bridge.start(f.cwd, "x", "worker", { ...f.scope, writable_paths: ["../secret"] }, "x"), /Invalid writable path/)
     await assert.rejects(bridge.start(f.cwd, "x", "scout", f.scope, "x"), /scouts are read-only/)
-    await assert.rejects(bridge.start(f.cwd, "x", "opus", f.scope, "x"), /Unknown DeepSeek tier/)
-    await assert.rejects(bridge.start(f.cwd, "x", "god", f.scope, "x"), /Unknown DeepSeek tier/)
+    await assert.rejects(bridge.start(f.cwd, "x", "opus", f.scope, "x"), /Unknown Pi tier/)
+    await assert.rejects(bridge.start(f.cwd, "x", "god", f.scope, "x"), /Unknown Pi tier/)
     writeFileSync(join(f.cwd, "stray"), "x")
     await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
   } finally { f.close() }

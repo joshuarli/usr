@@ -28,7 +28,7 @@ class PiWorkerSyncTests(unittest.TestCase):
         shutil.copy2(HELPER, self.root / "tools/sync/pi-worker.py")
         (self.project / "src/server.ts").write_text("export {}\n")
         (self.project / "package.json").write_text(json.dumps({
-            "dependencies": {"@earendil-works/pi-coding-agent": "1.4.0"},
+            "dependencies": {"@earendil-works/pi-coding-agent": "1.5.0"},
         }))
         (self.bin / "node").write_text("#!/bin/sh\nprintf 'v26.12.1\\n'\n")
         (self.bin / "node").chmod(0o755)
@@ -41,7 +41,7 @@ assert args[:2] == ["install", "--prefix"], args
 project = pathlib.Path(args[2])
 client = project / "node_modules/@earendil-works/pi-coding-agent"
 client.mkdir(parents=True, exist_ok=True)
-(client / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_VERSION", "1.4.0")}}))
+(client / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_VERSION", "1.5.0")}}))
 """
         (self.bin / "npm").write_text(npm)
         (self.bin / "npm").chmod(0o755)

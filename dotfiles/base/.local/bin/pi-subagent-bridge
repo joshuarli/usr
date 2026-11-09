@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 script=$0
+case $script in
+    */*) ;;
+    *) script=$(command -v "$script") ;;
+esac
 while [ -L "$script" ]; do
     link=$(readlink "$script")
     case $link in

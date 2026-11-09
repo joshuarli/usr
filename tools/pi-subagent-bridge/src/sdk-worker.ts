@@ -77,9 +77,12 @@ async function run(job: Job): Promise<Result> {
     const active = session.getActiveToolNames().slice().sort()
     if (active.join("\0") !== tools.slice().sort().join("\0"))
       throw new Error("Pi effective tool list does not match the approved allowlist")
+    const previousMessages = session.messages.length
     await session.prompt(job.prompt)
-    const last = session.messages.slice().reverse().find((m) => m.role === "assistant")
-    const text = session.getLastAssistantText() ?? null
+    const last = session.messages.slice(previousMessages).reverse().find((m) => m.role === "assistant")
+    const text = last?.role === "assistant"
+      ? last.content.filter((part) => part.type === "text").map((part) => part.text).join("").trim() || null
+      : null
     const sessionFile = session.sessionFile ?? null
     if (!last || last.role !== "assistant")
       return { state: "failed", text, sessionFile, error: "Pi returned no assistant message", usage: null }
