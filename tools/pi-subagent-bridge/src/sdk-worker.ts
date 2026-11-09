@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto"
 import { readFileSync, renameSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import {
   createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime,
   SessionManager, SettingsManager, type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent"
-import registerSubagents from "pi-subagents"
+
+const require = createRequire(import.meta.url)
+const subagentsExtensionPath = require.resolve("pi-subagents")
 
 type Job = {
   cwd: string
@@ -119,7 +122,8 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
   const loader = new DefaultResourceLoader({
     cwd: job.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    extensionFactories: [registerSubagents, rpcExtension],
+    additionalExtensionPaths: [subagentsExtensionPath],
+    extensionFactories: [rpcExtension],
   })
   await loader.reload()
   const errors = loader.getExtensions().errors
