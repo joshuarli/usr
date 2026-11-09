@@ -5,7 +5,7 @@ description: "Route all coding subagents through the shared Pi SDK bridge, scope
 
 # Orchestrate
 
-**All coding subagents from any harness use `pi-subagent-bridge`**, regardless of which skill initiated delegation. This includes non-orchestrate tools and ordinary review tasks. The only native exception is `god` in Claude Code or Codex, using the existing pinned native model. Never use native Claude `Agent`/`Task`, Codex `spawn_agent`, OpenCode child agents, Command Code `Explore`/`General`, Pi `pi-subagents`, or another harness's native child launcher for `scout`, `mechanic`, `worker`, or `expert`.
+**All coding subagents from any harness use `pi-subagent-bridge`**, regardless of which skill initiated delegation. This includes non-orchestrate tools and ordinary review tasks. The only native exception is `god` in Claude Code or Codex, using the existing pinned native model. Never use native Claude `Agent`/`Task`, Codex `spawn_agent`, OpenCode child agents, Command Code `Explore`/`General`, Pi's native `subagent` tool outside the bridge, or another harness's native child launcher for `scout`, `mechanic`, `worker`, or `expert`.
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. A worker may not delegate or broaden its task.
 
@@ -41,7 +41,7 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-The primary executor is an isolated Node process using the **Pi SDK**, pinned to the model above and reusing OpenCode Go credentials. It does not invoke the Pi CLI or start the OpenCode agent/server. Only an unavailable approved model/provider or a recognized quota/usage failure permits a fallback to the separate authenticated Command Code CLI, pinned to DeepSeek V4.1 Flash and effort above.
+The primary executor embeds **Pi SDK + pi-subagents**, invoking the extension RPC with the pinned model and tier and reusing OpenCode Go credentials. It does not invoke the Pi CLI or start the OpenCode agent/server. Only an unavailable approved model/provider or a recognized quota/usage failure permits a fallback to the separate authenticated Command Code CLI, pinned to DeepSeek V4.1 Flash and effort above.
 
 **Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Command Code has no third fallback. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 

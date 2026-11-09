@@ -1,6 +1,6 @@
 # pi-subagent-bridge
 
-One Pi SDK subagent runtime for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. Pi runs the primary worker directly through `@earendil-works/pi-coding-agent`; Command Code is the separate, pinned DeepSeek V4.1 Flash fallback.
+One Pi SDK subagent runtime for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. Primary execution is delegated through embedded Pi SDK to native pi-subagents RPC, rather than another custom agent loop. Command Code remains the separately authenticated, pinned DeepSeek V4.1 Flash fallback.
 
 | Tier | Pi SDK / OpenCode Go primary | Thinking | Command Code |
 | --- | --- | --- | --- |
@@ -13,12 +13,12 @@ No `god` tier. Claude Code and Codex alone use their pinned native `god` agents.
 
 ## Setup
 
-`sh sync` installs Node.js, Pi, Command Code, and the bridge's pinned SDK dependency, and registers the MCP server in Claude, Pi and OpenCode. Codex reads its tracked config. `sh sync bridge` reconciles MCP registrations; the old recognized `usr-opencode-worker` entry migrates to `pi-subagent-bridge` while foreign servers are preserved.
+`sh sync` installs Node.js, Pi, Command Code, and the bridge's pinned Pi SDK and pi-subagents dependencies, and registers the MCP server in Claude, Pi and OpenCode. Codex reads its tracked config. `sh sync bridge` reconciles MCP registrations; the old recognized `usr-opencode-worker` entry migrates to `pi-subagent-bridge` while foreign servers are preserved.
 
 `sh sync plan`
 `sh sync doctor`
 
-The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No extra long-running OpenCode service or native Pi subagent extension is required. The worker SDK subprocess starts only when a task is admitted.
+The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi installs the same pinned extension via `pi update --extensions --no-approve` after syncing.
 
 ## MCP tools
 
@@ -34,7 +34,7 @@ The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No extr
 
 `worker_status(cwd,session_id)` observes the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
 
-`worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned Pi SDK conversation or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts.
+`worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned native pi-subagents child in its original SDK host session, or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts.
 
 `worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination.
 
@@ -55,7 +55,7 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 ## Safety and durability
 
-The primary SDK subprocess has an exact model/effort, explicit tool allowlist, private session storage, and an isolated resource loader with no ambient extensions or subagent launches. The SDK prompt settles before its terminal result is written atomically. Ambiguous process exits and interrupted admissions **block** new attempts. The parent maintains cross-process worktree leases and per-session locks. Only a verified quota/model availability error may switch to Command Code, **before any edits**. A partial worktree is never replayed under another provider.
+The primary SDK host loads the exact pinned pi-subagents extension without ambient extensions. It submits an exact model/effort/tier and scoped brief to `subagents:rpc:v1:request`. Native completion events drive the terminal result; an absent receipt or interrupted SDK host remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. Only confirmed model/provider unavailability or a quota/usage error permits switching to Command Code before any edits. Partial work is never replayed under a second provider.
 
 State, prompt job files, SDK JSONL transcripts and Command Code NDJSON results live under ignored `.work/worker-bridge/`. These files may contain code and model output; keep that directory private. This is *not* an OS sandbox: ignored files, absolute-path reads, and external processes are beyond Git write-scope detection.
 

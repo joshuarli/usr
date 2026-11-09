@@ -1,6 +1,6 @@
 # Pi
 
-Pi is the canonical worker runtime for subagents launched from any coding harness. Use the shared `pi-subagent-bridge` MCP server or its CLI shim; do not invoke native Pi `pi-subagents`. The bridge uses `@earendil-works/pi-coding-agent` directly, rather than shelling out to `pi -p`. Independent SDK subprocesses preserve worktree and process isolation.
+Pi SDK and [`pi-subagents`](https://github.com/nicobailon/pi-subagents) are the canonical delegated runtime. Every coding harness calls the shared `pi-subagent-bridge` MCP tools or CLI shim. The bridge loads pi-subagents into an embedded SDK host and invokes its versioned delegation RPC directly, never through `pi -p` or an LLM-driven subagent decision. The outer bridge retains cross-harness worktree leases and verified fallback; pi-subagents owns the native child execution, completion events, and retained-session continuation.
 
 ## Pinned models
 
@@ -15,7 +15,7 @@ Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its glob
 
 ## Install
 
-Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned SDK dependency is installed within `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
+Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are installed within `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
 
 Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untracked and private** `~/.pi/agent/auth.json`:
 
@@ -30,9 +30,11 @@ Pi authenticates to OpenCode Go using the existing OpenCode login. In the **untr
 
 Pi resolves the command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. The fallback uses a separate interactive `cmd login`. No credentials are committed.
 
+After syncing, install the declared package in interactive Pi with `pi update --extensions --no-approve`. The bridge has its own pinned SDK extension dependency and does not depend on this extra interactive installation. The four user agent profiles in `~/.pi/agent/agents/` enforce the same model/tool contract for native interactive Pi.
+
 ## Worker runtime
 
-Each assignment gets a clean linked worktree under `.work/wt/` and an explicit scope (base HEAD, writable paths, acceptance proof, bounded attempts, stop conditions). `pi-subagent-bridge` starts a dedicated Node process running `createAgentSession` from the Pi SDK. It selects the exact model, sets the effort, permits only the role's tools and disables ambient extensions and skill-triggered child launches. Conversation state persists in the ignored `.work/worker-bridge/pi-sessions` directory; corrections reopen that exact session. The worker writes a terminal JSON outcome atomically after the SDK prompt finishes. An absent or malformed outcome stays blocked.
+Each assignment gets a clean linked worktree under `.work/wt/` and an explicit scope (base HEAD, writable paths, acceptance proof, bounded attempts, stop conditions). The bridge launches a dedicated SDK host with only the pinned pi-subagents extension and calls `subagents:rpc:v1:request` (`spawn`, async) with the exact tier/model/task. The package owns the child lifecycle, artifacts, and completion events. Corrections reopen the same durable SDK host session and use the native `resume` RPC with the previous run ID. Because the external parent already owns the worktree, native pi-subagents worktree allocation is disabled. Ambiguous admissions and missing completion receipts are blocked, not replayed.
 
 Only an unavailable exact model/provider or a recognized quota/usage failure can fall back to the pinned Command Code runner, and **only when the worktree is untouched and admission is unambiguous**. A task/test failure or an interrupted process does not warrant a retry with another provider. A runner report is not verification: the parent independently checks proof, changed paths, HEAD and the diff.
 
@@ -56,4 +58,4 @@ It also exposes `pi-subagent-bridge mcp` for JSON-RPC. See `tools/pi-subagent-br
 
 Offline: `cd tools/pi-subagent-bridge && npm test`, `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, and `sh dotfiles/worker-watch-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
 
-Pi SDK upstream reference: https://pi.dev/docs/latest/sdk
+Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/nicobailon/pi-subagents/blob/main/docs/extension-api.md
