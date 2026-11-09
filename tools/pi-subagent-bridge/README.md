@@ -18,7 +18,7 @@ No `god` tier. Claude Code and Codex alone use their pinned native `god` agents.
 `sh sync plan`
 `sh sync doctor`
 
-The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi installs the same pinned extension via `pi update --extensions --no-approve` after syncing.
+The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. `sh sync` now also reconciles the pinned interactive Pi extension automatically; no separate command is necessary.
 
 ## MCP tools
 
