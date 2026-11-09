@@ -83,6 +83,19 @@ client.mkdir(parents=True, exist_ok=True)
         self.assertEqual(json.loads(self.config.read_text()), original)
         self.run_helper("remove")
 
+    def test_owned_legacy_registration_is_migrated_even_when_new_is_current(self):
+        self.run_helper("install")
+        data = json.loads(self.config.read_text())
+        servers = data["mcpServers"]
+        servers["usr-opencode-worker"] = dict(servers["pi-subagent-bridge"])
+        self.config.write_text(json.dumps(data))
+        self.run_helper("check", success=False)
+        self.assertIn("migrate owned", self.run_helper("plan").stdout)
+        self.run_helper("install")
+        migrated = json.loads(self.config.read_text())
+        self.assertNotIn("usr-opencode-worker", migrated["mcpServers"])
+        self.run_helper("check")
+
     def test_plan_never_writes_or_installs(self):
         output = self.run_helper("plan").stdout
         self.assertIn("NPM: install", output)

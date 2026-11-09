@@ -34,6 +34,11 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, ["codex"], setup=False).select(["tool:codex"])
         self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:codex"])
 
+    def test_mcp_registration_tasks_serialize_their_sdk_install(self):
+        tasks = main.graph(self.ctx, [], setup=True).tasks
+        for name in ("claude-mcp", "pi-mcp", "opencode-mcp"):
+            self.assertIn("pi-sdk-install", tasks[name].resources)
+
     def test_tool_tasks_have_disjoint_resources(self):
         tasks = main.graph(self.ctx, ["cmd", "pnpm", "fd"], setup=False).tasks
         resources = [tasks[name].resources for name in ("tool:cmd", "tool:pnpm", "tool:fd", "tool:nodejs")]
