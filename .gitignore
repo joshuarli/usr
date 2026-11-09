@@ -13,3 +13,5 @@ sessions/
 *.sqlite-wal
 
 .cloudflare
+
+node_modules/
