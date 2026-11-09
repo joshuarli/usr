@@ -15,6 +15,7 @@ from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
 from installer import Installer, SkipInstall, default_tools
+from pi_extensions import missing as missing_pi_extensions
 from ownership import capture_new, claims_lock, merge_claims, records, ownership_lock, fingerprint, read_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -131,6 +132,32 @@ def apply_tool(ctx: Context, tool: str) -> None:
         with ownership_lock(ctx.state), claims_lock():
             merge_claims(ctx.state, set(leaf.claims), set(leaf.removed))
             capture_new(ctx.state, before, set(leaf.claims))
+
+
+
+def pi_extensions_status(ctx: Context) -> Probe:
+    try:
+        missing = missing_pi_extensions(ctx.root / "dotfiles/base/.pi/agent/settings.json", ctx.home)
+    except (OSError, ValueError, TypeError) as exc:
+        return Probe(False, "Invalid Pi package profile: " + str(exc), True)
+    detail = "; ".join(f"{name}@{version} (installed: {actual or 'missing'})"
+                       for _, name, version, actual in missing)
+    return Probe(not missing, detail or "Pi extensions match exact pins")
+
+
+def pi_extensions_apply(ctx: Context) -> None:
+    pi = ctx.home / ".local/bin/pi"
+    if not os.access(pi, os.X_OK):
+        raise RuntimeError("Pi launcher is missing; run sync tools pi")
+    extra = {
+        "PI_CODING_AGENT_DIR": str(ctx.home / ".pi/agent"),
+        "PATH": str(ctx.home / ".local/bin") + os.pathsep + ctx.env.get("PATH", ""),
+    }
+    for source, _, _, _ in missing_pi_extensions(ctx.root / "dotfiles/base/.pi/agent/settings.json", ctx.home):
+        required(command(ctx, str(pi), "install", source, "--no-approve", extra=extra),
+                 "Pi package installation")
+    required(command(ctx, str(pi), "update", "--extensions", "--no-approve", extra=extra),
+             "Pi extension reconciliation")
 
 
 def bridge_status(ctx: Context) -> Probe:
@@ -295,13 +322,16 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda t=tool: installed(ctx, t),
                           frozenset({f"tool:{tool}"}), reconcile=True))
     if ctx.profile != "server":
-        nodes.append(Task("claude-mcp", ("links", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2", "tool:pi"),
+        nodes.append(Task("pi-extensions", ("links", "tool:pi"),
+                          lambda: pi_extensions_status(ctx), lambda: pi_extensions_apply(ctx),
+                          lambda: pi_extensions_status(ctx), frozenset({"pi-config"}), reconcile=True))
+        nodes.append(Task("claude-mcp", ("pi-extensions", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2", "tool:pi"),
                           lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
                           lambda: bridge_status(ctx), frozenset({"claude-config", "pi-sdk-install"})))
-        nodes.append(Task("pi-mcp", ("links", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
+        nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
                           lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
                           lambda: pi_bridge_status(ctx), frozenset({"pi-config", "pi-sdk-install"})))
-        nodes.append(Task("opencode-mcp", ("links", "tool:nodejs", "tool:cmd", "tool:opencode2", "tool:pi"),
+        nodes.append(Task("opencode-mcp", ("pi-extensions", "tool:nodejs", "tool:cmd", "tool:opencode2", "tool:pi"),
                           lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
                           lambda: opencode_bridge_status(ctx), frozenset({"opencode-config", "pi-sdk-install"})))
     deps = ("links",)
