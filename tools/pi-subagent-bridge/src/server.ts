@@ -89,7 +89,7 @@ export function serve(load: () => Promise<Bridge> = connect): void {
     if (method === "initialize") {
       write({ jsonrpc: "2.0", id, result: {
         protocolVersion: PROTOCOL, capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "usr-opencode-worker", version: VERSION },
+        serverInfo: { name: "pi-subagent-bridge", version: VERSION },
       } })
       return
     }
@@ -122,12 +122,12 @@ export function serve(load: () => Promise<Bridge> = connect): void {
 
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })
   lines.on("line", (line) => {
-    if (Buffer.byteLength(line) > MAX_LINE) { console.error("usr-opencode-worker: oversized MCP request"); return }
+    if (Buffer.byteLength(line) > MAX_LINE) { console.error("pi-subagent-bridge: oversized MCP request"); return }
     try {
       const data: unknown = JSON.parse(line)
       if (!isObject(data) || data.jsonrpc !== "2.0") return
-      void handle(data as Message).catch((error) => console.error("usr-opencode-worker:", error))
-    } catch { console.error("usr-opencode-worker: invalid MCP JSON") }
+      void handle(data as Message).catch((error) => console.error("pi-subagent-bridge:", error))
+    } catch { console.error("pi-subagent-bridge: invalid MCP JSON") }
   })
 }
 

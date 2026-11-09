@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process"
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DEFAULT_MODEL, FREE_MODEL, GO_MODEL, checkedWorktree, makeWorkerBridge, selectedModel, type OpenCodePort } from "../src/bridge.ts"
+import { DEFAULT_MODEL, GO_MODEL, checkedWorktree, makeWorkerBridge, selectedModel, type OpenCodePort } from "../src/bridge.ts"
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim()
@@ -40,15 +40,15 @@ function fake(cwd: string) {
       { type: "assistant", content: [{ type: "reasoning", text: "secret chain" }, { type: "text", text: "Done; ran tests" }] },
     ] }),
     interrupt: async (input) => { calls.push({ op: "interrupt", input }); return { interrupted: active } },
-    models: async () => ({ location: { directory: cwd }, data: [{ providerID: "opencode", id: "deepseek-v4.1-flash-free", modelID: "deepseek-v4.1-flash-free", variants: [], enabled: true, status: "active" }] }),
+    models: async () => ({ location: { directory: cwd }, data: [{ providerID: "opencode-go", id: "deepseek-v4.1-flash", modelID: "deepseek-v4.1-flash", variants: [{ id: "high" }], enabled: true, status: "active" }] }),
   }
   return { api, calls, setActive: (value: boolean) => { active = value }, setQueued: (value: number) => { queued = value }, info }
 }
 
 test("model selection is closed; never silently switch providers", () => {
   assert.deepEqual(selectedModel("go"), GO_MODEL)
-  assert.deepEqual(selectedModel(), FREE_MODEL)
-  assert.deepEqual(selectedModel("free"), FREE_MODEL)
+  assert.deepEqual(selectedModel(), GO_MODEL)
+  assert.throws(() => selectedModel("free"), /no silent model fallback/)
   assert.throws(() => selectedModel("gpt-6"), /no silent model fallback/)
 })
 

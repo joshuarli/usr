@@ -30,7 +30,7 @@ function fixture() {
 function fake(cwd: string) {
   const calls: unknown[] = []
   let status = "succeeded", assistant = "PROOF: test exit 0", error: unknown = null
-  let variants = ["low", "high", "max"]
+  let variants = ["medium", "high", "max"]
   let commandDone = false
   let model = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
   const api: OpenCodePort = {
@@ -52,8 +52,10 @@ function fake(cwd: string) {
       { type: "assistant", content: [{ type: "text", text: assistant }] },
     ] }),
     interrupt: async () => ({ data: { interrupted: true } }),
-    models: async () => ({ data: [{ id: "deepseek-v4.1-flash", providerID: "opencode-go",
-      variants: variants.map((id) => ({ id })), enabled: true, status: "active" }] }),
+    models: async () => ({ data: ["deepseek-v4.1-flash", "muse-spark-1.3-contributor"].map((id) => ({
+      id, providerID: "opencode-go",
+      variants: variants.map((variant) => ({ id: variant })), enabled: true, status: "active",
+    })) }),
   }
   const command = {
     available: () => true,
@@ -76,7 +78,7 @@ test("OpenCode Go high runs a scoped worker; out-of-scope edits block acceptance
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    assert.equal(task.backend, "opencode")
+    assert.equal(task.backend, "pi")
     assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"variant":"high"')))
     writeFileSync(join(f.cwd, "README"), "changed\n")
     writeFileSync(join(f.cwd, "unrelated"), "bad\n")
@@ -149,7 +151,7 @@ test("terminal OpenCode quota failure falls back only when no changes exist", as
     m.fail("quota exceeded, monthly allowance exhausted")
     const status = await bridge.status(f.cwd, task.session_id)
     assert.equal(status.backend, "command-code")
-    assert.equal(status.fallback_reason, "OpenCode quota/usage failure")
+    assert.equal(status.fallback_reason, "Pi quota/usage failure")
   } finally { f.close() }
 })
 test("an ordinary failed task mentioning quota in its prose never triggers a fallback", async () => {
@@ -159,7 +161,7 @@ test("an ordinary failed task mentioning quota in its prose never triggers a fal
     const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
     m.fail("The project's quota test failed for a local assertion; no provider error", false)
     const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.backend, "opencode")
+    assert.equal(status.backend, "pi")
     assert.equal(status.state, "failed")
     assert.equal(status.fallback_reason, null)
     assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
@@ -174,7 +176,7 @@ test("quota does not silently restart a partially edited worktree", async () => 
     writeFileSync(join(f.cwd, "README"), "partial\n")
     m.fail("rate limit exceeded")
     const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.backend, "opencode")
+    assert.equal(status.backend, "pi")
     assert.equal(status.state, "blocked_partial_work")
   } finally { f.close() }
 })
@@ -277,7 +279,7 @@ test("overlapping worker starts admit at most one writer in the same worktree", 
     await assert.rejects(bridge.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
     releaseModels()
     const admitted = await first
-    assert.equal(admitted.backend, "opencode")
+    assert.equal(admitted.backend, "pi")
     assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"title"')).length, 1)
   } finally { f.close() }
 })

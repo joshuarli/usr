@@ -161,8 +161,10 @@ export function piPort(): OpenCodePort {
       const dir = stateDir(input.cwd), sessions: Record<string, boolean> = {}
       for (const filename of readdirSync(dir)) {
         if (!/^ses_[a-f0-9]{32}\.pi\.json$/.test(filename)) continue
-        const id = filename.slice(0, -8), s = load(input.cwd, id)
-        if (observe(s).state === "running") sessions[id] = true
+        const id = filename.slice(0, -8)
+        const entry = JSON.parse(readFileSync(join(dir, filename), "utf8")) as Stored
+        if (entry.cwd !== input.cwd || entry.id !== id) continue
+        if (observe(entry).state === "running") sessions[id] = true
       }
       return { data: sessions }
     },

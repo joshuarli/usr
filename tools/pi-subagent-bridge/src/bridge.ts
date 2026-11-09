@@ -17,17 +17,12 @@ export type OpenCodePort = {
 
 const SESSION_PREFIX = "usr-worker: "
 const MAX_BRIEF = 32_000
-export const FREE_MODEL: ModelRef = { providerID: "opencode", id: "deepseek-v4.1-flash-free" }
-export const GO_MODEL: ModelRef = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" }
-export const DEFAULT_MODEL = FREE_MODEL
+export const GO_MODEL: ModelRef = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
+export const DEFAULT_MODEL = GO_MODEL
 const SESSION_METADATA_KEY = "usr_worker_v1" as const
-
-export function selectedModel(value = process.env.USR_OPENCODE_WORKER_MODEL): ModelRef {
-  switch (value || "free") {
-    case "free": return FREE_MODEL
-    case "go": return GO_MODEL
-    default: throw new Error("USR_OPENCODE_WORKER_MODEL must be 'go' or 'free'; no silent model fallback")
-  }
+export function selectedModel(value = process.env.USR_PI_SUBAGENT_MODEL): ModelRef {
+  if (value === undefined || value === "go") return GO_MODEL
+  throw new Error("Only the pinned OpenCode Go model is permitted; no silent model fallback")
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

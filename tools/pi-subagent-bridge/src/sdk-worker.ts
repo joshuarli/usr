@@ -1,5 +1,4 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
 import {
   createAgentSession, createExtensionRuntime, ModelRuntime, SessionManager, SettingsManager,
   type ResourceLoader,
