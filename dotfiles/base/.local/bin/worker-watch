@@ -82,7 +82,7 @@ while :; do
     observed=$log
     [ -f "$observed" ] || observed=$errors
     [ -f "$observed" ] || observed=$record
-    modified=$(stat -f %m "$observed" 2>/dev/null || stat -c %Y "$observed" 2>/dev/null || date +%s)
+    modified=$(stat -c %Y "$observed" 2>/dev/null || stat -f %m "$observed" 2>/dev/null || date +%s)
     quiet=$(( $(date +%s) - modified ))
     if [ "$quiet" -ge $(( idle_minutes * 60 )) ]; then
         printf 'stalled: no executor output for %s min; last event: %s\n' "$(( quiet / 60 ))" "$(last_event)"
