@@ -295,13 +295,13 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
                           lambda t=tool: installed(ctx, t),
                           frozenset({f"tool:{tool}"}), reconcile=True))
     if ctx.profile != "server":
-        nodes.append(Task("claude-mcp", ("links", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2"),
+        nodes.append(Task("claude-mcp", ("links", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2", "tool:pi"),
                           lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
                           lambda: bridge_status(ctx), frozenset({"claude-config"})))
         nodes.append(Task("pi-mcp", ("links", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
                           lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
                           lambda: pi_bridge_status(ctx), frozenset({"pi-config"})))
-        nodes.append(Task("opencode-mcp", ("links", "tool:nodejs", "tool:cmd", "tool:opencode2"),
+        nodes.append(Task("opencode-mcp", ("links", "tool:nodejs", "tool:cmd", "tool:opencode2", "tool:pi"),
                           lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
                           lambda: opencode_bridge_status(ctx), frozenset({"opencode-config"})))
     deps = ("links",)

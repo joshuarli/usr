@@ -82,7 +82,7 @@ if [ -x "$target/.local/bin/claude" ] && [ -f "$root/tools/sync/claude-worker.py
     fi
 fi
 if [ -f "$target/.codex/config.toml" ]; then
-    if grep -q '^\[mcp_servers.usr-opencode-worker\]' "$target/.codex/config.toml"; then
+    if grep -q '^\[mcp_servers.pi-subagent-bridge\]' "$target/.codex/config.toml"; then
         ok 'Codex DeepSeek bridge is configured'
     else
         problem 'Codex DeepSeek MCP bridge is missing from config.toml'

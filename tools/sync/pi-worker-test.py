@@ -22,13 +22,13 @@ class PiWorkerSyncTests(unittest.TestCase):
         self.home.mkdir()
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.project = self.root / "tools/opencode-worker"
+        self.project = self.root / "tools/pi-subagent-bridge"
         (self.root / "tools/sync").mkdir(parents=True)
         (self.project / "src").mkdir(parents=True)
         shutil.copy2(HELPER, self.root / "tools/sync/pi-worker.py")
         (self.project / "src/server.ts").write_text("export {}\n")
         (self.project / "package.json").write_text(json.dumps({
-            "dependencies": {"@opencode/client": "2.2.5"},
+            "dependencies": {"@earendil-works/pi-coding-agent": "1.4.0"},
         }))
         (self.bin / "node").write_text("#!/bin/sh\nprintf 'v26.12.1\\n'\n")
         (self.bin / "node").chmod(0o755)
@@ -39,9 +39,9 @@ with open(os.environ["MOCK_NPM_LOG"], "a") as f:
     f.write(json.dumps(args) + "\\n")
 assert args[:2] == ["install", "--prefix"], args
 project = pathlib.Path(args[2])
-client = project / "node_modules/@opencode/client"
+client = project / "node_modules/@earendil-works/pi-coding-agent"
 client.mkdir(parents=True, exist_ok=True)
-(client / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_VERSION", "2.2.5")}}))
+(client / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_VERSION", "1.4.0")}}))
 """
         (self.bin / "npm").write_text(npm)
         (self.bin / "npm").chmod(0o755)
@@ -69,7 +69,7 @@ client.mkdir(parents=True, exist_ok=True)
         result = json.loads(self.config.read_text())
         self.assertEqual(result["theme"], original["theme"])
         self.assertEqual(result["mcpServers"]["other"], original["mcpServers"]["other"])
-        worker = result["mcpServers"]["usr-opencode-worker"]
+        worker = result["mcpServers"]["pi-subagent-bridge"]
         self.assertEqual(worker["command"], str(self.bin / "node"))
         self.assertEqual(worker["args"], ["--experimental-strip-types",
                          str(self.project / "src/server.ts")])
@@ -92,7 +92,7 @@ client.mkdir(parents=True, exist_ok=True)
         self.run_helper("check", success=False)
 
     def test_different_name_owner_is_preserved(self):
-        original = {"mcpServers": {"usr-opencode-worker": {
+        original = {"mcpServers": {"pi-subagent-bridge": {
             "type": "stdio", "command": "another", "args": ["different"]}}}
         self.config.write_text(json.dumps(original))
         self.run_helper("install", success=False)
@@ -101,23 +101,23 @@ client.mkdir(parents=True, exist_ok=True)
         self.run_helper("remove", success=False)
 
     def test_old_manual_registration_is_upgraded(self):
-        old = {"mcpServers": {"usr-opencode-worker": {
+        old = {"mcpServers": {"pi-subagent-bridge": {
             "command": "node", "args": ["--experimental-strip-types",
                                      str(self.project / "src/server.ts")]}}}
         self.config.write_text(json.dumps(old))
         self.run_helper("install")
         self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
-                         ["usr-opencode-worker"]["command"], str(self.bin / "node"))
+                         ["pi-subagent-bridge"]["command"], str(self.bin / "node"))
 
     def test_relocated_checkout_keeps_owned_registration_and_credentials(self):
         self.config.write_text(json.dumps({"theme": "keep", "mcpServers": {"other": {"command": "other"}}}))
         self.run_helper("install")
-        initial = json.loads(self.config.read_text())["mcpServers"]["usr-opencode-worker"]
+        initial = json.loads(self.config.read_text())["mcpServers"]["pi-subagent-bridge"]
         new_root = self.root / "moved-checkout"
         moved_script = new_root / "tools/sync/pi-worker.py"
         moved_script.parent.mkdir(parents=True)
         shutil.copy2(HELPER, moved_script)
-        moved_project = new_root / "tools/opencode-worker"
+        moved_project = new_root / "tools/pi-subagent-bridge"
         (moved_project / "src").mkdir(parents=True)
         (moved_project / "src/server.ts").write_text("export {}\n")
         shutil.copy2(self.project / "package.json", moved_project / "package.json")
@@ -129,26 +129,26 @@ client.mkdir(parents=True, exist_ok=True)
         result = json.loads(self.config.read_text())
         self.assertEqual(result["theme"], "keep")
         self.assertEqual(result["mcpServers"]["other"], {"command": "other"})
-        current = result["mcpServers"]["usr-opencode-worker"]
+        current = result["mcpServers"]["pi-subagent-bridge"]
         self.assertNotEqual(initial["args"], current["args"])
         self.assertEqual(current["args"][-1], str(moved_project / "src/server.ts"))
         self.run_helper("remove")
         self.assertEqual(json.loads(self.config.read_text())["mcpServers"], {"other": {"command": "other"}})
 
     def test_foreign_same_shape_without_ownership_is_preserved(self):
-        foreign = self.root / "foreign/tools/opencode-worker/src/server.ts"
-        self.config.write_text(json.dumps({"mcpServers": {"usr-opencode-worker": {
+        foreign = self.root / "foreign/tools/pi-subagent-bridge/src/server.ts"
+        self.config.write_text(json.dumps({"mcpServers": {"pi-subagent-bridge": {
             "type": "stdio", "command": "node",
             "args": ["--experimental-strip-types", str(foreign)]}}}))
         self.run_helper("install", success=False)
         self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
-                         ["usr-opencode-worker"]["args"][-1], str(foreign))
+                         ["pi-subagent-bridge"]["args"][-1], str(foreign))
 
     def test_stale_ownership_fingerprint_does_not_adopt_foreign_server(self):
         self.run_helper("install")
-        replacement = self.root / "foreign/tools/opencode-worker/src/server.ts"
+        replacement = self.root / "foreign/tools/pi-subagent-bridge/src/server.ts"
         data = json.loads(self.config.read_text())
-        data["mcpServers"]["usr-opencode-worker"]["args"][-1] = str(replacement)
+        data["mcpServers"]["pi-subagent-bridge"]["args"][-1] = str(replacement)
         self.config.write_text(json.dumps(data))
         self.run_helper("install", success=False)
         self.assertEqual(json.loads(self.config.read_text()), data)

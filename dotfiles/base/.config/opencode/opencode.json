@@ -14,12 +14,12 @@
   ],
   "mcp": {
     "servers": {
-      "usr-opencode-worker": {
+      "pi-subagent-bridge": {
         "type": "local",
         "command": [
           "/Users/josh/.local/share/nodejs/current/bin/node",
           "--experimental-strip-types",
-          "/Users/josh/usr/tools/opencode-worker/src/server.ts"
+          "/Users/josh/usr/tools/pi-subagent-bridge/src/server.ts"
         ],
         "codemode": false
       }

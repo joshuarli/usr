@@ -361,6 +361,6 @@ CODEX_CLI_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCL
 command = "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT"
 enabled = false
 
-[mcp_servers.usr-opencode-worker]
+[mcp_servers.pi-subagent-bridge]
 command = "/Users/josh/.local/share/nodejs/current/bin/node"
-args = ["--experimental-strip-types", "/Users/josh/usr/tools/opencode-worker/src/server.ts"]
+args = ["--experimental-strip-types", "/Users/josh/usr/tools/pi-subagent-bridge/src/server.ts"]

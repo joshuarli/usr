@@ -11,9 +11,10 @@ import subprocess
 import sys
 import tempfile
 
-NAME = "usr-opencode-worker"
+NAME = "pi-subagent-bridge"
+LEGACY_NAME = "usr-opencode-worker"
 ROOT = Path(__file__).resolve().parents[2]
-PROJECT = ROOT / "tools" / "opencode-worker"
+PROJECT = ROOT / "tools" / "pi-subagent-bridge"
 SERVER = PROJECT / "src" / "server.ts"
 HOME = Path(os.environ["HOME"])
 CONFIG = HOME / ".claude.json"
@@ -26,14 +27,14 @@ def die(message):
 
 def dependency_version():
     package = json.loads((PROJECT / "package.json").read_text())
-    version = package["dependencies"]["@opencode/client"]
+    version = package["dependencies"]["@earendil-works/pi-coding-agent"]
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-        die("OpenCode client must be pinned to an exact version")
+        die("Pi SDK must be pinned to an exact version")
     return version
 
 
 def dependency_current():
-    path = PROJECT / "node_modules" / "@opencode" / "client" / "package.json"
+    path = PROJECT / "node_modules" / "@earendil-works" / "pi-coding-agent" / "package.json"
     try:
         return json.loads(path.read_text())["version"] == dependency_version()
     except (OSError, KeyError, ValueError, TypeError):
@@ -99,14 +100,16 @@ def owned_entry(entry):
     if not isinstance(args, list) or len(args) != 2 or args[0] != "--experimental-strip-types":
         return False
     server = args[1]
-    if not isinstance(server, str) or not Path(server).is_absolute() or not server.endswith(
-        "/tools/opencode-worker/src/server.ts"
+    if not isinstance(server, str) or not Path(server).is_absolute() or not (
+        server.endswith("/tools/pi-subagent-bridge/src/server.ts")
+        or server.endswith("/tools/opencode-worker/src/server.ts")
     ):
         return False
     if entry.get("env") or not set(entry).issubset({"type", "command", "args", "env"}):
         return False
-    old_default = HOME / "usr/tools/opencode-worker/src/server.ts"
-    return (server == str(SERVER) or server == str(old_default) or
+    old_default = HOME / "usr/tools/pi-subagent-bridge/src/server.ts"
+    legacy_default = HOME / "usr/tools/opencode-worker/src/server.ts"
+    return (server == str(SERVER) or server == str(old_default) or server == str(legacy_default) or
             load_owner() == entry_fingerprint(entry))
 
 def configuration():
@@ -150,7 +153,7 @@ def install_dependency():
         env=env, check=True,
     )
     if not dependency_current():
-        die(f"npm did not install pinned @opencode/client {dependency_version()}")
+        die(f"npm did not install pinned @earendil-works/pi-coding-agent {dependency_version()}")
 
 
 def update_configuration(data, original):
@@ -178,31 +181,41 @@ def run(action):
     data, original = configuration()
     servers = data.get("mcpServers", {})
     previous = servers.get(NAME)
+    legacy = servers.get(LEGACY_NAME)
     node = managed_binary("node")
     desired = expected_entry(node or "node")
     if previous is not None and not owned_entry(previous):
         die(f"{NAME} already names a different MCP server; leaving it unchanged")
+    if legacy is not None and not owned_entry(legacy):
+        die(f"{LEGACY_NAME} is not an owned bridge; leaving it unchanged")
 
     if action == "plan":
+        if legacy is not None:
+            print(f"MCP: migrate owned {LEGACY_NAME} to {NAME}")
         if not dependency_current():
-            print(f"NPM: install pinned @opencode/client {dependency_version()}")
-        if previous != desired:
+            print(f"NPM: install pinned @earendil-works/pi-coding-agent {dependency_version()}")
+        if previous != desired or legacy is not None:
             print(f"MCP: register {NAME} with Claude user scope")
         elif load_owner() != entry_fingerprint(desired):
             print(f"MCP: record ownership of {NAME}")
         return
 
     if action == "check":
+        if legacy is not None:
+            die(f"legacy {LEGACY_NAME} registration is still active")
         if not dependency_current():
-            die("OpenCode worker dependency is not installed")
+            die("Pi SDK worker dependency is not installed")
         if previous != desired or load_owner() != entry_fingerprint(desired):
             die(f"{NAME} MCP registration is missing, unowned, or outdated")
         print(f"ok: {NAME} MCP and dependency current")
         return
 
     if action == "remove":
+        if legacy is not None:
+            del servers[LEGACY_NAME]
         if previous is not None:
             del servers[NAME]
+        if previous is not None or legacy is not None:
             update_configuration(data, original)
             print(f"sync: unregistered {NAME}")
         OWNER.unlink(missing_ok=True)
@@ -217,6 +230,7 @@ def run(action):
     desired = expected_entry(node)
     if previous != desired:
         servers = data.setdefault("mcpServers", {})
+        servers.pop(LEGACY_NAME, None)
         servers[NAME] = desired
         update_configuration(data, original)
         print(f"sync: registered {NAME} for Claude Code")
