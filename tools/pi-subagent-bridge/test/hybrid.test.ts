@@ -379,3 +379,30 @@ test("cancel acknowledgement does not release a worktree until the backend is te
     assert.notEqual(second.session_id, first.session_id)
   } finally { f.close() }
 })
+
+test("interrupted Pi resume cannot expose an old terminal result or release its lease", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    let prompts = 0
+    const api: OpenCodePort = {
+      ...m.api,
+      prompt: async (input) => {
+        prompts++
+        if (prompts === 2) throw new Error("resume admission interrupted")
+        return m.api.prompt(input)
+      },
+    }
+    const bridge = makeHybridBridge(api, m.command)
+    const original = await bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
+    assert.equal((await bridge.status(f.cwd, original.session_id)).state, "succeeded")
+    await assert.rejects(bridge.resume(f.cwd, original.session_id, "correct this"), /resume admission interrupted/)
+    const restarted = makeHybridBridge(m.api, m.command)
+    const status = await restarted.status(f.cwd, original.session_id)
+    assert.equal(status.state, "blocked_admission")
+    assert.equal(status.backend, "pi-transition")
+    await assert.rejects(restarted.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
+    await assert.rejects(restarted.resume(f.cwd, original.session_id, "retry"), /transition interrupted/)
+    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
+  } finally { f.close() }
+})
