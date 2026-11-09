@@ -96,7 +96,9 @@ Compare per-request metrics by version on the same route class:
     FROM logs.workersLogs WHERE ... AND <route class filter> GROUP BY v LIMIT 20 FORMAT JSON
 ```
 
-For an aggregate cost claim, use `statsctl compare` or `statsctl verify` with a committed policy. A lower monthly estimate is not a win (`statsctl help workflow`). Wait until the candidate side has enough events for the claim, and report its sample size. A change within noise is reported as unchanged.
+Check the mechanism first in a few traces of the new version, for example two spans that now start together. Averages taken at different times move with upstream latency, so they need this check before you trust them.
+
+For an aggregate cost claim, use `statsctl compare` or `statsctl verify` with a committed policy. Space deploys of the same project more than the comparison window plus one five-minute bucket apart. Otherwise the before window contains the previous deploy and the verdict is `confounded`. A lower monthly estimate is not a win (`statsctl help workflow`). Wait until the candidate side has enough events for the claim, and report its sample size. A change within noise is reported as unchanged.
 
 ## 6. Extend stats when the evidence is missing
 
