@@ -189,7 +189,6 @@ def alias_map() -> dict[str, str]:
         ".claude/skills": "../.agents/skills",
         ".gemini/antigravity-cli/skills": "../../.agents/skills",
         ".claude/CLAUDE.md": "../.codex/AGENTS.md",
-        ".claude/AGENTS.md": "../.codex/AGENTS.md",
         ".grok/AGENTS.md": "../.codex/AGENTS.md",
         ".config/opencode/AGENTS.md": "../../.codex/AGENTS.md",
         ".config/muse/AGENTS.md": "../../.codex/AGENTS.md",
