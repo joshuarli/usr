@@ -12,6 +12,11 @@ from ownership import fingerprint, read_manifest, records
 from link_recovery import pending_paths
 
 
+LEGACY_UNRECORDED_LINKS: tuple[tuple[str, str], ...] = (
+    (".claude/AGENTS.md", "../.codex/AGENTS.md"),
+)
+
+
 @dataclass(frozen=True)
 class Snapshot:
     kind: Literal["absent", "symlink", "file", "directory", "special"]
@@ -184,6 +189,14 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
                 actions.append(LinkAction("prune", path, before))
         # An owned record pointing to a still-present source may belong to
         # another deliberately retained link. Do not treat it as stale.
+    planned = {action.path for action in actions}
+    for rel, legacy_text in LEGACY_UNRECORDED_LINKS:
+        path = discovery.target / rel
+        if path in desired or path in reserved or path in planned:
+            continue
+        before = snapshot(path)
+        if before.kind == "symlink" and before.text == legacy_text and _parent_safe(path, discovery):
+            actions.append(LinkAction("prune", path, before))
     order = {"prune": 0, "forget": 1, "replace": 2, "link": 3}
     actions.sort(key=lambda a: (order[a.kind], str(a.path)))
     return LinkPlan(discovery.target, tuple(actions), tuple(sorted(set(conflicts))), correct, pending)

@@ -296,14 +296,32 @@ class LinkTests(unittest.TestCase):
         self.assertTrue((self.home / ".codex/AGENTS.md").is_symlink())
 
     def test_49_mirrored_link_kept_when_target_no_longer_provided(self):
-        adapter = self.root / "dotfiles/base/.claude/AGENTS.md"
+        adapter = self.root / "dotfiles/base/.tool/rules.md"
         adapter.parent.mkdir(parents=True)
-        adapter.symlink_to("../.codex/AGENTS.md")
+        adapter.symlink_to("../.shared/rules.md")
         self.track()
         self.sync()
-        dest = self.home / ".claude/AGENTS.md"
+        dest = self.home / ".tool/rules.md"
         adapter.unlink()
         self.assertNotIn(dest, [a.path for a in self.plan().actions])
+
+    def test_50_legacy_claude_agents_adapter_pruned_even_unrecorded(self):
+        self.source(".codex/AGENTS.md")
+        self.track()
+        (self.home / ".claude").mkdir()
+        legacy = self.home / ".claude/AGENTS.md"
+        legacy.symlink_to("../.codex/AGENTS.md")
+        p = self.plan()
+        self.assertIn(("prune", legacy), [(a.kind, a.path) for a in p.actions])
+        apply(p, self.owned)
+        self.assertFalse(legacy.is_symlink())
+        self.assertTrue(self.plan().converged)
+
+    def test_51_legacy_claude_agents_path_kept_when_not_the_old_adapter(self):
+        (self.home / ".claude").mkdir()
+        legacy = self.home / ".claude/AGENTS.md"
+        legacy.symlink_to("../my/AGENTS.md")
+        self.assertNotIn(legacy, [a.path for a in self.plan().actions])
 
     def test_28_tab_name_rejected_before_changes(self):
         self.source("a\tb")
