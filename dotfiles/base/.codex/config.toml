@@ -272,6 +272,27 @@ trust_level = "trusted"
 [projects."/Users/josh/d/finances"]
 trust_level = "trusted"
 
+[[hooks.SessionStart]]
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'python3 -I -S "$HOME/.local/bin/agent-model-overlay.py" codex'
+timeout = 5
+
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = 'python3 -I -S "$HOME/.local/bin/agent-model-overlay.py" codex'
+timeout = 5
+
+[[hooks.SubagentStart]]
+
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = 'python3 -I -S "$HOME/.local/bin/agent-model-overlay.py" codex'
+timeout = 5
+
 [[hooks.Stop]]
 
 [[hooks.Stop.hooks]]
