@@ -5,19 +5,18 @@ description: "Apply when a dashboard or admin UI is overwhelming, hard to act on
 
 # Refactor Dashboard UI
 
-A dashboard is working when a reader can say what to do next within seconds of opening it. An exhaustive report is not a dashboard, however clean it looks. Restyling alone leaves the overload in place, so change what the page says before you change how it looks. A wall of well-styled tables is still a wall.
+A dashboard is working when a reader can say what to do next within seconds of opening it. Restyling leaves the overload in place, so change what the page says before how it looks; a wall of well-styled tables is still a wall.
 
 ## Requirements
 
 - Build on `@laputa-systems/ui-dashboard`. Read the installed package's `README.md`, `dist/index.d.ts`, and `dist/styles.css` before writing markup. Never work from memory of its API.
 - For a Solid app, use the components. For static or server-rendered HTML, use the CSS-only mode and emit the exact `ui-*` structure the README documents.
-- If the render path cannot run Node, add the package as a pinned dev dependency, copy `dist/styles.css` and `dist/tokens.css` into the source tree at build time, and make the existing asset staleness check cover them. `styles.css` imports `./tokens.css`, so keep both in one directory.
-- Route the scope in `.npmrc`: `@laputa-systems:registry=https://npm.17166969.xyz/current/`.
+- When the project does not have the package yet, follow [installing the package](references/install.md).
 - Write app CSS only for what the library lacks, and build it from `--ui-*` tokens. Add no second palette, type scale, or dark theme. Do not restyle `ui-*` internals.
 
 ## Learn from the benchmark
 
-Read `~/d/stats/cloudflare/src/client/pages/` (start with `FleetPage.tsx` and `ProjectsPage.tsx`) and the screenshots in `~/d/stats/cloudflare/test/ui/*-snapshots/`. Copy these ideas, not its components or data. Stats leans on tables because it shows live metrics that are read across columns. Do not copy that density onto lists a reader has to work through.
+Read `~/d/stats/cloudflare/src/client/pages/` (start with `FleetPage.tsx` and `ProjectsPage.tsx`) and the screenshots in `~/d/stats/cloudflare/test/ui/*-snapshots/`. Copy the ideas, not its components, data, or table density: stats shows live metrics read across columns, not lists a reader works through.
 
 - **Status strip first.** A few tiles carry one number, one label, and one line of context. Each tile links to its detail. Tint a tile only when it needs attention.
 - **One panel, one question.** The panel title names the subject, and the panel meta states the basis in one line, such as the time window or what is excluded.
@@ -29,16 +28,15 @@ Read `~/d/stats/cloudflare/src/client/pages/` (start with `FleetPage.tsx` and `P
 
 ## Show only actionable signal
 
-Show something only if it tells the reader what to change or decide. For each element, ask what the reader would do differently after seeing it. If the answer is nothing, delete it. Collapsing it behind a disclosure is not a fix.
+For each element, ask what the reader would change or decide after seeing it. If nothing, delete it. Collapsing it behind a disclosure is not a fix.
 
-Counters are the exception. A number or a small chart puts the work in perspective and costs little visual noise, so keep those.
+Counters are the exception: a number or small chart gives perspective at little visual cost.
 
 - List only the entities that must change. Name the repositories off the preferred option, and count the compliant ones.
 - Turn healthy, settled, accepted, and known-limit states into counts.
-- Show only what will change the outcome. Drop an item when acting on it would achieve nothing, such as a dependency whose removal drops no packages.
+- Drop an item when acting on it would achieve nothing, such as a dependency whose removal drops no packages.
 - Name who must act in visible text, not only in a tooltip.
 - Remove full inventories and metadata from working pages. If a lookup is still needed, keep one surface for it behind search.
-- Keep the difference between "nothing to do" and "not checked".
 - Audit every page against this rule, not only the page someone complained about.
 
 ## Group and visualize
@@ -64,13 +62,13 @@ Keep the page easy on the eyes:
 
 - Put one or two facts on a card. Move identifiers such as advisory IDs and full repository lists to a tooltip or a disclosure.
 - Set names in the sans face. Keep monospace for commands and hashes.
-- Run the palette validator instead of trusting the library's series colors. In 0.5.0, `--ui-s3` and `--ui-s4` fail the normal-vision check, so prefer status colors where color means severity and one hue or emphasis elsewhere.
+- Run the palette validator instead of trusting the library's series colors; where a series color fails, use status colors for severity and one hue or emphasis elsewhere.
 - Print every charted value as text. Tooltips add detail but must not be the only way to read a value.
 
 ## Method
 
 1. **Measure the overload.** Render real data and screenshot the main pages at 1440×900 and 390×844. Record page heights, table rows, and the number of items in each category. These numbers are the baseline for the final report.
-2. **Name the reader's decisions.** List the few decisions the dashboard exists to support. For each element, name the decision it changes. Delete it if it changes none, unless it is a counter.
+2. **Name the reader's decisions.** List the few decisions the dashboard exists to support, then apply "Show only actionable signal" to every element against them.
 3. **Fix accuracy before layout.** Find labels the data cannot support, such as "critical" with no severity field. Find exclusions the page claims but does not apply, and advice the data does not prove. Overload often hides these defects, and a cleaner page makes them more believable.
 4. **Model actions as data.** In a pure, tested module separate from rendering, produce one record per action: what to do, why, where, and how. Merge duplicates so one change is one row. Rank by urgency, then by how much one change fixes. If the project has a command that performs the action, show that exact command.
 5. **Organize by the reader's work.** Make the landing page the ranked action list under a status strip. Add an entity view ranked worst first, such as repositories or hosts. Group analysis pages under a quieter heading. Keep existing URLs when you can.
