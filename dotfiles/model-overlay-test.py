@@ -19,22 +19,41 @@ OPUS = "claude-opus-5-5"
 SOL = "gpt-6.1-sol"
 OPUS_FILE = BASE / ".claude/model-overlays/opus-5-5.md"
 SOL_FILE = BASE / ".codex/model-overlays/gpt-6.1-sol.md"
+BASELINE = (
+    "usr model overlay selection: baseline. Earlier usr model overlays are inactive. "
+    "Follow the shared working contract and current task."
+)
+SCRATCH = ROOT / ".work/tmp"
 EVENTS = {
     "claude": ("SessionStart", "PostModelSwitch"),
     "codex": ("SessionStart", "UserPromptSubmit", "SubagentStart"),
 }
 
 
+def setUpModule() -> None:
+    result = subprocess.run(
+        ["sh", str(ROOT / "dotfiles/scratch-check.sh"), str(ROOT)],
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stdout + result.stderr)
+
+
 def invoke(harness: str, payload: object, script: Path = HOOK) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-I", "-S", str(script), harness],
-        input=json.dumps(payload), text=True, capture_output=True, check=False,
+        input=json.dumps(payload), text=True, capture_output=True, check=False, timeout=10,
     )
 
 
 def event_payload(event: str, model: object) -> dict[str, object]:
     field = "to_model" if event == "PostModelSwitch" else "model"
-    return {"hook_event_name": event, field: model, "source": "startup"}
+    payload: dict[str, object] = {"hook_event_name": event, field: model}
+    if event == "SessionStart":
+        payload["source"] = "startup"
+    elif event == "PostModelSwitch":
+        payload["source"] = "command"
+    return payload
 
 
 class ModelOverlayTests(unittest.TestCase):
@@ -67,13 +86,13 @@ class ModelOverlayTests(unittest.TestCase):
                 for model in models:
                     with self.subTest(harness=harness, event=event, model=model):
                         result = invoke(harness, event_payload(event, model))
-                        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                        self.assert_context(result, event, BASELINE)
 
     def test_cross_harness_models_do_not_load(self):
         for harness, model in (("claude", SOL), ("codex", OPUS)):
             for event in EVENTS[harness]:
                 result = invoke(harness, event_payload(event, model))
-                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                self.assert_context(result, event, BASELINE)
 
     def test_unsupported_events_cannot_inject_context(self):
         for harness, model in (("claude", OPUS), ("codex", SOL)):
@@ -91,7 +110,7 @@ class ModelOverlayTests(unittest.TestCase):
                 payload = {"hook_event_name": event, "requested_model": "opus",
                            "parent_model": SOL, "agent_type": "god"}
                 result = invoke(harness, payload)
-                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                self.assert_context(result, event, BASELINE)
 
     def test_switch_uses_target_not_previous_or_requested_model(self):
         payload = event_payload("PostModelSwitch", OPUS) | {
@@ -101,14 +120,14 @@ class ModelOverlayTests(unittest.TestCase):
         payload["to_model"] = "claude-sonnet-5-5"
         payload["model"] = OPUS
         result = invoke("claude", payload)
-        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        self.assert_context(result, "PostModelSwitch", BASELINE)
 
-    def test_switch_away_retires_only_the_opus_overlay(self):
+    def test_switch_away_selects_baseline(self):
         for target in ("claude-sonnet-5-5", "unknown", None):
             result = invoke("claude", event_payload("PostModelSwitch", target) | {"from_model": OPUS})
             self.assertEqual(result.returncode, 0, result.stderr)
             context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("no longer applies", context)
+            self.assertEqual(context, BASELINE)
             self.assertNotIn(OPUS_FILE.read_text(), context)
             self.assertNotIn(SOL_FILE.read_text(), context)
 
@@ -117,7 +136,34 @@ class ModelOverlayTests(unittest.TestCase):
         self.assert_context(invoke("codex", payload), "SubagentStart", SOL_FILE.read_text())
         payload["model"] = "gpt-6-luna"
         payload["parent_model"] = SOL
-        self.assertEqual(invoke("codex", payload).stdout, "")
+        self.assert_context(invoke("codex", payload), "SubagentStart", BASELINE)
+
+    def test_codex_switch_to_baseline_retires_inherited_sol_guidance(self):
+        self.assert_context(invoke("codex", event_payload("UserPromptSubmit", SOL)),
+                            "UserPromptSubmit", SOL_FILE.read_text())
+        result = invoke("codex", event_payload("UserPromptSubmit", "gpt-6.1-terra"))
+        self.assertNotEqual(result.stdout, "", "switch away must retire prior guidance")
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Earlier usr model overlays are inactive", context)
+        self.assertNotIn(SOL_FILE.read_text(), context)
+
+    def test_last_rapid_claude_switch_resets_even_when_previous_model_was_not_opus(self):
+        switches = ((OPUS, "claude-sonnet-5-5"), ("claude-sonnet-5-5", "claude-haiku-5-5"))
+        results = [invoke("claude", event_payload("PostModelSwitch", target) | {"from_model": previous})
+                   for previous, target in switches]
+        result = results[-1]
+        self.assertNotEqual(result.stdout, "", "only the last switch output reaches Claude")
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Earlier usr model overlays are inactive", context)
+
+    def test_baseline_resume_and_fork_reset_inherited_model_guidance(self):
+        for harness, model in (("claude", "claude-sonnet-5-5"), ("codex", "gpt-6.1-terra")):
+            for source in ("resume", "fork", "compact"):
+                with self.subTest(harness=harness, source=source):
+                    result = invoke(harness, event_payload("SessionStart", model) | {"source": source})
+                    self.assertNotEqual(result.stdout, "", "inherited context needs an explicit selection")
+                    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+                    self.assertIn("Earlier usr model overlays are inactive", context)
 
     def test_input_paths_and_transcripts_are_not_instructions(self):
         payload = event_payload("SessionStart", OPUS) | {
@@ -131,7 +177,7 @@ class ModelOverlayTests(unittest.TestCase):
     def test_invalid_input_is_visible_but_never_prints_payload(self):
         for raw in ("{USER_SECRET", "null", "[]", '"USER_SECRET"', "{" * 2000, " " * (1048576 + 1)):
             result = subprocess.run([sys.executable, "-I", "-S", str(HOOK), "claude"],
-                                    input=raw, text=True, capture_output=True, check=False)
+                                    input=raw, text=True, capture_output=True, check=False, timeout=10)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(result.stdout, "")
             self.assertIn("invalid hook input", result.stderr)
@@ -143,9 +189,7 @@ class ModelOverlayTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
 
     def test_installed_symlink_resolves_tracked_overlay_not_home_or_cwd(self):
-        scratch = ROOT / ".work/tmp"
-        scratch.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
             home = Path(directory) / "home with spaces"
             bin_dir = home / ".local/bin"
             bin_dir.mkdir(parents=True)
@@ -158,14 +202,12 @@ class ModelOverlayTests(unittest.TestCase):
                 [sys.executable, "-I", "-S", str(installed), "claude"],
                 input=json.dumps(event_payload("SessionStart", OPUS)),
                 cwd=home, env=os.environ | {"HOME": str(home)},
-                text=True, capture_output=True, check=False,
+                text=True, capture_output=True, check=False, timeout=10,
             )
             self.assert_context(result, "SessionStart", OPUS_FILE.read_text())
 
     def test_missing_empty_and_oversized_selected_files_report_failure(self):
-        scratch = ROOT / ".work/tmp"
-        scratch.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
             base = Path(directory)
             script = base / ".local/bin/agent-model-overlay.py"
             script.parent.mkdir(parents=True)
@@ -179,15 +221,15 @@ class ModelOverlayTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stdout, "")
                 self.assertIn("cannot read selected overlay", result.stderr)
-            result = invoke("codex", event_payload("SessionStart", "gpt-6.1-terra"), script)
-            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+            for harness in EVENTS:
+                for event in EVENTS[harness]:
+                    result = invoke(harness, event_payload(event, None), script)
+                    self.assert_context(result, event, BASELINE)
 
     def test_registered_hook_commands_work_with_installed_links(self):
         claude = json.loads((BASE / ".claude/settings.json").read_text())
         codex = tomllib.loads((BASE / ".codex/config.toml").read_text())
-        scratch = ROOT / ".work/tmp"
-        scratch.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=scratch) as directory:
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
             home = Path(directory) / "home with spaces"
             (home / ".local/bin").mkdir(parents=True)
             (home / ".local/bin" / HOOK.name).symlink_to(HOOK)
@@ -202,9 +244,45 @@ class ModelOverlayTests(unittest.TestCase):
                     self.assertFalse(handler.get("async", False))
                     result = subprocess.run(
                         ["sh", "-c", handler["command"]], input=json.dumps(event_payload(event, model)),
-                        env=os.environ | {"HOME": str(home)}, text=True, capture_output=True, check=False,
+                        env=os.environ | {"HOME": str(home)}, text=True, capture_output=True, check=False, timeout=10,
                     )
                     self.assert_context(result, event, path.read_text())
+                    baseline = subprocess.run(
+                        ["sh", "-c", handler["command"]], input=json.dumps(event_payload(event, None)),
+                        env=os.environ | {"HOME": str(home)}, text=True, capture_output=True,
+                        check=False, timeout=10,
+                    )
+                    self.assert_context(baseline, event, BASELINE)
+
+    def test_test_setup_rejects_unignored_or_symlinked_scratch(self):
+        for unsafe in ("unignored", "work-link", "tmp-link"):
+            with self.subTest(unsafe=unsafe), tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
+                root = Path(directory) / "repo"
+                root.mkdir()
+                subprocess.run(["git", "init", "-q", str(root)], check=True, timeout=10)
+                (root / "dotfiles").mkdir()
+                test = root / "dotfiles/model-overlay-test.py"
+                shutil.copy2(__file__, test)
+                shutil.copy2(ROOT / "dotfiles/scratch-check.sh", test.with_name("scratch-check.sh"))
+                outside = Path(directory) / "outside"
+                outside.mkdir()
+                if unsafe != "unignored":
+                    (root / ".git/info/exclude").write_text(".work/\n")
+                    link = root / ".work"
+                    if unsafe == "tmp-link":
+                        link.mkdir()
+                        link = link / "tmp"
+                    link.symlink_to(outside, target_is_directory=True)
+                result = subprocess.run(
+                    [sys.executable, "-I", "-S", str(test), "ModelOverlayTests.test_unknown_harness_is_rejected"],
+                    cwd=root, text=True, capture_output=True, check=False, timeout=10,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(".work", result.stderr)
+                self.assertIn("must be ignored" if unsafe == "unignored" else "must not be symlinks", result.stderr)
+                self.assertEqual(list(outside.iterdir()), [])
+                if unsafe == "unignored":
+                    self.assertFalse((root / ".work").exists())
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ class Harness(Enum):
 class Overlay(Enum):
     OPUS = ".claude/model-overlays/opus-5-5.md"
     SOL = ".codex/model-overlays/gpt-6.1-sol.md"
-    RETIRE_OPUS = "retire-opus"
+    BASELINE = "baseline"
 
 
 OPUS_MODEL = "claude-opus-5-5"
@@ -27,24 +27,23 @@ OVERLAY_LIMIT = 4096
 def select_overlay(harness: Harness, payload: dict[str, object]) -> Overlay | None:
     event = payload.get("hook_event_name")
     if harness is Harness.CLAUDE:
-        if event == "SessionStart" and payload.get("model") == OPUS_MODEL:
-            return Overlay.OPUS
-        if event == "PostModelSwitch":
-            if payload.get("to_model") == OPUS_MODEL:
-                return Overlay.OPUS
-            if payload.get("from_model") == OPUS_MODEL:
-                return Overlay.RETIRE_OPUS
-    elif event in ("SessionStart", "UserPromptSubmit", "SubagentStart"):
-        if payload.get("model") == SOL_MODEL:
-            return Overlay.SOL
+        if event == "SessionStart":
+            model = payload.get("model")
+        elif event == "PostModelSwitch":
+            model = payload.get("to_model")
+        else:
+            return None
+        return Overlay.OPUS if model == OPUS_MODEL else Overlay.BASELINE
+    if harness is Harness.CODEX and event in ("SessionStart", "UserPromptSubmit", "SubagentStart"):
+        return Overlay.SOL if payload.get("model") == SOL_MODEL else Overlay.BASELINE
     return None
 
 
 def read_overlay(overlay: Overlay) -> str:
-    if overlay is Overlay.RETIRE_OPUS:
+    if overlay is Overlay.BASELINE:
         return (
-            "The Claude Opus 5.5 overlay no longer applies. Follow the shared working "
-            "contract and the active model's instructions, not the previous model overlay."
+            "usr model overlay selection: baseline. Earlier usr model overlays are inactive. "
+            "Follow the shared working contract and current task."
         )
     source = Path(__file__).resolve().parents[2] / overlay.value
     with source.open("rb") as stream:
