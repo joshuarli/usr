@@ -67,3 +67,14 @@ It also exposes `pi-subagent-bridge mcp` for JSON-RPC. See `tools/pi-subagent-br
 Offline: `cd tools/pi-subagent-bridge && npm test`, `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, and `sh dotfiles/worker-watch-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
 
 Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/nicobailon/pi-subagents/blob/main/docs/extension-api.md
+
+## Experimental Muse subscription integration
+
+After `sh sync` and `muse` → `/login`, export
+`USR_PI_MUSE_SUBSCRIPTION=1` before launching the coding harness/MCP bridge.
+This selects the pinned `muse-sdk/muse-spark-1.3` subscription-backed provider
+for scout and mechanic as Pi-first; worker and expert retain their current routes.
+Muse-only nested child profiles preserve type-checked tier limits and the two-level
+depth cap. Remove the flag to preserve the standard Command Code/OpenCode Go policy.
+For a disposable real-account verification and Contributor-mode privacy details,
+read [the bridge documentation](../tools/pi-subagent-bridge/README.md).

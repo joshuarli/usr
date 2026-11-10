@@ -8,7 +8,8 @@ import { dirname, isAbsolute, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { GO_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIERS } from "./tier-policy.ts"
+import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIERS } from "./tier-policy.ts"
+import { musePreflight } from "./muse-subscription.ts"
 
 type Result = {
   state: "succeeded" | "failed" | "cancelled"
@@ -128,12 +129,18 @@ export function piPort(): OpenCodePort {
       ensureOpenCodeApiKey()
       const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
       const runtime = await ModelRuntime.create()
-      const available = [...VARIANTS]
+      const available: Array<{
+        id: string; providerID: string; enabled: boolean; status: string; variants: { id: string }[]
+      }> = [...VARIANTS]
         .filter(([id, config]) => runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
         .map(([id, config]) => ({
           id, providerID: config.providerID, enabled: true, status: "active",
           variants: [...config.variants].map((variant) => ({ id: variant })),
         }))
+      if (musePreflight().available) available.push({
+        id: MUSE_TIER_MODELS.scout.id, providerID: "muse-sdk", enabled: true, status: "active",
+        variants: [{ id: MUSE_TIER_MODELS.scout.variant }, { id: MUSE_TIER_MODELS.mechanic.variant }],
+      })
       return { data: available }
     },
     async create(input) {

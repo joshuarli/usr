@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MAX_SUBAGENT_DEPTH,
+  assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MUSE_TIER_MODELS, MUSE_AGENT_NAMES,
+  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH,
   TIER_TOOLS, TIERS, tierForModel, type ChildOf, type Tier,
 } from "../src/tier-policy.ts"
 import { nestedCallRefusal, registerTierGuard } from "../src/nested-guard.ts"
@@ -26,30 +27,38 @@ if (false) {
   typechecked("expert", "god")
 }
 
-function profile(tier: Tier): string {
-  const pin = GO_TIER_MODELS[tier]
+function profile(tier: Tier, family: "go" | "muse" = "go"): string {
+  const muse = family === "muse" && (tier === "scout" || tier === "mechanic")
+  const pin = muse ? MUSE_TIER_MODELS[tier] : GO_TIER_MODELS[tier]
+  const name = muse ? MUSE_AGENT_NAMES[tier] : tier
+  const children = muse ? MUSE_DELEGATION[tier] : DELEGATION[tier]
   return [
-    "---", "name: " + tier, "description: Fixed profile",
+    "---", "name: " + name, "description: Fixed profile",
     "model: " + pin.providerID + "/" + pin.id,
     "thinking: " + pin.variant,
     "tools:", ...TIER_TOOLS[tier].map((tool) => "  - " + tool),
     "allowNestedSubagents: true",
     "maxSubagentDepth: " + MAX_SUBAGENT_DEPTH,
-    "allowedAgents:", ...DELEGATION[tier].map((child) => "  - " + child),
+    "allowedAgents:", ...children.map((child) => "  - " + child),
     "---", "Profile body.",
   ].join("\n") + "\n"
 }
 function profileSettings(): object {
   return { subagents: {
-    agentOverrides: Object.fromEntries(TIERS.map((tier) => [
-      tier, { model: GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id,
-        thinking: GO_TIER_MODELS[tier].variant },
-    ])),
+    agentOverrides: Object.fromEntries([
+      ...TIERS.map((tier) => [tier, { model: GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id,
+        thinking: GO_TIER_MODELS[tier].variant }]),
+      ...(["scout", "mechanic"] as const).map((tier) => [MUSE_AGENT_NAMES[tier], {
+        model: "muse-sdk/muse-spark-1.3", thinking: MUSE_TIER_MODELS[tier].variant }]),
+    ]),
     modelScope: { enforce: true, strict: true,
-      allow: ["opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor"],
-      agents: Object.fromEntries(TIERS.map((tier) => [tier, {
-        allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id],
-      }])),
+      allow: ["opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor",
+        "muse-sdk/muse-spark-1.3"],
+      agents: Object.fromEntries([
+        ...TIERS.map((tier) => [tier, { allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id] }]),
+        ...(["scout", "mechanic"] as const).map((tier) => [MUSE_AGENT_NAMES[tier], {
+          allow: ["muse-sdk/muse-spark-1.3"] }]),
+      ]),
     },
   } }
 }
@@ -122,6 +131,8 @@ test("profile checks enforce one exact Go scope and one max depth", () => {
   mkdirSync(agentDir)
   try {
     for (const tier of TIERS) writeFileSync(join(agentDir, tier + ".md"), profile(tier))
+    for (const tier of ["scout", "mechanic"] as const)
+      writeFileSync(join(agentDir, MUSE_AGENT_NAMES[tier] + ".md"), profile(tier, "muse"))
     const settings = profileSettings()
     writeFileSync(join(home, "settings.json"), JSON.stringify(settings))
     mkdirSync(join(home, "extensions", "subagent"), { recursive: true })
@@ -163,4 +174,26 @@ test("installed child guard registers a real monotonic capability ceiling", () =
     shutdown({})
   }
   assert.equal(resolveCurrentSubagentCapabilityCeiling(sessionId), undefined)
+})
+
+test("Muse opt-in pins and nested tiers fail closed", () => {
+  for (const tier of ["scout", "mechanic"] as const) {
+    assert.equal(museSubscriptionSelected(tier, true), true)
+    assert.equal(museSubscriptionSelected(tier, false), false)
+    assert.equal(tierForModel(MUSE_TIER_MODELS[tier], tier === "scout"), tier)
+    assertTierProfile(tier, profile(tier, "muse"), "muse")
+    assert.ok(tierGuardPath(tier, MUSE_TIER_MODELS[tier]).pathname.endsWith("/muse-" + tier + ".ts"))
+    assert.throws(() => tierForModel({ ...MUSE_TIER_MODELS[tier], variant: "xhigh" }, tier === "scout"), /Unapproved/)
+  }
+  assert.equal(museSubscriptionSelected("worker", true), false)
+  assert.equal(museSubscriptionSelected("expert", true), false)
+  assert.throws(() => tierForModel({ providerID: "muse-sdk", id: "muse-spark-1.3", variant: "max" }, false), /Unapproved/)
+  assert.equal(nestedCallRefusal("scout", "subagent", { agent: "muse-scout", task: "Research",
+    options: { agentScope: "user" } }, "muse"), undefined)
+  assert.equal(nestedCallRefusal("mechanic", "subagent", { agent: "muse-mechanic", task: "Fix",
+    options: { agentScope: "user" } }, "muse"), undefined)
+  for (const agent of ["muse-mechanic", "expert", "scout"]) {
+    assert.match(nestedCallRefusal("scout", "subagent", { agent, task: "Escalate",
+      options: { agentScope: "user" } }, "muse") ?? "", /cannot delegate/)
+  }
 })

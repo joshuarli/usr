@@ -10,7 +10,8 @@
   "hideThinkingBlock": true,
   "defaultProjectTrust": "always",
   "packages": [
-    "npm:pi-subagents@0.87.0"
+    "npm:pi-subagents@0.87.0",
+    "npm:pi-muse-subscription@0.1.0"
   ],
   "skills": [
     "~/.agents/skills"
@@ -37,6 +38,14 @@
       "expert": {
         "model": "opencode-go/deepseek-v4.1-flash",
         "thinking": "max"
+      },
+      "muse-scout": {
+        "model": "muse-sdk/muse-spark-1.3",
+        "thinking": "medium"
+      },
+      "muse-mechanic": {
+        "model": "muse-sdk/muse-spark-1.3",
+        "thinking": "high"
       }
     },
     "modelScope": {
@@ -44,7 +53,8 @@
       "strict": true,
       "allow": [
         "opencode-go/deepseek-v4.1-flash",
-        "opencode-go/muse-spark-1.3-contributor"
+        "opencode-go/muse-spark-1.3-contributor",
+        "muse-sdk/muse-spark-1.3"
       ],
       "agents": {
         "scout": {
@@ -65,6 +75,16 @@
         "expert": {
           "allow": [
             "opencode-go/deepseek-v4.1-flash"
+          ]
+        },
+        "muse-scout": {
+          "allow": [
+            "muse-sdk/muse-spark-1.3"
+          ]
+        },
+        "muse-mechanic": {
+          "allow": [
+            "muse-sdk/muse-spark-1.3"
           ]
         }
       }

@@ -28,7 +28,8 @@ class PiWorkerSyncTests(unittest.TestCase):
         shutil.copy2(HELPER, self.root / "tools/sync/pi-worker.py")
         (self.project / "src/server.ts").write_text("export {}\n")
         (self.project / "package.json").write_text(json.dumps({
-            "dependencies": {"@earendil-works/pi-coding-agent": "1.5.0", "pi-subagents": "0.87.0"},
+            "dependencies": {"@earendil-works/pi-coding-agent": "1.5.0", "pi-subagents": "0.87.0",
+                             "pi-muse-subscription": "0.1.0"},
         }))
         (self.bin / "node").write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
         (self.bin / "node").chmod(0o755)
@@ -45,6 +46,9 @@ client.mkdir(parents=True, exist_ok=True)
 extension = project / "node_modules/pi-subagents"
 extension.mkdir(parents=True, exist_ok=True)
 (extension / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_SUBAGENTS_VERSION", "0.87.0")}}))
+muse = project / "node_modules/pi-muse-subscription"
+muse.mkdir(parents=True, exist_ok=True)
+(muse / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_MUSE_VERSION", "0.1.0")}}))
 """
         (self.bin / "npm").write_text(npm)
         (self.bin / "npm").chmod(0o755)

@@ -15,6 +15,9 @@ test("native Pi roles fail closed on provider, model, thinking and write scope",
   assert.throws(() => role({ ...job("muse-ember-1.0", "xhigh", false, "opencode"),
     priorRunId: "old", priorSessionFile: "/work/old.jsonl" }), /Unapproved/)
   assert.equal(role(job("deepseek-v4.1-flash", "max")), "expert")
+  assert.equal(role(job("muse-spark-1.3", "medium", true, "muse-sdk")), "scout")
+  assert.equal(role(job("muse-spark-1.3", "high", false, "muse-sdk")), "mechanic")
+  assert.throws(() => role(job("muse-spark-1.3", "max", false, "muse-sdk")), /Unapproved/)
   assert.throws(() => role(job("deepseek-v4.1-flash", "xhigh")), /Unapproved/)
   assert.throws(() => role(job("muse-spark-1.3-contributor", "medium", false)), /Unapproved/)
   assert.throws(() => role(job("deepseek-v4.1-flash", "high", true)), /Unapproved/)

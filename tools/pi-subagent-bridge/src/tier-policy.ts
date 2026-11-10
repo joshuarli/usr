@@ -32,6 +32,26 @@ export const GO_TIER_MODELS = {
   readonly variant: "medium" | "high" | "max"
 } }
 
+/** Exact subscription-backed Muse models: never used for worker or expert. */
+export const MUSE_TIER_MODELS = {
+  scout: { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "medium" },
+  mechanic: { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "high" },
+} as const satisfies Record<"scout" | "mechanic", {
+  readonly providerID: "muse-sdk"; readonly id: "muse-spark-1.3"; readonly variant: "medium" | "high"
+}>
+export type MuseTier = keyof typeof MUSE_TIER_MODELS
+export const MUSE_AGENT_NAMES = { scout: "muse-scout", mechanic: "muse-mechanic" } as const
+export const MUSE_DELEGATION = {
+  scout: ["muse-scout"],
+  mechanic: ["muse-scout", "muse-mechanic"],
+} as const satisfies { readonly [P in MuseTier]: readonly string[] }
+export function isMuseTier(tier: Tier): tier is MuseTier {
+  return tier === "scout" || tier === "mechanic"
+}
+export function museSubscriptionSelected(tier: Tier, enabled = process.env.USR_PI_MUSE_SUBSCRIPTION === "1"): tier is MuseTier {
+  return enabled && isMuseTier(tier)
+}
+
 export const TIER_TOOLS = {
   scout: ["read", "grep", "find", "ls", "subagent", "subagent_supervisor"],
   mechanic: ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"],
@@ -59,7 +79,12 @@ export function tierForModel(model: GoModelRef, readOnly: boolean): Tier {
     return expected.providerID === model.providerID &&
       expected.id === model.id && expected.variant === model.variant
   })
-  if (!tier || readOnly !== (tier === "scout"))
-    throw new Error("Unapproved Pi tier, model/effort or tool scope")
-  return tier
+  if (tier && readOnly === (tier === "scout")) return tier
+  for (const candidate of ["scout", "mechanic"] as const) {
+    const expected = MUSE_TIER_MODELS[candidate]
+    if (model.providerID === expected.providerID && model.id === expected.id &&
+        model.variant === expected.variant && readOnly === (candidate === "scout"))
+      return candidate
+  }
+  throw new Error("Unapproved Pi tier, model/effort or tool scope")
 }

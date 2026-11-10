@@ -1,6 +1,6 @@
 import { registerSubagentCapabilityCeiling, type SubagentCapabilityCeilingHandle } from "pi-subagents/capability-ceiling"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { assertDelegation, DELEGATION, type Tier } from "./tier-policy.ts"
+import { DELEGATION, isMuseTier, MUSE_DELEGATION, type Tier } from "./tier-policy.ts"
 
 type Block = { block: true; reason: string }
 const DENIED_FIELDS = new Set([
@@ -16,7 +16,8 @@ const CONTROL_FIELDS = new Set(["action", "id", "index", "message", "mode", "vie
 const START_FIELDS = new Set(["agent", "task", "async", "options"])
 
 /** Reject model-controlled attempts to escape the typed tier graph or reconfigure a nested launch. */
-export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown): string | undefined {
+export type GuardFamily = "go" | "muse"
+export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown, family: GuardFamily = "go"): string | undefined {
   if (toolName === "subagent_launch") return "Nested workflow scripts are not permitted by usr tier policy"
   if (toolName !== "subagent") return undefined
   if (!input || typeof input !== "object" || Array.isArray(input))
@@ -39,11 +40,11 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
     return "Nested delegation requires options.agentScope=user with no other options"
   if (typeof request.task !== "string" || !request.task.trim() || request.task.length > 32_000)
     return "Nested delegation requires a nonempty bounded task"
-  try {
-    assertDelegation(parent, request.agent)
-  } catch (error) {
-    return error instanceof Error ? error.message : "Unapproved nested tier"
-  }
+  const allowed: readonly string[] = family === "muse"
+    ? (isMuseTier(parent) ? MUSE_DELEGATION[parent] : [])
+    : DELEGATION[parent]
+  if (typeof request.agent !== "string" || !allowed.includes(request.agent))
+    return `Tier ${parent} cannot delegate to ${String(request.agent)}`
   return undefined
 }
 
@@ -52,15 +53,19 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
  * SDK owner. It runs in the child process, not in the parent prompt. Upstream
  * capability ceilings intersect monotonically and survive nested + async runs.
  */
-export function registerTierGuard(parent: Tier): (pi: ExtensionAPI) => void {
+export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi: ExtensionAPI) => void {
+  if (family === "muse" && !isMuseTier(parent)) throw new Error("Muse only supports scout/mechanic")
+  const children: readonly string[] = family === "muse"
+    ? (isMuseTier(parent) ? MUSE_DELEGATION[parent] : [])
+    : DELEGATION[parent]
   return (pi: ExtensionAPI) => {
     let ceiling: SubagentCapabilityCeilingHandle | undefined
     pi.on("session_start", (_event, ctx) => {
       ceiling?.dispose()
       ceiling = registerSubagentCapabilityCeiling({
         sessionId: ctx.sessionManager.getSessionId(),
-        source: "usr-bridge-" + parent,
-        ceiling: { allowedAgents: DELEGATION[parent] },
+        source: "usr-bridge-" + family + "-" + parent,
+        ceiling: { allowedAgents: [...children] },
       })
     })
     pi.on("session_shutdown", () => {
@@ -68,7 +73,7 @@ export function registerTierGuard(parent: Tier): (pi: ExtensionAPI) => void {
       ceiling = undefined
     })
     pi.on("tool_call", (event) => {
-      const reason = nestedCallRefusal(parent, event.toolName, event.input)
+      const reason = nestedCallRefusal(parent, event.toolName, event.input, family)
       return reason ? { block: true, reason } satisfies Block : undefined
     })
   }

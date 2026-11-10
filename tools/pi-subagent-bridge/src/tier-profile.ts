@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { parseDocument } from "yaml"
 import {
-  DELEGATION, GO_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIER_TOOLS, TIERS, type Tier,
+  DELEGATION, GO_TIER_MODELS, isMuseTier, MUSE_AGENT_NAMES, MUSE_DELEGATION, MUSE_TIER_MODELS,
+  MAX_SUBAGENT_DEPTH, TIER_TOOLS, TIERS, type Tier,
 } from "./tier-policy.ts"
 
 const TIER_GUARDS = {
@@ -12,7 +13,17 @@ const TIER_GUARDS = {
   expert: new URL("./guards/expert.ts", import.meta.url),
 } as const satisfies Record<Tier, URL>
 
-export function tierGuardPath(tier: Tier): URL { return TIER_GUARDS[tier] }
+const MUSE_GUARDS = {
+  scout: new URL("./guards/muse-scout.ts", import.meta.url),
+  mechanic: new URL("./guards/muse-mechanic.ts", import.meta.url),
+} as const
+export function tierGuardPath(tier: Tier, model?: { providerID: string }): URL {
+  if (model?.providerID === "muse-sdk") {
+    if (!isMuseTier(tier)) throw new Error("Muse cannot execute worker/expert")
+    return MUSE_GUARDS[tier]
+  }
+  return TIER_GUARDS[tier]
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -31,28 +42,32 @@ function exactList(value: unknown, expected: readonly string[], description: str
  * Validate the parsed YAML against the code-owned tier graph before admitting
  * a new root worker. A locally edited/synced profile cannot widen authority.
  */
-export function assertTierProfile(tier: Tier, markdown: string): void {
+export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "muse" = "go"): void {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)
   if (!match) throw new Error(`Missing Pi agent frontmatter: ${tier}`)
   const parsed = parseDocument(match[1]!, { uniqueKeys: true })
   if (parsed.errors.length) throw new Error(`Invalid Pi agent YAML ${tier}: ${parsed.errors[0]?.message}`)
   const config = record(parsed.toJS())
-  const pinned = GO_TIER_MODELS[tier]
-  if (config.name !== tier ||
+  if (family === "muse" && !isMuseTier(tier)) throw new Error("Unapproved Muse tier")
+  const muse = family === "muse" && isMuseTier(tier)
+  const pinned = muse ? MUSE_TIER_MODELS[tier] : GO_TIER_MODELS[tier]
+  const name = muse ? MUSE_AGENT_NAMES[tier] : tier
+  const children = muse ? MUSE_DELEGATION[tier] : DELEGATION[tier]
+  if (config.name !== name ||
       config.model !== pinned.providerID + "/" + pinned.id ||
       config.thinking !== pinned.variant ||
       config.maxSubagentDepth !== MAX_SUBAGENT_DEPTH ||
       config.allowNestedSubagents !== true)
     throw new Error(`Unapproved Pi tier profile for ${tier}`)
   exactList(config.tools, TIER_TOOLS[tier], `${tier}.tools`)
-  exactList(config.allowedAgents, DELEGATION[tier], `${tier}.allowedAgents`)
+  exactList(config.allowedAgents, children, `${name}.allowedAgents`)
   // Arbitrary extension, runner, model-scope, or tool overrides are not part of
   // the bridge's delegation surface. Fail closed rather than ignore them.
-  const allowed = new Set([
+  const allowedFields = new Set([
     "name", "description", "model", "thinking", "tools",
     "maxSubagentDepth", "allowNestedSubagents", "allowedAgents",
   ])
-  if (Object.keys(config).some((field) => !allowed.has(field)))
+  if (Object.keys(config).some((field) => !allowedFields.has(field)))
     throw new Error(`Unapproved Pi agent profile setting for ${tier}`)
 }
 
@@ -67,6 +82,7 @@ export function assertTierProfiles(agentDir: string): void {
   exactList(modelScope.allow, [
     "opencode-go/deepseek-v4.1-flash",
     "opencode-go/muse-spark-1.3-contributor",
+    "muse-sdk/muse-spark-1.3",
   ], "global.modelScope.allow")
   const overrides = record(sub.agentOverrides)
   const agents = record(modelScope.agents)
@@ -80,6 +96,18 @@ export function assertTierProfiles(agentDir: string): void {
     exactList(record(agents[tier]).allow, [expected.providerID + "/" + expected.id],
       `${tier}.modelScope.allow`)
   }
-  if (Object.keys(overrides).some((tier) => !TIERS.some((allowed) => allowed === tier)))
+  for (const tier of ["scout", "mechanic"] as const) {
+    const name = MUSE_AGENT_NAMES[tier], expected = MUSE_TIER_MODELS[tier]
+    assertTierProfile(tier, readFileSync(join(agentDir, "agents", name + ".md"), "utf8"), "muse")
+    const override = record(overrides[name])
+    if (override.model !== expected.providerID + "/" + expected.id ||
+        override.thinking !== expected.variant)
+      throw new Error(`Unapproved Pi model override for ${name}`)
+    exactList(record(agents[name]).allow, [expected.providerID + "/" + expected.id],
+      `${name}.modelScope.allow`)
+  }
+  const allowedNames: readonly string[] = [...TIERS, ...Object.values(MUSE_AGENT_NAMES)]
+  if (Object.keys(overrides).some(name => !allowedNames.includes(name)) ||
+      Object.keys(agents).some(name => !allowedNames.includes(name)))
     throw new Error("Unapproved additional Pi subagent tier override")
 }

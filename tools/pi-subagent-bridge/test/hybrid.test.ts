@@ -58,6 +58,7 @@ function fake(cwd: string) {
     models: async () => ({ data: [
       { id: "deepseek-v4.1-flash", providerID: "opencode-go" },
       { id: "muse-spark-1.3-contributor", providerID: "opencode-go" },
+      { id: "muse-spark-1.3", providerID: "muse-sdk" },
     ].map(({ id, providerID }) => ({
       id, providerID, variants: variants.map((variant) => ({ id: variant })),
       enabled: true, status: "active",
@@ -490,4 +491,50 @@ test("interrupted Pi resume remains blocked without exposing an old success", as
     await assert.rejects(restarted.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
     assert.equal(commandCalls(m.calls).length, 0)
   } finally { f.close() }
+})
+
+test("Muse subscription opt-in uses Pi for scout, leaves worker on Command-first", async () => {
+  const prior = process.env.USR_PI_MUSE_SUBSCRIPTION
+  process.env.USR_PI_MUSE_SUBSCRIPTION = "1"
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const check = await bridge.modelCheck(f.cwd, "scout")
+    assert.equal(check.primary.backend, "pi")
+    assert.deepEqual(check.primary.model, { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "medium" })
+    assert.equal(check.primary.available, true)
+    assert.equal(check.fallback.backend, "command-code")
+    const start = await bridge.start(f.cwd, "Muse scout", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
+    assert.equal(start.backend, "pi")
+    assert.equal(commandCalls(m.calls).length, 0)
+    assert.equal(piCreates(m.calls).length, 1)
+    const status = await bridge.status(f.cwd, start.session_id)
+    assert.equal(status.model.providerID, "muse-sdk")
+    const worker = await bridge.modelCheck(f.cwd, "worker")
+    assert.equal(worker.primary.backend, "command-code")
+    assert.equal(worker.fallback.model.providerID, "opencode-go")
+  } finally {
+    f.close()
+    if (prior === undefined) delete process.env.USR_PI_MUSE_SUBSCRIPTION
+    else process.env.USR_PI_MUSE_SUBSCRIPTION = prior
+  }
+})
+
+test("Muse quota on clean worktree falls back to Command Code without replaying edits", async () => {
+  const prior = process.env.USR_PI_MUSE_SUBSCRIPTION
+  process.env.USR_PI_MUSE_SUBSCRIPTION = "1"
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const start = await bridge.start(f.cwd, "Muse mechanic", "mechanic", f.scope, "Update README")
+    m.failPi("quota exceeded")
+    const status = await bridge.status(f.cwd, start.session_id)
+    assert.equal(status.backend, "command-code")
+    assert.equal(commandCalls(m.calls).length, 1)
+    assert.match(status.fallback_reason ?? "", /Primary Pi runner/)
+  } finally {
+    f.close()
+    if (prior === undefined) delete process.env.USR_PI_MUSE_SUBSCRIPTION
+    else process.env.USR_PI_MUSE_SUBSCRIPTION = prior
+  }
 })

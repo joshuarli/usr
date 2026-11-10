@@ -1,6 +1,6 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. **Command Code runs first** (Muse Ember for scout/mechanic, DeepSeek V4.1 Flash for worker/expert); **OpenCode Go via embedded Pi SDK + pi-subagents RPC is the only fallback**. No OpenCode server or separate custom agent loop is started.
+One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. **Command Code runs first** (Muse Ember for scout/mechanic, DeepSeek V4.1 Flash for worker/expert); **OpenCode Go via embedded Pi SDK + pi-subagents RPC is the only default fallback**. No OpenCode server or separate custom agent loop is started.
 
 | Tier | Command Code first | Effort | OpenCode Go fallback | Thinking |
 | --- | --- | --- | --- | --- |
@@ -9,7 +9,7 @@ One shared delegation bridge for every coding harness. Parents remain responsibl
 | worker | `deepseek/deepseek-v4.1-flash` | high | `opencode-go/deepseek-v4.1-flash` | high |
 | expert | `deepseek/deepseek-v4.1-flash` | max | `opencode-go/deepseek-v4.1-flash` | max |
 
-No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Command Code runs remain leaves. Native Pi fallback children may spawn exactly one additional generation, equal-or-weaker only (typed tier guard, immutable child extension, and max depth 2). **Only OpenCode Go models are eligible for OpenCode/Pi delegation.** Do not use `opencode/*` Zen, metered OpenCode models, or custom endpoints. Ember runs on Command Code only; the OpenCode Go scout/mechanic fallback remains Muse Spark 1.3 Contributor. The bridge requires `cmd login` for its preferred provider and a separate configured OpenCode Go credential for fallback. No unapproved models are permitted.
+No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Command Code runs remain leaves. Native Pi fallback children may spawn exactly one additional generation, equal-or-weaker only (typed tier guard, immutable child extension, and max depth 2). **Only OpenCode Go models are eligible for the default Go fallback.** The separate Muse SDK subscription path is opt-in. Do not use `opencode/*` Zen, metered OpenCode models, or custom endpoints. Ember runs on Command Code only; the OpenCode Go scout/mechanic fallback remains Muse Spark 1.3 Contributor. The bridge requires `cmd login` for its preferred provider and a separate configured OpenCode Go credential for fallback. No unapproved models are permitted.
 
 ## Setup
 
@@ -87,3 +87,38 @@ sh dotfiles/worker-watch-test.sh
 ```
 
 Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
+
+## Opt-in Muse Code subscription
+
+`USR_PI_MUSE_SUBSCRIPTION=1` selects Muse Spark 1.3 through the exact-pinned
+[`pi-muse-subscription`](https://github.com/jkeskikangas/pi-muse-subscription) extension
+as the **Pi-first** executor for **scout (medium)** and **mechanic (high)**. The
+default (unset) behavior remains Command Code first, OpenCode Go fallback, for every tier.
+Worker and expert stay on their existing pins regardless of this flag.
+This is subscription usage via the official Muse Code SDK, **not** the metered Meta API.
+
+- Install Muse Code >=1.4.14, launch `muse`, and sign in with `/login`.
+- Run `sh sync` to install the exact Pi and bridge npm pins. Set
+  `USR_PI_MUSE_SUBSCRIPTION=1` in the environment launching your coding harness
+  and MCP bridge, then restart the harness. `sh sync bridge` also reconciles the bridge.
+- On a clean *linked* worktree, run `pi-subagent-bridge model-check CWD scout`
+  and a disposable scout task using `worker_start` / `worker_status`. The model
+  check proves the local extension and Muse CLI exist, **not** subscription login
+  or available quota. The real run verifies entitlement and tool handling.
+- Monitor `muse usage`. The extension defaults Contributor mode **off** unless Muse
+  Code saved another preference; opt in explicitly using
+  `PI_MUSE_SDK_CONTRIBUTOR=on` only if you accept Meta using prompts/code for training.
+  Keep `META_API_KEY` unset: it would otherwise select metered API billing
+  (the extension also strips it from its Muse Code subprocess).
+
+Dedicated `muse-scout` and `muse-mechanic` profiles restrict nested tasks to the
+same subscription provider, with immutable equal-or-weaker tier ceilings and max
+depth 2. The SDK host explicitly loads the pinned provider and requires it in
+each detached child, even when ambient extensions are disabled. If admission is
+uncertain, the bridge never replays it; confirmed quota failures may fall back
+to Command Code **only before edits**. Already admitted sessions keep their
+pinned provider; removing the environment flag changes new admissions only.
+
+This is a community adapter using a developer-preview Muse Code SDK.
+Live account compatibility and network behavior must be tested locally before
+unattended use.

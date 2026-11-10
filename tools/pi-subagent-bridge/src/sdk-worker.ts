@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
 import { REQUEST, REPLY, COMPLETE, record, string, role, persist, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
+import { MUSE_AGENT_NAMES, isMuseTier } from "./tier-policy.ts"
+import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
 import { registerRequiredChildExtensions } from "pi-subagents/required-child-extensions"
 import { assertTierProfiles, tierGuardPath } from "./tier-profile.ts"
 import {
@@ -79,10 +81,15 @@ async function statusResult(rpc: Rpc, runId: string, sessionFile: string): Promi
 
 async function run(job: Job, started: (id: string) => void, dispatching: () => void): Promise<Result> {
   const tier = role(job)
-  ensureOpenCodeApiKey()
+  const muse = job.model.providerID === MUSE_PROVIDER
+  if (muse) {
+    const preflight = musePreflight()
+    if (!preflight.available) throw new Error(preflight.issue ?? "Muse Code is unavailable")
+  } else ensureOpenCodeApiKey()
   const runtime = await ModelRuntime.create()
-  const model = runtime.getModel(job.model.providerID, job.model.id)
-  if (!model || !runtime.hasConfiguredAuth(job.model.providerID))
+  // Extension providers register when the SDK host binds its extensions; it never calls the model itself.
+  const model = muse ? undefined : runtime.getModel(job.model.providerID, job.model.id)
+  if (!muse && (!model || !runtime.hasConfiguredAuth(job.model.providerID)))
     throw new Error("Pinned Pi provider/model unavailable or credentials not configured")
   const manager = job.priorSessionFile
     ? SessionManager.open(job.priorSessionFile, job.sessionDir, job.cwd)
@@ -118,25 +125,34 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
   const loader = new DefaultResourceLoader({
     cwd: job.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    additionalExtensionPaths: [subagentsExtensionPath],
+    additionalExtensionPaths: [subagentsExtensionPath, ...(muse ? [museExtensionPath()] : [])],
     extensionFactories: [rpcExtension],
   })
   await loader.reload()
   const errors = loader.getExtensions().errors
   if (errors.length > 0) throw new Error("Pi extension initialization failed: " + errors.map((e) => e.error).join("; "))
   const { session } = await createAgentSession({
-    cwd: job.cwd, agentDir, modelRuntime: runtime, model, thinkingLevel: job.model.variant === "max" ? "max" :
+    cwd: job.cwd, agentDir, modelRuntime: runtime, ...(model ? { model } : {}), thinkingLevel: job.model.variant === "max" ? "max" :
       job.model.variant === "xhigh" ? "xhigh" : job.model.variant === "medium" ? "medium" : "high",
     sessionManager: manager, settingsManager: settings, resourceLoader: loader, noTools: "builtin",
   })
   try {
     await session.bindExtensions({})
-    if (session.model?.provider !== job.model.providerID || session.model.id !== job.model.id ||
-        session.thinkingLevel !== job.model.variant)
+    if (muse) {
+      // Muse registers at bindExtensions rather than in the initial ModelRuntime catalog.
+      if (!runtime.getModel(job.model.providerID, job.model.id) ||
+          !runtime.hasConfiguredAuth(job.model.providerID))
+        throw new Error("Pinned Muse subscription provider failed to register in the Pi SDK")
+    } else if (session.model?.provider !== job.model.providerID || session.model.id !== job.model.id ||
+               session.thinkingLevel !== job.model.variant) {
       throw new Error("Pi SDK changed or clamped the pinned model/effort")
+    }
     const required = registerRequiredChildExtensions({
       sessionId: manager.getSessionId(),
-      extensions: [{ id: "usr-nested-tier-guard-v1", path: fileURLToPath(tierGuardPath(tier)) }],
+      extensions: [
+        { id: "usr-nested-tier-guard-v1", path: fileURLToPath(tierGuardPath(tier, job.model)) },
+        ...(muse ? [{ id: "usr-muse-subscription-v1", path: museExtensionPath() }] : []),
+      ],
       requireForAllRunners: true,
     })
     try {
@@ -149,7 +165,8 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
     const params: Record<string, unknown> = job.priorRunId
       ? { id: job.priorRunId, message: job.prompt }
       : {
-          agent: tier, task: job.prompt, async: true, cwd: job.cwd, worktree: false,
+          agent: muse && isMuseTier(tier) ? MUSE_AGENT_NAMES[tier] : tier,
+          task: job.prompt, async: true, cwd: job.cwd, worktree: false,
           model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,
           options: { agentScope: "user" },
         }
