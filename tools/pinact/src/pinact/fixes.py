@@ -138,7 +138,8 @@ def _has_alias(doc: SourceDocument) -> bool:
 
 def plan_pin_edits(doc: SourceDocument, source: bytes,
                     entries: dict | None,
-                    resolved: dict[tuple[str, str], str] | None) -> tuple[list[Edit], list[str]]:
+                    resolved: dict[tuple[str, str], str] | None,
+                    upgrade: bool = False) -> tuple[list[Edit], list[str]]:
     from pinact.pinning import SHA
     edits: list[Edit] = []
     notes: list[str] = []
@@ -156,31 +157,46 @@ def plan_pin_edits(doc: SourceDocument, source: bytes,
         if entries is not None:
             from pinact.catalog import catalog_approves_use, catalog_pin_for_spec
             if pinning.SHA.fullmatch(use.ref):
-                approved, note = catalog_approves_use(use, entries)
-                if not approved:
-                    notes.append(f"{doc.display}:{use.index + 1}: cannot approve "
-                                 f"{use.spec}: {note}")
-                continue
-            name = use.spec.rsplit("@", 1)[0]
-            parts = name.split("/")
-            base = "/".join(parts[:2]) if len(parts) >= 2 else name
-            sha, subpath, note = catalog_pin_for_spec(use.spec, entries)
-            if sha is None:
-                notes.append(f"{doc.display}:{use.index + 1}: cannot pin "
-                             f"{use.repo}@{use.ref}: {note}")
-                continue
-            full_name = base + subpath
-            annotation_ref = entries[use.repo.lower()].version
+                if not upgrade:
+                    approved, note = catalog_approves_use(use, entries)
+                    if not approved:
+                        notes.append(f"{doc.display}:{use.index + 1}: cannot approve "
+                                     f"{use.spec}: {note}")
+                    continue
+                sha, subpath, note = catalog_pin_for_spec(use.spec, entries, upgrade=True)
+                if sha is None:
+                    notes.append(f"{doc.display}:{use.index + 1}: cannot pin "
+                                 f"{use.repo}@{use.ref}: {note}")
+                    continue
+                entry = entries[use.repo.lower()]
+                full_name = ("/".join(use.spec.rsplit("@", 1)[0].split("/")[:2]) + subpath)
+                annotation_ref = entry.version
+                if use.ref.lower() == entry.sha.lower():
+                    continue
+            else:
+                if upgrade:
+                    sha, subpath, note = catalog_pin_for_spec(use.spec, entries, upgrade=True)
+                else:
+                    sha, subpath, note = catalog_pin_for_spec(use.spec, entries)
+                if sha is None:
+                    notes.append(f"{doc.display}:{use.index + 1}: cannot pin "
+                                 f"{use.repo}@{use.ref}: {note}")
+                    continue
+                entry = entries[use.repo.lower()]
+                name = use.spec.rsplit("@", 1)[0]
+                parts = name.split("/")
+                base = "/".join(parts[:2]) if len(parts) >= 2 else name
+                full_name = base + subpath
+                annotation_ref = entry.version
         elif resolved is not None and (use.repo, use.ref) in resolved:
             sha = resolved[use.repo, use.ref]
             full_name = use.spec.rsplit("@", 1)[0]
-            note = "resolved via network"
             annotation_ref = use.ref
         else:
             notes.append(f"{doc.display}:{use.index + 1}: {use.repo}@{use.ref} "
                          "needs --pin (network) or --catalog; leaving unchanged")
             continue
-        if SHA.fullmatch(use.ref):
+        if SHA.fullmatch(use.ref) and not upgrade:
             continue
         body = lines[use.index]
         from pinact.pinning import pin_comment
@@ -197,7 +213,10 @@ def plan_pin_edits(doc: SourceDocument, source: bytes,
         new_line_text = (bom_prefix + use.prefix + use.quote + full_name + "@" + sha
                          + use.quote + separator + annotation)
         replacement = new_line_text.encode("utf-8")
-        edits.append(Edit(start, end, expected, replacement, "unpinned-uses"))
+        rule = "unpinned-uses"
+        if entries is not None and upgrade:
+            rule = "unapproved-pin"
+        edits.append(Edit(start, end, expected, replacement, rule))
     return edits, notes
 
 
@@ -396,6 +415,8 @@ def fix_main(argv: list[str]) -> int:
                         help="allow network (git ls-remote) for pin resolution")
     parser.add_argument("--catalog", default=None,
                         help="approved-pin catalog (TOML)")
+    parser.add_argument("--upgrade", action="store_true",
+                        help="upgrade catalog-backed actions to their approved catalog versions")
     parser.add_argument("--policy", action="append", default=[],
                         help="explicit policy KEY=VALUE (permissions, timeout-minutes)")
     parser.add_argument("files", nargs="*", type=Path)
@@ -473,7 +494,7 @@ def fix_main(argv: list[str]) -> int:
             dirty = True
             continue
         try:
-            pin_edits, pin_notes = plan_pin_edits(doc, original, entries, resolved)
+            pin_edits, pin_notes = plan_pin_edits(doc, original, entries, resolved, upgrade=args.upgrade)
             obs_edits, obs_notes = plan_obsolete_edits(doc, original)
             pol_edits, pol_notes = plan_policy_edits(doc, original, policy)
         except EditRejected as exc:
@@ -502,13 +523,13 @@ def fix_main(argv: list[str]) -> int:
             return 2
         try:
             from pinact.lint import lint_one_file
-            before_default, _ = lint_one_file(path, "default")
-            after_default, _ = lint_one_file(tmppath, "default")
+            before_default, _ = lint_one_file(path, "default", catalog=args.catalog)
+            after_default, _ = lint_one_file(tmppath, "default", catalog=args.catalog)
             targeted = {e.rule for e in edits}
             for rule in targeted:
                 profile = "strict" if rule in {"missing-permissions", "suggest-timeout"} else "default"
-                before, _ = lint_one_file(path, profile)
-                after, _ = lint_one_file(tmppath, profile)
+                before, _ = lint_one_file(path, profile, catalog=args.catalog)
+                after, _ = lint_one_file(tmppath, profile, catalog=args.catalog)
                 n_before = sum(1 for f in before if f.id == rule or
                                (rule == "unpinned-uses" and f.id == rule) or
                                (rule == "missing-permissions" and f.id in (
@@ -540,7 +561,7 @@ def fix_main(argv: list[str]) -> int:
                     continue
                 from pinact.model import parse_document as _parse
                 redoc, _ = _parse(tmppath, str(tmppath))
-                re_pin, _n1 = plan_pin_edits(redoc, updated, entries, resolved)
+                re_pin, _n1 = plan_pin_edits(redoc, updated, entries, resolved, upgrade=args.upgrade)
                 re_obs, _n2 = plan_obsolete_edits(redoc, updated)
                 re_pol, _n3 = plan_policy_edits(redoc, updated, policy)
                 if re_pin or re_obs or re_pol:

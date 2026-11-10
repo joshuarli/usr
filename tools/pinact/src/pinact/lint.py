@@ -437,7 +437,7 @@ def lint_one_file(path: Path, profile: str, catalog: str | None = None) -> tuple
                         display, use.index + 1, _column(source_text, use.index),
                         "unapproved-pin", "error",
                         f"{use.repo}@{use.ref} is not approved by the catalog: "
-                        f"{note}", False))
+                        f"{note}", True))
     findings.sort(key=lambda item: (item.filepath, item.line, item.column, item.id, item.message))
     return findings, None
 

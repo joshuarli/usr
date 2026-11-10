@@ -123,7 +123,8 @@ def load_catalog(path: Path) -> dict[str, CatalogEntry]:
 
 
 def catalog_pin_for_spec(spec: str,
-                         entries: dict[str, CatalogEntry]) -> tuple[str | None, str, str]:
+                         entries: dict[str, CatalogEntry],
+                         upgrade: bool = False) -> tuple[str | None, str, str]:
     """Return (sha, subpath, note). sha None means refuse; note explains why."""
     from pinact import pinning
     try:
@@ -141,6 +142,8 @@ def catalog_pin_for_spec(spec: str,
     entry = entries.get(base.lower())
     if entry is None:
         return None, subpath, f"no approved pin for '{base}'"
+    if upgrade:
+        return entry.sha, subpath, f"upgraded to {entry.version}"
     if SHA.fullmatch(ref):
         return None, subpath, "SHA without version label is not proof of approval"
     if _major(ref) != _major(entry.channel):
