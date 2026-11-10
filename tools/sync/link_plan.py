@@ -89,15 +89,21 @@ def _source_exists(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
 
-def _old_managed_link(path: Path, sources: tuple[Path, ...], rel: Path) -> bool:
+def _old_managed_link(path: Path, sources: tuple[Path, ...], target: Path) -> bool:
     if not path.is_symlink():
         return False
+    rel = path.relative_to(target)
     raw = os.readlink(path)
     pointed = Path(os.path.normpath(os.path.join(path.parent, raw)))
     # Check the *lexical* old source path, not resolve(): a deleted source
     # is precisely the condition we are trying to detect.
-    return any(pointed == source / rel and not _source_exists(source / rel)
-               for source in sources)
+    if any(pointed == source / rel and not _source_exists(source / rel)
+           for source in sources):
+        return True
+    mirrored_source_gone = not any(_source_exists(source / rel) for source in sources)
+    return mirrored_source_gone and _inside(pointed, target) and any(
+        _source_exists(source / pointed.relative_to(target)) for source in sources
+    )
 
 
 def _already_correct(spec: LinkSpec, path: Path, text: str,
@@ -157,7 +163,7 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
         elif before.kind == "symlink" and _already_correct(spec, path, text, projected_dirs):
             correct += 1
         elif before.kind == "symlink" and path in owned_links and _old_managed_link(
-            path, discovery.sources, path.relative_to(discovery.target)
+            path, discovery.sources, discovery.target
         ):
             actions.append(LinkAction("replace", path, before, text))
         else:
@@ -170,7 +176,7 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
         if before.kind == "absent":
             actions.append(LinkAction("forget", path, before))
         elif path in owned_links and before.kind == "symlink" and _old_managed_link(
-            path, discovery.sources, path.relative_to(discovery.target)
+            path, discovery.sources, discovery.target
         ):
             if not _parent_safe(path, discovery):
                 conflicts.append(f"{path} passes through an unsafe symlinked parent")

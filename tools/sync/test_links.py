@@ -279,6 +279,32 @@ class LinkTests(unittest.TestCase):
         self.assertTrue((self.home / ".unowned").is_symlink())
         self.assertNotIn(("F", self.home / ".stale"), records(self.owned))
 
+    def test_48_prune_removed_layer_symlink_mirrored_into_target(self):
+        self.source(".codex/AGENTS.md")
+        adapter = self.root / "dotfiles/base/.claude/AGENTS.md"
+        adapter.parent.mkdir()
+        adapter.symlink_to("../.codex/AGENTS.md")
+        self.track()
+        self.sync()
+        dest = self.home / ".claude/AGENTS.md"
+        self.assertEqual(os.readlink(dest), "../.codex/AGENTS.md")
+        adapter.unlink()
+        p = self.plan()
+        self.assertEqual([(a.kind, a.path) for a in p.actions], [("prune", dest)])
+        apply(p, self.owned)
+        self.assertFalse(dest.is_symlink())
+        self.assertTrue((self.home / ".codex/AGENTS.md").is_symlink())
+
+    def test_49_mirrored_link_kept_when_target_no_longer_provided(self):
+        adapter = self.root / "dotfiles/base/.claude/AGENTS.md"
+        adapter.parent.mkdir(parents=True)
+        adapter.symlink_to("../.codex/AGENTS.md")
+        self.track()
+        self.sync()
+        dest = self.home / ".claude/AGENTS.md"
+        adapter.unlink()
+        self.assertNotIn(dest, [a.path for a in self.plan().actions])
+
     def test_28_tab_name_rejected_before_changes(self):
         self.source("a\tb")
         with self.assertRaises(LinkError): self.plan()
