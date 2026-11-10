@@ -83,6 +83,7 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
   const tier = role(job)
   const muse = job.model.providerID === MUSE_PROVIDER
   if (muse) {
+    process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
     const preflight = musePreflight()
     if (!preflight.available) throw new Error(preflight.issue ?? "Muse Code is unavailable")
   } else ensureOpenCodeApiKey()

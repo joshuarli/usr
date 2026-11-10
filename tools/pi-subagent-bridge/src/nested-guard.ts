@@ -54,9 +54,9 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
  * capability ceilings intersect monotonically and survive nested + async runs.
  */
 export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi: ExtensionAPI) => void {
-  if (family === "muse" && !isMuseTier(parent)) throw new Error("Muse only supports scout/mechanic")
+  if (family === "muse" && !isMuseTier(parent)) throw new Error("Muse cannot execute expert")
   const children: readonly string[] = family === "muse"
-    ? (isMuseTier(parent) ? MUSE_DELEGATION[parent] : [])
+    ? (isMuseTier(parent) ? MUSE_DELEGATION[parent as keyof typeof MUSE_DELEGATION] as any : [])
     : DELEGATION[parent]
   return (pi: ExtensionAPI) => {
     let ceiling: SubagentCapabilityCeilingHandle | undefined

@@ -137,10 +137,25 @@ export function piPort(): OpenCodePort {
           id, providerID: config.providerID, enabled: true, status: "active",
           variants: [...config.variants].map((variant) => ({ id: variant })),
         }))
-      if (musePreflight().available) available.push({
-        id: MUSE_TIER_MODELS.scout.id, providerID: "muse-sdk", enabled: true, status: "active",
-        variants: [{ id: MUSE_TIER_MODELS.scout.variant }, { id: MUSE_TIER_MODELS.mechanic.variant }],
-      })
+      if (musePreflight().available) {
+        const variants = new Set<string>()
+        for (const t of ["scout", "mechanic", "worker"] as const) {
+          const m = (MUSE_TIER_MODELS as any)[t]
+          if (m) variants.add(m.variant)
+        }
+        available.push({
+          id: MUSE_TIER_MODELS.scout.id === MUSE_TIER_MODELS.mechanic.id ? MUSE_TIER_MODELS.scout.id : (MUSE_TIER_MODELS as any).worker?.id ?? MUSE_TIER_MODELS.scout.id,
+          providerID: "muse-sdk", enabled: true, status: "active",
+          variants: Array.from(variants).map((variant) => ({ id: variant })),
+        })
+        // Also add worker model explicitly if different
+        if ((MUSE_TIER_MODELS as any).worker && (MUSE_TIER_MODELS as any).worker.id !== MUSE_TIER_MODELS.scout.id) {
+          available.push({
+            id: (MUSE_TIER_MODELS as any).worker.id, providerID: "muse-sdk", enabled: true, status: "active",
+            variants: [{ id: (MUSE_TIER_MODELS as any).worker.variant }],
+          })
+        }
+      }
       return { data: available }
     },
     async create(input) {

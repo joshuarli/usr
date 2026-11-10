@@ -32,24 +32,30 @@ export const GO_TIER_MODELS = {
   readonly variant: "medium" | "high" | "max"
 } }
 
-/** Exact subscription-backed Muse models: never used for worker or expert. */
+/** Exact subscription-backed Muse models */
 export const MUSE_TIER_MODELS = {
-  scout: { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "medium" },
-  mechanic: { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "high" },
-} as const satisfies Record<"scout" | "mechanic", {
-  readonly providerID: "muse-sdk"; readonly id: "muse-spark-1.3"; readonly variant: "medium" | "high"
-}>
+  scout: { providerID: "muse-sdk", id: "muse-ember-1.0", variant: "medium" },
+  mechanic: { providerID: "muse-sdk", id: "muse-ember-1.0", variant: "xhigh" },
+  worker: { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "xhigh" },
+} as const satisfies Partial<Record<Tier, {
+  readonly providerID: "muse-sdk"; readonly id: string; readonly variant: string
+}>> & {
+  scout: { providerID: "muse-sdk"; id: "muse-ember-1.0"; variant: "medium" }
+  mechanic: { providerID: "muse-sdk"; id: "muse-ember-1.0"; variant: "xhigh" }
+  worker: { providerID: "muse-sdk"; id: "muse-spark-1.3"; variant: "xhigh" }
+}
 export type MuseTier = keyof typeof MUSE_TIER_MODELS
-export const MUSE_AGENT_NAMES = { scout: "muse-scout", mechanic: "muse-mechanic" } as const
+export const MUSE_AGENT_NAMES = { scout: "muse-scout", mechanic: "muse-mechanic", worker: "muse-worker" } as const
 export const MUSE_DELEGATION = {
   scout: ["muse-scout"],
   mechanic: ["muse-scout", "muse-mechanic"],
+  worker: ["muse-scout", "muse-mechanic", "muse-worker"],
 } as const satisfies { readonly [P in MuseTier]: readonly string[] }
 export function isMuseTier(tier: Tier): tier is MuseTier {
-  return tier === "scout" || tier === "mechanic"
+  return tier === "scout" || tier === "mechanic" || tier === "worker"
 }
-export function museSubscriptionSelected(tier: Tier, enabled = process.env.USR_PI_MUSE_SUBSCRIPTION === "1"): tier is MuseTier {
-  return enabled && isMuseTier(tier)
+export function museSubscriptionSelected(tier: Tier, _enabled?: boolean): tier is MuseTier {
+  return isMuseTier(tier)
 }
 
 export const TIER_TOOLS = {
@@ -80,11 +86,12 @@ export function tierForModel(model: GoModelRef, readOnly: boolean): Tier {
       expected.id === model.id && expected.variant === model.variant
   })
   if (tier && readOnly === (tier === "scout")) return tier
-  for (const candidate of ["scout", "mechanic"] as const) {
-    const expected = MUSE_TIER_MODELS[candidate]
+  for (const candidate of ["scout", "mechanic", "worker"] as const) {
+    const expected = MUSE_TIER_MODELS[candidate as keyof typeof MUSE_TIER_MODELS]
+    if (!expected) continue
     if (model.providerID === expected.providerID && model.id === expected.id &&
         model.variant === expected.variant && readOnly === (candidate === "scout"))
-      return candidate
+      return candidate as Tier
   }
   throw new Error("Unapproved Pi tier, model/effort or tool scope")
 }
