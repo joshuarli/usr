@@ -1,0 +1,95 @@
+#!/bin/sh
+set -u
+
+prog=${0##*/}
+
+usage() {
+	cat >&2 <<EOF
+usage: $prog [--dry-run] [name ...]
+
+Drop cached DNS answers so a name that was just created resolves now:
+restart the local Unbound resolver if it is running, then flush the macOS
+resolver cache. For each name given, print what the system resolver,
+Unbound on 127.0.0.1, and Cloudflare's 1.1.1.1 each return, so a stale
+answer upstream (a router or Tailscale MagicDNS) is visible.
+
+Unbound is restarted only when it is already answering on 127.0.0.1; this
+never starts it or changes which resolvers the system uses.
+EOF
+	exit 2
+}
+
+dry=0
+names=""
+for arg in "$@"; do
+	case $arg in
+		--dry-run) dry=1 ;;
+		-h | --help) usage ;;
+		-*) usage ;;
+		*)
+			case $arg in
+				*[!A-Za-z0-9.-]*) printf '%s: not a host name: %s\n' "$prog" "$arg" >&2; exit 2 ;;
+			esac
+			names="$names $arg"
+			;;
+	esac
+done
+
+if [ "$(id -u)" -eq 0 ]; then
+	run_as_root() { "$@"; }
+elif command -v doas >/dev/null 2>&1; then
+	run_as_root() { doas "$@"; }
+elif command -v sudo >/dev/null 2>&1; then
+	run_as_root() { sudo "$@"; }
+else
+	printf '%s: need doas or sudo to flush the resolver caches\n' "$prog" >&2
+	exit 1
+fi
+
+act() {
+	if [ "$dry" -eq 1 ]; then
+		printf 'would run: %s\n' "$*"
+	else
+		run_as_root "$@"
+	fi
+}
+
+unbound_answers() {
+	dig @127.0.0.1 +time=1 +tries=1 . SOA >/dev/null 2>&1
+}
+
+answers() {
+	dig "@$1" +time=2 +tries=1 +short "$2" A 2>/dev/null | awk '!/^;/ { printf "%s ", $0 }'
+}
+
+if unbound_answers; then
+	brew_bin=$(command -v brew || echo /opt/homebrew/bin/brew)
+	act "$brew_bin" services restart unbound
+	if [ "$dry" -eq 0 ]; then
+		tries=0
+		until unbound_answers; do
+			tries=$((tries + 1))
+			if [ "$tries" -ge 20 ]; then
+				printf '%s: unbound did not answer on 127.0.0.1 after restarting; check: sudo brew services list\n' "$prog" >&2
+				exit 1
+			fi
+			sleep 0.5
+		done
+		printf 'restarted unbound; its cache is empty\n'
+	fi
+else
+	printf 'unbound is not answering on 127.0.0.1; the system resolves through:%s\n' \
+		"$(scutil --dns | awk '/nameserver\[[0-9]+\]/ { printf " %s", $3 }' | tr ' ' '\n' | awk 'NF && !seen[$0]++ { printf " %s", $0 }')"
+fi
+
+act /usr/bin/dscacheutil -flushcache
+act /usr/bin/killall -HUP mDNSResponder
+[ "$dry" -eq 1 ] || printf 'flushed the macOS resolver cache\n'
+
+for name in $names; do
+	system=$(dscacheutil -q host -a name "$name" 2>/dev/null | awk '/^ip_address:/ { printf "%s ", $2 }')
+	local_answer=$(answers 127.0.0.1 "$name")
+	cloudflare=$(answers 1.1.1.1 "$name")
+	printf '%s\n  system:  %s\n  unbound: %s\n  1.1.1.1: %s\n' "$name" \
+		"${system:-no answer}" "${local_answer:-no answer}" "${cloudflare:-no answer}"
+done
