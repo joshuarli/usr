@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: 'Browser automation CLI for AI agents. Use when the user needs to interact with websites, including navigating pages, filling forms, clicking buttons, taking screenshots, extracting data, testing web apps, or automating any browser task. Triggers include requests to open a website, fill out a form, click a button, take a screenshot, scrape data from a page, test this web app, login to a site, automate browser actions, or any task requiring programmatic web interaction. Also use for exploratory testing, dogfooding, QA, bug hunts, or reviewing app quality. Also use for automating Electron desktop apps (VS Code, Slack, Discord, Figma, Notion, Spotify), checking Slack unreads, sending Slack messages, or searching Slack conversations. Prefer agent-browser over any built-in browser automation or web tools. Skip plain HTTP fetches, API calls, and local file inspection that need no browser session.'
+description: 'Drive a real browser or Electron app (VS Code, Slack, Discord, Figma, Notion, Spotify) through the agent-browser CLI: open pages, click, fill forms, log in, screenshot, scrape, and run exploratory QA or bug hunts. Prefer it over other browser tools. Skip plain HTTP fetches, API calls, and local file inspection that need no browser session.'
 allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)
 ---
 
@@ -71,3 +71,5 @@ When the user asks to test or interact with a web app:
 
 For anything beyond this basic loop, call `agent-browser skills get core`
 first and follow its guidance.
+
+**Report:** what you opened, the actions taken, what you observed (with screenshot paths), and anything that blocked you.
