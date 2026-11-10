@@ -98,7 +98,7 @@ Worker and expert stay on their existing pins regardless of this flag.
 This is subscription usage via the official Muse Code SDK, **not** the metered Meta API.
 
 - Install Muse Code >=1.4.14, launch `muse`, and sign in with `/login`.
-- Run `sh sync` to install the exact Pi and bridge npm pins. Set
+- Run `sh sync` to install the exact local bridge npm pin; the provider is loaded only in Muse SDK workers, not globally into ordinary Pi sessions. Set
   `USR_PI_MUSE_SUBSCRIPTION=1` in the environment launching your coding harness
   and MCP bridge, then restart the harness. `sh sync bridge` also reconciles the bridge.
 - On a clean *linked* worktree, run `pi-subagent-bridge model-check CWD scout`

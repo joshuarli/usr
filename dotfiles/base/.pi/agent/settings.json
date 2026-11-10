@@ -10,8 +10,7 @@
   "hideThinkingBlock": true,
   "defaultProjectTrust": "always",
   "packages": [
-    "npm:pi-subagents@0.87.0",
-    "npm:pi-muse-subscription@0.1.0"
+    "npm:pi-subagents@0.87.0"
   ],
   "skills": [
     "~/.agents/skills"
