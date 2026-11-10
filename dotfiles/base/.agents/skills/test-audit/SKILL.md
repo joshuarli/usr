@@ -33,12 +33,7 @@ Judge tests in a bounded scope one at a time, or reshape a whole suite when the 
 
 Fix by calling the subject with one concrete input and asserting the literal output or effect: for a mock, the payload received; for an absence, also the presence on another input; for a constant, the mechanism that reads it.
 
-**Execution drag and isolation hazards** (repair, never delete to speed up):
-- *Idle timeout sleeps:* waiting out production default timeouts instead of a virtual clock or 50-200ms test timeout;
-- *False serialization:* sequential loops over independent seeds or matrix rows that could run concurrently or separately;
-- *Global-state collisions:* asserting on shared listings or databases instead of the test's own path, port, or handle;
-- *Redundant per-test setup I/O:* re-reading immutable files (migrations, queries, schemas) or re-computing digests instead of caching parsed assets;
-- *Leaked handles:* unclosed servers, child processes, sockets, or connections surviving the test.
+**Execution drag** (repair, never delete to speed up): waiting out production timeouts instead of a virtual clock or a 50-200ms test timeout; sequential loops over independent seeds or matrix rows; re-reading or re-digesting immutable assets (migrations, queries, schemas) per test instead of caching them.
 
 **Other junk leads** (investigate, never delete automatically): coverage probes with no assertion, copied fixtures or export lists, exact source greps, private-predicate tests duplicated at boundaries, duplicate invocations of one contract, provider-local replays of shared helpers, tests preserving test-only exports, and production code whose only callers are tests.
 
@@ -51,7 +46,7 @@ Fix by calling the subject with one concrete input and asserting the literal out
 
 ## Isolation and determinism
 
-Each test builds its own world: fresh temp directory under `.work/tmp`, own database or schema, `HOME`, config, and environment, torn down on pass and fail. Ephemeral ports and unique names; never a fixed port, shared file, or global singleton. Pass in any order and in parallel. No real clock, randomness, or network: inject a clock and seeded RNG; wait on a condition with a deadline, never a bare sleep. Touching the user's real home, shared services, or the network is a defect. If a wide test cannot be deterministic, narrow it until it can. No retries. Isolate mutable state while caching immutable assets.
+Each test builds its own world: fresh temp directory under `.work/tmp`, own database or schema, `HOME`, config, and environment, torn down on pass and fail, with no server, child process, socket, or connection outliving it. Ephemeral ports and unique names; never a fixed port, shared file, or global singleton, and assert on the test's own path, port, or handle rather than shared listings. Pass in any order and in parallel. No real clock, randomness, or network: inject a clock and seeded RNG; wait on a condition with a deadline, never a bare sleep. Touching the user's real home, shared services, or the network is a defect. If a wide test cannot be deterministic, narrow it until it can. No retries. Isolate mutable state while caching immutable assets.
 
 ## Coverage
 
@@ -67,13 +62,7 @@ Line coverage is not a gate and not a target. It rewards executing code, not che
 
 ## Decisions
 
-For each candidate, say in a line: the failure it can detect, the stronger proof that remains, and the focused command. One disposition each:
-- **Retain:** name the contract and failure caught.
-- **Fix:** keep the contract, repair the vacuous assertion, idle timeout, global collision, or leaked handle.
-- **Consolidate:** name the suite that absorbs it, preferring the wider boundary test.
-- **Delete:** name the remaining proof, or explain why no independent contract exists.
-
-Judge assertions, not names; inspect parameterized rows. Missing evidence means not ready to delete.
+Give each candidate one disposition (**Retain**, **Fix**, **Consolidate** into a named wider suite, or **Delete**) in one line naming the failure it detects, the proof that remains, and the focused command. Judge assertions, not names; inspect parameterized rows. Missing evidence means not ready to delete.
 
 ## Editing
 
