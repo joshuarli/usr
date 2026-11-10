@@ -16,8 +16,7 @@ export type CommandResult = {
 }
 
 const children = new Map<number, ChildProcess>()
-const MAX_TURNS: Record<Effort, number> = { low: 150, medium: 300, high: 500, xhigh: 650, max: 800 }
-const READ_ONLY_MAX_TURNS = 100
+const MAX_TURNS = 100_000
 
 export function startCommand(directory: string, logDirectory: string, text: string,
   effort: Effort, readOnly: boolean, resume?: string, model: string = COMMAND_MODEL): CommandRun {
@@ -32,7 +31,7 @@ export function startCommand(directory: string, logDirectory: string, text: stri
     "--model", model,
     "--effort", effort,
     "--output-format", "json",
-    "--max-turns", String(readOnly ? READ_ONLY_MAX_TURNS : MAX_TURNS[effort]),
+    "--max-turns", String(MAX_TURNS),
     "--skip-onboarding", "--no-auto-update", "--trust", "--no-skills",
     ...(readOnly ? ["--plan"] : ["--yolo"]),
     ...(resume ? ["--resume", resume] : []),
