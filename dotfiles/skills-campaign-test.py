@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import fnmatch
+import json
 import os
 import re
 import shutil
@@ -155,6 +157,19 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertTrue(adapter.is_symlink(), step)
             self.assertFalse(adapter.readlink().is_absolute(), step)
             self.assertEqual(canonical.resolve(), adapter.resolve(), step)
+
+    def test_claude_skips_instruction_adapters_while_working_in_this_repo(self):
+        patterns = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["claudeMdExcludes"]
+        canonical = ROOT / "dotfiles" / "base" / ".codex" / "AGENTS.md"
+        tracked = run("git", "-C", str(ROOT), "ls-files", "dotfiles/**/AGENTS.md", "dotfiles/**/CLAUDE.md").stdout.split()
+        self.assertTrue(tracked)
+        excluded = lambda path: any(fnmatch.fnmatchcase(str(path), pattern) for pattern in patterns)
+        for name in tracked:
+            path = ROOT / name
+            if path == canonical:
+                self.assertFalse(excluded(path), "the canonical contract is the global instruction file's link target")
+            else:
+                self.assertTrue(excluded(path), "adapter %s reloads the contract when Claude reads beside it" % name)
 
     def test_known_global_and_local_skill_trees_pass(self):
         for skills in (

@@ -1,0 +1,12 @@
+{
+  "claudeMdExcludes": [
+    "**/dotfiles/base/.claude/CLAUDE.md",
+    "**/dotfiles/base/.commandcode/AGENTS.md",
+    "**/dotfiles/base/.config/*/AGENTS.md",
+    "**/dotfiles/base/.dsh/AGENTS.md",
+    "**/dotfiles/base/.fx/AGENTS.md",
+    "**/dotfiles/base/.gemini/config/AGENTS.md",
+    "**/dotfiles/base/.grok/AGENTS.md",
+    "**/dotfiles/base/.pi/agent/AGENTS.md"
+  ]
+}
