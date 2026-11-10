@@ -52,5 +52,7 @@ Keep shell scripts compatible with macOS `/bin/sh` and dash. Python scripts use 
 
 Use `TODO.md` for deferred work and `docs/rfc/` when a design needs a decision. The `todo` skill owns both formats.
 
+`README.md` is a clean, up-to-date end-user guide: what the project is, how to get and use it, configuration and output users need, where to get help, and license. Keep developer setup, architecture, internals, and contributor workflow in `AGENTS.md` or `docs/`.
+
 
 For automatic Claude MCP registration, run `python3 -I tools/sync/claude-worker-test.py` (offline fixtures), then `sh -n sync` and `sh -n tools/sync/bootstrap.sh`. A live smoke test requires locally authenticated Claude/OpenCode Go/Command Code and is not part of offline tests.
