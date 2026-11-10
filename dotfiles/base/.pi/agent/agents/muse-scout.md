@@ -1,7 +1,7 @@
 ---
 name: muse-scout
 description: Read-only evidence gathering on Muse Code subscription.
-model: muse-sdk/muse-spark-1.3
+model: muse-sdk/muse-ember-1.0
 thinking: medium
 tools:
   - read

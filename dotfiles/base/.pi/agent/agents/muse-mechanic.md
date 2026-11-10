@@ -1,8 +1,8 @@
 ---
 name: muse-mechanic
 description: Scoped mechanical implementation on Muse Code subscription.
-model: muse-sdk/muse-spark-1.3
-thinking: high
+model: muse-sdk/muse-ember-1.0
+thinking: xhigh
 tools:
   - read
   - bash
