@@ -19,6 +19,7 @@ type Session = {
   backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition"; attempts: number
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string; continuations?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
+  execution_order?: "command-first"; fallback_blocked?: string
 }
 const EFFORT: Record<Tier, Effort> = {
   scout: "medium", mechanic: "xhigh", worker: "high", expert: "max",
@@ -31,8 +32,6 @@ const COMMAND_MODELS: Record<Tier, string> = {
   scout: COMMAND_EMBER_MODEL, mechanic: COMMAND_EMBER_MODEL, worker: COMMAND_MODEL, expert: COMMAND_MODEL,
 }
 const TURN_LIMIT_CONTINUATIONS = 2
-const ADMISSION_POLLS = 10
-const ADMISSION_POLL_MS = 500
 const QUOTA =/\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
 
 function git(cwd: string, ...args: string[]): string {
@@ -129,8 +128,8 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
   }
 }
 const PI_MODELS: Record<Tier, ModelRef> = {
-  scout: { providerID: "opencode", id: "muse-ember-1.0", variant: "medium" },
-  mechanic: { providerID: "opencode", id: "muse-ember-1.0", variant: "xhigh" },
+  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
+  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
   worker: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
   expert: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" },
 }
@@ -174,12 +173,17 @@ function untouched(s: Session): boolean {
 function quota(value: unknown): boolean {
   return QUOTA.test(typeof value === "string" ? value : JSON.stringify(value ?? ""))
 }
-function fallbackNotice(reason: string): string {
+function providerUnavailable(value: unknown): boolean {
+  const message = typeof value === "string" ? value : JSON.stringify(value ?? "")
+  return /\b(model (?:is |was )?(?:unavailable|not available|not found|unsupported)|unknown model|unsupported model|no such model|model does not exist|provider unavailable|provider not found|not logged in|not authenticated|authentication required|missing credentials)\b/i.test(message)
+}
+function fallbackNotice(s: Session): string {
   return [
-    reason,
+    s.fallback_reason,
     "Automatic fallback is expected and needs no parent action.",
     "The worktree was verified untouched before switching, so no work was lost or replayed.",
-    "The task continues on Command Code with the same scope, model and effort; verify it normally with worker_status.",
+    "The task continues on " + (s.backend === "pi" ? "OpenCode Go via the Pi SDK" : "Command Code") +
+      " with the same scope and approved tier pins; verify it normally with worker_status.",
     "Do not retry and do not start a duplicate worker.",
   ].join(" ")
 }
@@ -193,7 +197,7 @@ function blockedPartialNotice(): string {
 export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }) {
-  function fallback(s: Session, reason: string, detail?: unknown): Session {
+  function fallbackToCommand(s: Session, reason: string, detail?: unknown): Session {
     if (!command.available()) throw new Error("Pi " + reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
@@ -211,11 +215,38 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     save(s)
     return s
   }
+  async function fallbackToPi(s: Session, reason: string, detail?: unknown): Promise<Session> {
+    if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
+    // An in-flight, interrupted, or ambiguous Command Code process must never be duplicated.
+    if (s.command_run && command.status(s.command_run).state !== "failed")
+      throw new Error("Command Code is not known terminal; OpenCode Go fallback refused")
+    ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+    const worker = makeWorkerBridge(api, primaryFor(s))
+    if (!(await worker.modelCheck(s.cwd)).available)
+      throw new Error("Pinned OpenCode Go fallback model is unavailable")
+    s.backend = "pi-transition"
+    s.fallback_reason = reason
+    if (detail !== undefined)
+      s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
+    s.attempts = 1
+    save(s)
+    try {
+      const admitted = await worker.start(s.cwd, s.title, prompt(s), s.tier === "scout")
+      s.pi_id = admitted.session_id
+      s.backend = "pi"
+      save(s)
+      return s
+    } catch (error) {
+      if (String(error).includes("created but prompt admission failed"))
+        throw new Error(String(error) + "; worktree lease retained for session " + s.id)
+      throw error
+    }
+  }
   function admission(s: Session) {
     return {
       session_id: s.id, backend: s.backend, status: "admitted",
       fallback_reason: s.fallback_reason ?? null,
-      fallback_notice: s.fallback_reason ? fallbackNotice(s.fallback_reason) : null,
+      fallback_notice: s.fallback_reason ? fallbackNotice(s) : null,
     }
   }
   return {
@@ -233,16 +264,15 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           const runtime = await ModelRuntime.create()
           const model = modelFor(tierInput)
           if (!runtime.getModel(model.providerID, model.id))
-            issue = `Pinned primary model ${model.providerID}/${model.id} is not in the Pi SDK catalog`
+            issue = `Pinned OpenCode Go model ${model.providerID}/${model.id} is not in the Pi SDK catalog`
           else if (!runtime.hasConfiguredAuth(model.providerID))
             issue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
-      if (!available && issue)
-        issue = `Primary ${modelFor(tierInput).providerID}/${modelFor(tierInput).id} is temporarily unavailable: ${issue}. Fallback ${COMMAND_MODELS[tierInput]} is installed and ready.`
       return {
-        primary: { backend: "pi", model: modelFor(tierInput), available, issue },
-        fallback: { backend: "command-code", model: COMMAND_MODELS[tierInput], effort: EFFORT[tierInput], installed: command.available() },
+        primary: { backend: "command-code", model: COMMAND_MODELS[tierInput],
+          effort: EFFORT[tierInput], available: command.available() },
+        fallback: { backend: "pi", model: modelFor(tierInput), available, issue },
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {
@@ -252,52 +282,26 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const task = required(brief, "brief", 32000)
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, backend: "pi-admitting", attempts: 0, primary_model: modelFor(tierInput) }
+        task, backend: "command-transition", attempts: 0, execution_order: "command-first",
+        primary_model: modelFor(tierInput), command_model: COMMAND_MODELS[tierInput],
+        command_effort: EFFORT[tierInput] }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
       try { save(s) } catch (error) {
         releaseWorktree(leaseDir, dir, s.id)
         throw error
       }
-      const worker = makeWorkerBridge(api, modelFor(tierInput))
-      let available: boolean
-      try { available = (await worker.modelCheck(dir)).available }
-      catch (e) {
-        fallback(s, "Primary Pi runner unavailable at model check; continued on Command Code.", e)
+      if (!command.available()) {
+        await fallbackToPi(s, "Command Code CLI is unavailable; continued on OpenCode Go.")
         return admission(s)
       }
-      if (!available) {
-        fallback(s, "Pinned primary model unavailable; continued on Command Code.")
-        return admission(s)
-      }
-      try {
-        const admitted = await worker.start(dir, s.title, prompt(s), tierInput === "scout")
-        s.pi_id = admitted.session_id
-        s.backend = "pi"
-        s.attempts = 1
-        save(s)
-        for (let poll = 0; poll < ADMISSION_POLLS; poll++) {
-          const early = await worker.status(dir, admitted.session_id).catch(() => null)
-          if (!early) break
-          if (early.state === "running" || early.state === "queued") {
-            await new Promise((done) => setTimeout(done, ADMISSION_POLL_MS))
-            continue
-          }
-          if (early.state !== "succeeded" && quota(early.error) && untouched(s)) {
-            fallback(s, "Primary Pi runner unavailable at admission (provider usage limit); continued on Command Code.", early.error)
-            return admission(s)
-          }
-          break
-        }
-        return { ...admission(s), model: modelFor(s.tier) }
-      } catch (e) {
-        // A created Pi session may still execute; never start a second worker without proving it did not.
-        if (String(e).includes("created but prompt admission failed"))
-          throw new Error(String(e) + "; worktree lease retained for session " + s.id)
-        if (!quota(e)) throw e
-        fallback(s, "Primary Pi runner unavailable at admission (provider usage limit); continued on Command Code.", e)
-        return admission(s)
-      }
+      // Commit an admission transition before spawning. If the launch is ambiguous, retain the lease.
+      s.command_run = command.start(s.cwd, leaseDir, prompt(s),
+        fallbackEffortFor(s), s.tier === "scout", undefined, fallbackModelFor(s))
+      s.backend = "command-code"
+      s.attempts = 1
+      save(s)
+      return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
@@ -314,13 +318,15 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         last_assistant_text = response.last_assistant_text
         error = response.error
         usage = { cost_reported_usd: response.cost_reported_usd, tokens: response.tokens }
-        if (state !== "running" && state !== "queued" && state !== "succeeded" &&
-          quota(error)) {
+        // Historical Pi-first sessions retain their original fallback policy.
+        // Newly admitted Command-first sessions never fail back to Command a second time.
+        if (s.execution_order !== "command-first" &&
+            state !== "running" && state !== "queued" && state !== "succeeded" && quota(error)) {
           if (!untouched(s)) {
             state = "blocked_partial_work"
             notice = blockedPartialNotice()
           } else {
-            fallback(s, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", error)
+            fallbackToCommand(s, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", error)
             state = "running"
             last_assistant_text = null
             error = null
@@ -338,11 +344,36 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         error = response.state === "failed" || response.state === "unknown_or_interrupted"
           ? response.result?.error ?? response.stderr : null
         usage = response.result?.usage ?? null
+        if (s.execution_order === "command-first" && s.fallback_blocked) {
+          state = "blocked_fallback"
+          notice = s.fallback_blocked
+        } else if (s.execution_order === "command-first" && state === "failed" &&
+                   (quota(error) || providerUnavailable(error))) {
+          if (!untouched(s)) {
+            state = "blocked_partial_work"
+            notice = blockedPartialNotice()
+          } else {
+            try {
+              await fallbackToPi(s,
+                "Primary Command Code provider/model unavailable; continued on OpenCode Go before edits.", error)
+              state = "running"
+              last_assistant_text = null
+              error = null
+              usage = null
+            } catch (fallbackError) {
+              // Do not retry a blocked fallback on every status poll.
+              s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
+              save(s)
+              state = s.backend === "pi-transition" ? "blocked_admission" : "blocked_fallback"
+              notice = s.fallback_blocked
+            }
+          }
+        }
       }
       const changed_paths = changes(s.cwd, s.scope.base_revision)
       const out_of_scope_paths = outside(changed_paths, s.scope.writable_paths)
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
-      if (s.fallback_reason && !notice) notice = fallbackNotice(s.fallback_reason)
+      if (s.fallback_reason && !notice) notice = fallbackNotice(s)
       // A verified terminal response releases worktree admission, not session history.
       // Unknown/interrupted/queued work remains leased until explicitly inspected.
       if (["succeeded", "failed", "turn_limit", "cancelled", "canceled"].includes(state)) {
@@ -373,7 +404,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
-      if (s.backend === "command-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition")
+      if (s.backend === "command-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.backend === "pi") {

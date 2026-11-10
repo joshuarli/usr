@@ -1,15 +1,15 @@
 # pi-subagent-bridge
 
-One Pi SDK subagent runtime for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. Primary execution is delegated through embedded Pi SDK to native pi-subagents RPC, rather than another custom agent loop. Command Code remains the separately authenticated, tier-pinned fallback (Muse Ember for scout/mechanic, DeepSeek V4.1 Flash for worker/expert).
+One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. **Command Code runs first** (Muse Ember for scout/mechanic, DeepSeek V4.1 Flash for worker/expert); **OpenCode Go via embedded Pi SDK + pi-subagents RPC is the only fallback**. No OpenCode server or separate custom agent loop is started.
 
-| Tier | Pi SDK primary | Thinking | Command Code |
-| --- | --- | --- | --- |
-| scout | `opencode/muse-ember-1.0` | medium | `meta/muse-ember`, medium |
-| mechanic | `opencode/muse-ember-1.0` | xhigh | `meta/muse-ember`, xhigh |
-| worker | `opencode-go/deepseek-v4.1-flash` | high | `deepseek/deepseek-v4.1-flash`, high |
-| expert | `opencode-go/deepseek-v4.1-flash` | max | `deepseek/deepseek-v4.1-flash`, max |
+| Tier | Command Code first | Effort | OpenCode Go fallback | Thinking |
+| --- | --- | --- | --- | --- |
+| scout | `meta/muse-ember` | medium | `opencode-go/muse-spark-1.3-contributor` | medium |
+| mechanic | `meta/muse-ember` | xhigh | `opencode-go/muse-spark-1.3-contributor` | high |
+| worker | `deepseek/deepseek-v4.1-flash` | high | `opencode-go/deepseek-v4.1-flash` | high |
+| expert | `deepseek/deepseek-v4.1-flash` | max | `opencode-go/deepseek-v4.1-flash` | max |
 
-No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Neither runner may spawn another agent. Primary models require the shared OpenCode Zen/Go credential configured in Pi; OpenCode Zen Ember is metered and has a tracked Pi catalog entry in `dotfiles/base/.pi/agent/models.json` until upstream catches up; fallback requires `cmd login`. No other model is permitted.
+No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Neither runner may spawn another agent. **Only OpenCode Go models are eligible for OpenCode/Pi delegation.** Do not use `opencode/*` Zen, metered OpenCode models, or custom endpoints. Ember runs on Command Code only; the OpenCode Go scout/mechanic fallback remains Muse Spark 1.3 Contributor. The bridge requires `cmd login` for its preferred provider and a separate configured OpenCode Go credential for fallback. No unapproved models are permitted.
 
 ## Setup
 
@@ -22,7 +22,7 @@ The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No Open
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` checks the specific pinned Pi model and Command Code installation.
+`worker_model_check(cwd, tier)` reports Command Code first (executable installed) and the exact OpenCode Go-only Pi fallback model/auth.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -55,7 +55,7 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 ## Safety and durability
 
-The primary SDK host loads the exact pinned pi-subagents extension without ambient extensions. It submits an exact model/effort/tier and scoped brief to `subagents:rpc:v1:request`. Native completion events drive the terminal result; an absent receipt or interrupted SDK host remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. Only confirmed model/provider unavailability or a provider usage limit before any edits permits switching to Command Code. The switch is reported transparently, not as a failure: `worker_start`/`worker_status` return `fallback_reason` (what happened), `fallback_notice` (that the switch was automatic and needs no parent action, with the same scope and pinned tier model and no duplicate start), and `fallback_detail` (the original provider message, for diagnosis). The `error` field is cleared once the fallback has safely taken over. Partial work is never replayed under a second provider.
+The Command Code runner is preferred and pins an exact model and effort. If Command Code is not installed or its provider/model/usage fails conclusively before edits, the embedded Pi SDK host loads only the pinned pi-subagents extension and submits the allowed OpenCode Go model via `subagents:rpc:v1:request`. An absent receipt, interrupted process, or uncertain admission remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. No fallback after edits or a second fallback from Go is allowed. The switch is reported transparently, not as a failure: `worker_start`/`worker_status` return `fallback_reason` (what happened), `fallback_notice` (that the switch was automatic and needs no parent action, with the same scope and pinned tier model and no duplicate start), and `fallback_detail` (the original provider message, for diagnosis). The `error` field is cleared once the fallback has safely taken over. Partial work is never replayed under a second provider.
 
 State, prompt job files, SDK JSONL transcripts and Command Code NDJSON results live under ignored `.work/worker-bridge/`. These files may contain code and model output; keep that directory private. This is *not* an OS sandbox: ignored files, absolute-path reads, and external processes are beyond Git write-scope detection.
 

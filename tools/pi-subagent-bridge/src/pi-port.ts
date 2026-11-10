@@ -24,7 +24,7 @@ const children = new Map<number, ChildProcess>()
 const worker = fileURLToPath(new URL("./sdk-worker.ts", import.meta.url))
 const VARIANTS: Record<string, { providerID: string; variants: string[] }> = {
   "deepseek-v4.1-flash": { providerID: "opencode-go", variants: ["high", "max"] },
-  "muse-ember-1.0": { providerID: "opencode", variants: ["medium", "xhigh"] },
+  "muse-spark-1.3-contributor": { providerID: "opencode-go", variants: ["medium", "high"] },
 }
 
 function stateDir(cwd: string): string {

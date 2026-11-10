@@ -17,6 +17,11 @@ class OrchestrateTests(unittest.TestCase):
         for method in ("worker_model_check", "worker_start", "worker_status", "worker_resume"):
             self.assertIn(method, self.text)
 
+    def test_command_first_and_opencode_go_only(self):
+        self.assertIn("Command Code is the first executor", self.text)
+        self.assertIn("only models actually available through the `opencode-go`", self.text)
+        self.assertNotIn("opencode/muse-ember-1.0", self.text)
+
     def test_god_exception(self):
         self.assertIn("claude-opus-5-5", self.text)
         self.assertIn("gpt-6.1-sol", self.text)

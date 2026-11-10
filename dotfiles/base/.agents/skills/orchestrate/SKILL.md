@@ -11,12 +11,14 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 ## Pinned tiers
 
-| Tier | Pi SDK primary (OpenCode Zen / Go) | Thinking | Command Code fallback | Purpose |
-| --- | --- | --- | --- | --- |
-| scout | `opencode/muse-ember-1.0` | `medium` | `meta/muse-ember`, `medium` | Read-only exploration |
-| mechanic | `opencode/muse-ember-1.0` | `xhigh` | `meta/muse-ember`, `xhigh` | Mechanical scoped edits |
-| worker | `opencode-go/deepseek-v4.1-flash` | `high` | `deepseek/deepseek-v4.1-flash`, `high` | Implementation, debugging, testing |
-| expert | `opencode-go/deepseek-v4.1-flash` | `max` | `deepseek/deepseek-v4.1-flash`, `max` | Difficult architectural or cross-cutting work |
+| Tier | Command Code first | Effort | OpenCode Go fallback via Pi | Thinking | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| scout | `meta/muse-ember` | `medium` | `opencode-go/muse-spark-1.3-contributor` | `medium` | Read-only exploration |
+| mechanic | `meta/muse-ember` | `xhigh` | `opencode-go/muse-spark-1.3-contributor` | `high` | Mechanical scoped edits |
+| worker | `deepseek/deepseek-v4.1-flash` | `high` | `opencode-go/deepseek-v4.1-flash` | `high` | Implementation, debugging, testing |
+| expert | `deepseek/deepseek-v4.1-flash` | `max` | `opencode-go/deepseek-v4.1-flash` | `max` | Difficult architectural or cross-cutting work |
+
+**Hard OpenCode boundary:** only models actually available through the `opencode-go` provider may be delegated via OpenCode/Pi. Never use `opencode/*` (Zen), other metered OpenCode models, or custom model endpoints. Availability in standard OpenCode does **not** imply OpenCode Go eligibility. If a desired model is not on Go, keep it exclusive to another approved provider (e.g., Muse Ember on Command Code), or choose a supported Go model. Do not automatically substitute Zen.
 
 No Pi god tier is available. **Only Claude Code** may spawn a native `god` on `claude-opus-5-5` at `xhigh`; **only Codex** may spawn a native `god` on `gpt-6.1-sol` at `high`. Other harnesses do not have `god`; do not silently substitute another model or map it to `expert`.
 
@@ -41,9 +43,9 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-The primary executor embeds **Pi SDK + pi-subagents**, invoking the extension RPC with the pinned model and tier and reusing the shared OpenCode credential for Zen and Go. It does not invoke the Pi CLI or start the OpenCode agent/server. Only an unavailable approved model/provider or a recognized quota/usage failure permits a fallback to the separate authenticated Command Code CLI, pinned to Muse Ember for scout/mechanic or DeepSeek V4.1 Flash for worker/expert, at the exact effort above.
+**Command Code is the first executor for every non-god tier**, pinned to Muse Ember for scout/mechanic and DeepSeek V4.1 Flash for worker/expert. OpenCode Go is **second**: the bridge embeds Pi SDK + pi-subagents and invokes its exact Go-only pinned model through the extension RPC, without starting OpenCode or the Pi CLI. Only a missing Command Code executable or a confirmed provider/model/usage failure may switch to Go, before any edits and with unambiguous termination. No second fallback is allowed. Legacy sessions retain their admitted backend and pinned models rather than being restarted.
 
-**Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Command Code has no third fallback. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
+**Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. OpenCode Go is the final fallback: no third provider, no return to Command Code. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 
 ## Clef-flash advisory routing
 

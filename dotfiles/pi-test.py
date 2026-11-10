@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "opencode/muse-ember-1.0"
+MODEL = "opencode-go/muse-spark-1.3-contributor"
 TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "xhigh", "god": "xhigh"}
 
 
@@ -154,7 +154,7 @@ else:
         self.assertEqual(set(sub["modelScope"]["allow"]), {
             "opencode-go/deepseek-v4.1-flash", MODEL})
         expected = {"scout": (MODEL, "medium"),
-                    "mechanic": (MODEL, "xhigh"),
+                    "mechanic": (MODEL, "high"),
                     "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
                     "expert": ("opencode-go/deepseek-v4.1-flash", "max")}
         for tier, (model, effort) in expected.items():
@@ -165,12 +165,9 @@ else:
             self.assertIn("model: " + model, agent)
             self.assertIn("thinking: " + effort, agent)
             self.assertNotIn("tools: subagent", agent)
-        catalog = json.loads((PROFILE / "models.json").read_text())
-        ember = catalog["providers"]["opencode"]["models"][0]
-        self.assertEqual(ember["id"], "muse-ember-1.0")
-        self.assertEqual(ember["api"], "openai-responses")
-        self.assertEqual(ember["thinkingLevelMap"]["xhigh"], "xhigh")
-        self.assertEqual(ember["thinkingLevelMap"]["medium"], "medium")
+        self.assertFalse((PROFILE / "models.json").exists(),
+                         "No custom OpenCode Zen catalog is allowed for delegated workers")
+        self.assertTrue(all(name.startswith("opencode-go/") for name in sub["modelScope"]["allow"]))
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")

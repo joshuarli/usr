@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Read-only inventory and evidence gathering.
-model: opencode/muse-ember-1.0
+model: opencode-go/muse-spark-1.3-contributor
 thinking: medium
 tools: read, grep, find, ls
 ---

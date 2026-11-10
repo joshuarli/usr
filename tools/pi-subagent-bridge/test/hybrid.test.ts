@@ -1,15 +1,16 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs"
+import { appendFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
-import { type OpenCodePort } from "../src/bridge.ts"
-import { type CommandRun } from "../src/command.ts"
+import type { OpenCodePort } from "../src/bridge.ts"
+import type { CommandRun } from "../src/command.ts"
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim()
+
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "usr-hybrid-")))
   git(root, "init", "-q")
@@ -22,16 +23,20 @@ function fixture() {
   mkdirSync(join(root, ".work", "wt"), { recursive: true })
   const cwd = join(root, ".work", "wt", "a")
   git(root, "worktree", "add", "-qb", "lane-a", cwd)
-  const scope: Scope = { base_revision: git(cwd, "rev-parse", "HEAD"), writable_paths: ["README"],
-    acceptance_proof: "Run a focused verifier; report exact command, exit code and output",
-    attempt_limit: 2, stop_on: "Unexpected dependencies or contract changes" }
+  const scope: Scope = {
+    base_revision: git(cwd, "rev-parse", "HEAD"), writable_paths: ["README"],
+    acceptance_proof: "Run a focused verifier; report command, exit and output",
+    attempt_limit: 2, stop_on: "Unexpected dependencies or contract changes",
+  }
   return { root, cwd, scope, close: () => rmSync(root, { recursive: true, force: true }) }
 }
+
 function fake(cwd: string) {
   const calls: unknown[] = []
-  let status = "succeeded", assistant = "PROOF: test exit 0", error: unknown = null
-  let variants = ["medium", "high", "xhigh", "max"]
-  let commandDone = false
+  let piState = "succeeded", piError: unknown = null
+  let variants = ["medium", "high", "max"]
+  let commandAvailable = true, commandDone = false, commandFailure: string | null = null
+  let commandFinalText: string | null = null
   let model = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
   const api: OpenCodePort = {
     create: async (input) => {
@@ -44,66 +49,257 @@ function fake(cwd: string) {
       id: "ses_fixture", title: "usr-worker: demo",
       model, location: { directory: cwd },
       metadata: { usr_worker_v1: { directory: cwd, model } },
-      outcome: status, error,
+      outcome: piState, error: piError,
     } }),
     active: async () => ({ data: {} }),
     inbox: async () => ({ data: [] }),
-    messages: async () => ({ data: [
-      { type: "assistant", content: [{ type: "text", text: assistant }] },
-    ] }),
+    messages: async () => ({ data: [{ type: "assistant", content: [{ type: "text", text: "PROOF: test exit 0" }] }] }),
     interrupt: async () => ({ data: { interrupted: true } }),
     models: async () => ({ data: [
       { id: "deepseek-v4.1-flash", providerID: "opencode-go" },
-      { id: "muse-ember-1.0", providerID: "opencode" },
+      { id: "muse-spark-1.3-contributor", providerID: "opencode-go" },
     ].map(({ id, providerID }) => ({
-      id, providerID,
-      variants: variants.map((variant) => ({ id: variant })), enabled: true, status: "active",
+      id, providerID, variants: variants.map((variant) => ({ id: variant })),
+      enabled: true, status: "active",
     })) }),
   }
   const command = {
-    available: () => true,
-    start: (dir: string, _log: string, prompt: string, effort: "low" | "medium" | "high" | "xhigh" | "max", readOnly: boolean, resume?: string, selectedModel?: string): CommandRun => {
+    available: () => commandAvailable,
+    start: (dir: string, _log: string, prompt: string,
+      effort: "low" | "medium" | "high" | "xhigh" | "max",
+      readOnly: boolean, resume?: string, selectedModel?: string): CommandRun => {
       calls.push({ command: true, dir, prompt, effort, readOnly, resume, model: selectedModel })
-      return { pid: 123, output: "fake", errors: "fake", started_at: "2026-11-06" }
+      return { pid: 123, output: "fake", errors: "fake", started_at: "2026-11-09" }
     },
-    status: () => commandDone ?
-      { state: "succeeded", result: { subtype: "success" as const, sessionId: "cmd-session", finalText: "proof" }, stderr: null } :
+    status: () => commandFailure ?
+      { state: "failed", result: { subtype: "error" as const,
+        sessionId: "cmd-session", error: commandFailure, finalText: commandFinalText ?? "failed" }, stderr: null } :
+      commandDone ?
+      { state: "succeeded", result: { subtype: "success" as const,
+        sessionId: "cmd-session", finalText: "proof" }, stderr: null } :
       { state: "running", result: null, stderr: null },
     cancel: () => true,
   }
-  return { api, command, calls,
-    fail: (text: string, providerError = true) => { status = "failed"; assistant = text; error = providerError ? { code: 429, message: text } : null },
-    omitModels: () => { variants = [] }, done: () => { commandDone = true } }
+  return {
+    api, command, calls,
+    failPi: (error: string) => { piState = "failed"; piError = { code: 429, message: error } },
+    omitGo: () => { variants = [] },
+    noCommand: () => { commandAvailable = false },
+    failCommand: (error: string, finalText?: string) => {
+      commandFailure = error; commandFinalText = finalText ?? null
+    },
+    done: () => { commandDone = true },
+  }
 }
+const commandCalls = (calls: unknown[]) =>
+  calls.filter((value) => !!value && typeof value === "object" && "command" in value)
+const piCreates = (calls: unknown[]) =>
+  calls.filter((value) => !!value && typeof value === "object" && "title" in value)
 
-test("every Pi tier pins exactly the requested provider, model, and effort", async () => {
+test("Command Code is primary, and fallback model pins are exclusively OpenCode Go", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     const expected = [
-      ["scout", "opencode", "muse-ember-1.0", "medium", "medium", "meta/muse-ember"],
-      ["mechanic", "opencode", "muse-ember-1.0", "xhigh", "xhigh", "meta/muse-ember"],
-      ["worker", "opencode-go", "deepseek-v4.1-flash", "high", "high", "deepseek/deepseek-v4.1-flash"],
-      ["expert", "opencode-go", "deepseek-v4.1-flash", "max", "max", "deepseek/deepseek-v4.1-flash"],
+      ["scout", "meta/muse-ember", "medium", "muse-spark-1.3-contributor", "medium"],
+      ["mechanic", "meta/muse-ember", "xhigh", "muse-spark-1.3-contributor", "high"],
+      ["worker", "deepseek/deepseek-v4.1-flash", "high", "deepseek-v4.1-flash", "high"],
+      ["expert", "deepseek/deepseek-v4.1-flash", "max", "deepseek-v4.1-flash", "max"],
     ] as const
-    for (const [tier, providerID, id, variant, fallbackEffort, fallbackModel] of expected) {
-      const found = await bridge.modelCheck(f.cwd, tier)
-      assert.deepEqual(found.primary.model, { providerID, id, variant })
-      assert.equal(found.primary.available, true)
-      assert.equal(found.fallback.effort, fallbackEffort)
-      assert.equal(found.fallback.model, fallbackModel)
+    for (const [tier, model, effort, fallbackId, fallbackEffort] of expected) {
+      const status = await bridge.modelCheck(f.cwd, tier)
+      assert.equal(status.primary.backend, "command-code")
+      assert.equal(status.primary.model, model)
+      assert.equal(status.primary.effort, effort)
+      assert.equal(status.primary.available, true)
+      assert.equal(status.fallback.backend, "pi")
+      assert.deepEqual(status.fallback.model, {
+        providerID: "opencode-go", id: fallbackId, variant: fallbackEffort,
+      })
+      assert.equal(status.fallback.available, true)
     }
     await assert.rejects(bridge.modelCheck(f.cwd, "god"), /Unknown Pi tier/)
   } finally { f.close() }
 })
 
-test("OpenCode Go high runs a scoped worker; out-of-scope edits block acceptance", async () => {
+test("Command Code scout and mechanic use Ember medium and xhigh, even when Go has no models", async () => {
+  for (const [tier, effort] of [["scout", "medium"], ["mechanic", "xhigh"]] as const) {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+      m.omitGo()
+      const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
+      const started = await bridge.start(f.cwd, tier, tier, scope, "Provide evidence")
+      assert.equal(started.backend, "command-code")
+      assert.equal(started.fallback_reason, null)
+      assert.equal(commandCalls(m.calls).length, 1)
+      assert.equal(piCreates(m.calls).length, 0)
+      assert.match(JSON.stringify(commandCalls(m.calls)[0]), /"model":"meta\/muse-ember"/)
+      assert.match(JSON.stringify(commandCalls(m.calls)[0]), new RegExp('"effort":"' + effort + '"'))
+      m.done()
+      const result = await bridge.status(f.cwd, started.session_id)
+      assert.equal(result.model, "meta/muse-ember")
+      assert.equal(result.effort, effort)
+    } finally { f.close() }
+  }
+})
+
+test("missing Command Code starts exactly the pinned OpenCode Go Spark fallback", async () => {
+  for (const [tier, variant] of [["scout", "medium"], ["mechanic", "high"]] as const) {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+      m.noCommand()
+      const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
+      const started = await bridge.start(f.cwd, tier, tier, scope, "Find proof")
+      assert.equal(started.backend, "pi")
+      assert.match(started.fallback_notice ?? "", /needs no parent action/)
+      const result = await bridge.status(f.cwd, started.session_id)
+      assert.deepEqual(result.model, {
+        providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant,
+      })
+      assert.equal(result.effort, variant)
+      assert.equal(commandCalls(m.calls).length, 0)
+      assert.equal(piCreates(m.calls).length, 1)
+    } finally { f.close() }
+  }
+})
+
+test("Command quota failure on a clean worktree switches once to OpenCode Go", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const started = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.failCommand("quota exceeded, allowance exhausted")
+    const result = await bridge.status(f.cwd, started.session_id)
+    assert.equal(result.backend, "pi")
+    assert.equal(result.state, "running")
+    assert.equal(result.error, null)
+    assert.deepEqual(result.model, { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" })
+    assert.match(result.fallback_reason ?? "", /continued on OpenCode Go/)
+    assert.match(result.fallback_notice ?? "", /Do not retry/)
+    assert.match(result.fallback_detail ?? "", /quota exceeded/)
+    assert.equal(commandCalls(m.calls).length, 1)
+    assert.equal(piCreates(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("explicit model-not-found error allows a single Go fallback", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "read", "scout", { ...f.scope, writable_paths: [] }, "Locate evidence")
+    m.failCommand("model not found")
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.backend, "pi")
+    assert.deepEqual(status.model, {
+      providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium",
+    })
+  } finally { f.close() }
+})
+
+test("quota in task prose is not a provider error and never causes fallback", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    assert.equal(task.backend, "pi")
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"variant":"high"')))
+    m.failCommand("ordinary task failure", "The project's quota assertion failed")
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.backend, "command-code")
+    assert.equal(status.state, "failed")
+    assert.equal(status.fallback_reason, null)
+    assert.equal(piCreates(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("Command quota after edits cannot replay partial work on Go", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    writeFileSync(join(f.cwd, "README"), "partial\n")
+    m.failCommand("rate limit exceeded")
+    const result = await bridge.status(f.cwd, task.session_id)
+    assert.equal(result.backend, "command-code")
+    assert.equal(result.state, "blocked_partial_work")
+    assert.match(result.fallback_notice ?? "", /decide manually/)
+    assert.equal(piCreates(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("unavailable Go fallback blocks and stays blocked without polling retries", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    m.omitGo()
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.failCommand("quota exhausted")
+    const first = await bridge.status(f.cwd, task.session_id)
+    assert.equal(first.state, "blocked_fallback")
+    assert.match(first.fallback_notice ?? "", /Go fallback blocked/)
+    const second = await bridge.status(f.cwd, task.session_id)
+    assert.equal(second.state, "blocked_fallback")
+    assert.equal(commandCalls(m.calls).length, 1)
+    assert.equal(piCreates(m.calls).length, 0)
+    await assert.rejects(bridge.start(f.cwd, "other", "worker", f.scope, "Edit README"), /active worker/)
+  } finally { f.close() }
+})
+
+test("a failing Go fallback never restarts Command Code", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    m.noCommand()
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.failPi("quota exceeded")
+    const result = await bridge.status(f.cwd, task.session_id)
+    assert.equal(result.backend, "pi")
+    assert.equal(result.state, "failed")
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("uncertain Command termination must not start another provider", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const command = { ...m.command,
+      status: () => ({ state: "unknown_or_interrupted", result: null, stderr: "quota exhausted" }) }
+    const bridge = makeHybridBridge(m.api, command)
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    const result = await bridge.status(f.cwd, task.session_id)
+    assert.equal(result.backend, "command-code")
+    assert.equal(result.state, "unknown_or_interrupted")
+    assert.equal(piCreates(m.calls).length, 0)
+    await assert.rejects(bridge.start(f.cwd, "other", "worker", f.scope, "Edit README"), /active worker/)
+  } finally { f.close() }
+})
+
+test("two overlapping status requests cannot duplicate a Go fallback", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    m.failCommand("quota exhausted")
+    const results = await Promise.allSettled([
+      bridge.status(f.cwd, task.session_id),
+      bridge.status(f.cwd, task.session_id),
+    ])
+    assert.equal(results.filter((x) => x.status === "fulfilled").length, 1)
+    const rejected = results.find((x) => x.status === "rejected")
+    assert.ok(rejected && rejected.status === "rejected")
+    assert.match(String(rejected.reason), /transition in progress/)
+    assert.equal(piCreates(m.calls).length, 1)
+    assert.equal(commandCalls(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("fallback Pi writer still blocks out-of-scope edits", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    m.noCommand()
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
     writeFileSync(join(f.cwd, "README"), "changed\n")
     writeFileSync(join(f.cwd, "unrelated"), "bad\n")
     const status = await bridge.status(f.cwd, task.session_id)
@@ -112,330 +308,186 @@ test("OpenCode Go high runs a scoped worker; out-of-scope edits block acceptance
     await assert.rejects(bridge.resume(f.cwd, task.session_id, "fix tests"), /out-of-scope/)
   } finally { f.close() }
 })
-test("missing OpenCode variant starts read-only Command Code scout; resume is pinned", async () => {
+
+test("invalid scopes, unapproved tiers and dirty worktrees fail before any execution", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    m.omitModels()
-    const scope = { ...f.scope, writable_paths: [] }
-    const task = await bridge.start(f.cwd, "research", "scout", scope, "Locate relevant code")
-    assert.equal(task.backend, "command-code")
-    assert.match(task.fallback_notice ?? "", /needs no parent action/)
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"readOnly":true')))
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"medium"')))
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"model":"meta/muse-ember"')))
+    await assert.rejects(bridge.start(f.cwd, "x", "worker",
+      { ...f.scope, writable_paths: ["../secret"] }, "x"), /Invalid writable path/)
+    await assert.rejects(bridge.start(f.cwd, "x", "scout", f.scope, "x"), /scouts are read-only/)
+    await assert.rejects(bridge.start(f.cwd, "x", "god", f.scope, "x"), /Unknown Pi tier/)
+    writeFileSync(join(f.cwd, "untracked"), "bad")
+    await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("Command correction resumes the same pinned Ember session, with a bounded attempt count", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "mechanical", "mechanic", f.scope, "Edit README")
     m.done()
-    assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
-    await bridge.resume(f.cwd, task.session_id, "Give file:line evidence")
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"resume":"cmd-session"')))
+    await bridge.resume(f.cwd, task.session_id, "Recheck the change")
+    const calls = commandCalls(m.calls)
+    assert.equal(calls.length, 2)
+    assert.ok(calls.every((x) => JSON.stringify(x).includes('"model":"meta/muse-ember"')))
+    assert.ok(calls.every((x) => JSON.stringify(x).includes('"effort":"xhigh"')))
+    assert.match(JSON.stringify(calls[1]), /"resume":"cmd-session"/)
     await assert.rejects(bridge.resume(f.cwd, task.session_id, "third attempt"), /attempt limit/)
   } finally { f.close() }
 })
-test("missing primary mechanic variant uses Muse Ember xhigh in Command Code, including resume", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    m.omitModels()
-    const task = await bridge.start(f.cwd, "mechanical", "mechanic", f.scope, "Edit README")
-    assert.equal(task.backend, "command-code")
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"xhigh"')))
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"model":"meta/muse-ember"')))
-    m.done()
-    const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.model, "meta/muse-ember")
-    assert.equal(status.effort, "xhigh")
-    await bridge.resume(f.cwd, task.session_id, "Recheck README")
-    const launches = m.calls.filter((c) => JSON.stringify(c).includes('"command":true'))
-    assert.equal(launches.length, 2)
-    assert.ok(launches.every((c) => JSON.stringify(c).includes('"model":"meta/muse-ember"')))
-  } finally { f.close() }
-})
-test("an OpenCode server that cannot start admits the task on Command Code", async () => {
+
+test("Command turn cap continuation does not consume the normal retry budget", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
-    const api: OpenCodePort = { ...m.api, models: async () => { throw new Error("Failed to start server") } }
-    const task = await makeHybridBridge(api, m.command).start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    assert.equal(task.backend, "command-code")
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"high"')))
-    assert.ok(!m.calls.some((c) => JSON.stringify(c).includes("ses_fixture")))
-  } finally { f.close() }
-})
-test("a prompt rejected for quota right after admission starts on Command Code without a status poll", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd)
-    const api: OpenCodePort = { ...m.api, prompt: async (input) => { m.calls.push(input); m.fail("weekly usage limit reached"); return {} } }
-    const task = await makeHybridBridge(api, m.command).start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    assert.equal(task.backend, "command-code")
-    assert.match(task.fallback_reason ?? "", /continued on Command Code/)
-    assert.match(task.fallback_notice ?? "", /needs no parent action/)
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 1)
-  } finally { f.close() }
-})
-test("a Command Code turn cap continues the task without spending its single attempt", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd)
-    m.omitModels()
     const command = { ...m.command, status: () =>
-      ({ state: "turn_limit", result: { subtype: "max_turns" as const, sessionId: "cmd-session", finalText: "partial" }, stderr: null }) }
+      ({ state: "turn_limit", result: { subtype: "max_turns" as const,
+        sessionId: "cmd-session", finalText: "partial" }, stderr: null }) }
     const bridge = makeHybridBridge(m.api, command)
     const task = await bridge.start(f.cwd, "fix", "worker", { ...f.scope, attempt_limit: 1 }, "Edit README")
     await bridge.resume(f.cwd, task.session_id, "continue")
     await bridge.resume(f.cwd, task.session_id, "continue")
-    const continued = m.calls.filter((c) => JSON.stringify(c).includes("CONTINUE THE SAME TASK"))
+    const continued = commandCalls(m.calls).filter((c) => JSON.stringify(c).includes("CONTINUE THE SAME TASK"))
     assert.equal(continued.length, 2)
-    assert.ok(continued.every((c) => JSON.stringify(c).includes('"resume":"cmd-session"')))
     await assert.rejects(bridge.resume(f.cwd, task.session_id, "continue"), /continuation limit/)
   } finally { f.close() }
 })
-test("terminal OpenCode quota failure falls back only when no changes exist", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    m.fail("quota exceeded, monthly allowance exhausted")
-    const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.backend, "command-code")
-    assert.equal(status.fallback_reason, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.")
-    assert.equal(status.error, null)
-    assert.match(status.fallback_notice ?? "", /needs no parent action/)
-    assert.match(status.fallback_notice ?? "", /Do not retry/)
-    assert.match(status.fallback_detail ?? "", /quota exceeded/)
-  } finally { f.close() }
-})
-test("an ordinary failed task mentioning quota in its prose never triggers a fallback", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    m.fail("The project's quota test failed for a local assertion; no provider error", false)
-    const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.backend, "pi")
-    assert.equal(status.state, "failed")
-    assert.equal(status.fallback_reason, null)
-    assert.equal(status.fallback_notice, null)
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
-  } finally { f.close() }
-})
 
-test("quota does not silently restart a partially edited worktree", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    writeFileSync(join(f.cwd, "README"), "partial\n")
-    m.fail("rate limit exceeded")
-    const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.backend, "pi")
-    assert.equal(status.state, "blocked_partial_work")
-    assert.equal(status.fallback_reason, null)
-    assert.match(status.fallback_notice ?? "", /decide manually/)
-  } finally { f.close() }
-})
-test("reject invalid scope, unapproved tier, and dirty worktree", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    await assert.rejects(bridge.start(f.cwd, "x", "worker", { ...f.scope, writable_paths: ["../secret"] }, "x"), /Invalid writable path/)
-    await assert.rejects(bridge.start(f.cwd, "x", "scout", f.scope, "x"), /scouts are read-only/)
-    await assert.rejects(bridge.start(f.cwd, "x", "opus", f.scope, "x"), /Unknown Pi tier/)
-    await assert.rejects(bridge.start(f.cwd, "x", "god", f.scope, "x"), /Unknown Pi tier/)
-    writeFileSync(join(f.cwd, "stray"), "x")
-    await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
-  } finally { f.close() }
-})
-
-test("two concurrent status calls cannot spawn duplicate Command Code fallbacks", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    m.fail("OpenCode usage allowance exhausted")
-    const results = await Promise.allSettled([
-      bridge.status(f.cwd, task.session_id),
-      bridge.status(f.cwd, task.session_id),
-    ])
-    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1)
-    const refused = results.find((r) => r.status === "rejected")
-    assert.ok(refused && refused.status === "rejected")
-    assert.match(String(refused.reason), /transition in progress/)
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 1)
-    assert.equal((await bridge.status(f.cwd, task.session_id)).backend, "command-code")
-  } finally { f.close() }
-})
-
-test("overlapping corrections can admit at most one new Command Code run", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    m.omitModels()
-    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
-    m.done()
-    const results = await Promise.allSettled([
-      bridge.resume(f.cwd, task.session_id, "first correction"),
-      bridge.resume(f.cwd, task.session_id, "second correction"),
-    ])
-    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1)
-    assert.equal(results.filter((r) => r.status === "rejected").length, 1)
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 2)
-  } finally { f.close() }
-})
-
-test("interrupted Command Code launch remains a persisted blocked transition", async () => {
+test("interrupted Command launch preserves a blocked transition and lease", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
-    m.omitModels()
-    let launched = 0
-    const bridge = makeHybridBridge(m.api, {
-      ...m.command,
-      start: () => { launched++; throw new Error("could not spawn cmd") },
-    })
-    await assert.rejects(bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README"), /could not spawn/)
-    const stateDir = join(f.root, ".work", "worker-bridge")
-    const { readdirSync } = await import("node:fs")
-    const ids = readdirSync(stateDir).filter((name) => /^usrw_.*\.json$/.test(name))
-    assert.equal(ids.length, 1)
-    const sessionId = ids[0].replace(/\.json$/, "")
-    const status = await bridge.status(f.cwd, sessionId)
-    assert.equal(status.state, "blocked_transition")
+    const command = { ...m.command, start: () => { throw new Error("cannot spawn cmd") } }
+    const bridge = makeHybridBridge(m.api, command)
+    await assert.rejects(bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README"), /cannot spawn/)
+    const files = readdirSync(join(f.root, ".work", "worker-bridge"))
+      .filter((name) => /^usrw_.*\.json$/.test(name))
+    assert.equal(files.length, 1)
+    const id = files[0].replace(/\.json$/, "")
+    const status = await bridge.status(f.cwd, id)
     assert.equal(status.backend, "command-transition")
-    assert.equal(launched, 1)
-    await assert.rejects(bridge.resume(f.cwd, sessionId, "retry"), /transition interrupted/)
+    assert.equal(status.state, "blocked_transition")
+    assert.equal(piCreates(m.calls).length, 0)
+    await assert.rejects(bridge.resume(f.cwd, id, "retry"), /transition interrupted/)
   } finally { f.close() }
 })
 
-test("ambiguous OpenCode prompt admission never launches a second paid worker", async () => {
+test("uncertain Pi fallback admission retains lease, never restarts Command", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
-    const api = { ...m.api, prompt: async () => { throw new Error("quota exhausted") } }
+    m.noCommand()
+    const api: OpenCodePort = { ...m.api, prompt: async () => { throw new Error("quota exhausted") } }
     const bridge = makeHybridBridge(api, m.command)
-    await assert.rejects(bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README"), /prompt admission failed/)
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
+    await assert.rejects(bridge.start(f.cwd, "uncertain", "worker", f.scope, "Edit README"),
+      /lease retained for session/)
+    const ids = readdirSync(join(f.root, ".work", "worker-bridge"))
+      .filter((name) => /^usrw_.*\.json$/.test(name))
+    assert.equal(ids.length, 1)
+    const id = ids[0].replace(/\.json$/, "")
+    const restarted = makeHybridBridge(m.api, m.command)
+    const status = await restarted.status(f.cwd, id)
+    assert.equal(status.backend, "pi-transition")
+    assert.equal(status.state, "blocked_admission")
+    assert.equal(commandCalls(m.calls).length, 0)
+    await assert.rejects(restarted.start(f.cwd, "another", "worker", f.scope, "Edit README"), /active worker/)
   } finally { f.close() }
 })
 
-test("overlapping worker starts admit at most one writer in the same worktree", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd)
-    let releaseModels: () => void = () => {}
-    const gate = new Promise<void>((resolve) => { releaseModels = resolve })
-    const api: OpenCodePort = { ...m.api, models: async (input) => {
-      await gate
-      return m.api.models(input)
-    } }
-    const bridge = makeHybridBridge(api, m.command)
-    const first = bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
-    await assert.rejects(bridge.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
-    releaseModels()
-    const admitted = await first
-    assert.equal(admitted.backend, "pi")
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"title"')).length, 1)
-  } finally { f.close() }
-})
-
-test("a verified terminal result releases the worktree; old resume cannot race a new owner", async () => {
+test("overlapping starts lease the worktree before admitting the first Command run", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const first = await bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
-    await assert.rejects(bridge.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
-    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "succeeded")
-    const second = await bridge.start(f.cwd, "second", "worker", f.scope, "Edit README")
-    assert.notEqual(second.session_id, first.session_id)
-    await assert.rejects(bridge.resume(f.cwd, first.session_id, "more feedback"), /active for worker/)
+    const first = bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
+    const started = await first
+    assert.equal(started.backend, "command-code")
+    assert.equal(commandCalls(m.calls).length, 1)
   } finally { f.close() }
 })
 
-test("a restarted bridge preserves an active admission lease until terminal status", async () => {
+test("independent linked worktrees can admit separate Command runs", async () => {
+  const f = fixture()
+  try {
+    const secondCwd = join(f.root, ".work", "wt", "b")
+    git(f.root, "worktree", "add", "-qb", "lane-b", secondCwd)
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const secondScope = { ...f.scope, base_revision: git(secondCwd, "rev-parse", "HEAD") }
+    const [a, b] = await Promise.all([
+      bridge.start(f.cwd, "one", "worker", f.scope, "Edit README"),
+      bridge.start(secondCwd, "two", "worker", secondScope, "Edit README"),
+    ])
+    assert.notEqual(a.session_id, b.session_id)
+    assert.equal(commandCalls(m.calls).length, 2)
+  } finally { f.close() }
+})
+
+test("terminal Command runs release worktrees, but old sessions cannot race new owners", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
+    m.done()
+    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "succeeded")
+    const second = await bridge.start(f.cwd, "two", "worker", f.scope, "Edit README")
+    assert.notEqual(first.session_id, second.session_id)
+    await assert.rejects(bridge.resume(f.cwd, first.session_id, "retry"), /active for worker/)
+  } finally { f.close() }
+})
+
+test("restart preserves an active Command admission until terminal status", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
-    const first = await makeHybridBridge(m.api, m.command).start(f.cwd, "first", "worker", f.scope, "Edit README")
+    const first = await makeHybridBridge(m.api, m.command)
+      .start(f.cwd, "one", "worker", f.scope, "Edit README")
     const restarted = makeHybridBridge(m.api, m.command)
-    await assert.rejects(restarted.start(f.cwd, "another", "worker", f.scope, "Edit README"), /active worker/)
+    await assert.rejects(restarted.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
+    m.done()
     assert.equal((await restarted.status(f.cwd, first.session_id)).state, "succeeded")
-    const next = await restarted.start(f.cwd, "next", "worker", f.scope, "Edit README")
+    const next = await restarted.start(f.cwd, "two", "worker", f.scope, "Edit README")
     assert.notEqual(next.session_id, first.session_id)
   } finally { f.close() }
 })
 
-test("independent worktrees remain independently admissible", async () => {
-  const f = fixture()
-  try {
-    const cwd2 = join(f.root, ".work", "wt", "b")
-    git(f.root, "worktree", "add", "-qb", "lane-b", cwd2)
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const scope2 = { ...f.scope, base_revision: git(cwd2, "rev-parse", "HEAD") }
-    const [first, second] = await Promise.all([
-      bridge.start(f.cwd, "one", "worker", f.scope, "Edit README"),
-      bridge.start(cwd2, "two", "worker", scope2, "Edit README"),
-    ])
-    assert.notEqual(first.session_id, second.session_id)
-  } finally { f.close() }
-})
-
-test("ambiguous admission retains its worktree lease and is inspectable after restart", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd)
-    const api: OpenCodePort = { ...m.api, prompt: async () => { throw new Error("quota exhausted") } }
-    const bridge = makeHybridBridge(api, m.command)
-    await assert.rejects(bridge.start(f.cwd, "uncertain", "worker", f.scope, "Edit README"), /lease retained for session/)
-    const { readdirSync } = await import("node:fs")
-    const state = join(f.root, ".work", "worker-bridge")
-    const ids = readdirSync(state).filter((name) => /^usrw_.*\.json$/.test(name))
-    assert.equal(ids.length, 1)
-    const sessionID = ids[0].replace(/\.json$/, "")
-    const restarted = makeHybridBridge(m.api, m.command)
-    const status = await restarted.status(f.cwd, sessionID)
-    assert.equal(status.state, "blocked_admission")
-    await assert.rejects(restarted.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
-    await assert.rejects(restarted.resume(f.cwd, sessionID, "retry"), /transition interrupted/)
-  } finally { f.close() }
-})
-
-test("cancel acknowledgement does not release a worktree until the backend is terminal", async () => {
+test("cancel acknowledgement cannot release a lease until a terminal backend result", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
     assert.equal((await bridge.cancel(f.cwd, first.session_id)).interrupted, true)
     await assert.rejects(bridge.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
-    m.fail("ordinary failure", false)
+    m.failCommand("ordinary failure")
     assert.equal((await bridge.status(f.cwd, first.session_id)).state, "failed")
     const second = await bridge.start(f.cwd, "two", "worker", f.scope, "Edit README")
     assert.notEqual(second.session_id, first.session_id)
   } finally { f.close() }
 })
 
-test("interrupted Pi resume cannot expose an old terminal result or release its lease", async () => {
+test("interrupted Pi resume remains blocked without exposing an old success", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
+    m.noCommand()
     let prompts = 0
-    const api: OpenCodePort = {
-      ...m.api,
-      prompt: async (input) => {
-        prompts++
-        if (prompts === 2) throw new Error("resume admission interrupted")
-        return m.api.prompt(input)
-      },
-    }
+    const api: OpenCodePort = { ...m.api, prompt: async (input) => {
+      prompts++
+      if (prompts === 2) throw new Error("resume admission interrupted")
+      return m.api.prompt(input)
+    } }
     const bridge = makeHybridBridge(api, m.command)
-    const original = await bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
-    assert.equal((await bridge.status(f.cwd, original.session_id)).state, "succeeded")
-    await assert.rejects(bridge.resume(f.cwd, original.session_id, "correct this"), /resume admission interrupted/)
+    const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "succeeded")
+    await assert.rejects(bridge.resume(f.cwd, first.session_id, "correct"), /resume admission interrupted/)
     const restarted = makeHybridBridge(m.api, m.command)
-    const status = await restarted.status(f.cwd, original.session_id)
-    assert.equal(status.state, "blocked_admission")
-    assert.equal(status.backend, "pi-transition")
-    await assert.rejects(restarted.start(f.cwd, "second", "worker", f.scope, "Edit README"), /active worker/)
-    await assert.rejects(restarted.resume(f.cwd, original.session_id, "retry"), /transition interrupted/)
-    assert.equal(m.calls.filter((c) => JSON.stringify(c).includes('"command":true')).length, 0)
+    const result = await restarted.status(f.cwd, first.session_id)
+    assert.equal(result.backend, "pi-transition")
+    assert.equal(result.state, "blocked_admission")
+    await assert.rejects(restarted.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
+    assert.equal(commandCalls(m.calls).length, 0)
   } finally { f.close() }
 })

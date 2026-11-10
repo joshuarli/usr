@@ -8,17 +8,15 @@ function job(id: string, variant: string, readOnly = false, providerID = "openco
 }
 
 test("native Pi roles fail closed on provider, model, thinking and write scope", () => {
-  assert.equal(role(job("muse-ember-1.0", "medium", true, "opencode")), "scout")
-  assert.equal(role(job("muse-ember-1.0", "xhigh", false, "opencode")), "mechanic")
-  assert.throws(() => role(job("muse-ember-1.0", "high", false, "opencode")), /Unapproved/)
-  assert.throws(() => role(job("muse-ember-1.0", "medium", true)), /Unapproved/)
-  const legacy = job("muse-spark-1.3-contributor", "medium", true)
-  assert.throws(() => role(legacy), /Unapproved/)
-  assert.equal(role({ ...legacy, priorRunId: "run1", priorSessionFile: "/work/state/old.jsonl" }), "scout")
+  assert.equal(role(job("muse-spark-1.3-contributor", "medium", true)), "scout")
+  assert.equal(role(job("muse-spark-1.3-contributor", "high")), "mechanic")
+  assert.throws(() => role(job("muse-ember-1.0", "medium", true, "opencode")), /Unapproved/)
+  assert.throws(() => role({ ...job("muse-ember-1.0", "xhigh", false, "opencode"),
+    priorRunId: "old", priorSessionFile: "/work/old.jsonl" }), /Unapproved/)
   assert.equal(role(job("deepseek-v4.1-flash", "high")), "worker")
   assert.equal(role(job("deepseek-v4.1-flash", "max")), "expert")
   assert.throws(() => role(job("deepseek-v4.1-flash", "xhigh")), /Unapproved/)
-  assert.throws(() => role(job("muse-ember-1.0", "medium", false, "opencode")), /Unapproved/)
+  assert.throws(() => role(job("muse-spark-1.3-contributor", "medium", false)), /Unapproved/)
   assert.throws(() => role(job("deepseek-v4.1-flash", "high", true)), /Unapproved/)
   assert.throws(() => role(job("god", "max")), /Unapproved/)
 })

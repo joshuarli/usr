@@ -1,8 +1,8 @@
 ---
 name: mechanic
 description: Mechanical implementation with specified acceptance.
-model: opencode/muse-ember-1.0
-thinking: xhigh
+model: opencode-go/muse-spark-1.3-contributor
+thinking: high
 tools: read, bash, edit, write, grep, find, ls
 ---
 
