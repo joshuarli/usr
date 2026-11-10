@@ -58,18 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I -S \"$HOME/.local/bin/agent-model-overlay.py\" claude",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "PostModelSwitch": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -I -S \"$HOME/.local/bin/agent-model-overlay.py\" claude",
+            "command": "python3 -I -S \"$HOME/.local/bin/agent-instructions.py\" claude",
             "timeout": 5
           }
         ]

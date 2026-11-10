@@ -12,11 +12,11 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 
 ## Instructions and skills
 
-[`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) is the canonical global instruction file. The adapters under `dotfiles/base/` point each harness to it.
+[`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) remains the normal shared contract. Other harness adapters still point to it. Claude's `CLAUDE.md` and Codex's higher-precedence `AGENTS.override.md` instead load a small bootstrap; startup hooks select the normal contract or the lean contract for Opus 5.5 in Claude and Sol 6.1 in Codex. The contracts are alternatives, not layers. See [instruction profiles](model-profiles.md) for activation, fallback, and fresh-session boundaries.
 
 | Harness | Global instructions | Shared skills |
 | --- | --- | --- |
-| Codex | `~/.codex/AGENTS.md` | `~/.agents/skills/` |
+| Codex | `~/.codex/AGENTS.override.md` (profile bootstrap) | `~/.agents/skills/` |
 | Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/` |
 | Muse Code | `~/.config/muse/AGENTS.md` | `~/.agents/skills/` |
 | Grok Code | `~/.grok/AGENTS.md` | `~/.agents/skills/` |
@@ -27,7 +27,7 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 | Command Code (`cmd`, opt-in) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
 | Vercel fx (opt-in) | `~/.fx/AGENTS.md` | `~/.agents/skills/` |
 
-**Routing coverage:** all ten harness profiles share the canonical `AGENTS.md` and `orchestrate` policy. All standard coding subagents, including those launched outside `orchestrate`, use the `pi-subagent-bridge` MCP server or CLI. Only Claude and Codex may use native `god` with their existing pinned models. This is a shared instruction policy, not a universal interception mechanism; Claude/Grok native launches are also blocked by `agent-tier-gate`, while other host-native launchers may not expose enforceable hooks. `decide` is optional advisory routing only. After updating `usr`, run `sh sync plan`, `sh sync`, and `sh sync doctor`.
+**Routing coverage:** both instruction profiles and all ten harnesses share the `orchestrate` delegation policy. All standard coding subagents, including those launched outside `orchestrate`, use the `pi-subagent-bridge` MCP server or CLI. Only Claude and Codex may use native `god` with their existing pinned models. This is a shared instruction policy, not a universal interception mechanism; Claude/Grok native launches are also blocked by `agent-tier-gate`, while other host-native launchers may not expose enforceable hooks. `decide` is optional advisory routing only. After updating `usr`, run `sh sync plan`, `sh sync`, and `sh sync doctor`.
 
 Install Node.js 26.13.0 and the latest npm with `sh sync tools nodejs` on macOS arm64 or Linux x86_64 and arm64. No-argument `sync tools` also installs Node.js on those platforms, preferring the sync-managed runtime over any `node` earlier on `PATH` when it exists. Command Code requires Node.js 26.12.0+ and is installed by default with `sh sync` (or individually with `sh sync tools cmd`), into `~/.local/share/command-code` (or `$XDG_DATA_HOME/command-code`). Grok is likewise opt-in (`sh sync tools grok`); neither is downloaded by no-argument `sync tools` or `sh sync`. Sync the tracked configuration with `sh sync` as usual, then run `cmd login` yourself. The installer never touches Command's `~/.commandcode` credentials or sessions.
 

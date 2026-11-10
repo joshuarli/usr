@@ -276,22 +276,17 @@ trust_level = "trusted"
 
 [[hooks.SessionStart.hooks]]
 type = "command"
-command = 'python3 -I -S "$HOME/.local/bin/agent-model-overlay.py" codex'
+command = 'python3 -I -S "$HOME/.local/bin/agent-instructions.py" codex'
 timeout = 5
-
-[[hooks.UserPromptSubmit]]
-
-[[hooks.UserPromptSubmit.hooks]]
-type = "command"
-command = 'python3 -I -S "$HOME/.local/bin/agent-model-overlay.py" codex'
-timeout = 5
+additionalContextLimit = 0
 
 [[hooks.SubagentStart]]
 
 [[hooks.SubagentStart.hooks]]
 type = "command"
-command = 'python3 -I -S "$HOME/.local/bin/agent-model-overlay.py" codex'
+command = 'python3 -I -S "$HOME/.local/bin/agent-instructions.py" codex'
 timeout = 5
+additionalContextLimit = 0
 
 [[hooks.Stop]]
 

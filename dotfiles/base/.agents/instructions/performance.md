@@ -1,0 +1,5 @@
+# Performance and dependency checks
+
+Dependencies are your call. Vet maintenance, transitive weight, license, and whether the standard library or a few lines would do, and say why in your reply. A dependency must stay within the project's performance gates (build time, binary size, startup, runtime); measure when it could move one. If the repo defines no gates, state the build-time and binary-size impact. Remove ones you stop using.
+
+Time-based perf gates (build time, startup, runtime) run only when `perf-gate-ready` exits 0, and again with `-1` right after the measurement; discard a run that overlapped load. If the host stays busy the gate is deferred: it never counts as a pass or blocks iteration, but it blocks calling the work done or releasing. Say "perf gate deferred: host busy" in the reply. Memory and binary-size gates always run. Prefer CPU time for compute cost, use a statistic suited to the claim (median for typical latency, a tail percentile for tail behavior, minimum only for best-case behavior), and interleave baseline and candidate runs. Fail only on a regression larger than the observed spread.

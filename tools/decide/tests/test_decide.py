@@ -548,7 +548,7 @@ class DecideTests(unittest.TestCase):
                 self.request,
                 "clef-flash",
                 self.env,
-                transport=lambda *args, body=body: DECIDE.HttpResponse(200, body),
+                transport=lambda *args, body=body: DECIDE.HttpResponse(status=200, body=body),
             )
             self.assertEqual(outcome["status"], "unavailable", step)
             self.assertEqual(outcome["reason"], "invalid_provider_response", step)
@@ -1187,7 +1187,6 @@ class DecideTests(unittest.TestCase):
     def test_all_coding_harnesses_share_one_routing_policy(self):
         canonical = (ROOT / "dotfiles/base/.codex/AGENTS.md").resolve(strict=True)
         aliases = (
-            "dotfiles/base/.claude/CLAUDE.md",
             "dotfiles/base/.commandcode/AGENTS.md",
             "dotfiles/base/.config/muse/AGENTS.md",
             "dotfiles/base/.config/opencode/AGENTS.md",
@@ -1201,6 +1200,13 @@ class DecideTests(unittest.TestCase):
             link = ROOT / path
             self.assertTrue(link.is_symlink(), path)
             self.assertEqual(link.resolve(strict=True), canonical, path)
+        bootstrap = ROOT / "dotfiles/base/.agents/instructions/bootstrap.md"
+        for path in ("dotfiles/base/.claude/CLAUDE.md", "dotfiles/base/.codex/AGENTS.override.md"):
+            self.assertEqual((ROOT / path).resolve(strict=True), bootstrap.resolve(strict=True))
+        lean = (ROOT / "dotfiles/base/.agents/instructions/lean.md").read_text()
+        self.assertIn("Before delegation, read `orchestrate`", lean)
+        self.assertIn("pi-subagent-bridge", lean)
+        self.assertIn("`decide` routing", lean)
         instructions = canonical.read_text()
         self.assertIn("Before assigning nontrivial work to any coding subagent", instructions)
         self.assertIn("decide route --guide", instructions)

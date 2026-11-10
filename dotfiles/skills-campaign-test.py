@@ -139,11 +139,10 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertIn('opencode/autoinvoke: "false"', content)
             self.assertIn("allow_implicit_invocation: false", (skill / "agents" / "openai.yaml").read_text(encoding="utf-8"))
 
-    def test_global_instruction_adapters_resolve_to_the_canonical_contract(self):
+    def test_global_instruction_adapters_resolve_to_their_selected_entry_points(self):
         base = ROOT / "dotfiles" / "base"
         canonical = base / ".codex" / "AGENTS.md"
         adapters = (
-            base / ".claude" / "CLAUDE.md",
             base / ".config" / "muse" / "AGENTS.md",
             base / ".grok" / "AGENTS.md",
             base / ".dsh" / "AGENTS.md",
@@ -157,19 +156,22 @@ class SkillCampaignTests(unittest.TestCase):
             self.assertTrue(adapter.is_symlink(), step)
             self.assertFalse(adapter.readlink().is_absolute(), step)
             self.assertEqual(canonical.resolve(), adapter.resolve(), step)
+        bootstrap = base / ".agents" / "instructions" / "bootstrap.md"
+        for adapter in (base / ".claude" / "CLAUDE.md", base / ".codex" / "AGENTS.override.md"):
+            self.assertTrue(adapter.is_symlink())
+            self.assertFalse(adapter.readlink().is_absolute())
+            self.assertEqual(bootstrap.resolve(), adapter.resolve())
 
     def test_claude_skips_instruction_adapters_while_working_in_this_repo(self):
         patterns = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["claudeMdExcludes"]
-        canonical = ROOT / "dotfiles" / "base" / ".codex" / "AGENTS.md"
-        tracked = run("git", "-C", str(ROOT), "ls-files", "dotfiles/**/AGENTS.md", "dotfiles/**/CLAUDE.md").stdout.split()
+        tracked = run("git", "-C", str(ROOT), "ls-files", "dotfiles/**/AGENTS*.md", "dotfiles/**/CLAUDE.md").stdout.split()
         self.assertTrue(tracked)
         excluded = lambda path: any(fnmatch.fnmatchcase(str(path), pattern) for pattern in patterns)
         for name in tracked:
             path = ROOT / name
-            if path == canonical:
-                self.assertFalse(excluded(path), "the canonical contract is the global instruction file's link target")
-            else:
-                self.assertTrue(excluded(path), "adapter %s reloads the contract when Claude reads beside it" % name)
+            self.assertTrue(excluded(path), "adapter %s reloads a contract when Claude reads beside it" % name)
+        self.assertFalse(excluded(ROOT / "AGENTS.md"))
+        self.assertFalse(excluded(ROOT / "dotfiles/base/.agents/instructions/bootstrap.md"))
 
     def test_claude_finds_no_nested_skills_directory_in_this_repo(self):
         tracked = run("git", "-C", str(ROOT), "ls-files", "*.claude/skills", "*.claude/skills/*").stdout.split()

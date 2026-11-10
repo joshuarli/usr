@@ -15,7 +15,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Home sync, layers, tools, doctor, uninstall | [docs/sync.md](docs/sync.md) |
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
-| Model-specific execution overlays | [docs/model-overlays.md](docs/model-overlays.md) |
+| Instruction profiles | [docs/model-profiles.md](docs/model-profiles.md) |
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
