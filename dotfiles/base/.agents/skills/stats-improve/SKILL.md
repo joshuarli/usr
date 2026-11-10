@@ -46,15 +46,7 @@ Group the labels into route classes with `jaq`, then rank them by total CPU and 
 - High CPU per request on a rare route means repeated computation worth caching.
 - A large share of top-level requests means the requests are reaching the Worker at all.
 
-Facts about this SQL surface, all of them verified:
-
-- `logs.workersLogs`, R2, and D1 rows are unweighted: use `COUNT(*)` and plain `SUM`. Their `sampleInterval` is a stamp equal to `1/headSamplingRate`, not a weight. Weighting by it inflated counts by 4 to 10 (stats commit `84a6fe5`).
-- Durable Object invocations are the exception and use `SUM(sampleInterval)`.
-- A named stateless entrypoint (`$workers.entrypoint` set and not `default`) is a loopback `ctx.exports` or service binding call. It is not billed as a request, but its CPU is billed.
-- No entrypoint means a top-level fetch. `default` means a cron invocation.
-- `ORDER BY` needs a `LIMIT`.
-- `quantile` and `splitByChar` are unsupported; use `APPROX_MAX` and post-process locally.
-- Escape `$` in shell strings, and pipe the results through `jaq`.
+Before writing or changing a raw query, read the [verified SQL facts](references/sql.md); unweighted counts and entrypoint meanings are easy to get wrong.
 
 For where the wall time goes inside one request, read a trace's spans:
 
