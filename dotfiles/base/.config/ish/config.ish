@@ -20,6 +20,7 @@ set HOMEBREW_NO_ANALYTICS 1
 set CARGO_NET_GIT_FETCH_WITH_CLI true
 
 alias p   "$HOME/Applications/Player.app/Contents/MacOS/player"
+alias v   "/Applications/View.app/Contents/MacOS/view"
 
 alias sshnew ssh-keygen -t ed25519 -N ""
 
