@@ -15,8 +15,9 @@ Code session) is stopped; --all stops every client's server.
 Only the server process is signalled. Workers are separate processes and their
 state is on disk, so running workers keep running and stay observable.
 
-After a reload, a Claude Code session reconnects the server through /mcp
-(select pi-subagent-bridge, then Reconnect) if it does not come back by itself.
+In Claude Code, /mcp then Reconnect on pi-subagent-bridge restarts that
+session's server by itself; use this script for other clients, for --all, or
+from a shell that the client started.
 EOF
   exit 2
 }
