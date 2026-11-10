@@ -7,19 +7,9 @@ description: "Apply when a campaign leaves worktrees or scratch behind, or the u
 
 When a campaign leaves worktrees behind, delegate one bounded inventory and cleanup pass to a `mechanic`-tier worker per `orchestrate` routing. The coordinator supplies the repository, current campaign branch and head, campaign scope, and known active worktrees. Worktree and branch removal follow `orchestrate`'s worktree lifecycle; this skill adds the checks below.
 
-The worker may remove a checkout only when all of these are true:
+The worker inventories with `git worktree list --porcelain` and removes a checkout only with `worktree-retire <path> --into <campaign-head>`, which refuses locked, dirty, or unintegrated checkouts (ancestor, or patch-equivalent with no merges) and lists ignored files. Before running it, confirm what the tool cannot see: the checkout belongs to the named campaign, its lane is complete per the coordinator or campaign record, and no agent, process, or session is using it. Preserve useful ignored data at a repo-local ignored path, or keep the checkout when it has a current consumer, before passing `--discard-ignored`.
 
-- The checkout belongs to the named campaign and its lane is confirmed complete by the coordinator or campaign record.
-- No active agent, process, or session owns or uses it; it is not locked.
-- Its `git status --porcelain --untracked-files=all` is empty.
-- Its committed changes are already in the campaign head. First check `git merge-base --is-ancestor <checkout-head> <campaign-head>`. If that fails, accept patch-equivalence only when `git rev-list --merges <campaign-head>..<checkout-head>` is empty and `git cherry <campaign-head> <checkout-head>` has no `+` entries. Retain it if this cannot be proven.
-- Ignored files and local artifacts have been inspected. Preserve useful data at a repo-local ignored path or retain the checkout when it has a current consumer.
-
-Keep the integration checkout, in-flight or parked work, dirty checkouts, unknown ownership, and any checkout whose integration or completion is uncertain. Never use `git worktree remove --force` or remove worktree directories with `rm`. Leave branches to `orchestrate`'s lifecycle.
-
-The worker inventories with `git worktree list --porcelain`, verifies each candidate against the supplied campaign head and active-worktree list, then removes verified paths with `git worktree remove <path>`. If removal refuses, retain the path and report the reason. Do not expand to other repositories or recursively spawn workers.
-
-Settle the merge question per lane with `git cherry <campaign-head> <checkout-head>`: all `-` entries and no `+` entries means there is nothing to merge. Any `+` entry is useful work; integrate it into the campaign head before retiring anything from that lane.
+Keep the integration checkout, in-flight or parked work, unknown ownership, and anything the tool refuses; report its reason. A "not integrated" refusal means the lane holds useful work (`git cherry <campaign-head> <checkout-head>` shows `+` entries): integrate it before retiring that lane. Never use `git worktree remove --force` or `rm` on a worktree. Do not expand to other repositories or recursively spawn workers.
 
 Before removing scratch, establish the live set and never touch it: the active fixture, runner roots created or written since the live run started, prepared inputs the live run consumes, uncommitted changes in any checkout, and checkouts named as retained in the campaign record. Identify the live fixture by recency plus the running process, not by name pattern alone.
 

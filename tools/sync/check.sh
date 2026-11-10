@@ -35,6 +35,7 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	(cd dotfiles && sh pre-push-test.sh)
 	(cd dotfiles && sh worker-watch-test.sh)
 	(cd dotfiles && sh worktree-remove-test.sh)
+	python3 -I dotfiles/worktree-retire-test.py
 	(cd dotfiles && sh zsh-shim-test.sh)
 	sh tools/mdtool/tests/mdtool-test.sh
 	python3 -I tools/decide/tests/test_decide.py
