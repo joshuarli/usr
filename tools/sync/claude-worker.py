@@ -40,9 +40,9 @@ def dependency_version():
     return dependency_versions()["@earendil-works/pi-coding-agent"]
 
 
-def dependency_current():
+def dependency_current(root: Path = PROJECT) -> bool:
     for name, version in dependency_versions().items():
-        path = PROJECT / "node_modules" / name / "package.json"
+        path = root / "node_modules" / name / "package.json"
         try:
             if json.loads(path.read_text())["version"] != version:
                 return False
@@ -158,13 +158,29 @@ def install_dependency():
         die(f"Node.js 26+ required for bridge; found {version}")
     env = os.environ.copy()
     env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
-    subprocess.run(
-        [npm, "install", "--prefix", str(PROJECT), "--ignore-scripts",
-         "--no-package-lock", "--no-audit", "--no-fund"],
-        env=env, check=True,
-    )
-    if not dependency_current():
-        die(f"npm did not install pinned @earendil-works/pi-coding-agent {dependency_version()}")
+    stage = Path(tempfile.mkdtemp(prefix=".node_modules.", dir=PROJECT))
+    try:
+        shutil.copy2(PROJECT / "package.json", stage / "package.json")
+        subprocess.run(
+            [npm, "install", "--prefix", str(stage), "--ignore-scripts",
+             "--no-package-lock", "--no-audit", "--no-fund"],
+            env=env, check=True,
+        )
+        if not dependency_current(stage):
+            die(f"npm did not install pinned @earendil-works/pi-coding-agent {dependency_version()}")
+        previous = stage.with_name(stage.name + ".previous")
+        if (PROJECT / "node_modules").exists():
+            os.replace(PROJECT / "node_modules", previous)
+        try:
+            os.replace(stage / "node_modules", PROJECT / "node_modules")
+        except OSError:
+            if previous.exists():
+                os.replace(previous, PROJECT / "node_modules")
+            raise
+        if previous.exists():
+            shutil.rmtree(previous, ignore_errors=True)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def update_configuration(data, original):

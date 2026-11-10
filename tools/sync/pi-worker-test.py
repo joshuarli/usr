@@ -90,6 +90,14 @@ muse.mkdir(parents=True, exist_ok=True)
         self.assertEqual(json.loads(self.config.read_text()), original)
         self.run_helper("remove")
 
+    def test_foreign_node_modules_is_replaced(self):
+        (self.project / "node_modules/.pnpm").mkdir(parents=True)
+        (self.project / "node_modules/.modules.yaml").write_text("packageManager: pnpm@12.18.0\n")
+        self.run_helper("install")
+        self.assertFalse((self.project / "node_modules/.pnpm").exists())
+        self.assertFalse((self.project / "node_modules/.modules.yaml").exists())
+        self.run_helper("check")
+
     def test_owned_legacy_registration_is_migrated_even_when_new_is_current(self):
         self.run_helper("install")
         data = json.loads(self.config.read_text())
