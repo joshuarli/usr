@@ -14,6 +14,7 @@ from link_recovery import pending_paths
 
 LEGACY_UNRECORDED_LINKS: tuple[tuple[str, str], ...] = (
     (".claude/AGENTS.md", "../.codex/AGENTS.md"),
+    (".claude/CLAUDE.md", "../.codex/AGENTS.md"),
 )
 
 
@@ -172,6 +173,8 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
         elif before.kind == "symlink" and path in owned_links and _old_managed_link(
             path, discovery.sources, discovery.target
         ):
+            actions.append(LinkAction("replace", path, before, text))
+        elif before.kind == "symlink" and (spec.relative.as_posix(), before.text) in LEGACY_UNRECORDED_LINKS:
             actions.append(LinkAction("replace", path, before, text))
         else:
             conflicts.append(f"{path} already exists and is not the declared link")

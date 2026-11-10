@@ -351,6 +351,35 @@ class LinkTests(unittest.TestCase):
         with self.assertRaises(LinkError):
             discover(self.root, self.home, "linux")
 
+    def test_55_legacy_claude_md_adapter_retargeted_even_unrecorded(self):
+        self.source(".codex/AGENTS.md")
+        self.source(".agents/instructions/bootstrap.md")
+        adapter = self.root / "dotfiles/base/.claude/CLAUDE.md"
+        adapter.parent.mkdir()
+        adapter.symlink_to("../.agents/instructions/bootstrap.md")
+        self.track()
+        (self.home / ".claude").mkdir()
+        dest = self.home / ".claude/CLAUDE.md"
+        dest.symlink_to("../.codex/AGENTS.md")
+        p = self.plan()
+        self.assertFalse(p.conflicts, p.conflicts)
+        self.assertIn(("replace", dest), [(a.kind, a.path) for a in p.actions])
+        apply(p, self.owned)
+        self.assertEqual(os.readlink(dest), "../.agents/instructions/bootstrap.md")
+        self.assertTrue(self.plan().converged)
+
+    def test_56_claude_md_with_unknown_text_still_conflicts(self):
+        self.source(".agents/instructions/bootstrap.md")
+        adapter = self.root / "dotfiles/base/.claude/CLAUDE.md"
+        adapter.parent.mkdir()
+        adapter.symlink_to("../.agents/instructions/bootstrap.md")
+        self.track()
+        (self.home / ".claude").mkdir()
+        dest = self.home / ".claude/CLAUDE.md"
+        dest.symlink_to("../my/CLAUDE.md")
+        self.assertTrue(self.plan().conflicts)
+        self.assertEqual(os.readlink(dest), "../my/CLAUDE.md")
+
     def test_28_tab_name_rejected_before_changes(self):
         self.source("a\tb")
         with self.assertRaises(LinkError): self.plan()
