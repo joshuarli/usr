@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
-import { cancelCommand, COMMAND_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
+import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 export type Tier = "scout" | "mechanic" | "worker" | "expert"
@@ -18,9 +18,17 @@ type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
   backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition"; attempts: number
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string; continuations?: number
+  primary_model?: ModelRef; command_model?: string; command_effort?: Effort
 }
 const EFFORT: Record<Tier, Effort> = {
+  scout: "medium", mechanic: "xhigh", worker: "high", expert: "max",
+}
+// Sessions admitted before the Ember migration must retain their original pins.
+const LEGACY_EFFORT: Record<Tier, Effort> = {
   scout: "low", mechanic: "high", worker: "high", expert: "max",
+}
+const COMMAND_MODELS: Record<Tier, string> = {
+  scout: COMMAND_EMBER_MODEL, mechanic: COMMAND_EMBER_MODEL, worker: COMMAND_MODEL, expert: COMMAND_MODEL,
 }
 const TURN_LIMIT_CONTINUATIONS = 2
 const ADMISSION_POLLS = 10
@@ -121,12 +129,23 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
   }
 }
 const PI_MODELS: Record<Tier, ModelRef> = {
-  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
-  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
+  scout: { providerID: "opencode", id: "muse-ember-1.0", variant: "medium" },
+  mechanic: { providerID: "opencode", id: "muse-ember-1.0", variant: "xhigh" },
   worker: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
   expert: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" },
 }
+const LEGACY_PI_MODELS: Partial<Record<Tier, ModelRef>> = {
+  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
+  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
+}
 function modelFor(tier: Tier) { return PI_MODELS[tier] }
+function primaryFor(s: Session): ModelRef { return s.primary_model ?? LEGACY_PI_MODELS[s.tier] ?? modelFor(s.tier) }
+function fallbackModelFor(s: Session): string {
+  return s.command_model ?? (s.primary_model ? COMMAND_MODELS[s.tier] : COMMAND_MODEL)
+}
+function fallbackEffortFor(s: Session): Effort {
+  return s.command_effort ?? (s.primary_model ? EFFORT[s.tier] : LEGACY_EFFORT[s.tier])
+}
 function cmdAvailable(): boolean {
   for (const part of (process.env.PATH || "").split(":")) {
     if (!part) continue
@@ -136,7 +155,7 @@ function cmdAvailable(): boolean {
 }
 function prompt(s: Session): string {
   return [
-    "You execute a single scoped task using the pinned Pi tier model. The parent harness coordinates.",
+    "You execute a single scoped task using the pinned tier model. The parent harness coordinates.",
     "Tier: " + s.tier + ". Task: " + s.task,
     "Use only worktree " + s.cwd + " at base revision " + s.scope.base_revision,
     "Writable paths: " + (s.scope.writable_paths.join(", ") || "NONE: READ ONLY"),
@@ -181,11 +200,13 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     const dir = stateDir(s.cwd)
     s.backend = "command-transition"
     s.command_run = undefined
+    s.command_model = fallbackModelFor(s)
+    s.command_effort = fallbackEffortFor(s)
     s.fallback_reason = reason
     if (detail !== undefined) s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
     s.attempts = 1
     save(s)
-    s.command_run = command.start(s.cwd, dir, prompt(s), EFFORT[s.tier], s.tier === "scout")
+    s.command_run = command.start(s.cwd, dir, prompt(s), fallbackEffortFor(s), s.tier === "scout", undefined, fallbackModelFor(s))
     s.backend = "command-code"
     save(s)
     return s
@@ -218,10 +239,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
       if (!available && issue)
-        issue = `Primary ${modelFor(tierInput).providerID}/${modelFor(tierInput).id} is temporarily unavailable: ${issue}. Fallback ${COMMAND_MODEL} is installed and ready.`
+        issue = `Primary ${modelFor(tierInput).providerID}/${modelFor(tierInput).id} is temporarily unavailable: ${issue}. Fallback ${COMMAND_MODELS[tierInput]} is installed and ready.`
       return {
         primary: { backend: "pi", model: modelFor(tierInput), available, issue },
-        fallback: { backend: "command-code", model: COMMAND_MODEL, effort: EFFORT[tierInput], installed: command.available() },
+        fallback: { backend: "command-code", model: COMMAND_MODELS[tierInput], effort: EFFORT[tierInput], installed: command.available() },
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {
@@ -231,7 +252,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const task = required(brief, "brief", 32000)
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, backend: "pi-admitting", attempts: 0 }
+        task, backend: "pi-admitting", attempts: 0, primary_model: modelFor(tierInput) }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
       try { save(s) } catch (error) {
@@ -288,7 +309,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         error = "Pi admission interrupted or uncertain; inspect this session before recovery"
       } else if (s.backend === "pi") {
         if (!s.pi_id) throw new Error("Missing Pi session")
-        const response = await makeWorkerBridge(api, modelFor(s.tier)).status(s.cwd, s.pi_id)
+        const response = await makeWorkerBridge(api, primaryFor(s)).status(s.cwd, s.pi_id)
         state = typeof response.state === "string" ? response.state : "unknown"
         last_assistant_text = response.last_assistant_text
         error = response.error
@@ -331,8 +352,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       }
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
-        model: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? modelFor(s.tier) : COMMAND_MODEL,
-        effort: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? modelFor(s.tier).variant : EFFORT[s.tier], state, last_assistant_text, error, usage,
+        model: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s) : fallbackModelFor(s),
+        effort: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s).variant : fallbackEffortFor(s), state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
         fallback_reason: s.fallback_reason ?? null,
@@ -361,7 +382,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         s.attempts++
         s.backend = "pi-transition"
         save(s)
-        await makeWorkerBridge(api, modelFor(s.tier)).resume(s.cwd, s.pi_id, "Same-scope correction only: " + correction)
+        await makeWorkerBridge(api, primaryFor(s)).resume(s.cwd, s.pi_id, "Same-scope correction only: " + correction)
         s.backend = "pi"
         save(s)
       } else {
@@ -379,7 +400,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         s.command_run = command.start(s.cwd, stateDir(s.cwd),
           prompt(s) + (continuation ? "\nCONTINUE THE SAME TASK FROM WHERE THE TURN LIMIT STOPPED IT: " :
             "\nSAME-SCOPE CORRECTION ONLY: ") + correction,
-          EFFORT[s.tier], s.tier === "scout", previous.result.sessionId)
+          fallbackEffortFor(s), s.tier === "scout", previous.result.sessionId, fallbackModelFor(s))
         s.backend = "command-code"
         save(s)
       }
@@ -391,7 +412,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let interrupted = false
       if (s.backend === "pi") {
         if (!s.pi_id) throw new Error("Missing Pi session")
-        interrupted = (await makeWorkerBridge(api, modelFor(s.tier)).cancel(s.cwd, s.pi_id)).interrupted
+        interrupted = (await makeWorkerBridge(api, primaryFor(s)).cancel(s.cwd, s.pi_id)).interrupted
       } else if (s.command_run) interrupted = command.cancel(s.command_run)
       return { session_id: s.id, interrupted,
         note: "Never signal a Command Code PID left by an earlier MCP process; it may have been reused." }

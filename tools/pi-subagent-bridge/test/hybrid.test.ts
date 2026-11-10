@@ -52,15 +52,18 @@ function fake(cwd: string) {
       { type: "assistant", content: [{ type: "text", text: assistant }] },
     ] }),
     interrupt: async () => ({ data: { interrupted: true } }),
-    models: async () => ({ data: ["deepseek-v4.1-flash", "muse-spark-1.3-contributor"].map((id) => ({
-      id, providerID: "opencode-go",
+    models: async () => ({ data: [
+      { id: "deepseek-v4.1-flash", providerID: "opencode-go" },
+      { id: "muse-ember-1.0", providerID: "opencode" },
+    ].map(({ id, providerID }) => ({
+      id, providerID,
       variants: variants.map((variant) => ({ id: variant })), enabled: true, status: "active",
     })) }),
   }
   const command = {
     available: () => true,
-    start: (dir: string, _log: string, prompt: string, effort: "low" | "high" | "max", readOnly: boolean, resume?: string): CommandRun => {
-      calls.push({ command: true, dir, prompt, effort, readOnly, resume })
+    start: (dir: string, _log: string, prompt: string, effort: "low" | "medium" | "high" | "xhigh" | "max", readOnly: boolean, resume?: string, selectedModel?: string): CommandRun => {
+      calls.push({ command: true, dir, prompt, effort, readOnly, resume, model: selectedModel })
       return { pid: 123, output: "fake", errors: "fake", started_at: "2026-11-06" }
     },
     status: () => commandDone ?
@@ -78,17 +81,17 @@ test("every Pi tier pins exactly the requested provider, model, and effort", asy
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     const expected = [
-      ["scout", "muse-spark-1.3-contributor", "medium", "low"],
-      ["mechanic", "muse-spark-1.3-contributor", "high", "high"],
-      ["worker", "deepseek-v4.1-flash", "high", "high"],
-      ["expert", "deepseek-v4.1-flash", "max", "max"],
+      ["scout", "opencode", "muse-ember-1.0", "medium", "medium", "meta/muse-ember"],
+      ["mechanic", "opencode", "muse-ember-1.0", "xhigh", "xhigh", "meta/muse-ember"],
+      ["worker", "opencode-go", "deepseek-v4.1-flash", "high", "high", "deepseek/deepseek-v4.1-flash"],
+      ["expert", "opencode-go", "deepseek-v4.1-flash", "max", "max", "deepseek/deepseek-v4.1-flash"],
     ] as const
-    for (const [tier, id, variant, fallbackEffort] of expected) {
+    for (const [tier, providerID, id, variant, fallbackEffort, fallbackModel] of expected) {
       const found = await bridge.modelCheck(f.cwd, tier)
-      assert.deepEqual(found.primary.model, { providerID: "opencode-go", id, variant })
+      assert.deepEqual(found.primary.model, { providerID, id, variant })
       assert.equal(found.primary.available, true)
       assert.equal(found.fallback.effort, fallbackEffort)
-      assert.equal(found.fallback.model, "deepseek/deepseek-v4.1-flash")
+      assert.equal(found.fallback.model, fallbackModel)
     }
     await assert.rejects(bridge.modelCheck(f.cwd, "god"), /Unknown Pi tier/)
   } finally { f.close() }
@@ -119,12 +122,32 @@ test("missing OpenCode variant starts read-only Command Code scout; resume is pi
     assert.equal(task.backend, "command-code")
     assert.match(task.fallback_notice ?? "", /needs no parent action/)
     assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"readOnly":true')))
-    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"low"')))
+    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"medium"')))
+    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"model":"meta/muse-ember"')))
     m.done()
     assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
     await bridge.resume(f.cwd, task.session_id, "Give file:line evidence")
     assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"resume":"cmd-session"')))
     await assert.rejects(bridge.resume(f.cwd, task.session_id, "third attempt"), /attempt limit/)
+  } finally { f.close() }
+})
+test("missing primary mechanic variant uses Muse Ember xhigh in Command Code, including resume", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    m.omitModels()
+    const task = await bridge.start(f.cwd, "mechanical", "mechanic", f.scope, "Edit README")
+    assert.equal(task.backend, "command-code")
+    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"effort":"xhigh"')))
+    assert.ok(m.calls.some((c) => JSON.stringify(c).includes('"model":"meta/muse-ember"')))
+    m.done()
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.model, "meta/muse-ember")
+    assert.equal(status.effort, "xhigh")
+    await bridge.resume(f.cwd, task.session_id, "Recheck README")
+    const launches = m.calls.filter((c) => JSON.stringify(c).includes('"command":true'))
+    assert.equal(launches.length, 2)
+    assert.ok(launches.every((c) => JSON.stringify(c).includes('"model":"meta/muse-ember"')))
   } finally { f.close() }
 })
 test("an OpenCode server that cannot start admits the task on Command Code", async () => {

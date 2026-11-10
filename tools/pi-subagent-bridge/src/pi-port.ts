@@ -22,9 +22,9 @@ type Stored = {
 const SESSION = /^ses_[a-f0-9]{32}$/
 const children = new Map<number, ChildProcess>()
 const worker = fileURLToPath(new URL("./sdk-worker.ts", import.meta.url))
-const VARIANTS: Record<string, string[]> = {
-  "deepseek-v4.1-flash": ["high", "max"],
-  "muse-spark-1.3-contributor": ["medium", "high"],
+const VARIANTS: Record<string, { providerID: string; variants: string[] }> = {
+  "deepseek-v4.1-flash": { providerID: "opencode-go", variants: ["high", "max"] },
+  "muse-ember-1.0": { providerID: "opencode", variants: ["medium", "xhigh"] },
 }
 
 function stateDir(cwd: string): string {
@@ -120,10 +120,10 @@ export function piPort(): OpenCodePort {
       const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
       const runtime = await ModelRuntime.create()
       const available = Object.entries(VARIANTS)
-        .filter(([id]) => runtime.getModel("opencode-go", id) && runtime.hasConfiguredAuth("opencode-go"))
-        .map(([id, variants]) => ({
-          id, providerID: "opencode-go", enabled: true, status: "active",
-          variants: variants.map((variant) => ({ id: variant })),
+        .filter(([id, config]) => runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
+        .map(([id, config]) => ({
+          id, providerID: config.providerID, enabled: true, status: "active",
+          variants: config.variants.map((variant) => ({ id: variant })),
         }))
       return { data: available }
     },

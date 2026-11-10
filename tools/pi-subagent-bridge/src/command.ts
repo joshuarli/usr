@@ -3,7 +3,8 @@ import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync }
 import { randomUUID } from "node:crypto"
 
 export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
-export type Effort = "low" | "high" | "max"
+export const COMMAND_EMBER_MODEL = "meta/muse-ember"
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
 export type CommandRun = { pid: number; output: string; errors: string; started_at: string }
 export type CommandResult = {
   subtype: "success" | "error" | "max_turns"
@@ -15,11 +16,12 @@ export type CommandResult = {
 }
 
 const children = new Map<number, ChildProcess>()
-const MAX_TURNS: Record<Effort, number> = { low: 48, high: 160, max: 256 }
+const MAX_TURNS: Record<Effort, number> = { low: 48, medium: 96, high: 160, xhigh: 224, max: 256 }
 const READ_ONLY_MAX_TURNS = 32
 
 export function startCommand(directory: string, logDirectory: string, text: string,
-  effort: Effort, readOnly: boolean, resume?: string): CommandRun {
+  effort: Effort, readOnly: boolean, resume?: string, model: string = COMMAND_MODEL): CommandRun {
+  if (model !== COMMAND_MODEL && model !== COMMAND_EMBER_MODEL) throw new Error("Unapproved Command Code model")
   const suffix = randomUUID()
   const output = `${logDirectory}/${suffix}.ndjson`
   const errors = `${logDirectory}/${suffix}.stderr`
@@ -27,7 +29,7 @@ export function startCommand(directory: string, logDirectory: string, text: stri
   const stderr = openSync(errors, "wx", 0o600)
   const args = [
     "-p", text,
-    "--model", COMMAND_MODEL,
+    "--model", model,
     "--effort", effort,
     "--output-format", "json",
     "--max-turns", String(readOnly ? READ_ONLY_MAX_TURNS : MAX_TURNS[effort]),

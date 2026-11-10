@@ -11,10 +11,10 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 ## Pinned tiers
 
-| Tier | Pi SDK primary on OpenCode Go | Thinking | Command Code fallback | Purpose |
+| Tier | Pi SDK primary (OpenCode Zen / Go) | Thinking | Command Code fallback | Purpose |
 | --- | --- | --- | --- | --- |
-| scout | `opencode-go/muse-spark-1.3-contributor` | `medium` | `deepseek/deepseek-v4.1-flash`, `low` | Read-only exploration |
-| mechanic | `opencode-go/muse-spark-1.3-contributor` | `high` | `deepseek/deepseek-v4.1-flash`, `high` | Mechanical scoped edits |
+| scout | `opencode/muse-ember-1.0` | `medium` | `meta/muse-ember`, `medium` | Read-only exploration |
+| mechanic | `opencode/muse-ember-1.0` | `xhigh` | `meta/muse-ember`, `xhigh` | Mechanical scoped edits |
 | worker | `opencode-go/deepseek-v4.1-flash` | `high` | `deepseek/deepseek-v4.1-flash`, `high` | Implementation, debugging, testing |
 | expert | `opencode-go/deepseek-v4.1-flash` | `max` | `deepseek/deepseek-v4.1-flash`, `max` | Difficult architectural or cross-cutting work |
 
@@ -41,7 +41,7 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-The primary executor embeds **Pi SDK + pi-subagents**, invoking the extension RPC with the pinned model and tier and reusing OpenCode Go credentials. It does not invoke the Pi CLI or start the OpenCode agent/server. Only an unavailable approved model/provider or a recognized quota/usage failure permits a fallback to the separate authenticated Command Code CLI, pinned to DeepSeek V4.1 Flash and effort above.
+The primary executor embeds **Pi SDK + pi-subagents**, invoking the extension RPC with the pinned model and tier and reusing the shared OpenCode credential for Zen and Go. It does not invoke the Pi CLI or start the OpenCode agent/server. Only an unavailable approved model/provider or a recognized quota/usage failure permits a fallback to the separate authenticated Command Code CLI, pinned to Muse Ember for scout/mechanic or DeepSeek V4.1 Flash for worker/expert, at the exact effort above.
 
 **Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Command Code has no third fallback. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 

@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "opencode-go/muse-spark-1.3-contributor"
+MODEL = "opencode/muse-ember-1.0"
 TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "xhigh", "god": "xhigh"}
 
 
@@ -152,18 +152,25 @@ else:
         self.assertEqual(sub["maxThinking"], "max")
         self.assertTrue(sub["modelScope"]["strict"])
         self.assertEqual(set(sub["modelScope"]["allow"]), {
-            "opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor"})
-        expected = {"scout": ("muse-spark-1.3-contributor", "medium"),
-                    "mechanic": ("muse-spark-1.3-contributor", "high"),
-                    "worker": ("deepseek-v4.1-flash", "high"),
-                    "expert": ("deepseek-v4.1-flash", "max")}
+            "opencode-go/deepseek-v4.1-flash", MODEL})
+        expected = {"scout": (MODEL, "medium"),
+                    "mechanic": (MODEL, "xhigh"),
+                    "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
+                    "expert": ("opencode-go/deepseek-v4.1-flash", "max")}
         for tier, (model, effort) in expected.items():
-            self.assertEqual(sub["agentOverrides"][tier], {"model": "opencode-go/" + model, "thinking": effort})
+            self.assertEqual(sub["agentOverrides"][tier], {"model": model, "thinking": effort})
+            self.assertEqual(sub["modelScope"]["agents"][tier]["allow"], [model])
             agent = (PROFILE / "agents" / (tier + ".md")).read_text()
             self.assertIn("name: " + tier, agent)
-            self.assertIn("model: opencode-go/" + model, agent)
+            self.assertIn("model: " + model, agent)
             self.assertIn("thinking: " + effort, agent)
             self.assertNotIn("tools: subagent", agent)
+        catalog = json.loads((PROFILE / "models.json").read_text())
+        ember = catalog["providers"]["opencode"]["models"][0]
+        self.assertEqual(ember["id"], "muse-ember-1.0")
+        self.assertEqual(ember["api"], "openai-responses")
+        self.assertEqual(ember["thinkingLevelMap"]["xhigh"], "xhigh")
+        self.assertEqual(ember["thinkingLevelMap"]["medium"], "medium")
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")

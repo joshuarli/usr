@@ -34,12 +34,17 @@ export function string(value: unknown): string | null {
 export function role(job: Job): string {
   const identity = job.model.providerID + "/" + job.model.id + ":" + job.model.variant
   const tiers: Record<string, string> = {
-    "opencode-go/muse-spark-1.3-contributor:medium": "scout",
-    "opencode-go/muse-spark-1.3-contributor:high": "mechanic",
+    "opencode/muse-ember-1.0:medium": "scout",
+    "opencode/muse-ember-1.0:xhigh": "mechanic",
     "opencode-go/deepseek-v4.1-flash:high": "worker",
     "opencode-go/deepseek-v4.1-flash:max": "expert",
   }
-  const tier = tiers[identity]
+  // Permit legacy Spark roles solely when resuming an already-owned native run.
+  const old: Record<string, string> = {
+    "opencode-go/muse-spark-1.3-contributor:medium": "scout",
+    "opencode-go/muse-spark-1.3-contributor:high": "mechanic",
+  }
+  const tier = tiers[identity] ?? (job.priorRunId && job.priorSessionFile ? old[identity] : undefined)
   if (!tier || (job.readOnly !== (tier === "scout"))) throw new Error("Unapproved Pi tier or tool scope")
   return tier
 }

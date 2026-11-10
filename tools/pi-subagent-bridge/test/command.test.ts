@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSy
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { commandResult, startCommand } from "../src/command.ts"
+import { COMMAND_EMBER_MODEL, commandResult, startCommand } from "../src/command.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session", async () => {
@@ -28,11 +28,14 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.match(args, /--effort\nhigh/)
     assert.match(args, /--yolo/)
     assert.match(args, /--max-turns\n160\n/)
-    const second = startCommand(root, logs, "cite lines", "low", true, output.result?.sessionId)
+    const second = startCommand(root, logs, "cite lines", "xhigh", true, output.result?.sessionId, COMMAND_EMBER_MODEL)
     let next = commandResult(second)
     for (let i = 0; i < 100 && !next.result; i++) { await delay(10); next = commandResult(second) }
     assert.equal(next.state, "succeeded")
     assert.match(readFileSync(argsFile, "utf8"), /--plan/)
+    assert.match(readFileSync(argsFile, "utf8"), /--model\\nmeta\\/muse-ember/)
+    assert.match(readFileSync(argsFile, "utf8"), /--effort\\nxhigh/)
+    assert.throws(() => startCommand(root, logs, "bad", "medium", true, undefined, "unapproved"), /Unapproved/)
     assert.match(readFileSync(argsFile, "utf8"), /--resume\ncmd-session/)
   } finally {
     process.env.PATH = oldPath
