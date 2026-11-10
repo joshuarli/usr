@@ -22,6 +22,12 @@ class LinkSpec:
     source: Path
     layer: Path
     directory: bool
+    home_link_text: str | None = None
+
+
+CODE_DECLARED_LINKS: tuple[tuple[PurePosixPath, PurePosixPath], ...] = (
+    (PurePosixPath(".claude/skills"), PurePosixPath(".agents/skills")),
+)
 
 
 @dataclass(frozen=True)
@@ -97,6 +103,12 @@ def discover(root: Path, target: Path, platform: str) -> Discovery:
                 continue
             _safe_relative(rel)
             _add(specs, LinkSpec(rel, source_root / rel, source_root, False))
+    for relative, home_target in CODE_DECLARED_LINKS:
+        if relative in specs:
+            raise LinkError(f"{relative} is declared in code; remove its file from {specs[relative].layer}")
+        if target_spec := specs.get(home_target):
+            text = os.path.relpath(home_target, relative.parent)
+            specs[relative] = LinkSpec(relative, target_spec.source, target_spec.layer, False, text)
     keys = sorted(specs, key=lambda p: p.as_posix())
     for relative in keys:
         for parent in relative.parents:

@@ -82,6 +82,8 @@ def _parent_safe(path: Path, discovery: Discovery) -> bool:
 
 
 def _desired_text(spec: LinkSpec, path: Path) -> str:
+    if spec.home_link_text is not None:
+        return spec.home_link_text
     if not spec.directory and spec.source.is_symlink():
         source_text = os.readlink(spec.source)
         if not os.path.isabs(source_text):

@@ -1208,10 +1208,7 @@ class DecideTests(unittest.TestCase):
         orchestrate = ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md"
         self.assertTrue(orchestrate.is_file())
         self.assertTrue((ROOT / "dotfiles/base/.agents/skills/.sym-dir").is_file())
-        for path in (
-            "dotfiles/base/.claude/skills",
-            "dotfiles/base/.gemini/antigravity-cli/skills",
-        ):
+        for path in ("dotfiles/base/.gemini/antigravity-cli/skills",):
             link = ROOT / path
             self.assertTrue(link.is_symlink(), path)
             self.assertEqual(link.resolve(strict=True), orchestrate.parent.parent, path)

@@ -226,14 +226,14 @@ class LinkTests(unittest.TestCase):
     def test_21_dangling_source_link_becomes_valid_after_directory_link(self):
         self.marker(".agents/skills")
         self.source(".agents/skills/keep")
-        dest = self.root / "dotfiles/base/.claude/skills"
+        dest = self.root / "dotfiles/base/.tool/skills"
         dest.parent.mkdir(); dest.symlink_to("../.agents/skills")
-        (self.home / ".claude").mkdir()
-        (self.home / ".claude/skills").symlink_to("../.agents/skills")
+        (self.home / ".tool").mkdir()
+        (self.home / ".tool/skills").symlink_to("../.agents/skills")
         p = self.plan()
         self.assertFalse(p.conflicts, p.conflicts)
         apply(p, self.owned)
-        self.assertTrue((self.home / ".claude/skills/keep").exists())
+        self.assertTrue((self.home / ".tool/skills/keep").exists())
 
     def test_22_no_path_traversal_through_discovery(self):
         self.source("a")
@@ -322,6 +322,34 @@ class LinkTests(unittest.TestCase):
         legacy = self.home / ".claude/AGENTS.md"
         legacy.symlink_to("../my/AGENTS.md")
         self.assertNotIn(legacy, [a.path for a in self.plan().actions])
+
+    def test_52_claude_skills_link_is_declared_without_a_layer_file(self):
+        self.marker(".agents/skills")
+        self.source(".agents/skills/review/SKILL.md")
+        self.track()
+        self.sync()
+        self.assertEqual(os.readlink(self.home / ".claude/skills"), "../.agents/skills")
+        self.assertTrue((self.home / ".claude/skills/review/SKILL.md").exists())
+        self.assertTrue(self.plan().converged)
+
+    def test_53_claude_skills_link_from_old_layer_symlink_is_kept(self):
+        self.marker(".agents/skills")
+        self.source(".agents/skills/review/SKILL.md")
+        self.track()
+        (self.home / ".claude").mkdir()
+        (self.home / ".claude/skills").symlink_to("../.agents/skills")
+        self.sync()
+        self.assertTrue((self.home / ".claude/skills/review/SKILL.md").exists())
+        self.assertTrue(self.plan().converged)
+
+    def test_54_layer_file_at_code_declared_link_is_rejected(self):
+        self.marker(".agents/skills")
+        self.source(".agents/skills/review/SKILL.md")
+        adapter = self.root / "dotfiles/base/.claude/skills"
+        adapter.parent.mkdir(); adapter.symlink_to("../.agents/skills")
+        self.track()
+        with self.assertRaises(LinkError):
+            discover(self.root, self.home, "linux")
 
     def test_28_tab_name_rejected_before_changes(self):
         self.source("a\tb")

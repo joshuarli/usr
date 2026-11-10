@@ -36,6 +36,8 @@ The `host/macos/` directory is not part of the layer sync.
 
 Sync prunes a recorded link whose old layer source is gone, including a link that mirrored a layer symlink to a home path the layers still provide; `sh sync plan` lists these as `PRUNE`. Foreign links, still-present source links, and unrecorded links are preserved, except the legacy `~/.claude/AGENTS.md -> ../.codex/AGENTS.md` adapter, which made Claude load the shared contract twice. To retire a managed link, remove its tracked declaration and run `sh sync links`. Test with an isolated `TARGET` scratch home; the old standalone `sym` command has been retired.
 
+`~/.claude/skills -> ../.agents/skills` is declared in `tools/sync/links.py` instead of as a layer file, because Claude Code would otherwise discover the tracked link while working inside this repository and list every skill twice. A layer file at that path is an error.
+
 ## Cross-harness Pi SDK subagent bridge
 
 `sh sync` (and `sh sync bridge`) reconciles tracked user-level Pi packages before registering any bridge MCP servers. Its `pi-extensions` task repairs missing or mismatched exact npm pins and runs `pi update --extensions --no-approve`. Pi's updater deliberately skips exact-pinned npm sources, so the repair step is required. `sh sync plan` and `sh sync doctor` only inspect package versions and perform no downloads or writes. Project-local extensions are excluded by `--no-approve`.
