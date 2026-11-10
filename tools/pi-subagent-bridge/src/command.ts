@@ -16,8 +16,8 @@ export type CommandResult = {
 }
 
 const children = new Map<number, ChildProcess>()
-const MAX_TURNS: Record<Effort, number> = { low: 48, medium: 96, high: 160, xhigh: 224, max: 256 }
-const READ_ONLY_MAX_TURNS = 32
+const MAX_TURNS: Record<Effort, number> = { low: 150, medium: 300, high: 500, xhigh: 650, max: 800 }
+const READ_ONLY_MAX_TURNS = 100
 
 export function startCommand(directory: string, logDirectory: string, text: string,
   effort: Effort, readOnly: boolean, resume?: string, model: string = COMMAND_MODEL): CommandRun {
