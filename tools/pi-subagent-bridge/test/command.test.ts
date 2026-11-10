@@ -33,8 +33,8 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     for (let i = 0; i < 100 && !next.result; i++) { await delay(10); next = commandResult(second) }
     assert.equal(next.state, "succeeded")
     assert.match(readFileSync(argsFile, "utf8"), /--plan/)
-    assert.match(readFileSync(argsFile, "utf8"), /--model\\nmeta\\/muse-ember/)
-    assert.match(readFileSync(argsFile, "utf8"), /--effort\\nxhigh/)
+    assert.ok(readFileSync(argsFile, "utf8").includes("--model\nmeta/muse-ember\n"))
+    assert.ok(readFileSync(argsFile, "utf8").includes("--effort\nxhigh\n"))
     assert.throws(() => startCommand(root, logs, "bad", "medium", true, undefined, "unapproved"), /Unapproved/)
     assert.match(readFileSync(argsFile, "utf8"), /--resume\ncmd-session/)
   } finally {

@@ -30,7 +30,7 @@ function fixture() {
 function fake(cwd: string) {
   const calls: unknown[] = []
   let status = "succeeded", assistant = "PROOF: test exit 0", error: unknown = null
-  let variants = ["medium", "high", "max"]
+  let variants = ["medium", "high", "xhigh", "max"]
   let commandDone = false
   let model = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
   const api: OpenCodePort = {
