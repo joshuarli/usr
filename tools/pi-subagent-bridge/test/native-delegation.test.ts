@@ -10,10 +10,10 @@ function job(id: string, variant: string, readOnly = false, providerID = "openco
 test("native Pi roles fail closed on provider, model, thinking and write scope", () => {
   assert.equal(role(job("muse-spark-1.3-contributor", "medium", true)), "scout")
   assert.equal(role(job("muse-spark-1.3-contributor", "high")), "mechanic")
+  assert.equal(role(job("deepseek-v4.1-flash", "high")), "worker")
   assert.throws(() => role(job("muse-ember-1.0", "medium", true, "opencode")), /Unapproved/)
   assert.throws(() => role({ ...job("muse-ember-1.0", "xhigh", false, "opencode"),
     priorRunId: "old", priorSessionFile: "/work/old.jsonl" }), /Unapproved/)
-  assert.equal(role(job("deepseek-v4.1-flash", "high")), "worker")
   assert.equal(role(job("deepseek-v4.1-flash", "max")), "expert")
   assert.throws(() => role(job("deepseek-v4.1-flash", "xhigh")), /Unapproved/)
   assert.throws(() => role(job("muse-spark-1.3-contributor", "medium", false)), /Unapproved/)

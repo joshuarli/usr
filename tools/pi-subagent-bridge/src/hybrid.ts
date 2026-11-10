@@ -6,7 +6,8 @@ import { checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } f
 import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
-export type Tier = "scout" | "mechanic" | "worker" | "expert"
+import { GO_TIER_MODELS, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
+export type { Tier } from "./tier-policy.ts"
 export type Scope = {
   base_revision: string
   writable_paths: string[]
@@ -42,7 +43,7 @@ function required(value: unknown, name: string, max = 2000): string {
   return value
 }
 function isTier(value: unknown): value is Tier {
-  return typeof value === "string" && Object.hasOwn(EFFORT, value)
+  return isBridgeTier(value)
 }
 function scopeFor(value: unknown, tier: Tier, cwd: string, checkHead = true): Scope {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("scope must be an object")
@@ -127,12 +128,7 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
-const PI_MODELS: Record<Tier, ModelRef> = {
-  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
-  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
-  worker: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
-  expert: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" },
-}
+const PI_MODELS: Record<Tier, ModelRef> = GO_TIER_MODELS
 const LEGACY_PI_MODELS: Partial<Record<Tier, ModelRef>> = {
   scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
   mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
@@ -160,7 +156,10 @@ function prompt(s: Session): string {
     "Writable paths: " + (s.scope.writable_paths.join(", ") || "NONE: READ ONLY"),
     "Required acceptance proof: " + s.scope.acceptance_proof,
     "Attempt limit: " + s.scope.attempt_limit + ". Stop on: " + s.scope.stop_on,
-    "Do not spawn children, commit, switch branches, merge, push, add dependencies, or edit outside writable paths.",
+    "Native Pi workers may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
+    "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
+    "Command Code workers remain leaves: do not spawn subagents from Command Code.",
+    "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths.",
     "Stop if blocked or if the requirements demand more scope. Do not broaden the task.",
     "Return a PROOF RECORD instead of a summary: changed paths; exact commands, exit codes and decisive output;",
     "file:line evidence for research; and explicit unverified cases and blockers. Never invent a passing check.",

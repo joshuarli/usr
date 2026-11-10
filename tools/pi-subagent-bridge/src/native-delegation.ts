@@ -1,4 +1,5 @@
 import { renameSync, writeFileSync } from "node:fs"
+import { tierForModel, type Tier } from "./tier-policy.ts"
 
 export type Job = {
   cwd: string
@@ -31,17 +32,8 @@ export function record(value: unknown): Record<string, unknown> | null {
 export function string(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null
 }
-export function role(job: Job): string {
-  const identity = job.model.providerID + "/" + job.model.id + ":" + job.model.variant
-  const tiers: Record<string, string> = {
-    "opencode-go/muse-spark-1.3-contributor:medium": "scout",
-    "opencode-go/muse-spark-1.3-contributor:high": "mechanic",
-    "opencode-go/deepseek-v4.1-flash:high": "worker",
-    "opencode-go/deepseek-v4.1-flash:max": "expert",
-  }
-  const tier = tiers[identity]
-  if (!tier || (job.readOnly !== (tier === "scout"))) throw new Error("Unapproved Pi tier or tool scope")
-  return tier
+export function role(job: Job): Tier {
+  return tierForModel(job.model, job.readOnly)
 }
 export function persist(path: string, result: Result): void {
   const temporary = path + "." + process.pid + ".tmp"

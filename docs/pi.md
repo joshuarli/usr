@@ -40,6 +40,14 @@ Only a missing Command Code executable, an unavailable exact Command Code model/
 
 This is a Git write-scope check, not an OS sandbox. Ignored paths and host-side effects require additional containment such as `sbx` or a VM.
 
+## One-level native Pi nesting
+
+The embedded Pi fallback is not inherently limited to leaf agents. The four tracked native Pi agent profiles explicitly expose `subagent` and declare exact, ordered descendant allowlists. A required child extension registers an independently enforced capability ceiling from the typed `src/tier-policy.ts` graph in **each first-level child and its descendants**. The SDK checks parsed YAML profile parity and Go-only modelScope before a new root launch. The native runtime inherits the ceiling through nested/async children and applies a strict `maxSubagentDepth = 2`; second-level agents cannot delegate again. A permitted nested launch uses the model-facing shape `subagent({ agent: "mechanic", task: "...", options: { agentScope: "user" } })`; all other nested options are rejected.
+
+Scout → scout; mechanic → scout/mechanic; worker → scout/mechanic/worker; expert → scout/mechanic/worker/expert. No God. A nested call cannot select a model, override tools/provider, create a new worktree, change cwd or use workflow-script launch modes: a code-installed tool-call guard rejects those paths, alongside the upstream `allowedAgents` and depth admission checks. Nested children remain in the assigned worktree; the outer parent must check the combined diff and acceptance proof. This is *not* an OS sandbox against arbitrary shell commands.
+
+**Command Code is still the primary backend and currently remains a leaf.** This change enables nesting in the Pi/OpenCode Go fallback only, not Command Code's standalone CLI process; do not claim universal bridge nesting without implementing a separate typed, authenticated child-delegation interface.
+
 ## CLI entrypoint
 
 The `pi-subagent-bridge` executable in `~/.local/bin` invokes the same SDK bridge when a harness cannot speak MCP:

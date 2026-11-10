@@ -7,7 +7,7 @@ description: "Route all coding subagents through the shared Pi SDK bridge, scope
 
 **All coding subagents from any harness use `pi-subagent-bridge`**, regardless of which skill initiated delegation. This includes non-orchestrate tools and ordinary review tasks. The only native exception is `god` in Claude Code or Codex, using the existing pinned native model. Never use native Claude `Agent`/`Task`, Codex `spawn_agent`, OpenCode child agents, Command Code `Explore`/`General`, Pi's native `subagent` tool outside the bridge, or another harness's native child launcher for `scout`, `mechanic`, `worker`, or `expert`.
 
-The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. A worker may not delegate or broaden its task.
+The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. A native Pi child may delegate one additional generation to equal-or-weaker tiers, only when its assigned task calls for it; no worker may broaden its scope. Command Code workers are still leaves.
 
 ## Pinned tiers
 
@@ -35,7 +35,7 @@ The parent creates a clean, dedicated linked worktree under `.work/wt/<slice>`. 
 - `scope.acceptance_proof`: named command with expected result, or a source file:line for research.
 - `scope.attempt_limit`: 1 normally; 2 only for one justified same-scope correction.
 - `scope.stop_on`: ambiguity, scope expansion, new dependencies, contract changes, unavailable proof.
-- `brief`: one outcome, relevant facts, prohibited changes, and no downstream delegation.
+- `brief`: one outcome, relevant facts, prohibited changes, and whether one-level Pi fanout is justified; never delegate beyond the assigned scope.
 
 **Admission is not completion.** Observe the returned ID using `worker_status` or wait with `worker-watch`, then read its terminal result. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
 
@@ -44,6 +44,8 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 ## Provider fallback and ambiguous runs
 
 **Command Code is the first executor for every non-god tier**, pinned to Muse Ember for scout/mechanic and DeepSeek V4.1 Flash for worker/expert. OpenCode Go is **second**: the bridge embeds Pi SDK + pi-subagents and invokes its exact Go-only pinned model through the extension RPC, without starting OpenCode or the Pi CLI. Only a missing Command Code executable or a confirmed provider/model/usage failure may switch to Go, before any edits and with unambiguous termination. No second fallback is allowed. Legacy sessions retain their admitted backend and pinned models rather than being restarted.
+
+**Native Pi nested delegation, enforced by code:** Root Pi children (depth 1) have the native `subagent` tool and may make at most one more generation (depth 2). The typed tier lattice is scout → scout; mechanic → scout/mechanic; worker → scout/mechanic/worker; expert → any of those four. God is never allowed. The SDK pins a required per-tier guard extension into every child and descendant; it registers a monotonic `allowedAgents` ceiling, rejects model/cwd/worktree overrides and workflow launches, and upstream enforces `maxSubagentDepth = 2`. Profile parsing and strict Go modelScope are checked before first admission. A nested child cannot delegate again. All descendants share the original worktree/write budget; acceptance, conflict avoidance, and review remain the outer parent's responsibility. **Command Code executions do not gain native Pi nesting**; they must not start bridge CLI children or host-native agents. A separate typed delegation interface would be required for Command Code parity.
 
 **Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. OpenCode Go is the final fallback: no third provider, no return to Command Code. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 
@@ -67,7 +69,7 @@ Carry forward findings and failed approaches. Every child gets:
 - A concrete deliverable with only the needed context.
 - Proportionate checks, an attempt limit, and a stopping condition.
 - The current campaign ruling, plus a duty to report misleading metrics, repeated gate failures, or shared blockers rather than work around them.
-- No further delegation unless the brief grants it; Grok may delegate to lower tiers within its depth cap. Claude-triggered DeepSeek executors never delegate. Codex V2 children never delegate because V1's `agents.max_depth` does not apply.
+- Only Pi SDK workers may delegate one native child generation, at equal-or-weaker tier and within their original brief; the code-owned ceiling/depth guard makes escalation an error. Command Code workers do not nest. Host-native child launches remain forbidden outside the bridge.
 
 ## Worktree lifecycle
 

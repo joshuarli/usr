@@ -9,7 +9,7 @@ One shared delegation bridge for every coding harness. Parents remain responsibl
 | worker | `deepseek/deepseek-v4.1-flash` | high | `opencode-go/deepseek-v4.1-flash` | high |
 | expert | `deepseek/deepseek-v4.1-flash` | max | `opencode-go/deepseek-v4.1-flash` | max |
 
-No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Neither runner may spawn another agent. **Only OpenCode Go models are eligible for OpenCode/Pi delegation.** Do not use `opencode/*` Zen, metered OpenCode models, or custom endpoints. Ember runs on Command Code only; the OpenCode Go scout/mechanic fallback remains Muse Spark 1.3 Contributor. The bridge requires `cmd login` for its preferred provider and a separate configured OpenCode Go credential for fallback. No unapproved models are permitted.
+No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Command Code runs remain leaves. Native Pi fallback children may spawn exactly one additional generation, equal-or-weaker only (typed tier guard, immutable child extension, and max depth 2). **Only OpenCode Go models are eligible for OpenCode/Pi delegation.** Do not use `opencode/*` Zen, metered OpenCode models, or custom endpoints. Ember runs on Command Code only; the OpenCode Go scout/mechanic fallback remains Muse Spark 1.3 Contributor. The bridge requires `cmd login` for its preferred provider and a separate configured OpenCode Go credential for fallback. No unapproved models are permitted.
 
 ## Setup
 
@@ -19,6 +19,19 @@ No `god` tier. Claude Code and Codex alone use their pinned native `god` agents.
 `sh sync doctor`
 
 The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. `sh sync` now also reconciles the pinned interactive Pi extension automatically; no separate command is necessary.
+
+## Bounded native Pi nesting
+
+The Pi fallback is a real subagent runtime, not a prompt-only coordination promise. Its required child extension registers an inherited `allowedAgents` capability ceiling for each tier and blocks unapproved `subagent` launches (model/cwd/worktree overrides, workflow scripting, higher tiers). Upstream Pi separately enforces the depth cap at launch; an inner child cannot spawn a third layer. The bridge validates the typed tier contract against parsed agent YAML and strict Go-only model scope **before a new child starts**. Nested calls must use `options: { agentScope: "user" }` to prevent project-scoped agent shadows; per-call model, worktree, and tool overrides fail before delegation. The central rules are `src/tier-policy.ts`, the required guard is `src/nested-guard.ts`, and the profile validator is `src/tier-profile.ts`.
+
+| Pi parent | Allowed nested child |
+| --- | --- |
+| scout | scout |
+| mechanic | scout, mechanic |
+| worker | scout, mechanic, worker |
+| expert | scout, mechanic, worker, expert |
+
+**Command Code is first but still does not support child delegation.** Nested Pi children share their first-level worktree and scope; native restrictions do not replace OS sandboxing, worktree diff review or acceptance proof. The CLI/MCP entrypoint is not an authorized child launcher.
 
 ## MCP tools
 

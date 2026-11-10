@@ -8,6 +8,7 @@ import { dirname, isAbsolute, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
+import { GO_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIERS } from "./tier-policy.ts"
 
 type Result = {
   state: "succeeded" | "failed" | "cancelled"
@@ -22,9 +23,16 @@ type Stored = {
 const SESSION = /^ses_[a-f0-9]{32}$/
 const children = new Map<number, ChildProcess>()
 const worker = fileURLToPath(new URL("./sdk-worker.ts", import.meta.url))
-const VARIANTS: Record<string, { providerID: string; variants: string[] }> = {
-  "deepseek-v4.1-flash": { providerID: "opencode-go", variants: ["high", "max"] },
-  "muse-spark-1.3-contributor": { providerID: "opencode-go", variants: ["medium", "high"] },
+// Derive the supported catalog from the same typed pins used at admission.
+const VARIANTS = new Map<string, { providerID: "opencode-go"; variants: Set<string> }>()
+for (const tier of TIERS) {
+  const { providerID, id, variant } = GO_TIER_MODELS[tier]
+  const group = VARIANTS.get(id)
+  if (group) {
+    group.variants.add(variant)
+  } else {
+    VARIANTS.set(id, { providerID, variants: new Set([variant]) })
+  }
 }
 
 function stateDir(cwd: string): string {
@@ -91,6 +99,7 @@ function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: 
   try {
     const child = spawn(process.execPath, ["--experimental-strip-types", worker, jobPath], {
       cwd: s.cwd, stdio: ["ignore", "ignore", fd],
+      env: { ...process.env, PI_SUBAGENT_MAX_DEPTH: String(MAX_SUBAGENT_DEPTH) },
     })
     const pid = child.pid
     child.on("error", (error) => {
@@ -119,11 +128,11 @@ export function piPort(): OpenCodePort {
       ensureOpenCodeApiKey()
       const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
       const runtime = await ModelRuntime.create()
-      const available = Object.entries(VARIANTS)
+      const available = [...VARIANTS]
         .filter(([id, config]) => runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
         .map(([id, config]) => ({
           id, providerID: config.providerID, enabled: true, status: "active",
-          variants: config.variants.map((variant) => ({ id: variant })),
+          variants: [...config.variants].map((variant) => ({ id: variant })),
         }))
       return { data: available }
     },

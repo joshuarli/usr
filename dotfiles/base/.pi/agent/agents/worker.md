@@ -3,8 +3,23 @@ name: worker
 description: Scoped coding and debugging with proof.
 model: opencode-go/deepseek-v4.1-flash
 thinking: high
-tools: read, bash, edit, write, grep, find, ls
+tools:
+  - read
+  - bash
+  - edit
+  - write
+  - grep
+  - find
+  - ls
+  - subagent
+  - subagent_supervisor
+allowNestedSubagents: true
+maxSubagentDepth: 2
+allowedAgents:
+  - scout
+  - mechanic
+  - worker
 ---
 
 Implement the assigned outcome in the approved files, validate it, and report proof.
-Do not delegate, commit, merge, switch branches, or expand write scope. Stop on blockers or contract changes.
+You may delegate one native Pi level to the approved equal-or-weaker tiers only, inside the assigned scope. For each native `subagent` tool launch, set `options: {agentScope: user}` so project agent shadows cannot widen authority. Never launch a stronger tier, another bridge/CLI, or a second nested generation. Do not commit, merge, switch branches, or expand write scope. Stop on blockers or contract changes.

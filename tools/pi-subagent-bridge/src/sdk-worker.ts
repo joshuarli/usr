@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
 import { REQUEST, REPLY, COMPLETE, record, string, role, persist, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
+import { registerRequiredChildExtensions } from "pi-subagents/required-child-extensions"
+import { assertTierProfiles, tierGuardPath } from "./tier-profile.ts"
 import {
   createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime,
   SessionManager, SettingsManager, type ExtensionAPI,
@@ -85,6 +88,7 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
     ? SessionManager.open(job.priorSessionFile, job.sessionDir, job.cwd)
     : SessionManager.create(job.cwd, job.sessionDir)
   const agentDir = getAgentDir()
+  if (!job.priorRunId) assertTierProfiles(agentDir)
   const settings = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } })
   const completions = new Map<string, Record<string, unknown>>()
   const waiters = new Map<string, (event: Record<string, unknown>) => void>()
@@ -130,6 +134,12 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
     if (session.model?.provider !== job.model.providerID || session.model.id !== job.model.id ||
         session.thinkingLevel !== job.model.variant)
       throw new Error("Pi SDK changed or clamped the pinned model/effort")
+    const required = registerRequiredChildExtensions({
+      sessionId: manager.getSessionId(),
+      extensions: [{ id: "usr-nested-tier-guard-v1", path: fileURLToPath(tierGuardPath(tier)) }],
+      requireForAllRunners: true,
+    })
+    try {
     const rpc = api.send
     if (!rpc) throw new Error("Pi extension RPC is unavailable")
     const ping = unwrap(await rpc("ping", {}))
@@ -181,6 +191,7 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
     const synthesized = event.__bridge_result as Result | undefined
     if (synthesized && typeof synthesized === "object" && "state" in synthesized) return synthesized
     return terminal(event, id, sessionFile)
+    } finally { required.dispose() }
   } finally {
     session.dispose()
   }

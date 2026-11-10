@@ -150,6 +150,8 @@ else:
         self.assertEqual(settings["skills"], ["~/.agents/skills"])
         sub = settings["subagents"]
         self.assertEqual(sub["maxThinking"], "max")
+        depth_settings = json.loads((PROFILE / "extensions/subagent/config.json").read_text())
+        self.assertEqual(depth_settings["maxSubagentDepth"], 2)
         self.assertTrue(sub["modelScope"]["strict"])
         self.assertEqual(set(sub["modelScope"]["allow"]), {
             "opencode-go/deepseek-v4.1-flash", MODEL})
@@ -157,6 +159,12 @@ else:
                     "mechanic": (MODEL, "high"),
                     "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
                     "expert": ("opencode-go/deepseek-v4.1-flash", "max")}
+        nested = {
+            "scout": ["scout"],
+            "mechanic": ["scout", "mechanic"],
+            "worker": ["scout", "mechanic", "worker"],
+            "expert": ["scout", "mechanic", "worker", "expert"],
+        }
         for tier, (model, effort) in expected.items():
             self.assertEqual(sub["agentOverrides"][tier], {"model": model, "thinking": effort})
             self.assertEqual(sub["modelScope"]["agents"][tier]["allow"], [model])
@@ -164,7 +172,13 @@ else:
             self.assertIn("name: " + tier, agent)
             self.assertIn("model: " + model, agent)
             self.assertIn("thinking: " + effort, agent)
-            self.assertNotIn("tools: subagent", agent)
+            self.assertIn("  - subagent\n", agent)
+            self.assertIn("  - subagent_supervisor\n", agent)
+            self.assertIn("maxSubagentDepth: 2", agent)
+            self.assertIn("allowNestedSubagents: true", agent)
+            for child in nested[tier]:
+                self.assertIn("  - " + child + "\n", agent)
+            self.assertNotIn("  - god\n", agent)
         self.assertFalse((PROFILE / "models.json").exists(),
                          "No custom OpenCode Zen catalog is allowed for delegated workers")
         self.assertTrue(all(name.startswith("opencode-go/") for name in sub["modelScope"]["allow"]))
