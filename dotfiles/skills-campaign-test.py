@@ -171,6 +171,11 @@ class SkillCampaignTests(unittest.TestCase):
             else:
                 self.assertTrue(excluded(path), "adapter %s reloads the contract when Claude reads beside it" % name)
 
+    def test_claude_finds_no_nested_skills_directory_in_this_repo(self):
+        tracked = run("git", "-C", str(ROOT), "ls-files", "*.claude/skills", "*.claude/skills/*").stdout.split()
+        nested = sorted({name for name in tracked if not name.startswith(".claude/")})
+        self.assertEqual([], nested, "Claude lists every skill again under a nested .claude/skills")
+
     def test_known_global_and_local_skill_trees_pass(self):
         for skills in (
             ROOT / "dotfiles" / "base" / ".agents" / "skills",
