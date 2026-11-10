@@ -1,0 +1,88 @@
+#!/bin/sh
+set -u
+
+prog=${0##*/}
+
+usage() {
+  cat >&2 <<EOF
+usage: $prog [--all] [--dry-run]
+
+Stop pi-subagent-bridge MCP server processes so their client starts a fresh
+one with the current code. By default only the server owned by the calling
+client (the nearest ancestor that runs a bridge server, such as this Claude
+Code session) is stopped; --all stops every client's server.
+
+Only the server process is signalled. Workers are separate processes and their
+state is on disk, so running workers keep running and stay observable.
+
+After a reload, a Claude Code session reconnects the server through /mcp
+(select pi-subagent-bridge, then Reconnect) if it does not come back by itself.
+EOF
+  exit 2
+}
+
+all=0
+dry=0
+for arg in "$@"; do
+  case $arg in
+    --all) all=1 ;;
+    --dry-run) dry=1 ;;
+    -h | --help) usage ;;
+    *) usage ;;
+  esac
+done
+
+servers=$(ps -axo pid=,ppid=,command= | awk '
+  /pi-subagent-bridge\/src\/server\.ts/ || /pi-subagent-bridge\/src\/cli\.ts mcp/ {
+    if ($0 !~ /awk/) print $1, $2
+  }')
+
+if [ -z "$servers" ]; then
+  printf '%s: no pi-subagent-bridge server is running\n' "$prog"
+  exit 0
+fi
+
+targets=""
+if [ "$all" -eq 1 ]; then
+  targets=$(printf '%s\n' "$servers" | awk '{ print $1 }')
+else
+  pid=$$
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ]; do
+    match=$(printf '%s\n' "$servers" | awk -v parent="$pid" '$2 == parent { print $1 }')
+    if [ -n "$match" ]; then
+      targets=$match
+      break
+    fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+  if [ -z "$targets" ]; then
+    printf '%s: no bridge server belongs to a client above this shell; use --all to stop every server\n' "$prog" >&2
+    printf '%s\n' "$servers" | while read -r spid sppid; do
+      printf '  server %s (client %s: %s)\n' "$spid" "$sppid" "$(ps -o command= -p "$sppid" 2>/dev/null | cut -c1-60)" >&2
+    done
+    exit 1
+  fi
+fi
+
+for spid in $targets; do
+  client=$(printf '%s\n' "$servers" | awk -v p="$spid" '$1 == p { print $2 }')
+  label=$(ps -o command= -p "$client" 2>/dev/null | cut -c1-60)
+  if [ "$dry" -eq 1 ]; then
+    printf 'would stop server %s (client %s: %s)\n' "$spid" "$client" "$label"
+    continue
+  fi
+  kill -TERM "$spid" 2>/dev/null || { printf '%s: server %s already gone\n' "$prog" "$spid"; continue; }
+  waited=0
+  while kill -0 "$spid" 2>/dev/null && [ "$waited" -lt 50 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$spid" 2>/dev/null; then
+    kill -KILL "$spid" 2>/dev/null
+    printf 'stopped server %s with SIGKILL after 5 s (client %s: %s)\n' "$spid" "$client" "$label"
+  else
+    printf 'stopped server %s (client %s: %s)\n' "$spid" "$client" "$label"
+  fi
+done
+
+[ "$dry" -eq 1 ] || printf 'In Claude Code, run /mcp, select pi-subagent-bridge, and Reconnect if it is not already back.\n'

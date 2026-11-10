@@ -70,6 +70,10 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 The Command Code runner is preferred and pins an exact model and effort. If Command Code is not installed or its provider/model/usage fails conclusively before edits, the bridge tries the pinned Muse SDK model for scout/mechanic/worker, then the allowed OpenCode Go model for every tier; each Pi route loads only the pinned pi-subagents extension (plus the pinned Muse provider on the Muse route) and submits via `subagents:rpc:v1:request`. An absent receipt, interrupted process, or uncertain admission remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. No fallback after edits or a second fallback from Muse/Go is allowed. The switch is reported transparently, not as a failure: `worker_start`/`worker_status` return `fallback_reason` (what happened), `fallback_notice` (that the switch was automatic and needs no parent action, with the same scope and pinned tier model and no duplicate start), and `fallback_detail` (the original provider message, for diagnosis). The `error` field is cleared once the fallback has safely taken over. Partial work is never replayed under a second provider.
 
+## Reloading the server
+
+Each MCP client runs its own bridge server, so a code change reaches a client only after its server restarts. `pi-subagent-bridge-reload` stops the server that belongs to the calling client (`--all` stops every client's, `--dry-run` lists them). It signals only the server process: workers are separate processes with on-disk state, so running workers keep running. In Claude Code, run it as `! pi-subagent-bridge-reload`, then `/mcp`, select `pi-subagent-bridge`, and Reconnect if it is not already back.
+
 State, prompt job files, SDK JSONL transcripts and Command Code NDJSON results live under ignored `.work/worker-bridge/`. These files may contain code and model output; keep that directory private. This is *not* an OS sandbox: ignored files, absolute-path reads, and external processes are beyond Git write-scope detection.
 
 ## Tests
