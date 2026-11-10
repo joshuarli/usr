@@ -154,7 +154,8 @@ else:
         self.assertEqual(depth_settings["maxSubagentDepth"], 2)
         self.assertTrue(sub["modelScope"]["strict"])
         self.assertEqual(set(sub["modelScope"]["allow"]), {
-            "opencode-go/deepseek-v4.1-flash", MODEL})
+            "opencode-go/deepseek-v4.1-flash", MODEL,
+            "muse-sdk/muse-spark-1.3", "muse-sdk/muse-ember-1.0"})
         expected = {"scout": (MODEL, "medium"),
                     "mechanic": (MODEL, "high"),
                     "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
@@ -179,9 +180,31 @@ else:
             for child in nested[tier]:
                 self.assertIn("  - " + child + "\n", agent)
             self.assertNotIn("  - god\n", agent)
+        muse_expected = {"muse-scout": ("muse-sdk/muse-ember-1.0", "medium"),
+                         "muse-mechanic": ("muse-sdk/muse-ember-1.0", "xhigh"),
+                         "muse-worker": ("muse-sdk/muse-spark-1.3", "xhigh")}
+        muse_nested = {
+            "muse-scout": ["muse-scout"],
+            "muse-mechanic": ["muse-scout", "muse-mechanic"],
+            "muse-worker": ["muse-scout", "muse-mechanic", "muse-worker"],
+        }
+        for tier, (model, effort) in muse_expected.items():
+            self.assertEqual(sub["agentOverrides"][tier], {"model": model, "thinking": effort})
+            self.assertEqual(sub["modelScope"]["agents"][tier]["allow"], [model])
+            agent = (PROFILE / "agents" / (tier + ".md")).read_text()
+            self.assertIn("name: " + tier, agent)
+            self.assertIn("model: " + model, agent)
+            self.assertIn("thinking: " + effort, agent)
+            self.assertIn("  - subagent\n", agent)
+            self.assertIn("  - subagent_supervisor\n", agent)
+            self.assertIn("maxSubagentDepth: 2", agent)
+            self.assertIn("allowNestedSubagents: true", agent)
+            for child in muse_nested[tier]:
+                self.assertIn("  - " + child + "\n", agent)
+            self.assertNotIn("  - god\n", agent)
         self.assertFalse((PROFILE / "models.json").exists(),
                          "No custom OpenCode Zen catalog is allowed for delegated workers")
-        self.assertTrue(all(name.startswith("opencode-go/") for name in sub["modelScope"]["allow"]))
+        self.assertTrue(all(name.startswith(("opencode-go/", "muse-sdk/")) for name in sub["modelScope"]["allow"]))
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")
