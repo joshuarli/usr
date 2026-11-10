@@ -52,7 +52,7 @@ function fake(cwd: string) {
       { id: "muse-spark-1.3-contributor", providerID: "opencode-go", variants: [{ id: "medium" }, { id: "high" }], enabled: true, status: "active" },
     ] }),
   }
-  const command = {
+  const command: NonNullable<Parameters<typeof makeHybridBridge>[1]> = {
     available: () => true,
     start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "2026-11-09" }),
     status: () => ({ state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd", finalText: "proof" }, stderr: null }),

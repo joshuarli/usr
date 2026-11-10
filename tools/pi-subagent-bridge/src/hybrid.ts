@@ -23,6 +23,7 @@ type Session = {
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
   execution_order?: "command-first"; fallback_blocked?: string
 }
+function currentBackend(s: Session): Session["backend"] { return s.backend }
 const EFFORT: Record<Tier, Effort> = {
   scout: "medium", mechanic: "xhigh", worker: "high", expert: "max",
 }
@@ -445,7 +446,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
                 } catch (fallbackError) {
                   s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
                   save(s)
-                  state = s.backend === "pi-transition" ? "blocked_admission" : "blocked_fallback"
+                  state = currentBackend(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
                   notice = s.fallback_blocked
                 }
               }
@@ -460,7 +461,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
               } catch (fallbackError) {
                 s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
                 save(s)
-                state = s.backend === "pi-transition" ? "blocked_admission" : "blocked_fallback"
+                state = currentBackend(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
                 notice = s.fallback_blocked
               }
             }

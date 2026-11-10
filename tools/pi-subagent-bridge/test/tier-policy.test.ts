@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -123,6 +123,8 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
     assert.throws(() => assertTierProfile(tier,
       profile(tier).replace("model: opencode-go/", "model: opencode/")), /Unapproved/)
   }
+  for (const tier of ["scout", "mechanic", "worker"] as const)
+    assert.ok(existsSync(tierGuardPath(tier, { providerID: "muse-sdk" })), tier)
 })
 
 test("profile checks enforce one exact Go scope and one max depth", () => {
