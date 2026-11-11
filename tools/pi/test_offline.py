@@ -65,6 +65,26 @@ class OfflineTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,"malformed"):
                     pi_offline.verify_archive()
 
+    def test_managed_pi_launcher_uses_only_bundle(self):
+        node = shutil.which("node")
+        if not node: self.skipTest("Node not available")
+        version = subprocess.check_output([node, "-p", "process.versions.node"], text=True)
+        if int(version.split(".")[0]) < 26: self.skipTest("Node 26 required")
+        with tempfile.TemporaryDirectory() as temp:
+            bin_dir = Path(temp)
+            npm = bin_dir / "npm"
+            marker = bin_dir / "npm-called"
+            npm.write_text("#!/bin/sh\\nprintf bad > " + repr(str(marker)) + "\\nexit 99\\n")
+            npm.chmod(0o755)
+            env = dict(os.environ, HOME=str(self.home),
+                       PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+                       npm_config_registry="http://127.0.0.1:9")
+            p = subprocess.run([str(self.root/"bin/pi"), "--version"],
+                               env=env, capture_output=True, text=True, timeout=25)
+            self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
+            self.assertIn("1.5.0", p.stdout)
+            self.assertFalse(marker.exists(), "Pi launcher invoked npm")
+
     def test_bundled_cli_and_typescript_import_without_npm(self):
         node=shutil.which("node")
         if not node:self.skipTest("Node not available")
