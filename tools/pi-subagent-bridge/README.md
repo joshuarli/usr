@@ -13,12 +13,12 @@ No `god` tier. Claude Code and Codex alone use their pinned native `god` agents.
 
 ## Setup
 
-`sh sync` installs Node.js, Pi, Command Code, and the bridge's pinned Pi SDK and pi-subagents dependencies, and registers the MCP server in Claude, Pi and OpenCode. Codex reads its tracked config. `sh sync bridge` reconciles MCP registrations; the old recognized `usr-opencode-worker` entry migrates to `pi-subagent-bridge` while foreign servers are preserved.
+`sh sync` installs Node.js and Command Code as usual, but installs the Pi 1.5.0 CLI/SDK plus pinned subagents/Muse/intercom dependencies **exclusively from the committed SHA-256-verified platform archive** under `vendor/pi/runtime/`. It links the bridge to the same extracted dependency closure (no npm install). The bridge MCP is registered for Claude, Pi and OpenCode; Codex uses tracked config. `sh sync bridge` reconciles MCP registrations; the old recognized `usr-opencode-worker` entry migrates to `pi-subagent-bridge` while foreign servers are preserved.
 
 `sh sync plan`
 `sh sync doctor`
 
-The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. `sh sync` now also reconciles the pinned interactive Pi extension automatically; no separate command is necessary.
+The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi loads locally bundled subagents and intercom extensions through its managed launcher; no `pi install`, `pi update`, npm or npx runs on the Pi setup path. The scoped SDK bridge continues to load only subagents and (when needed) Muse, never unrestricted intercom tools.
 
 ## Bounded native Pi nesting
 
@@ -119,7 +119,7 @@ loaded only inside Muse SDK workers, never globally into ordinary Pi sessions.
 This is subscription usage via the official Muse Code SDK, **not** the metered Meta API.
 
 - Install Muse Code >=1.4.14, launch `muse`, and sign in with `/login`.
-- Run `sh sync`; it installs the exact local bridge npm pin. No environment flag
+- Run `sh sync`; it links the bridge to the local pinned SDK/Muse archive, without npm. No environment flag
   selects the Muse route, and `USR_PI_MUSE_SUBSCRIPTION` is ignored. `sh sync bridge`
   reconciles the bridge.
 - On a clean *linked* worktree, run `pi-subagent-bridge model-check CWD scout`
