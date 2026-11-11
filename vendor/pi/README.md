@@ -1,20 +1,40 @@
-# Pi source vendor (not yet a self-contained runtime)
+# Vendored Pi runtime
 
-This directory holds byte-for-byte **selected source** snapshots from the upstream Git commits in [upstreams.json](upstreams.json). The `files` maps store each upstream Git **blob SHA**, not merely a package version.
+The Pi coding agent, its SDK, `pi-subagents`, the Muse subscription adapter, and the Pi intercom adapter are available from **committed, self-contained runtime archives**. Normal Pi setup never invokes npm, npx, `pi install`, `pi update`, or the package registry. The `pi-subagent-bridge` uses that same dependency closure, not a separately installed SDK.
 
-| Source | License | Purpose |
+## Offline installation
+
+`sh sync tools pi` installs the matching checked-in `runtime/<platform>.tar.gz` beneath `${XDG_DATA_HOME:-$HOME/.local/share}/pi`. The installer verifies the archive byte count and SHA-256 from [runtime/artifacts.json](runtime/artifacts.json), rejects unsafe tar members, validates package versions, stages the tree, and atomically switches the managed Pi prefix. It creates `~/.local/bin/pi` and loads the vendored subagent and intercom extensions by their absolute local paths.
+
+`sh sync bridge` (or desktop `sh sync`) connects the bridge's `node_modules` to the same installed closure. `sh sync plan` and `sh sync doctor` remain read-only. The tracked Pi settings declare `packages: []` and sync rejects nonempty package arrays: neither Pi startup nor sync is allowed to reconcile online extension sources. The installer preserves credentials and refuses foreign/unmanaged paths.
+
+| Archive | Platform |
+| --- | --- |
+| `runtime/darwin-arm64.tar.gz` | macOS Apple Silicon |
+| `runtime/linux-x64.tar.gz` | Linux x86-64, including musl |
+| `runtime/linux-arm64.tar.gz` | Linux ARM64 |
+
+Node.js 26.12+ is required. The Node.js installation is a separate sync tool, and **other unrelated sync tools** (Command Code, npm, etc.) may still use npm or the network. The guarantee here is that the **Pi CLI, SDK, bridge dependencies and Pi intercom setup** use no npm fetch, even with an empty npm cache and registry disabled.
+
+## Provenance
+
+[upstreams.json](upstreams.json) records each upstream source repository and full commit SHA; the file inventory records the actual upstream Git **blob SHA** for every imported source file. These exact source snapshots are retained:
+
+| Source | License | Runtime role |
 | --- | --- | --- |
-| `pi-subagents` | MIT | Native subagent extension and RPC |
-| `agent-intercom-pi` | AGPL-3.0-or-later | Pi intercom adapter |
-| `agent-intercom-core` | AGPL-3.0-or-later | Intercom broker policy/protocol |
-| `pi-muse-subscription` | MIT | Muse subscription adapter |
+| `pi-subagents` | MIT | Native delegation extension and RPC |
+| `agent-intercom-pi` | AGPL-3.0-or-later | Interactive Pi intercom adapter |
+| `agent-intercom-core` | AGPL-3.0-or-later | Intercom broker protocol and policy |
+| `pi-muse-subscription` | MIT | Muse SDK subscription provider |
 
-All upstream copyright notices remain in their respective directories. The intercom components are AGPL; keep notices and evaluate obligations before incorporating their code into a distributed combined work.
+The Pi 1.5.0 CLI/SDK package is bundled as an exact-version dependency closure; its source repository/tag/SHA are listed in `upstreams.json` under `tracked_only`. The runtime artifacts are checksum-pinned in `runtime/artifacts.json`. The upstream intercom AGPL notices remain in their directories. Review these obligations before redistributing a derived combined application.
 
-**Crucial limitation:** these are source snapshots. The Pi CLI, `@earendil-works/pi-coding-agent` SDK and transitive runtime dependencies, intercom's core build output and the other harness adapters have **not** been bundled into a complete offline runtime. Existing `sync` still uses npm for the Pi executable and bridge dependencies. The snapshots are **not activated**; do not switch `settings.json` to local paths until the complete module graph is available and tested. A source checkout alone does not meet the no-npm requirement.
+## Updating (explicit only)
 
-`python3 -I tools/pi/vendor.py check` checks every tracked file against its upstream Git blob SHA and rejects unexpected additions. `python3 -I tools/pi/vendor.py plan` compares upstream heads without writing. `python3 -I tools/pi/vendor.py update` updates the selected source snapshots and provenance, but **does not** upgrade or activate the SDK/runtime automatically. See `/pi-update` for the full update gates.
+Use the manual `/pi-update` skill: validate source provenance, inspect upstream releases, advance all compatible SHAs, update the CLI/SDK package pins, then run `bash tools/pi/build-runtime.sh` on the supported platform builders. The script may use npm **during explicit build/update only**, from a temporary workspace; it packs vendor source snapshots and the complete installed dependency closure into a new archive. Commit the archives plus their SHA-256 manifest **together**. Do not replace ordinary sync with a package-manager fallback. `python3 -I tools/pi/vendor.py check` verifies all upstream blob hashes offline, and `python3 -I tools/pi/test_offline.py` exercises an actual archive with npm unavailable.
 
-The endpoint for this effort is a Pi runtime archive (or reproducible equivalent) **committed under `usr`**, including platform-specific assets and every transitive runtime dependency. Routine `sh sync`, `sh sync bridge`, and `sh sync doctor` must perform zero npm network accesses, and they must not invoke `pi install` or `pi update`. Build/fetch work belongs to the explicit `pi-update` workflow, never normal setup.
+## Intercom scope and limits
 
-No separate intercom fleet/orchestrator package should be imported. `pi-subagent-bridge` remains the sole worker admission, lease, scope and verification authority; intercom is only a messaging capability.
+Interactive Pi loads the local intercom adapter. Its local broker is configured with the bundled `tsx` loader rather than `npx`, `inboundTrigger: "never"` by default, and `confirmSend: true`. No separate fleet/orchestrator package is imported. The scoped `pi-subagent-bridge` SDK workers deliberately load only their required subagent/Muse extensions and do **not** inherit unrestricted intercom tools. Independent Claude/Codex/OpenCode intercom adapters are **not** part of these Pi archives; cross-harness messaging requires separately enabled compatible adapters and is not implied by this Pi-only runtime.
+
+Worker admission, worktree lease, scope, model, nested tier and proof remain exclusively owned by `pi-subagent-bridge`.
