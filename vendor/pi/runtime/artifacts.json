@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "pi_version": "1.5.0",
+  "node_minimum": "26.0.0",
+  "artifacts": {
+    "linux-x64": {
+      "path": "linux-x64.tar.gz",
+      "sha256": "8bf114da8a179210ee6290127a232a24a34be4d556c8c7fc8f59c95bdf212fe2",
+      "bytes": 37252993
+    }
+  }
+}
