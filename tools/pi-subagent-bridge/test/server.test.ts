@@ -25,7 +25,11 @@ test("stdio MCP handshake, tool discovery and malformed tool rejection need no O
   assert.equal(replies.length, 3)
   assert.equal(replies.find((r) => r.id === 1)?.result?.protocolVersion, "2025-06-18")
   assert.deepEqual(replies.find((r) => r.id === 2)?.result?.tools?.map((t: { name: string }) => t.name), [
-    "worker_model_check", "worker_start", "worker_status", "worker_resume", "worker_cancel",
+    "worker_model_check", "worker_start", "worker_status", "worker_resume", "worker_steer", "worker_cancel",
   ])
+  const steer = replies.find((r) => r.id === 2)?.result?.tools
+    ?.find((t: { name: string }) => t.name === "worker_steer")
+  assert.equal(steer?.inputSchema?.type, "object")
+  assert.deepEqual(steer?.inputSchema?.required, ["cwd", "session_id", "note"])
   assert.equal(replies.find((r) => r.id === 3)?.error?.code, -32602)
 })

@@ -33,6 +33,7 @@ function fake(cwd: string) {
   const api: OpenCodePort = {
     create: async (input) => { calls.push({ op: "create", input }); return { data: { ...info } } },
     prompt: async (input) => { calls.push({ op: "prompt", input }); return {} },
+    steer: async (input) => { calls.push({ op: "steer", input }); return { data: { delivered: true, deliveryStatus: "delivered" } } },
     get: async (input) => { calls.push({ op: "get", input }); return { data: info } },
     active: async () => ({ data: active ? { ses_fixture: {} } : {} }),
     inbox: async () => ({ data: Array.from({ length: queued }, (_, i) => ({ id: i })) }),
@@ -90,6 +91,11 @@ test("worker session is admitted, observable, resumable, interruptible; model an
     await assert.rejects(bridge.resume(f.cwd, "ses_fixture", "fix test"), /running or has queued input/)
     mock.setQueued(0)
     assert.equal((await bridge.resume(f.cwd, "ses_fixture", "fix test")).status, "admitted")
+    const steered = await bridge.steer(f.cwd, "ses_fixture", "Prefer the pinned check")
+    assert.equal(steered.receipt.delivered, true)
+    const steerInput = mock.calls.find((c) => c.op === "steer")?.input as { text?: string }
+    assert.match(String(steerInput?.text),
+      /PARENT STEERING \(same scope and write boundaries\):\nPrefer the pinned check/)
     assert.equal((await bridge.cancel(f.cwd, "ses_fixture")).interrupted, false)
     assert.equal(mock.calls.filter((c) => c.op === "prompt").length, 2)
   } finally { f.close() }

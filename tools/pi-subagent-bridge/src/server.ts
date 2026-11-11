@@ -46,7 +46,7 @@ const tools = [
   },
   {
     name: "worker_status",
-    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. When fallback_reason is set, fallback_notice explains the automatic switch: it is expected, needs no action, and the task continues on Command Code. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A Command Code run whose recorded process is gone or whose PID identity changed is terminal interrupted and releases its worktree lease. When fallback_reason is set, fallback_notice explains the automatic switch: it is expected, needs no action, and the task continues on Command Code. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, session_id: idSchema }, required: ["cwd", "session_id"], additionalProperties: false },
   },
   {
@@ -56,6 +56,14 @@ const tools = [
       cwd: cwdSchema, session_id: idSchema,
       feedback: { type: "string", maxLength: 32000 },
     }, required: ["cwd", "session_id", "feedback"], additionalProperties: false },
+  },
+  {
+    name: "worker_steer",
+    description: "Parent ONLY: redirect a RUNNING worker in the same scope and write boundaries. Pi workers forward the note to the native pi-subagents steer RPC. Command Code runs are interrupted, termination is proven from the recorded process identity, and the same Command Code session resumes with the note; attempts are unchanged and a separate steer cap applies. A finished session is refused; use worker_resume.",
+    inputSchema: { type: "object", properties: {
+      cwd: cwdSchema, session_id: idSchema,
+      note: { type: "string", minLength: 1, maxLength: 32000 },
+    }, required: ["cwd", "session_id", "note"], additionalProperties: false },
   },
   {
     name: "worker_cancel",
@@ -110,6 +118,7 @@ export function serve(load: () => Promise<Bridge> = connect): void {
         case "worker_start": result = await worker.start(args.cwd, args.title, args.tier, args.scope, args.brief); break
         case "worker_status": result = await worker.status(args.cwd, args.session_id); break
         case "worker_resume": result = await worker.resume(args.cwd, args.session_id, args.feedback); break
+        case "worker_steer": result = await worker.steer(args.cwd, args.session_id, args.note); break
         case "worker_cancel": result = await worker.cancel(args.cwd, args.session_id); break
         default: rpcError(id, -32602, "Unknown tool"); return
       }

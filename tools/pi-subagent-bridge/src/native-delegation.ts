@@ -10,6 +10,8 @@ export type Job = {
   priorSessionFile?: string
   priorRunId?: string
   resultPath: string
+  controlPath?: string
+  receiptPath?: string
 }
 export type Result = {
   state: "succeeded" | "failed" | "cancelled"
@@ -45,6 +47,11 @@ export function unwrap(reply: Reply): Record<string, unknown> {
   const data = record(reply.data)
   if (!data) throw new Error("pi-subagents RPC returned no data")
   return data
+}
+export async function steerNative(rpc: Rpc, id: string, message: string): Promise<Record<string, unknown> | null> {
+  const reply = await rpc("steer", { id, message })
+  if (!reply.success) throw new Error("pi-subagents RPC rejected steer: " + (reply.error?.message ?? "unknown error"))
+  return record(reply.data)
 }
 export function runDetails(reply: Reply): { runId: string; asyncDir: string | null } {
   const data = unwrap(reply), details = record(data.details)

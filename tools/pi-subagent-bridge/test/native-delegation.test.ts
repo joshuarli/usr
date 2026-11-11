@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { role, runId, terminal, unwrap, type Job } from "../src/native-delegation.ts"
+import { role, runId, steerNative, terminal, unwrap, type Job, type Rpc } from "../src/native-delegation.ts"
 
 function job(id: string, variant: string, readOnly = false, providerID = "opencode-go"): Job {
   return { cwd: "/work", prompt: "proof", model: { providerID, id, variant },
@@ -30,6 +30,22 @@ test("native run IDs are provider-issued and path safe", () => {
   assert.throws(() => runId({ success: true, data: { details: {} } }), /identity/)
   assert.throws(() => runId({ success: true, data: { details: { asyncId: "../escape" } } }), /identity/)
   assert.throws(() => unwrap({ success: false, error: { message: "model unavailable" } }), /model unavailable/)
+})
+
+test("native steer forwards the exact run and note to the pi-subagents steer RPC", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = []
+  const rpc: Rpc = async (method, params) => {
+    calls.push({ method, params })
+    return { success: true, data: { state: "delivered", deliveryStatus: "delivered" } }
+  }
+  const receipt = await steerNative(rpc, "run-42", "tighten the focused test")
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].method, "steer")
+  assert.deepEqual(calls[0].params, { id: "run-42", message: "tighten the focused test" })
+  assert.equal(receipt?.deliveryStatus, "delivered")
+  await assert.rejects(
+    steerNative(async () => ({ success: false, error: { message: "no live run" } }), "run-42", "x"),
+    /no live run/)
 })
 
 test("native terminal receipts require one successful child and actual proof output", () => {

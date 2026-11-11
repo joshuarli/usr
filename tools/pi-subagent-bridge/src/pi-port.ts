@@ -15,7 +15,7 @@ type Result = {
   state: "succeeded" | "failed" | "cancelled"
   text: string | null; error: string | null; usage: unknown; sessionFile: string | null; runId: string | null
 }
-type Run = { pid: number; output: string; errors: string }
+type Run = { pid: number; output: string; errors: string; control?: string; receipts?: string }
 type Stored = {
   id: string; title: string; model: ModelRef; cwd: string
   metadata: { usr_worker_v1: { directory: string; model: ModelRef } }
@@ -89,11 +89,14 @@ function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: 
   const dir = stateDir(s.cwd), id = randomUUID()
   const output = join(dir, id + ".result.json"), errors = join(dir, id + ".stderr")
   const jobPath = join(dir, id + ".job.json")
+  const control = join(dir, id + ".steer.ndjson"), receipts = join(dir, id + ".steer-receipts.ndjson")
   const sessionDir = join(dir, "pi-sessions")
   mkdirSync(sessionDir, { recursive: true, mode: 0o700 })
+  writeFileSync(control, "", { mode: 0o600, flag: "wx" })
+  writeFileSync(receipts, "", { mode: 0o600, flag: "wx" })
   const job = {
     cwd: s.cwd, model: s.model, readOnly: s.readOnly, prompt,
-    sessionDir, priorSessionFile, priorRunId, resultPath: output,
+    sessionDir, priorSessionFile, priorRunId, resultPath: output, controlPath: control, receiptPath: receipts,
   }
   writeFileSync(jobPath, JSON.stringify(job), { mode: 0o600, flag: "wx" })
   const fd = openSync(errors, "wx", 0o600)
@@ -111,7 +114,7 @@ function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: 
     if (pid === undefined) throw new Error("Cannot launch Pi SDK worker")
     children.set(pid, child)
     child.unref()
-    return { pid, output, errors }
+    return { pid, output, errors, control, receipts }
   } finally { closeSync(fd) }
 }
 function verifiedSessionPath(s: Stored, value: string | null): string {
@@ -220,6 +223,34 @@ export function piPort(): OpenCodePort {
       const s = load(input.cwd, input.sessionID)
       const child = s.run && children.get(s.run.pid)
       return { data: { interrupted: child ? child.kill("SIGTERM") : false } }
+    },
+    async steer(input) {
+      const s = load(input.cwd, input.sessionID)
+      if (!s.run?.control || !s.run.receipts) throw new Error("Pi worker has no steering channel")
+      if (observe(s).state !== "running") throw new Error("Pi worker is not running; use worker_resume for a finished session")
+      const requestId = randomUUID()
+      appendFileSync(s.run.control, JSON.stringify({ id: requestId, message: input.text }) + "\n", { mode: 0o600 })
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        let text = ""
+        try { text = readFileSync(s.run.receipts, "utf8") } catch {}
+        for (const line of text.split("\n")) {
+          if (!line.trim()) continue
+          let receipt: Record<string, unknown> | null = null
+          try {
+            const value: unknown = JSON.parse(line)
+            receipt = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null
+          } catch { continue }
+          if (!receipt || receipt.id !== requestId) continue
+          if (receipt.ok !== true)
+            throw new Error("pi-subagents RPC rejected steer: " + String(receipt.error ?? "unknown error"))
+          const data = receipt.data && typeof receipt.data === "object" && !Array.isArray(receipt.data)
+            ? receipt.data as Record<string, unknown> : {}
+          return { data: { ...data, request_id: requestId, accepted: true } }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      return { data: { request_id: requestId, accepted: false, delivery_status: "pending" } }
     },
   }
 }

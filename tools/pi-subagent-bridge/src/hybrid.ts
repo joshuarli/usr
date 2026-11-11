@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
-import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, startCommand, type CommandRun, type Effort } from "./command.ts"
+import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 import { GO_TIER_MODELS, MUSE_TIER_MODELS, museSubscriptionSelected, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
@@ -19,7 +19,8 @@ export type Scope = {
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
   backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition"; attempts: number
-  pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string; continuations?: number
+  pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string
+  continuations?: number; steers?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
   execution_order?: "command-first"; fallback_blocked?: string
 }
@@ -34,7 +35,9 @@ const LEGACY_EFFORT: Record<Tier, Effort> = {
 const COMMAND_MODELS: Record<Tier, string> = {
   scout: COMMAND_EMBER_MODEL, mechanic: COMMAND_EMBER_MODEL, worker: COMMAND_MODEL, expert: COMMAND_MODEL,
 }
-const TURN_LIMIT_CONTINUATIONS = 2
+export const TURN_LIMIT_CONTINUATIONS = 2
+export const STEER_LIMIT = 2
+const TERMINATION_WAIT_MS = 2000
 const QUOTA =/\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
 
 function git(cwd: string, ...args: string[]): string {
@@ -104,6 +107,7 @@ function load(cwd: unknown, id: unknown): Session {
   if (s.cwd !== dir || !isTier(s.tier)) throw new Error("Session/worktree mismatch")
   scopeFor(s.scope, s.tier, dir, false)
   if (!Number.isInteger(s.attempts) || s.attempts < 0 ||
+    (s.steers !== undefined && (!Number.isInteger(s.steers) || s.steers < 0)) ||
     (s.backend === "pi" && typeof s.pi_id !== "string") ||
     (s.backend === "command-code" && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
     !["pi", "pi-admitting", "pi-transition", "command-code", "command-transition"].includes(s.backend)) {
@@ -397,8 +401,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         const response = command.status(s.command_run)
         state = response.state
         last_assistant_text = response.result?.finalText?.slice(-5000) ?? null
-        error = response.state === "failed" || response.state === "unknown_or_interrupted"
-          ? response.result?.error ?? response.stderr : null
+        error = response.state === "interrupted"
+          ? "Command Code process is gone or its recorded PID identity changed; the run is terminal and cannot be replayed"
+          : response.state === "failed"
+            ? response.result?.error ?? response.stderr : null
         usage = response.result?.usage ?? null
         if (s.execution_order === "command-first" && s.fallback_blocked) {
           state = "blocked_fallback"
@@ -473,8 +479,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
       if (s.fallback_reason && !notice) notice = fallbackNotice(s)
       // A verified terminal response releases worktree admission, not session history.
-      // Unknown/interrupted/queued work remains leased until explicitly inspected.
-      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled"].includes(state)) {
+      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted"].includes(state)) {
         const directory = stateDir(s.cwd)
         if (activeWorktreeOwner(directory, s.cwd) === s.id)
           releaseWorktree(directory, s.cwd, s.id)
@@ -485,6 +490,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         effort: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s).variant : fallbackEffortFor(s), state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
+        continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
+        steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
         fallback_reason: s.fallback_reason ?? null,
         fallback_notice: notice,
         fallback_detail: s.fallback_detail ?? null,
@@ -517,7 +524,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
         const previous = command.status(s.command_run)
-        if (previous.state === "running" || previous.state === "unknown_or_interrupted")
+        if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
@@ -545,6 +552,62 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       } else if (s.command_run) interrupted = command.cancel(s.command_run)
       return { session_id: s.id, interrupted,
         note: "Never signal a Command Code PID left by an earlier MCP process; it may have been reused." }
+      })
+    },
+    async steer(cwd: unknown, id: unknown, note: unknown) {
+      return withSessionLock(cwd, id, async (s) => {
+      const steering = required(note, "note", 32000)
+      if (s.backend === "command-transition" || s.backend === "pi-admitting" ||
+          s.backend === "pi-transition" || s.fallback_blocked)
+        throw new Error("Worker transition interrupted; inspect session before steering")
+      if ((s.steers ?? 0) >= STEER_LIMIT) throw new Error("Steer limit reached for this session")
+      if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
+        outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
+        throw new Error("Cannot steer changed HEAD or out-of-scope work")
+      if (s.backend === "pi") {
+        if (!s.pi_id) throw new Error("Missing Pi session")
+        const worker = makeWorkerBridge(api, primaryFor(s))
+        const observed = await worker.status(s.cwd, s.pi_id)
+        const observedState = typeof observed.state === "string" ? observed.state : "unknown"
+        if (observedState !== "running" && observedState !== "queued")
+          throw new Error("Pi worker is not running (state " + observedState + "); use worker_resume for a finished session")
+        ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+        const receipt = await worker.steer(s.cwd, s.pi_id, steering)
+        s.steers = (s.steers ?? 0) + 1
+        save(s)
+        return { session_id: s.id, backend: s.backend, status: "steered", interrupted: false,
+          steers: s.steers, steer_limit: STEER_LIMIT, receipt }
+      }
+      if (!s.command_run) throw new Error("Missing Command Code process")
+      const previous = command.status(s.command_run)
+      if (previous.state !== "running")
+        throw new Error("Command Code run is not running (state " + previous.state +
+          "); use worker_resume for a finished session")
+      const sessionId = commandSession(s.command_run)
+      if (!sessionId)
+        throw new Error("Command Code session identity is not recorded; cannot restart after steering")
+      ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+      if (!command.cancel(s.command_run))
+        throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
+      let state = command.status(s.command_run).state
+      const deadline = Date.now() + TERMINATION_WAIT_MS
+      while (state === "running" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        state = command.status(s.command_run).state
+      }
+      if (state === "running")
+        throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
+      s.steers = (s.steers ?? 0) + 1
+      s.backend = "command-transition"
+      s.command_run = undefined
+      save(s)
+      s.command_run = command.start(s.cwd, stateDir(s.cwd),
+        prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering,
+        fallbackEffortFor(s), s.tier === "scout", sessionId, fallbackModelFor(s))
+      s.backend = "command-code"
+      save(s)
+      return { session_id: s.id, backend: s.backend, status: "steered", interrupted: true,
+        steers: s.steers, steer_limit: STEER_LIMIT }
       })
     },
   }

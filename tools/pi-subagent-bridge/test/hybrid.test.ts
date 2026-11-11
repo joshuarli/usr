@@ -1,12 +1,12 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
-import { appendFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync, realpathSync } from "node:fs"
+import { execFileSync, spawn } from "node:child_process"
+import { appendFileSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
+import { makeHybridBridge, STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, type Scope } from "../src/hybrid.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
-import type { CommandRun } from "../src/command.ts"
+import { commandResult, processStartTime, type CommandRun, type Effort } from "../src/command.ts"
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim()
@@ -45,6 +45,10 @@ function fake(cwd: string) {
       return { data: { id: "ses_fixture" } }
     },
     prompt: async (input) => { calls.push(input); return {} },
+    steer: async (input) => {
+      calls.push({ op: "steer", input })
+      return { data: { delivered: true, deliveryStatus: "delivered" } }
+    },
     get: async () => ({ data: {
       id: "ses_fixture", title: "usr-worker: demo",
       model, location: { directory: cwd },
@@ -85,6 +89,7 @@ function fake(cwd: string) {
   return {
     api, command, calls,
     failPi: (error: string) => { piState = "failed"; piError = { code: 429, message: error } },
+    setPiState: (state: string) => { piState = state },
     omitGo: () => { variants = [] },
     noCommand: () => { commandAvailable = false },
     failCommand: (error: string, finalText?: string) => {
@@ -97,6 +102,27 @@ const commandCalls = (calls: unknown[]) =>
   calls.filter((value) => !!value && typeof value === "object" && "command" in value)
 const piCreates = (calls: unknown[]) =>
   calls.filter((value) => !!value && typeof value === "object" && "title" in value)
+
+function steerable(f: ReturnType<typeof fixture>, m: ReturnType<typeof fake>) {
+  const control = { cancelled: false, starts: 0, alwaysRunning: false }
+  const command = {
+    ...m.command,
+    start: (dir: string, _log: string, prompt: string, effort: Effort, readOnly: boolean,
+      resume?: string, selectedModel?: string): CommandRun => {
+      control.starts++
+      const errors = join(f.root, "cmd-" + control.starts + ".stderr")
+      writeFileSync(errors, "session: cmd-session\n")
+      m.calls.push({ command: true, dir, prompt, effort, readOnly, resume, model: selectedModel })
+      control.cancelled = false
+      return { pid: 9000 + control.starts, output: "fake", errors, started_at: "2026-11-09", proc_start: "1" }
+    },
+    status: () => control.cancelled && !control.alwaysRunning
+      ? { state: "interrupted" as const, result: null, stderr: null }
+      : { state: "running" as const, result: null, stderr: null },
+    cancel: () => { control.cancelled = true; return true },
+  }
+  return { command, control }
+}
 
 test("Command Code is primary, and fallback model pins are exclusively OpenCode Go", async () => {
   const f = fixture()
@@ -335,12 +361,201 @@ test("Command turn cap continuation does not consume the normal retry budget", a
         sessionId: "cmd-session", finalText: "partial" }, stderr: null }) }
     const bridge = makeHybridBridge(m.api, command)
     const task = await bridge.start(f.cwd, "fix", "worker", { ...f.scope, attempt_limit: 1 }, "Edit README")
+    const initial = await bridge.status(f.cwd, task.session_id)
+    assert.equal(initial.continuations, 0)
+    assert.equal(initial.continuation_limit, TURN_LIMIT_CONTINUATIONS)
     await bridge.resume(f.cwd, task.session_id, "continue")
     await bridge.resume(f.cwd, task.session_id, "continue")
     const continued = commandCalls(m.calls).filter((c) => JSON.stringify(c).includes("CONTINUE THE SAME TASK"))
     assert.equal(continued.length, 2)
     await assert.rejects(bridge.resume(f.cwd, task.session_id, "continue"), /continuation limit/)
+    const final = await bridge.status(f.cwd, task.session_id)
+    assert.equal(final.continuations, 2)
+    assert.equal(final.continuation_limit, TURN_LIMIT_CONTINUATIONS)
   } finally { f.close() }
+})
+
+test("worker_steer interrupts a running Command Code run, proves termination, and resumes its session without an attempt", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const { command } = steerable(f, m)
+    const bridge = makeHybridBridge(m.api, command)
+    const task = await bridge.start(f.cwd, "one", "worker", { ...f.scope, attempt_limit: 1 }, "Edit README")
+    const steered = await bridge.steer(f.cwd, task.session_id, "Also check the edge case")
+    assert.equal(steered.status, "steered")
+    assert.equal(steered.interrupted, true)
+    assert.equal(steered.steers, 1)
+    assert.equal(steered.steer_limit, STEER_LIMIT)
+    const calls = commandCalls(m.calls)
+    assert.equal(calls.length, 2)
+    assert.match(JSON.stringify(calls[1]), /"resume":"cmd-session"/)
+    assert.match(JSON.stringify(calls[1]),
+      /PARENT STEERING \(same scope and write boundaries\): Also check the edge case/)
+    assert.match(JSON.stringify(calls[1]), /You execute a single scoped task/)
+    const saved = JSON.parse(readFileSync(
+      join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8")) as { attempts: number; steers?: number }
+    assert.equal(saved.attempts, 1)
+    assert.equal(saved.steers, 1)
+    await bridge.steer(f.cwd, task.session_id, "Second bounded steer")
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.steers, 2)
+    assert.equal(status.steer_limit, STEER_LIMIT)
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "Third steer"), /Steer limit/)
+    assert.equal(commandCalls(m.calls).length, 3)
+  } finally { f.close() }
+})
+
+test("worker_steer refuses a finished Command Code session and points to worker_resume", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    m.done()
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "late steering"), /use worker_resume/)
+    assert.equal(commandCalls(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("worker_steer refuses changed HEAD and out-of-scope work exactly like resume", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const { command } = steerable(f, m)
+    const bridge = makeHybridBridge(m.api, command)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    writeFileSync(join(f.cwd, "unrelated"), "bad\n")
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"), /out-of-scope/)
+    rmSync(join(f.cwd, "unrelated"))
+    git(f.cwd, "commit", "--allow-empty", "-qm", "moved")
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"), /changed HEAD/)
+    assert.equal(commandCalls(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("worker_steer never restarts an interrupted Command Code run that has not terminated", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const { command, control } = steerable(f, m)
+    control.alwaysRunning = true
+    const bridge = makeHybridBridge(m.api, command)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"), /did not terminate/)
+    assert.equal(commandCalls(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("worker_steer on the Pi backend forwards the note through the native steer path", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    m.noCommand()
+    m.setPiState("running")
+    const bridge = makeHybridBridge(m.api, m.command)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    assert.equal(task.backend, "pi")
+    const steered = await bridge.steer(f.cwd, task.session_id, "Use the new helper")
+    assert.equal(steered.status, "steered")
+    assert.equal(steered.interrupted, false)
+    const call = m.calls.find((value) =>
+      !!value && typeof value === "object" && "op" in value && (value as { op?: string }).op === "steer")
+    assert.ok(call)
+    assert.match(JSON.stringify(call),
+      /PARENT STEERING \(same scope and write boundaries\):\\nUse the new helper/)
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.steers, 1)
+    assert.equal(status.steer_limit, STEER_LIMIT)
+  } finally { f.close() }
+})
+
+test("a gone Command Code PID is terminal interrupted, releases its lease, and admits a new worker", async () => {
+  const f = fixture()
+  try {
+    const logs = join(f.root, "logs")
+    mkdirSync(logs)
+    let starts = 0
+    const command = {
+      available: () => true,
+      start: (): CommandRun => {
+        starts++
+        const output = join(logs, "out" + starts + ".ndjson"), errors = join(logs, "err" + starts + ".stderr")
+        writeFileSync(output, ""); writeFileSync(errors, "")
+        return { pid: 2 ** 22 + 11, output, errors, started_at: "2026-11-09", proc_start: "1" }
+      },
+      status: (run: CommandRun) => commandResult(run),
+      cancel: () => false,
+    }
+    const bridge = makeHybridBridge(fake(f.cwd).api, command)
+    const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    const status = await bridge.status(f.cwd, first.session_id)
+    assert.equal(status.state, "interrupted")
+    assert.match(String(status.error), /process is gone|PID identity changed/)
+    const second = await bridge.start(f.cwd, "two", "worker", f.scope, "Edit README")
+    assert.notEqual(second.session_id, first.session_id)
+    assert.equal(starts, 2)
+  } finally { f.close() }
+})
+
+test("a live Command Code PID with a different start time is interrupted and releases its lease", async () => {
+  const f = fixture()
+  const child = spawn("sleep", ["30"], { stdio: "ignore" })
+  try {
+    const logs = join(f.root, "logs")
+    mkdirSync(logs)
+    let starts = 0
+    const command = {
+      available: () => true,
+      start: (): CommandRun => {
+        starts++
+        const output = join(logs, "out" + starts + ".ndjson"), errors = join(logs, "err" + starts + ".stderr")
+        writeFileSync(output, ""); writeFileSync(errors, "")
+        return { pid: child.pid!, output, errors, started_at: "2026-11-09", proc_start: "0" }
+      },
+      status: (run: CommandRun) => commandResult(run),
+      cancel: () => false,
+    }
+    const bridge = makeHybridBridge(fake(f.cwd).api, command)
+    const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "interrupted")
+    const second = await bridge.start(f.cwd, "two", "worker", f.scope, "Edit README")
+    assert.notEqual(first.session_id, second.session_id)
+  } finally {
+    child.kill("SIGKILL")
+    if (child.exitCode === null) await new Promise((resolve) => child.on("exit", resolve))
+    f.close()
+  }
+})
+
+test("a live Command Code PID with the recorded start time stays running and keeps the lease", async () => {
+  const f = fixture()
+  const child = spawn("sleep", ["30"], { stdio: "ignore" })
+  try {
+    const recorded = processStartTime(child.pid!)
+    assert.ok(recorded)
+    const logs = join(f.root, "logs")
+    mkdirSync(logs)
+    let starts = 0
+    const command = {
+      available: () => true,
+      start: (): CommandRun => {
+        starts++
+        const output = join(logs, "out" + starts + ".ndjson"), errors = join(logs, "err" + starts + ".stderr")
+        writeFileSync(output, ""); writeFileSync(errors, "")
+        return { pid: child.pid!, output, errors, started_at: "2026-11-09", proc_start: recorded }
+      },
+      status: (run: CommandRun) => commandResult(run),
+      cancel: () => false,
+    }
+    const bridge = makeHybridBridge(fake(f.cwd).api, command)
+    const first = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    assert.equal((await bridge.status(f.cwd, first.session_id)).state, "running")
+    await assert.rejects(bridge.start(f.cwd, "two", "worker", f.scope, "Edit README"), /active worker/)
+  } finally {
+    child.kill("SIGKILL")
+    if (child.exitCode === null) await new Promise((resolve) => child.on("exit", resolve))
+    f.close()
+  }
 })
 
 test("interrupted Command launch preserves a blocked transition and lease", async () => {

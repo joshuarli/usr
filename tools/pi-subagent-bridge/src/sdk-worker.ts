@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
-import { REQUEST, REPLY, COMPLETE, record, string, role, persist, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc } from "./native-delegation.ts"
+import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { MUSE_AGENT_NAMES, isMuseTier } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
@@ -77,6 +77,32 @@ async function statusResult(rpc: Rpc, runId: string, sessionFile: string): Promi
     } catch { /* try next shape */ }
   }
   return null
+}
+
+function drainSteering(controlPath: string, receiptPath: string, offset: number, runId: string, rpc: Rpc): number {
+  let buffer: Buffer
+  try { buffer = readFileSync(controlPath) } catch { return offset }
+  if (buffer.length <= offset) return offset
+  const chunk = buffer.subarray(offset)
+  const end = chunk.lastIndexOf(0x0a)
+  if (end < 0) return offset
+  for (const line of chunk.subarray(0, end).toString("utf8").split("\n")) {
+    if (!line.trim()) continue
+    let request: Record<string, unknown> | null = null
+    try { request = record(JSON.parse(line)) } catch { continue }
+    if (!request || typeof request.id !== "string" || typeof request.message !== "string") continue
+    const requestId = request.id, message = request.message
+    void steerNative(rpc, runId, message).then(
+      (data) => {
+        try { appendFileSync(receiptPath, JSON.stringify({ id: requestId, ok: true, data }) + "\n") }
+        catch {}
+      },
+      (error) => {
+        try { appendFileSync(receiptPath, JSON.stringify({ id: requestId, ok: false, error: String(error) }) + "\n") }
+        catch {}
+      })
+  }
+  return offset + end + 1
 }
 
 async function run(job: Job, started: (id: string) => void, dispatching: () => void): Promise<Result> {
@@ -175,7 +201,24 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
     const reply = await rpc(job.priorRunId ? "resume" : "spawn", params)
     const { runId: id, asyncDir } = runDetails(reply)
     started(id)
-    if (completions.has(id)) return terminal(completions.get(id)!, id, sessionFile)
+    const controlPath = job.controlPath, receiptPath = job.receiptPath
+    let steerTimer: NodeJS.Timeout | undefined
+    const stopSteering = () => {
+      if (steerTimer) clearInterval(steerTimer)
+      steerTimer = undefined
+    }
+    if (controlPath && receiptPath) {
+      let steerOffset = 0
+      steerTimer = setInterval(() => {
+        try { steerOffset = drainSteering(controlPath, receiptPath, steerOffset, id, rpc) }
+        catch {}
+      }, 300)
+      steerTimer.unref?.()
+    }
+    if (completions.has(id)) {
+      stopSteering()
+      return terminal(completions.get(id)!, id, sessionFile)
+    }
     const event = await new Promise<Record<string, unknown>>((resolve, reject) => {
       let settled = false
       const keepalive = setInterval(() => {}, 60_000)
@@ -185,6 +228,7 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
         clearInterval(keepalive)
         clearInterval(poll)
         clearTimeout(timer)
+        stopSteering()
         waiters.delete(id)
         fn(v)
       }

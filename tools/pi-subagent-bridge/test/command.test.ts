@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSy
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { COMMAND_EMBER_MODEL, commandResult, startCommand } from "../src/command.ts"
+import { COMMAND_EMBER_MODEL, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session", async () => {
@@ -27,6 +27,7 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.match(args, /deepseek\/deepseek-v4\.1-flash/)
     assert.match(args, /--effort\nhigh/)
     assert.match(args, /--yolo/)
+    assert.match(args, /--verbose/)
     assert.match(args, /--max-turns\n100000\n/)
     const second = startCommand(root, logs, "cite lines", "xhigh", true, output.result?.sessionId, COMMAND_EMBER_MODEL)
     let next = commandResult(second)
@@ -37,8 +38,24 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.ok(readFileSync(argsFile, "utf8").includes("--effort\nxhigh\n"))
     assert.throws(() => startCommand(root, logs, "bad", "medium", true, undefined, "unapproved"), /Unapproved/)
     assert.match(readFileSync(argsFile, "utf8"), /--resume\ncmd-session/)
+    assert.equal(commandSession(first), "cmd-session")
+    assert.equal(commandSession(second), "cmd-session")
   } finally {
     process.env.PATH = oldPath
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("the verbose session line identifies a run before its result line exists", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-session-")))
+  const output = join(root, "out.ndjson"), errors = join(root, "err.stderr")
+  writeFileSync(output, "")
+  writeFileSync(errors, "session: early-session\nsome progress\n")
+  try {
+    const run = { pid: 2 ** 22 + 9, output, errors, started_at: new Date().toISOString(), proc_start: "1" }
+    assert.equal(commandResult(run).state, "interrupted")
+    assert.equal(commandSession(run), "early-session")
+  } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -83,17 +100,20 @@ test("spawn failure with an invalid cmd shebang is handled without crashing the 
   }
 })
 
-test("a live Command Code process spawned by another bridge process reports running", async () => {
+test("a recorded process start time keeps a live foreign run running and makes a reused PID interrupted", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-foreign-")))
   const output = join(root, "out.ndjson"), errors = join(root, "err.stderr")
   writeFileSync(output, ""); writeFileSync(errors, "")
   const child = spawn("sleep", ["30"], { stdio: "ignore" })
   try {
-    const run = { pid: child.pid!, output, errors, started_at: new Date().toISOString() }
+    const recorded = processStartTime(child.pid!)
+    assert.ok(recorded)
+    const run = { pid: child.pid!, output, errors, started_at: new Date().toISOString(), proc_start: recorded }
     assert.equal(commandResult(run).state, "running")
+    assert.equal(commandResult({ ...run, proc_start: "0" }).state, "interrupted")
     child.kill("SIGKILL")
     await new Promise((resolve) => child.on("exit", resolve))
-    assert.equal(commandResult(run).state, "unknown_or_interrupted")
+    assert.equal(commandResult(run).state, "interrupted")
   } finally {
     child.kill("SIGKILL")
     rmSync(root, { recursive: true, force: true })

@@ -45,11 +45,13 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 - `attempt_limit`: 1 or 2, with the second only for a justified same-scope correction.
 - `stop_on`: ambiguity, new dependencies, scope or contract changes, unavailable proof.
 
-`worker_status(cwd,session_id)` observes the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
+`worker_status(cwd,session_id)` observes the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. It also reports `continuations` used against `continuation_limit`, so a `turn_limit` session can be continued for free with `worker_resume` until that cap, and `steers` used against `steer_limit`. A Command Code run whose recorded process is gone, or whose PID now has a different start time (a reused PID), is reported as the terminal `interrupted` state and its worktree lease is released; an alive PID with the recorded start time stays `running` and keeps the lease. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
 
-`worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned native pi-subagents child in its original SDK host session, or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts.
+`worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned native pi-subagents child in its original SDK host session, or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts. A `turn_limit` result is continued with `TURN_LIMIT_CONTINUATIONS` free continuations that do not consume attempts; the used count and cap are in `worker_status`.
 
-`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination.
+`worker_steer(cwd,session_id,note)` redirects a **running** worker without changing its scope or write boundaries. On the Pi backend it forwards the note to the native pi-subagents `steer` RPC for the owned run. On Command Code it verifies HEAD and the write boundary exactly as `worker_resume` does, interrupts the run, waits until the recorded process is proven gone, then restarts the same Command Code session with `--resume <sessionId>` and the original prompt plus `PARENT STEERING (same scope and write boundaries): <note>`. It never changes `attempts`; it is bounded by its own `steer_limit`, and it refuses to signal a PID that this bridge process does not own. A finished or non-running session is refused with a pointer to `worker_resume`.
+
+`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination; a later `worker_status` reports `interrupted` and releases the lease once the recorded process is provably gone.
 
 ## CLI
 
@@ -61,6 +63,7 @@ pi-subagent-bridge model-check CWD TIER
 pi-subagent-bridge start CWD TITLE TIER SCOPE_JSON_FILE BRIEF_FILE
 pi-subagent-bridge status CWD SESSION_ID
 pi-subagent-bridge resume CWD SESSION_ID FEEDBACK_FILE
+pi-subagent-bridge steer CWD SESSION_ID NOTE_FILE
 pi-subagent-bridge cancel CWD SESSION_ID
 ```
 
@@ -68,7 +71,7 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 ## Safety and durability
 
-The Command Code runner is preferred and pins an exact model and effort. If Command Code is not installed or its provider/model/usage fails conclusively before edits, the bridge tries the pinned Muse SDK model for scout/mechanic/worker, then the allowed OpenCode Go model for every tier; each Pi route loads only the pinned pi-subagents extension (plus the pinned Muse provider on the Muse route) and submits via `subagents:rpc:v1:request`. An absent receipt, interrupted process, or uncertain admission remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. No fallback after edits or a second fallback from Muse/Go is allowed. The switch is reported transparently, not as a failure: `worker_start`/`worker_status` return `fallback_reason` (what happened), `fallback_notice` (that the switch was automatic and needs no parent action, with the same scope and pinned tier model and no duplicate start), and `fallback_detail` (the original provider message, for diagnosis). The `error` field is cleared once the fallback has safely taken over. Partial work is never replayed under a second provider.
+The Command Code runner is preferred and pins an exact model and effort. Each run records the child process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) so a reused PID is never mistaken for the original worker; an `interrupted` run releases its lease only after that identity check, and a live PID with the recorded start time keeps it. `--verbose` records the Command Code session identity on stderr before the result, which lets `worker_steer` resume the same session after a proven interruption. If Command Code is not installed or its provider/model/usage fails conclusively before edits, the bridge tries the pinned Muse SDK model for scout/mechanic/worker, then the allowed OpenCode Go model for every tier; each Pi route loads only the pinned pi-subagents extension (plus the pinned Muse provider on the Muse route) and submits via `subagents:rpc:v1:request`. An absent receipt, interrupted process, or uncertain admission remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. No fallback after edits or a second fallback from Muse/Go is allowed. The switch is reported transparently, not as a failure: `worker_start`/`worker_status` return `fallback_reason` (what happened), `fallback_notice` (that the switch was automatic and needs no parent action, with the same scope and pinned tier model and no duplicate start), and `fallback_detail` (the original provider message, for diagnosis). The `error` field is cleared once the fallback has safely taken over. Partial work is never replayed under a second provider.
 
 ## Reloading the server
 

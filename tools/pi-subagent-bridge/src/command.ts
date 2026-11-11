@@ -1,11 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
 export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
 export const COMMAND_EMBER_MODEL = "meta/muse-ember"
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
-export type CommandRun = { pid: number; output: string; errors: string; started_at: string }
+export type CommandRun = { pid: number; output: string; errors: string; started_at: string; proc_start?: string | null }
 export type CommandResult = {
   subtype: "success" | "error" | "max_turns"
   sessionId?: string
@@ -31,6 +31,7 @@ export function startCommand(directory: string, logDirectory: string, text: stri
     "--model", model,
     "--effort", effort,
     "--output-format", "json",
+    "--verbose",
     "--max-turns", String(MAX_TURNS),
     "--skip-onboarding", "--no-auto-update", "--trust", "--no-skills",
     ...(readOnly ? ["--plan"] : ["--yolo"]),
@@ -52,7 +53,7 @@ export function startCommand(directory: string, logDirectory: string, text: stri
     if (pid === undefined) throw new Error("Cannot start Command Code: cmd missing or not executable")
     children.set(pid, child)
     child.unref()
-    return { pid, output, errors, started_at: new Date().toISOString() }
+    return { pid, output, errors, started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
   } finally {
     closeSync(stdout)
     closeSync(stderr)
@@ -91,9 +92,43 @@ export function commandResult(run: CommandRun): { state: string; result: Command
     const state = last.subtype === "success" ? "succeeded" : last.subtype === "max_turns" ? "turn_limit" : "failed"
     return { state, result: last, stderr }
   }
-  if (children.has(run.pid) || processAlive(run.pid)) return { state: "running", result: null, stderr }
+  const identity = children.has(run.pid) ? "same" : processIdentity(run)
+  if (identity === "same" || identity === "unknown") return { state: "running", result: null, stderr }
   if (stderr?.includes("spawn error:")) return { state: "failed", result: null, stderr }
-  return { state: "unknown_or_interrupted", result: null, stderr }
+  return { state: "interrupted", result: null, stderr }
+}
+
+export function processStartTime(pid: number): string | null {
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync("/proc/" + pid + "/stat", "utf8")
+      const end = stat.lastIndexOf(")")
+      if (end < 0) return null
+      return stat.slice(end + 1).trim().split(/\s+/)[19] || null
+    } catch { return null }
+  }
+  try {
+    const value = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+      encoding: "utf8", timeout: 5000,
+    }).trim()
+    return value || null
+  } catch { return null }
+}
+
+function processIdentity(run: CommandRun): "same" | "different" | "gone" | "unknown" {
+  if (!processAlive(run.pid)) return "gone"
+  if (!run.proc_start) return "unknown"
+  const current = processStartTime(run.pid)
+  if (current === null) return "unknown"
+  return current === run.proc_start ? "same" : "different"
+}
+
+export function commandSession(run: CommandRun): string | null {
+  const result = commandResult(run).result
+  if (result?.sessionId) return result.sessionId
+  try {
+    return /^session:[ \t]*(\S+)[ \t]*$/m.exec(readFileSync(run.errors, "utf8"))?.[1] ?? null
+  } catch { return null }
 }
 
 function processAlive(pid: number): boolean {

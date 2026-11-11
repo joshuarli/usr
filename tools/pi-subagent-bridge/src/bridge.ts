@@ -7,6 +7,7 @@ export type SessionArgs = { sessionID: string; cwd?: string }
 export type OpenCodePort = {
   create(input: { title: string; agent: "build" | "plan"; model: ModelRef; location: { directory: string }; metadata: { usr_worker_v1: { directory: string; model: ModelRef } } }): Promise<unknown>
   prompt(input: SessionArgs & { text: string }): Promise<unknown>
+  steer(input: SessionArgs & { text: string }): Promise<unknown>
   get(input: SessionArgs): Promise<unknown>
   active(input?: { cwd?: string }): Promise<unknown>
   inbox(input: SessionArgs): Promise<unknown>
@@ -207,6 +208,12 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       if (activeSession(active, id) || queuedInputs(inbox)) throw new Error("Worker is running or has queued input; do not enqueue competing feedback")
       await api.prompt({ sessionID: id, cwd: directory, text: `Parent feedback (same scope and write boundaries):\n${feedback}` })
       return { session_id: id, cwd: directory, status: "admitted" }
+    },
+    async steer(cwd: unknown, sessionID: unknown, note: unknown) {
+      const { id, directory } = await ownedSession(sessionID, cwd)
+      const text = "PARENT STEERING (same scope and write boundaries):\n" + requiredText(note, "note")
+      const receipt = object(unbox(await api.steer({ sessionID: id, cwd: directory, text })))
+      return { session_id: id, cwd: directory, receipt }
     },
     async cancel(cwd: unknown, sessionID: unknown) {
       const { id, directory } = await ownedSession(sessionID, cwd)

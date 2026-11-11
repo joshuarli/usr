@@ -39,6 +39,7 @@ function fake(cwd: string) {
   const api: OpenCodePort = {
     create: async (input) => { model = input.model as typeof model; return { data: { id: "ses_fixture" } } },
     prompt: async () => ({}),
+    steer: async () => ({ data: { delivered: true, deliveryStatus: "delivered" } }),
     get: async () => ({ data: {
       id: "ses_fixture", title: "usr-worker: demo", model, location: { directory: cwd },
       metadata: { usr_worker_v1: { directory: cwd, model } }, outcome: "succeeded", error: null,

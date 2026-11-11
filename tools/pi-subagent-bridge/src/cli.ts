@@ -42,8 +42,15 @@ async function main(args: string[]): Promise<void> {
       result = await bridge.cancel(cwd, id)
       break
     }
+    case "steer": {
+      const [cwd, id, noteFile] = rest
+      if (!cwd || !id || !noteFile || rest.length !== 3)
+        throw new Error("usage: pi-subagent-bridge steer CWD SESSION_ID NOTE_FILE")
+      result = await bridge.steer(cwd, id, readFileSync(noteFile, "utf8"))
+      break
+    }
     default:
-      throw new Error("usage: pi-subagent-bridge {mcp|model-check|start|status|resume|cancel}")
+      throw new Error("usage: pi-subagent-bridge {mcp|model-check|start|status|resume|cancel|steer}")
   }
   process.stdout.write(JSON.stringify(result) + "\n")
 }
