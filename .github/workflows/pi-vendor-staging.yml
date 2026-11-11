@@ -1,0 +1,15 @@
+name: Pi vendor staging verification
+on:
+  push:
+    branches: [pi-vendor-staging]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify exact upstream source hashes and skill
+        run: |
+          python3 -I tools/pi/vendor.py check
+          python3 -I tools/pi/test_vendor.py
+          python3 -m py_compile tools/pi/vendor.py tools/pi/test_vendor.py
+          sh dotfiles/skills-check.sh dotfiles/base/.agents/skills

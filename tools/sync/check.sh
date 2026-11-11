@@ -11,6 +11,7 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	python3 -I tools/sync/test_dag.py
 	python3 -I tools/sync/test_main.py
 	python3 -I tools/sync/test_pi_extensions.py
+	python3 -I tools/pi/test_vendor.py
 	python3 -I tools/sync/test_links.py
 	python3 -I tools/sync/test_uninstall.py
 	python3 -I tools/sync/test_kache.py
