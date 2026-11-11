@@ -11,6 +11,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pi_offline  # noqa: E402
+
 NAME = "pi-subagent-bridge"
 LEGACY_NAME = "usr-opencode-worker"
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,14 +44,7 @@ def dependency_version():
 
 
 def dependency_current(root: Path = PROJECT) -> bool:
-    for name, version in dependency_versions().items():
-        path = root / "node_modules" / name / "package.json"
-        try:
-            if json.loads(path.read_text())["version"] != version:
-                return False
-        except (OSError, KeyError, ValueError, TypeError):
-            return False
-    return True
+    return pi_offline.bridge_current(root, pi_offline.runtime_dir(HOME))
 
 
 def managed_binary(name):
@@ -142,45 +138,8 @@ def configuration():
 
 
 def install_dependency():
-    if dependency_current():
-        return
-    if (PROJECT / "node_modules").is_symlink():
-        die("refusing to modify symlinked node_modules")
-    node, npm = managed_binary("node"), managed_binary("npm")
-    if not node or not npm:
-        die("Node.js and npm are required; run sync to install them")
-    try:
-        version = subprocess.check_output([node, "--version"], text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        die("cannot execute Node.js")
-    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", version)
-    if not match or int(match.group(1)) < 26:
-        die(f"Node.js 26+ required for bridge; found {version}")
-    env = os.environ.copy()
-    env["PATH"] = str(Path(node).parent) + os.pathsep + env.get("PATH", "")
-    stage = Path(tempfile.mkdtemp(prefix=".node_modules.", dir=PROJECT))
-    try:
-        shutil.copy2(PROJECT / "package.json", stage / "package.json")
-        subprocess.run(
-            [npm, "install", "--prefix", str(stage), "--ignore-scripts",
-             "--no-package-lock", "--no-audit", "--no-fund"],
-            env=env, check=True,
-        )
-        if not dependency_current(stage):
-            die(f"npm did not install pinned @earendil-works/pi-coding-agent {dependency_version()}")
-        previous = stage.with_name(stage.name + ".previous")
-        if (PROJECT / "node_modules").exists():
-            os.replace(PROJECT / "node_modules", previous)
-        try:
-            os.replace(stage / "node_modules", PROJECT / "node_modules")
-        except OSError:
-            if previous.exists():
-                os.replace(previous, PROJECT / "node_modules")
-            raise
-        if previous.exists():
-            shutil.rmtree(previous, ignore_errors=True)
-    finally:
-        shutil.rmtree(stage, ignore_errors=True)
+    """Link bridge to usr's prebuilt offline Pi closure. No npm subprocess."""
+    pi_offline.link_bridge(PROJECT, pi_offline.runtime_dir(HOME))
 
 
 def update_configuration(data, original):
@@ -220,7 +179,7 @@ def run(action):
         if legacy is not None:
             print(f"MCP: migrate owned {LEGACY_NAME} to {NAME}")
         if not dependency_current():
-            print(f"NPM: install pinned @earendil-works/pi-coding-agent {dependency_version()}")
+            print("OFFLINE: link vendored Pi SDK and extensions")
         if previous != desired or legacy is not None:
             print(f"MCP: register {NAME} with Claude user scope")
         elif load_owner() != entry_fingerprint(desired):
