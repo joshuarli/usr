@@ -5,8 +5,8 @@
   "artifacts": {
     "linux-x64": {
       "path": "linux-x64.tar.gz",
-      "sha256": "a9c350c64abfb505bf159e8dc16c23bb7207b1b1c897b52f012c054c69631148",
-      "bytes": 37256396
+      "sha256": "45d0c20b9107beeb6171b81b6050a6348d0d2b6670a7ba651d3bf9cc3d2df66e",
+      "bytes": 37255814
     },
     "darwin-arm64": {
       "path": "darwin-arm64.tar.gz",
