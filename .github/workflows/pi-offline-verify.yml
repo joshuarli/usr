@@ -1,0 +1,40 @@
+name: Verify Pi offline setup and bridge
+on:
+  push:
+    branches: [pi-offline-runtime]
+    paths:
+      - "tools/sync/**"
+      - "tools/pi/test_offline.py"
+      - "dotfiles/pi-test.py"
+      - "dotfiles/base/.pi/**"
+      - ".github/workflows/pi-offline-verify.yml"
+  workflow_dispatch:
+jobs:
+  offline:
+    if: github.actor != 'github-actions[bot]'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - name: Offline Pi package and sync acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .work
+          python3 -I tools/pi/vendor.py check
+          python3 -I tools/pi/test_vendor.py
+          python3 -I tools/pi/test_offline.py
+          python3 -I dotfiles/pi-test.py
+          python3 -I tools/sync/test_pi_extensions.py
+          python3 -I tools/sync/pi-worker-test.py
+          python3 -I tools/sync/claude-worker-test.py
+          python3 -I tools/sync/opencode-worker-test.py
+          python3 -I tools/sync/test_main.py
+          python3 -I tools/sync/test_installer.py
+          sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
