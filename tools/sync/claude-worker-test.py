@@ -52,7 +52,7 @@ class ClaudeWorkerSyncTests(unittest.TestCase):
                         PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
         self.env.pop("OPENCODE", None)
         self.config = self.home / ".claude.json"
-        self.config.parent.mkdir(parents=True)
+        self.config.parent.mkdir(parents=True, exist_ok=True)
         sha = "a" * 64
         arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "x64")
         key = platform.system().lower() + "-" + arch
