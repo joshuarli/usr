@@ -1,0 +1,23 @@
+name: Smoke-test Pi closure on Alpine musl without any network
+on:
+  push:
+    branches: [pi-offline-runtime]
+    paths: [".github/workflows/pi-alpine-smoke.yml"]
+  workflow_dispatch:
+jobs:
+  alpine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Exercise committed Linux archive under musl with no network
+        shell: bash
+        run: |
+          docker run --rm --network none -v "$PWD:/usr-repo:ro" \
+            --workdir /usr-repo node:26-alpine sh -ec '
+              mkdir -p /tmp/pi-offline
+              tar -xzf vendor/pi/runtime/linux-x64.tar.gz -C /tmp/pi-offline
+              node /tmp/pi-offline/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js --version
+              node --import /tmp/pi-offline/node_modules/tsx/dist/loader.mjs \
+                   --input-type=module -e \
+                   "await import(\"file:///tmp/pi-offline/node_modules/@dataforxyz/agent-intercom-pi/index.ts\"); console.log(\"intercom-musl-ok\")"
+            '
