@@ -34,3 +34,5 @@ Update **Pi itself, the Pi SDK, pi-subagents, intercom and its shared core, Muse
 - Commit the updated upstream manifest, source/dist artifacts, integration changes, tests and docs together. Report each old → new SHA, version and validation result. If a required closure/artifact/gate is missing, **do not activate** the new runtime; leave it staged and report incomplete.
 
 The current source snapshots are intentionally *not* a finished offline distribution. Do not pretend the requested transition has already occurred just because this skill exists.
+
+**Report:** List the old and new version and full Git SHA for every component, all tests run and their results, the exact offline-install proof, any licensing changes, and any incomplete runtime/adapter work. An update without these proofs remains unactivated.
