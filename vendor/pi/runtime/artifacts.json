@@ -10,8 +10,8 @@
     },
     "darwin-arm64": {
       "path": "darwin-arm64.tar.gz",
-      "sha256": "668b42b2296c5cc8767164d0c8edaf1d92b91d24e2fbc68a5e430ee848d9e1bd",
-      "bytes": 36964862
+      "sha256": "0285bdad384a54246d186b7ca4f5e47a0f9491b5036de20da7c92e4765f18c4d",
+      "bytes": 36958539
     },
     "linux-arm64": {
       "path": "linux-arm64.tar.gz",
