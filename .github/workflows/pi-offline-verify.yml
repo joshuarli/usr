@@ -6,6 +6,7 @@ on:
       - "tools/sync/**"
       - "tools/pi/test_offline.py"
       - "dotfiles/pi-test.py"
+      - "dotfiles/doctor-test.sh"
       - "dotfiles/base/.pi/**"
       - ".github/workflows/pi-offline-verify.yml"
   workflow_dispatch:
@@ -15,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
