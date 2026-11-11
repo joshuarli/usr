@@ -201,9 +201,17 @@ def link_bridge(project: Path, root: Path) -> bool:
     link = project / "node_modules"
     if link.is_symlink():
         raise OfflinePiError(f"refusing foreign bridge dependency symlink: {link}")
-    if link.exists() and not version_matches(project):
-        # Prior sync did install these packages into the project; foreign dirs are preserved.
-        raise OfflinePiError(f"refusing unmanaged bridge dependencies: {link}")
+    if link.exists():
+        # Adopt only the exact old usr-managed npm closure, not arbitrary node_modules.
+        try:
+            legacy = all(json.loads((link / name / "package.json").read_text())["version"] == version
+                         for name, version in PACKAGES.items()
+                         if name in ("@earendil-works/pi-coding-agent", "pi-subagents",
+                                     "pi-muse-subscription"))
+        except (OSError, KeyError, ValueError, TypeError):
+            legacy = False
+        if not legacy:
+            raise OfflinePiError(f"refusing unmanaged bridge dependencies: {link}")
     project.mkdir(parents=True, exist_ok=True)
     tmp = project / (".node_modules.offline-" + next(tempfile._get_candidate_names()))
     tmp.symlink_to(root / "node_modules", target_is_directory=True)
@@ -224,3 +232,51 @@ def link_bridge(project: Path, root: Path) -> bool:
         return True
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def configure_intercom(home: Path, root: Path) -> bool:
+    """Choose a local TS loader, never npx; preserve explicitly configured user behavior."""
+    directory = home / ".pi/agent/intercom"
+    file = directory / "config.json"
+    if directory.is_symlink() or file.is_symlink():
+        raise OfflinePiError(f"refusing symlinked intercom configuration: {file}")
+    loader = root / "node_modules/tsx/dist/loader.mjs"
+    if not loader.is_file():
+        raise OfflinePiError(f"missing self-contained TS loader: {loader}")
+    if file.exists():
+        try:
+            data = json.loads(file.read_text())
+        except (OSError, ValueError) as exc:
+            raise OfflinePiError(f"invalid intercom config: {file}") from exc
+        if not isinstance(data, dict):
+            raise OfflinePiError("intercom config must be an object")
+    else:
+        data = {}
+    desired = dict(data)
+    # Any existing explicit non-npm broker remains under the user's control.
+    if not desired.get("brokerCommand") or desired.get("brokerCommand") in ("npx", "npm"):
+        desired["brokerCommand"] = "node"
+        desired["brokerArgs"] = ["--import", str(loader)]
+    elif desired.get("brokerCommand") == "node" and desired.get("brokerArgs", []) == ["--no-install", "tsx"]:
+        desired["brokerArgs"] = ["--import", str(loader)]
+    desired.setdefault("inboundTrigger", "never")
+    desired.setdefault("confirmSend", True)
+    if desired == data:
+        return False
+    directory.mkdir(parents=True, exist_ok=True)
+    old = file.read_bytes() if file.exists() else None
+    fd, temp = tempfile.mkstemp(prefix=".config.", dir=directory)
+    try:
+        os.fchmod(fd, stat.S_IMODE(file.stat().st_mode) if file.exists() else 0o600)
+        with os.fdopen(fd, "w", encoding="utf8") as out:
+            json.dump(desired, out, indent=2)
+            out.write("\n")
+            out.flush()
+            os.fsync(out.fileno())
+        if old is not None and file.read_bytes() != old:
+            raise OfflinePiError("concurrent intercom config change; retry sync")
+        os.replace(temp, file)
+    finally:
+        if os.path.lexists(temp):
+            os.unlink(temp)
+    return True
