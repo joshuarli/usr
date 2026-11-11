@@ -81,14 +81,12 @@ test -f "$scratch/runtime/node_modules/@dataforxyz/agent-intercom-core/dist/inde
 (
  cd "$scratch/runtime"
  node --input-type=module -e '
-   import { createRequire } from "node:module";
-   const req = createRequire(import.meta.url);
    for (const x of ["@earendil-works/pi-coding-agent",
                     "pi-subagents",
                     "pi-subagents/required-child-extensions",
                     "pi-muse-subscription/src/index.ts",
                     "@dataforxyz/agent-intercom-pi/index.ts"]) {
-     console.log(x + " -> " + req.resolve(x));
+     console.log(x + " -> " + import.meta.resolve(x));
    }'
  node node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js --version
 )
