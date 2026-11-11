@@ -479,7 +479,9 @@
         "src/supervision.ts": "45b4e0d8792d2bbde5ba28f9546b5b69900be817",
         "src/worker-identity.ts": "1ce0f1e1bdb61ac3d9c135ab3d03e564225dad87",
         "src/worker-store-migration-vectors.ts": "6393d6b57ca75ee81bd3af559056207c1da037ce",
-        "src/worker-store-migration.ts": "b850e0070db4482a06236c8bd014b004f30a343c"
+        "src/worker-store-migration.ts": "b850e0070db4482a06236c8bd014b004f30a343c",
+        "tsconfig.build.json": "eb32f4d473d88205fcd31356c93f8316992af978",
+        "tsconfig.json": "5e224e1ea7ba24e0b265827b147cab051632b2bb"
       }
     },
     "pi-muse-subscription": {

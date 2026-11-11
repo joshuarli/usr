@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "vendor/pi/upstreams.json"
 EXCLUDE = re.compile(r"(\.test\.|^test/|^\.github/|package-lock\.json|\.png$|\.jpg$|\.webp$|\.gitignore$)")
 SUBAGENTS = re.compile(r"^(src/|agents/|docs/|skills/|prompts/|index\.ts$|.*\.mjs$|.*\.cjs$|package\.json$|LICENSE$|README\.md$)")
-OTHER = re.compile(r"^(src/|broker/|ui/|provider/|skills/|index\.ts$|.*\.ts$|.*\.mjs$|.*\.cjs$|package\.json$|LICENSE$|README\.md$|COPYRIGHT$|LICENSE_TRANSITION\.md$|THIRD_PARTY_NOTICES\.md$)")
+OTHER = re.compile(r"^(src/|broker/|ui/|provider/|skills/|index\.ts$|.*\.ts$|.*\.mjs$|.*\.cjs$|package\.json$|LICENSE$|README\.md$|COPYRIGHT$|LICENSE_TRANSITION\.md$|THIRD_PARTY_NOTICES\.md$|tsconfig(?:\.build)?\.json$)")
 SHA = re.compile(r"[0-9a-f]{40}")
 SUPPORTED = {"pi-subagents", "agent-intercom-pi", "agent-intercom-core", "pi-muse-subscription"}
 

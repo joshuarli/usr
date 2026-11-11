@@ -1,0 +1,32 @@
+name: Build complete offline Pi runtime
+on:
+  push:
+    branches: [pi-offline-runtime]
+    paths:
+      - "tools/pi/build-runtime.sh"
+      - "vendor/pi/**"
+      - ".github/workflows/pi-offline-build.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  linux:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26'
+      - name: Build full dependency closure
+        run: bash tools/pi/build-runtime.sh
+      - name: Commit verified offline archive
+        shell: bash
+        run: |
+          git config user.name "usr-pi-vendor-bot"
+          git config user.email "usr-pi-vendor-bot@users.noreply.github.com"
+          git add -f vendor/pi/runtime
+          git commit -m "Vendor linux Pi runtime dependency archive [skip ci]"
+          git push origin HEAD:pi-offline-runtime
