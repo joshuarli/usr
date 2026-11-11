@@ -1,14 +1,15 @@
 Prefix: USR
 Next: 39
 
-### USR-38 · P1 · Finish self-contained Pi runtime and intercom activation
+### USR-38 · P2 · Complete companion intercom adapters and supervisor consultation
 
-- **Area:** Dependency packaging / agent coordination
-- **Where:** `vendor/pi/`, `tools/sync/{installer,main,pi_extensions,pi-worker,claude-worker,opencode-worker}.py`, `tools/pi-subagent-bridge/`, `dotfiles/base/.pi/agent/settings.json`
-- **Problem:** `vendor/pi/` currently contains audited upstream *source* snapshots, not the Pi executable, SDK build, transitive runtime closure, or Claude/Codex/OpenCode intercom adapters. Normal `sh sync` still invokes npm for Pi CLI and bridge dependencies, and `pi install/update` for extensions. The intercom adapter cannot yet be activated offline and should not be confused with working runtime integration.
-- **Recommendation:** Use `/pi-update` to vendor/build a complete verified distributable from pinned upstream SHAs, wire local package paths, remove all npm/registry paths from routine Pi setup, and prove Pi CLI, SDK, worker RPC, Muse and intercom via fresh cacheless cross-harness smoke tests. Preserve the typed tier guard, worktree leases and parent-only authority; use intercom for messaging only, and disable unsolicited wakeups by default.
+- **Area:** Cross-harness agent communication
+- **Where:** `vendor/pi/`, `tools/pi-subagent-bridge/`, `docs/pi.md`
+- **Delivered:** Pi 1.5.0 CLI, SDK, pi-subagents, Muse SDK adapter, intercom Pi/core plus their entire installed JS closure are bundled as SHA-256-verified platform archives (macOS ARM64, Linux x64/ARM64). `sh sync tools pi`, `sh sync bridge` and the Pi launcher never download npm dependencies or run `pi install/update`. Interactive Pi loads local intercom with `inboundTrigger: "never"` and `confirmSend: true`.
+- **Remaining:** Claude/Codex/OpenCode *companion intercom adapters* are not yet vendored/registered. Scoped Pi SDK child workers deliberately do not load intercom, so `contact_supervisor` is not exposed inside child sessions. These are **communications features**, separate from the now-offline Pi installation, and must not bypass existing typed tier restrictions, worktree ownership, and acceptance proof.
+- **Recommendation:** Vendor compatible companion adapters and core protocol revisions, track each upstream commit SHA, register only required MCP hooks/wrappers, and add cross-harness send/ask/reply tests plus bounded child-supervisor consultation with strict admission/permission gates. Do not add the intercom fleet orchestrator or enable unsolicited model wakeups.
 - **Fix with:** `pi-update`
-- **Effort:** XL
+- **Effort:** L
 
 ### USR-5 · P2 · Push rules do not require user approval
 
