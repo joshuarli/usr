@@ -30,6 +30,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ffmpeg_runtime  # noqa: E402
+import pi_offline  # noqa: E402
 
 NODE_MINIMUM = "26.12.0"
 NODEJS_VERSION = "26.13.0"
@@ -1200,8 +1201,40 @@ class Installer:
                        no_release="could not resolve the latest agent-browser version")
 
     def install_pi(self) -> None:
-        self._npm_tool("pi", self.pi_root, "@earendil-works/pi-coding-agent", "pi",
-                       extra=("--ignore-scripts",), fetch_msg="Installing Pi ...")
+        """Install the complete Pi SDK, CLI and extensions from a verified local archive."""
+        if not self.node_meets_minimum():
+            self.skip("pi", f"Node.js {NODE_MINIMUM} or newer is required")
+        launcher = self.dest / "pi"
+        target = str(self.pi_root / "bin/pi")
+        if launcher.exists() or launcher.is_symlink():
+            if not launcher.is_symlink() or os.readlink(launcher) != target \
+                    or not (self.state / "pi").is_file():
+                self.skip("pi", f"{launcher} already exists outside dl management")
+        if self.pi_root.exists() or self.pi_root.is_symlink():
+            if self.pi_root.is_symlink() or not self.pi_root.is_dir() \
+                    or (not (self.state / "pi").is_file() and not pi_offline.current(self.pi_root)):
+                self.skip("pi", f"{self.pi_root} already exists without dl records")
+        try:
+            entry, _ = pi_offline.verify_archive()
+            wanted = "offline:" + entry["sha256"]
+            if (pi_offline.current(self.pi_root) and self._state_text("pi") == wanted
+                    and launcher.is_symlink() and os.readlink(launcher) == target):
+                pi_offline.configure_intercom(self.home, self.pi_root)
+                self.own_dir(self.pi_root)
+                self.own_file(launcher)
+                self.own_file(self.state / "pi")
+                self.current("pi is current (vendored; no npm)")
+                return
+            self.own_missing_dirs(self.pi_root.parent)
+            pi_offline.install(self.pi_root)
+            pi_offline.configure_intercom(self.home, self.pi_root)
+        except (pi_offline.OfflinePiError, OSError, ValueError) as exc:
+            self.skip("pi", str(exc))
+        self.own_dir(self.pi_root)
+        self.link_symlink(launcher, target)
+        self.write_state("pi", wanted)
+        self.changed = True
+        self.ok("Installed Pi CLI, SDK, subagents and intercom from usr (no npm)")
 
     def repair_dsh_tui_patch(self) -> bool:
         patch_path = self.dsh_root / "lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
