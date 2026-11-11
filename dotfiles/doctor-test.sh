@@ -14,7 +14,8 @@ mkdir -p "$fixture/dotfiles/base/.config" "$fixture/dotfiles/base/.codex" \
 cp "$repo/sync" "$fixture/sync"
 cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninstall.py" \
    "$repo/tools/sync/ownership.py" "$repo/tools/sync/links.py" \
-   "$repo/tools/sync/link_plan.py" "$repo/tools/sync/link_apply.py" "$repo/tools/sync/link_recovery.py" "$fixture/tools/sync/"
+   "$repo/tools/sync/link_plan.py" "$repo/tools/sync/link_apply.py" "$repo/tools/sync/link_recovery.py" \
+   "$repo/tools/sync/pi_extensions.py" "$fixture/tools/sync/"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
 printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["testtool"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
