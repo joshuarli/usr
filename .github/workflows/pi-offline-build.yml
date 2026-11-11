@@ -1,17 +1,10 @@
 name: Build complete offline Pi runtime
 on:
-  push:
-    branches: [pi-offline-runtime]
-    paths:
-      - "tools/pi/build-runtime.sh"
-      - "vendor/pi/**"
-      - ".github/workflows/pi-offline-build.yml"
   workflow_dispatch:
 permissions:
   contents: write
 jobs:
   linux:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -29,11 +22,10 @@ jobs:
           git config user.email "usr-pi-vendor-bot@users.noreply.github.com"
           git add -f vendor/pi/runtime
           git commit -m "Vendor linux Pi runtime dependency archive [skip ci]"
-          git pull --rebase origin pi-offline-runtime
-          git push origin HEAD:pi-offline-runtime
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
 
   macos:
-    if: github.actor != 'github-actions[bot]'
     needs: linux
     runs-on: macos-26
     steps:
@@ -46,8 +38,8 @@ jobs:
       - name: Build macOS ARM64 runtime
         shell: bash
         run: |
-          git fetch origin pi-offline-runtime
-          git checkout -B pi-offline-runtime origin/pi-offline-runtime
+          git fetch origin "$GITHUB_REF_NAME"
+          git checkout -B "$GITHUB_REF_NAME" "origin/$GITHUB_REF_NAME"
           uname -m
           test "$(uname -m)" = "arm64"
           bash tools/pi/build-runtime.sh
@@ -58,5 +50,5 @@ jobs:
           git config user.email "usr-pi-vendor-bot@users.noreply.github.com"
           git add -f vendor/pi/runtime
           git commit -m "Vendor macOS ARM64 Pi runtime archive [skip ci]"
-          git pull --rebase origin pi-offline-runtime
-          git push origin HEAD:pi-offline-runtime
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"
