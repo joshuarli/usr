@@ -202,12 +202,15 @@ def link_bridge(project: Path, root: Path) -> bool:
     if link.is_symlink():
         raise OfflinePiError(f"refusing foreign bridge dependency symlink: {link}")
     if link.exists():
-        # Adopt only the exact old usr-managed npm closure, not arbitrary node_modules.
+        # Previous Claude/OpenCode bridge installs had two packages; Pi also
+        # installed Muse. Adopt only the exact known closure, never pnpm/foreign dirs.
         try:
-            legacy = all(json.loads((link / name / "package.json").read_text())["version"] == version
-                         for name, version in PACKAGES.items()
-                         if name in ("@earendil-works/pi-coding-agent", "pi-subagents",
-                                     "pi-muse-subscription"))
+            legacy = not (link / ".pnpm").exists() and all(
+                json.loads((link / name / "package.json").read_text())["version"] == PACKAGES[name]
+                for name in ("@earendil-works/pi-coding-agent", "pi-subagents"))
+            muse = link / "pi-muse-subscription/package.json"
+            if muse.exists():
+                legacy = legacy and json.loads(muse.read_text())["version"] == PACKAGES["pi-muse-subscription"]
         except (OSError, KeyError, ValueError, TypeError):
             legacy = False
         if not legacy:
