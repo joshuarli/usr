@@ -142,22 +142,12 @@ def pi_extensions_status(ctx: Context) -> Probe:
         return Probe(False, "Invalid Pi package profile: " + str(exc), True)
     detail = "; ".join(f"{name}@{version} (installed: {actual or 'missing'})"
                        for _, name, version, actual in missing)
-    return Probe(not missing, detail or "Pi extensions match exact pins")
+    return Probe(not missing, detail or "Pi extensions are bundled locally (no npm)")
 
 
 def pi_extensions_apply(ctx: Context) -> None:
-    pi = ctx.home / ".local/bin/pi"
-    if not os.access(pi, os.X_OK):
-        raise RuntimeError("Pi launcher is missing; run sync tools pi")
-    extra = {
-        "PI_CODING_AGENT_DIR": str(ctx.home / ".pi/agent"),
-        "PATH": str(ctx.home / ".local/bin") + os.pathsep + ctx.env.get("PATH", ""),
-    }
-    for source, _, _, _ in missing_pi_extensions(ctx.root / "dotfiles/base/.pi/agent/settings.json", ctx.home):
-        required(command(ctx, str(pi), "install", source, "--no-approve", extra=extra),
-                 "Pi package installation")
-    required(command(ctx, str(pi), "update", "--extensions", "--no-approve", extra=extra),
-             "Pi extension reconciliation")
+    # No package download, registry probe or Pi updater is permitted by sync.
+    missing_pi_extensions(ctx.root / "dotfiles/base/.pi/agent/settings.json", ctx.home)
 
 
 def bridge_status(ctx: Context) -> Probe:
