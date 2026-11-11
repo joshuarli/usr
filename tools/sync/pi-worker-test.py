@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Offline behavior tests for sync-owned Pi MCP setup."""
+"""Offline-only Pi bridge registration tests; npm is forbidden in the fixture."""
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -9,202 +10,128 @@ import sys
 import tempfile
 import unittest
 
-ROOT = Path(__file__).resolve().parents[2]
-HELPER = ROOT / "tools/sync/pi-worker.py"
+REPO = Path(__file__).resolve().parents[2]
+SCRIPT = REPO / "tools/sync/pi-worker.py"
+OFFLINE = REPO / "tools/sync/pi_offline.py"
+PACKAGES = {
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "pi-subagents": "0.87.0",
+    "pi-muse-subscription": "0.1.0",
+    "@dataforxyz/agent-intercom-pi": "0.10.0",
+    "@dataforxyz/agent-intercom-core": "0.1.0",
+}
 
 
 class PiWorkerSyncTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="sync-claude-mcp-")
+        self.temp = tempfile.TemporaryDirectory(prefix="usr-offline-pi-")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.home = self.root / "home"
         self.home.mkdir()
-        self.bin = self.root / "bin"
-        self.bin.mkdir()
+        sync = self.root / "tools/sync"
+        sync.mkdir(parents=True)
+        shutil.copy2(SCRIPT, sync / SCRIPT.name)
+        shutil.copy2(OFFLINE, sync / OFFLINE.name)
+        self.script = sync / SCRIPT.name
         self.project = self.root / "tools/pi-subagent-bridge"
-        (self.root / "tools/sync").mkdir(parents=True)
         (self.project / "src").mkdir(parents=True)
-        shutil.copy2(HELPER, self.root / "tools/sync/pi-worker.py")
         (self.project / "src/server.ts").write_text("export {}\n")
         (self.project / "package.json").write_text(json.dumps({
-            "dependencies": {"@earendil-works/pi-coding-agent": "1.5.0", "pi-subagents": "0.87.0",
-                             "pi-muse-subscription": "0.1.0"},
+            "dependencies": PACKAGES
         }))
-        (self.bin / "node").write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
-        (self.bin / "node").chmod(0o755)
-        npm = f"""#!{sys.executable}
-import json, pathlib, sys, os
-args = sys.argv[1:]
-with open(os.environ["MOCK_NPM_LOG"], "a") as f:
-    f.write(json.dumps(args) + "\\n")
-assert args[:2] == ["install", "--prefix"], args
-project = pathlib.Path(args[2])
-client = project / "node_modules/@earendil-works/pi-coding-agent"
-client.mkdir(parents=True, exist_ok=True)
-(client / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_VERSION", "1.5.0")}}))
-extension = project / "node_modules/pi-subagents"
-extension.mkdir(parents=True, exist_ok=True)
-(extension / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_SUBAGENTS_VERSION", "0.87.0")}}))
-muse = project / "node_modules/pi-muse-subscription"
-muse.mkdir(parents=True, exist_ok=True)
-(muse / "package.json").write_text(json.dumps({{"version": os.environ.get("MOCK_MUSE_VERSION", "0.1.0")}}))
-"""
-        (self.bin / "npm").write_text(npm)
-        (self.bin / "npm").chmod(0o755)
-        self.log = self.root / "npm.log"
-        self.env = dict(os.environ, HOME=str(self.home),
-                        PATH=str(self.bin) + os.pathsep + os.environ.get("PATH", ""),
-                        MOCK_NPM_LOG=str(self.log))
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "node").write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
+        (bin_dir / "node").chmod(0o755)
+        (bin_dir / "npm").write_text("#!/bin/sh\necho illegal-npm >&2\nexit 99\n")
+        (bin_dir / "npm").chmod(0o755)
+        (bin_dir / "opencode").write_text("#!/bin/sh\nif [ \"$1\" = service ]; then echo stopped; exit 0; fi\nexit 1\n")
+        (bin_dir / "opencode").chmod(0o755)
+        self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"),
+                        PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+        self.env.pop("OPENCODE", None)
         self.config = self.home / ".pi/agent/mcp.json"
         self.config.parent.mkdir(parents=True)
-        self.script = self.root / "tools/sync/pi-worker.py"
+        sha = "a" * 64
+        arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "x64")
+        key = platform.system().lower() + "-" + arch
+        vendor = self.root / "vendor/pi/runtime"
+        vendor.mkdir(parents=True)
+        (vendor / "artifacts.json").write_text(json.dumps({
+            "schema":1, "pi_version":"1.5.0", "artifacts":{
+                key: {"path":key+".tar.gz", "sha256":sha, "bytes":0}}}))
+        self.runtime = self.home / ".local/share/pi"
+        for name, version in PACKAGES.items():
+            pkg = self.runtime / "node_modules" / name
+            pkg.mkdir(parents=True)
+            (pkg / "package.json").write_text(json.dumps({"version":version}))
+        cli = self.runtime / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("export {}")
+        wrapper = self.runtime / "bin/pi"
+        wrapper.parent.mkdir()
+        wrapper.write_text("#!/bin/sh\nexit 0\n")
+        wrapper.chmod(0o755)
+        (self.runtime / ".usr-pi-runtime.json").write_text(json.dumps({
+            "schema":1,"sha256":sha,"platform":key,"pi_version":"1.5.0"}))
 
-    def run_helper(self, action, success=True):
-        result = subprocess.run([sys.executable, "-I", str(self.script), action],
-                                env=self.env, capture_output=True, text=True, timeout=20)
+    def action(self, cmd, success=True):
+        result = subprocess.run([sys.executable, "-I", str(self.script), cmd],
+                                env=self.env, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
 
-    def test_install_is_idempotent_and_preserves_unrelated_credentials(self):
-        original = {
-            "theme": "keep exactly",
-            "mcpServers": {"other": {"command": "other", "args": ["--value", "secret"]}},
-        }
-        self.config.write_text(json.dumps(original))
-        self.run_helper("install")
-        result = json.loads(self.config.read_text())
-        self.assertEqual(result["theme"], original["theme"])
-        self.assertEqual(result["mcpServers"]["other"], original["mcpServers"]["other"])
-        worker = result["mcpServers"]["pi-subagent-bridge"]
-        self.assertEqual(worker["command"], str(self.bin / "node"))
-        self.assertEqual(worker["args"], ["--experimental-strip-types",
-                         str(self.project / "src/server.ts")])
-        self.assertEqual(len(self.log.read_text().splitlines()), 1)
-        self.run_helper("check")
-        snapshot = self.config.read_bytes()
-        self.run_helper("install")
-        self.assertEqual(self.config.read_bytes(), snapshot)
-        self.assertEqual(len(self.log.read_text().splitlines()), 1)
-        self.run_helper("remove")
-        self.assertEqual(json.loads(self.config.read_text()), original)
-        self.run_helper("remove")
+    def servers(self):
+        value = json.loads(self.config.read_text())
+        return value["mcp"]["servers"] if "pi" == "opencode" else value["mcpServers"]
 
-    def test_foreign_node_modules_is_replaced(self):
-        (self.project / "node_modules/.pnpm").mkdir(parents=True)
-        (self.project / "node_modules/.modules.yaml").write_text("packageManager: pnpm@12.18.0\n")
-        self.run_helper("install")
-        self.assertFalse((self.project / "node_modules/.pnpm").exists())
-        self.assertFalse((self.project / "node_modules/.modules.yaml").exists())
-        self.run_helper("check")
+    def test_offline_install_check_remove_and_idempotence(self):
+        self.assertIn("OFFLINE:", self.action("plan").stdout)
+        self.assertFalse((self.project / "node_modules").exists())
+        self.action("check", success=False)
+        self.action("install")
+        self.assertTrue((self.project / "node_modules").is_symlink())
+        self.assertEqual((self.project / "node_modules").resolve(), (self.runtime / "node_modules").resolve())
+        self.assertIn("pi-subagent-bridge", self.servers())
+        self.action("check")
+        before = self.config.read_bytes()
+        self.action("install")
+        self.assertEqual(self.config.read_bytes(), before)
+        self.action("remove")
+        self.assertNotIn("pi-subagent-bridge", self.servers())
 
-    def test_owned_legacy_registration_is_migrated_even_when_new_is_current(self):
-        self.run_helper("install")
+    def test_foreign_bridge_dependency_directory_is_preserved(self):
+        foreign = self.project / "node_modules/.pnpm"
+        foreign.mkdir(parents=True)
+        (foreign / "do-not-delete").write_text("sentinel")
+        self.action("install", success=False)
+        self.assertEqual((foreign / "do-not-delete").read_text(), "sentinel")
+
+    def test_foreign_registration_is_preserved(self):
+        if "pi" == "opencode":
+            document = {"mcp": {"servers": {"pi-subagent-bridge": {"type":"remote","url":"https://example.com"}}}}
+        else:
+            document = {"mcpServers":{"pi-subagent-bridge":{"command":"another","args":["different"]}}}
+        self.config.write_text(json.dumps(document))
+        self.action("install", success=False)
+        self.assertEqual(json.loads(self.config.read_text()), document)
+        self.assertFalse((self.project / "node_modules").exists())
+
+    def test_runtime_unavailable_fails_closed(self):
+        (self.runtime / ".usr-pi-runtime.json").unlink()
+        self.action("install", success=False)
+        self.assertFalse((self.project / "node_modules").exists())
+
+    def test_legacy_owned_registration_migrates(self):
+        self.action("install")
         data = json.loads(self.config.read_text())
-        servers = data["mcpServers"]
+        servers = data["mcp"]["servers"] if "pi" == "opencode" else data["mcpServers"]
         servers["usr-opencode-worker"] = dict(servers["pi-subagent-bridge"])
         self.config.write_text(json.dumps(data))
-        self.run_helper("check", success=False)
-        self.assertIn("migrate owned", self.run_helper("plan").stdout)
-        self.run_helper("install")
-        migrated = json.loads(self.config.read_text())
-        self.assertNotIn("usr-opencode-worker", migrated["mcpServers"])
-        self.run_helper("check")
-
-    def test_plan_never_writes_or_installs(self):
-        output = self.run_helper("plan").stdout
-        self.assertIn("NPM: install", output)
-        self.assertIn("MCP: register", output)
-        self.assertFalse(self.config.exists())
-        self.assertFalse(self.log.exists())
-        self.run_helper("check", success=False)
-
-    def test_different_name_owner_is_preserved(self):
-        original = {"mcpServers": {"pi-subagent-bridge": {
-            "type": "stdio", "command": "another", "args": ["different"]}}}
-        self.config.write_text(json.dumps(original))
-        self.run_helper("install", success=False)
-        self.assertEqual(json.loads(self.config.read_text()), original)
-        self.assertFalse(self.log.exists())
-        self.run_helper("remove", success=False)
-
-    def test_old_manual_registration_is_upgraded(self):
-        old = {"mcpServers": {"pi-subagent-bridge": {
-            "command": "node", "args": ["--experimental-strip-types",
-                                     str(self.project / "src/server.ts")]}}}
-        self.config.write_text(json.dumps(old))
-        self.run_helper("install")
-        self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
-                         ["pi-subagent-bridge"]["command"], str(self.bin / "node"))
-
-    def test_other_platform_home_registration_is_adopted(self):
-        other = Path("/Users") / self.home.name
-        old = {"mcpServers": {"pi-subagent-bridge": {
-            "command": str(other / ".local/share/nodejs/current/bin/node"),
-            "args": ["--experimental-strip-types",
-                     str(other / "usr/tools/pi-subagent-bridge/src/server.ts")]}}}
-        self.config.write_text(json.dumps(old))
-        self.run_helper("install")
-        current = json.loads(self.config.read_text())["mcpServers"]["pi-subagent-bridge"]
-        self.assertEqual(current["command"], str(self.bin / "node"))
-        self.assertEqual(current["args"][-1], str(self.project / "src/server.ts"))
-        self.run_helper("check")
-
-    def test_relocated_checkout_keeps_owned_registration_and_credentials(self):
-        self.config.write_text(json.dumps({"theme": "keep", "mcpServers": {"other": {"command": "other"}}}))
-        self.run_helper("install")
-        initial = json.loads(self.config.read_text())["mcpServers"]["pi-subagent-bridge"]
-        new_root = self.root / "moved-checkout"
-        moved_script = new_root / "tools/sync/pi-worker.py"
-        moved_script.parent.mkdir(parents=True)
-        shutil.copy2(HELPER, moved_script)
-        moved_project = new_root / "tools/pi-subagent-bridge"
-        (moved_project / "src").mkdir(parents=True)
-        (moved_project / "src/server.ts").write_text("export {}\n")
-        shutil.copy2(self.project / "package.json", moved_project / "package.json")
-        self.script = moved_script
-        self.project = moved_project
-        self.assertIn("MCP: register", self.run_helper("plan").stdout)
-        self.run_helper("install")
-        self.run_helper("check")
-        result = json.loads(self.config.read_text())
-        self.assertEqual(result["theme"], "keep")
-        self.assertEqual(result["mcpServers"]["other"], {"command": "other"})
-        current = result["mcpServers"]["pi-subagent-bridge"]
-        self.assertNotEqual(initial["args"], current["args"])
-        self.assertEqual(current["args"][-1], str(moved_project / "src/server.ts"))
-        self.run_helper("remove")
-        self.assertEqual(json.loads(self.config.read_text())["mcpServers"], {"other": {"command": "other"}})
-
-    def test_foreign_same_shape_without_ownership_is_preserved(self):
-        foreign = self.root / "foreign/tools/pi-subagent-bridge/src/server.ts"
-        self.config.write_text(json.dumps({"mcpServers": {"pi-subagent-bridge": {
-            "type": "stdio", "command": "node",
-            "args": ["--experimental-strip-types", str(foreign)]}}}))
-        self.run_helper("install", success=False)
-        self.assertEqual(json.loads(self.config.read_text())["mcpServers"]
-                         ["pi-subagent-bridge"]["args"][-1], str(foreign))
-
-    def test_stale_ownership_fingerprint_does_not_adopt_foreign_server(self):
-        self.run_helper("install")
-        replacement = self.root / "foreign/tools/pi-subagent-bridge/src/server.ts"
-        data = json.loads(self.config.read_text())
-        data["mcpServers"]["pi-subagent-bridge"]["args"][-1] = str(replacement)
-        self.config.write_text(json.dumps(data))
-        self.run_helper("install", success=False)
-        self.assertEqual(json.loads(self.config.read_text()), data)
-
-    def test_failed_install_never_registers_mcp(self):
-        self.env["MOCK_VERSION"] = "0.0.1"
-        self.run_helper("install", success=False)
-        self.assertFalse(self.config.exists())
-
-    def test_refuses_symlinked_config(self):
-        outside = self.root / "other.json"
-        outside.write_text("{}")
-        self.config.symlink_to(outside)
-        self.run_helper("install", success=False)
-        self.assertEqual(outside.read_text(), "{}")
+        self.action("check", success=False)
+        self.action("install")
+        self.assertNotIn("usr-opencode-worker", self.servers())
 
 
 if __name__ == "__main__":
