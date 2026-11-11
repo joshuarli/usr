@@ -2,11 +2,13 @@
 
 Command Code is the preferred executor for delegated work; the exact-pinned Muse SDK subscription is the default middle option for scout/mechanic/worker, and Pi SDK + [`pi-subagents`](https://github.com/nicobailon/pi-subagents) provide the last-resort OpenCode Go fallback. Every coding harness calls the shared `pi-subagent-bridge` MCP tools or CLI shim. When a Pi fallback is required, the bridge loads pi-subagents into an embedded SDK host and invokes its versioned delegation RPC directly, never through `pi -p` or an LLM-driven subagent decision. The outer bridge retains cross-harness worktree leases and verified fallback; pi-subagents owns the native child execution, completion events, and retained-session continuation.
 
-## Source vendoring (in progress)
+## Vendored, npm-free Pi runtime
 
-The source snapshots for `pi-subagents`, `agent-intercom-pi`, its `agent-intercom-core`, and `pi-muse-subscription` are committed under [`vendor/pi/`](../vendor/pi/README.md). [`upstreams.json`](../vendor/pi/upstreams.json) records each Git commit SHA and source blob SHA. Run `python3 -I tools/pi/vendor.py check` to verify them; `/pi-update` is the explicit update workflow.
+Pi 1.5.0, its SDK, `pi-subagents`, the Muse provider and `agent-intercom-pi` are packaged with their transitive dependencies under [`vendor/pi/runtime/`](../vendor/pi/README.md). `sh sync tools pi` checks the platform-specific archive against a committed SHA-256 and extracts the local closure. The shared `pi-subagent-bridge` links to the **same** local SDK packages. Supported platforms: macOS ARM64, Linux x64 and Linux ARM64. Pi setup and bridge registration do not invoke npm, npx, or `pi install/update`; `/pi-update` is the explicit maintainer-only update workflow.
 
-**Not yet active or npm-free:** these are source snapshots only. Pi CLI/SDK and transitive dependencies are not packaged locally; normal sync still installs Pi/bridge dependencies through npm. Intercom has not been enabled in live sessions. Do not claim the offline requirement or cross-harness intercom is fulfilled until a complete distributable and fresh-host smoke tests are committed.
+The [source manifest](../vendor/pi/upstreams.json) records full upstream Git commit and file blob SHAs, while [artifacts.json](../vendor/pi/runtime/artifacts.json) authenticates the built runtime archives. Pi's launcher loads `pi-subagents` and `agent-intercom-pi` from the installed local directory. Intercom's broker uses the bundled TypeScript loader, with automatic model wakeups disabled by default (`inboundTrigger: "never"`). Interactive Pi can communicate with compatible peers; Claude/Codex/OpenCode companion adapters are not installed by this Pi-only runtime. Scoped SDK children intentionally do not inherit intercom capabilities.
+
+**Scope:** unrelated `usr` tools may still install or update themselves with npm. This guarantee is about the Pi executable, SDK, bridge dependencies, and Pi extension setup, not every tool in full `sh sync`.
 
 ## Pinned models
 
@@ -21,7 +23,7 @@ Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its glob
 
 ## Install
 
-Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are installed within `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
+Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are symlinked from the SHA-256-verified local Pi runtime into `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
 
 Pi authenticates only to OpenCode Go using the existing OpenCode login. In the **untracked and private** `~/.pi/agent/auth.json`:
 
@@ -36,7 +38,7 @@ Pi authenticates only to OpenCode Go using the existing OpenCode login. In the *
 
 Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. Muse Ember is available in Command Code and through the Muse SDK, **not** in the allowed OpenCode Go set. The tracked custom Zen model catalog has been removed. Command Code uses a separate interactive `cmd login` and runs first. No credentials are committed.
 
-`sh sync` now reconciles interactive Pi packages automatically: it repairs missing or mismatched exact pins with `pi install`, then runs `pi update --extensions --no-approve`. The updater alone skips exact-pinned packages, which is why both steps are needed. `sh sync plan` and `sh sync doctor` inspect installed versions without modifying anything. The bridge has its own pinned SDK dependency and does not require a second manual Pi package installation. The tracked user agent profiles in `~/.pi/agent/agents/` enforce the same role contract for interactive Pi.
+`sh sync` does **not** run `pi install`, `pi update`, or npm for Pi. The tracked package list is empty and a nonempty Pi package list is treated as a sync conflict; the CLI explicitly loads its locally vendored extensions. `sh sync plan` and `sh sync doctor` inspect local postconditions without writing. The bridge uses the single installed Pi runtime, and the tracked user profiles in `~/.pi/agent/agents/` enforce the same tier contract for interactive Pi.
 
 ## Worker runtime
 
@@ -82,7 +84,7 @@ It also exposes `pi-subagent-bridge mcp` for JSON-RPC. See `tools/pi-subagent-br
 
 ## Verification
 
-Offline: `cd tools/pi-subagent-bridge && npm test`, `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, `sh dotfiles/worker-watch-test.sh` and `sh dotfiles/worker-campaign-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
+Offline: `python3 -I tools/pi/vendor.py check`, `python3 -I tools/pi/test_offline.py`, `cd tools/pi-subagent-bridge && npm test` (developer test invocation only), `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, `sh dotfiles/worker-watch-test.sh` and `sh dotfiles/worker-campaign-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
 
 Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/nicobailon/pi-subagents/blob/main/docs/extension-api.md
 
