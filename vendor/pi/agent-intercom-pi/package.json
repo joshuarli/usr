@@ -1,0 +1,73 @@
+{
+  "name": "@dataforxyz/agent-intercom-pi",
+  "version": "0.10.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "main": "index.ts",
+  "files": [
+    "banner.png",
+    "*.ts",
+    "!*.test.ts",
+    "broker/**/*.ts",
+    "!broker/**/*.test.ts",
+    "provider/provider.mjs",
+    "!provider/entry.ts",
+    "ui/**/*.ts",
+    "skills/**/*",
+    "!**/*.test.ts",
+    "THIRD_PARTY_NOTICES.md",
+    "licenses/**/*",
+    "COPYRIGHT",
+    "LICENSE_TRANSITION.md"
+  ],
+  "scripts": {
+    "build:protected-provider": "node scripts/build-protected-provider.mjs",
+    "prepack": "npm run build:protected-provider",
+    "test": "tsx --test broker/*.test.ts *.test.ts test/*.test.ts",
+    "test:ci": "tsx --test --test-concurrency=1 broker/*.test.ts *.test.ts test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "dependencies": {
+    "@dataforxyz/agent-intercom-core": "git+https://github.com/dataforxyz/agent-intercom-core.git#8316cbab548f422ad11c78ed887fabeef94817c1",
+    "tsx": "^4.20.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@types/node": "^22.15.0",
+    "typebox": "*",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dataforxyz/agent-intercom-pi.git"
+  },
+  "homepage": "https://github.com/dataforxyz/agent-intercom-pi#readme",
+  "bugs": {
+    "url": "https://github.com/dataforxyz/agent-intercom-pi/issues"
+  }
+}

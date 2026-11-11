@@ -58,6 +58,12 @@ Rule of thumb:
 
 Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-the-backlog` to implement it. Each can run on its own. `ultratriage` ends open to feedback or the choice to start burn-down; it continues straight into implementation only when you have already asked for both. Accepted designs remain open until implemented, and prerequisite work lands before its dependents.
 
+## Maintenance
+
+| Skill | Mode | Use it to |
+| --- | --- | --- |
+| `pi-update` | Explicit | Update Pi, the SDK and vendored Pi extensions against current upstream commits, record exact SHAs and prove offline setup before activation. |
+
 ## Verification
 
 | Skill | Mode | Use it to |

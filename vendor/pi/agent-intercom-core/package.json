@@ -1,0 +1,66 @@
+{
+  "name": "@dataforxyz/agent-intercom-core",
+  "version": "0.1.0",
+  "description": "Shared security policy kernel and protocol primitives for Agent Intercom",
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dataforxyz/agent-intercom-core.git"
+  },
+  "homepage": "https://github.com/dataforxyz/agent-intercom-core#readme",
+  "bugs": {
+    "url": "https://github.com/dataforxyz/agent-intercom-core/issues"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./policy": {
+      "types": "./dist/policy.d.ts",
+      "import": "./dist/policy.js"
+    },
+    "./vectors": {
+      "types": "./dist/policy-vectors.d.ts",
+      "import": "./dist/policy-vectors.js"
+    },
+    "./canonical": {
+      "types": "./dist/canonical.d.ts",
+      "import": "./dist/canonical.js"
+    },
+    "./boss": {
+      "types": "./dist/boss.d.ts",
+      "import": "./dist/boss.js"
+    },
+    "./boss/policy": {
+      "types": "./dist/boss-policy.d.ts",
+      "import": "./dist/boss-policy.js"
+    },
+    "./boss/vectors": {
+      "types": "./dist/boss-vectors.d.ts",
+      "import": "./dist/boss-vectors.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "verify": "npm run typecheck && npm test && npm run build && node test/package-smoke.mjs"
+  },
+  "dependencies": {
+    "@types/node": "^24.10.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

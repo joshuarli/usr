@@ -1,5 +1,14 @@
 Prefix: USR
-Next: 38
+Next: 39
+
+### USR-38 · P1 · Finish self-contained Pi runtime and intercom activation
+
+- **Area:** Dependency packaging / agent coordination
+- **Where:** `vendor/pi/`, `tools/sync/{installer,main,pi_extensions,pi-worker,claude-worker,opencode-worker}.py`, `tools/pi-subagent-bridge/`, `dotfiles/base/.pi/agent/settings.json`
+- **Problem:** `vendor/pi/` currently contains audited upstream *source* snapshots, not the Pi executable, SDK build, transitive runtime closure, or Claude/Codex/OpenCode intercom adapters. Normal `sh sync` still invokes npm for Pi CLI and bridge dependencies, and `pi install/update` for extensions. The intercom adapter cannot yet be activated offline and should not be confused with working runtime integration.
+- **Recommendation:** Use `/pi-update` to vendor/build a complete verified distributable from pinned upstream SHAs, wire local package paths, remove all npm/registry paths from routine Pi setup, and prove Pi CLI, SDK, worker RPC, Muse and intercom via fresh cacheless cross-harness smoke tests. Preserve the typed tier guard, worktree leases and parent-only authority; use intercom for messaging only, and disable unsolicited wakeups by default.
+- **Fix with:** `pi-update`
+- **Effort:** XL
 
 ### USR-5 · P2 · Push rules do not require user approval
 

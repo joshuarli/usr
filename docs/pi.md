@@ -2,6 +2,12 @@
 
 Command Code is the preferred executor for delegated work; the exact-pinned Muse SDK subscription is the default middle option for scout/mechanic/worker, and Pi SDK + [`pi-subagents`](https://github.com/nicobailon/pi-subagents) provide the last-resort OpenCode Go fallback. Every coding harness calls the shared `pi-subagent-bridge` MCP tools or CLI shim. When a Pi fallback is required, the bridge loads pi-subagents into an embedded SDK host and invokes its versioned delegation RPC directly, never through `pi -p` or an LLM-driven subagent decision. The outer bridge retains cross-harness worktree leases and verified fallback; pi-subagents owns the native child execution, completion events, and retained-session continuation.
 
+## Source vendoring (in progress)
+
+The source snapshots for `pi-subagents`, `agent-intercom-pi`, its `agent-intercom-core`, and `pi-muse-subscription` are committed under [`vendor/pi/`](../vendor/pi/README.md). [`upstreams.json`](../vendor/pi/upstreams.json) records each Git commit SHA and source blob SHA. Run `python3 -I tools/pi/vendor.py check` to verify them; `/pi-update` is the explicit update workflow.
+
+**Not yet active or npm-free:** these are source snapshots only. Pi CLI/SDK and transitive dependencies are not packaged locally; normal sync still installs Pi/bridge dependencies through npm. Intercom has not been enabled in live sessions. Do not claim the offline requirement or cross-harness intercom is fulfilled until a complete distributable and fresh-host smoke tests are committed.
+
 ## Pinned models
 
 | Role | Command Code primary | Effort | Muse SDK middle | OpenCode Go fallback via Pi SDK |
