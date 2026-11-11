@@ -1,0 +1,67 @@
+---
+name: green
+description: "Use for /green: get CI green for the current context. On a feature branch, bring its open pull request to merge-ready (conflicts, bot review comments, required CI). On the default branch, fix the default branch's CI. Never merges, approves, or enables auto-merge."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
+---
+
+# Green
+
+Make CI green for whatever the owner is standing on, then stop. Merging, approving, enabling auto-merge, and clicking the merge button are the owner's, even when they say "finish", "land", or "get it over the line".
+
+Use [sleep](../sleep/SKILL.md) for this workflow.
+
+## Pick the target
+
+An explicit PR number, URL, or branch in the invocation wins. Otherwise read `git branch --show-current` and the default branch (`gh repo view --json defaultBranchRef`):
+
+- **Feature branch with an open PR** (`gh pr view --json url,state`): run **PR mode** on that PR.
+- **Default branch** (`main`, `master`, or whatever the repo names it): run **default-branch mode**.
+- **Feature branch with no open PR, or a detached head:** report that and stop. Do not open a PR.
+
+State the chosen target and mode before the first change.
+
+## Shared rules
+
+- **Required CI is the bar.** Read the repo's rulesets for the required check names. Other checks matter only when they fail for a reason that also breaks a required one, or when the owner asked. With no ruleset (common on the default branch), every workflow that ran on the head commit counts.
+- **Watch active checks.** Wait a bounded time for running checks, then reread. Wait again only after observable progress; if state is unchanged, report it as pending and stop. Stop sooner when a failure needs a decision you cannot make from the code. On failure, read the failed log, fix the cause or rerun a flake once you have evidence it is a flake, push, and check again. Stop after two reruns of the same flake. If the remaining step is a human approval, unavailable credential, or enforced push boundary, report it precisely and stop after other independent authorized work.
+- **Blocked push.** If the pre-push hook refuses because the session has no terminal, stop that push: do not allocate a terminal or push through the API. Leave the commits, give the owner the fully resolved push command (remote and branch), and finish other independent authorized work.
+
+## PR mode
+
+- **Do not merge.** Do not run `gh pr merge`, push to the base branch, or turn on auto-merge. Say when it is ready.
+- **Do not approve.** A missing human approval is a report, not something you submit. You may request reviewers who are not already requested. A `+1` reaction is not an approval.
+- **Push only the PR head.** Conflict fixes and CI fixes go on the pull request's head branch. Confirm the remote allows it before the first push.
+- **Bot comments are claims.** Read every unresolved review thread and review body from a bot (Bugbot, Seer, Sentry, Copilot, and the rest). A bot's patch is not evidence. Fix a comment only when you can show the bug in the current code or with a failing test. Do not leave a real bug with a reply and no fix. Leave human comments alone.
+- **Reply, resolve, and react on the bot's comment.** Do this only after the cited commit is on the pull request head, so not after a blocked push. For each bot thread: reply, resolve, then react on the bot's comment (not on your reply). `+1` when you accepted it and fixed it. `-1` when you rejected it. A rejection still gets a reply that says why the claim is false, and the thread is still resolved. One reply per thread.
+- **Stale base.** A red check on a stale base is not a code bug until the branch is current and the check fails again.
+
+1. Record the PR URL, head branch, base branch, review decision, mergeable state, and required checks.
+2. If the head conflicts with the base, merge the base in (or rebase if that is what the branch already does) and resolve conflicts in a worktree. Run the narrowest test that covers the resolution. Push to the head branch.
+3. If it is merely behind and the repo requires the branch to be up to date, update it with `gh api -X PUT repos/<owner>/<repo>/pulls/<n>/update-branch`. If that API is unavailable, merge the base the same way as a conflict.
+4. Work the unresolved bot threads per the rules, push fixes, then reply, resolve, and react as below. Re-watch CI after each push.
+5. Wait for required checks per the rules, then re-read mergeable state. Code and checks are ready when there are no conflicts, required checks are green, and every bot thread has been answered, resolved, and reacted to. A missing human approval means the PR is not mergeable yet; report that approval as outstanding and stop. If a push was blocked, report that local fixes are not on the PR head and give the exact push action.
+
+An inline thread id looks like `PRRT_...`. `COMMENT_ID` is the bot comment's numeric id. `<sha>` is the head commit that contains the fix. Use `-1` instead of `+1` when you rejected the comment.
+
+```bash
+gh api graphql -f query='mutation($id:ID!,$body:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id,body:$body}){comment{id}}}' -f id='PRRT_...' -f body='Fixed in <sha>. <one sentence>.'
+gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id='PRRT_...'
+gh api -X POST repos/<owner>/<repo>/pulls/comments/COMMENT_ID/reactions -f content='+1'
+```
+
+A bot note that is not a review thread has nothing to resolve. Reply with `gh pr comment <n> --body '...'`, then react: `issues/comments/COMMENT_ID/reactions` for a conversation comment, `pulls/<n>/reviews/<review_id>/reactions` for a review body.
+
+## Default-branch mode
+
+Invoking `/green` here authorizes committing CI fixes to the default branch and pushing them, as "fix ci" does.
+
+- **Start from the remote tip.** `git fetch`, then confirm local is not behind or diverged from `origin/<default>`. If local has unpushed commits that are not yours, report them and stop rather than push someone else's work. If behind, fast-forward first.
+- **Judge the tip, not history.** Read the runs for `origin/<default>`'s head commit (`gh run list --branch <default> --commit <sha>`, plus `gh api repos/<owner>/<repo>/commits/<sha>/check-runs` for non-Actions checks). An older red run that a later green run superseded is not a failure.
+- **Fix forward.** Reproduce the failure locally where possible, commit the fix on the default branch, push, and watch the new run. Do not force-push, revert others' commits, or disable or skip a check to turn it green; a check that must change is a decision for the owner.
+- **Someone else's push lands mid-run.** Rebase your fix onto the new tip, rerun the narrowest check, and push; judge CI on the new tip.
+
+**The test:** the target matches the branch you were on (or the explicit argument); its required checks are green on the current head; in PR mode, the head has no conflicts and every bot thread has a reply, resolution, and reaction, with code/check readiness reported separately from human approval and forge mergeability. You did not merge, approve, or force-push.
+
+**Report:** the mode and target (PR URL, or default branch and head sha); what you changed and pushed; in PR mode, bot comments fixed and rejected, each with the reason; required checks and their conclusions; anything still blocking, including a human approval. In PR mode end with whether the owner can merge it now; in default-branch mode, with whether the tip is green.

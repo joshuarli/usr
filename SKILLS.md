@@ -84,7 +84,7 @@ Repo upkeep and getting work merged.
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `pr-ready` | Explicit | Bring one open PR toward merge-ready with unattended execution: resolve conflicts, judge bot comments, reply on GitHub, and check required CI. It never merges. |
+| `green` | Explicit | Get CI green for where you stand, with unattended execution: on a feature branch, bring its open PR to merge-ready (conflicts, bot comments, required CI); on the default branch, fix its CI. It never merges. |
 | `upgrade` | Explicit | Bump dependencies and pins to the newest stable versions, then run focused checks. |
 | `docs-refresh` | Explicit | Bring docs up to date with the code and make them shorter. Edits docs and comments, never behavior. |
 | `settle` | Explicit | Before moving to another computer: find unmerged and local-only work and separate what must travel from what regenerates. |

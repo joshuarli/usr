@@ -111,7 +111,7 @@ class SkillCampaignTests(unittest.TestCase):
             "create-verification-skill",
             "docs-refresh",
             "double-take",
-            "pr-ready",
+            "green",
             "self-contained-prompt",
             "settle",
             "ultrareview",
