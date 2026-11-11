@@ -7,6 +7,11 @@
       "path": "linux-x64.tar.gz",
       "sha256": "a9c350c64abfb505bf159e8dc16c23bb7207b1b1c897b52f012c054c69631148",
       "bytes": 37256396
+    },
+    "darwin-arm64": {
+      "path": "darwin-arm64.tar.gz",
+      "sha256": "668b42b2296c5cc8767164d0c8edaf1d92b91d24e2fbc68a5e430ee848d9e1bd",
+      "bytes": 36964862
     }
   }
 }
