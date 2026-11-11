@@ -3,6 +3,7 @@
 #
 # Usage:
 #   worker-watch <repo-root> <usrw_session_id> [idle-minutes]
+#   worker-watch --state <repo-root> <usrw_session_id>
 #
 # The bridge returns "admitted" and has no completion callback. Run this as a
 # background command instead of polling worker_status: it exits when the
@@ -10,12 +11,20 @@
 # executor process is gone without one (exit 3), or when its NDJSON log has
 # been quiet for idle-minutes (default 10; exit 2), printing the last event
 # so the coordinator can tell a long download from a stuck worker. SDK workers report an atomic result; unknown states require manual inspection.
+# --state asks for the same evidence once, without blocking: it prints
+# succeeded, failed, turn_limit, interrupted, running or unknown and exits 0.
 
 set -u
 
 prog=${0##*/}
+state_only=0
+if [ "${1:-}" = --state ]; then
+    state_only=1
+    shift
+fi
 
 die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+unknown() { [ "$state_only" -eq 1 ] && { printf 'unknown\n'; exit 0; }; die "$*"; }
 usage() { printf 'usage: %s <repo-root> <usrw_session_id> [idle-minutes]\n' "$prog" >&2; exit 2; }
 
 [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage
@@ -26,26 +35,27 @@ case $idle_minutes in '' | *[!0-9]*) usage ;; esac
 command -v jaq >/dev/null 2>&1 || die "jaq is required"
 
 record="$root/.work/worker-bridge/$session.json"
-[ -f "$record" ] || die "no session record at $record"
+[ -f "$record" ] || unknown "no session record at $record"
 
 backend=$(jaq -r '.backend // (if .command_run then "command-code" else "" end)' "$record")
 case $backend in
     pi)
         pi_id=$(jaq -r '.pi_id // empty' "$record")
-        [ -n "$pi_id" ] || die "Pi session has no SDK child ID"
+        [ -n "$pi_id" ] || unknown "Pi session has no SDK child ID"
         child_record="$root/.work/worker-bridge/$pi_id.pi.json"
-        [ -f "$child_record" ] || die "Pi SDK session record not found: $child_record"
+        [ -f "$child_record" ] || unknown "Pi SDK session record not found: $child_record"
         pid=$(jaq -r '.run.pid // empty' "$child_record")
         log=$(jaq -r '.run.output // empty' "$child_record")
         errors=$(jaq -r '.run.errors // empty' "$child_record")
-        [ -n "$pid" ] && [ -n "$log" ] || die "Pi SDK worker admission is incomplete"
+        [ -n "$pid" ] && [ -n "$log" ] || unknown "Pi SDK worker admission is incomplete"
         ;;
     command-code)
         pid=$(jaq -r '.command_run.pid // empty' "$record")
         log=$(jaq -r '.command_run.output // empty' "$record")
-        [ -n "$pid" ] && [ -n "$log" ] || die "Command Code session has no active runner"
+        [ -n "$pid" ] && [ -n "$log" ] || unknown "Command Code session has no active runner"
         ;;
     *)
+        [ "$state_only" -eq 1 ] && { printf 'unknown\n'; exit 0; }
         printf '%s: %s has no known terminal-output backend; inspect worker_status\n' "$prog" "$session"
         exit 4
         ;;
@@ -60,21 +70,42 @@ last_event() {
             tail -n 1
     fi
 }
-terminal_result() {
+state=
+inspect() {
+    state=
     if [ "$backend" = pi ]; then
         if [ -s "$log" ] && jaq -e '.state == "succeeded" or .state == "failed" or .state == "cancelled"' "$log" >/dev/null 2>&1; then
-            jaq -r '"finished: \(.state)\n\(.text // .error // "" | tostring | .[0:2000])"' "$log"
+            raw_state=$(jaq -r '.state' "$log")
+            case $raw_state in cancelled) state=interrupted ;; *) state=$raw_state ;; esac
             return 0
         fi
         return 1
     fi
     result=$(grep '"type":"result"' "$log" 2>/dev/null | tail -n 1)
     [ -n "$result" ] || return 1
-    printf '%s\n' "$result" | jaq -r '"finished: \(.subtype)\n\(.result // "" | tostring | .[0:2000])"'
+    case $(printf '%s\n' "$result" | jaq -r '.subtype') in
+        success) state=succeeded ;;
+        max_turns) state=turn_limit ;;
+        *) state=failed ;;
+    esac
+}
+terminal_print() {
+    if [ "$backend" = pi ]; then
+        jaq -r '"finished: \(.state)\n\(.text // .error // "" | tostring | .[0:2000])"' "$log"
+    else
+        printf '%s\n' "$result" | jaq -r '"finished: \(.subtype)\n\(.result // "" | tostring | .[0:2000])"'
+    fi
 }
 
+if [ "$state_only" -eq 1 ]; then
+    if inspect; then printf '%s\n' "$state"; exit 0; fi
+    if ! kill -0 "$pid" 2>/dev/null; then printf 'interrupted\n'; exit 0; fi
+    printf 'running\n'
+    exit 0
+fi
+
 while :; do
-    if terminal_result; then exit 0; fi
+    if inspect; then terminal_print; exit 0; fi
     if ! kill -0 "$pid" 2>/dev/null; then
         printf 'exited without terminal result (pid %s); last event: %s\n' "$pid" "$(last_event)"
         exit 3

@@ -53,6 +53,18 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 
 `worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination; a later `worker_status` reports `interrupted` and releases the lease once the recorded process is provably gone.
 
+## Coordinating many workers
+
+A parent running several lanes should not keep its own table of session IDs and worktrees. Every session is already recorded under `<repo>/.work/worker-bridge/usrw_*.json`, so `worker-campaign` discovers lanes from those records and blocks in the background until any unacknowledged session finishes:
+
+```
+worker-campaign wait [--timeout DURATION] [ROOT...]
+worker-campaign ack ID...
+worker-campaign list [ROOT...]
+```
+
+`wait` prints `<id> <state> <cwd> <title>` once per newly terminal session (`succeeded`, `failed`, `turn_limit`, `interrupted`), exits 0, and takes roots from arguments or colon-separated `$WORKER_CAMPAIGN_ROOTS` so lanes in different repositories are covered without absolute/relative path registration. With `--timeout` it prints `tick: N running` and exits 2. `ack` persists IDs under `${XDG_STATE_HOME:-$HOME/.local/state}/worker-campaign/acked` and is idempotent; `list` shows state, age, worktree and continuation/steer budgets. Terminal state reuses `worker-watch --state ROOT ID`, so it is the same Command Code result/PID or Pi SDK evidence as `worker_status`, without the MCP server or Node code. Use `worker-watch ROOT ID` instead when you want to follow a single lane's last event.
+
 ## CLI
 
 Identical actions are available to harnesses without MCP:
@@ -91,6 +103,7 @@ python3 -I tools/sync/claude-worker-test.py
 python3 -I tools/sync/pi-worker-test.py
 python3 -I tools/sync/opencode-worker-test.py
 sh dotfiles/worker-watch-test.sh
+sh dotfiles/worker-campaign-test.sh
 ```
 
 Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.

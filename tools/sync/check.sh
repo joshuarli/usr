@@ -34,6 +34,7 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	sh dotfiles/reset-agents-test.sh
 	(cd dotfiles && sh pre-push-test.sh)
 	(cd dotfiles && sh worker-watch-test.sh)
+	(cd dotfiles && sh worker-campaign-test.sh)
 	(cd dotfiles && sh worktree-remove-test.sh)
 	python3 -I dotfiles/worktree-retire-test.py
 	(cd dotfiles && sh zsh-shim-test.sh)

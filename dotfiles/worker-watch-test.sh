@@ -54,6 +54,24 @@ expect 2 "a quiet log reports the last queued tool" quiet 0 "shell_command: Down
 session remote "" ""
 expect 4 "a missing backend is refused" remote 10 "no known terminal-output backend"
 
+# state <wanted exit> <description> <id> <state word>
+state () {
+    out=$(sh "$watch" --state "$scratch" "$3" 2>&1)
+    got=$?
+    case $out in *"$4"*) ;; *) got="$got-without-$4" ;; esac
+    if [ "$got" = "$1" ]; then
+        printf 'ok: %s\n' "$2"
+    else
+        printf 'FAIL: %s (wanted %s, got %s): %s\n' "$2" "$1" "$got" "$out"
+        nfailed=$((nfailed + 1))
+    fi
+}
+
+state 0 "--state names a finished run without blocking" done succeeded
+state 0 "--state names a gone executor" crashed interrupted
+state 0 "--state names a live executor" quiet running
+state 0 "--state names a backend it cannot follow" remote unknown
+
 pi_id=ses_0123456789abcdef0123456789abcdef
 printf '{"backend":"pi","pi_id":"%s"}\n' "$pi_id" > "$bridge/pi-done.json"
 printf '{"id":"%s","cwd":"%s","run":{"pid":%s,"output":"%s/pi-result.json","errors":"%s/pi-err"}}\n' "$pi_id" "$scratch" "$alive" "$bridge" "$bridge" > "$bridge/$pi_id.pi.json"

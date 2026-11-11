@@ -40,6 +40,18 @@ Only a missing Command Code executable, an unavailable exact Command Code model/
 
 This is a Git write-scope check, not an OS sandbox. Ignored paths and host-side effects require additional containment such as `sbx` or a VM.
 
+## Coordinating a campaign
+
+Sessions are recorded per repository under `.work/worker-bridge/`, so a parent does not need a hand-maintained lane table. `worker-watch` follows one session and exits on its terminal evidence. `worker-campaign` discovers every `usrw_*.json` under one or more repository roots and blocks until any unacknowledged session becomes terminal:
+
+```
+worker-campaign wait [--timeout DURATION] [ROOT...]
+worker-campaign ack ID...
+worker-campaign list [ROOT...]
+```
+
+`wait` exits 0 and prints one `<id> <state> <cwd> <title>` line per newly terminal session (`succeeded`, `failed`, `turn_limit`, `interrupted`), or exits 2 with a one-line `tick: N running` summary after `--timeout` (for example `30m`). Roots may instead be given colon-separated in `$WORKER_CAMPAIGN_ROOTS`, which lets one background wait cover worktrees in several repositories. `ack` records the IDs under `${XDG_STATE_HOME:-$HOME/.local/state}/worker-campaign/acked` so a session is never reported twice; it is idempotent. `list` prints state, age, worktree and the recorded continuation/steer budgets. Terminal state is the same evidence `worker-watch` uses, obtained with `worker-watch --state ROOT ID`: the Command Code `result` record, a gone process without one, or a Pi SDK child record.
+
 ## One-level native Pi nesting
 
 The embedded Pi fallback is not inherently limited to leaf agents. The tracked native Pi agent profiles (scout, mechanic, worker, expert, and the Muse-only `muse-scout`, `muse-mechanic`, `muse-worker`) explicitly expose `subagent` and declare exact, ordered descendant allowlists. A required child extension registers an independently enforced capability ceiling from the typed `src/tier-policy.ts` graph in **each first-level child and its descendants**. The SDK checks parsed YAML profile parity and the exact modelScope before a new root launch. The native runtime inherits the ceiling through nested/async children and applies a strict `maxSubagentDepth = 2`; second-level agents cannot delegate again. A permitted nested launch uses the model-facing shape `subagent({ agent: "mechanic", task: "...", options: { agentScope: "user" } })`; all other nested options are rejected.
@@ -64,7 +76,7 @@ It also exposes `pi-subagent-bridge mcp` for JSON-RPC. See `tools/pi-subagent-br
 
 ## Verification
 
-Offline: `cd tools/pi-subagent-bridge && npm test`, `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, and `sh dotfiles/worker-watch-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
+Offline: `cd tools/pi-subagent-bridge && npm test`, `python3 -I dotfiles/pi-test.py`, `python3 -I dotfiles/orchestrate-test.py`, the `tools/sync/*worker-test.py` cases, `sh dotfiles/worker-watch-test.sh` and `sh dotfiles/worker-campaign-test.sh`. These tests cannot prove live SDK-provider compatibility, auth refresh, quota balance, model catalog freshness or successful tool execution. Complete the disposable-worktree live gate before relying on unattended operation.
 
 Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/nicobailon/pi-subagents/blob/main/docs/extension-api.md
 
