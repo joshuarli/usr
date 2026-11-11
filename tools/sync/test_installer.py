@@ -474,9 +474,10 @@ sys.exit(1)
         self.assertEqual(launcher.read_text(), "keep")
         inst = self.make()
         inst.env["MOCK_NPM_FAIL"] = "1"
-        with self.assertRaises(SkipInstall):
-            inst.install_pi()
-        self.assertFalse((self.home / ".local/share/pi").exists())
+        # Pi uses the checked-in archive and cannot touch the npm mock.
+        inst.install_pi()
+        self.assertTrue((self.home / ".local/share/pi/node_modules").is_dir())
+        self.assertEqual(self.state("pi").startswith("offline:"), True)
 
     def test_pnpm_beside_polluted_home(self):
         home_bin = self.home / ".local/share/pnpm/bin"
