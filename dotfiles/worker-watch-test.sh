@@ -77,4 +77,10 @@ printf '{"backend":"pi","pi_id":"%s"}\n' "$pi_id" > "$bridge/pi-done.json"
 printf '{"id":"%s","cwd":"%s","run":{"pid":%s,"output":"%s/pi-result.json","errors":"%s/pi-err"}}\n' "$pi_id" "$scratch" "$alive" "$bridge" "$bridge" > "$bridge/$pi_id.pi.json"
 printf '{"state":"succeeded","text":"SDK proof"}\n' > "$bridge/pi-result.json"
 expect 0 "Pi SDK terminal result is observed" pi-done 10 "SDK proof"
+printf '{"backend":"codex","command_run":{"pid":%s,"output":"%s/codex.ndjson"}}\n' "$alive" "$bridge" > "$bridge/codex.json"
+printf '{"type":"thread.started","thread_id":"thread"}\n{"type":"item.completed","item":{"type":"agent_message","text":"Codex proof"}}\n{"type":"turn.completed"}\n' > "$bridge/codex.ndjson"
+state 0 "Codex receipt does not precede process termination" codex running
+printf '{"backend":"codex","command_run":{"pid":%s,"output":"%s/codex.ndjson"}}\n' "$gone" "$bridge" > "$bridge/codex.json"
+state 0 "Codex completed turn is observed after termination" codex succeeded
+expect 0 "Codex proof is displayed" codex 10 "Codex proof"
 [ "$nfailed" -eq 0 ]

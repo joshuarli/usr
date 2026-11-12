@@ -49,10 +49,11 @@ case $backend in
         errors=$(jaq -r '.run.errors // empty' "$child_record")
         [ -n "$pid" ] && [ -n "$log" ] || unknown "Pi SDK worker admission is incomplete"
         ;;
-    command-code)
+    command-code|codex)
         pid=$(jaq -r '.command_run.pid // empty' "$record")
         log=$(jaq -r '.command_run.output // empty' "$record")
-        [ -n "$pid" ] && [ -n "$log" ] || unknown "Command Code session has no active runner"
+        errors=$(jaq -r '.command_run.errors // empty' "$record")
+        [ -n "$pid" ] && [ -n "$log" ] || unknown "Session has no active runner"
         ;;
     *)
         [ "$state_only" -eq 1 ] && { printf 'unknown\n'; exit 0; }
@@ -81,7 +82,17 @@ inspect() {
         fi
         return 1
     fi
-    result=$(grep '"type":"result"' "$log" 2>/dev/null | tail -n 1)
+    if [ "$backend" = codex ]; then
+        kill -0 "$pid" 2>/dev/null && return 1
+        result=$(jaq -sc '[.[] | select(.type == "turn.completed" or .type == "turn.failed")] | last // empty' "$log" 2>/dev/null)
+        [ -n "$result" ] || return 1
+        case $(printf '%s\n' "$result" | jaq -r '.type') in
+            turn.completed) state=succeeded ;;
+            turn.failed) state=failed ;;
+        esac
+        return 0
+    fi
+    result=$(rg '"type":"result"' "$log" 2>/dev/null | tail -n 1)
     [ -n "$result" ] || return 1
     case $(printf '%s\n' "$result" | jaq -r '.subtype') in
         success) state=succeeded ;;
@@ -92,6 +103,9 @@ inspect() {
 terminal_print() {
     if [ "$backend" = pi ]; then
         jaq -r '"finished: \(.state)\n\(.text // .error // "" | tostring | .[0:2000])"' "$log"
+    elif [ "$backend" = codex ]; then
+        printf 'finished: %s\n' "$state"
+        jaq -sr '[.[] | select(.type == "item.completed" and .item.type == "agent_message") | .item.text] | last // "" | .[0:2000]' "$log"
     else
         printf '%s\n' "$result" | jaq -r '"finished: \(.subtype)\n\(.result // "" | tostring | .[0:2000])"'
     fi

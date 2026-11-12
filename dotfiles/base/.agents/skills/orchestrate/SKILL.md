@@ -13,12 +13,12 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 ## Pinned tiers
 
-| Tier | Command Code first | Effort | Pi fallback (in order) | Purpose |
-| --- | --- | --- | --- | --- |
-| scout | `meta/muse-ember` | `medium` | `opencode-go/muse-spark-1.3-contributor` (`medium`) | Read-only exploration |
-| mechanic | `meta/muse-ember` | `xhigh` | `opencode-go/muse-spark-1.3-contributor` (`high`) | Mechanical scoped edits |
-| worker | `deepseek/deepseek-v4.1-flash` | `high` | `muse-sdk/muse-spark-1.3` (`xhigh`), then `opencode-go/deepseek-v4.1-flash` (`high`) | Implementation, debugging, testing |
-| expert | `deepseek/deepseek-v4.1-flash` | `max` | `opencode-go/deepseek-v4.1-flash` (`max`) | Difficult architectural or cross-cutting work |
+| Tier | Codex first | Command Code | Effort | Pi fallback (in order) | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| scout | `gpt-6-luna` (`medium`) | `meta/muse-ember` | `medium` | `opencode-go/muse-spark-1.3-contributor` (`medium`) | Read-only exploration |
+| mechanic | `gpt-6-luna` (`high`) | `meta/muse-ember` | `xhigh` | `opencode-go/muse-spark-1.3-contributor` (`high`) | Mechanical scoped edits |
+| worker | `gpt-6.1-terra` (`medium`) | `deepseek/deepseek-v4.1-flash` | `high` | `muse-sdk/muse-spark-1.3` (`xhigh`), then `opencode-go/deepseek-v4.1-flash` (`high`) | Implementation, debugging, testing |
+| expert | `gpt-6.1-terra` (`xhigh`) | `deepseek/deepseek-v4.1-flash` | `max` | `opencode-go/deepseek-v4.1-flash` (`max`) | Difficult architectural or cross-cutting work |
 
 **OpenCode boundary:** scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden; a model not pinned for its tier stays with its other approved provider.
 
@@ -38,9 +38,9 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-**Command Code is the first executor for every non-god tier**, then the Contributor Spark fallback for scout/mechanic, the Muse SDK for worker, then OpenCode Go (through the bridge's embedded Pi SDK) as the final fallback for worker/expert. Only a missing Command Code executable or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models.
+**Codex subscription is the first executor for every non-god tier**, followed by Command Code, then the Contributor Spark fallback for scout/mechanic, the Muse SDK for worker, then OpenCode Go (through the bridge's embedded Pi SDK) as the final fallback for worker/expert. Only an unavailable executor or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models.
 
-**Nesting:** a Pi SDK child may delegate one more generation, at an equal-or-weaker tier, only when its brief calls for it; the bridge's guard rejects anything else (deeper nesting, `god`, model or worktree overrides). Descendants share the original worktree and write budget, and the outer parent still owns acceptance and review. Command Code workers are leaves: no bridge CLI children, no host-native agents.
+**Nesting:** a Pi SDK child may delegate one more generation, at an equal-or-weaker tier, only when its brief calls for it; the bridge's guard rejects anything else (deeper nesting, `god`, model or worktree overrides). Descendants share the original worktree and write budget, and the outer parent still owns acceptance and review. Codex and Command Code workers are leaves: no bridge CLI children, no host-native agents.
 
 **Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 

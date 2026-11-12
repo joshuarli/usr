@@ -1,15 +1,15 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the same durable session state and worktree contracts. The configured routing order is **Command Code first**, then for the Pi fallback **OpenCode Go Contributor-Spark** for scout/mechanic, **Muse SDK subscription** for worker, and **OpenCode Go** for worker/expert. No OpenCode server or separate custom agent loop is started. The [known failure-path defects](#safety-and-durability) below limit that progression and the reliability of success records.
+One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the same durable session state and worktree contracts. The routing order is **Codex subscription**, then **Command Code**, then for the Pi fallback **OpenCode Go Contributor-Spark** for scout/mechanic, **Muse SDK subscription** for worker, and **OpenCode Go** for worker/expert. No OpenCode server or separate custom agent loop is started. The [known failure-path defects](#safety-and-durability) below limit that progression and the reliability of success records.
 
-| Tier | Command Code first | Effort | Pi fallback (in order) |
-| --- | --- | --- | --- |
-| scout | `meta/muse-ember` | medium | `opencode-go/muse-spark-1.3-contributor` (medium) |
-| mechanic | `meta/muse-ember` | xhigh | `opencode-go/muse-spark-1.3-contributor` (high) |
-| worker | `deepseek/deepseek-v4.1-flash` | high | `muse-sdk/muse-spark-1.3` (xhigh), then `opencode-go/deepseek-v4.1-flash` (high) |
-| expert | `deepseek/deepseek-v4.1-flash` | max | `opencode-go/deepseek-v4.1-flash` (max) |
+| Tier | Codex first | Command Code | Effort | Pi fallback (in order) |
+| --- | --- | --- | --- | --- |
+| scout | `gpt-6-luna` (medium) | `meta/muse-ember` | medium | `opencode-go/muse-spark-1.3-contributor` (medium) |
+| mechanic | `gpt-6-luna` (high) | `meta/muse-ember` | xhigh | `opencode-go/muse-spark-1.3-contributor` (high) |
+| worker | `gpt-6.1-terra` (medium) | `deepseek/deepseek-v4.1-flash` | high | `muse-sdk/muse-spark-1.3` (xhigh), then `opencode-go/deepseek-v4.1-flash` (high) |
+| expert | `gpt-6.1-terra` (xhigh) | `deepseek/deepseek-v4.1-flash` | max | `opencode-go/deepseek-v4.1-flash` (max) |
 
-No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Command Code runs remain leaves. Native Pi children may spawn exactly one additional generation, equal-or-weaker only (typed tier guard, immutable child extension, and max depth 2), on the Contributor-Spark, Muse SDK and OpenCode Go routes. **`opencode-go/muse-spark-1.3-contributor` is used for scout/mechanic; no free `opencode/*` Zen model is usable from a headless client (the upstream gateway rejects non-OpenCode-Client User-Agents with `429 FreeUsageLimitError`, see `docs/pi.md#why-zen-is-not-a-pin`)**. Other OpenCode Go or custom endpoints remain forbidden. The bridge requires `cmd login` for its preferred provider, a Muse Code login for the worker lane, and a configured OpenCode Go credential for the Pi fallback. No unapproved models are permitted.
+No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Codex and Command Code runs remain leaves. Codex scouts have read, search and file-list tools but no shell or write tools. Native Pi children may spawn exactly one additional generation, equal-or-weaker only (typed tier guard, immutable child extension, and max depth 2), on the Contributor-Spark, Muse SDK and OpenCode Go routes. **`opencode-go/muse-spark-1.3-contributor` is used for scout/mechanic; no free `opencode/*` Zen model is usable from a headless client (the upstream gateway rejects non-OpenCode-Client User-Agents with `429 FreeUsageLimitError`, see `docs/pi.md#why-zen-is-not-a-pin`)**. Other OpenCode Go or custom endpoints remain forbidden. The bridge requires `codex login` with ChatGPT for its preferred provider, `cmd login` for Command Code, a Muse Code login for the worker lane, and a configured OpenCode Go credential for the Pi fallback. No unapproved models are permitted.
 
 ## Setup
 
@@ -31,11 +31,11 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 | worker | scout, mechanic, worker |
 | expert | scout, mechanic, worker, expert |
 
-**Command Code is first but still does not support child delegation.** Nested Pi children share their first-level worktree and scope; native restrictions do not replace OS sandboxing, worktree diff review or acceptance proof. The CLI/MCP entrypoint is not an authorized child launcher.
+**Codex and Command Code workers are leaves.** Nested Pi children share their first-level worktree and scope; native restrictions do not replace OS sandboxing, worktree diff review or acceptance proof. The CLI/MCP entrypoint is not an authorized child launcher.
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` reports Command Code first (executable installed), the exact pinned Pi fallback where the tier has one (Contributor Spark for scout/mechanic, Muse for worker, Go for worker/expert) and its auth.
+`worker_model_check(cwd, tier)` reports Codex first (CLI signed in with ChatGPT), Command Code (executable installed), the exact pinned Pi fallback where the tier has one (Contributor Spark for scout/mechanic, Muse for worker, Go for worker/expert) and its auth. Its `primary` is Codex, `fallback` is Command Code, and `pi_fallback` is the first Pi model.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -45,13 +45,13 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 - `attempt_limit`: 1 or 2, with the second only for a justified same-scope correction.
 - `stop_on`: ambiguity, new dependencies, scope or contract changes, unavailable proof.
 
-`worker_status(cwd,session_id)` observes the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. It also reports `continuations` used against `continuation_limit`, so a `turn_limit` session can be continued for free with `worker_resume` until that cap, and `steers` used against `steer_limit`. A Command Code run whose recorded process is gone, or whose PID now has a different start time (a reused PID), is reported as the terminal `interrupted` state and its worktree lease is released; an alive PID with the recorded start time stays `running` and keeps the lease. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
+`worker_status(cwd,session_id)` observes the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. It also reports `continuations` used against `continuation_limit`, so a `turn_limit` session can be continued for free with `worker_resume` until that cap, and `steers` used against `steer_limit`. A Codex or Command Code run whose recorded process is gone, or whose PID now has a different start time (a reused PID), is reported as the terminal `interrupted` state and its worktree lease is released; an alive PID with the recorded start time stays `running` and keeps the lease. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
 
-`worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned native pi-subagents child in its original SDK host session, or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts. A `turn_limit` result is continued with `TURN_LIMIT_CONTINUATIONS` free continuations that do not consume attempts; the used count and cap are in `worker_status`.
+`worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned native pi-subagents child in its original SDK host session, the Codex thread, or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts. A `turn_limit` result is continued with `TURN_LIMIT_CONTINUATIONS` free continuations that do not consume attempts; the used count and cap are in `worker_status`.
 
-`worker_steer(cwd,session_id,note)` redirects a **running** worker without changing its scope or write boundaries. On the Pi backend it forwards the note to the native pi-subagents `steer` RPC for the owned run. On Command Code it verifies HEAD and the write boundary exactly as `worker_resume` does, interrupts the run, waits until the recorded process is proven gone, then restarts the same Command Code session with `--resume <sessionId>` and the original prompt plus `PARENT STEERING (same scope and write boundaries): <note>`. It never changes `attempts`; it is bounded by its own `steer_limit`, and it refuses to signal a PID that this bridge process does not own. A finished or non-running session is refused with a pointer to `worker_resume`.
+`worker_steer(cwd,session_id,note)` redirects a **running** worker without changing its scope or write boundaries. On the Pi backend it forwards the note to the native pi-subagents `steer` RPC for the owned run. On Codex and Command Code it verifies HEAD and the write boundary exactly as `worker_resume` does, interrupts the run, waits until the recorded process is proven gone, then resumes the same session and the original prompt plus `PARENT STEERING (same scope and write boundaries): <note>`. It never changes `attempts`; it is bounded by its own `steer_limit`, and it refuses to signal a PID that this bridge process does not own. A finished or non-running session is refused with a pointer to `worker_resume`.
 
-`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination. For Command Code, a later `worker_status` can report `interrupted` and release the lease after proving the recorded process gone. Pi requires a terminal result: a dead host without one remains `unknown_or_interrupted` and keeps its lease.
+`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination. For Codex and Command Code, a later `worker_status` can report `cancelled` and release the lease after proving the recorded process gone. Pi requires a terminal result: a dead host without one remains `unknown_or_interrupted` and keeps its lease.
 
 ## Coordinating many workers
 
@@ -75,9 +75,9 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 ## Safety and durability
 
-Command Code records process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
+Codex and Command Code record process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
 
-The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic go from Command Code to the pinned Contributor Spark model; worker progresses from Command Code through Muse to Go; expert goes directly from Command Code to Go. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
+Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Each tier goes from Codex to Command Code. Scout/mechanic then go from Command Code to the pinned Contributor Spark model; worker progresses from Command Code through Muse to Go; expert goes directly from Command Code to Go. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
 
 Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins.
 
@@ -85,7 +85,7 @@ Exception recovery accepts only the admitted run's matching metadata and paired 
 
 Each MCP client runs its own bridge server, so a code change reaches a client only after its server restarts. `pi-subagent-bridge-reload` stops the server that belongs to the calling client (`--all` stops every client's, `--dry-run` lists them). It signals only the server process: workers are separate processes with on-disk state, so running workers keep running. In Claude Code, `/mcp`, then Reconnect on `pi-subagent-bridge`, restarts that session's server without the script. The script finds its target by walking up from the shell it runs in, so run it from a shell the client started, or pass `--all`.
 
-State, prompt job files, SDK JSONL transcripts and Command Code NDJSON results live under ignored `.work/worker-bridge/`. These files may contain code and model output; keep that directory private. This is *not* an OS sandbox: ignored files, absolute-path reads, and external processes are beyond Git write-scope detection.
+State, prompt job files, SDK JSONL transcripts, Codex and Command Code NDJSON results live under ignored `.work/worker-bridge/`. These files may contain code and model output; keep that directory private. This is *not* an OS sandbox: ignored files, absolute-path reads, and external processes are beyond Git write-scope detection.
 
 ## Tests
 

@@ -115,7 +115,7 @@ export function processStartTime(pid: number): string | null {
   } catch { return null }
 }
 
-function processIdentity(run: CommandRun): "same" | "different" | "gone" | "unknown" {
+export function processIdentity(run: CommandRun): "same" | "different" | "gone" | "unknown" {
   if (!processAlive(run.pid)) return "gone"
   if (!run.proc_start) return "unknown"
   const current = processStartTime(run.pid)

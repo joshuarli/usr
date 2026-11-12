@@ -39,7 +39,7 @@ Pi authenticates only to OpenCode Go using the existing OpenCode login. In the *
 }
 ```
 
-Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. Pi authenticates only to OpenCode Go with that credential (exported as `OPENCODE_API_KEY`); there is no Zen access from the Pi path. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Command Code uses a separate interactive `cmd login` and runs first. No credentials are committed.
+Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. Pi authenticates only to OpenCode Go with that credential (exported as `OPENCODE_API_KEY`); there is no Zen access from the Pi path. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Codex subscription runs first using `codex login` with ChatGPT. Command Code uses a separate interactive `cmd login` and runs second. No credentials are committed.
 
 `sh sync` does **not** run `pi install`, `pi update`, or npm for Pi. The tracked package list is empty and a nonempty Pi package list is treated as a sync conflict; the CLI explicitly loads its locally vendored extensions. `sh sync plan` and `sh sync doctor` inspect local postconditions without writing. The bridge uses the single installed Pi runtime, and the tracked user profiles in `~/.pi/agent/agents/` enforce the same tier contract for interactive Pi.
 
@@ -71,7 +71,7 @@ The tracked native Pi profiles (scout, mechanic, worker, expert, and the Muse-on
 
 Scout → scout; mechanic → scout/mechanic; worker → scout/mechanic/worker; expert → scout/mechanic/worker/expert. No God. A nested call cannot select a model, override tools/provider, create a new worktree, change cwd or use workflow-script launch modes: a code-installed tool-call guard rejects those paths, alongside the upstream `allowedAgents` and depth admission checks. Nested children remain in the assigned worktree; the outer parent must check the combined diff and acceptance proof. This is *not* an OS sandbox against arbitrary shell commands.
 
-**Command Code is still the primary backend and currently remains a leaf.** This change enables nesting in the Pi fallback (Muse or OpenCode Go) only, not Command Code's standalone CLI process; do not claim universal bridge nesting without implementing a separate typed, authenticated child-delegation interface.
+**Codex is the primary backend. Codex and Command Code remain leaves.** This change enables nesting in the Pi fallback (Muse or OpenCode Go) only, not Command Code's standalone CLI process; do not claim universal bridge nesting without implementing a separate typed, authenticated child-delegation interface.
 
 ## CLI entrypoint
 

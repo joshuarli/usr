@@ -30,12 +30,12 @@ const idSchema = { type: "string", description: "usrw_ session ID returned by wo
 const tools = [
   {
     name: "worker_model_check",
-    description: "Read-only: inspect the pinned Pi SDK model for this tier and Command Code fallback availability.",
+    description: "Read-only: inspect the pinned Codex subscription model and Command Code and Pi fallback availability for this tier.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, tier: tierSchema }, required: ["cwd", "tier"], additionalProperties: false },
   },
   {
     name: "worker_start",
-    description: "Any parent harness: delegate a scoped task to a Pi SDK worker; if the primary runner is temporarily unavailable before any edits, the task continues automatically on Command Code DeepSeek 4.1 Flash with the same scope and model. This fallback is expected and needs no parent action; never start a duplicate. Admission is NOT completion.",
+    description: "Delegate a scoped task to the pinned Codex subscription tier, then Command Code and Pi fallbacks on recognized provider failure before edits and after confirmed termination. Never start a duplicate. Admission is not completion.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },
@@ -46,12 +46,12 @@ const tools = [
   },
   {
     name: "worker_status",
-    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A Command Code run whose recorded process is gone or whose PID identity changed is terminal interrupted and releases its worktree lease. When fallback_reason is set, fallback_notice explains the automatic switch: it is expected, needs no action, and the task continues on Command Code. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A Codex or Command Code run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, session_id: idSchema }, required: ["cwd", "session_id"], additionalProperties: false },
   },
   {
     name: "worker_resume",
-    description: "Parent ONLY: enqueue targeted feedback in the SAME inactive, unqueued Pi worker session. Cannot change model, worktree, or ownership boundaries. Never retry unchanged failures.",
+    description: "Parent ONLY: enqueue targeted feedback in the SAME inactive worker session. Cannot change model, worktree, or ownership boundaries. Never retry unchanged failures.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema, session_id: idSchema,
       feedback: { type: "string", maxLength: 32000 },
@@ -59,7 +59,7 @@ const tools = [
   },
   {
     name: "worker_steer",
-    description: "Parent ONLY: redirect a RUNNING worker in the same scope and write boundaries. Pi workers forward the note to the native pi-subagents steer RPC. Command Code runs are interrupted, termination is proven from the recorded process identity, and the same Command Code session resumes with the note; attempts are unchanged and a separate steer cap applies. A finished session is refused; use worker_resume.",
+    description: "Parent ONLY: redirect a RUNNING worker in the same scope and write boundaries. Pi workers forward the note to the native pi-subagents steer RPC. Codex and Command Code runs are interrupted, termination is proven, and the same session resumes with the note; attempts are unchanged and a separate steer cap applies. A finished session is refused; use worker_resume.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema, session_id: idSchema,
       note: { type: "string", minLength: 1, maxLength: 32000 },

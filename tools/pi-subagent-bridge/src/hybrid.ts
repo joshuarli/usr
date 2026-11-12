@@ -4,6 +4,7 @@ import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, 
 import { dirname, join, resolve } from "node:path"
 import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
 import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
+import { CODEX_TIER_MODELS, codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 import { GO_TIER_MODELS, MUSE_TIER_MODELS, museSubscriptionSelected, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
@@ -18,12 +19,13 @@ export type Scope = {
 }
 type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
-  backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition"; attempts: number
+  backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition" | "codex" | "codex-transition"; attempts: number
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string
   continuations?: number; steers?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
   remaining_pi?: Array<"muse" | "go">
-  execution_order?: "command-first"; fallback_blocked?: string
+  execution_order?: "command-first" | "codex-first"; fallback_blocked?: string
+  codex_model?: string; codex_effort?: Effort; cancel_requested?: boolean
 }
 function currentBackend(s: Session): Session["backend"] { return s.backend }
 const EFFORT: Record<Tier, Effort> = {
@@ -110,8 +112,8 @@ function load(cwd: unknown, id: unknown): Session {
   if (!Number.isInteger(s.attempts) || s.attempts < 0 ||
     (s.steers !== undefined && (!Number.isInteger(s.steers) || s.steers < 0)) ||
     (s.backend === "pi" && typeof s.pi_id !== "string") ||
-    (s.backend === "command-code" && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
-    !["pi", "pi-admitting", "pi-transition", "command-code", "command-transition"].includes(s.backend)) {
+    ((s.backend === "command-code" || s.backend === "codex") && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
+    !["pi", "pi-admitting", "pi-transition", "command-code", "command-transition", "codex", "codex-transition"].includes(s.backend)) {
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   }
   return s
@@ -160,9 +162,10 @@ function prompt(s: Session): string {
     "Writable paths: " + (s.scope.writable_paths.join(", ") || "NONE: READ ONLY"),
     "Required acceptance proof: " + s.scope.acceptance_proof,
     "Attempt limit: " + s.scope.attempt_limit + ". Stop on: " + s.scope.stop_on,
+    ...(s.tier === "scout" && (s.backend === "codex" || s.backend === "codex-transition") ? ["Use bridge_scout tools to inspect the actual files. Never claim a shell command ran; report only tool output you observed."] : []),
     "Native Pi workers may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
     "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
-    "Command Code workers remain leaves: do not spawn subagents from Command Code.",
+    "Codex and Command Code workers remain leaves: do not spawn subagents.",
     "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths.",
     "Stop if blocked or if the requirements demand more scope. Do not broaden the task.",
     "Return a PROOF RECORD instead of a summary: changed paths; exact commands, exit codes and decisive output;",
@@ -201,9 +204,9 @@ function blockedPartialNotice(): string {
 
 export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
-}) {
+}, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession }) {
   function fallbackToCommand(s: Session, reason: string, detail?: unknown): Session {
-    if (!command.available()) throw new Error("Pi " + reason + "; Command Code cmd unavailable")
+    if (!command.available()) throw new Error(reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
     const dir = stateDir(s.cwd)
@@ -287,7 +290,6 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async modelCheck(cwd: unknown, tierInput: unknown) {
       const dir = checkedWorktree(cwd)
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
-      // Command Code is primary
       let museAvailable = false, museIssue: string | null = null
       if (museSubscriptionSelected(tierInput)) {
         try {
@@ -318,10 +320,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const piLane = { backend: "pi", model: modelFor(tierInput),
         available: museSubscriptionSelected(tierInput) ? museInfo.available : goInfo.available,
         issue: museSubscriptionSelected(tierInput) ? museInfo.issue : goInfo.issue }
+      const commandLane = { backend: "command-code", model: COMMAND_MODELS[tierInput], effort: EFFORT[tierInput], available: command.available() }
       return {
-        primary: { backend: "command-code", model: COMMAND_MODELS[tierInput],
-          effort: EFFORT[tierInput], available: command.available() },
-        fallback: piLane,
+        primary: { backend: "codex", ...CODEX_TIER_MODELS[tierInput], available: codex.available() },
+        fallback: commandLane,
+        command_code: commandLane,
+        pi_fallback: piLane,
         muse: museSubscriptionSelected(tierInput) ? { backend: "pi", model: modelFor(tierInput), available: museInfo.available, issue: museInfo.issue } : undefined,
         opencode_go: { backend: "pi", model: GO_TIER_MODELS[tierInput], available: goInfo.available, issue: goInfo.issue },
       }
@@ -333,8 +337,9 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const task = required(brief, "brief", 32000)
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, backend: "command-transition", attempts: 0,
-        execution_order: "command-first" as const,
+        task, backend: "codex-transition", attempts: 0,
+        execution_order: "codex-first" as const,
+        codex_model: CODEX_TIER_MODELS[tierInput].model, codex_effort: CODEX_TIER_MODELS[tierInput].effort,
         remaining_pi: museSubscriptionSelected(tierInput) ? ["muse", "go"] : ["go"],
         command_model: COMMAND_MODELS[tierInput],
         command_effort: EFFORT[tierInput] }
@@ -344,8 +349,17 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         releaseWorktree(leaseDir, dir, s.id)
         throw error
       }
-      // Command Code is primary (#1)
+      if (codex.available()) {
+        s.command_run = codex.start(s.cwd, leaseDir, prompt(s), s.codex_effort!, s.tier === "scout", undefined, s.codex_model)
+        s.backend = "codex"
+        s.attempts = 1
+        save(s)
+        return admission(s)
+      }
+      s.fallback_reason = "Codex subscription unavailable; continued on the next approved provider."
       if (command.available()) {
+        s.backend = "command-transition"
+        save(s)
         // Commit an admission transition before spawning. If the launch is ambiguous, retain the lease.
         s.command_run = command.start(s.cwd, leaseDir, prompt(s),
           fallbackEffortFor(s), s.tier === "scout", undefined, fallbackModelFor(s))
@@ -372,9 +386,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         last_assistant_text = response.last_assistant_text
         error = response.error
         usage = { cost_reported_usd: response.cost_reported_usd, tokens: response.tokens }
-        // Historical Pi-first sessions retain their original fallback policy.
-        // Newly admitted Command-first sessions never fail back to Command a second time.
-        if (s.execution_order !== "command-first" &&
+        if (s.execution_order === undefined &&
             state !== "running" && state !== "queued" && state !== "succeeded" && quota(error)) {
           if (!untouched(s)) {
             state = "blocked_partial_work"
@@ -386,24 +398,51 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             error = null
           }
         }
+      } else if (s.backend === "codex-transition") {
+        state = "blocked_transition"
+        last_assistant_text = null
+        error = "Codex transition interrupted; inspect persisted state and worktree before recovery"
       } else if (s.backend === "command-transition") {
         state = "blocked_transition"
         last_assistant_text = null
         error = "Command Code transition interrupted; inspect persisted state and worktree before recovery"
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
-        const response = command.status(s.command_run)
+        const response = s.backend === "codex" ? codex.status(s.command_run) : command.status(s.command_run)
         state = response.state
         last_assistant_text = response.result?.finalText?.slice(-5000) ?? null
         error = response.state === "interrupted"
-          ? "Command Code process is gone or its recorded PID identity changed; the run is terminal and cannot be replayed"
+          ? "Worker process is gone or its recorded PID identity changed; the run is terminal and cannot be replayed"
           : response.state === "failed"
             ? response.result?.error ?? response.stderr : null
         usage = response.result?.usage ?? null
-        if (s.execution_order === "command-first" && s.fallback_blocked) {
+        if (s.cancel_requested && (state === "failed" || state === "interrupted")) { state = "cancelled"; error = null }
+        if (s.fallback_blocked) {
           state = "blocked_fallback"
           notice = s.fallback_blocked
-        } else if (s.execution_order === "command-first" && state === "failed" &&
+        } else if (s.backend === "codex" && !s.cancel_requested && state === "failed" && (quota(error) || providerUnavailable(error))) {
+          if (!untouched(s)) {
+            state = "blocked_partial_work"
+            notice = blockedPartialNotice()
+          } else {
+            try {
+              s.backend = "codex-transition"
+              s.command_run = undefined
+              save(s)
+              if (command.available()) fallbackToCommand(s, "Codex provider/model unavailable; continued on Command Code before edits.", error)
+              else await fallbackToPi(s, "Codex and Command Code unavailable; continued on an approved Pi provider.", error)
+              state = "running"
+              last_assistant_text = null
+              error = null
+              usage = null
+            } catch (fallbackError) {
+              s.fallback_blocked = "Fallback blocked: " + String(fallbackError)
+              save(s)
+              state = currentBackend(s) === "pi-transition" || currentBackend(s) === "command-transition" || currentBackend(s) === "codex-transition" ? "blocked_admission" : "blocked_fallback"
+              notice = s.fallback_blocked
+            }
+          }
+        } else if (s.backend === "command-code" && !s.cancel_requested && s.execution_order !== undefined && state === "failed" &&
                    (quota(error) || providerUnavailable(error))) {
           if (!untouched(s)) {
             state = "blocked_partial_work"
@@ -450,8 +489,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       }
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
-        model: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s) : fallbackModelFor(s),
-        effort: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s).variant : fallbackEffortFor(s), state, last_assistant_text, error, usage,
+        model: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s) : s.backend === "codex" || s.backend === "codex-transition" ? s.codex_model : fallbackModelFor(s),
+        effort: s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s).variant : s.backend === "codex" || s.backend === "codex-transition" ? s.codex_effort : fallbackEffortFor(s), state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
         acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
         continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
@@ -473,7 +512,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
-      if (s.backend === "command-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition" || s.fallback_blocked)
+      if (s.backend === "codex-transition" || s.backend === "command-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.backend === "pi") {
@@ -487,21 +526,24 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         save(s)
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
-        const previous = command.status(s.command_run)
+        const runner = s.backend === "codex" ? codex : command
+        const backend = s.backend
+        const previous = runner.status(s.command_run)
         if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
         else s.attempts++
-        s.backend = "command-transition"
+        s.backend = backend === "codex" ? "codex-transition" : "command-transition"
         s.command_run = undefined
+        s.cancel_requested = false
         save(s)
-        s.command_run = command.start(s.cwd, stateDir(s.cwd),
+        s.command_run = runner.start(s.cwd, stateDir(s.cwd),
           prompt(s) + (continuation ? "\nCONTINUE THE SAME TASK FROM WHERE THE TURN LIMIT STOPPED IT: " :
             "\nSAME-SCOPE CORRECTION ONLY: ") + correction,
-          fallbackEffortFor(s), s.tier === "scout", previous.result.sessionId, fallbackModelFor(s))
-        s.backend = "command-code"
+          (backend === "codex" ? s.codex_effort! : fallbackEffortFor(s)), s.tier === "scout", previous.result.sessionId, backend === "codex" ? s.codex_model : fallbackModelFor(s))
+        s.backend = backend
         save(s)
       }
       return { session_id: s.id, backend: s.backend, status: "admitted" }
@@ -513,7 +555,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (s.backend === "pi") {
         if (!s.pi_id) throw new Error("Missing Pi session")
         interrupted = (await makeWorkerBridge(api, primaryFor(s)).cancel(s.cwd, s.pi_id)).interrupted
-      } else if (s.command_run) interrupted = command.cancel(s.command_run)
+      } else if (s.command_run) {
+        s.cancel_requested = true
+        save(s)
+        interrupted = s.backend === "codex" ? codex.cancel(s.command_run) : command.cancel(s.command_run)
+        if (!interrupted) { s.cancel_requested = false; save(s) }
+      }
       return { session_id: s.id, interrupted,
         note: "Never signal a Command Code PID left by an earlier MCP process; it may have been reused." }
       })
@@ -521,7 +568,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async steer(cwd: unknown, id: unknown, note: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       const steering = required(note, "note", 32000)
-      if (s.backend === "command-transition" || s.backend === "pi-admitting" ||
+      if (s.backend === "codex-transition" || s.backend === "command-transition" || s.backend === "pi-admitting" ||
           s.backend === "pi-transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before steering")
       if ((s.steers ?? 0) >= STEER_LIMIT) throw new Error("Steer limit reached for this session")
@@ -543,32 +590,34 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           steers: s.steers, steer_limit: STEER_LIMIT, receipt }
       }
       if (!s.command_run) throw new Error("Missing Command Code process")
-      const previous = command.status(s.command_run)
+      const runner = s.backend === "codex" ? codex : command
+      const backend = s.backend
+      const previous = runner.status(s.command_run)
       if (previous.state !== "running")
         throw new Error("Command Code run is not running (state " + previous.state +
           "); use worker_resume for a finished session")
-      const sessionId = commandSession(s.command_run)
+      const sessionId = backend === "codex" ? codex.session(s.command_run) : commandSession(s.command_run)
       if (!sessionId)
         throw new Error("Command Code session identity is not recorded; cannot restart after steering")
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-      if (!command.cancel(s.command_run))
+      if (!runner.cancel(s.command_run))
         throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
-      let state = command.status(s.command_run).state
+      let state = runner.status(s.command_run).state
       const deadline = Date.now() + TERMINATION_WAIT_MS
       while (state === "running" && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100))
-        state = command.status(s.command_run).state
+        state = runner.status(s.command_run).state
       }
       if (state === "running")
         throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
       s.steers = (s.steers ?? 0) + 1
-      s.backend = "command-transition"
+      s.backend = backend === "codex" ? "codex-transition" : "command-transition"
       s.command_run = undefined
       save(s)
-      s.command_run = command.start(s.cwd, stateDir(s.cwd),
+      s.command_run = runner.start(s.cwd, stateDir(s.cwd),
         prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering,
-        fallbackEffortFor(s), s.tier === "scout", sessionId, fallbackModelFor(s))
-      s.backend = "command-code"
+        (backend === "codex" ? s.codex_effort! : fallbackEffortFor(s)), s.tier === "scout", sessionId, backend === "codex" ? s.codex_model : fallbackModelFor(s))
+      s.backend = backend
       save(s)
       return { session_id: s.id, backend: s.backend, status: "steered", interrupted: true,
         steers: s.steers, steer_limit: STEER_LIMIT }
