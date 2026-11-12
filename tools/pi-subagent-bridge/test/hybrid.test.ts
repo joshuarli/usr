@@ -761,3 +761,33 @@ for (const edge of ["create", "prompt"] as const) {
     })
   }
 }
+
+for (const tier of ["scout", "mechanic", "worker", "expert"] as const) {
+  for (const route of ["initial", "status"] as const) {
+    test(`USR-45: ${tier} ${route} skips unavailable Muse and persists exact Go pin`, async () => {
+      const { GO_TIER_MODELS } = await import("../src/tier-policy.ts")
+      const f = fixture()
+      try {
+        const m = fake(f.cwd)
+        const models = m.api.models
+        m.api.models = async (input) => {
+          const catalog = await models(input) as { data: Array<{ providerID: string }> }
+          return { data: catalog.data.filter((model) => model.providerID === "opencode-go") }
+        }
+        const bridge = makeHybridBridge(m.api, m.command)
+        if (route === "initial") m.noCommand()
+        const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
+        const started = await bridge.start(f.cwd, "go", tier, scope, "Provide proof")
+        if (route === "status") m.failCommand("provider unavailable")
+        const status = await bridge.status(f.cwd, started.session_id)
+        assert.equal(status.backend, "pi")
+        assert.deepEqual(status.model, GO_TIER_MODELS[tier])
+        assert.equal(piCreates(m.calls).length, 1)
+        const stored = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", started.session_id + ".json"), "utf8"))
+        assert.deepEqual(stored.primary_model, GO_TIER_MODELS[tier])
+        assert.deepEqual(stored.remaining_pi, [])
+        assert.deepEqual((await makeHybridBridge(m.api, m.command).status(f.cwd, started.session_id)).model, GO_TIER_MODELS[tier])
+      } finally { f.close() }
+    })
+  }
+}

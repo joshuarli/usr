@@ -22,6 +22,7 @@ type Session = {
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string
   continuations?: number; steers?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
+  remaining_pi?: Array<"muse" | "go">
   execution_order?: "command-first"; fallback_blocked?: string
 }
 function currentBackend(s: Session): Session["backend"] { return s.backend }
@@ -230,9 +231,29 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     if (s.command_run && command.status(s.command_run).state !== "failed")
       throw new Error("Command Code is not known terminal; OpenCode Go fallback refused")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+    if (s.remaining_pi) {
+      let selected: ModelRef | undefined
+      while (s.remaining_pi.length) {
+        const destination = s.remaining_pi.shift()!
+        const candidate = destination === "muse" && museSubscriptionSelected(s.tier)
+          ? MUSE_TIER_MODELS[s.tier] : GO_TIER_MODELS[s.tier]
+        if (destination === "muse") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
+        try {
+          if ((await makeWorkerBridge(api, candidate).modelCheck(s.cwd)).available) {
+            selected = candidate
+            break
+          }
+        } catch { }
+      }
+      if (!selected) {
+        save(s)
+        throw new Error("Pinned Pi fallback models are unavailable")
+      }
+      s.primary_model = selected
+    }
     const worker = makeWorkerBridge(api, primaryFor(s))
     if (!(await worker.modelCheck(s.cwd)).available)
-      throw new Error("Pinned OpenCode Go fallback model is unavailable")
+      throw new Error("Pinned Pi fallback model is unavailable")
     s.backend = "pi-transition"
     s.fallback_reason = reason
     if (detail !== undefined)
@@ -306,12 +327,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (git(dir, "status", "--porcelain", "--untracked-files=all")) throw new Error("Worker worktree must start clean")
       const task = required(brief, "brief", 32000)
       const useMuse = museSubscriptionSelected(tierInput)
-      const museModel = useMuse ? modelFor(tierInput) : null
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
         task, backend: "command-transition", attempts: 0,
         execution_order: "command-first" as const,
-        primary_model: useMuse ? museModel! : undefined, command_model: COMMAND_MODELS[tierInput],
+        remaining_pi: useMuse ? ["muse", "go"] : ["go"], command_model: COMMAND_MODELS[tierInput],
         command_effort: EFFORT[tierInput] }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
@@ -329,40 +349,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         save(s)
         return admission(s)
       }
-      // Command Code unavailable - try Muse as #2 (middle option) for scout/mechanic
-      if (useMuse && museModel) {
-        try {
-          process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
-          if ((await makeWorkerBridge(api, museModel).modelCheck(dir)).available) {
-            s.backend = "pi-transition"
-            save(s)
-            const admitted = await makeWorkerBridge(api, primaryFor(s)).start(s.cwd, s.title, prompt(s), s.tier === "scout")
-            s.pi_id = admitted.session_id
-            s.backend = "pi"
-            s.attempts = 1
-            save(s)
-            s.fallback_reason = "Command Code CLI is unavailable; continued on Muse subscription."
-            save(s)
-            return admission(s)
-          }
-        } catch (error) {
-          if (currentBackend(s) === "pi-transition")
-            throw new Error(String(error) + "; worktree lease retained for session " + s.id)
-        }
-        try {
-          await fallbackToPi(s, "Command Code CLI is unavailable; Muse subscription unavailable; continued on OpenCode Go.")
-          return admission(s)
-        } catch (e) {
-          throw e
-        }
-      }
-      // Fall back to OpenCode Go as last resort
-      try {
-        await fallbackToPi(s, "Command Code CLI is unavailable; continued on OpenCode Go.")
-        return admission(s)
-      } catch (e) {
-        throw e
-      }
+      await fallbackToPi(s, "Command Code CLI is unavailable; continued on an approved Pi provider.")
+      return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
@@ -416,68 +404,18 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             state = "blocked_partial_work"
             notice = blockedPartialNotice()
           } else {
-            if (museSubscriptionSelected(s.tier) && !s.primary_model?.providerID) {
-              try {
-                process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
-                const museModel = modelFor(s.tier)
-                if ((await makeWorkerBridge(api, museModel).modelCheck(s.cwd)).available) {
-                  s.primary_model = museModel
-                  const reason = "Primary Command Code provider/model unavailable; trying Muse subscription before OpenCode Go."
-                  s.fallback_reason = s.fallback_reason ? (s.fallback_reason + " " + reason) : reason
-                  if (error !== undefined) s.fallback_detail = (typeof error === "string" ? error : JSON.stringify(error)).slice(0, 2000)
-                  s.attempts = 1
-                  ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-                  const worker = makeWorkerBridge(api, primaryFor(s))
-                  s.backend = "pi-transition"
-                  save(s)
-                  const admitted = await worker.start(s.cwd, s.title, prompt(s), s.tier === "scout")
-                  s.pi_id = admitted.session_id
-                  s.backend = "pi"
-                  s.attempts = 1
-                  save(s)
-                  state = "running"
-                  last_assistant_text = null
-                  error = null
-                  usage = null
-                } else {
-                  throw new Error("Muse unavailable")
-                }
-              } catch (museError) {
-                if (currentBackend(s) === "pi-transition") {
-                  s.fallback_blocked = "Muse admission uncertain; inspect before retrying: " + String(museError)
-                  save(s)
-                  state = "blocked_admission"
-                  last_assistant_text = null
-                  error = s.fallback_blocked
-                  notice = s.fallback_blocked
-                } else try {
-                  await fallbackToPi(s,
-                    "Primary Command Code provider/model unavailable; Muse unavailable; continued on OpenCode Go before edits.", error)
-                  state = "running"
-                  last_assistant_text = null
-                  error = null
-                  usage = null
-                } catch (fallbackError) {
-                  s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
-                  save(s)
-                  state = currentBackend(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
-                  notice = s.fallback_blocked
-                }
-              }
-            } else {
-              try {
-                await fallbackToPi(s,
-                  "Primary Command Code provider/model unavailable; continued on OpenCode Go before edits.", error)
-                state = "running"
-                last_assistant_text = null
-                error = null
-                usage = null
-              } catch (fallbackError) {
-                s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
-                save(s)
-                state = currentBackend(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
-                notice = s.fallback_blocked
-              }
+            try {
+              await fallbackToPi(s,
+                "Primary Command Code provider/model unavailable; continued on an approved Pi provider before edits.", error)
+              state = "running"
+              last_assistant_text = null
+              error = null
+              usage = null
+            } catch (fallbackError) {
+              s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
+              save(s)
+              state = currentBackend(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
+              notice = s.fallback_blocked
             }
           }
         }

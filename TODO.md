@@ -1,14 +1,6 @@
 Prefix: USR
 Next: 51
 
-### USR-39 · P1 · Failed Pi workers can inherit another worker's successful proof
-
-- **Area:** Data
-- **Where:** `tools/pi-subagent-bridge/src/sdk-worker.ts:28`, `tools/pi-subagent-bridge/src/sdk-worker.ts:266`, `tools/pi-subagent-bridge/src/pi-port.ts:77`, `tools/pi-subagent-bridge/src/pi-port.ts:93`
-- **Problem:** SDK hosts share `pi-sessions/subagent-artifacts`. After dispatch or admission, the exception handler calls `artifactResult` with an empty run ID, which matches every artifact filename. A failed worker can persist an earlier worker's success and proof as its own. An offline probe executed the unmodified recovery and main function bodies with the real persistence function: an old successful metadata/output pair plus a current-run timeout produced `state: "succeeded"`, the old proof text, and `runId: ""`. The host exited 1, but `pi-port` accepts the result JSON independently of that exit code, so status can report false success and release the lease. Vendored `pi-subagents` enables session artifacts by default.
-- **Recommendation:** Retain the admitted run ID, async directory, and session file across the exception boundary. Recover only an exact owned run, reject empty identities, and validate artifact identity before accepting success. Add a regression with one worker's success followed by another worker's timeout; the second must never inherit the first's proof or release its lease on that evidence.
-- **Fix with:** `durable-state`
-- **Effort:** S
 
 ### USR-40 · P1 · Failed Node upgrades remove the working runtime and block retry
 
@@ -19,14 +11,6 @@ Next: 51
 - **Fix with:** `durable-state`
 - **Effort:** S
 
-### USR-41 · P2 · Uncertain Muse admission starts a second worker in the same worktree
-
-- **Area:** Concurrency
-- **Where:** `tools/pi-subagent-bridge/src/hybrid.ts:333`, `tools/pi-subagent-bridge/src/hybrid.ts:227`, `tools/pi-subagent-bridge/src/hybrid.ts:418`, `tools/pi-subagent-bridge/src/bridge.ts:179`, `tools/pi-subagent-bridge/src/pi-port.ts:184`
-- **Problem:** The Muse startup catch treats every error as permission to fall through, including `created but prompt admission failed`. The fallback helper checks Command Code termination but not an uncertain Pi admission. A fake provider port exercised the real bridges with Command Code absent: the first prompt left a child active and raised a receipt error; the bridge created and prompted a second child, retained only its session ID, and claimed no work was replayed. The real Pi adapter can fail after spawning and before saving its final admission record. The status-driven fallback has the same catch pattern. Two workers can then write the same worktree under one tracked assignment.
-- **Recommendation:** Distinguish confirmed pre-admission provider failures from failures after session creation or dispatch. Persist the child identity before dispatch and retain the lease in a blocked state when admission is uncertain. Require proof of no admitted child or confirmed termination before another start. Assert exactly one creation and prompt in both ambiguous-admission paths.
-- **Fix with:** `lifecycle-concurrency`
-- **Effort:** M
 
 ### USR-42 · P2 · Automatic Claude worktree removal deletes ignored artifacts
 
@@ -55,14 +39,6 @@ Next: 51
 - **Fix with:** `durable-state`
 - **Effort:** S
 
-### USR-45 · P2 · Muse unavailability blocks the available OpenCode Go fallback
-
-- **Area:** Errors
-- **Where:** `tools/pi-subagent-bridge/src/hybrid.ts:140`, `tools/pi-subagent-bridge/src/hybrid.ts:227`, `tools/pi-subagent-bridge/src/hybrid.ts:308`, `tools/pi-subagent-bridge/src/hybrid.ts:418`
-- **Problem:** Scout, mechanic, and worker sessions initialize `primary_model` to Muse. The helper advertised as the Go fallback calls `primaryFor(s)` without selecting the Go pin, so it checks Muse again. A real bridge fixture advertised the approved Go worker model and no Muse model: `modelCheck` reported Go available, but `start` failed with `Pinned OpenCode Go fallback model is unavailable` and created no child. Both missing-Command-Code startup and Command Code provider recovery use this helper. When the retry does launch, its notice can claim Go while the actual model remains Muse.
-- **Recommendation:** Represent remaining fallback destinations explicitly and select/persist the destination's exact pinned model before an allowed transition. Cover Muse absent plus Go available, both at initial startup and after a confirmed Command Code provider failure, for every eligible tier. Preserve admitted sessions' original provider and resolve the uncertain-admission defect independently.
-- **Fix with:** `make-invalid-states-unrepresentable`
-- **Effort:** S
 
 ### USR-46 · P2 · Claude children start from the main checkout instead of the caller's worktree
 

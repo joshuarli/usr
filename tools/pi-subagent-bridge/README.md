@@ -79,7 +79,7 @@ Command Code records process start time (Linux `/proc/<pid>/stat` field 22; macO
 
 The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker should progress through Muse to Go; expert goes directly from Command Code to Go. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
 
-**Known limitations:** [USR-39, USR-41, and USR-45](../../TODO.md) demonstrate exceptions in the current implementation. Exception recovery can attribute another Pi worker's successful artifact to the failed run; an uncertain Muse admission can start a second child; and the Go fallback can select the Muse model again. Treat notices and success records as claims to verify, keep parent proof independent, and do not use these paths as migration acceptance until repaired. Moving the runtime to `pi-build` does not fix this first-party bridge code.
+Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins.
 
 ## Reloading the server
 
@@ -132,8 +132,7 @@ Dedicated `muse-scout`, `muse-mechanic` and `muse-worker` profiles restrict nest
 tasks to the same subscription provider, with immutable equal-or-weaker tier ceilings
 and max depth 2. The SDK host explicitly loads the pinned provider and requires it in
 each detached child, even when ambient extensions are disabled. Admitted sessions
-retain their pinned provider; the current uncertain-admission defect is tracked
-as USR-41 under [Safety and durability](#safety-and-durability).
+retain their pinned provider; uncertain admissions retain their lease under [Safety and durability](#safety-and-durability).
 
 This is a community adapter using a developer-preview Muse Code SDK.
 Live account compatibility and network behavior must be tested locally before
