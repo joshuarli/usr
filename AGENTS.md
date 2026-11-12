@@ -19,10 +19,12 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
+| Pi build migration plan | [docs/CAMPAIGN-PI-BUILD.md](docs/CAMPAIGN-PI-BUILD.md) |
 | macOS preference management | [docs/macos-preferences.md](docs/macos-preferences.md) |
+| Linux CPU power policy | [docs/power-policy.md](docs/power-policy.md) |
 | Alpine provisioner | [host/alpine/README.md](host/alpine/README.md) |
 | Skills guide | [SKILLS.md](SKILLS.md) |
-| Deferred work and RFCs | [TODO.md](TODO.md), [docs/rfc/](docs/rfc/) |
+| Deferred work | [TODO.md](TODO.md) |
 
 ## Background work
 

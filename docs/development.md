@@ -11,6 +11,8 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
+| Pi archive, launcher, or SDK closure | `python3 -I tools/pi/vendor.py check` and `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_offline.py`; see [bridge checks](../tools/pi-subagent-bridge/README.md#tests) for affected delegation behavior |
+| Pi bridge installation or MCP registration | `python3 -I tools/pi/test_sync_bridge_offline.py` in a disposable checkout, plus the affected `tools/sync/*worker-test.py` cases |
 | `sync` DAG/bootstrap | `python3 -I tools/sync/test_dag.py`, `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh -n sync`, and `sh dotfiles/doctor-test.sh` |
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
@@ -50,9 +52,8 @@ After changing Markdown, choose the `mdtool` check that matches the edit: use `l
 
 Keep shell scripts compatible with macOS `/bin/sh` and dash. Python scripts use only the standard library. Add a failing numbered case to `tools/sync/test_links.py` before modifying link reconciliation; run the Python suite and the scratch-home integration tests.
 
-Use `TODO.md` for deferred work and `docs/rfc/` when a design needs a decision. The `todo` skill owns both formats.
+Use `TODO.md` for deferred work and create an RFC under `docs/rfc/` when a design needs a decision. The `todo` skill owns both formats.
 
 `README.md` is a clean, up-to-date end-user guide: what the project is, how to get and use it, configuration and output users need, where to get help, and license. Keep developer setup, architecture, internals, and contributor workflow in `AGENTS.md` or `docs/`.
 
-
-For automatic Claude MCP registration, run `python3 -I tools/sync/claude-worker-test.py` (offline fixtures), then `sh -n sync` and `sh -n tools/sync/bootstrap.sh`. A live smoke test requires locally authenticated Claude/OpenCode Go/Command Code and is not part of offline tests.
+Use the supported Node version (currently at least 26.12.0) for Pi runtime checks. `test_offline.py` skips three runtime cases when Node is absent or below major 26; a green suite with skips does not verify SDK loading. `test_sync_bridge_offline.py` creates and removes an ignored bridge dependency link and refuses an existing installation, so use a disposable checkout. Live provider checks require local account authentication and remain separate from fixture proof.

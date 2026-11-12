@@ -23,8 +23,6 @@
     # parallel index stat() calls
     preloadIndex = true
 
-    # global pre-push hook: refuses a push without a terminal, so agents and scripts cannot push
-
     # multi-pack-index for faster object lookup across packs
     multiPackIndex = true
 

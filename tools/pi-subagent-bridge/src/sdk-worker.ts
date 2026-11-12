@@ -276,8 +276,6 @@ async function main(): Promise<void> {
     persist(job.resultPath, result)
   } catch (error) {
     if (admitted || dispatchAttempted) {
-      // A run may have been dispatched or a terminal result may exist on disk; persist best-effort failure
-      // evidence rather than exiting silently.
       try {
         const fallback = artifactResult(job.sessionDir, null, "", job.priorSessionFile ?? "")
         if (fallback) { persist(job.resultPath, fallback); process.exitCode = 1; return }

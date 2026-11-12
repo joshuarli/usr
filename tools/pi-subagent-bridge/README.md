@@ -1,6 +1,6 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the **same** durable session state and worktree contracts. **Command Code runs first** (Muse Ember for scout/mechanic, DeepSeek V4.1 Flash for worker/expert); the exact-pinned **Muse SDK subscription is the default middle option** for scout/mechanic/worker; **OpenCode Go via embedded Pi SDK + pi-subagents RPC is the last-resort fallback**. No OpenCode server or separate custom agent loop is started.
+One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the same durable session state and worktree contracts. The configured routing order is **Command Code first**, **Muse SDK subscription** for scout/mechanic/worker, then **OpenCode Go via embedded Pi SDK + pi-subagents RPC**. No OpenCode server or separate custom agent loop is started. The [known failure-path defects](#safety-and-durability) below limit that progression and the reliability of success records.
 
 | Tier | Command Code first | Effort | Muse SDK middle | OpenCode Go fallback |
 | --- | --- | --- | --- | --- |
@@ -51,19 +51,11 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 
 `worker_steer(cwd,session_id,note)` redirects a **running** worker without changing its scope or write boundaries. On the Pi backend it forwards the note to the native pi-subagents `steer` RPC for the owned run. On Command Code it verifies HEAD and the write boundary exactly as `worker_resume` does, interrupts the run, waits until the recorded process is proven gone, then restarts the same Command Code session with `--resume <sessionId>` and the original prompt plus `PARENT STEERING (same scope and write boundaries): <note>`. It never changes `attempts`; it is bounded by its own `steer_limit`, and it refuses to signal a PID that this bridge process does not own. A finished or non-running session is refused with a pointer to `worker_resume`.
 
-`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination; a later `worker_status` reports `interrupted` and releases the lease once the recorded process is provably gone.
+`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination. For Command Code, a later `worker_status` can report `interrupted` and release the lease after proving the recorded process gone. Pi requires a terminal result: a dead host without one remains `unknown_or_interrupted` and keeps its lease.
 
 ## Coordinating many workers
 
-A parent running several lanes should not keep its own table of session IDs and worktrees. Every session is already recorded under `<repo>/.work/worker-bridge/usrw_*.json`, so `worker-campaign` discovers lanes from those records and blocks in the background until any unacknowledged session finishes:
-
-```
-worker-campaign wait [--timeout DURATION] [ROOT...]
-worker-campaign ack ID...
-worker-campaign list [ROOT...]
-```
-
-`wait` prints `<id> <state> <cwd> <title>` once per newly terminal session (`succeeded`, `failed`, `turn_limit`, `interrupted`), exits 0, and takes roots from arguments or colon-separated `$WORKER_CAMPAIGN_ROOTS` so lanes in different repositories are covered without absolute/relative path registration. With `--timeout` it prints `tick: N running` and exits 2. `ack` persists IDs under `${XDG_STATE_HOME:-$HOME/.local/state}/worker-campaign/acked` and is idempotent; `list` shows state, age, worktree and continuation/steer budgets. Terminal state reuses `worker-watch --state ROOT ID`, so it is the same Command Code result/PID or Pi SDK evidence as `worker_status`, without the MCP server or Node code. Use `worker-watch ROOT ID` instead when you want to follow a single lane's last event.
+Use `worker-campaign` to discover persisted sessions and wait for notifications, or `worker-watch` to follow one session. See [campaign coordination](../../docs/pi.md#coordinating-a-campaign) for commands and state-file locations. These shell watchers do not perform the bridge's process-start identity checks or release leases. Their `interrupted` observation for a dead Pi host is not equivalent to an accepted terminal result; check `worker_status` before reusing the worktree.
 
 ## CLI
 
@@ -83,7 +75,11 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 ## Safety and durability
 
-The Command Code runner is preferred and pins an exact model and effort. Each run records the child process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) so a reused PID is never mistaken for the original worker; an `interrupted` run releases its lease only after that identity check, and a live PID with the recorded start time keeps it. `--verbose` records the Command Code session identity on stderr before the result, which lets `worker_steer` resume the same session after a proven interruption. If Command Code is not installed or its provider/model/usage fails conclusively before edits, the bridge tries the pinned Muse SDK model for scout/mechanic/worker, then the allowed OpenCode Go model for every tier; each Pi route loads only the pinned pi-subagents extension (plus the pinned Muse provider on the Muse route) and submits via `subagents:rpc:v1:request`. An absent receipt, interrupted process, or uncertain admission remains blocked. Cross-process worktree leases and locks remain at the MCP/CLI boundary. No fallback after edits or a second fallback from Muse/Go is allowed. The switch is reported transparently, not as a failure: `worker_start`/`worker_status` return `fallback_reason` (what happened), `fallback_notice` (that the switch was automatic and needs no parent action, with the same scope and pinned tier model and no duplicate start), and `fallback_detail` (the original provider message, for diagnosis). The `error` field is cleared once the fallback has safely taken over. Partial work is never replayed under a second provider.
+Command Code records process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
+
+The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker should progress through Muse to Go; expert goes directly from Command Code to Go. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
+
+**Known limitations:** [USR-39, USR-41, and USR-45](../../TODO.md) demonstrate exceptions in the current implementation. Exception recovery can attribute another Pi worker's successful artifact to the failed run; an uncertain Muse admission can start a second child; and the Go fallback can select the Muse model again. Treat notices and success records as claims to verify, keep parent proof independent, and do not use these paths as migration acceptance until repaired. Moving the runtime to `pi-build` does not fix this first-party bridge code.
 
 ## Reloading the server
 
@@ -106,7 +102,7 @@ sh dotfiles/worker-watch-test.sh
 sh dotfiles/worker-campaign-test.sh
 ```
 
-Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
+`npm test` is an explicit developer check requiring the package's development dependencies and a supported Node; the production archive does not supply that test toolchain. Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
 
 ## Muse Code subscription
 
@@ -135,9 +131,9 @@ This is subscription usage via the official Muse Code SDK, **not** the metered M
 Dedicated `muse-scout`, `muse-mechanic` and `muse-worker` profiles restrict nested
 tasks to the same subscription provider, with immutable equal-or-weaker tier ceilings
 and max depth 2. The SDK host explicitly loads the pinned provider and requires it in
-each detached child, even when ambient extensions are disabled. If admission is
-uncertain, the bridge never replays it; an admitted Muse session keeps its pinned
-provider and does not fall back again.
+each detached child, even when ambient extensions are disabled. Admitted sessions
+retain their pinned provider; the current uncertain-admission defect is tracked
+as USR-41 under [Safety and durability](#safety-and-durability).
 
 This is a community adapter using a developer-preview Muse Code SDK.
 Live account compatibility and network behavior must be tested locally before

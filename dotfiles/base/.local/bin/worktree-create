@@ -36,7 +36,5 @@ exclude=$(git -C "$root" rev-parse --path-format=absolute --git-path info/exclud
 mkdir -p "$(dirname "$exclude")"
 grep -qxF '/.work/' "$exclude" 2>/dev/null || printf '%s\n' '/.work/' >> "$exclude"
 
-# Branch from the checked-out commit, not the remote default branch, so a lane
-# starts from the campaign branch it was launched from.
 git -C "$root" worktree add --no-track -b "worktree-$name" "$dir" HEAD >&2
 printf '%s\n' "$dir"

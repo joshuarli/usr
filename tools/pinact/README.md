@@ -14,6 +14,7 @@ pinact run --check
 pinact lint --profile=correctness --format=json
 pinact lint --format=json --catalog "$CATALOG" -- "$WORKFLOW"
 pinact fix --catalog "$CATALOG" -- "$WORKFLOW"
+pinact fix --catalog "$CATALOG" --upgrade -- "$WORKFLOW"
 pinact fix --diff --policy timeout-minutes=15 -- "$WORKFLOW"
 ```
 
@@ -32,7 +33,7 @@ External `uses: owner/repo[/path]@ref` values become full commit SHAs with versi
 Annotated tags resolve to their peeled commit SHA. A tag/branch name collision fails rather than
 guessing, and branches require `--allow-branches`. `--refresh` only re-resolves existing SHA
 references through their explicit version comments; it does not select a newer semantic version.
-Use Renovate or an explicit version change to select an upgrade.
+Use Renovate, an explicit version change, or the catalog upgrade option below to select a target.
 
 The pinner preserves comments, quoting, indentation, line endings, and file modes. Local `./` and
 `docker://` actions are skipped. It ignores `uses:` keys in non-action fields and shell blocks.
@@ -64,8 +65,8 @@ profiles, fixes, and limits.
 
 `--catalog path` validates the TOML catalog and reports references not approved by it. Catalog
 records use `[actions."owner/repo"]` tables with `channel`, `version`, and a 40-character `sha`.
-They reject malformed records, ambiguous repositories, major changes, unlabeled SHAs as proof, and
-catalog downgrades. The catalog remains caller-owned policy.
+Malformed and ambiguous catalog records are rejected. Ordinary catalog approval refuses major
+changes, unlabeled SHAs as proof, and catalog downgrades. The catalog remains caller-owned policy.
 
 ## Fixing
 
@@ -74,6 +75,12 @@ commands, and explicit `--policy` requests. It does not infer permission or time
 example, `--policy permissions=contents:read` adds a read-only permission block, and
 `--policy timeout-minutes=15` adds a job timeout. Privilege-adding or ambiguous policy edits are
 refused. `--diff` prints a unified diff and never writes.
+
+`fix --catalog C --upgrade` explicitly selects each action's exact catalog SHA/version, including
+major changes, unlabeled pins, and downgrades. Review the catalog before selecting that policy.
+[USR-48](../../TODO.md) tracks a current validation defect: a mutable same-major ref already
+approved by the catalog can be rejected under `--upgrade`. Ordinary `fix --catalog C` pins that
+case correctly; retain the refusal for other inputs until its cause is understood.
 
 The fixer checks that planned edits match the original bytes, do not overlap, introduce no new
 correctness errors, resolve their targeted finding, and are idempotent. It preserves unrelated
