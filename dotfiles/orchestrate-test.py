@@ -18,15 +18,16 @@ class OrchestrateTests(unittest.TestCase):
             self.assertIn(method, self.text)
 
     def test_codex_first_and_contributor_pin_only(self):
-        self.assertIn("Codex subscription is the first executor", self.text)
+        self.assertIn("Codex subscription is first for scout/mechanic/worker", self.text)
         self.assertIn("followed by Command Code", self.text)
         self.assertIn("scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`", self.text)
         self.assertNotIn("opencode/muse-ember-1.0", self.text)
 
-    def test_god_exception(self):
-        self.assertIn("claude-opus-5-5", self.text)
-        self.assertIn("gpt-6.1-sol", self.text)
-        self.assertIn("No Pi god tier", self.text)
+    def test_carbon_expert_and_god_only(self):
+        self.assertIn("gemini-4-carbon-high", self.text)
+        self.assertIn("No Pi `god` tier", self.text)
+        self.assertIn("Gemini 4 Argon is banned", self.text)
+        self.assertIn("neither has fallback", self.text)
 
     def test_no_old_mcp_registration(self):
         for path in ("dotfiles/base/.config/opencode/opencode.json", "dotfiles/base/.codex/config.toml"):
@@ -36,11 +37,11 @@ class OrchestrateTests(unittest.TestCase):
         json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
 
     def test_native_subagents_are_the_quota_fallback(self):
-        self.assertIn("Quota fallback: when the bridge runs out of quota, use native subagents.", self.text)
+        self.assertIn("Quota fallback for scout/mechanic/worker only:", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
         for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
             content = (ROOT / path).read_text()
-            self.assertIn("runs out of quota", content)
+            self.assertIn("quota", content)
             self.assertNotIn("Missing bridge means no delegation", content)
             self.assertNotIn("blocks delegation rather than authorizing another launcher", content)
         settings = json.loads((ROOT / "dotfiles/base/.claude/settings.json").read_text())

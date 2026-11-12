@@ -1,15 +1,18 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness. Parents remain responsible for decomposition, verification, integration and cleanup. The MCP server and CLI expose the same durable session state and worktree contracts. The routing order is **Codex subscription**, then **Command Code**, then for the Pi fallback **OpenCode Go Contributor-Spark** for scout/mechanic, **Muse SDK subscription** for worker, and **OpenCode Go** for worker/expert. No OpenCode server or separate custom agent loop is started. The [known failure-path defects](#safety-and-durability) below limit that progression and the reliability of success records.
+One shared delegation bridge for every coding harness. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state. New `expert` and `god` tasks run **only** Antigravity CLI `gemini-4-carbon-high`; no Argon, native Opus/Sol, or fallback. Scout, mechanic and worker retain the existing Codex → Command Code → Pi backend chain. Already-admitted legacy sessions retain their original models.
 
-| Tier | Codex first | Command Code | Effort | Pi fallback (in order) |
-| --- | --- | --- | --- | --- |
-| scout | `gpt-6-luna` (medium) | `meta/muse-ember` | medium | `opencode-go/muse-spark-1.3-contributor` (medium) |
-| mechanic | `gpt-6-luna` (high) | `meta/muse-ember` | xhigh | `opencode-go/muse-spark-1.3-contributor` (high) |
-| worker | `gpt-6.1-terra` (medium) | `deepseek/deepseek-v4.1-flash` | high | `muse-sdk/muse-spark-1.3` (xhigh), then `opencode-go/deepseek-v4.1-flash` (high) |
-| expert | `gpt-6.1-terra` (xhigh) | `deepseek/deepseek-v4.1-flash` | max | `opencode-go/deepseek-v4.1-flash` (max) |
+| Tier | Primary | Fallback (in order) |
+| --- | --- | --- |
+| scout | Codex `gpt-6-luna` (medium) | Command Code `meta/muse-ember` (medium), Pi `opencode-go/muse-spark-1.3-contributor` (medium) |
+| mechanic | Codex `gpt-6-luna` (high) | Command Code `meta/muse-ember` (xhigh), Pi `opencode-go/muse-spark-1.3-contributor` (high) |
+| worker | Codex `gpt-6.1-terra` (medium) | Command Code `deepseek/deepseek-v4.1-flash` (high), Pi `muse-sdk/muse-spark-1.3` (xhigh), Pi `opencode-go/deepseek-v4.1-flash` (high) |
+| expert | Antigravity `gemini-4-carbon-high` (high) | **None** |
+| god | Antigravity `gemini-4-carbon-high` (high) | **None** |
 
-No `god` tier. Claude Code and Codex alone use their pinned native `god` agents. Codex and Command Code runs remain leaves. Codex scouts have read, search and file-list tools but no shell or write tools. Native Pi children may spawn exactly one additional generation, equal-or-weaker only (typed tier guard, immutable child extension, and max depth 2), on the Contributor-Spark, Muse SDK and OpenCode Go routes. **`opencode-go/muse-spark-1.3-contributor` is used for scout/mechanic; no free `opencode/*` Zen model is usable from a headless client (the upstream gateway rejects non-OpenCode-Client User-Agents with `429 FreeUsageLimitError`, see `docs/pi.md#why-zen-is-not-a-pin`)**. Other OpenCode Go or custom endpoints remain forbidden. The bridge requires `codex login` with ChatGPT for its preferred provider, `cmd login` for Command Code, a Muse Code login for the worker lane, and a configured OpenCode Go credential for the Pi fallback. No unapproved models are permitted.
+The bridge validates `agy models` for the exact Carbon slug before admission and pins it on every launch and resume. Its streaming JSON `init` record must confirm the same model before success is accepted. Carbon entitlement is required (Google AI Ultra or eligible enterprise); absence, quota or authentication errors stop the lane. This repository does not purchase API credits. For tasks formerly using Gemini 3.8 Flash in Antigravity, the documented successor slugs are `gemini-4-hydrogen-{low,medium,high,xhigh}`; no tracked Gemini 3.8 bridge pin exists to migrate. Direct Antigravity use should pin available Hydrogen and must never select Argon or fall back to 3.8. See [Google's headless CLI reference](https://antigravity.google/docs/cli/headless/).
+
+The lower-tier Pi route retains bounded native Pi nesting. There is **no Pi `god` tier**. The Carbon backend is a root executor, not a Pi agent; it may not use bridge nesting and must not start separate native subagents. Carbon invokes `agy` headlessly with tool permissions allowed, so independent diff/scope verification remains mandatory; this does **not** provide an OS sandbox.
 
 ## Setup
 
@@ -35,7 +38,7 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` reports Codex first (CLI signed in with ChatGPT), Command Code (executable installed), the exact pinned Pi fallback where the tier has one (Contributor Spark for scout/mechanic, Muse for worker, Go for worker/expert) and its auth. Its `primary` is Codex, `fallback` is Command Code, and `pi_fallback` is the first Pi model.
+`worker_model_check(cwd, tier)` reports pinned Carbon and no fallback for expert/god; for scout/mechanic/worker it reports Codex first, then Command Code and the pinned Pi fallback.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -77,9 +80,9 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 Codex and Command Code record process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
 
-Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Each tier goes from Codex to Command Code. Scout/mechanic then go from Command Code to the pinned Contributor Spark model; worker progresses from Command Code through Muse to Go; expert goes directly from Command Code to Go. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
+Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker go from Codex to Command Code and their approved Pi fallbacks. Expert/god run Carbon only; provider failure cannot switch them to another model. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
 
-Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins.
+Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins. New expert/god sessions pin Carbon as their only provider.
 
 ## Reloading the server
 

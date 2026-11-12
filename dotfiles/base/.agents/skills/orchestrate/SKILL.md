@@ -5,24 +5,29 @@ description: "Route all coding subagents through the shared Pi SDK bridge, scope
 
 # Orchestrate
 
-**All coding subagents from any harness use `pi-subagent-bridge`**, regardless of which skill initiated delegation. This includes non-orchestrate tools and ordinary review tasks. While the bridge has capacity, the only native exception is `god` in Claude Code or Codex, using the existing pinned native model. Do not use native Claude `Agent`/`Task`, Codex `spawn_agent`, OpenCode child agents, Command Code `Explore`/`General`, Pi's native `subagent` tool outside the bridge, or another harness's native child launcher for `scout`, `mechanic`, `worker`, or `expert` while the bridge can run them.
+**All coding subagents from any harness use `pi-subagent-bridge`**, including `expert` and `god`. New expert/god jobs MUST use the bridge's pinned Antigravity CLI `gemini-4-carbon-high` backend. Do not spawn native Claude/Codex `god`, or use native subagents while an approved lower-tier bridge backend is available. The only exception is the lower-tier quota fallback below.
 
-**Quota fallback: when the bridge runs out of quota, use native subagents.** The bridge has run out when it cannot run a worker on any pinned backend. That shows up as a provider usage-limit error in `worker_status.error` (including a `429 FreeUsageLimitError` after every pinned lane was exhausted — retrying the bridge will hit the same wall), `worker_model_check` reporting no available backend for the tier, or a session left in `blocked_fallback` or `blocked_partial_work`. When a bridge worker fails at runtime on a provider usage-limit error with no pinned lanes left, do not start another bridge dispatch; delegate to the harness's native subagents. Delegate the same work through the harness's own native subagents (Claude `Agent`, Codex `spawn_agent`, and so on). No hook gates native subagents. Match the native model to the tier: in Claude Code, `haiku` for scout and `sonnet` for mechanic, worker and expert, and `opus` only for work that would justify `god`. Keep the bridge contract: the same brief, a dedicated worktree, no commits, pushes, branch switches or stash, and parent review and verification. First preserve any partial bridge work as a WIP commit, and start the native child in a fresh worktree from it, because the bridge keeps its lease on the old one. Go back to the bridge once it has capacity.
+**Quota fallback for scout/mechanic/worker only:** When the bridge cannot run any pinned backend, use harness-native subagents with the same brief, isolated worktree, scope, and verification. In Claude Code use `haiku` for scout and `sonnet` for mechanic/worker. Preserve any partial work before relaunch. Never use this fallback for expert or god: Carbon unavailable or exhausted is a blocker, not permission to use Argon, native Opus/Sol, or a cheaper model. No hook gates native subagents. Return to the bridge when it has capacity.
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.
 
 ## Pinned tiers
 
-| Tier | Codex first | Command Code | Effort | Pi fallback (in order) | Purpose |
-| --- | --- | --- | --- | --- | --- |
-| scout | `gpt-6-luna` (`medium`) | `meta/muse-ember` | `medium` | `opencode-go/muse-spark-1.3-contributor` (`medium`) | Read-only exploration |
-| mechanic | `gpt-6-luna` (`high`) | `meta/muse-ember` | `xhigh` | `opencode-go/muse-spark-1.3-contributor` (`high`) | Mechanical scoped edits |
-| worker | `gpt-6.1-terra` (`medium`) | `deepseek/deepseek-v4.1-flash` | `high` | `muse-sdk/muse-spark-1.3` (`xhigh`), then `opencode-go/deepseek-v4.1-flash` (`high`) | Implementation, debugging, testing |
-| expert | `gpt-6.1-terra` (`xhigh`) | `deepseek/deepseek-v4.1-flash` | `max` | `opencode-go/deepseek-v4.1-flash` (`max`) | Difficult architectural or cross-cutting work |
+| Tier | Primary executor/model | Effort | Provider fallback |
+| --- | --- | --- | --- |
+| scout | Codex `gpt-6-luna` | medium | Command Code `meta/muse-ember` (medium); Pi `opencode-go/muse-spark-1.3-contributor` (medium) |
+| mechanic | Codex `gpt-6-luna` | high | Command Code `meta/muse-ember` (xhigh); Pi `opencode-go/muse-spark-1.3-contributor` (high) |
+| worker | Codex `gpt-6.1-terra` | medium | Command Code `deepseek/deepseek-v4.1-flash` (high); Pi `muse-sdk/muse-spark-1.3` (xhigh), then `opencode-go/deepseek-v4.1-flash` (high) |
+| expert | Antigravity CLI `gemini-4-carbon-high` | high | **None. Fail closed.** |
+| god | Antigravity CLI `gemini-4-carbon-high` | high | **None. Fail closed.** |
 
-**OpenCode boundary:** scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden; a model not pinned for its tier stays with its other approved provider.
+**Model prohibition:** Gemini 4 Argon is banned from routing, fallback, and substitutions. Antigravity CLI's `--model` is pinned and verified against `agy models`. No implicit or automatic downgrade. Carbon currently needs Google AI Ultra or eligible enterprise Antigravity access; the bridge never buys API credits.
 
-No Pi god tier is available. **Only Claude Code** may spawn a native `god` on `claude-opus-5-5` at `xhigh`; **only Codex** may spawn a native `god` on `gpt-6.1-sol` at `high`. Other harnesses do not have `god`; do not silently substitute another model or map it to `expert`.
+**Hydrogen succession:** When a task would previously select Gemini 3.8 Flash, prefer the available `gemini-4-hydrogen-high` or `gemini-4-hydrogen-medium` in Antigravity. Documented CLI slugs are `gemini-4-hydrogen-{low,medium,high,xhigh}`. Existing Codex/Command/Pi pins are not Gemini 3.8 and must not be relabeled. Hydrogen is not a configured bridge backend; use it directly only with an explicit pin and a successful `agy models` check. Never fall back to Gemini 3.8 or Argon.
+
+**OpenCode boundary:** scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The existing Pi expert profile remains only for already-admitted legacy sessions, not new expert dispatches.
+
+No Pi `god` tier exists. Root `god` is a terminal Carbon lane; no native child fanout. Reserve it for exceptional architectural decisions and independent adversarial review. Expert/god differ by brief and acceptance proof, not by model.
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify `expert`. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
@@ -38,7 +43,7 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-**Codex subscription is the first executor for every non-god tier**, followed by Command Code, then the Contributor Spark fallback for scout/mechanic, the Muse SDK for worker, then OpenCode Go (through the bridge's embedded Pi SDK) as the final fallback for worker/expert. Only an unavailable executor or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models.
+**Codex subscription is first for scout/mechanic/worker**, followed by Command Code, then Pi. Expert and god route straight to Carbon; neither has fallback. Only an unavailable executor or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models, including prior Pi/Command/Codex expert sessions.
 
 **Nesting:** a Pi SDK child may delegate one more generation, at an equal-or-weaker tier, only when its brief calls for it; the bridge's guard rejects anything else (deeper nesting, `god`, model or worktree overrides). Descendants share the original worktree and write budget, and the outer parent still owns acceptance and review. Codex and Command Code workers are leaves: no bridge CLI children, no host-native agents.
 

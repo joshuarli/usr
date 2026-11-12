@@ -13,7 +13,7 @@ const PROTOCOL = "2025-06-18"
 const MAX_LINE = 100_000
 
 const cwdSchema = { type: "string", description: "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it." }
-const tierSchema = { type: "string", enum: ["scout", "mechanic", "worker", "expert"] }
+const tierSchema = { type: "string", enum: ["scout", "mechanic", "worker", "expert", "god"] }
 const scopeSchema = {
   type: "object",
   properties: {
@@ -30,12 +30,12 @@ const idSchema = { type: "string", description: "usrw_ session ID returned by wo
 const tools = [
   {
     name: "worker_model_check",
-    description: "Read-only: inspect the pinned Codex subscription model and Command Code and Pi fallback availability for this tier.",
+    description: "Read-only: inspect the pinned model and provider for this tier. Expert and god require Antigravity Carbon High with no fallback.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, tier: tierSchema }, required: ["cwd", "tier"], additionalProperties: false },
   },
   {
     name: "worker_start",
-    description: "Delegate a scoped task to the pinned Codex subscription tier, then Command Code and Pi fallbacks on recognized provider failure before edits and after confirmed termination. Never start a duplicate. Admission is not completion.",
+    description: "Delegate a scoped task. Scout/mechanic/worker use Codex then approved fallbacks; expert/god use only pinned Antigravity Carbon High. Never start a duplicate. Admission is not completion.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },

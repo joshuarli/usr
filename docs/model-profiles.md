@@ -1,6 +1,6 @@
 # Instruction profiles
 
-Load one user contract, not a normal contract plus model-specific corrections. Native harness prompts, project instructions, model/effort defaults, permissions, and worker routing remain unchanged.
+Load one user contract, not a normal contract plus model-specific corrections. Native harness prompts, project instructions, model/effort defaults, and permissions remain unchanged. The shared bridge now pins new expert/god work to Carbon; instruction profile selection remains separate.
 
 | Harness and reported model | Contract |
 | --- | --- |

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, type Scope } from "../src/hybrid.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
+import { CARBON_MODEL, CARBON_EFFORT } from "../src/antigravity.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { commandResult, processStartTime, type CommandRun, type Effort } from "../src/command.ts"
 
@@ -133,7 +134,6 @@ test("model check reports Codex primary and Command Code pins", async () => {
       ["scout", "meta/muse-ember", "medium"],
       ["mechanic", "meta/muse-ember", "xhigh"],
       ["worker", "deepseek/deepseek-v4.1-flash", "high"],
-      ["expert", "deepseek/deepseek-v4.1-flash", "max"],
     ] as const
     for (const [tier, model, effort] of expected) {
       const status = await bridge.modelCheck(f.cwd, tier)
@@ -143,7 +143,92 @@ test("model check reports Codex primary and Command Code pins", async () => {
       assert.equal(status.command_code.effort, effort)
       assert.equal(status.command_code.available, true)
     }
-    await assert.rejects(bridge.modelCheck(f.cwd, "god"), /Unknown Pi tier/)
+    assert.equal((await bridge.modelCheck(f.cwd, "expert")).primary.model, CARBON_MODEL)
+    assert.equal((await bridge.modelCheck(f.cwd, "god")).primary.model, CARBON_MODEL)
+  } finally { f.close() }
+})
+
+
+function carbonFake() {
+  const starts: Array<{ model?: string; effort: Effort; resume?: string; readOnly: boolean }> = []
+  let available = true
+  let failed = false
+  const run: CommandRun = { pid: 9012, output: "fake", errors: "fake", started_at: "now" }
+  return {
+    starts,
+    setAvailable: (value: boolean) => { available = value },
+    fail: () => { failed = true },
+    runner: {
+      available: () => available,
+      start: (_dir: string, _log: string, _prompt: string, effort: Effort, readOnly: boolean, resume?: string, model?: string): CommandRun => {
+        if (model !== CARBON_MODEL || effort !== CARBON_EFFORT || readOnly) throw new Error("Unapproved Carbon dispatch")
+        starts.push({ model, effort, readOnly, resume })
+        return run
+      },
+      status: () => failed ?
+        { state: "failed", result: { subtype: "error" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", error: "429 quota exhausted" }, stderr: null } :
+        { state: "succeeded", result: { subtype: "success" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", finalText: "PROOF" }, stderr: null },
+      cancel: () => true,
+      session: () => "7ce10216-708a-4ba7-9128-53789b2ce8ad",
+    },
+  }
+}
+
+for (const tier of ["expert", "god"] as const) {
+  test(`${tier} uses only pinned Carbon High, persists it, and never falls back on quota`, async () => {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd), carbon = carbonFake()
+      const bridge = makeHybridBridge(m.api, m.command, noCodex, carbon.runner)
+      const check = await bridge.modelCheck(f.cwd, tier)
+      assert.deepEqual(check.primary, { backend: "carbon", model: CARBON_MODEL, effort: CARBON_EFFORT, available: true })
+      assert.equal(check.fallback, null)
+      const task = await bridge.start(f.cwd, tier, tier, f.scope, "Inspect source and prove behavior")
+      assert.equal(task.backend, "carbon")
+      assert.deepEqual(carbon.starts, [{ model: CARBON_MODEL, effort: "high", readOnly: false, resume: undefined }])
+      const persisted = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
+      assert.equal(persisted.backend, "carbon")
+      assert.equal(persisted.tier, tier)
+      assert.equal(persisted.command_model, undefined)
+      carbon.fail()
+      const status = await bridge.status(f.cwd, task.session_id)
+      assert.equal(status.state, "failed")
+      assert.equal(status.model, CARBON_MODEL)
+      assert.equal(status.fallback_reason, null)
+      assert.equal(carbon.starts.length, 1)
+      assert.equal(commandCalls(m.calls).length, 0)
+      assert.equal(piCreates(m.calls).length, 0)
+    } finally { f.close() }
+  })
+}
+
+test("unavailable Carbon blocks expert/god before starting any other model or claiming a lease", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), carbon = carbonFake()
+    carbon.setAvailable(false)
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, carbon.runner)
+    for (const tier of ["expert", "god"] as const) {
+      await assert.rejects(bridge.start(f.cwd, tier, tier, f.scope, "Work"), /Carbon High unavailable.*No fallback/)
+    }
+    assert.equal(carbon.starts.length, 0)
+    assert.equal(commandCalls(m.calls).length, 0)
+    assert.equal(piCreates(m.calls).length, 0)
+    const task = await bridge.start(f.cwd, "safe", "worker", f.scope, "Work")
+    assert.equal(task.backend, "command-code")
+  } finally { f.close() }
+})
+
+test("Carbon corrections preserve the exact model and conversation", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), carbon = carbonFake()
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, carbon.runner)
+    const task = await bridge.start(f.cwd, "review", "expert", f.scope, "Work")
+    assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
+    await bridge.resume(f.cwd, task.session_id, "Verify a second edge case")
+    assert.deepEqual(carbon.starts[1], { model: CARBON_MODEL, effort: "high", readOnly: false,
+      resume: "7ce10216-708a-4ba7-9128-53789b2ce8ad" })
   } finally { f.close() }
 })
 
@@ -348,7 +433,7 @@ test("invalid scopes, unapproved tiers and dirty worktrees fail before any execu
     await assert.rejects(bridge.start(f.cwd, "x", "worker",
       { ...f.scope, writable_paths: ["../secret"] }, "x"), /Invalid writable path/)
     await assert.rejects(bridge.start(f.cwd, "x", "scout", f.scope, "x"), /scouts are read-only/)
-    await assert.rejects(bridge.start(f.cwd, "x", "god", f.scope, "x"), /Unknown Pi tier/)
+    await assert.rejects(bridge.start(f.cwd, "x", "titan", f.scope, "x"), /Unknown Pi tier/)
     writeFileSync(join(f.cwd, "untracked"), "bad")
     await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
     assert.equal(commandCalls(m.calls).length, 0)
@@ -782,7 +867,7 @@ for (const edge of ["create", "prompt"] as const) {
   }
 }
 
-for (const tier of ["scout", "mechanic", "worker", "expert"] as const) {
+for (const tier of ["scout", "mechanic", "worker"] as const) {
   for (const route of ["initial", "status"] as const) {
     test(`USR-45: ${tier} ${route} skips unavailable Muse and persists exact Go pin`, async () => {
       const { GO_TIER_MODELS } = await import("../src/tier-policy.ts")
@@ -837,8 +922,8 @@ for (const route of ["initial", "status"] as const) {
 }
 
 
-test("Codex is first for every tier and a pre-edit quota failure advances to Command Code", async () => {
-  for (const tier of ["scout", "mechanic", "worker", "expert"] as const) {
+test("Codex is first for standard tiers and a pre-edit quota failure advances to Command Code", async () => {
+  for (const tier of ["scout", "mechanic", "worker"] as const) {
     const f = fixture()
     try {
       const m = fake(f.cwd)
