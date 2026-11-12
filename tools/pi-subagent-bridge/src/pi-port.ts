@@ -103,7 +103,7 @@ function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: 
   try {
     const child = spawn(process.execPath, ["--experimental-strip-types", worker, jobPath], {
       cwd: s.cwd, stdio: ["ignore", "ignore", fd],
-      env: { ...process.env, PI_SUBAGENT_MAX_DEPTH: String(MAX_SUBAGENT_DEPTH) },
+      env: { ...process.env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_SUBAGENT_MAX_DEPTH: String(MAX_SUBAGENT_DEPTH) },
     })
     const pid = child.pid
     child.on("error", (error) => {

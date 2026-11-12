@@ -106,6 +106,10 @@ function drainSteering(controlPath: string, receiptPath: string, offset: number,
 }
 
 async function run(job: Job, started: (id: string) => void, dispatching: () => void): Promise<Result> {
+  // Children inherit a no-package-network environment even when the worktree
+  // contains an npm/git Pi package declaration.
+  process.env.PI_OFFLINE = "1"
+  process.env.PI_SKIP_VERSION_CHECK = "1"
   const tier = role(job)
   const muse = job.model.providerID === MUSE_PROVIDER
   if (muse) {

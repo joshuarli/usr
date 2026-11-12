@@ -116,6 +116,13 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertIn("intercom-ok",p.stdout)
 
+    def test_delegated_sdk_workers_inherit_no_package_network_mode(self):
+        port = (ROOT/"tools/pi-subagent-bridge/src/pi-port.ts").read_text()
+        sdk = (ROOT/"tools/pi-subagent-bridge/src/sdk-worker.ts").read_text()
+        self.assertIn('PI_OFFLINE: "1"', port)
+        self.assertIn('PI_SKIP_VERSION_CHECK: "1"', port)
+        self.assertIn('process.env.PI_OFFLINE = "1"', sdk)
+
     def test_pi_update_cannot_invoke_online_package_manager(self):
         env = dict(os.environ, HOME=str(self.home),
                    npm_config_registry="http://127.0.0.1:9")
