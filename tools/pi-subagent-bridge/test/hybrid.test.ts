@@ -722,3 +722,42 @@ test("Muse quota on clean worktree falls back to Command Code without replaying 
     f.close()
   }
 })
+
+for (const edge of ["create", "prompt"] as const) {
+  for (const route of ["initial", "status"] as const) {
+    test(`USR-41: uncertain Muse ${edge} on ${route} retains lease and never admits twice`, async () => {
+      const f = fixture()
+      try {
+        const m = fake(f.cwd)
+        let creates = 0, prompts = 0
+        const create = m.api.create
+        m.api.create = async (input) => {
+          creates++
+          if (edge === "create") throw new Error("create response lost")
+          return create(input)
+        }
+        m.api.prompt = async () => { prompts++; throw new Error("prompt response lost") }
+        const bridge = makeHybridBridge(m.api, m.command)
+        let id: string
+        if (route === "initial") {
+          m.noCommand()
+          await assert.rejects(bridge.start(f.cwd, "uncertain", "worker", f.scope, "Edit README"), /lost|admission/)
+          const state = join(f.root, ".work", "worker-bridge")
+          id = readdirSync(state).find((x) => /^usrw_.*\.json$/.test(x))!.slice(0, -5)
+        } else {
+          id = (await bridge.start(f.cwd, "uncertain", "worker", f.scope, "Edit README")).session_id
+          const path = join(f.root, ".work", "worker-bridge", id + ".json")
+          const session = JSON.parse(readFileSync(path, "utf8"))
+          delete session.primary_model
+          writeFileSync(path, JSON.stringify(session))
+          m.failCommand("provider unavailable")
+        }
+        assert.equal((await bridge.status(f.cwd, id)).state, "blocked_admission")
+        assert.equal((await bridge.status(f.cwd, id)).state, "blocked_admission")
+        assert.equal(creates, 1)
+        assert.equal(prompts, edge === "prompt" ? 1 : 0)
+        await assert.rejects(bridge.start(f.cwd, "duplicate", "worker", f.scope, "Edit README"), /active worker/)
+      } finally { f.close() }
+    })
+  }
+}

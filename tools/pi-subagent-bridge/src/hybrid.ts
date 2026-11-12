@@ -345,8 +345,9 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             save(s)
             return admission(s)
           }
-        } catch (e) {
-          // Fall through to OpenCode Go
+        } catch (error) {
+          if (currentBackend(s) === "pi-transition")
+            throw new Error(String(error) + "; worktree lease retained for session " + s.id)
         }
         try {
           await fallbackToPi(s, "Command Code CLI is unavailable; Muse subscription unavailable; continued on OpenCode Go.")
@@ -442,7 +443,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
                   throw new Error("Muse unavailable")
                 }
               } catch (museError) {
-                try {
+                if (currentBackend(s) === "pi-transition") {
+                  s.fallback_blocked = "Muse admission uncertain; inspect before retrying: " + String(museError)
+                  save(s)
+                  state = "blocked_admission"
+                  last_assistant_text = null
+                  error = s.fallback_blocked
+                  notice = s.fallback_blocked
+                } else try {
                   await fallbackToPi(s,
                     "Primary Command Code provider/model unavailable; Muse unavailable; continued on OpenCode Go before edits.", error)
                   state = "running"
