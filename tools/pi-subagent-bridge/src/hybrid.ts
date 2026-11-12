@@ -463,8 +463,22 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const changed_paths = changes(s.cwd, s.scope.base_revision)
       const out_of_scope_paths = outside(changed_paths, s.scope.writable_paths)
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
-      if (s.fallback_reason && !notice)
-        notice = state.startsWith("blocked") ? "Provider transition blocked; inspect the owned session before retrying." : fallbackNotice(s)
+      if (s.fallback_reason && !notice) {
+        if (state.startsWith("blocked")) {
+          notice = "Provider transition blocked; inspect the owned session before retrying."
+        } else if ((s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition") &&
+                   ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
+          const provider = primaryFor(s).providerID === "opencode"
+            ? "the pinned free Zen fallback"
+            : primaryFor(s).providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
+          notice = "The task was admitted to " + provider + " via Command Code's absence or failure, but that Pi run ended in " + state +
+            " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
+            " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +
+            " per the orchestrate quota-fallback rule, delegate to the harness's native subagents instead of restarting the bridge."
+        } else {
+          notice = fallbackNotice(s)
+        }
+      }
       // A verified terminal response releases worktree admission, not session history.
       if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted"].includes(state)) {
         const directory = stateDir(s.cwd)

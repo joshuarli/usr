@@ -271,6 +271,23 @@ test("a failing Go fallback never restarts Command Code", async () => {
   } finally { f.close() }
 })
 
+test("Zen fallback failure on a provider usage limit reports a terminal, action-required notice", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
+    m.noCommand()
+    const task = await bridge.start(f.cwd, "read", "scout", { ...f.scope, writable_paths: [] }, "Provide evidence")
+    assert.equal(task.backend, "pi")
+    m.failPi("opencode API error (429): FreeUsageLimitError - Free usage limit reached")
+    const result = await bridge.status(f.cwd, task.session_id)
+    assert.equal(result.backend, "pi")
+    assert.equal(result.state, "failed")
+    assert.match(result.fallback_notice ?? "", /every pinned lane is exhausted/)
+    assert.equal(/task continues on OpenCode Zen/i.test(result.fallback_notice ?? ""), false)
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
 test("uncertain Command termination must not start another provider", async () => {
   const f = fixture()
   try {
