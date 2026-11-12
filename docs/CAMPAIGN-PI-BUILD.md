@@ -1,8 +1,8 @@
 # Status
 
 - **Goal:** move Pi producer inputs and archives to `pi-build`, preserve full runtime behavior through pinned releases, then deliver explicit `headless-usr` selection.
-- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44). `pi-build` `9dd4c4c` durably preserves verified sources, notices and existing archives.
-- **In progress:** staged consumer acquisition and recovery fixtures; actual locked full builder. Deterministic repackaging alone is not a source-build or runtime-parity result.
+- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44), `f90d6be` (proven pre-admission model-loss race), `292eaa4` (staged consumer). `pi-build` `9dd4c4c` durably preserves verified sources, notices and existing archives.
+- **In progress:** actual locked full builder and exact runtime protocol fixtures. The current vendored archive still performs an automatic Muse catalog probe; its baseline binding test contains that known behavior instead of treating the offline policy as passed. The candidate verifier rejects it. Deterministic repackaging alone is not a source-build or runtime-parity result.
 - **Next:** finish the full builder's portable production/build locks, then exact-candidate behavior and target/libc verification before publication and consumer cutover.
 - **Parked proof:** no release, all-target runtime parity, live-account entitlement or headless acceptance. Performance timing gate deferred while host swap exceeds the gate. No target or release is counted as passed from a skip.
 
@@ -72,3 +72,5 @@ Total compressed baseline: 111,101,952 bytes. Symlink targets are not counted tw
 Update or retire `tools/pi` tests, `tools/sync/check.sh`, old `vendor.py`/`build-runtime.sh`, Pi build/verify/Alpine workflows, sync/worker registration, the actual `/pi-update` SKILL.md and its SKILLS.md description, and current operator docs in the same cutover. `/pi-update` must build/verify/publish in the builder and bump the consumer only after compatibility proof. Routine sync consumes the existing pin.
 
 Retain meaningful offline/runtime fixtures. Run `test_sync_bridge_offline.py` only in a disposable checkout. Audit all tracked references to retired paths; historical ticket/plan evidence is not a live caller. `git ls-files vendor/pi` must become empty only after durable provenance preservation and accepted replacement delivery. Never rewrite history to remove old blobs.
+
+Extracted-runtime local proof commands use `node --import RUNTIME/node_modules/tsx/dist/loader.mjs` with `tools/pi/test_sdk_protocol.mjs RUNTIME`, `tools/pi/test_intercom_protocol.mjs RUNTIME`, and `tools/pi/verify-extensions.mjs RUNTIME`. The separate `test_runtime_protocol.mjs RUNTIME [MUSE_EXECUTABLE]` probes the installed Muse host before any model turn. It does not establish account entitlement or close USR-50. Only the old vendored binding diagnostic uses `--baseline-catalog`.

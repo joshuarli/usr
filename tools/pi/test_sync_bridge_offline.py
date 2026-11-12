@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_LINK = ROOT / "tools/pi-subagent-bridge/node_modules"
@@ -65,6 +66,9 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
             npx = nodebin / "npx"
             npx.write_text('#!/bin/sh\nexit 97\n')
             npx.chmod(0o755)
+            opencode = bindir / "opencode"
+            opencode.write_text('#!/bin/sh\nif [ "$1/$2" = service/status ]; then printf "stopped\\n"; exit 0; fi\nexit 98\n')
+            opencode.chmod(0o755)
             current = home / ".local/share/nodejs/current"
             current.symlink_to(release, target_is_directory=True)
             for tool in ("node", "npm", "npx"):
@@ -85,6 +89,22 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
             )
             for key in ("OPENCODE", "PI_CODING_AGENT_DIR"):
                 env.pop(key, None)
+            sys.path.insert(0, str(ROOT / "tools/sync"))
+            from link_apply import apply
+            from link_plan import plan_links
+            from links import discover
+            owned = home / ".local/state/sync/dl-owned"
+            env["DL_OWNED_FILE"] = str(owned)
+            unlink = Path.unlink
+            def interrupt_journal(path, *args, **kwargs):
+                if path.parent.name.endswith(".pending-links") and path.suffix == ".json":
+                    raise OSError("fixture interruption after stage deletion")
+                return unlink(path, *args, **kwargs)
+            with patch.object(Path, "unlink", interrupt_journal):
+                with self.assertRaisesRegex(OSError, "fixture interruption after stage deletion"):
+                    apply(plan_links(discover(ROOT, home, osname), owned), owned)
+            pending = owned.with_name(owned.name + ".pending-links")
+            self.assertTrue(list(pending.glob("*.json")))
             try:
                 for attempt in range(2):
                     proc = subprocess.run(
@@ -96,6 +116,7 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                     self.assertFalse(marker.exists(),
                                      "A Pi setup action invoked npm: " + (
                                          marker.read_text() if marker.exists() else ""))
+                self.assertFalse(list(pending.glob("*.json")), "whole sync bridge did not finalize the interrupted link journal")
                 pi = bindir / "pi"
                 self.assertTrue(pi.is_symlink())
                 self.assertIn("PI_OFFLINE=1", pi.resolve().read_text())

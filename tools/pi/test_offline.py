@@ -10,15 +10,19 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-ROOT=Path(__file__).resolve().parents[2]
-sys.path.insert(0,str(ROOT/"tools/sync"))
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"tools/sync"))
 import pi_offline
+
+ROOT=Path(__file__).resolve().parents[2]
 
 class OfflineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp=tempfile.TemporaryDirectory(prefix="pi-no-npm-")
         cls.home=Path(cls.tmp.name)
+        environment = patch.dict(os.environ, {"XDG_DATA_HOME": str(cls.home / ".local/share")})
+        environment.start()
+        cls.addClassCleanup(environment.stop)
         cls.root=pi_offline.runtime_dir(cls.home)
         cls.entry,_=pi_offline.verify_archive()
         assert pi_offline.install(cls.root)
@@ -116,6 +120,22 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertIn("intercom-ok",p.stdout)
 
+    def test_real_muse_msp_host_opens_scoped_workspace_before_turn(self):
+        if not shutil.which("muse"): self.skipTest("Separately installed Muse executable unavailable; live host bootstrap unverified")
+        node = shutil.which("node")
+        if not node: self.skipTest("Node not available")
+        version = subprocess.check_output([node, "-p", "process.versions.node"], text=True)
+        if int(version.split(".")[0]) < 26: self.skipTest("Node 26 required")
+        loader = self.root/"node_modules/tsx/dist/loader.mjs"
+        fixture = ROOT/"tools/pi/test_runtime_protocol.mjs"
+        env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
+                   npm_config_registry="http://127.0.0.1:9")
+        p = subprocess.run([node, "--import", str(loader), str(fixture), str(self.root)],
+                           cwd=self.root, env=env, capture_output=True,
+                           text=True, timeout=25)
+        self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
+        self.assertIn("installed Muse accepted scoped session/start", p.stdout)
+
     def test_delegated_sdk_workers_inherit_no_package_network_mode(self):
         port = (ROOT/"tools/pi-subagent-bridge/src/pi-port.ts").read_text()
         sdk = (ROOT/"tools/pi-subagent-bridge/src/sdk-worker.ts").read_text()
@@ -144,10 +164,10 @@ class OfflineTests(unittest.TestCase):
         checker = ROOT/"tools/pi/verify-extensions.mjs"
         env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
                    npm_config_registry="http://127.0.0.1:9")
-        p = subprocess.run([node, "--import", str(loader), str(checker), str(self.root)],
+        p = subprocess.run([node, "--import", str(loader), str(checker), str(self.root), "--baseline-catalog"],
                            cwd=self.root, env=env, capture_output=True,
                            text=True, timeout=35)
         self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
-        self.assertIn("ok: Pi SDK loaded", p.stdout)
+        self.assertIn("ok: Pi SDK bound subagents, intercom, and Muse", p.stdout)
 
 if __name__=="__main__":unittest.main()
