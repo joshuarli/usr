@@ -1406,17 +1406,17 @@ class Installer:
                 actual = os.readlink(launcher) if launcher.is_symlink() else ""
                 if actual != str(self.nodejs_root / "current/bin" / command) or (not managed and not healed):
                     self.skip("nodejs", f"{launcher} already exists outside dl management")
+        # Use npm already bundled in the pinned Node.js tarball. The Node
+        # prerequisite of offline Pi setup must never query npm's registry.
+        # A separately requested npm upgrade is a maintenance task, not sync.
         npm_latest = ""
         if managed:
             current_bin = str(self.nodejs_root / "current/bin")
-            npm_latest = self.run([str(self.nodejs_root / "current/bin/npm"), "view", "npm@latest", "version"],
-                                  capture=True, extra_env={"PATH": current_bin + os.pathsep + self._path}).stdout.strip()
-            if not self.valid_version(npm_latest):
-                self.unchecked("nodejs", "could not resolve the latest npm version")
-                return
-            installed_npm = self.run([str(self.nodejs_root / "current/bin/npm"), "--version"], capture=True).stdout.strip()
-            installed_node = self.run([str(self.nodejs_root / "current/bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip()
-            if installed_npm == npm_latest and installed_node == NODEJS_VERSION:
+            installed_npm = self.run([str(self.nodejs_root / "current/bin/npm"), "--version"],
+                                     capture=True, extra_env={"PATH": current_bin + os.pathsep + self._path}).stdout.strip()
+            installed_node = self.run([str(self.nodejs_root / "current/bin/node"), "-p", "process.versions.node"],
+                                      capture=True).stdout.strip()
+            if self.valid_version(installed_npm) and installed_node == NODEJS_VERSION:
                 self.own_file(self.nodejs_root / "current")
                 self.own_dir(self.nodejs_root / previous_release)
                 for command in ("node", "npm", "npx"):
@@ -1424,11 +1424,8 @@ class Installer:
                     if not launcher.exists() and not launcher.is_symlink():
                         self.link_symlink(launcher, str(self.nodejs_root / "current/bin" / command))
                     self.own_file(launcher)
-                self.current(f"nodejs is current ({NODEJS_VERSION}, npm {npm_latest})")
+                self.current(f"nodejs is current ({NODEJS_VERSION}, npm {installed_npm} bundled)")
                 return
-        elif self.which("npm"):
-            candidate = self.npm_view("npm@latest")
-            npm_latest = candidate if self.valid_version(candidate) else ""
         self.own_missing_dirs(self.nodejs_root)
         self.nodejs_root.mkdir(parents=True, exist_ok=True)
         staged_bundle = self.stage_dir(self.nodejs_root, ".nodejs.")
@@ -1458,16 +1455,12 @@ class Installer:
                 archive_path.unlink(missing_ok=True)
             if not (staged_bundle / "bin/node").is_file() or not (staged_bundle / "bin/npm").is_file():
                 self.skip("nodejs", "Node.js archive is missing node or npm")
-            if not npm_latest:
-                npm_latest = self.run([str(staged_bundle / "bin/npm"), "view", "npm@latest", "version"],
-                                      capture=True, extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}).stdout.strip()
+            npm_latest = self.run(
+                [str(staged_bundle / "bin/npm"), "--version"],
+                capture=True, extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}
+            ).stdout.strip()
             if not self.valid_version(npm_latest):
-                self.skip("nodejs", "could not resolve the latest npm version")
-            self.fetch_msg(f"Installing npm {npm_latest} ...")
-            npm_result = self.run([str(staged_bundle / "bin/npm"), "install", "--global", "--prefix", str(staged_bundle),
-                                   f"npm@{npm_latest}"], extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path})
-            if npm_result.returncode:
-                self.skip("nodejs", f"npm {npm_latest} install failed")
+                self.skip("nodejs", "Node.js archive does not contain a working bundled npm")
             staged_node = self.run([str(staged_bundle / "bin/node"), "-p", "process.versions.node"], capture=True).stdout.strip()
             staged_npm = self.run([str(staged_bundle / "bin/npm"), "--version"], capture=True,
                                   extra_env={"PATH": str(staged_bundle / "bin") + os.pathsep + self._path}).stdout.strip()
