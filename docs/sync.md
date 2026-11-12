@@ -40,6 +40,9 @@ Sync prunes a recorded link whose old layer source is gone, including a link tha
 
 ## Cross-harness Pi SDK subagent bridge
 
+`sh sync bridge` selects only the managed Node.js/Pi runtime and MCP registration tasks. It does **not** install Command Code, Claude Code, OpenCode, Homebrew packages, or any other npm-managed harness as a prerequisite. Node.js itself is downloaded from its checksum-pinned distribution tarball when absent; its **bundled** npm is not upgraded or queried against the npm registry.
+
+
 `sh sync tools pi` selects a committed, **SHA-256-verified offline Pi runtime archive** under [`vendor/pi/runtime/`](../vendor/pi/README.md): macOS ARM64, Linux x64, or Linux ARM64. The archive includes Pi 1.5.0, the SDK, `pi-subagents`, `pi-muse-subscription`, `agent-intercom-pi`, `agent-intercom-core` and their complete installed JS dependencies. Sync extracts it atomically into `${XDG_DATA_HOME:-$HOME/.local/share}/pi` and installs a user launcher. **No Pi-specific npm, npx, package-registry query, `pi install`, or `pi update` occurs during ordinary sync or Pi startup.** The Pi settings have `packages: []`; any nonempty package declaration is a hard error. Updating the Pi closure belongs to the explicit `/pi-update` maintenance workflow.
 
 The `pi-extensions` sync task now validates that offline-only policy without mutation. The `pi-subagent-bridge` dependency directory links to the very same installed runtime, instead of running npm to install a second SDK. `sh sync` registers the bridge with Claude, Pi and OpenCode; Codex reads the tracked `[mcp_servers.pi-subagent-bridge]` entry. Foreign MCP servers, credentials and sessions are preserved. Intercom is loaded into **interactive Pi** and uses the included local TypeScript broker launcher, with automatic model wakeups disabled. Companion intercom adapters for the other harnesses are separate integrations.

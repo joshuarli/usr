@@ -23,7 +23,7 @@ BRIDGE = ROOT / "tools/sync/claude-worker.py"
 PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 
-NPM_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
+NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
 JQ_TOOLS = frozenset({"codex", "node-build"})
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
@@ -280,7 +280,7 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
     while pending:
         tool = pending.pop()
         prerequisites = set()
-        if tool in NPM_TOOLS:
+        if tool in NODE_RUNTIME_TOOLS:
             prerequisites.add("nodejs")
         if tool in JQ_TOOLS:
             prerequisites.add("jaq")
@@ -296,7 +296,7 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
         dependencies = ["links"] if setup else []
         if has_alpine and setup:
             dependencies.append("host:alpine")
-        if tool in NPM_TOOLS:
+        if tool in NODE_RUNTIME_TOOLS:
             dependencies.append("tool:nodejs")
         if tool in JQ_TOOLS:
             dependencies.append("tool:jaq")

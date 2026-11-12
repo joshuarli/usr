@@ -1,6 +1,6 @@
 # Vendored Pi runtime
 
-The Pi coding agent, its SDK, `pi-subagents`, the Muse subscription adapter, and the Pi intercom adapter are available from **committed, self-contained runtime archives**. Normal Pi setup never invokes npm, npx, `pi install`, `pi update`, or the package registry. The `pi-subagent-bridge` uses that same dependency closure, not a separately installed SDK.
+The Pi coding agent, its SDK, `pi-subagents`, the Muse subscription adapter, and the Pi intercom adapter are available from **committed, self-contained runtime archives**. Normal Pi setup never invokes npm, npx, `pi install`, `pi update`, or the package registry. The Pi launcher also rejects direct `pi install`/`pi update` commands and forces `PI_OFFLINE=1` so project-local package declarations cannot trigger a fetch, including when nested Pi SDK children run. The `pi-subagent-bridge` uses that same dependency closure, not a separately installed SDK.
 
 ## Offline installation
 
