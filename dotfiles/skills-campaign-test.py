@@ -144,7 +144,6 @@ class SkillCampaignTests(unittest.TestCase):
         canonical = base / ".codex" / "AGENTS.md"
         adapters = (
             base / ".config" / "muse" / "AGENTS.md",
-            base / ".grok" / "AGENTS.md",
             base / ".dsh" / "AGENTS.md",
             base / ".commandcode" / "AGENTS.md",
             base / ".config" / "opencode" / "AGENTS.md",

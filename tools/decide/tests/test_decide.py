@@ -1194,7 +1194,6 @@ class DecideTests(unittest.TestCase):
             "dotfiles/base/.dsh/AGENTS.md",
             "dotfiles/base/.fx/AGENTS.md",
             "dotfiles/base/.gemini/config/AGENTS.md",
-            "dotfiles/base/.grok/AGENTS.md",
             "dotfiles/base/.pi/agent/AGENTS.md",
         )
         for path in aliases:

@@ -20,7 +20,6 @@ Both arguments are required. Normalize the agent name, but never guess the sessi
 | Codex | `codex` | `$CODEX_HOME/sessions` and `$CODEX_HOME/archived_sessions` (default `~/.codex/`). The session is `rollout-*.jsonl`; its ID is the first record's `payload.id` or `payload.session_id`, written bare. |
 | Claude Code | `claude`, `claude-code` | `$CLAUDE_CONFIG_DIR/projects` (default `~/.claude/projects`). The ID is `sessionId` in the transcript records; a subagent sidechain under `subagents` uses its file stem. |
 | Muse Code | `muse`, `muse-code` | `$XDG_DATA_HOME/muse/sessions` (default `~/.local/share/muse/sessions`). Each session is a directory holding `session.jsonl`; the ID is the directory name. |
-| Grok Code | `grok`, `grok-code` | `$GROK_HOME/sessions` (default `~/.grok/sessions`). Each session directory holds `chat_history.jsonl`; the ID is the directory name. |
 | OpenCode | `opencode` | `$XDG_DATA_HOME/opencode` (default `~/.local/share/opencode`) holds the SQLite database `opencode.db`. The session is a `session_v2` row, its ID is that row's `id`, and its messages are `session_message` rows ordered by `seq`. |
 | Pi | `pi` | `$PI_CODING_AGENT_SESSION_DIR` (default under `$PI_CODING_AGENT_DIR/sessions`, then `~/.pi/agent/sessions`). Files are `<timestamp>_<id>.jsonl`; the ID is the first session record's `id`, or the filename suffix. |
 | Command Code | `cmd`, `command`, `command-code` | `$COMMANDCODE_HOME/projects` (default `~/.commandcode/projects`). Session files are `.jsonl`, excluding `.checkpoints.jsonl`; the ID is the first record's `session.id`, falling back to the file stem. |
@@ -51,7 +50,6 @@ If the user explicitly wants to reopen the original agent, provide the correct h
 | Codex | `codex resume <ID>` |
 | Claude Code | `claude --resume <ID>` |
 | Muse Code | `muse resume <ID>` |
-| Grok Code | `grok --resume <ID>` |
 | OpenCode | `opencode --session <ID>` |
 | Pi | `pi --session <ID>` |
 | Command Code | `cmd --session <ID>` |

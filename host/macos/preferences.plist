@@ -7612,17 +7612,6 @@
 					<key>yRelative</key>
 					<integer>74</integer>
 				</dict>
-				<key>Grok Bot Installer_0x1.848cc1f9aaddcp+29</key>
-				<dict>
-					<key>AnchorRelativeTo</key>
-					<integer>1</integer>
-					<key>ScreenID</key>
-					<integer>0</integer>
-					<key>xRelative</key>
-					<integer>-66</integer>
-					<key>yRelative</key>
-					<integer>74</integer>
-				</dict>
 				<key>Helium_0x1.8416ff88p+29</key>
 				<dict>
 					<key>AnchorRelativeTo</key>

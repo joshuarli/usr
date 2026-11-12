@@ -13,7 +13,6 @@ while [ "$xdg_cache_home" != / ] && [ "${xdg_cache_home%/}" != "$xdg_cache_home"
 
 agent_roots="claude|$HOME/.claude
 codex|$HOME/.codex
-grok|$HOME/.grok
 muse|$xdg_config_home/muse
 muse|$xdg_data_home/muse
 opencode|$HOME/.config/opencode

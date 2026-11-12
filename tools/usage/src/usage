@@ -17,28 +17,25 @@ import threading
 import time
 import unicodedata
 
-
 PROVIDERS = (
     ("claude", "Claude Code", "claude"),
     ("cmd", "Command Code", "cmd"),
     ("codex", "Codex", "codex"),
     ("muse", "Muse Code", "muse"),
-    ("grok", "Grok Build", "grok"),
     ("dsh", "DeepSeek API", "dsh"),
     ("agy", "Antigravity", "agy"),
     ("opencode", "OpenCode Go", "opencode2"),
 )
-HELP = """usage: usage [claude|cmd|codex|muse|grok|dsh|agy|opencode]
+HELP = """usage: usage [claude|cmd|codex|muse|dsh|agy|opencode]
 
 Read subscription quota usage from Claude Code, Command Code, Codex,
-Muse Code, Grok Build, OpenCode Go, and Antigravity, plus the DeepSeek API credit balance.
-Grok queries its CLI billing extension over ACP. The DeepSeek balance is not
+Muse Code, OpenCode Go, and Antigravity, plus the DeepSeek API credit
+balance. The DeepSeek balance is not
 a subscription quota. With no provider, query every supported CLI installed
 here. These reads do not submit a model prompt. Claude Code uses its
 undocumented OAuth usage endpoint and does not refresh credentials. OpenCode
 Go queries its hosted usage endpoint with the stored OAuth credential.
 """
-
 
 def stop_process(process):
     if process.stdin and not process.stdin.closed:
@@ -55,7 +52,6 @@ def stop_process(process):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
-
 
 def read_rpc_response(process, request_id, deadline):
     while True:
@@ -79,11 +75,9 @@ def read_rpc_response(process, request_id, deadline):
             raise RuntimeError(detail)
         return message.get("result")
 
-
 def send_rpc(process, request):
     process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
     process.stdin.flush()
-
 
 def query_rpc(binary, arguments, method, experimental=False):
     process = subprocess.Popen(
@@ -120,12 +114,10 @@ def query_rpc(binary, arguments, method, experimental=False):
     finally:
         stop_process(process)
 
-
 def json_object(value: object, error: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise RuntimeError(error)
     return {key: item for key, item in value.items() if isinstance(key, str)}
-
 
 def query_codex(binary: str) -> dict[str, object]:
     return json_object(
@@ -133,17 +125,14 @@ def query_codex(binary: str) -> dict[str, object]:
         "Codex returned an invalid usage response",
     )
 
-
 def muse_last_observed(binary: str) -> object:
     try:
         return query_rpc(binary, ["serve", "--no-session-log"], "usage/read", True)
     except Exception:
         return None
 
-
 def is_percent(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
 
 def run_muse_usage(binary: str) -> dict[str, object]:
     try:
@@ -170,7 +159,6 @@ def run_muse_usage(binary: str) -> dict[str, object]:
         raise RuntimeError("Muse returned an invalid usage response")
     return result
 
-
 def muse_allowance_complete(result: dict[str, object]) -> bool:
     allowance = result.get("allowance")
     return isinstance(allowance, dict) and any(
@@ -178,13 +166,11 @@ def muse_allowance_complete(result: dict[str, object]) -> bool:
         for section in (allowance.get("window"), allowance.get("weekly"))
     )
 
-
 def muse_last_observed_usage(binary: str) -> dict[str, object] | None:
     fallback = muse_last_observed(binary)
     if isinstance(fallback, dict) and isinstance(fallback.get("usage"), dict):
         return json_object(fallback, "Muse returned an invalid usage response")
     return None
-
 
 def muse_failure_reason(result: dict[str, object] | None, error: str | None) -> str:
     if result is not None:
@@ -199,7 +185,6 @@ def muse_failure_reason(result: dict[str, object] | None, error: str | None) -> 
     if error is not None:
         return error
     return "Muse returned no subscription quota"
-
 
 def query_muse(binary: str) -> dict[str, object]:
     try:
@@ -224,95 +209,6 @@ def query_muse(binary: str) -> dict[str, object]:
     if observed is not None:
         return observed
     raise RuntimeError(muse_failure_reason(result, None))
-
-
-def grok_usage(result: object) -> dict[str, object]:
-    config = result.get("config") if isinstance(result, dict) else None
-    if not isinstance(config, dict):
-        raise RuntimeError("Grok returned no subscription billing configuration")
-    current = config.get("currentPeriod")
-    current = current if isinstance(current, dict) else {}
-    prepaid = config.get("prepaidBalance")
-    usage_percent = config.get("creditUsagePercent")
-    if (
-        isinstance(usage_percent, bool)
-        or not isinstance(usage_percent, (int, float))
-        or not math.isfinite(usage_percent)
-    ):
-        raise RuntimeError("Grok returned no valid subscription usage percentage")
-    prepaid_cents = prepaid.get("val") if isinstance(prepaid, dict) else None
-    if (
-        isinstance(prepaid_cents, bool)
-        or not isinstance(prepaid_cents, (int, float))
-        or not math.isfinite(prepaid_cents)
-    ):
-        prepaid_cents = None
-    subscription_tier = result.get("subscription_tier") if isinstance(result, dict) else None
-    return {
-        "subscription_tier": (
-            subscription_tier if isinstance(subscription_tier, str) else None
-        ),
-        "usage_percent": usage_percent,
-        "period_type": (
-            current.get("type") if isinstance(current.get("type"), str) else None
-        ),
-        "reset_at": current.get("end") or config.get("billingPeriodEnd"),
-        "prepaid_balance_cents": prepaid_cents,
-    }
-
-
-def query_grok(binary: str) -> dict[str, object]:
-    process = subprocess.Popen(
-        [binary, "--no-auto-update", "agent", "stdio"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        encoding="utf-8",
-        bufsize=1,
-    )
-    deadline = time.monotonic() + 35
-    try:
-        send_rpc(
-            process,
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": 1,
-                    "clientCapabilities": {
-                        "fs": {"readTextFile": True, "writeTextFile": True},
-                        "terminal": True,
-                    },
-                },
-            },
-        )
-        initialized = read_rpc_response(process, 1, deadline)
-        auth_methods = initialized.get("authMethods", [])
-        if not any(method.get("id") == "cached_token" for method in auth_methods):
-            raise RuntimeError("Grok subscription login is unavailable; run `grok login`")
-        send_rpc(
-            process,
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "authenticate",
-                "params": {"methodId": "cached_token", "_meta": {"headless": True}},
-            },
-        )
-        read_rpc_response(process, 2, deadline)
-        send_rpc(
-            process,
-            {"jsonrpc": "2.0", "id": 3, "method": "_x.ai/billing", "params": {}},
-        )
-        result = read_rpc_response(process, 3, deadline)
-        return grok_usage(result)
-    except TimeoutError as error:
-        raise RuntimeError("Grok billing request timed out after 35 seconds") from error
-    finally:
-        stop_process(process)
-
 
 def read_claude_credentials():
     config_directory = os.environ.get("CLAUDE_CONFIG_DIR")
@@ -355,7 +251,6 @@ def read_claude_credentials():
     if not isinstance(oauth, dict) or not isinstance(oauth.get("accessToken"), str):
         raise RuntimeError("Claude Code credential store has no OAuth subscription token")
     return oauth
-
 
 def query_claude(binary: str) -> dict[str, object]:
     oauth = read_claude_credentials()
@@ -421,10 +316,8 @@ def query_claude(binary: str) -> dict[str, object]:
         raise RuntimeError("Anthropic returned no recognized quota windows")
     return {"plan": oauth.get("subscriptionType"), "usage": json_object(usage, "Anthropic returned an invalid usage response")}
 
-
 def curl_config_value(value):
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
 
 def read_deepseek_api_key():
     token = os.environ.get("DEEPSEEK_API_KEY")
@@ -455,7 +348,6 @@ def read_deepseek_api_key():
     if not process.stdout:
         raise RuntimeError("vault returned an empty DEEPSEEK_API_KEY")
     return process.stdout
-
 
 def query_dsh(binary: str) -> dict[str, object]:
     token = read_deepseek_api_key()
@@ -528,7 +420,6 @@ def query_dsh(binary: str) -> dict[str, object]:
             raise RuntimeError("DeepSeek returned an invalid balance entry")
     return json_object(result, "DeepSeek returned an invalid balance response")
 
-
 def agy_groups(result):
     if not isinstance(result, dict):
         return None
@@ -547,7 +438,6 @@ def agy_groups(result):
         if isinstance(groups, list):
             return groups
     return None
-
 
 def query_agy(binary: str) -> dict[str, object]:
     process = subprocess.run(
@@ -574,7 +464,6 @@ def query_agy(binary: str) -> dict[str, object]:
     if (not report or not report.strip()) and not groups:
         raise RuntimeError("Antigravity returned no quota report")
     return {"report": report, "groups": groups}
-
 
 def read_opencode_account(binary: str) -> dict[str, object]:
     try:
@@ -617,7 +506,6 @@ def read_opencode_account(binary: str) -> dict[str, object]:
     if fallback is None:
         raise RuntimeError("OpenCode Go login not found; run `opencode2 auth login`")
     return json_object(fallback, "OpenCode auth export returned an invalid credential")
-
 
 def query_opencode(binary: str) -> dict[str, object]:
     account = read_opencode_account(binary)
@@ -696,7 +584,6 @@ def query_opencode(binary: str) -> dict[str, object]:
         "usage": usage,
     }
 
-
 def read_cmd_api_key() -> tuple[str, str]:
     base_url = os.environ.get("COMMANDCODE_API_URL", "https://api.commandcode.ai")
     key = os.environ.get("COMMAND_CODE_API_KEY")
@@ -720,7 +607,6 @@ def read_cmd_api_key() -> tuple[str, str]:
     if not isinstance(credentials, dict) or not isinstance(credentials.get("apiKey"), str):
         raise RuntimeError("Command Code credential store has no API key")
     return credentials["apiKey"], base_url
-
 
 def request_cmd(base_url: str, token: str, endpoint: str) -> dict[str, object]:
     curl = shutil.which("curl")
@@ -779,7 +665,6 @@ def request_cmd(base_url: str, token: str, endpoint: str) -> dict[str, object]:
         raise RuntimeError("Command Code returned invalid usage JSON") from error
     return json_object(result, "Command Code returned an invalid usage response")
 
-
 def cmd_plan_total(plan_id: object) -> float | None:
     totals = {
         "individual-go": 10,
@@ -800,7 +685,6 @@ def cmd_plan_total(plan_id: object) -> float | None:
             return totals[known]
     return None
 
-
 def query_cmd(binary: str) -> dict[str, object]:
     token, base_url = read_cmd_api_key()
     org_id = None
@@ -817,7 +701,6 @@ def query_cmd(binary: str) -> dict[str, object]:
     summary = request_cmd(base_url, token, f"/alpha/usage/summary{suffix}")
     return {"whoami": whoami, "credits": credits, "subscription": subscription, "summary": summary}
 
-
 def local_time(timestamp, scale=1):
     if not isinstance(timestamp, (int, float)):
         return "unknown"
@@ -827,7 +710,6 @@ def local_time(timestamp, scale=1):
         )
     except (OverflowError, OSError, ValueError):
         return "unknown"
-
 
 def reset_seconds(timestamp: object, scale: float = 1) -> float | None:
     try:
@@ -841,7 +723,6 @@ def reset_seconds(timestamp: object, scale: float = 1) -> float | None:
         return target - time.time()
     except (OverflowError, OSError, ValueError):
         return None
-
 
 def reset_delay(timestamp: object, scale: float = 1) -> str:
     remaining = reset_seconds(timestamp, scale)
@@ -861,7 +742,6 @@ def reset_delay(timestamp: object, scale: float = 1) -> str:
         parts.append(f"{minutes}m")
     return "".join(parts)
 
-
 def duration_name(minutes):
     if not isinstance(minutes, (int, float)) or minutes <= 0:
         return None
@@ -880,13 +760,11 @@ def duration_name(minutes):
         parts.append(f"{remaining_minutes}m")
     return " ".join(parts)
 
-
 def color(text, code, stream=None):
     stream = stream or sys.stdout
     if not stream.isatty() or "NO_COLOR" in os.environ:
         return str(text)
     return f"\033[{code}m{text}\033[0m"
-
 
 def usage_color_code(value) -> str:
     if value >= 100:
@@ -894,7 +772,6 @@ def usage_color_code(value) -> str:
     if value >= 80:
         return "33"
     return "32"
-
 
 def usage_bar(value: object, width: int = 20) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -905,7 +782,6 @@ def usage_bar(value: object, width: int = 20) -> str:
     filled = min(width, max(0, filled))
     return color("█" * filled + "░" * (width - filled), usage_color_code(value))
 
-
 def percentage_text(value):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return color("unknown", "2") if value is None else str(value)
@@ -914,10 +790,8 @@ def percentage_text(value):
     text = f"{value:.1f}% used"
     return color(text, usage_color_code(value))
 
-
 def print_heading(title):
     print(color(title, "1;36"))
-
 
 def reset_urgency_color(timestamp: object, scale: float = 1) -> str:
     remaining = reset_seconds(timestamp, scale)
@@ -929,7 +803,6 @@ def reset_urgency_color(timestamp: object, scale: float = 1) -> str:
         return "32"
     return "33"
 
-
 def print_window(label: str, used: object, reset: object, scale: float = 1) -> None:
     delay = reset_delay(reset, scale)
     reset_text = color("resets in " + delay, reset_urgency_color(reset, scale))
@@ -939,7 +812,6 @@ def print_window(label: str, used: object, reset: object, scale: float = 1) -> N
     else:
         print(f"  {label}: {percentage_text(used)}, {reset_text}")
 
-
 def print_aligned_windows(rows) -> None:
     rows = list(rows)
     width = 0
@@ -948,7 +820,6 @@ def print_aligned_windows(rows) -> None:
     for row in rows:
         scale = row[3] if len(row) > 3 else 1
         print_window(str(row[0]).ljust(width), row[1], row[2], scale)
-
 
 def normalize_window_label(raw: object, fallback: str) -> str:
     if isinstance(raw, str) and raw.strip():
@@ -965,7 +836,6 @@ def normalize_window_label(raw: object, fallback: str) -> str:
         if cleaned:
             return cleaned
     return fallback
-
 
 def print_codex(result: dict[str, object]) -> None:
     print_heading("Codex")
@@ -995,7 +865,6 @@ def print_codex(result: dict[str, object]) -> None:
         used = window.get("usedPercent")
         rows.append((label, used, window.get("resetsAt")))
     print_aligned_windows(rows)
-
 
 def claude_windows(result):
     limits = result.get("limits")
@@ -1049,14 +918,12 @@ def claude_windows(result):
         windows.append((label, percent, item.get("resets_at")))
     return windows
 
-
 def print_claude(result: dict[str, object]) -> None:
     print_heading("Claude Code")
     if result.get("plan"):
         print(f"  plan: {result['plan']}")
     windows = claude_windows(result["usage"])
     print_aligned_windows(windows)
-
 
 def print_muse(result: dict[str, object]) -> None:
     print_heading("Muse Code")
@@ -1094,18 +961,6 @@ def print_muse(result: dict[str, object]) -> None:
         rows.append(("7d", weekly.get("usedPercent"), weekly.get("resetsAtMs"), 1000))
     print_aligned_windows(rows)
 
-
-def print_grok(result: dict[str, object]) -> None:
-    print_heading("Grok Build")
-    if result.get("subscription_tier"):
-        print(f"  plan: {result['subscription_tier']}")
-    label = normalize_window_label(result.get("period_type"), "subscription")
-    print_window(label, result.get("usage_percent"), result.get("reset_at"))
-    prepaid = result.get("prepaid_balance_cents")
-    if isinstance(prepaid, (int, float)) and not isinstance(prepaid, bool):
-        print(f"  prepaid credits: ${prepaid / 100:.2f}")
-
-
 def print_dsh(result: dict[str, object]) -> None:
     print_heading("DeepSeek API")
     available = result.get("is_available")
@@ -1125,7 +980,6 @@ def print_dsh(result: dict[str, object]) -> None:
             f"  {currency}: {total} total "
             f"({granted} granted, {topped_up} topped up)"
         )
-
 
 def agy_bucket_used(bucket: object) -> object:
     if not isinstance(bucket, dict):
@@ -1149,7 +1003,6 @@ def agy_bucket_used(bucket: object) -> object:
         return None
     return (1 - remaining) * 100
 
-
 def agy_bucket_reset(bucket: object) -> object:
     if not isinstance(bucket, dict):
         return None
@@ -1158,7 +1011,6 @@ def agy_bucket_reset(bucket: object) -> object:
         if value is not None:
             return value
     return None
-
 
 def agy_windows(result: dict[str, object]) -> list[tuple[str, object, object]]:
     windows = []
@@ -1207,7 +1059,6 @@ def agy_windows(result: dict[str, object]) -> list[tuple[str, object, object]]:
         windows.append((label, used, parts[3].strip() or None))
     return windows
 
-
 def print_agy(result: dict[str, object]) -> None:
     print_heading("Antigravity")
     windows = agy_windows(result)
@@ -1215,7 +1066,6 @@ def print_agy(result: dict[str, object]) -> None:
         print(f"  {color('no subscription quota returned', '33')}")
         return
     print_aligned_windows(windows)
-
 
 def opencode_windows(result):
     usage = result.get("usage") if isinstance(result, dict) else None
@@ -1239,7 +1089,6 @@ def opencode_windows(result):
         windows.append((label, percent, window.get("resetsAt"), status))
     return windows
 
-
 def print_opencode(result: dict[str, object]) -> None:
     print_heading("OpenCode Go")
     email = result.get("email")
@@ -1255,7 +1104,6 @@ def print_opencode(result: dict[str, object]) -> None:
             label = f"{label} [{status}]"
         rows.append((label, percent, reset))
     print_aligned_windows(rows)
-
 
 def cmd_plan_name(plan_id: object) -> str | None:
     names = {
@@ -1277,14 +1125,12 @@ def cmd_plan_name(plan_id: object) -> str | None:
             return names[known]
     return None
 
-
 def cmd_credit_float(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if not math.isfinite(value):
         return None
     return max(0.0, value)
-
 
 def cmd_windows(result: dict[str, object]) -> list[tuple[str, object, object]]:
     credits = result.get("credits")
@@ -1302,7 +1148,6 @@ def cmd_windows(result: dict[str, object]) -> list[tuple[str, object, object]]:
             continue
         rows.append((label, min(used / cap * 100, 100), window.get("resetAt"), 1000))
     return rows
-
 
 def print_cmd(result: dict[str, object]) -> None:
     print_heading("Command Code")
@@ -1353,7 +1198,6 @@ def print_cmd(result: dict[str, object]) -> None:
     elif percent is None:
         print(f"  {color('no subscription quota returned', '33')}")
 
-
 def main(arguments):
     if arguments in (["-h"], ["--help"]):
         print(HELP, end="")
@@ -1385,7 +1229,6 @@ def main(arguments):
         "cmd": query_cmd,
         "codex": query_codex,
         "muse": query_muse,
-        "grok": query_grok,
         "dsh": query_dsh,
         "agy": query_agy,
         "opencode": query_opencode,
@@ -1395,7 +1238,6 @@ def main(arguments):
         "cmd": print_cmd,
         "codex": print_codex,
         "muse": print_muse,
-        "grok": print_grok,
         "dsh": print_dsh,
         "agy": print_agy,
         "opencode": print_opencode,
@@ -1425,7 +1267,6 @@ def main(arguments):
                     render[key](result)
                     sys.stdout.flush()
     return 1 if failures else 0
-
 
 raise SystemExit(main(sys.argv[1:]))
 PY

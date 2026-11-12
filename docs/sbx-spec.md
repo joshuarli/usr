@@ -60,9 +60,8 @@ When `~/usr/dotfiles/base` exists, sources are **only**:
 | `dotfiles/base/.agents/skills/` | `~/.agents/skills/` | read-only |
 | `dotfiles/base/.codex/AGENTS.md` | `~/.codex/AGENTS.md` | read-only |
 | `dotfiles/base/.claude/agents/`, if present | `~/.claude/agents/` | read-only |
-| `dotfiles/base/.grok/agents/`, if present | `~/.grok/agents/` | read-only |
 
-The private home also receives relative symlink adapters for Claude's `CLAUDE.md` and skills, Grok instructions, Muse/OpenCode/Antigravity instructions and skills, DeepSeek, and Command Code. All adapters refer only to the canonical instruction file or shared skills; they **do not** import normal user-level agent settings, auth, tokens, plugin state, history, logs, hooks, or caches. Other repository files are not mounted solely because `usr` is present. A user's CWD may itself be `~/usr`, in which case its normal writable-project grant encompasses those tracked sources: the read-only *alias* does not make the original project immutable.
+The private home also receives relative symlink adapters for Claude's `CLAUDE.md` and skills, Muse/OpenCode/Antigravity instructions and skills, DeepSeek, and Command Code. All adapters refer only to the canonical instruction file or shared skills; they **do not** import normal user-level agent settings, auth, tokens, plugin state, history, logs, hooks, or caches. Other repository files are not mounted solely because `usr` is present. A user's CWD may itself be `~/usr`, in which case its normal writable-project grant encompasses those tracked sources: the read-only *alias* does not make the original project immutable.
 
 The private home is disposable. The host paths of the skills and instructions are validated before constructing the policy: if a checked-in source symlink points beyond the tracked source tree, launching is refused. Symlinks inside a permitted skill tree can point to visible paths or to unavailable paths, but do not independently grant access to their external targets.
 

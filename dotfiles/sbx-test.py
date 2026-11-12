@@ -122,7 +122,6 @@ class PolicyTests(LocalFixture):
         self.assertEqual(s.skills, base / ".agents/skills")
         self.assertEqual(s.instructions, base / ".codex/AGENTS.md")
         self.assertEqual(s.claude_agents, base / ".claude/agents")
-        self.assertIsNone(s.grok_agents)
         self.assertIsNone(self.plan("--no-skills").sources)
 
     def test_broken_or_external_skill_source_rejected(self):

@@ -347,15 +347,6 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_uv()
 
-    def test_grok_keep_and_install(self):
-        routes = {"https://x.ai/cli/stable": b"1.2.3\n",
-                  "https://x.ai/cli/grok-1.2.3-linux-x86_64": (b"binary", {"ETag": "e"})}
-        inst = self.make(routes)
-        inst.install_grok()
-        self.assertEqual(self.dest_path("grok").read_bytes() if False else (self.home / ".grok/downloads/grok-linux-x86_64").read_bytes(), b"binary")
-        self.assertTrue((self.home / ".grok/bin/grok").is_symlink())
-        self.assertEqual(self.state("grok"), "e")
-
     def _python_build_routes(self, tool, inner, repo, tag="20261101", triple="x86_64-unknown-linux-musl"):
         asset = f"python-{tag}-{triple}-install_only_stripped.tar.gz" if tool == "python3" else f"node-{tag}-{triple}-install_only_stripped.tar.gz"
         url = f"https://example.invalid/{asset}"

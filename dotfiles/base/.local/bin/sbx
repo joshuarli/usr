@@ -30,7 +30,6 @@ class Sources:
     skills: Path
     instructions: Path
     claude_agents: Path | None
-    grok_agents: Path | None
 
 
 @dataclass(frozen=True)
@@ -136,7 +135,7 @@ def get_sources(home: Path, enabled: bool) -> Sources | None:
                 raise SandboxError(f"agent definition source resolves outside usr: {found}")
             return found
         return None
-    return Sources(skills, instructions, agents(".claude/agents"), agents(".grok/agents"))
+    return Sources(skills, instructions, agents(".claude/agents"))
 
 
 def parse(argv: list[str], *, backend: str | None = None, home: Path | None = None,
@@ -189,7 +188,6 @@ def alias_map() -> dict[str, str]:
         ".claude/skills": "../.agents/skills",
         ".gemini/antigravity-cli/skills": "../../.agents/skills",
         ".claude/CLAUDE.md": "../.codex/AGENTS.md",
-        ".grok/AGENTS.md": "../.codex/AGENTS.md",
         ".config/opencode/AGENTS.md": "../../.codex/AGENTS.md",
         ".config/muse/AGENTS.md": "../../.codex/AGENTS.md",
         ".gemini/config/AGENTS.md": "../../.codex/AGENTS.md",
@@ -205,8 +203,6 @@ def skill_bindings(sources: Sources, home: Path) -> list[tuple[Path, Path]]:
     ]
     if sources.claude_agents:
         bindings.append((sources.claude_agents, home / ".claude/agents"))
-    if sources.grok_agents:
-        bindings.append((sources.grok_agents, home / ".grok/agents"))
     return bindings
 
 

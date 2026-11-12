@@ -13,7 +13,7 @@ Instructions drift as they grow: two skills give opposite orders, a rule is rest
 
 ## Scope and cost
 
-- **Everything an agent reads.** `dotfiles/base/.codex/AGENTS.md` and every adapter linking to it, the repo `AGENTS.md`, `SKILLS.md`, `docs/agent-setup.md`, `dotfiles/base/.claude/agents/` and `dotfiles/base/.grok/agents/`, and every `SKILL.md` and `references/` file under `dotfiles/base/.agents/skills/` and `.agents/skills/`.
+- **Everything an agent reads.** `dotfiles/base/.codex/AGENTS.md` and every adapter linking to it, the repo `AGENTS.md`, `SKILLS.md`, `docs/agent-setup.md`, `dotfiles/base/.claude/agents/`, and every `SKILL.md` and `references/` file under `dotfiles/base/.agents/skills/` and `.agents/skills/`.
 - **Weight findings by load cost.** The global contract loads in every session, auto-skill descriptions in every session, and skill bodies only on use. A byte cut from the contract is worth more than a paragraph cut from an explicit skill.
 - **Each harness loads the contract once.** List the adapter symlinks (`fd -H -t l '^(AGENTS|CLAUDE|GEMINI)\.md$' dotfiles`) against the paths in `docs/agent-setup.md`. A second adapter in one harness's directory doubles the contract in every session, and so does a stale link left in the home directory, which sync must then retire. Inside this repo, Claude Code also loads nested instruction files and `.claude/skills` directories beside files it reads; `.claude/settings.json` excludes the adapters and sync declares `~/.claude/skills` in code. When a finding is about load cost, prove it: run `claude -p --model claude-haiku-5-5 --allowedTools Read` asking it to read a file in the suspect directory and list every `Contents of` header, once with the fix and once without.
 

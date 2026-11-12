@@ -12,12 +12,12 @@ A skill that reads well proves nothing. Read existing sessions to see whether it
 
 ## Data
 
-Read the session transcripts directly, read-only: `~/.claude/projects`, `~/.codex/sessions`, `~/.local/share/muse/sessions`, and `~/.grok/sessions`.
+Read the session transcripts directly, read-only: `~/.claude/projects`, `~/.codex/sessions`, and `~/.local/share/muse/sessions`.
 
-- List each skill's kind (auto or explicit-only), the sessions that listed it, and the sessions that loaded it, for Claude, Codex, Muse, and Grok.
+- List each skill's kind (auto or explicit-only), the sessions that listed it, and the sessions that loaded it, for Claude, Codex, and Muse.
 - For each load, note its date, harness, project, how it loaded, and a clipped excerpt of the preceding prompt.
 
-A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex or Grok, or Muse's recorded skill-read event. Grok saves no session skill catalog, so its listed count, firing rate, and listed-but-not-loaded skips are unavailable; judge it from load examples and session coverage. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. Rate alone decides nothing.
+A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex, or Muse's recorded skill-read event. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. Rate alone decides nothing.
 
 ## Steps
 
@@ -38,4 +38,4 @@ Report the decisions and edit skills only when asked.
 
 **The test:** every decision cites counts, a sampled session, and what the work gained or lost, and never treats a higher invocation rate as success. After a change, re-run to see whether outcomes in the situations moved, or say it is too soon to tell. Causal claims need a paired comparison, which needs separate authorization.
 
-**Report:** the window and session counts; a table of skill, listed, loaded, and rate per harness (mark Grok listing and rate unavailable); costly misses and harmless skips; each decision with its evidence; skills with too little data; what to re-measure and when.
+**Report:** the window and session counts; a table of skill, listed, loaded, and rate per harness; costly misses and harmless skips; each decision with its evidence; skills with too little data; what to re-measure and when.

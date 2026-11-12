@@ -41,17 +41,6 @@ present "$home/.claude/settings.json"
 present "$home/.claude/.credentials.json"
 absent "$home/.claude/history.jsonl"
 
-mkdir -p "$home/.grok/sessions"
-: > "$home/.grok/config.toml"
-: > "$home/.grok/auth.json"
-: > "$home/.grok/mcp_credentials.json"
-: > "$home/.grok/sessions/history.jsonl"
-reset_agent grok
-present "$home/.grok/config.toml"
-present "$home/.grok/auth.json"
-present "$home/.grok/mcp_credentials.json"
-absent "$home/.grok/sessions"
-
 mkdir -p "$home/.config/muse" "$home/.local/share/muse/sessions"
 : > "$home/.config/muse/settings.json"
 : > "$home/.config/muse/auth.json"
@@ -102,21 +91,30 @@ absent "$custom_cache/opencode/bin"
 outside=$scratch/outside
 symlink_home=$scratch/symlink-home
 mkdir -p "$outside" "$symlink_home"
-: > "$outside/state"
-ln -s "$outside" "$symlink_home/.grok"
-if HOME=$symlink_home "$reset_agents" grok >/dev/null 2>&1; then
+: > "$outside/config-sentinel"
+mkdir -p "$symlink_home/.config"
+ln -s "$outside" "$symlink_home/.config/muse"
+if HOME=$symlink_home \
+    XDG_CONFIG_HOME=$symlink_home/.config \
+    XDG_DATA_HOME=$symlink_home/.local/share \
+    XDG_CACHE_HOME=$symlink_home/.cache \
+    "$reset_agents" muse >/dev/null 2>&1; then
     printf 'FAIL: a harness home symlink was accepted\n' >&2
     exit 1
 fi
-present "$outside/state"
+present "$outside/config-sentinel"
 
 physical_home=$scratch/physical-home
 linked_home=$scratch/linked-home
-mkdir -p "$physical_home/.grok"
-: > "$physical_home/.grok/runtime.json"
+mkdir -p "$physical_home/.config/muse"
+: > "$physical_home/.config/muse/runtime.json"
 ln -s "$physical_home" "$linked_home"
-HOME=$linked_home "$reset_agents" grok
-absent "$physical_home/.grok/runtime.json"
+HOME=$linked_home \
+    XDG_CONFIG_HOME=$linked_home/.config \
+    XDG_DATA_HOME=$linked_home/.local/share \
+    XDG_CACHE_HOME=$linked_home/.cache \
+    "$reset_agents" muse
+absent "$physical_home/.config/muse/runtime.json"
 
 physical_xdg_home=$scratch/physical-xdg-home
 linked_xdg_home=$scratch/linked-xdg-home
@@ -146,7 +144,7 @@ if usage=$(reset_agent invalid 2>&1); then
     exit 1
 fi
 case $usage in
-    *'agents: claude codex grok muse opencode'*) ;;
+    *'agents: claude codex muse opencode'*) ;;
     *) printf 'FAIL: usage did not list each agent once\n' >&2; exit 1 ;;
 esac
 
@@ -168,7 +166,6 @@ HOME=$home \
 printf '%s\n' \
     "$home/.claude" \
     "$home/.codex" \
-    "$home/.grok" \
     "$home/.config/muse" \
     "$home/.local/share/muse" \
     "$home/.config/opencode" \

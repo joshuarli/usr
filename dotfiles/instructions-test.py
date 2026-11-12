@@ -49,7 +49,7 @@ class InstructionTests(unittest.TestCase):
                     self.assert_contract(run_hook(harness, {"hook_event_name": event, "model": model}), event, LEAN)
 
     def test_all_other_or_missing_model_ids_select_the_complete_normal_contract(self):
-        models = (None, "", "opus", "sol", "gpt-6.1-terra", "gpt-6-luna", "grok-4.7",
+        models = (None, "", "opus", "sol", "gpt-6.1-terra", "gpt-6-luna", "muse-9.9",
                   "claude-sonnet-5-5", "claude-opus-5-50", "claude-opus-5-5-future",
                   "gpt-6.1-sol-future", "openrouter/gpt-6.1-sol", "../../private", [], {}, 55)
         for harness, target in MODELS.items():
@@ -97,7 +97,7 @@ class InstructionTests(unittest.TestCase):
             self.assertEqual(result.stderr, b"agent-instructions: invalid hook input\n")
 
     def test_unknown_harness_is_rejected(self):
-        result = run_hook("grok", {"hook_event_name": "SessionStart", "model": MODELS["claude"]})
+        result = run_hook("opencode", {"hook_event_name": "SessionStart", "model": MODELS["claude"]})
         self.assertEqual((result.returncode, result.stdout), (2, ""))
 
     def test_missing_empty_oversized_and_non_utf8_contracts_fail_without_partial_output(self):
@@ -193,7 +193,7 @@ class InstructionTests(unittest.TestCase):
     def test_other_harnesses_keep_the_original_normal_contract(self):
         for relative in (".commandcode/AGENTS.md", ".config/muse/AGENTS.md", ".config/opencode/AGENTS.md",
                          ".dsh/AGENTS.md", ".fx/AGENTS.md", ".gemini/config/AGENTS.md",
-                         ".grok/AGENTS.md", ".pi/agent/AGENTS.md"):
+                         ".pi/agent/AGENTS.md"):
             self.assertEqual((BASE / relative).resolve(strict=True), NORMAL.resolve(strict=True))
 
 

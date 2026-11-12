@@ -17,7 +17,7 @@ Next: 51
 
 - **Area:** Errors
 - **Where:** `tools/usage/src/usage:60`, `tools/usage/src/usage:88`, `tools/usage/src/usage:264`
-- **Problem:** `read_rpc_response` calls `select` on a pipe wrapped in buffered text I/O. When a child writes a notification and response together, the first `readline` can buffer both. After skipping the notification, the loop waits on the empty descriptor instead of consuming the buffered response, eventually reporting the normal 35-second timeout. A local child fixture using the real reader and a 300 ms deadline returned a response sent alone, but timed out on notification-plus-response in one write; a subsequent `readline` recovered the already received response. Codex/Muse RPC and Grok ACP use this reader.
+- **Problem:** `read_rpc_response` calls `select` on a pipe wrapped in buffered text I/O. When a child writes a notification and response together, the first `readline` can buffer both. After skipping the notification, the loop waits on the empty descriptor instead of consuming the buffered response, eventually reporting the normal 35-second timeout. A local child fixture using the real reader and a 300 ms deadline returned a response sent alone, but timed out on notification-plus-response in one write; a subsequent `readline` recovered the already received response. Codex/Muse RPC use this reader.
 - **Recommendation:** Frame unbuffered bytes with deadline-aware polling, or read complete messages on a dedicated reader into a queue. Cover several JSON lines in one write, fragmented lines, and a child that remains alive after its response.
 - **Fix with:** `os-boundaries`
 - **Effort:** S

@@ -128,7 +128,6 @@ class Installer:
         self.ffmpeg_home = Path(self.env.get("FFMPEG_HOME") or self.data_home / "ffmpeg")
         self.oxish_home = Path(self.env.get("OXISH_HOME") or self.data_home / "oxish")
         self.gluon_home = Path(self.env.get("GLUON_HOME") or self.data_home / "gluon")
-        self.grok_home = Path(self.env.get("GROK_HOME") or self.home / ".grok")
         self.opencode2_home = Path(self.env.get("OPENCODE2_HOME") or self.home / ".opencode")
         self.cmd_root = self.data_home / "command-code"
         self.pi_root = self.data_home / "pi-runtime"
@@ -910,68 +909,6 @@ class Installer:
         self.write_state("fx", record)
         self.changed = True
         self.ok(f"Installed {self.dest}/fx ({tag})")
-
-    def install_grok(self) -> None:
-        if self.installed("grok") and not self.legacy_binary("grok"):
-            if (self.dest / "grok").is_file() and not (self.dest / "grok").is_symlink() \
-                    and (self.state / "grok").is_file() and not self.which("file"):
-                self.warn("Warning: file is required to identify the existing Grok launcher; keeping it")
-            self.current("grok is installed")
-            return
-        platforms = {("darwin", "x86_64"): "macos-x86_64", ("darwin", "aarch64"): "macos-aarch64",
-                     ("linux", "x86_64"): "linux-x86_64", ("linux", "aarch64"): "linux-aarch64"}
-        if (self.os_name, self.arch) not in platforms:
-            self.skip("grok", f"no upstream binary for {self.os_name}/{self.arch}")
-        platform_name = platforms[(self.os_name, self.arch)]
-        version = ""
-        for line in self.fetch_text("https://x.ai/cli/stable").splitlines():
-            if re.match(r"^\d+\.\d+\.\d+$", line.strip()):
-                version = line.strip()
-        if not version:
-            self.unchecked("grok", "no stable release found")
-            return
-        url = f"https://x.ai/cli/grok-{version}-{platform_name}"
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked("grok", f"{url} is unreachable")
-            return
-        bin_dir = self.grok_home / "bin"
-        downloads = self.grok_home / "downloads"
-        binary = downloads / f"grok-{platform_name}"
-        if not self.legacy_binary("grok") and self.is_current("grok", record):
-            self.own_file(bin_dir / "grok")
-            target = os.readlink(bin_dir / "grok") if (bin_dir / "grok").is_symlink() else ""
-            self.own_grok_target(target)
-            self.current(f"grok is current ({version})")
-            return
-        if binary.exists() or binary.is_symlink():
-            self.skip("grok", f"{binary} already exists")
-        if (bin_dir / "grok").exists() or (bin_dir / "grok").is_symlink():
-            self.skip("grok", f"{bin_dir}/grok already exists")
-        self.own_missing_dirs(bin_dir)
-        self.own_missing_dirs(downloads)
-        bin_dir.mkdir(parents=True, exist_ok=True)
-        downloads.mkdir(parents=True, exist_ok=True)
-        staged = self.stage_file(downloads, ".grok.")
-        if not self.download(url, staged):
-            staged.unlink(missing_ok=True)
-            self.skip("grok", "download failed")
-        if self.os_name == "darwin":
-            self.run(["xattr", "-d", "com.apple.quarantine", str(staged)])
-            self.run(["codesign", "-fs", "-", str(staged)], check=True)
-        staged.chmod(staged.stat().st_mode | 0o111)
-        os.replace(staged, binary)
-        self.own_file(binary)
-        self.link_symlink(bin_dir / "grok", f"../downloads/grok-{platform_name}")
-        self.link_symlink(self.dest / "grok", str(bin_dir / "grok"))
-        self.write_state("grok", record)
-        self.changed = True
-        self.ok(f"Installed {self.dest}/grok")
-
-    def own_grok_target(self, target: str) -> None:
-        if target in ("../downloads/grok-macos-x86_64", "../downloads/grok-macos-aarch64",
-                      "../downloads/grok-linux-x86_64", "../downloads/grok-linux-aarch64"):
-            self.own_file(self.grok_home / "downloads" / Path(target).name)
 
     def _install_python_build(self, tool: str, root: Path, triples: dict[tuple[str, str], str],
                               repo: str, inner: str, links: list[tuple[str, str]],
@@ -2771,7 +2708,7 @@ class Installer:
     def install(self, tool: str) -> None:
         handlers = {
             "fd": lambda: self.install_fd_or_rg("fd"), "rg": lambda: self.install_fd_or_rg("rg"),
-            "grok": self.install_grok, "fx": self.install_fx, "dsh": self.install_dsh,
+            "fx": self.install_fx, "dsh": self.install_dsh,
             "cmd": self.install_cmd, "pnpm": self.install_pnpm, "cf": self.install_cf,
             "agent-browser": self.install_agent_browser, "pi": self.install_pi,
             "antigravity": self.install_antigravity, "agy": self.install_antigravity,
@@ -2854,12 +2791,6 @@ class Installer:
                 if target.startswith(str(self.home / ".claude") + os.sep) or target.startswith(str(self.claude_versions) + os.sep):
                     self.own_file(Path(target))
         self.record_managed_binary("fx")
-        self.record_managed_binary("grok")
-        if (self.state / "grok").is_file() and (self.state / "grok").stat().st_size > 0 \
-                and (self.dest / "grok").is_symlink() and os.readlink(self.dest / "grok") == str(self.grok_home / "bin/grok"):
-            self.own_file(self.grok_home / "bin/grok")
-            target = os.readlink(self.grok_home / "bin/grok") if (self.grok_home / "bin/grok").is_symlink() else ""
-            self.own_grok_target(target)
         self.record_managed_binary("codex")
         if (self.state / "codex").is_file() and (self.state / "codex").stat().st_size > 0:
             target = os.readlink(self.dest / "codex") if (self.dest / "codex").is_symlink() else ""
