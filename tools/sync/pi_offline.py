@@ -152,7 +152,13 @@ def install(root: Path) -> bool:
         with tarfile.open(file, "r:gz") as archive:
             members = archive.getmembers()
             validate_members(members)
-            archive.extractall(stage, filter="data")
+            # tarfile's strict filter was introduced after the oldest Python
+            # accepted by sync. validate_members() checks every path/type/link
+            # first; retain compatibility with the supported Python 3.9+ bootstrap.
+            if hasattr(tarfile, "data_filter"):
+                archive.extractall(stage, filter="data")
+            else:
+                archive.extractall(stage)
         if not version_matches(stage):
             raise OfflinePiError("Pi archive missing pinned CLI, SDK or extensions")
         (stage / "bin").mkdir()
