@@ -20,7 +20,7 @@ Turn an undecided backlog into work an implementer can take cold. Make the owner
 
 ## Steps
 
-1. **Inventory before deciding.** Read the instructions, overview, backlog, RFCs, and linked decisions; identify authoritative sources, revision, and working changes.
+1. **Inventory before deciding.** Read the instructions, overview, backlog via `todo list --json` and `todo show ID --json`, RFCs, and linked decisions; identify authoritative sources, revision, and working changes.
    - Include drafts, accepted-but-unimplemented and orphan RFCs, and blocked and already-actionable tickets.
    - Paginate accessible external trackers the repo uses, separating issues from pull requests.
    - Record every original ID or path, reconcile mirrors, and note inaccessible sources.
@@ -30,7 +30,7 @@ Turn an undecided backlog into work an implementer can take cold. Make the owner
 
 3. **Resolve related decisions together.** Find shared causes, incompatible proposals, and prerequisites. Use [architect](../architect/SKILL.md) for consequential choices between different designs; keep routine decisions short. Choose one approach, explain why its strongest alternative loses, and name contract, migration, compatibility, and failure-handling consequences. Resolve upstream choices first, then revisit every dependent ticket. Clearing a design blocker does not finish dependent implementation.
 
-4. **Record decisions where they belong.** Give each item a concrete decision or reaffirmed recommendation, source evidence (`file:line`, command result, or authoritative link), and next action. Specify intended behavior, affected boundaries, observable acceptance, and prerequisites without leaving "A or B" to the implementer. Keep small decisions in tickets; use RFCs for substantial contracts. Complete a draft's Decision, settle Open questions, and update Status, preserving rationale and alternatives. Describe future behavior as a target until implemented; refresh only related docs.
+4. **Record decisions where they belong.** Use `todo edit ID --json -` for ticket changes and `todo close ID` for settled removals. Give each item a concrete decision or reaffirmed recommendation, source evidence (`file:line`, command result, or authoritative link), and next action. Specify intended behavior, affected boundaries, observable acceptance, and prerequisites without leaving "A or B" to the implementer. Keep small decisions in tickets; use RFCs for substantial contracts. Complete a draft's Decision, settle Open questions, and update Status, preserving rationale and alternatives. Describe future behavior as a target until implemented; refresh only related docs.
 
    Give each ticket one honest disposition, using the repo's vocabulary:
 

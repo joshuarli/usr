@@ -13,7 +13,7 @@ Close the bounded queue captured from `TODO.md`. Dependencies and existing owner
 ## Rules
 
 - **Work on a branch, then merge.** Use a branch named `backlog-<date>` cut from the current branch. When the run ends, merge it into the branch it was cut from and end there. Never run formatters.
-- **Keep the active queue bounded.** Capture the tickets already in `TODO.md` at the start. Record newly discovered tickets for a later run; do not add them to the active queue unless the user asks. Keep incomplete tickets open.
+- **Keep the active queue bounded.** Capture `todo list --json` at the start and use `todo show ID --json` for details. Record newly discovered tickets for a later run; do not add them to the active queue unless the user asks. Keep incomplete tickets open.
 - **Honor prerequisites and recorded deferrals.** Read dependencies in tickets and accepted RFCs. Hold a dependent until its prerequisites are integrated and verified. If a prerequisite parks, keep its dependents open with the same blocker. Revisit a recorded deferral only when its trigger or evidence changes, or the owner changes the decision. Keep an unresolved owner decision or draft RFC parked. An accepted design does not replace prerequisite implementation.
 - **Let priority schedule ready work.** Start the highest-priority ready ticket first, then work down by priority and ID. Dependencies, file conflicts, and acceptance determine integration. A ticket blocked by active lane ownership is not ready; integrate or park that owner before starting conflicting work. Recompute readiness after integrations. Do not delay an independent verified fix solely to make commit history follow priority order.
 - **Choose lanes economically.** Complete a trivial ticket directly when that costs less than a handoff. A worker may take a coherent group of small related tickets when that reduces briefing and integration cost. Use separate worktrees when concurrency, isolation, or conflict risk justifies them; do not create one per ticket by default. For multiple lanes, follow [orchestrate](../orchestrate/SKILL.md) and its [lane contract](../orchestrate/references/campaigns.md#lane-contract).
@@ -22,12 +22,12 @@ Close the bounded queue captured from `TODO.md`. Dependencies and existing owner
 - **Park precisely.** Parking follows the sleep rule. A routine download alone is not a reason to park. Do not close a ticket while its required acceptance remains blocked.
 - **Keep ticket ownership clear.** Workers do not edit `TODO.md`. They report each ticket's diff, checks, acceptance evidence, and any defect outside the ticket. The parent owns integration and ticket accounting.
 - **Reuse valid acceptance evidence.** Read each diff against the ticket's `Recommendation`. Reject unrelated edits, changes outside its `Where` files, unbriefed dependencies, and weakened or deleted tests. Reuse successful checks while their inputs and assumptions hold, and rerun them only when integration, changed inputs, or a binding requirement could invalidate them. Keep before-fix failure evidence for bug fixes.
-- **Commit each closed ticket separately.** Put the accepted change and ticket removal in the same commit. Delete a linked RFC in that commit only when `todo` defines the ticket as complete. Use a Conventional Commit with a `Closes ABC-123` footer. A worker handling several tickets still delivers a separate commit for each. Do not close an incomplete ticket.
+- **Commit each closed ticket separately.** Put the accepted change and ticket removal using `todo close ID` after verification in the same commit. Delete a linked RFC in that commit only when `todo` defines the ticket as complete. Use a Conventional Commit with a `Closes ABC-123` footer. A worker handling several tickets still delivers a separate commit for each. Do not close an incomplete ticket.
 - **Record discoveries for later.** File newly found defects as tickets per `todo`, in one `docs(todo)` commit after the active queue. Do not work them in this run unless requested.
 
 ## Steps
 
-1. Read `AGENTS.md`, `TODO.md`, linked decisions, and any existing ultratriage result. Capture the active queue and map prerequisites, conflicts, and owner decisions.
+1. Read `AGENTS.md`, the structured backlog, linked decisions, and any existing ultratriage result. Capture the active queue and map prerequisites, conflicts, and owner decisions.
 2. Start the highest-priority ready work. Choose direct work, a coherent worker group, and worktrees according to `orchestrate` economics.
 3. Integrate accepted work when its dependencies and acceptance allow, one commit per closed ticket.
 4. File new defects, then confirm `TODO.md` contains only open, parked, and newly filed tickets.

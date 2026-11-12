@@ -7,25 +7,11 @@ description: "Apply when asked to save, defer, or ticket something for later (\"
 
 A deferred item is a ticket in a committed file, not a code comment, a chat reply, or memory. One shape means any ticket can be picked up cold, and review findings and todos are the same thing.
 
-## Where
+## Backlog
 
-- **`TODO.md` at the repo root, committed.** Create it when absent, with a header of two lines: `Prefix: ABC` and `Next: 1`.
-- **The prefix is 3 to 4 uppercase letters from the repo name,** chosen on the first ticket and never changed.
-- **An ID is the prefix and `Next`,** which then increments. IDs are never reused, even after a ticket is deleted. Tickets sit in priority order, then ID, and `rg ABC-123` finds one.
+`TODO.md` at the repo root is the source of truth. Create an absent file with `Prefix: ABC` and `Next: 1`; choose a 3–4 uppercase letter prefix from the repo name and never change it. Use `todo list --json` to find possible matches and `todo show ABC-123 --json` for the full record. Use `todo add --json -` and `todo edit ABC-123 --json -` with JSON on standard input, and `todo close ABC-123` when done. Run `todo check` after changes. See `tools/todo/README.md` in the dotfiles repository for the record schema and commands. The CLI allocates IDs and orders tickets; never manually rewrite the backlog for these operations. Areas describe the affected domain, including Delegation.
 
-## Ticket
-
-```markdown
-### ABC-123 · P2 · <title naming the problem>
-
-- **Area:** Architecture | Types | Config | Errors | Concurrency | Data | Security | Tests | Performance | Dead code | Navigability | Build | Dependencies | Operability | Docs
-- **Where:** `path:line`, ...
-- **Problem:** what is wrong or missing, how it fails, who is hit, and the evidence. Say `unproven` for a P1 or P2 you could not prove.
-- **Recommendation:** the smallest change that removes the cause.
-- **Fix with:** the skill that carries out the recommendation, or `none`.
-- **Effort:** S (hours) | M (days) | L (weeks)
-- **Design:** optional, a link to the RFC for this ticket.
-```
+Each ticket needs a problem title, area, evidence locations, problem and impact, smallest recommendation, implementation skill or `none`, and S/M/L effort. Say `unproven` for a P1 or P2 you could not prove. Link a design RFC when needed.
 
 Rate by impact times likelihood, never by effort.
 
@@ -36,12 +22,12 @@ Rate by impact times likelihood, never by effort.
 
 ## Filing
 
-- **Filing is not doing.** Read only enough to fill `Where`, and make no code change for the ticket. File one ticket per independent item, and extend a match found in `TODO.md` instead of duplicating it.
+- **Filing is not doing.** Read only enough to fill `Where`, and make no code change for the ticket. File one ticket per independent item, and extend a match found with `todo list` and `todo show` instead of duplicating it.
 - **Priority comes from the user.** When they give none, choose from the definitions and say it was assumed.
 - **A review finding is a ticket as it stands.** An open decision that blocks one is a draft RFC linked from it.
 - **Code never cites ticket IDs.** A reminder the code needs becomes a test or a check.
 - A commit that finishes a ticket ends its body with `Closes ABC-123`.
-- **Delete a ticket when it is done.** Git history is the record, and no done list is kept. Delete its RFC in the same change when the RFC section calls that RFC done.
+- **Close a ticket with `todo close` when it is done.** Git history is the record, and no done list is kept. Delete its RFC in the same change when the RFC section calls that RFC done.
 - **Campaign lanes never write `TODO.md`.** A lane reports a deferred item and the integrator files it.
 
 ## RFC

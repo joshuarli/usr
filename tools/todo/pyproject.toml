@@ -1,0 +1,6 @@
+[project]
+name = "todo"
+version = "0.1.0"
+description = "Manage Markdown TODO backlogs"
+requires-python = ">=3.9"
+dependencies = []

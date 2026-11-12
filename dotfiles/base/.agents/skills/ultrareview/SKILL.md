@@ -21,7 +21,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 
 ## Steps
 
-1. **Orient.** Read AGENTS.md, README, manifests, CI config, the open tickets in `TODO.md`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
+1. **Orient.** Read AGENTS.md, README, manifests, CI config, the open tickets via `todo list --json` and matching details via `todo show ID --json`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
 2. **Review** through the lenses below. On a big repo use `orchestrate`: one read-only lane per group of rows, told which lens skill files to read and returning only candidate findings in the `todo` ticket shape. Lanes are `worker`, or `scout` for pure inventory (the build, CI, and dependency row), however large the code. Use `expert` only for a lane on crash consistency, races, or `unsafe` soundness, and state why in the brief. Merge findings that share a root cause and rank them.
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
@@ -67,7 +67,7 @@ Delete a completed RFC the same way. `todo` says when an RFC is done. An accepte
 
 ## Findings
 
-File each finding as a `todo` ticket in `TODO.md`, in that skill's shape, priority definitions, and ID rules. Order tickets by priority, then impact. Rate by impact times likelihood, never by effort.
+File each finding with `todo add --json -`, following the `todo` skill's evidence and priority rules; use `todo edit` to extend a match. Rate by impact times likelihood, never by effort.
 
 - **Tickets already open** are re-verified, not duplicated: delete one that is fixed, update one that drifted, and keep its ID. A new finding takes the next ID.
 - **A finding that needs a design or an owner's call** gets a draft RFC under `docs/rfc/`, linked from its ticket. Choices only the owner can make, each with options and a recommendation, belong in the RFC's Open questions.
