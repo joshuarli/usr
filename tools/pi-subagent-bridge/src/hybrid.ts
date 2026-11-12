@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
+import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
 import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
@@ -252,7 +252,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       s.primary_model = selected
     }
     const worker = makeWorkerBridge(api, primaryFor(s))
-    if (!(await worker.modelCheck(s.cwd)).available)
+    if (!s.remaining_pi && !(await worker.modelCheck(s.cwd)).available)
       throw new Error("Pinned Pi fallback model is unavailable")
     s.backend = "pi-transition"
     s.fallback_reason = reason
@@ -267,6 +267,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       save(s)
       return s
     } catch (error) {
+      if (error instanceof PreAdmissionError && s.remaining_pi?.length) {
+        s.backend = "command-transition"
+        save(s)
+        return fallbackToPi(s, reason, detail)
+      }
       if (String(error).includes("created but prompt admission failed"))
         throw new Error(String(error) + "; worktree lease retained for session " + s.id)
       throw error
@@ -423,7 +428,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const changed_paths = changes(s.cwd, s.scope.base_revision)
       const out_of_scope_paths = outside(changed_paths, s.scope.writable_paths)
       const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
-      if (s.fallback_reason && !notice) notice = fallbackNotice(s)
+      if (s.fallback_reason && !notice)
+        notice = state.startsWith("blocked") ? "Provider transition blocked; inspect the owned session before retrying." : fallbackNotice(s)
       // A verified terminal response releases worktree admission, not session history.
       if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted"].includes(state)) {
         const directory = stateDir(s.cwd)

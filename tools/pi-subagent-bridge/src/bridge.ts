@@ -16,6 +16,8 @@ export type OpenCodePort = {
   models(input: { location: { directory: string } }): Promise<unknown>
 }
 
+export class PreAdmissionError extends Error {}
+
 const SESSION_PREFIX = "usr-worker: "
 const MAX_BRIEF = 32_000
 export const GO_MODEL: ModelRef = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
@@ -163,8 +165,11 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       const directory = checkedWorktree(cwd, true)
       const name = requiredText(title, "title", 100)
       const text = requiredText(brief, "brief")
-      if (!modelAvailable(await api.models({ location: { directory } }), model)) {
-        throw new Error(`Pinned model ${model.providerID}/${model.id}${model.variant ? "#" + model.variant : ""} unavailable. No fallback.`)
+      try {
+        if (!modelAvailable(await api.models({ location: { directory } }), model))
+          throw new Error(`Pinned model ${model.providerID}/${model.id}${model.variant ? "#" + model.variant : ""} unavailable. No fallback.`)
+      } catch (error) {
+        throw new PreAdmissionError(String(error), { cause: error })
       }
       const result = object(unbox(await api.create({
         title: SESSION_PREFIX + name, agent: readOnly ? "plan" : "build", model, location: { directory },

@@ -791,3 +791,27 @@ for (const tier of ["scout", "mechanic", "worker", "expert"] as const) {
     })
   }
 }
+
+for (const route of ["initial", "status"] as const) {
+  test(`USR-41/45: ${route} Muse loss before create can advance to Go`, async () => {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd)
+      const models = m.api.models
+      let queries = 0
+      m.api.models = async (input) => {
+        queries++
+        const catalog = await models(input) as { data: Array<{ providerID: string }> }
+        return queries === 1 ? catalog : { data: catalog.data.filter((model) => model.providerID === "opencode-go") }
+      }
+      const bridge = makeHybridBridge(m.api, m.command)
+      if (route === "initial") m.noCommand()
+      const started = await bridge.start(f.cwd, "race", "worker", f.scope, "Provide proof")
+      if (route === "status") m.failCommand("provider unavailable")
+      const status = await bridge.status(f.cwd, started.session_id)
+      assert.equal(status.backend, "pi")
+      assert.deepEqual(status.model, { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" })
+      assert.equal(piCreates(m.calls).length, 1)
+    } finally { f.close() }
+  })
+}
