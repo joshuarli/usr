@@ -1,9 +1,9 @@
 # Status
 
 - **Goal:** move Pi producer inputs and archives to `pi-build`, preserve full runtime behavior through pinned releases, then deliver explicit `headless-usr` selection.
-- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44), `f90d6be` (proven pre-admission model-loss race), `292eaa4` (staged consumer). `pi-build` `9dd4c4c` durably preserves verified sources, notices and existing archives.
-- **In progress:** actual locked full builder and exact runtime protocol fixtures. The current vendored archive still performs an automatic Muse catalog probe; its baseline binding test contains that known behavior instead of treating the offline policy as passed. The candidate verifier rejects it. Deterministic repackaging alone is not a source-build or runtime-parity result.
-- **Next:** finish the full builder's portable production/build locks, then exact-candidate behavior and target/libc verification before publication and consumer cutover.
+- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44), `f90d6be` (proven pre-admission model-loss race), `292eaa4` (staged consumer), `f1fd64c` (extracted SDK/broker protocol probes), `1e8b38f` (probe intercom shutdown). `pi-build` `9dd4c4c` durably preserves verified sources, notices and existing archives; `46885cc` adds the locked darwin-arm64 full builder (repeat build byte-identical, SDK loader, detached child and intercom probes pass on its archive).
+- **In progress:** Linux x64/arm64 locks and builds on native CI runners. The current vendored archive still performs an automatic Muse catalog probe; the builder candidate patches it out and its verifier rejects the old behavior.
+- **Next:** native Linux prepare/build/verify/repro (glibc and a separate musl execution check), then publication and consumer cutover.
 - **Parked proof:** no release, all-target runtime parity, live-account entitlement or headless acceptance. Performance timing gate deferred while host swap exceeds the gate. No target or release is counted as passed from a skip.
 
 # Authority and execution
