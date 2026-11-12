@@ -63,7 +63,7 @@ class OfflineTests(unittest.TestCase):
         self.assertTrue(pi_release.link_bridge(project,self.prefix,legacy))
         self.assertTrue(pi_release.bridge_current(project,self.prefix))
         self.assertFalse(pi_release.link_bridge(project,self.prefix,legacy))
-        self.assertEqual((project/"node_modules").resolve(),self.generation/"node_modules")
+        self.assertEqual((project/"node_modules").resolve(),(self.generation/"node_modules").resolve())
         foreign=self.home/"foreign/node_modules/.pnpm"
         foreign.mkdir(parents=True)
         (foreign/"sentinel").write_text("keep")
