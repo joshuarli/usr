@@ -5,6 +5,7 @@ on:
     paths:
       - "tools/sync/**"
       - "tools/pi/test_offline.py"
+      - "tools/pi/test_sync_bridge_offline.py"
       - "dotfiles/pi-test.py"
       - "dotfiles/doctor-test.sh"
       - "dotfiles/base/.pi/**"
@@ -31,6 +32,7 @@ jobs:
           python3 -I tools/pi/vendor.py check
           python3 -I tools/pi/test_vendor.py
           python3 -I tools/pi/test_offline.py
+          python3 -I tools/pi/test_sync_bridge_offline.py
           python3 -I dotfiles/pi-test.py
           python3 -I tools/sync/test_pi_extensions.py
           python3 -I tools/sync/pi-worker-test.py
@@ -42,6 +44,11 @@ jobs:
           # The full repository suite expects no system PyYAML C extension; isolate it
           # from GitHub runner site-packages without installing any pip packages.
           python3 -m venv --without-pip .work/isolated-python
-          PATH="$PWD/.work/isolated-python/bin:$PATH" \
+          # worker-watch requires jaq; jq is compatible with the expressions
+          # used by its regression tests on platforms without a jaq release.
+          command -v jq >/dev/null || { echo "jq missing on runner" >&2; exit 1; }
+          mkdir -p .work/test-bin
+          ln -sf "$(command -v jq)" .work/test-bin/jaq
+          PATH="$PWD/.work/test-bin:$PWD/.work/isolated-python/bin:$PATH" \
             GIT_AUTHOR_NAME=CI GIT_AUTHOR_EMAIL=ci@example.invalid \
             GIT_COMMITTER_NAME=CI GIT_COMMITTER_EMAIL=ci@example.invalid sh sync check
