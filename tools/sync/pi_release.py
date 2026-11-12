@@ -1,0 +1,266 @@
+"""Pinned Pi release acquisition, isolated from routine sync until cutover."""
+from __future__ import annotations
+
+from contextlib import contextmanager
+import fcntl
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import tarfile
+import tempfile
+from uuid import uuid4
+from typing import TypedDict
+import urllib.error
+import urllib.parse
+import urllib.request
+
+import pi_offline
+
+HEX = re.compile(r"[0-9a-f]{64}")
+TARGETS = {"darwin-arm64", "linux-x64", "linux-arm64"}
+RECEIPT = ".usr-pi-release.json"
+
+
+class Artifact(TypedDict):
+    archive: str
+    sha256: str
+    bytes: int
+
+
+class Pin(TypedDict):
+    schema: int
+    release_url: str
+    builder_revision: str
+    profile: str
+    provenance_sha256: str
+    targets: dict[str, Artifact]
+
+
+
+def pin_entry(pin: Pin, target: str) -> Artifact:
+    try:
+        entry = pin["targets"][target]
+        url = urllib.parse.urlsplit(pin["release_url"])
+        if (pin["schema"] != 1 or target not in TARGETS
+                or pin["profile"] not in {"full", "headless-usr"}
+                or not re.fullmatch(r"[0-9a-f]{40}", pin["builder_revision"])
+                or not HEX.fullmatch(pin["provenance_sha256"])
+                or url.scheme not in {"https", "http"} or not url.netloc
+                or url.query or url.fragment or url.username or url.password
+                or (url.scheme == "http" and url.hostname not in {"127.0.0.1", "localhost", "::1"})
+                or entry["archive"] != f"{target}-{pin['profile']}.tar.gz"
+                or not HEX.fullmatch(entry["sha256"])
+                or type(entry["bytes"]) is not int or entry["bytes"] <= 0):
+            raise ValueError("invalid identity")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise pi_offline.OfflinePiError(f"invalid Pi release pin: {exc}") from exc
+    return entry
+
+
+def sync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def sync_tree(root: Path) -> None:
+    for path in root.rglob("*"):
+        if not path.is_symlink() and path.is_file():
+            with path.open("rb") as stream:
+                os.fsync(stream.fileno())
+    directories = [path for path in root.rglob("*") if path.is_dir() and not path.is_symlink()]
+    for path in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+        sync_directory(path)
+    sync_directory(root)
+
+
+def fetch(url: str, path: Path, limit: int) -> None:
+    try:
+        response = urllib.request.urlopen(url, timeout=30)
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
+    with response, path.open("xb") as stream:
+        count = 0
+        while block := response.read(min(1 << 20, limit + 1)):
+            count += len(block)
+            if count > limit:
+                raise pi_offline.OfflinePiError("Pi release asset exceeds pinned size")
+            stream.write(block)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def verified(file: Path, sha256: str, size: int) -> bool:
+    return (not file.is_symlink() and file.is_file() and file.stat().st_size == size
+            and pi_offline.digest(file) == sha256)
+
+
+def acquire(pin: Pin, target: str, cache: Path) -> Path:
+    entry = pin_entry(pin, target)
+    if cache.is_symlink():
+        raise pi_offline.OfflinePiError("refusing symlinked Pi cache")
+    cache.mkdir(parents=True, exist_ok=True)
+    archive = cache / (entry["sha256"] + ".tar.gz")
+    if verified(archive, entry["sha256"], entry["bytes"]):
+        return archive
+    with tempfile.TemporaryDirectory(prefix=".download-", dir=cache) as temp:
+        stage = Path(temp)
+        base = pin["release_url"].rstrip("/") + "/"
+        provenance = stage / "provenance.json"
+        fetch(base + "provenance.json", provenance, 8 << 20)
+        if pi_offline.digest(provenance) != pin["provenance_sha256"]:
+            raise pi_offline.OfflinePiError("Pi provenance digest mismatch")
+        data = json.loads(provenance.read_text())
+        expected = {"target": target, "profile": pin["profile"], **entry}
+        if (data.get("schema") != 1 or data.get("builder_revision") != pin["builder_revision"]
+                or data.get("targets", {}).get(target) != expected):
+            raise pi_offline.OfflinePiError("Pi provenance identity mismatch")
+        sums = stage / "SHA256SUMS"
+        fetch(base + "SHA256SUMS", sums, 1 << 20)
+        matches = [line.split() for line in sums.read_text().splitlines()
+                   if len(line.split()) == 2 and line.split()[1] == entry["archive"]]
+        if matches != [[entry["sha256"], entry["archive"]]]:
+            raise pi_offline.OfflinePiError("Pi release SHA256SUMS disagrees with pin")
+        candidate = stage / "archive.tar.gz"
+        fetch(base + entry["archive"], candidate, entry["bytes"])
+        if not verified(candidate, entry["sha256"], entry["bytes"]):
+            raise pi_offline.OfflinePiError("Pi release archive hash or size mismatch")
+        os.replace(candidate, archive)
+        sync_directory(cache)
+    return archive
+
+
+def safe_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
+    members = archive.getmembers()
+    names: dict[str, tarfile.TarInfo] = {}
+    for member in members:
+        path = PurePosixPath(member.name)
+        if (path.is_absolute() or ".." in path.parts or not path.parts
+                or member.name.rstrip("/") != path.as_posix()
+                or path.parts[0] != "node_modules" or member.name in names
+                or not (member.isdir() or member.isfile() or member.issym())):
+            raise pi_offline.OfflinePiError(f"unsafe Pi release archive member: {member.name}")
+        member.mode &= 0o777
+        names[member.name.rstrip("/")] = member
+    for name, member in names.items():
+        if any(str(parent) in names and not names[str(parent)].isdir()
+               for parent in PurePosixPath(name).parents):
+            raise pi_offline.OfflinePiError(f"Pi archive traverses a link: {name}")
+        if member.issym():
+            import posixpath
+            destination = posixpath.normpath(posixpath.join(posixpath.dirname(name), member.linkname))
+            resolved = names.get(destination)
+            if member.linkname.startswith("/") or resolved is None or not resolved.isfile():
+                raise pi_offline.OfflinePiError(f"unsafe or chained Pi archive link: {name}")
+    return members
+
+
+def inventory(root: Path) -> dict[str, dict[str, str | int]]:
+    result: dict[str, dict[str, str | int]] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        if relative == RECEIPT:
+            continue
+        if path.is_symlink():
+            result[relative] = {"link": os.readlink(path)}
+        elif path.is_file():
+            result[relative] = {"sha256": pi_offline.digest(path), "mode": path.stat().st_mode & 0o777}
+    return result
+
+
+@contextmanager
+def writer(prefix: Path):
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    with (prefix.parent / (prefix.name + ".install.lock")).open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def generation(path: Path, pin: Pin, target: str) -> bool:
+    try:
+        if path.is_symlink() or not path.is_dir():
+            return False
+        receipt = json.loads((path / RECEIPT).read_text())
+        return bool(receipt["pin"] == pin and receipt["target"] == target and receipt["files"] == inventory(path))
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def select(prefix: Path, entry: Artifact) -> None:
+    link = prefix / (".current-" + uuid4().hex)
+    try:
+        link.symlink_to("releases/" + entry["sha256"])
+        os.replace(link, prefix / "current")
+        sync_directory(prefix)
+        sync_directory(prefix.parent)
+    finally:
+        link.unlink(missing_ok=True)
+
+
+def current(prefix: Path, pin: Pin, target: str) -> Path | None:
+    entry = pin_entry(pin, target)
+    path = prefix / "releases" / entry["sha256"]
+    try:
+        if (prefix.is_symlink() or not (prefix / "current").is_symlink()
+                or os.readlink(prefix / "current") != "releases/" + entry["sha256"]
+                or path.is_symlink()):
+            return None
+        if generation(path, pin, target):
+            return path
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
+
+
+def install(prefix: Path, pin: Pin, target: str, cache: Path) -> Path:
+    entry = pin_entry(pin, target)
+    with writer(prefix):
+        if (prefix / "releases").is_symlink() or (prefix / ".usr-pi-releases").is_symlink():
+            raise pi_offline.OfflinePiError("refusing foreign symlink in Pi release prefix")
+        installed = current(prefix, pin, target)
+        if installed:
+            return installed
+        if prefix.is_symlink() or (prefix.exists() and not (prefix / ".usr-pi-releases").is_file()):
+            raise pi_offline.OfflinePiError(f"refusing foreign Pi release prefix: {prefix}")
+        pointer = prefix / "current"
+        if pointer.exists() and not pointer.is_symlink():
+            raise pi_offline.OfflinePiError("refusing foreign Pi selection")
+        destination = prefix / "releases" / entry["sha256"]
+        if generation(destination, pin, target):
+            select(prefix, entry)
+            return destination
+        archive = acquire(pin, target, cache)
+        prefix.mkdir(exist_ok=True)
+        (prefix / ".usr-pi-releases").touch()
+        releases = prefix / "releases"
+        releases.mkdir(exist_ok=True)
+        if releases.is_symlink():
+            raise pi_offline.OfflinePiError("refusing symlinked Pi releases directory")
+        destination = releases / entry["sha256"]
+        with tempfile.TemporaryDirectory(prefix=".stage-", dir=releases) as temporary:
+            stage = Path(temporary) / "runtime"
+            stage.mkdir()
+            with tarfile.open(archive, "r:gz") as stream:
+                members = safe_members(stream)
+                if hasattr(tarfile, "data_filter"):
+                    stream.extractall(stage, members, filter="data")
+                else:
+                    stream.extractall(stage, members)
+            if not pi_offline.version_matches(stage):
+                raise pi_offline.OfflinePiError("Pi release missing required runtime packages")
+            (stage / "bin").mkdir()
+            launcher = stage / "bin/pi"
+            launcher.write_text(pi_offline.wrapper(destination))
+            launcher.chmod(0o755)
+            (stage / RECEIPT).write_text(json.dumps({"pin": pin, "target": target, "files": inventory(stage)}, sort_keys=True))
+            if destination.exists() or destination.is_symlink():
+                raise pi_offline.OfflinePiError("existing Pi release is modified; preserve and inspect before retry")
+            sync_tree(stage)
+            os.replace(stage, destination)
+            sync_directory(releases)
+        select(prefix, entry)
+        return destination
