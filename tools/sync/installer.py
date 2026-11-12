@@ -1955,7 +1955,8 @@ class Installer:
         if not self.which("zipinfo"):
             self.skip("gluon", "zipinfo is required to validate the archive")
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
-                   ("linux", "x86_64"): "x86_64-unknown-linux-musl"}
+                   ("linux", "x86_64"): "x86_64-unknown-linux-musl",
+                   ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in triples:
             self.skip("gluon", f"no gluon release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
@@ -2920,9 +2921,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
         tools.append("jaq")
     tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fs srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
-        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "rimage"]
-    if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64")):
-        tools.append("gluon")
+        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "rimage", "gluon"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("zzz")
     if os_name == "darwin":
