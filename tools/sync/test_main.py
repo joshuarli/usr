@@ -51,20 +51,26 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, ["python3"], setup=False).select(["tool:python3"])
         self.assertEqual([t.name for t in dag.order()], ["tool:python3"])
 
-    def test_bridge_requires_node_command_and_claude(self):
+    def test_bridge_requires_only_offline_pi_and_node(self):
         dag = main.graph(self.ctx, [], setup=True).select(["claude-mcp"])
         names = {task.name for task in dag.order()}
-        self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:claude", "tool:opencode2", "claude-mcp"} <= names)
+        self.assertTrue({"links", "tool:nodejs", "tool:pi", "pi-extensions", "claude-mcp"} <= names)
+        self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
+                         "bridge registration must not install npm-managed provider harnesses")
 
-    def test_pi_bridge_requires_node_command_and_pi(self):
+    def test_pi_bridge_requires_only_offline_pi_and_node(self):
         dag = main.graph(self.ctx, [], setup=True).select(["pi-mcp"])
         names = {task.name for task in dag.order()}
-        self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:pi", "tool:opencode2", "pi-mcp"} <= names)
+        self.assertTrue({"links", "tool:nodejs", "tool:pi", "pi-extensions", "pi-mcp"} <= names)
+        self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
+                         "bridge registration must not install npm-managed provider harnesses")
 
-    def test_opencode_bridge_requires_node_command_and_opencode2(self):
+    def test_opencode_bridge_requires_only_offline_pi_and_node(self):
         dag = main.graph(self.ctx, [], setup=True).select(["opencode-mcp"])
         names = {task.name for task in dag.order()}
-        self.assertTrue({"links", "tool:nodejs", "tool:cmd", "tool:opencode2", "opencode-mcp"} <= names)
+        self.assertTrue({"links", "tool:nodejs", "tool:pi", "pi-extensions", "opencode-mcp"} <= names)
+        self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
+                         "bridge registration must not install npm-managed provider harnesses")
 
     def test_alternate_target_links_never_touch_home(self):
         target = self.ctx.root / "fixture-home"
