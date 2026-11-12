@@ -34,6 +34,18 @@ class OrchestrateTests(unittest.TestCase):
             self.assertNotIn("usr-opencode-worker", content)
         json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
 
+    def test_native_subagents_are_the_quota_fallback(self):
+        self.assertIn("Quota fallback: when the bridge runs out of quota, use native subagents.", self.text)
+        self.assertIn("No hook gates native subagents.", self.text)
+        for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
+            content = (ROOT / path).read_text()
+            self.assertIn("runs out of quota", content)
+            self.assertNotIn("Missing bridge means no delegation", content)
+            self.assertNotIn("blocks delegation rather than authorizing another launcher", content)
+        settings = json.loads((ROOT / "dotfiles/base/.claude/settings.json").read_text())
+        self.assertNotIn("PreToolUse", settings.get("hooks", {}))
+        self.assertFalse((ROOT / "dotfiles/base/.local/bin/agent-tier-gate").exists())
+
     def test_global_rule(self):
         contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()
         self.assertIn("in every harness and skill", contract)

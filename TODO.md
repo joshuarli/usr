@@ -109,15 +109,6 @@ Next: 51
 - **Fix with:** `durable-state`
 - **Effort:** S
 
-### USR-49 · P1 · Native subagents must be the fallback when the bridge runs out of quota
-
-- **Area:** Delegation
-- **Where:** `dotfiles/base/.local/bin/agent-tier-gate:24-26`, `dotfiles/base/.claude/settings.json` (PreToolUse hook), `dotfiles/base/.claude/agents/god.md`, `skills/orchestrate/SKILL.md`, `docs/agent-setup.md`
-- **Problem:** `agent-tier-gate` rejects every native Claude subagent except `god`, so a native subagent cannot serve as the fallback when pi-subagent-bridge cannot run. The orchestrate skill also forbids native `Agent` children for scout, mechanic, worker and expert, without exception. On 2026-11-12 Command Code reached its weekly limit, the Muse fallback broke (USR-50) and OpenCode Go had no auth. The parent was told to use native subagents, but the gate admitted only `god`. Six routine lanes (parity ports, a Lean slice, a qualification run) therefore ran on the most expensive pinned model.
-- **Recommendation:** The owner's intent is that agent-tier-gate does not apply to native subagents, and that native subagents are used whenever pi-subagent-bridge runs out of quota. Remove the native-subagent restriction from the gate, or scope it to the case it was meant for. State the rule plainly in the orchestrate skill and docs/agent-setup.md: the bridge is the default, and when it reports a usage limit or no available backend, the parent delegates through native subagents at a model matched to the tier, not `god` by default. Add a gate test covering a native `general-purpose` launch.
-- **Fix with:** `orchestrate`
-- **Effort:** S
-
 ### USR-50 · P1 · Muse Code 1.4.15 rejects the bridge's MCP toolset selector
 
 - **Area:** Delegation

@@ -42,17 +42,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "agent-tier-gate"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
