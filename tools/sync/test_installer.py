@@ -749,7 +749,7 @@ sys.exit(1)
     def test_gluon_bundle(self):
         members = {"meson": b"m", "ninja": b"n", "gluon-build": b"b"}
         payload = make_zip(members, executable=set(members))
-        routes, base = self._bundle_routes("joshuarli/gluon", "release-abc123", "gluon-x86_64-unknown-linux-musl.zip", payload)
+        routes, base = self._bundle_routes("laputa-systems/gluon", "release-abc123", "gluon-x86_64-unknown-linux-musl.zip", payload)
         inst = self.make(routes)
         inst.install_gluon()
         for command in ("meson", "ninja", "gluon-build"):
