@@ -347,20 +347,6 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_uv()
 
-    def _python_build_routes(self, tool, inner, repo, tag="20261101", triple="x86_64-unknown-linux-musl"):
-        asset = f"python-{tag}-{triple}-install_only_stripped.tar.gz" if tool == "python3" else f"node-{tag}-{triple}-install_only_stripped.tar.gz"
-        url = f"https://example.invalid/{asset}"
-        payload = make_tar({inner: b"#!/bin/sh\nexit 0\n"})
-        import hashlib
-        digest = hashlib.sha256(payload).hexdigest()
-        release = {"assets": [{"name": asset, "browser_download_url": url},
-                              {"name": "SHA256SUMS", "browser_download_url": "https://example.invalid/sums"}]}
-        routes = {f"https://github.com/{repo}/releases.atom": atom([("2024-01-01", tag)]),
-                  f"https://api.github.com/repos/{repo}/releases/tags/{tag}": json.dumps(release).encode(),
-                  url: (payload, {"ETag": "e"}),
-                  "https://example.invalid/sums": f"{digest}  {asset}\n".encode()}
-        return routes, url, asset
-
     def _pinned_python(self, routes):
         import hashlib
         payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"})
@@ -397,11 +383,25 @@ sys.exit(1)
                 inst.install_python3()
         self.assertFalse(self.dest_path("python3").exists())
 
-    def test_nodebuild_install(self):
-        routes, url, asset = self._python_build_routes("node-build", "node/bin/node", "laputa-systems/node-build")
+    def test_nodebuild_install_current_and_checksum_mismatch(self):
+        sha = "9" * 40
+        payload = make_tar({"node/bin/node": b"#!/bin/sh\nexit 0\n"}, "w:xz")
+        routes = self._build_routes("laputa-systems/node-build", "node", sha, payload, version="24.19.2")
         inst = self.make(routes)
         inst.install_nodebuild()
-        self.assertTrue(self.dest_path("node-build").is_symlink())
+        link = self.dest_path("node-build")
+        self.assertEqual(os.readlink(link),
+                         str(self.home / f".local/share/node-build/release-{sha}/node/bin/node"))
+        inst = self.make(routes)
+        inst.install_nodebuild()
+        self.assertFalse(inst.changed)
+        sha = "a" * 40
+        routes = self._build_routes("laputa-systems/node-build", "node", sha, payload, version="24.19.2",
+                                    listed="0" * 64)
+        inst = self.make(routes)
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install_nodebuild()
+        self.assertIn("checksum mismatch", str(ctx.exception))
 
     def test_nodejs_checksum_mismatch_is_a_skip(self):
         inst = self.make({"https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz": b"not-the-pinned-build"},
