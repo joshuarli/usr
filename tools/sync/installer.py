@@ -1229,7 +1229,10 @@ class Installer:
                 self.fetch_msg(f"Installing Pi runtime {entry['archive']} from {pin['release_url']} ...")
                 pi_release.install(self.pi_root, pin, key, cache)
             pi_offline.configure_intercom(self.home, self.pi_root / "current")
-        except (pi_offline.OfflinePiError, OSError, ValueError, URLError) as exc:
+        except URLError as exc:
+            self.skip("pi", f"cannot download the pinned Pi release from {pin['release_url']} "
+                            f"({getattr(exc, 'reason', exc)}); the existing Pi installation is unchanged")
+        except (pi_offline.OfflinePiError, OSError, ValueError) as exc:
             self.skip("pi", str(exc))
         self.own_dir(self.pi_root)
         if cache.is_dir() and not cache.is_symlink():
