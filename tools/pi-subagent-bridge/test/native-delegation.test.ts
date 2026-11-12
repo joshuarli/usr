@@ -8,17 +8,16 @@ function job(id: string, variant: string, readOnly = false, providerID = "openco
 }
 
 test("native Pi roles fail closed on provider, model, thinking and write scope", () => {
-  assert.equal(role(job("inkling-2-small-free", "low", true, "opencode")), "scout")
-  assert.equal(role(job("inkling-2-small-free", "high", false, "opencode")), "mechanic")
+  assert.equal(role(job("muse-spark-1.3-contributor", "medium", true, "opencode-go")), "scout")
+  assert.equal(role(job("muse-spark-1.3-contributor", "high", false, "opencode-go")), "mechanic")
   assert.equal(role(job("deepseek-v4.1-flash", "high")), "worker")
-  assert.throws(() => role(job("inkling-2-small-free", "high", true, "opencode")), /Unapproved/)
-  assert.throws(() => role({ ...job("muse-ember-1.0", "medium", true, "opencode"),
+  assert.throws(() => role(job("muse-spark-1.3-contributor", "high", true, "opencode-go")), /Unapproved/)
+  assert.throws(() => role({ ...job("muse-ember-1.0", "medium", true, "opencode-go"),
     priorRunId: "old", priorSessionFile: "/work/old.jsonl" }), /Unapproved/)
   assert.equal(role(job("deepseek-v4.1-flash", "max")), "expert")
-  assert.throws(() => role(job("inkling-2-small-free", "low", true, "opencode-go")), /Unapproved/)
   assert.equal(role(job("muse-spark-1.3", "xhigh", false, "muse-sdk")), "worker")
   assert.throws(() => role(job("deepseek-v4.1-flash", "xhigh")), /Unapproved/)
-  assert.throws(() => role(job("inkling-2-small-free", "medium", true, "opencode")), /Unapproved/)
+  assert.throws(() => role(job("muse-spark-1.3-contributor", "medium", false, "opencode-go")), /Unapproved/)
   assert.throws(() => role(job("deepseek-v4.1-flash", "high", true)), /Unapproved/)
   assert.throws(() => role(job("god", "max")), /Unapproved/)
 })

@@ -21,11 +21,11 @@
     "defaultExtensions": [],
     "agentOverrides": {
       "scout": {
-        "model": "opencode/inkling-2-small-free",
-        "thinking": "low"
+        "model": "opencode-go/muse-spark-1.3-contributor",
+        "thinking": "medium"
       },
       "mechanic": {
-        "model": "opencode/inkling-2-small-free",
+        "model": "opencode-go/muse-spark-1.3-contributor",
         "thinking": "high"
       },
       "worker": {
@@ -45,19 +45,19 @@
       "enforce": true,
       "strict": true,
       "allow": [
-        "opencode/inkling-2-small-free",
         "opencode-go/deepseek-v4.1-flash",
+        "opencode-go/muse-spark-1.3-contributor",
         "muse-sdk/muse-spark-1.3"
       ],
       "agents": {
         "scout": {
           "allow": [
-            "opencode/inkling-2-small-free"
+            "opencode-go/muse-spark-1.3-contributor"
           ]
         },
         "mechanic": {
           "allow": [
-            "opencode/inkling-2-small-free"
+            "opencode-go/muse-spark-1.3-contributor"
           ]
         },
         "worker": {

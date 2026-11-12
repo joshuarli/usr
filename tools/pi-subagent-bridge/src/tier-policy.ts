@@ -21,27 +21,16 @@ export const DELEGATION = {
   expert: ["scout", "mechanic", "worker", "expert"],
 } as const satisfies { readonly [P in Tier]: readonly AllowedChild[P][] }
 
-/** The sole permitted Zen pin: free, declared in ~/.pi/agent/models.json. */
-export const ZEN_TIER_MODELS = {
-  scout: { providerID: "opencode", id: "inkling-2-small-free", variant: "low" },
-  mechanic: { providerID: "opencode", id: "inkling-2-small-free", variant: "high" },
-} as const satisfies { readonly [P in "scout" | "mechanic"]: {
-  readonly providerID: "opencode"
-  readonly id: "inkling-2-small-free"
-  readonly variant: "low" | "high"
-} }
-export type ZenTier = keyof typeof ZEN_TIER_MODELS
-export function isZenTier(tier: Tier): tier is ZenTier {
-  return tier === "scout" || tier === "mechanic"
-}
-
+/** OpenCode Go serves the subsidized Contributor-Spark models under the same subscription as DeepSeek. */
 export const GO_TIER_MODELS = {
+  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
+  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
   worker: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
   expert: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" },
-} as const satisfies { readonly [P in "worker" | "expert"]: {
+} as const satisfies { readonly [P in Tier]: {
   readonly providerID: "opencode-go"
-  readonly id: "deepseek-v4.1-flash"
-  readonly variant: "high" | "max"
+  readonly id: "muse-spark-1.3-contributor" | "deepseek-v4.1-flash"
+  readonly variant: "medium" | "high" | "max"
 } }
 
 export const MUSE_TIER_MODELS = {
@@ -83,20 +72,15 @@ export function assertDelegation<P extends Tier>(parent: P, child: unknown): ass
 /** Exact pins admitted for nested spawns, per tier. */
 export type GoModelRef = { providerID: string; id: string; variant?: string }
 export function tierForModel(model: GoModelRef, readOnly: boolean): Tier {
-  for (const candidate of TIERS) {
-    const expected = candidate === "scout" || candidate === "mechanic"
-      ? ZEN_TIER_MODELS[candidate]
-      : candidate === "worker" ? MUSE_TIER_MODELS.worker : undefined
-    if (expected && model.providerID === expected.providerID &&
-        model.id === expected.id && model.variant === expected.variant &&
-        readOnly === (candidate === "scout"))
-      return candidate
-  }
-  for (const candidate of ["worker", "expert"] as const) {
+  if (model.providerID === MUSE_TIER_MODELS.worker.providerID &&
+      model.id === MUSE_TIER_MODELS.worker.id &&
+      model.variant === MUSE_TIER_MODELS.worker.variant && !readOnly)
+    return "worker"
+  const tier = TIERS.find((candidate) => {
     const expected = GO_TIER_MODELS[candidate]
-    if (model.providerID === expected.providerID && model.id === expected.id &&
-        model.variant === expected.variant && !readOnly)
-      return candidate
-  }
+    return expected.providerID === model.providerID &&
+      expected.id === model.id && expected.variant === model.variant
+  })
+  if (tier && readOnly === (tier === "scout")) return tier
   throw new Error("Unapproved Pi tier, model/effort or tool scope")
 }

@@ -22,4 +22,4 @@ allowedAgents:
 ---
 
 Implement the assigned outcome in the approved files, validate it, and report proof.
-You may delegate one native Pi level to the approved equal-or-weaker tiers only, inside the assigned scope. Nested spawns run the pinned Zen scout/mechanic agents. For each native `subagent` tool launch, set `options: {agentScope: user}` so project agent shadows cannot widen authority. Never launch a stronger tier, another bridge/CLI, or a second nested generation. Do not commit, merge, switch branches, or expand write scope. Stop on blockers or contract changes.
+You may delegate one native Pi level to the approved equal-or-weaker tiers only, inside the assigned scope. Nested spawns run the pinned Contributor Spark scout/mechanic agents. For each native `subagent` tool launch, set `options: {agentScope: user}` so project agent shadows cannot widen authority. Never launch a stronger tier, another bridge/CLI, or a second nested generation. Do not commit, merge, switch branches, or expand write scope. Stop on blockers or contract changes.

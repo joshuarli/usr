@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { GO_TIER_MODELS, MUSE_TIER_MODELS, ZEN_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
+import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
 
 type Result = {
@@ -25,8 +25,8 @@ const SESSION = /^ses_[a-f0-9]{32}$/
 const children = new Map<number, ChildProcess>()
 const worker = fileURLToPath(new URL("./sdk-worker.ts", import.meta.url))
 // Derive the supported catalog from the same typed pins used at admission.
-const VARIANTS = new Map<string, { providerID: "opencode" | "opencode-go"; variants: Set<string> }>()
-for (const pin of [...Object.values(GO_TIER_MODELS), ...Object.values(ZEN_TIER_MODELS)]) {
+const VARIANTS = new Map<string, { providerID: "opencode-go"; variants: Set<string> }>()
+for (const pin of Object.values(GO_TIER_MODELS)) {
   const group = VARIANTS.get(pin.id)
   if (group) {
     group.variants.add(pin.variant)

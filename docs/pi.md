@@ -1,6 +1,6 @@
 # Pi
 
-Every coding harness delegates through the shared `pi-subagent-bridge` MCP tools or CLI shim. Its routing policy prefers Command Code, then the pinned free Zen model for scout/mechanic, the pinned Muse SDK subscription for worker, and OpenCode Go for worker/expert through Pi SDK and [`pi-subagents`](https://github.com/nicobailon/pi-subagents). The bridge invokes the versioned delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native child execution, completion events, and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability) for known result-identity and fallback defects.
+Every coding harness delegates through the shared `pi-subagent-bridge` MCP tools or CLI shim. Its routing policy prefers Command Code, then the pinned Contributor-Spark models for scout/mechanic, the pinned Muse SDK subscription for worker, and OpenCode Go through Pi SDK and [`pi-subagents`](https://github.com/nicobailon/pi-subagents). The bridge invokes the versioned delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native child execution, completion events, and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability) for known result-identity and fallback defects.
 
 ## Pinned, npm-free Pi runtime
 
@@ -8,7 +8,7 @@ Pi 1.5.0, its SDK, `pi-subagents`, the Muse provider and `agent-intercom-pi` are
 
 Pi's launcher loads `pi-subagents` and `agent-intercom-pi` from the installed local directory. Intercom's broker uses the bundled TypeScript loader, with automatic model wakeups disabled by default (`inboundTrigger: "never"`). Interactive Pi can communicate with compatible peers; Claude/Codex/OpenCode companion adapters are not installed by this Pi-only runtime. Scoped SDK children intentionally do not inherit intercom capabilities.
 
-**Changes to the Pi installation go through `pi-build`, never local edits.** If the Pi runtime or a bundled extension (pi-subagents, pi-muse-subscription, agent-intercom-pi) needs a change, it is made in [`pi-build`](https://github.com/joshuarli/pi-build) as a snapshot update or local patch, released there, and adopted in `usr` only by bumping [`tools/pi/runtime.pin.json`](../tools/pi/runtime.pin.json). Do not hand-patch the installed closure under `~/.pi/agent` or the install prefix, drop extra extensions into it, or fork its dependencies locally. Tracked first-party configuration (bridge, profiles, settings, `models.json`) lives in `usr` and is changed there; it never requires touching the runtime.
+**Changes to the Pi installation go through `pi-build`, never local edits.** If the Pi runtime or a bundled extension (pi-subagents, pi-muse-subscription, agent-intercom-pi) needs a change, it is made in [`pi-build`](https://github.com/joshuarli/pi-build) as a snapshot update or local patch, released there, and adopted in `usr` only by bumping [`tools/pi/runtime.pin.json`](../tools/pi/runtime.pin.json). Do not hand-patch the installed closure under `~/.pi/agent` or the install prefix, drop extra extensions into it, or fork its dependencies locally. Tracked first-party configuration (bridge, profiles, settings) lives in `usr` and is changed there; it never requires touching the runtime.
 
 The first-party bridge, harness configuration, the consumer pin, installation and registration remain in `usr`. The [Pi build campaign](CAMPAIGN-PI-BUILD.md) tracks the remaining headless-profile work.
 
@@ -18,7 +18,11 @@ The first-party bridge, harness configuration, the consumer pin, installation an
 
 The [bridge model table](../tools/pi-subagent-bridge/README.md) owns the exact role/model/effort mapping for all three providers.
 
-Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its global `subagents.modelScope` allows only the pinned OpenCode Go DeepSeek model, the pinned free Zen model, and the pinned Muse SDK model. **The `opencode/inkling-2-small-free` pin is the sole permitted Zen exception** (free tier; declared in `~/.pi/agent/models.json`, scout `low`, mechanic `high`). All other `opencode/*` Zen models, metered endpoints, and custom providers are forbidden even when advertised by a model catalog. The free tier rate-limits (`429 FreeUsageLimitError`); a command-first scout/mechanic admitted to it that dies at runtime with that error is terminal as `failed` — the intended escape is the orchestrate native-subagent fallback, not a fresh bridge dispatch. No Pi `god` role exists. Claude Code and Codex alone may invoke their existing native `god` models. The SDK bridge independently enforces the role pins and the effective model, effort, and tool allowlists, so Pi settings or a project override cannot silently select another model for bridge workers.
+Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its global `subagents.modelScope` allows only the pinned OpenCode Go models and the pinned Muse SDK model. Scout and mechanic run on `opencode-go/muse-spark-1.3-contributor` (scout `medium`, mechanic `high`), the subsidized Contributor Spark variant; Meta may use prompts, code and outputs for training. A free `opencode/*` Zen pin was tried for those tiers and abandoned, see [Why Zen is not a pin](#why-zen-is-not-a-pin). No Pi `god` role exists. Claude Code and Codex alone may invoke their existing native `god` models. The SDK bridge independently enforces the role pins and the effective model, effort, and tool allowlists, so Pi settings or a project override cannot silently select another model for bridge workers.
+
+## Why Zen is not a pin
+
+`opencode/inkling-2-small-free` looked like a zero-cost fit for scout and mechanic, and was pinned for them. It cannot work from a headless SDK worker: **every free Zen model answers non-official-client requests with `429 FreeUsageLimitError`, regardless of account, API key, IP, session headers or quota window.** The upstream gateway only serves free capacity to traffic carrying the official OpenCode client's `User-Agent` (`opencode/…`); the `x-opencode-client`, `x-opencode-session` and `x-opencode-version` headers do not unlock it, and non-opencode User-Agents get the 429 from anywhere. Interactive opencode sessions keep working, which masks the gate completely. Verified locally against the live endpoint on 2026-11-12 (see `tools/pi-subagent-bridge/test/hybrid.test.ts` fixtures and the bridge admission logs). opencode has confirmed this is intended: "Free models are meant for use inside OpenCode … for an application integration, use a paid model or Go" ([issue](https://github.com/anomalyco/opencode/issues/43786), [issue](https://github.com/anomalyco/opencode/issues/42074), [issue](https://github.com/anomalyco/opencode/issues/42029), [issue](https://github.com/anomalyco/opencode/issues/58205)). Routing bridge traffic through the official client path would mean spoofing the client's `User-Agent`, an anti-abuse gate the bridge deliberately does not evade; a local `opencode serve` passthrough was rejected as fragile and unsupported. Contributor Spark on OpenCode Go is the subsidized paid lane and is what scout and mechanic pin.
 
 ## Install
 
@@ -35,7 +39,7 @@ Pi authenticates only to OpenCode Go using the existing OpenCode login. In the *
 }
 ```
 
-Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. The tracked custom Zen model catalog declares exactly `opencode/inkling-2-small-free` (free) in `~/.pi/agent/models.json`; the Pi SDK authenticates it as the `opencode` provider with the same OpenCode OAuth credential exported as `OPENCODE_API_KEY`. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Command Code uses a separate interactive `cmd login` and runs first. No credentials are committed.
+Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. Pi authenticates only to OpenCode Go with that credential (exported as `OPENCODE_API_KEY`); there is no Zen access from the Pi path. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Command Code uses a separate interactive `cmd login` and runs first. No credentials are committed.
 
 `sh sync` does **not** run `pi install`, `pi update`, or npm for Pi. The tracked package list is empty and a nonempty Pi package list is treated as a sync conflict; the CLI explicitly loads its locally vendored extensions. `sh sync plan` and `sh sync doctor` inspect local postconditions without writing. The bridge uses the single installed Pi runtime, and the tracked user profiles in `~/.pi/agent/agents/` enforce the same tier contract for interactive Pi.
 
@@ -93,8 +97,8 @@ Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/n
 
 After `sh sync` and `muse` → `/login`, the bridge uses the pinned Muse SDK model as
 the Pi fallback for the worker tier when Command Code is unavailable or fails before
-edits: `muse-sdk/muse-spark-1.3` (xhigh). Scout and mechanic run on the pinned free Zen
-model `opencode/inkling-2-small-free` (scout `low`, mechanic `high`); expert runs on
+edits: `muse-sdk/muse-spark-1.3` (xhigh). Scout and mechanic run on the pinned
+`opencode-go/muse-spark-1.3-contributor` (scout `medium`, mechanic `high`); expert runs on
 `opencode-go/deepseek-v4.1-flash` (max). No environment flag is required and
 `USR_PI_MUSE_SUBSCRIPTION` is ignored. Muse-only nested child profiles preserve
 type-checked tier limits and the two-level depth cap. The bridge sets

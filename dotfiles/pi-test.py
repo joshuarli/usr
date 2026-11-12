@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/pi"))
 from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "opencode/inkling-2-small-free"
+MODEL = "opencode-go/muse-spark-1.3-contributor"
 TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "xhigh", "god": "xhigh"}
 
 
@@ -126,7 +126,7 @@ class PiTests(unittest.TestCase):
         self.assertEqual(set(sub["modelScope"]["allow"]), {
             "opencode-go/deepseek-v4.1-flash", MODEL,
             "muse-sdk/muse-spark-1.3"})
-        expected = {"scout": (MODEL, "low"),
+        expected = {"scout": (MODEL, "medium"),
                     "mechanic": (MODEL, "high"),
                     "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
                     "expert": ("opencode-go/deepseek-v4.1-flash", "max")}
@@ -171,11 +171,9 @@ class PiTests(unittest.TestCase):
         for deleted in ("muse-scout", "muse-mechanic"):
             self.assertFalse((PROFILE / "agents" / (deleted + ".md")).exists(),
                              "Muse scout/mechanic profiles are retired")
-        catalog = json.loads((PROFILE / "models.json").read_text())
-        zen_ids = [m["id"] for m in catalog["providers"]["opencode"]["models"]]
-        self.assertEqual(zen_ids, ["inkling-2-small-free"],
-                         "models.json must pin exactly the free Zen scout/mechanic model")
-        self.assertTrue(all(name.startswith(("opencode/", "opencode-go/", "muse-sdk/")) for name in sub["modelScope"]["allow"]))
+        self.assertFalse((PROFILE / "models.json").exists(),
+                         "No custom OpenCode Zen catalog is permitted for delegated workers")
+        self.assertTrue(all(name.startswith(("opencode-go/", "muse-sdk/")) for name in sub["modelScope"]["allow"]))
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")

@@ -1,7 +1,7 @@
 ---
 name: mechanic
 description: Mechanical implementation with specified acceptance.
-model: opencode/inkling-2-small-free
+model: opencode-go/muse-spark-1.3-contributor
 thinking: high
 tools:
   - read

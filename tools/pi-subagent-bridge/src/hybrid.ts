@@ -6,7 +6,7 @@ import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort
 import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
-import { GO_TIER_MODELS, MUSE_TIER_MODELS, ZEN_TIER_MODELS, museSubscriptionSelected, isZenTier, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
+import { GO_TIER_MODELS, MUSE_TIER_MODELS, museSubscriptionSelected, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
 export type { Tier } from "./tier-policy.ts"
 export type Scope = {
@@ -22,14 +22,14 @@ type Session = {
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string
   continuations?: number; steers?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
-  remaining_pi?: Array<"muse" | "go" | "zen">
+  remaining_pi?: Array<"muse" | "go">
   execution_order?: "command-first"; fallback_blocked?: string
 }
 function currentBackend(s: Session): Session["backend"] { return s.backend }
 const EFFORT: Record<Tier, Effort> = {
   scout: "medium", mechanic: "xhigh", worker: "high", expert: "max",
 }
-// Sessions admitted before the Zen migration must retain their original pins.
+// Sessions admitted before the Contributor-Spark pin migration must retain their original pins.
 const LEGACY_EFFORT: Record<Tier, Effort> = {
   scout: "low", mechanic: "high", worker: "high", expert: "max",
 }
@@ -135,16 +135,10 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
-// Sessions admitted before the Zen migration must retain their original pins.
-const LEGACY_PI_MODELS: Partial<Record<Tier, ModelRef>> = {
-  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
-  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
-}
 function modelFor(tier: Tier): ModelRef {
-  if (isZenTier(tier)) return ZEN_TIER_MODELS[tier]
-  return museSubscriptionSelected(tier) ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier as "worker" | "expert"]
+  return museSubscriptionSelected(tier) ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier]
 }
-function primaryFor(s: Session): ModelRef { return s.primary_model ?? LEGACY_PI_MODELS[s.tier] ?? modelFor(s.tier) }
+function primaryFor(s: Session): ModelRef { return s.primary_model ?? modelFor(s.tier) }
 function fallbackModelFor(s: Session): string {
   return s.command_model ?? (s.primary_model ? COMMAND_MODELS[s.tier] : COMMAND_MODEL)
 }
@@ -192,9 +186,7 @@ function fallbackNotice(s: Session): string {
     "Automatic fallback is expected and needs no parent action.",
     "The worktree was verified untouched before switching, so no work was lost or replayed.",
     "The task continues on " + (s.backend === "pi"
-      ? (primaryFor(s).providerID === "muse-sdk" ? "Muse subscription via the Pi SDK"
-        : primaryFor(s).providerID === "opencode" ? "OpenCode Zen via the Pi SDK"
-        : "OpenCode Go via the Pi SDK")
+      ? (primaryFor(s).providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK")
       : "Command Code") +
       " with the same scope and approved tier pins; verify it normally with worker_status.",
     "Do not retry and do not start a duplicate worker.",
@@ -240,11 +232,9 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         const destination = s.remaining_pi.shift()!
         const candidate = destination === "muse" && museSubscriptionSelected(s.tier)
           ? MUSE_TIER_MODELS.worker
-          : destination === "zen" && isZenTier(s.tier)
-            ? ZEN_TIER_MODELS[s.tier]
-            : destination === "go" && (s.tier === "worker" || s.tier === "expert")
-              ? GO_TIER_MODELS[s.tier]
-              : undefined
+          : destination === "go"
+            ? GO_TIER_MODELS[s.tier]
+            : undefined
         if (destination === "muse") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
         if (!candidate) continue
         try {
@@ -298,25 +288,6 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const dir = checkedWorktree(cwd)
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       // Command Code is primary
-      let zenAvailable = false, zenIssue: string | null = null
-      if (isZenTier(tierInput)) {
-        try {
-          zenAvailable = (await makeWorkerBridge(api, ZEN_TIER_MODELS[tierInput]).modelCheck(dir)).available
-        } catch (e) { zenIssue = String(e) }
-        if (!zenAvailable && !zenIssue) {
-          try {
-            const { ensureOpenCodeApiKey } = await import("./opencode-auth.ts")
-            ensureOpenCodeApiKey()
-            const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
-            const runtime = await ModelRuntime.create()
-            const model = ZEN_TIER_MODELS[tierInput]
-            if (!runtime.getModel(model.providerID, model.id))
-              zenIssue = `Pinned OpenCode Zen model ${model.providerID}/${model.id} is not in the Pi SDK catalog (models.json?)`
-            else if (!runtime.hasConfiguredAuth(model.providerID))
-              zenIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
-          } catch { /* keep issue null if diagnosis unavailable */ }
-        }
-      }
       let museAvailable = false, museIssue: string | null = null
       if (museSubscriptionSelected(tierInput)) {
         try {
@@ -326,14 +297,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           museIssue = musePreflight().issue ?? "Muse subscription model unavailable; check Muse Code login"
       }
       let goAvailable = false, goIssue: string | null = null
-      if (tierInput === "worker" || tierInput === "expert") {
-        try {
-          goAvailable = (await makeWorkerBridge(api, GO_TIER_MODELS[tierInput]).modelCheck(dir)).available
-        } catch (e) { goIssue = String(e) }
-      } else {
-        goIssue = "OpenCode Go is not a pinned lane for this tier"
-      }
-      if (!goAvailable && !goIssue && (tierInput === "worker" || tierInput === "expert")) {
+      try {
+        goAvailable = (await makeWorkerBridge(api, GO_TIER_MODELS[tierInput]).modelCheck(dir)).available
+      } catch (e) { goIssue = String(e) }
+      if (!goAvailable && !goIssue) {
         try {
           const { ensureOpenCodeApiKey } = await import("./opencode-auth.ts")
           ensureOpenCodeApiKey()
@@ -346,19 +313,17 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             goIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
-      const zenInfo = isZenTier(tierInput) ? { available: zenAvailable, issue: zenIssue } : { available: false, issue: null }
       const museInfo = museSubscriptionSelected(tierInput) ? { available: museAvailable, issue: museIssue } : { available: false, issue: null }
       const goInfo = { available: goAvailable, issue: goIssue }
       const piLane = { backend: "pi", model: modelFor(tierInput),
-        available: isZenTier(tierInput) ? zenInfo.available : museSubscriptionSelected(tierInput) ? museInfo.available : goInfo.available,
-        issue: isZenTier(tierInput) ? zenInfo.issue : museSubscriptionSelected(tierInput) ? museInfo.issue : goInfo.issue }
+        available: museSubscriptionSelected(tierInput) ? museInfo.available : goInfo.available,
+        issue: museSubscriptionSelected(tierInput) ? museInfo.issue : goInfo.issue }
       return {
         primary: { backend: "command-code", model: COMMAND_MODELS[tierInput],
           effort: EFFORT[tierInput], available: command.available() },
         fallback: piLane,
-        zen: isZenTier(tierInput) ? zenInfo : undefined,
         muse: museSubscriptionSelected(tierInput) ? { backend: "pi", model: modelFor(tierInput), available: museInfo.available, issue: museInfo.issue } : undefined,
-        opencode_go: !isZenTier(tierInput) ? { backend: "pi", model: GO_TIER_MODELS[tierInput as "worker" | "expert"], available: goInfo.available, issue: goInfo.issue } : undefined,
+        opencode_go: { backend: "pi", model: GO_TIER_MODELS[tierInput], available: goInfo.available, issue: goInfo.issue },
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {
@@ -370,7 +335,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
         task, backend: "command-transition", attempts: 0,
         execution_order: "command-first" as const,
-        remaining_pi: isZenTier(tierInput) ? ["zen"] : museSubscriptionSelected(tierInput) ? ["muse", "go"] : ["go"],
+        remaining_pi: museSubscriptionSelected(tierInput) ? ["muse", "go"] : ["go"],
         command_model: COMMAND_MODELS[tierInput],
         command_effort: EFFORT[tierInput] }
       const leaseDir = stateDir(dir)
@@ -468,9 +433,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           notice = "Provider transition blocked; inspect the owned session before retrying."
         } else if ((s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition") &&
                    ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
-          const provider = primaryFor(s).providerID === "opencode"
-            ? "the pinned free Zen fallback"
-            : primaryFor(s).providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
+          const provider = primaryFor(s).providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
           notice = "The task was admitted to " + provider + " via Command Code's absence or failure, but that Pi run ended in " + state +
             " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
             " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +

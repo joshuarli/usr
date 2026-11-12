@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MUSE_TIER_MODELS, MUSE_AGENT_NAMES,
-  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH, ZEN_TIER_MODELS,
+  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH,
   TIER_TOOLS, TIERS, tierForModel, type ChildOf, type Tier,
 } from "../src/tier-policy.ts"
 import { nestedCallRefusal, registerTierGuard } from "../src/nested-guard.ts"
@@ -27,20 +27,9 @@ if (false) {
   typechecked("expert", "god")
 }
 
-function pinFor(tier: Tier, family: "go" | "muse" | "zen") {
-  if (family === "zen") return ZEN_TIER_MODELS[tier as "scout" | "mechanic"]
-  if (family === "muse") return MUSE_TIER_MODELS[tier as "worker"]
-  return GO_TIER_MODELS[tier as "worker" | "expert"]
-}
-function familyFor(tier: Tier): "zen" | "go" {
-  return tier === "scout" || tier === "mechanic" ? "zen" : "go"
-}
-function profile(tier: Tier, family: "go" | "muse" | "zen" = familyFor(tier)): string {
+function profile(tier: Tier, family: "go" | "muse" = "go"): string {
   const muse = family === "muse"
-  const zen = family === "zen"
-  const pin = zen ? ZEN_TIER_MODELS[tier as "scout" | "mechanic"]
-    : muse ? MUSE_TIER_MODELS[tier as "worker"]
-    : GO_TIER_MODELS[tier as "worker" | "expert"]
+  const pin = muse ? MUSE_TIER_MODELS[tier as "worker"] : GO_TIER_MODELS[tier]
   const name = muse ? MUSE_AGENT_NAMES[tier as "worker"] : tier
   const children = muse ? MUSE_DELEGATION[tier as "worker"] : DELEGATION[tier]
   return [
@@ -57,18 +46,18 @@ function profile(tier: Tier, family: "go" | "muse" | "zen" = familyFor(tier)): s
 function profileSettings(): object {
   return { subagents: {
     agentOverrides: Object.fromEntries([
-      ...TIERS.map((tier) => [tier, { model: pinFor(tier, familyFor(tier)).providerID + "/" + pinFor(tier, familyFor(tier)).id,
-        thinking: pinFor(tier, familyFor(tier)).variant }]),
+      ...TIERS.map((tier) => [tier, { model: GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id,
+        thinking: GO_TIER_MODELS[tier].variant }]),
       [MUSE_AGENT_NAMES.worker, {
         model: MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id,
         thinking: MUSE_TIER_MODELS.worker.variant }],
     ]),
     modelScope: { enforce: true, strict: true,
-      allow: ["opencode/inkling-2-small-free",
-        "opencode-go/deepseek-v4.1-flash",
+      allow: ["opencode-go/deepseek-v4.1-flash",
+        "opencode-go/muse-spark-1.3-contributor",
         "muse-sdk/muse-spark-1.3"],
       agents: Object.fromEntries([
-        ...TIERS.map((tier) => [tier, { allow: [pinFor(tier, familyFor(tier)).providerID + "/" + pinFor(tier, familyFor(tier)).id] }]),
+        ...TIERS.map((tier) => [tier, { allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id] }]),
         [MUSE_AGENT_NAMES.worker, { allow: [MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id] }],
       ]),
     },
@@ -89,12 +78,10 @@ test("typed lattice is reflexive/monotone and excludes escalation or god", () =>
 
 test("pinned model / effective effort is a typed role identity, not a string lookup", () => {
   for (const tier of TIERS) {
-    const model = pinFor(tier, familyFor(tier))
+    const model = GO_TIER_MODELS[tier]
     assert.equal(tierForModel(model, tier === "scout"), tier)
     assert.throws(() => tierForModel({ ...model, variant: "xhigh" }, tier === "scout"), /Unapproved/)
   }
-  assert.throws(() => tierForModel({ providerID: "opencode", id: "inkling-2-small-free", variant: "low" }, false), /Unapproved/)
-  assert.throws(() => tierForModel({ providerID: "opencode", id: "inkling-2-small-free", variant: "high" }, true), /Unapproved/)
   assert.throws(() => tierForModel({ providerID: "muse-sdk", id: "muse-spark-1.3", variant: "max" }, false), /Unapproved/)
 })
 
@@ -126,7 +113,7 @@ test("code-owned tool boundary rejects model overrides, scripts, tier escalation
 
 test("real YAML profiles are validated as runtime policy; drift fails before spawning", () => {
   for (const tier of TIERS) {
-    const family = familyFor(tier)
+    const family = "go" as const
     assertTierProfile(tier, profile(tier, family), family)
     assert.ok(tierGuardPath(tier).pathname.endsWith("/" + tier + ".ts"))
     assert.throws(() => assertTierProfile(tier,
@@ -136,7 +123,7 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
     assert.throws(() => assertTierProfile(tier,
       profile(tier, family).replace("tools:", "tools:\n  - unrestricted_shell"), family), /allowlist/)
     assert.throws(() => assertTierProfile(tier,
-      profile(tier, family).replace("model: " + pinFor(tier, family).providerID, "model: openrouter"), family), /Unapproved/)
+      profile(tier, family).replace("model: " + GO_TIER_MODELS[tier].providerID, "model: openrouter"), family), /Unapproved/)
   }
   assertTierProfile("worker", profile("worker", "muse"), "muse")
   assert.ok(existsSync(tierGuardPath("worker", { providerID: "muse-sdk" })))

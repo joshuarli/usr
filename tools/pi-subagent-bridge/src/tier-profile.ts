@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { parseDocument } from "yaml"
 import {
-  DELEGATION, GO_TIER_MODELS, isMuseTier, isZenTier, MUSE_AGENT_NAMES, MUSE_DELEGATION, MUSE_TIER_MODELS,
-  ZEN_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIER_TOOLS, TIERS, type Tier,
+  DELEGATION, GO_TIER_MODELS, isMuseTier, MUSE_AGENT_NAMES, MUSE_DELEGATION, MUSE_TIER_MODELS,
+  MAX_SUBAGENT_DEPTH, TIER_TOOLS, TIERS, type Tier,
 } from "./tier-policy.ts"
 
 const TIER_GUARDS = {
@@ -41,18 +41,15 @@ function exactList(value: unknown, expected: readonly string[], description: str
  * Validate the parsed YAML against the code-owned tier graph before admitting
  * a new root worker. A locally edited/synced profile cannot widen authority.
  */
-export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "muse" | "zen" = "go"): void {
+export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "muse" = "go"): void {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)
   if (!match) throw new Error(`Missing Pi agent frontmatter: ${tier}`)
   const parsed = parseDocument(match[1]!, { uniqueKeys: true })
   if (parsed.errors.length) throw new Error(`Invalid Pi agent YAML ${tier}: ${parsed.errors[0]?.message}`)
   const config = record(parsed.toJS())
   if (family === "muse" && !isMuseTier(tier)) throw new Error("Unapproved Muse tier")
-  if (family === "zen" && !isZenTier(tier)) throw new Error("Unapproved Zen tier")
-  if (family === "go" && tier !== "worker" && tier !== "expert") throw new Error("Unapproved Go tier")
   const muse = family === "muse" && isMuseTier(tier)
-  const zen = family === "zen" && isZenTier(tier)
-  const pinned = muse ? MUSE_TIER_MODELS[tier] : zen ? ZEN_TIER_MODELS[tier as "scout" | "mechanic"] : GO_TIER_MODELS[tier as "worker" | "expert"]
+  const pinned = muse ? MUSE_TIER_MODELS[tier] : GO_TIER_MODELS[tier]
   const name = muse ? MUSE_AGENT_NAMES[tier] : tier
   const children = muse ? MUSE_DELEGATION[tier] : DELEGATION[tier]
   if (config.name !== name ||
@@ -82,20 +79,15 @@ export function assertTierProfiles(agentDir: string): void {
       modelScope.enforce !== true || modelScope.strict !== true)
     throw new Error("Pi subagent depth/model scope must be enforced")
   exactList(modelScope.allow, [
-    "opencode/inkling-2-small-free",
     "opencode-go/deepseek-v4.1-flash",
+    "opencode-go/muse-spark-1.3-contributor",
     "muse-sdk/muse-spark-1.3",
   ], "global.modelScope.allow")
   const overrides = record(sub.agentOverrides)
   const agents = record(modelScope.agents)
-  const tierFamily = (tier: Tier): "zen" | "go" => isZenTier(tier) ? "zen" : "go"
-  const tierPin = (tier: Tier) => tierFamily(tier) === "zen"
-    ? ZEN_TIER_MODELS[tier as "scout" | "mechanic"]
-    : GO_TIER_MODELS[tier as "worker" | "expert"]
   for (const tier of TIERS) {
-    const family = tierFamily(tier)
-    assertTierProfile(tier, readFileSync(join(agentDir, "agents", tier + ".md"), "utf8"), family)
-    const expected = tierPin(tier)
+    assertTierProfile(tier, readFileSync(join(agentDir, "agents", tier + ".md"), "utf8"))
+    const expected = GO_TIER_MODELS[tier]
     const override = record(overrides[tier])
     if (override.model !== expected.providerID + "/" + expected.id ||
         override.thinking !== expected.variant)

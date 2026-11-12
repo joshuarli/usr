@@ -60,7 +60,7 @@ function fake(cwd: string) {
     messages: async () => ({ data: [{ type: "assistant", content: [{ type: "text", text: "PROOF: test exit 0" }] }] }),
     interrupt: async () => ({ data: { interrupted: true } }),
     models: async () => ({ data: [
-      { id: "inkling-2-small-free", providerID: "opencode" },
+      { id: "muse-spark-1.3-contributor", providerID: "opencode-go" },
       { id: "deepseek-v4.1-flash", providerID: "opencode-go" },
       { id: "muse-spark-1.3", providerID: "muse-sdk" },
     ].map(({ id, providerID }) => ({
@@ -166,8 +166,8 @@ test("Command Code scout and mechanic use Ember medium and xhigh, even when Go h
   }
 })
 
-test("missing Command Code starts exactly the pinned Zen fallback", async () => {
-  for (const [tier, variant] of [["scout", "low"], ["mechanic", "high"]] as const) {
+test("missing Command Code starts exactly the pinned Contributor fallback", async () => {
+  for (const [tier, variant] of [["scout", "medium"], ["mechanic", "high"]] as const) {
     const f = fixture()
     try {
       const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
@@ -179,7 +179,7 @@ test("missing Command Code starts exactly the pinned Zen fallback", async () => 
       const result = await bridge.status(f.cwd, started.session_id)
       assert.equal(commandCalls(m.calls).length, 0)
       assert.equal(piCreates(m.calls).length, 1)
-      assert.deepEqual(result.model, { providerID: "opencode", id: "inkling-2-small-free", variant })
+      assert.deepEqual(result.model, { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant })
     } finally { f.close() }
   }
 })
@@ -271,7 +271,7 @@ test("a failing Go fallback never restarts Command Code", async () => {
   } finally { f.close() }
 })
 
-test("Zen fallback failure on a provider usage limit reports a terminal, action-required notice", async () => {
+test("Go fallback failure on a provider usage limit reports a terminal, action-required notice", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
@@ -283,7 +283,7 @@ test("Zen fallback failure on a provider usage limit reports a terminal, action-
     assert.equal(result.backend, "pi")
     assert.equal(result.state, "failed")
     assert.match(result.fallback_notice ?? "", /every pinned lane is exhausted/)
-    assert.equal(/task continues on OpenCode Zen/i.test(result.fallback_notice ?? ""), false)
+    assert.equal(/task continues on/i.test(result.fallback_notice ?? ""), false)
     assert.equal(commandCalls(m.calls).length, 0)
   } finally { f.close() }
 })
@@ -710,14 +710,14 @@ test("interrupted Pi resume remains blocked without exposing an old success", as
   } finally { f.close() }
 })
 
-test("scout stays Command-first; the pinned Zen lane is the Pi fallback", async () => {
+test("scout stays Command-first; the pinned Contributor lane is the Pi fallback", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
     const check = await bridge.modelCheck(f.cwd, "scout")
     assert.equal(check.primary.backend, "command-code")
-    assert.deepEqual(check.fallback.model, { providerID: "opencode", id: "inkling-2-small-free", variant: "low" })
-    const start = await bridge.start(f.cwd, "Zen scout", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
+    assert.deepEqual(check.fallback.model, { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" })
+    const start = await bridge.start(f.cwd, "Contributor scout", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
     assert.equal(start.backend, "command-code")
     assert.equal(commandCalls(m.calls).length, 1)
     assert.equal(piCreates(m.calls).length, 0)
@@ -728,12 +728,12 @@ test("scout stays Command-first; the pinned Zen lane is the Pi fallback", async 
   }
 })
 
-test("mechanic stays Command-first with Zen pinned for Pi fallback", async () => {
+test("mechanic stays Command-first with Contributor pinned for Pi fallback", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command)
-    const start = await bridge.start(f.cwd, "Zen mechanic", "mechanic", f.scope, "Update README")
-    // With cmd primary, Zen is fallback
+    const start = await bridge.start(f.cwd, "Contributor mechanic", "mechanic", f.scope, "Update README")
+    // With cmd primary, Go is fallback
     assert.equal(start.backend, "command-code")
   } finally {
     f.close()
@@ -779,7 +779,7 @@ for (const edge of ["create", "prompt"] as const) {
   }
 }
 
-for (const tier of ["worker", "expert"] as const) {
+for (const tier of ["scout", "mechanic", "worker", "expert"] as const) {
   for (const route of ["initial", "status"] as const) {
     test(`USR-45: ${tier} ${route} skips unavailable Muse and persists exact Go pin`, async () => {
       const { GO_TIER_MODELS } = await import("../src/tier-policy.ts")
@@ -792,8 +792,8 @@ for (const tier of ["worker", "expert"] as const) {
           return { data: catalog.data.filter((model) => model.providerID === "opencode-go") }
         }
         const bridge = makeHybridBridge(m.api, m.command)
+        const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
         if (route === "initial") m.noCommand()
-        const scope = f.scope
         const started = await bridge.start(f.cwd, "go", tier, scope, "Provide proof")
         if (route === "status") m.failCommand("provider unavailable")
         const status = await bridge.status(f.cwd, started.session_id)
@@ -804,37 +804,6 @@ for (const tier of ["worker", "expert"] as const) {
         assert.deepEqual(stored.primary_model, GO_TIER_MODELS[tier])
         assert.deepEqual(stored.remaining_pi, [])
         assert.deepEqual((await makeHybridBridge(m.api, m.command).status(f.cwd, started.session_id)).model, GO_TIER_MODELS[tier])
-      } finally { f.close() }
-    })
-  }
-}
-
-for (const tier of ["scout", "mechanic"] as const) {
-  for (const route of ["initial", "status"] as const) {
-    test(`USR-45: ${tier} ${route} blocks when the pinned Zen model is unavailable`, async () => {
-      const f = fixture()
-      try {
-        const m = fake(f.cwd)
-        const models = m.api.models
-        m.api.models = async (input) => {
-          const catalog = await models(input) as { data: Array<{ providerID: string }> }
-          return { data: catalog.data.filter((model) => model.providerID === "opencode-go") }
-        }
-        const bridge = makeHybridBridge(m.api, m.command)
-        const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
-        if (route === "initial") {
-          m.noCommand()
-          await assert.rejects(bridge.start(f.cwd, "zen", tier, scope, "Provide proof"), /Pinned Pi fallback models are unavailable/)
-          assert.equal(piCreates(m.calls).length, 0)
-          return
-        }
-        const started = await bridge.start(f.cwd, "zen", tier, scope, "Provide proof")
-        m.failCommand("provider unavailable")
-        const status = await bridge.status(f.cwd, started.session_id)
-        assert.equal(status.backend, "command-code")
-        assert.equal(status.state, "blocked_fallback")
-        assert.match((status as { fallback_notice?: string }).fallback_notice ?? "", /Pi fallback blocked/)
-        assert.equal(piCreates(m.calls).length, 0)
       } finally { f.close() }
     })
   }
