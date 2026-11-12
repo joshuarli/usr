@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 49
+Next: 51
 
 ### USR-39 · P1 · Failed Pi workers can inherit another worker's successful proof
 
@@ -108,3 +108,22 @@ Next: 49
 - **Recommendation:** Serialize the complete load-modify-save transaction or use a compare-and-retry revision. Preserve state validation and add the two-process disjoint-allowance regression.
 - **Fix with:** `durable-state`
 - **Effort:** S
+
+### USR-49 · P1 · Native subagents must be the fallback when the bridge runs out of quota
+
+- **Area:** Delegation
+- **Where:** `dotfiles/base/.local/bin/agent-tier-gate:24-26`, `dotfiles/base/.claude/settings.json` (PreToolUse hook), `dotfiles/base/.claude/agents/god.md`, `skills/orchestrate/SKILL.md`, `docs/agent-setup.md`
+- **Problem:** `agent-tier-gate` rejects every native Claude subagent except `god`, so a native subagent cannot serve as the fallback when pi-subagent-bridge cannot run. The orchestrate skill also forbids native `Agent` children for scout, mechanic, worker and expert, without exception. On 2026-11-12 Command Code reached its weekly limit, the Muse fallback broke (USR-50) and OpenCode Go had no auth. The parent was told to use native subagents, but the gate admitted only `god`. Six routine lanes (parity ports, a Lean slice, a qualification run) therefore ran on the most expensive pinned model.
+- **Recommendation:** The owner's intent is that agent-tier-gate does not apply to native subagents, and that native subagents are used whenever pi-subagent-bridge runs out of quota. Remove the native-subagent restriction from the gate, or scope it to the case it was meant for. State the rule plainly in the orchestrate skill and docs/agent-setup.md: the bridge is the default, and when it reports a usage limit or no available backend, the parent delegates through native subagents at a model matched to the tier, not `god` by default. Add a gate test covering a native `general-purpose` launch.
+- **Fix with:** `orchestrate`
+- **Effort:** S
+
+### USR-50 · P1 · Muse Code 1.4.15 rejects the bridge's MCP toolset selector
+
+- **Area:** Delegation
+- **Where:** `tools/pi-subagent-bridge/node_modules/pi-muse-subscription/src/convert.ts:7-8` (`MCP_TOOLSET`), `src/host.ts:162`, `~/.local/bin/muse` (auto-update)
+- **Problem:** pi-muse-subscription 0.1.0 writes `"toolset": ["mcp__pi__*"]` into each Muse host's settings. Muse Code auto-updated to 1.4.15 (R8339.1) on 2026-11-11 and now refuses that run with `invalid run configuration: unknown tool mcp__pi__*`. Every Muse-backed bridge worker fails at startup, so the Muse fallback for scout, mechanic and worker is dead. A worker whose Command Code run hit a usage limit after making edits also stays leased as `blocked_partial_work`, and `worker_cancel` cannot release it, so a parent must recreate the worktree to continue.
+- **Recommendation:** Determine the selector form Muse 1.4.15 accepts, for example the namespaced `mcp__pi.*` that `convert.ts:75` already decodes, or an explicit tool list. Fix `MCP_TOOLSET`, and add a bridge smoke test that starts one real Muse run. Pin the Muse version the bridge supports, or check it in `worker_model_check`, so an auto-update fails visibly instead of at the first launch. Let the parent release a `blocked_partial_work` lease once it has preserved the work.
+- **Fix with:** `root-cause`
+- **Effort:** S
+
