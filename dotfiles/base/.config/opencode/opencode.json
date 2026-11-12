@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode-go/deepseek-v4.1-flash#max",
+  "model": "opencode/inkling-2-small-free#high",
   "shell": "/bin/bash",
   "compaction": {
     "buffer": 600000
