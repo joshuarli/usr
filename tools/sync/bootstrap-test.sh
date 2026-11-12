@@ -95,4 +95,22 @@ if run_bootstrap "$home" "$work/evil.tar.gz" >"$work/evil.log" 2>&1; then
 fi
 [ ! -e "$home/.local/bin/python3" ] || fail "unsafe archive installed a python3 launcher"
 
+# A managed python3 that crashes (as a build for a newer macOS does on its first
+# subprocess) must not be chosen; sync falls back to a working python3.
+crash_home=$work/crash-home
+mkdir -p "$crash_home/.local/bin" "$work/good-bin"
+cat > "$crash_home/.local/bin/python3" <<'EOS'
+#!/bin/sh
+[ "${1:-}" = --version ] && exec python3-real --version
+kill -SEGV $$
+EOS
+chmod 755 "$crash_home/.local/bin/python3"
+real=$(command -v python3)
+ln -s "$real" "$work/good-bin/python3-real"
+ln -s "$real" "$work/good-bin/python3"
+if ! HOME=$crash_home DL_OWNED_FILE=$crash_home/owned PATH="$work/good-bin:/usr/bin:/bin" \
+        sh "$root/sync" layers >"$work/crash.log" 2>&1; then
+    fail "sync did not run main.py on the fallback python3: $(cat "$work/crash.log")"
+fi
+
 printf 'bootstrap-test: ok\n'

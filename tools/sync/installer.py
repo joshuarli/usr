@@ -34,6 +34,7 @@ import pi_offline  # noqa: E402
 import pi_release  # noqa: E402
 
 NODE_MINIMUM = "26.12.0"
+PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 NODEJS_VERSION = "26.13.0"
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
 PLAYER_REPO = "joshuarli/play"
@@ -979,7 +980,7 @@ class Installer:
         release_dir = root / tag
         if release_dir.exists() or release_dir.is_symlink():
             existing = release_dir / inner
-            smoke = ([str(existing), "-c", "import sqlite3, ssl"] if tool == "python3"
+            smoke = ([str(existing), "-c", PYTHON_SMOKE] if tool == "python3"
                      else [str(existing), "--version"])
             if existing.is_file() and os.access(existing, os.X_OK) \
                     and self.run(smoke, capture=True).returncode == 0:
@@ -1025,8 +1026,8 @@ class Installer:
         if run_staged and self.run([str(inner_path), "--version"], capture=True).returncode:
             self.skip(tool, "staged node binary does not run")
         if tool == "python3" and pin is not None and self.run(
-                [str(inner_path), "-c", "import sqlite3, ssl"], capture=True).returncode:
-            self.skip(tool, "sqlite3/ssl imports failed in staged python")
+                [str(inner_path), "-c", PYTHON_SMOKE], capture=True).returncode:
+            self.skip(tool, "staged python failed its sqlite3/ssl/subprocess smoke test (built for a newer OS?)")
         os.replace(staged_bundle, release_dir)
         self.own_dir(release_dir)
         for link_name, inner_name in links:
@@ -1034,7 +1035,7 @@ class Installer:
         self.write_state(tool, record)
         self.changed = True
         self.ok(f"Installed {self.dest}/{tool}")
-        if tool == "python3" and pin is None and self.run([str(self.dest / "python3"), "-c", "import sqlite3, ssl"],
+        if tool == "python3" and pin is None and self.run([str(self.dest / "python3"), "-c", PYTHON_SMOKE],
                                          capture=True).returncode:
             self.warn(f"Python is installed but sqlite3/ssl imports failed; install libgcc or inspect {release_dir}")
             raise SkipInstall(tool, "sqlite3/ssl imports failed")

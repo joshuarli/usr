@@ -233,7 +233,7 @@ install_python3() {
     release_dir="${PYTHON_BUILD_ROOT}/${tag}"
     if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
         if [ -x "${release_dir}/python/bin/python3.15" ] \
-            && "${release_dir}/python/bin/python3.15" -c 'import sqlite3, ssl' >/dev/null 2>&1; then
+            && "${release_dir}/python/bin/python3.15" -c 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)' >/dev/null 2>&1; then
             switch_python_links "$release_dir" "$expected_sha256"
             _dl_ok "Installed ${DEST}/python3"
             return
@@ -286,8 +286,8 @@ install_python3() {
         skip python3 "archive is missing python/bin/python3.15"
         return
     fi
-    if ! "${tmpbundle}/python/bin/python3.15" -c 'import sqlite3, ssl' >/dev/null 2>&1; then
-        skip python3 "sqlite3/ssl imports failed in staged python"
+    if ! "${tmpbundle}/python/bin/python3.15" -c 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)' >/dev/null 2>&1; then
+        skip python3 "staged python failed its sqlite3/ssl/subprocess smoke test (built for a newer OS?)"
         return
     fi
     mv "$tmpbundle" "$release_dir"

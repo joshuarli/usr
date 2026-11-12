@@ -19,10 +19,18 @@ case ${1:-} in
     ;;
 esac
 
-python=$home/.local/bin/python3
-if [ ! -x "$python" ]; then
-  python=$(command -v python3 || :)
-fi
+# The smoke test runs a subprocess: a python-build release built for a newer
+# macOS starts, but crashes in os.pipe on the first subprocess it spawns.
+smoke='import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
+choose_python() {
+  for candidate in "$home/.local/bin/python3" "$(command -v python3 || :)" /usr/bin/python3; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ] && "$candidate" -I -c "$smoke" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+}
+python=$(choose_python)
 case $(uname -s) in
   Darwin)
     case ${1:-} in
@@ -31,8 +39,8 @@ case $(uname -s) in
         if [ ! -x "$home/.local/bin/python3" ]; then
           mkdir -p "$(dirname -- "$state")" "$root/.work/tmp"
           DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" jaq
-          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" python3
-          python=$home/.local/bin/python3
+          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" python3 || :
+          python=$(choose_python)
         fi
         ;;
     esac
@@ -44,15 +52,15 @@ case $(uname -s) in
         if [ ! -x "$home/.local/bin/python3" ] && [ -z "$python" ] \
           && awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release 2>/dev/null | grep -qx alpine; then
           mkdir -p "$(dirname -- "$state")" "$root/.work/tmp"
-          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" python3
-          python=$home/.local/bin/python3
+          DL_OWNED_FILE="$state" sh "$root/tools/sync/bootstrap.sh" python3 || :
+          python=$(choose_python)
         fi
         ;;
     esac
     ;;
 esac
 [ -n "$python" ] && [ -x "$python" ] || {
-  printf '%s\n' 'sync: Python 3.9+ is required. macOS and Alpine bootstrap the pinned python-build automatically; other platforms need an existing Python 3.9+.' >&2
+  printf '%s\n' 'sync: no working Python 3.9+ found. macOS and Alpine bootstrap the pinned python-build automatically, but it needs a host OS at least as new as the one it was built for; otherwise provide an existing Python 3.9+.' >&2
   exit 1
 }
 exec "$python" -I "$root/tools/sync/main.py" "$@"
