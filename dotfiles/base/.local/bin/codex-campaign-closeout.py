@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 
 import argparse
+import fcntl
 import json
 import os
 import stat
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
 
@@ -227,8 +229,27 @@ def ensure_work_directory(root):
     return directory
 
 
+@contextmanager
+def state_lock(root):
+    directory = work_directory(root)
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(directory / ".codex-campaign-closeout.lock", flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise CloseoutError("campaign closeout lock must be a regular file")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def begin(root):
     ensure_work_directory(root)
+    with state_lock(root):
+        begin_locked(root)
+
+
+def begin_locked(root):
     if state_file_status(state_path(root)):
         load_state(root)
         print(f"Campaign closeout is already active in {root}")
@@ -250,6 +271,11 @@ def begin(root):
 
 
 def allow(root, path, reason):
+    with state_lock(root):
+        allow_locked(root, path, reason)
+
+
+def allow_locked(root, path, reason):
     if not reason.strip():
         raise CloseoutError("an allow reason is required")
     state = load_state(root)
@@ -274,6 +300,14 @@ def allow(root, path, reason):
 
 
 def cancel(root):
+    if not work_directory(root).is_dir():
+        print("Campaign closeout is not active")
+        return
+    with state_lock(root):
+        cancel_locked(root)
+
+
+def cancel_locked(root):
     path = state_path(root)
     if not state_file_status(path):
         print("Campaign closeout is not active")
@@ -329,6 +363,16 @@ def run_hook():
         return
     if not directory.is_dir():
         return
+    try:
+        if not state_file_status(state_path(root)):
+            return
+        with state_lock(root):
+            run_hook_locked(root, input_error)
+    except (CloseoutError, OSError, ValueError) as error:
+        block(f"Campaign closeout check failed: {error}")
+
+
+def run_hook_locked(root, input_error):
     marker = state_path(root)
     try:
         if not state_file_status(marker):

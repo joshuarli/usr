@@ -49,14 +49,6 @@ Next: 56
 - **Fix with:** `error-model`
 - **Effort:** S
 
-### USR-32 · P3 · Concurrent campaign allowances can overwrite each other
-
-- **Area:** Concurrency
-- **Where:** `dotfiles/base/.local/bin/codex-campaign-closeout.py:132`, `dotfiles/base/.local/bin/codex-campaign-closeout.py:171`, `dotfiles/base/.local/bin/codex-campaign-closeout.py:252`
-- **Problem:** Concurrent allow commands load the same allowed dictionary, add different worktrees, then replace the state file without a lock or generation check. A two-process fixture using the real `allow` implementation and real Git worktrees synchronized both calls after `load_state`: both reported success, but only one allowance survived. The Stop hook can later block a worktree reported as allowed. Atomic file replacement protects syntax, not the read-modify-write transaction.
-- **Recommendation:** Serialize the complete load-modify-save transaction or use a compare-and-retry revision. Preserve state validation and add the two-process disjoint-allowance regression.
-- **Fix with:** `durable-state`
-- **Effort:** S
 
 ### USR-51 · P3 · Select local verification for changed files
 
