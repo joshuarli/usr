@@ -28,7 +28,7 @@ Ownership is split. The [`pi-build`](https://github.com/joshuarli/pi-build) chec
 
 ## Bump the usr consumer
 
-9. Download the published assets independently (not from the workflow's artifacts). Check `SHA256SUMS`, every archive digest and size, and the `provenance.json` digest and identity. Write `tools/pi/runtime.pin.json` from those values: `release_url`, `builder_revision`, `profile`, `provenance_sha256`, and each target's `archive`, `sha256` and `bytes`.
+9. Download the published assets independently (not from the workflow's artifacts). Check `SHA256SUMS`, every archive digest and size, and the `provenance.json` digest and identity. Write `tools/pi/runtime.pin.json` from those values: `release_url` (the `release-<full sha>` tag), `builder_revision`, `profile`, `version`, `provenance_sha256`, and each target's `archive`, `sha256` and `bytes`.
 10. Scan `tools/sync/installer.py`, `tools/sync/pi_release.py`, `tools/sync/pi_extensions.py`, `tools/sync/{pi,claude,opencode}-worker.py` and `tools/pi-subagent-bridge` for npm install/view/update, `pi install/update`, or any fetch beyond the pinned release assets. Any other Pi download path breaks the contract. Fail closed with no hidden online fallback.
 
 ## Verification before integration

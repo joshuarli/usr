@@ -105,7 +105,10 @@ def python_build_pin(pin_path: Path | None = None) -> tuple[str, str, dict[str, 
 _ENTRY = re.compile(r"<entry>(.*?)</entry>", re.S)
 _UPDATED = re.compile(r"<updated>([^<]+)</updated>")
 _TAG_LINK = re.compile(r"releases/tag/([^\"']+)\"")
-_FFMPEG_TAG = re.compile(r"^(\d{8})(?:-r(\d+))?$")
+BUILD_RELEASE_CANDIDATES = 5
+_FFMPEG_LEGACY_TAG = re.compile(r"^\d{8}(?:-r\d+)?$")
+_FFMPEG_BUILD_TAG = re.compile(r"^release-[0-9a-f]{40}$")
+_FFMPEG_TAG = re.compile(r"^(?:\d{8}(?:-r\d+)?|release-[0-9a-f]{40})$")
 
 
 class Installer:
@@ -307,10 +310,9 @@ class Installer:
                 return value.strip()
         return ""
 
-    def latest_tag(self, feed_url: str, *, prefix: str = "", exclude_prefix: str = "") -> str:
+    def release_tags(self, feed_url: str, *, prefix: str = "", exclude_prefix: str = "") -> list[str]:
         text = self.fetch_text(feed_url)
-        newest_updated = ""
-        newest_tag = ""
+        found: list[tuple[str, str]] = []
         for entry in _ENTRY.findall(text):
             updated_match = _UPDATED.search(entry)
             tag_match = _TAG_LINK.search(entry)
@@ -321,28 +323,49 @@ class Installer:
                 continue
             if exclude_prefix and tag.startswith(exclude_prefix):
                 continue
-            if updated_match.group(1) > newest_updated:
-                newest_updated = updated_match.group(1)
-                newest_tag = tag
-        return newest_tag
+            found.append((updated_match.group(1), tag))
+        found.sort(key=lambda item: item[0], reverse=True)
+        return [tag for _, tag in found]
 
-    def latest_date_tag(self, feed_url: str) -> str:
-        text = self.fetch_text(feed_url)
-        newest_key = ""
-        newest_tag = ""
-        for entry in _ENTRY.findall(text):
-            tag_match = _TAG_LINK.search(entry)
-            if not tag_match:
-                continue
-            tag = tag_match.group(1)
-            date_match = _FFMPEG_TAG.match(tag)
-            if not date_match:
-                continue
-            key = date_match.group(1) + (date_match.group(2) or "0").zfill(6)
-            if key > newest_key:
-                newest_key = key
-                newest_tag = tag
-        return newest_tag
+    def latest_tag(self, feed_url: str, *, prefix: str = "", exclude_prefix: str = "") -> str:
+        tags = self.release_tags(feed_url, prefix=prefix, exclude_prefix=exclude_prefix)
+        return tags[0] if tags else ""
+
+    def release_asset(self, tool: str, base: str, tag: str, product: str, triple: str,
+                      version: str = "") -> tuple[str, str, str] | None:
+        version_re = re.escape(version) if version else r"[0-9][^\s/]*"
+        pattern = re.compile(rf"{re.escape(product)}-({version_re})-{re.escape(triple)}\.tar\.xz")
+        sums = self.fetch_text(f"{base}/SHA256SUMS")
+        assets = [fields[1] for line in sums.splitlines()
+                  if len(fields := line.split()) == 2 and pattern.fullmatch(fields[1])]
+        if len(assets) != 1:
+            return None
+        asset = assets[0]
+        found = pattern.fullmatch(asset).group(1)
+        manifest_name = f"{product}-{found}-{triple}.manifest.json"
+        expected = self.sums_for(sums, manifest_name)
+        body = b""
+        try:
+            body, _ = self.fetch(f"{base}/{manifest_name}")
+            manifest = json.loads(body)
+        except (URLError, OSError, ValueError):
+            manifest = None
+        if (len(expected) != 64 or hashlib.sha256(body).hexdigest() != expected
+                or not isinstance(manifest, dict)):
+            self.skip(tool, f"{tag} {manifest_name} is missing or does not match SHA256SUMS")
+        if (manifest.get("schema_version") != 1 or manifest.get("product") != product
+                or manifest.get("version") != found or manifest.get("target") != triple
+                or manifest.get("source_revision") != tag[len("release-"):]):
+            self.skip(tool, f"{tag} {manifest_name} does not describe {asset}")
+        return asset, found, self.sums_for(sums, asset)
+
+    def build_release(self, tool: str, repo: str, product: str, triple: str) -> tuple[str, str, str] | None:
+        for tag in self.release_tags(f"https://github.com/{repo}/releases.atom", prefix="release-")[:BUILD_RELEASE_CANDIDATES]:
+            base = f"https://github.com/{repo}/releases/download/{tag}"
+            found = self.release_asset(tool, base, tag, product, triple)
+            if found is not None:
+                return tag, found[0], base
+        return None
 
     def fetch_json(self, url: str) -> dict:
         text = self.fetch_text(url)
@@ -1748,9 +1771,9 @@ class Installer:
             self.skip(tool, f"{link} is not a dl-managed symlink")
         self.link_symlink(link, want)
 
-    def _zip_bundle(self, tool: str, home: Path, commands: list[str], state_name: str, *,
-                    in_bin: bool, asset: str, url: str, sums_url: str, release_dir: Path,
-                    validate, ok_message: str, install_message: str, on_current=None) -> None:
+    def _archive_bundle(self, tool: str, home: Path, commands: list[str], state_name: str, *,
+                        in_bin: bool, asset: str, url: str, sums_url: str, release_dir: Path,
+                        validate, ok_message: str, install_message: str, on_current=None) -> None:
         for command in commands:
             existing = self.dest / command
             if existing.exists() or existing.is_symlink():
@@ -1811,12 +1834,13 @@ class Installer:
         if len(expected) != 64 or self.sha256_file(archive_path) != expected:
             archive_path.unlink(missing_ok=True)
             self.skip(tool, f"{asset} checksum mismatch")
-        names = self.zip_names(archive_path)
+        tarball = asset.endswith(".tar.xz")
+        names = self.tar_names(archive_path) if tarball else self.zip_names(archive_path)
         if names is None or self.archive_paths_bad(names):
             archive_path.unlink(missing_ok=True)
             self.skip(tool, f"{asset} contains an invalid path")
         staged = self.stage_dir(releases, f".{tool}.")
-        if not self.extract_zip(archive_path, staged):
+        if not (self.extract_tar(archive_path, staged) if tarball else self.extract_zip(archive_path, staged)):
             archive_path.unlink(missing_ok=True)
             shutil.rmtree(staged, ignore_errors=True)
             self.skip(tool, f"{asset} could not be extracted")
@@ -1852,20 +1876,17 @@ class Installer:
         return True
 
     def install_git(self) -> None:
-        if not self.which("zipinfo"):
-            self.skip("git", "zipinfo is required to validate the archive")
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
                    ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in triples:
             self.skip("git", f"no git-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        tag = self.latest_tag("https://github.com/laputa-systems/git-build/releases.atom")
-        if not tag:
+        release = self.build_release("git", "laputa-systems/git-build", "git", triple)
+        if release is None:
             self.unchecked("git", "no release found")
             return
-        asset = f"git-{triple}.zip"
-        base = f"https://github.com/laputa-systems/git-build/releases/download/{tag}"
+        tag, asset, base = release
         def validate(staged: Path) -> bool:
             if not (staged / "git").is_file() or not os.access(staged / "git", os.X_OK):
                 return False
@@ -1883,36 +1904,33 @@ class Installer:
             if not (staged / "git-sh-i18n--envsubst").is_file() or not os.access(staged / "git-sh-i18n--envsubst", os.X_OK):
                 return False
             return True
-        self._zip_bundle("git", self.git_home, GIT_COMMANDS, "git", in_bin=False,
-                         asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
-                         release_dir=self.git_home / "releases" / f"{tag}-{triple}",
-                         validate=validate, ok_message=f"git is current ({tag})",
-                         install_message=f"Installed {self.dest}/git",
-                         on_current=self.ensure_git_templates)
+        self._archive_bundle("git", self.git_home, GIT_COMMANDS, "git", in_bin=False,
+                             asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
+                             release_dir=self.git_home / "releases" / f"{tag}-{triple}",
+                             validate=validate, ok_message=f"git is current ({tag})",
+                             install_message=f"Installed {self.dest}/git",
+                             on_current=self.ensure_git_templates)
 
     def install_ssh(self) -> None:
-        if not self.which("zipinfo"):
-            self.skip("ssh", "zipinfo is required to validate the archive")
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
                    ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in triples:
             self.skip("ssh", f"no ssh-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        tag = self.latest_tag("https://github.com/laputa-systems/ssh-build/releases.atom")
-        if not tag:
+        release = self.build_release("ssh", "laputa-systems/ssh-build", "ssh", triple)
+        if release is None:
             self.unchecked("ssh", "no release found")
             return
-        asset = f"ssh-{triple}.zip"
-        base = f"https://github.com/laputa-systems/ssh-build/releases/download/{tag}"
+        tag, asset, base = release
         def validate(staged: Path) -> bool:
             return all((staged / command).is_file() and os.access(staged / command, os.X_OK)
                        for command in SSH_COMMANDS)
-        self._zip_bundle("ssh", self.ssh_home, SSH_COMMANDS, "ssh", in_bin=False,
-                         asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
-                         release_dir=self.ssh_home / "releases" / f"{tag}-{triple}",
-                         validate=validate, ok_message=f"ssh is current ({tag})",
-                         install_message=f"Installed {self.dest}/ssh")
+        self._archive_bundle("ssh", self.ssh_home, SSH_COMMANDS, "ssh", in_bin=False,
+                             asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
+                             release_dir=self.ssh_home / "releases" / f"{tag}-{triple}",
+                             validate=validate, ok_message=f"ssh is current ({tag})",
+                             install_message=f"Installed {self.dest}/ssh")
 
     def prune_gluon_releases(self) -> None:
         home = self.gluon_home
@@ -1954,11 +1972,11 @@ class Installer:
                     return False
                 path.chmod(0o755)
             return True
-        self._zip_bundle("gluon", self.gluon_home, GLUON_COMMANDS, "gluon", in_bin=False,
-                         asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
-                         release_dir=self.gluon_home / "releases" / f"{tag}-{triple}",
-                         validate=validate, ok_message=f"gluon is current ({tag})",
-                         install_message=f"Installed meson, ninja, and gluon-build ({tag})")
+        self._archive_bundle("gluon", self.gluon_home, GLUON_COMMANDS, "gluon", in_bin=False,
+                             asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
+                             release_dir=self.gluon_home / "releases" / f"{tag}-{triple}",
+                             validate=validate, ok_message=f"gluon is current ({tag})",
+                             install_message=f"Installed meson, ninja, and gluon-build ({tag})")
         self.prune_gluon_releases()
 
     def install_oxish(self) -> None:
@@ -1968,20 +1986,19 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("oxish", f"no ssh-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        tag = self.latest_tag("https://github.com/laputa-systems/ssh-build/releases.atom")
-        if not tag:
+        release = self.build_release("oxish", "laputa-systems/ssh-build", "oxish", triple)
+        if release is None:
             self.unchecked("oxish", "no release found")
             return
-        asset = f"oxish-{triple}.zip"
-        base = f"https://github.com/laputa-systems/ssh-build/releases/download/{tag}"
+        tag, asset, base = release
         def validate(staged: Path) -> bool:
             return all((staged / "bin" / command).is_file() and os.access(staged / "bin" / command, os.X_OK)
                        for command in OXISH_COMMANDS)
-        self._zip_bundle("oxish", self.oxish_home, OXISH_COMMANDS, "oxish-server", in_bin=True,
-                         asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
-                         release_dir=self.oxish_home / "releases" / f"{tag}-{triple}",
-                         validate=validate, ok_message=f"oxish is current ({tag})",
-                         install_message=f"Installed {self.dest}/oxish-server")
+        self._archive_bundle("oxish", self.oxish_home, OXISH_COMMANDS, "oxish-server", in_bin=True,
+                             asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
+                             release_dir=self.oxish_home / "releases" / f"{tag}-{triple}",
+                             validate=validate, ok_message=f"oxish is current ({tag})",
+                             install_message=f"Installed {self.dest}/oxish-server")
 
     def ffmpeg_triple(self, tool: str) -> str:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -2018,8 +2035,14 @@ class Installer:
                 return f"{program.name} does not run: {detail}{hint}"
         return ""
 
-    def ffmpeg_runtime_asset(self, tag: str, triple: str, upstream: str = "") -> tuple[str, str, str]:
+    def ffmpeg_runtime_asset(self, tool: str, tag: str, triple: str, upstream: str = "") -> tuple[str, str, str, str]:
         base = f"https://github.com/{FFMPEG_REPO}/releases/download/{tag}"
+        if _FFMPEG_BUILD_TAG.match(tag):
+            found = self.release_asset(tool, base, tag, "ffmpeg-runtime", triple, upstream)
+            if found is None or len(found[2]) != 64:
+                raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
+            asset, _, expected = found
+            return asset, f"{base}/{asset}", expected, asset.removesuffix(".tar.xz")
         sums_path = Path(tempfile.mkstemp()[1])
         try:
             if not self.download(f"{base}/SHA256SUMS", sums_path):
@@ -2040,7 +2063,7 @@ class Installer:
         if not re.match(rf"^ffmpeg-{name}\+{re.escape(tag)}-{re.escape(triple)}-runtime\.tar\.gz$", asset) \
                 or re.search(r"[^A-Za-z0-9._+\-]", asset):
             raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
-        return asset, f"{base}/{asset.replace('+', '%2B')}", expected
+        return asset, f"{base}/{asset.replace('+', '%2B')}", expected, asset.removesuffix(".tar.gz")
 
     def install_ffmpeg_release(self, tool: str, tag: str, triple: str, upstream: str = "") -> Path:
         releases = self.ffmpeg_home / "releases"
@@ -2052,7 +2075,7 @@ class Installer:
             return release_dir
         if release_dir.is_symlink() or (exists and not release_dir.is_dir()):
             self.skip(tool, f"{release_dir} is not a release directory")
-        asset, url, expected = self.ffmpeg_runtime_asset(tag, triple, upstream)
+        asset, url, expected, top = self.ffmpeg_runtime_asset(tool, tag, triple, upstream)
         self.own_missing_dirs(releases)
         releases.mkdir(parents=True, exist_ok=True)
         self.fetch_msg(f"Downloading {asset} ...")
@@ -2065,7 +2088,11 @@ class Installer:
             if self.sha256_file(archive_path) != expected:
                 self.skip(tool, f"{asset} checksum mismatch")
             try:
-                ffmpeg_runtime.extract(archive_path, asset.removesuffix(".tar.gz"), staged)
+                ffmpeg_runtime.extract(archive_path, top, staged)
+                if _FFMPEG_BUILD_TAG.match(tag):
+                    ffmpeg_runtime.check_identity(staged, target=triple, archive=asset,
+                                                  version=top[len("ffmpeg-runtime-"):-len(f"-{triple}")],
+                                                  commit=tag[len("release-"):])
             except ffmpeg_runtime.RuntimeArchiveError as exc:
                 self.skip(tool, f"{asset}: {exc}")
             staged.chmod(0o755)
@@ -2095,7 +2122,7 @@ class Installer:
                 for tag in self.ffmpeg_pinned_tags(pin):
                     keep.add(f"{tag}-{triple}-runtime")
                 self.own_file(pin)
-        retired = re.compile(rf"^\d{{8}}(?:-r\d+)?-{re.escape(triple)}(?:-runtime)?$")
+        retired = re.compile(rf"^(?:\d{{8}}(?:-r\d+)?|release-[0-9a-f]{{40}})-{re.escape(triple)}(?:-runtime)?$")
         for entry in sorted(releases.iterdir()):
             if entry.is_symlink() or not entry.is_dir():
                 continue
@@ -2136,10 +2163,11 @@ class Installer:
 
     def install_ffmpeg(self) -> None:
         triple = self.ffmpeg_triple("ffmpeg")
-        tag = self.latest_date_tag(f"https://github.com/{FFMPEG_REPO}/releases.atom")
-        if not tag:
+        release = self.build_release("ffmpeg", FFMPEG_REPO, "ffmpeg-runtime", triple)
+        if release is None:
             self.unchecked("ffmpeg", "no release found")
             return
+        tag = release[0]
         home = self.ffmpeg_home
         for command in FFMPEG_COMMANDS:
             existing = self.dest / command
@@ -2328,10 +2356,10 @@ class Installer:
             shutil.rmtree(old, ignore_errors=True)
 
     def player_runtime_pin(self, declared: object) -> tuple[str, str]:
-        match = re.fullmatch(r"(\d+(?:\.\d+)*)\+(\d{8}(?:-r\d+)?)", declared.strip()) \
+        match = re.fullmatch(r"(\d+(?:\.\d+)*)\+(\d{8}(?:-r\d+)?|release-[0-9a-f]{40})", declared.strip()) \
             if isinstance(declared, str) else None
         if match is None:
-            self.skip("player", "the release does not declare its FFmpeg runtime as <ffmpeg>+<tag>")
+            self.skip("player", "the release does not declare its FFmpeg runtime as <ffmpeg>+release-<commit>")
         return match.group(1), match.group(2)
 
     def pinned_player_runtime(self) -> Path | None:
