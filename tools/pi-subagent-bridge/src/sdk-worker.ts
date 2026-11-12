@@ -7,7 +7,7 @@ import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, u
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { MUSE_AGENT_NAMES, isMuseTier } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
-import { registerRequiredChildExtensions } from "pi-subagents/required-child-extensions"
+
 import { assertTierProfiles, tierGuardPath } from "./tier-profile.ts"
 import {
   createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime,
@@ -16,6 +16,7 @@ import {
 
 const require = createRequire(import.meta.url)
 const subagentsExtensionPath = require.resolve("pi-subagents")
+const requiredExtensionsExtensionPath = fileURLToPath(new URL("./extensions/register-required-child-extensions.ts", import.meta.url))
 const POLL_MS = 1500
 const TIMEOUT_MS = 4 * 60 * 60 * 1000
 
@@ -100,6 +101,14 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
     : SessionManager.create(job.cwd, job.sessionDir)
   const agentDir = getAgentDir()
   if (!job.priorRunId) assertTierProfiles(agentDir)
+  const sessionId = manager.getSessionId()
+  process.env.USR_REQUIRED_CHILD_EXTENSIONS_JSON = JSON.stringify({
+    sessionId,
+    extensions: [
+      { id: "usr-nested-tier-guard-v1", path: fileURLToPath(tierGuardPath(tier, job.model)) },
+      ...(muse ? [{ id: "usr-muse-subscription-v1", path: museExtensionPath() }] : []),
+    ],
+  })
   const settings = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } })
   const completions = new Map<string, Record<string, unknown>>()
   const waiters = new Map<string, (event: Record<string, unknown>) => void>()
@@ -129,7 +138,7 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   const loader = new DefaultResourceLoader({
     cwd: job.cwd, agentDir, settingsManager: settings,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
-    additionalExtensionPaths: [subagentsExtensionPath, ...(muse ? [museExtensionPath()] : [])],
+    additionalExtensionPaths: [subagentsExtensionPath, ...(muse ? [museExtensionPath()] : []), requiredExtensionsExtensionPath],
     extensionFactories: [rpcExtension],
   })
   await loader.reload()
@@ -152,15 +161,6 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
                session.thinkingLevel !== job.model.variant) {
       throw new Error("Pi SDK changed or clamped the pinned model/effort")
     }
-    const required = registerRequiredChildExtensions({
-      sessionId: manager.getSessionId(),
-      extensions: [
-        { id: "usr-nested-tier-guard-v1", path: fileURLToPath(tierGuardPath(tier, job.model)) },
-        ...(muse ? [{ id: "usr-muse-subscription-v1", path: museExtensionPath() }] : []),
-      ],
-      requireForAllRunners: true,
-    })
-    try {
     const rpc = api.send
     if (!rpc) throw new Error("Pi extension RPC is unavailable")
     const ping = unwrap(await rpc("ping", {}))
@@ -231,7 +231,6 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
     const synthesized = event.__bridge_result as Result | undefined
     if (synthesized && typeof synthesized === "object" && "state" in synthesized) return synthesized
     return terminal(event, id, sessionFile)
-    } finally { required.dispose() }
   } finally {
     session.dispose()
   }
