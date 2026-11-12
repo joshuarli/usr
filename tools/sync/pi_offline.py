@@ -133,6 +133,9 @@ def wrapper(root: Path) -> str:
     return ("#!/bin/sh\n"
             "# Bundled in usr; never install or update npm dependencies at runtime.\n"
             "set -eu\n"
+            # PI_OFFLINE blocks any project-configured npm/git package auto-installs,
+            # and prevents Pi's automatic model catalog/version update requests.
+            "export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1\n"
             f"exec node {shlex.quote(str(sdk))} "
             f"--extension {shlex.quote(str(subagent))} "
             f"--extension {shlex.quote(str(intercom))} \"$@\"\n")
