@@ -378,7 +378,7 @@ def main(argv: list[str]) -> int:
         raise GraphError("usage: sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|check|check-parallel|layers]")
     defaults = tool_list(ctx) if command_name in ("apply", "plan", "doctor") or (command_name == "tools" and not argv) else []
     chosen = argv if command_name == "tools" and argv else defaults
-    full = graph(ctx, chosen, setup=command_name in {"apply", "plan", "doctor", "bridge"})
+    full = graph(ctx, chosen, setup=command_name in {"apply", "plan", "doctor"})
     if command_name == "links":
         selected = full.select(["links"])
     elif command_name == "bridge":
