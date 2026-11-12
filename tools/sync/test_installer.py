@@ -812,6 +812,7 @@ sys.exit(1)
         self.assertNotIn("jaq", linux_arm)
         self.assertIn("mold", linux_arm)
         self.assertNotIn("player", linux_arm)
+        self.assertIn("gluon", linux_arm)
         server_file = self.root / "server.txt"
         server_file.write_text("fd\nrg\n")
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])
