@@ -14,11 +14,12 @@
   },
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
-    "test": "tsrs -p tsconfig.json --noEmit && node --experimental-strip-types --test test/*.test.ts",
+    "test": "tsrs -p tsconfig.json --noEmit && node --import tsx --test test/*.test.ts",
     "typecheck": "tsrs -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
-    "tsrs": "0.22.0-ts7.1.0-beta"
+    "tsrs": "0.22.0-ts7.1.0-beta",
+    "tsx": "4.20.6"
   }
 }
