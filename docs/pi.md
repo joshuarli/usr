@@ -16,7 +16,7 @@ The first-party bridge, harness configuration, the consumer pin, installation an
 
 The [bridge model table](../tools/pi-subagent-bridge/README.md) owns the exact role/model/effort mapping for all three providers.
 
-Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its global `subagents.modelScope` allows only the pinned OpenCode Go Spark/DeepSeek models and the pinned Muse SDK models. **Only models supported by OpenCode Go may be used through OpenCode/Pi:** standard `opencode/*` Zen models, metered endpoints, and custom providers are forbidden even when advertised by a model catalog. No Pi `god` role exists. Claude Code and Codex alone may invoke their existing native `god` models. The SDK bridge independently enforces the role pins and the effective model, effort, and tool allowlists, so Pi settings or a project override cannot silently select another model for bridge workers.
+Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its global `subagents.modelScope` allows only the pinned OpenCode Go DeepSeek model, the pinned free Zen model, and the pinned Muse SDK model. **The `opencode/inkling-2-small-free` pin is the sole permitted Zen exception** (free tier; declared in `~/.pi/agent/models.json`, scout `low`, mechanic `high`). All other `opencode/*` Zen models, metered endpoints, and custom providers are forbidden even when advertised by a model catalog. No Pi `god` role exists. Claude Code and Codex alone may invoke their existing native `god` models. The SDK bridge independently enforces the role pins and the effective model, effort, and tool allowlists, so Pi settings or a project override cannot silently select another model for bridge workers.
 
 ## Install
 
@@ -33,7 +33,7 @@ Pi authenticates only to OpenCode Go using the existing OpenCode login. In the *
 }
 ```
 
-Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. Muse Ember is available in Command Code and through the Muse SDK, **not** in the allowed OpenCode Go set. The tracked custom Zen model catalog has been removed. Command Code uses a separate interactive `cmd login` and runs first. No credentials are committed.
+Pi resolves the credential command at runtime; OpenCode's OAuth session may need refreshing with `opencode2`. The tracked custom Zen model catalog declares exactly `opencode/inkling-2-small-free` (free) in `~/.pi/agent/models.json`; the Pi SDK authenticates it as the `opencode` provider with the same OpenCode OAuth credential exported as `OPENCODE_API_KEY`. Muse Ember remains only in the Command Code lane; nothing on the Pi path pins it. Command Code uses a separate interactive `cmd login` and runs first. No credentials are committed.
 
 `sh sync` does **not** run `pi install`, `pi update`, or npm for Pi. The tracked package list is empty and a nonempty Pi package list is treated as a sync conflict; the CLI explicitly loads its locally vendored extensions. `sh sync plan` and `sh sync doctor` inspect local postconditions without writing. The bridge uses the single installed Pi runtime, and the tracked user profiles in `~/.pi/agent/agents/` enforce the same tier contract for interactive Pi.
 
@@ -61,7 +61,7 @@ These commands use the shell `worker-watch --state ROOT ID` as a notification ai
 
 ## One-level native Pi nesting
 
-The tracked native Pi profiles (scout, mechanic, worker, expert, and the Muse-only `muse-scout`, `muse-mechanic`, `muse-worker`) expose `subagent` and declare ordered descendant allowlists. A required child extension registers the capability ceiling from the typed [`tier-policy.ts`](../tools/pi-subagent-bridge/src/tier-policy.ts) graph in each first-level child and its descendants. The SDK checks parsed YAML profile parity and the exact modelScope before a new root launch. Nested/async children inherit that ceiling and `maxSubagentDepth = 2`; second-level agents cannot delegate again. A permitted nested launch uses `subagent({ agent: "mechanic", task: "...", options: { agentScope: "user" } })`; all other nested options are rejected.
+The tracked native Pi profiles (scout, mechanic, worker, expert, and the Muse-only `muse-worker`) expose `subagent` and declare ordered descendant allowlists. A required child extension registers the capability ceiling from the typed [`tier-policy.ts`](../tools/pi-subagent-bridge/src/tier-policy.ts) graph in each first-level child and its descendants. The SDK checks parsed YAML profile parity and the exact modelScope before a new root launch. Nested/async children inherit that ceiling and `maxSubagentDepth = 2`; second-level agents cannot delegate again. A permitted nested launch uses `subagent({ agent: "mechanic", task: "...", options: { agentScope: "user" } })`; all other nested options are rejected.
 
 Scout → scout; mechanic → scout/mechanic; worker → scout/mechanic/worker; expert → scout/mechanic/worker/expert. No God. A nested call cannot select a model, override tools/provider, create a new worktree, change cwd or use workflow-script launch modes: a code-installed tool-call guard rejects those paths, alongside the upstream `allowedAgents` and depth admission checks. Nested children remain in the assigned worktree; the outer parent must check the combined diff and acceptance proof. This is *not* an OS sandbox against arbitrary shell commands.
 
@@ -89,12 +89,13 @@ Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/n
 
 ## Muse subscription integration
 
-After `sh sync` and `muse` → `/login`, the bridge uses the pinned Muse SDK models as
-the default middle option when Command Code is unavailable or fails before edits:
-`muse-sdk/muse-ember-1.0` for scout (medium) and mechanic (xhigh), and
-`muse-sdk/muse-spark-1.3` for worker (xhigh). Expert has no Muse route. No environment
-flag is required and `USR_PI_MUSE_SUBSCRIPTION` is ignored. Muse-only nested child
-profiles preserve type-checked tier limits and the two-level depth cap. The bridge sets
+After `sh sync` and `muse` → `/login`, the bridge uses the pinned Muse SDK model as
+the Pi fallback for the worker tier when Command Code is unavailable or fails before
+edits: `muse-sdk/muse-spark-1.3` (xhigh). Scout and mechanic run on the pinned free Zen
+model `opencode/inkling-2-small-free` (scout `low`, mechanic `high`); expert runs on
+`opencode-go/deepseek-v4.1-flash` (max). No environment flag is required and
+`USR_PI_MUSE_SUBSCRIPTION` is ignored. Muse-only nested child profiles preserve
+type-checked tier limits and the two-level depth cap. The bridge sets
 `PI_MUSE_SDK_CONTRIBUTOR=on` for its Muse workers, so Meta may use prompts, code and
 outputs for training.
 For a disposable real-account verification and Contributor-mode privacy details,

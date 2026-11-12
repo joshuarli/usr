@@ -137,7 +137,8 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
   if (errors.length > 0) throw new Error("Pi extension initialization failed: " + errors.map((e) => e.error).join("; "))
   const { session } = await createAgentSession({
     cwd: job.cwd, agentDir, modelRuntime: runtime, ...(model ? { model } : {}), thinkingLevel: job.model.variant === "max" ? "max" :
-      job.model.variant === "xhigh" ? "xhigh" : job.model.variant === "medium" ? "medium" : "high",
+      job.model.variant === "xhigh" ? "xhigh" : job.model.variant === "medium" ? "medium" :
+      job.model.variant === "low" ? "low" : job.model.variant === "minimal" ? "minimal" : "high",
     sessionManager: manager, settingsManager: settings, resourceLoader: loader, noTools: "builtin",
   })
   try {

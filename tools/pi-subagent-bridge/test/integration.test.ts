@@ -50,7 +50,7 @@ function fake(cwd: string) {
     interrupt: async () => ({ data: { interrupted: true } }),
     models: async () => ({ data: [
       { id: "deepseek-v4.1-flash", providerID: "opencode-go", variants: [{ id: "high" }, { id: "max" }], enabled: true, status: "active" },
-      { id: "muse-spark-1.3-contributor", providerID: "opencode-go", variants: [{ id: "medium" }, { id: "high" }], enabled: true, status: "active" },
+      { id: "inkling-2-small-free", providerID: "opencode", variants: [{ id: "low" }, { id: "high" }], enabled: true, status: "active" },
     ] }),
   }
   const command: NonNullable<Parameters<typeof makeHybridBridge>[1]> = {

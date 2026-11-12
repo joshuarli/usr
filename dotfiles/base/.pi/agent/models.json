@@ -1,0 +1,33 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "opencode": {
+      "models": [
+        {
+          "id": "inkling-2-small-free",
+          "name": "Inkling 2 Small Free",
+          "api": "openai-responses",
+          "baseUrl": "https://opencode.ai/inference/openai/v1",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "off": null,
+            "minimal": "minimal",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+            "max": "max"
+          },
+          "input": [
+            "text"
+          ],
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        }
+      ]
+    }
+  }
+}

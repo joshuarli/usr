@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/pi"))
 from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "opencode-go/muse-spark-1.3-contributor"
+MODEL = "opencode/inkling-2-small-free"
 TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "xhigh", "god": "xhigh"}
 
 
@@ -125,8 +125,8 @@ class PiTests(unittest.TestCase):
         self.assertTrue(sub["modelScope"]["strict"])
         self.assertEqual(set(sub["modelScope"]["allow"]), {
             "opencode-go/deepseek-v4.1-flash", MODEL,
-            "muse-sdk/muse-spark-1.3", "muse-sdk/muse-ember-1.0"})
-        expected = {"scout": (MODEL, "medium"),
+            "muse-sdk/muse-spark-1.3"})
+        expected = {"scout": (MODEL, "low"),
                     "mechanic": (MODEL, "high"),
                     "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
                     "expert": ("opencode-go/deepseek-v4.1-flash", "max")}
@@ -150,13 +150,9 @@ class PiTests(unittest.TestCase):
             for child in nested[tier]:
                 self.assertIn("  - " + child + "\n", agent)
             self.assertNotIn("  - god\n", agent)
-        muse_expected = {"muse-scout": ("muse-sdk/muse-ember-1.0", "medium"),
-                         "muse-mechanic": ("muse-sdk/muse-ember-1.0", "xhigh"),
-                         "muse-worker": ("muse-sdk/muse-spark-1.3", "xhigh")}
+        muse_expected = {"muse-worker": ("muse-sdk/muse-spark-1.3", "xhigh")}
         muse_nested = {
-            "muse-scout": ["muse-scout"],
-            "muse-mechanic": ["muse-scout", "muse-mechanic"],
-            "muse-worker": ["muse-scout", "muse-mechanic", "muse-worker"],
+            "muse-worker": ["scout", "mechanic", "muse-worker"],
         }
         for tier, (model, effort) in muse_expected.items():
             self.assertEqual(sub["agentOverrides"][tier], {"model": model, "thinking": effort})
@@ -172,9 +168,14 @@ class PiTests(unittest.TestCase):
             for child in muse_nested[tier]:
                 self.assertIn("  - " + child + "\n", agent)
             self.assertNotIn("  - god\n", agent)
-        self.assertFalse((PROFILE / "models.json").exists(),
-                         "No custom OpenCode Zen catalog is allowed for delegated workers")
-        self.assertTrue(all(name.startswith(("opencode-go/", "muse-sdk/")) for name in sub["modelScope"]["allow"]))
+        for deleted in ("muse-scout", "muse-mechanic"):
+            self.assertFalse((PROFILE / "agents" / (deleted + ".md")).exists(),
+                             "Muse scout/mechanic profiles are retired")
+        catalog = json.loads((PROFILE / "models.json").read_text())
+        zen_ids = [m["id"] for m in catalog["providers"]["opencode"]["models"]]
+        self.assertEqual(zen_ids, ["inkling-2-small-free"],
+                         "models.json must pin exactly the free Zen scout/mechanic model")
+        self.assertTrue(all(name.startswith(("opencode/", "opencode-go/", "muse-sdk/")) for name in sub["modelScope"]["allow"]))
         self.assertNotIn("god", sub["agentOverrides"])
         self.assertFalse((PROFILE / "agents/god.md").exists())
         self.assertEqual(os.readlink(PROFILE / "AGENTS.md"), "../../.codex/AGENTS.md")

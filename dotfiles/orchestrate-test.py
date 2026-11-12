@@ -17,9 +17,9 @@ class OrchestrateTests(unittest.TestCase):
         for method in ("worker_model_check", "worker_start", "worker_status", "worker_resume"):
             self.assertIn(method, self.text)
 
-    def test_command_first_and_opencode_go_only(self):
+    def test_command_first_and_zen_pin_only(self):
         self.assertIn("Command Code is the first executor", self.text)
-        self.assertIn("only models actually available through the `opencode-go`", self.text)
+        self.assertIn("the only permitted `opencode/*` (Zen) model is `opencode/inkling-2-small-free`", self.text)
         self.assertNotIn("opencode/muse-ember-1.0", self.text)
 
     def test_god_exception(self):

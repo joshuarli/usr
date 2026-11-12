@@ -81,7 +81,7 @@ try {
   await new Promise(resolveWait => setTimeout(resolveWait, 250));
   if (existsSync(museLog)) throw new Error("Offline runtime attempted an automatic Muse catalog refresh");
   if (!museModels.some(model => model.id === "muse-ember-1.0"))
-    throw new Error("Bundled Muse catalog lacks the pinned Ember model");
+    throw new Error("Bundled Muse catalog lacks muse-ember-1.0");
   for (const name of ["npm", "npx"])
     if (existsSync(join(agentDir, name + ".called"))) throw new Error("Runtime invoked " + name);
   console.log("ok: Pi SDK bound subagents, intercom, and Muse; " +

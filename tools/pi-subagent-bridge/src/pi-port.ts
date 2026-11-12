@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIERS } from "./tier-policy.ts"
+import { GO_TIER_MODELS, MUSE_TIER_MODELS, ZEN_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
 
 type Result = {
@@ -25,14 +25,13 @@ const SESSION = /^ses_[a-f0-9]{32}$/
 const children = new Map<number, ChildProcess>()
 const worker = fileURLToPath(new URL("./sdk-worker.ts", import.meta.url))
 // Derive the supported catalog from the same typed pins used at admission.
-const VARIANTS = new Map<string, { providerID: "opencode-go"; variants: Set<string> }>()
-for (const tier of TIERS) {
-  const { providerID, id, variant } = GO_TIER_MODELS[tier]
-  const group = VARIANTS.get(id)
+const VARIANTS = new Map<string, { providerID: "opencode" | "opencode-go"; variants: Set<string> }>()
+for (const pin of [...Object.values(GO_TIER_MODELS), ...Object.values(ZEN_TIER_MODELS)]) {
+  const group = VARIANTS.get(pin.id)
   if (group) {
-    group.variants.add(variant)
+    group.variants.add(pin.variant)
   } else {
-    VARIANTS.set(id, { providerID, variants: new Set([variant]) })
+    VARIANTS.set(pin.id, { providerID: pin.providerID, variants: new Set([pin.variant]) })
   }
 }
 
@@ -143,23 +142,10 @@ export function piPort(): OpenCodePort {
           variants: [...config.variants].map((variant) => ({ id: variant })),
         }))
       if (musePreflight().available) {
-        const variants = new Set<string>()
-        for (const t of ["scout", "mechanic", "worker"] as const) {
-          const m = (MUSE_TIER_MODELS as any)[t]
-          if (m) variants.add(m.variant)
-        }
         available.push({
-          id: MUSE_TIER_MODELS.scout.id === MUSE_TIER_MODELS.mechanic.id ? MUSE_TIER_MODELS.scout.id : (MUSE_TIER_MODELS as any).worker?.id ?? MUSE_TIER_MODELS.scout.id,
-          providerID: "muse-sdk", enabled: true, status: "active",
-          variants: Array.from(variants).map((variant) => ({ id: variant })),
+          id: MUSE_TIER_MODELS.worker.id, providerID: "muse-sdk", enabled: true, status: "active",
+          variants: [{ id: MUSE_TIER_MODELS.worker.variant }],
         })
-        // Also add worker model explicitly if different
-        if ((MUSE_TIER_MODELS as any).worker && (MUSE_TIER_MODELS as any).worker.id !== MUSE_TIER_MODELS.scout.id) {
-          available.push({
-            id: (MUSE_TIER_MODELS as any).worker.id, providerID: "muse-sdk", enabled: true, status: "active",
-            variants: [{ id: (MUSE_TIER_MODELS as any).worker.variant }],
-          })
-        }
       }
       return { data: available }
     },

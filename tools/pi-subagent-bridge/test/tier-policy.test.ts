@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MUSE_TIER_MODELS, MUSE_AGENT_NAMES,
-  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH,
+  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH, ZEN_TIER_MODELS,
   TIER_TOOLS, TIERS, tierForModel, type ChildOf, type Tier,
 } from "../src/tier-policy.ts"
 import { nestedCallRefusal, registerTierGuard } from "../src/nested-guard.ts"
@@ -27,11 +27,22 @@ if (false) {
   typechecked("expert", "god")
 }
 
-function profile(tier: Tier, family: "go" | "muse" = "go"): string {
-  const muse = family === "muse" && ((tier === "scout" || tier === "mechanic" || tier === "worker") && (MUSE_TIER_MODELS as any)[tier])
-  const pin = muse ? (MUSE_TIER_MODELS as any)[tier] : (GO_TIER_MODELS as any)[tier]
-  const name = muse ? (MUSE_AGENT_NAMES as any)[tier] : tier
-  const children = muse ? (MUSE_DELEGATION as any)[tier] : (DELEGATION as any)[tier]
+function pinFor(tier: Tier, family: "go" | "muse" | "zen") {
+  if (family === "zen") return ZEN_TIER_MODELS[tier as "scout" | "mechanic"]
+  if (family === "muse") return MUSE_TIER_MODELS[tier as "worker"]
+  return GO_TIER_MODELS[tier as "worker" | "expert"]
+}
+function familyFor(tier: Tier): "zen" | "go" {
+  return tier === "scout" || tier === "mechanic" ? "zen" : "go"
+}
+function profile(tier: Tier, family: "go" | "muse" | "zen" = familyFor(tier)): string {
+  const muse = family === "muse"
+  const zen = family === "zen"
+  const pin = zen ? ZEN_TIER_MODELS[tier as "scout" | "mechanic"]
+    : muse ? MUSE_TIER_MODELS[tier as "worker"]
+    : GO_TIER_MODELS[tier as "worker" | "expert"]
+  const name = muse ? MUSE_AGENT_NAMES[tier as "worker"] : tier
+  const children = muse ? MUSE_DELEGATION[tier as "worker"] : DELEGATION[tier]
   return [
     "---", "name: " + name, "description: Fixed profile",
     "model: " + pin.providerID + "/" + pin.id,
@@ -39,25 +50,26 @@ function profile(tier: Tier, family: "go" | "muse" = "go"): string {
     "tools:", ...(TIER_TOOLS as any)[tier].map((tool: string) => "  - " + tool),
     "allowNestedSubagents: true",
     "maxSubagentDepth: " + MAX_SUBAGENT_DEPTH,
-    "allowedAgents:", ...(children as string[]).map((child: string) => "  - " + child),
+    "allowedAgents:", ...(children as readonly string[]).map((child) => "  - " + child),
     "---", "Profile body.",
   ].join("\n") + "\n"
 }
 function profileSettings(): object {
   return { subagents: {
     agentOverrides: Object.fromEntries([
-      ...TIERS.map((tier) => [tier, { model: GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id,
-        thinking: GO_TIER_MODELS[tier].variant }]),
-      ...(["scout", "mechanic"] as const).map((tier) => [MUSE_AGENT_NAMES[tier], {
-        model: (MUSE_TIER_MODELS as any)[tier].providerID + "/" + (MUSE_TIER_MODELS as any)[tier].id, thinking: (MUSE_TIER_MODELS as any)[tier].variant }]),
+      ...TIERS.map((tier) => [tier, { model: pinFor(tier, familyFor(tier)).providerID + "/" + pinFor(tier, familyFor(tier)).id,
+        thinking: pinFor(tier, familyFor(tier)).variant }]),
+      [MUSE_AGENT_NAMES.worker, {
+        model: MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id,
+        thinking: MUSE_TIER_MODELS.worker.variant }],
     ]),
     modelScope: { enforce: true, strict: true,
-      allow: ["opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor",
-        "muse-sdk/muse-spark-1.3", "muse-sdk/muse-ember-1.0"],
+      allow: ["opencode/inkling-2-small-free",
+        "opencode-go/deepseek-v4.1-flash",
+        "muse-sdk/muse-spark-1.3"],
       agents: Object.fromEntries([
-        ...TIERS.map((tier) => [tier, { allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id] }]),
-        ...(["scout", "mechanic"] as const).map((tier) => [MUSE_AGENT_NAMES[tier], {
-          allow: [(MUSE_TIER_MODELS as any)[tier].providerID + "/" + (MUSE_TIER_MODELS as any)[tier].id] }]),
+        ...TIERS.map((tier) => [tier, { allow: [pinFor(tier, familyFor(tier)).providerID + "/" + pinFor(tier, familyFor(tier)).id] }]),
+        [MUSE_AGENT_NAMES.worker, { allow: [MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id] }],
       ]),
     },
   } }
@@ -75,13 +87,15 @@ test("typed lattice is reflexive/monotone and excludes escalation or god", () =>
   assert.equal(canDelegate("worker", "expert"), false)
 })
 
-test("Go model / effective effort is a typed role identity, not a string lookup", () => {
+test("pinned model / effective effort is a typed role identity, not a string lookup", () => {
   for (const tier of TIERS) {
-    const model = GO_TIER_MODELS[tier]
+    const model = pinFor(tier, familyFor(tier))
     assert.equal(tierForModel(model, tier === "scout"), tier)
-    assert.throws(() => tierForModel({ ...model, providerID: "opencode" }, tier === "scout"), /Unapproved/)
     assert.throws(() => tierForModel({ ...model, variant: "xhigh" }, tier === "scout"), /Unapproved/)
   }
+  assert.throws(() => tierForModel({ providerID: "opencode", id: "inkling-2-small-free", variant: "low" }, false), /Unapproved/)
+  assert.throws(() => tierForModel({ providerID: "opencode", id: "inkling-2-small-free", variant: "high" }, true), /Unapproved/)
+  assert.throws(() => tierForModel({ providerID: "muse-sdk", id: "muse-spark-1.3", variant: "max" }, false), /Unapproved/)
 })
 
 test("code-owned tool boundary rejects model overrides, scripts, tier escalation, worktree escape", () => {
@@ -112,39 +126,39 @@ test("code-owned tool boundary rejects model overrides, scripts, tier escalation
 
 test("real YAML profiles are validated as runtime policy; drift fails before spawning", () => {
   for (const tier of TIERS) {
-    assertTierProfile(tier, profile(tier))
+    const family = familyFor(tier)
+    assertTierProfile(tier, profile(tier, family), family)
     assert.ok(tierGuardPath(tier).pathname.endsWith("/" + tier + ".ts"))
     assert.throws(() => assertTierProfile(tier,
-      profile(tier).replace("maxSubagentDepth: 2", "maxSubagentDepth: 3")), /Unapproved/)
+      profile(tier, family).replace("maxSubagentDepth: 2", "maxSubagentDepth: 3"), family), /Unapproved/)
     assert.throws(() => assertTierProfile(tier,
-      profile(tier).replace("allowedAgents:", "allowedAgents:\n  - god")), /allowlist/)
+      profile(tier, family).replace("allowedAgents:", "allowedAgents:\n  - god"), family), /allowlist/)
     assert.throws(() => assertTierProfile(tier,
-      profile(tier).replace("tools:", "tools:\n  - unrestricted_shell")), /allowlist/)
+      profile(tier, family).replace("tools:", "tools:\n  - unrestricted_shell"), family), /allowlist/)
     assert.throws(() => assertTierProfile(tier,
-      profile(tier).replace("model: opencode-go/", "model: opencode/")), /Unapproved/)
+      profile(tier, family).replace("model: " + pinFor(tier, family).providerID, "model: openrouter"), family), /Unapproved/)
   }
-  for (const tier of ["scout", "mechanic", "worker"] as const)
-    assert.ok(existsSync(tierGuardPath(tier, { providerID: "muse-sdk" })), tier)
+  assertTierProfile("worker", profile("worker", "muse"), "muse")
+  assert.ok(existsSync(tierGuardPath("worker", { providerID: "muse-sdk" })))
 })
 
-test("profile checks enforce one exact Go scope and one max depth", () => {
+test("profile checks enforce one exact pinned scope and one max depth", () => {
   const home = mkdtempSync(join(tmpdir(), "usr-tier-policy-"))
   const agentDir = join(home, "agents")
   mkdirSync(agentDir)
   try {
     for (const tier of TIERS) writeFileSync(join(agentDir, tier + ".md"), profile(tier))
-    for (const tier of ["scout", "mechanic"] as const)
-      writeFileSync(join(agentDir, MUSE_AGENT_NAMES[tier] + ".md"), profile(tier, "muse"))
+    writeFileSync(join(agentDir, MUSE_AGENT_NAMES.worker + ".md"), profile("worker", "muse"))
     const settings = profileSettings()
     writeFileSync(join(home, "settings.json"), JSON.stringify(settings))
     mkdirSync(join(home, "extensions", "subagent"), { recursive: true })
     writeFileSync(join(home, "extensions", "subagent", "config.json"), JSON.stringify({ maxSubagentDepth: 2 }))
     assert.doesNotThrow(() => assertTierProfiles(home))
-    const zen = structuredClone(settings) as { subagents: { modelScope: { allow: string[] } } }
-    zen.subagents.modelScope.allow.push("opencode/muse-ember-1.0")
-    writeFileSync(join(home, "settings.json"), JSON.stringify(zen))
+    const extra = structuredClone(settings) as { subagents: { modelScope: { allow: string[] } } }
+    extra.subagents.modelScope.allow.push("openrouter/foo")
+    writeFileSync(join(home, "settings.json"), JSON.stringify(extra))
     assert.throws(() => assertTierProfiles(home), /allowlist/)
-    zen.subagents.modelScope.allow.pop()
+    writeFileSync(join(home, "settings.json"), JSON.stringify(settings))
     writeFileSync(join(home, "extensions", "subagent", "config.json"), JSON.stringify({ maxSubagentDepth: 3 }))
     assert.throws(() => assertTierProfiles(home), /depth\/model/)
   } finally {
@@ -178,15 +192,17 @@ test("installed child guard registers a real monotonic capability ceiling", () =
   assert.equal(resolveCurrentSubagentCapabilityCeiling(sessionId), undefined)
 })
 
-test("Muse opt-in pins and nested tiers fail closed", () => {
-  for (const tier of ["scout", "mechanic", "worker"] as const) {
-    assert.equal(museSubscriptionSelected(tier), true)
-    assert.equal(tierForModel((MUSE_TIER_MODELS as any)[tier], tier === "scout"), tier)
-  }
+test("Muse worker pins and nested tiers fail closed", () => {
+  assert.equal(museSubscriptionSelected("worker"), true)
+  assert.equal(museSubscriptionSelected("scout"), false)
+  assert.equal(museSubscriptionSelected("mechanic"), false)
   assert.equal(museSubscriptionSelected("expert"), false)
+  assert.equal(tierForModel(MUSE_TIER_MODELS.worker, false), "worker")
   assert.throws(() => tierForModel({ providerID: "muse-sdk", id: "muse-spark-1.3", variant: "max" }, false), /Unapproved/)
-  assert.equal(nestedCallRefusal("scout", "subagent", { agent: "muse-scout", task: "Research",
+  assert.equal(nestedCallRefusal("worker", "subagent", { agent: "scout", task: "Research",
     options: { agentScope: "user" } }, "muse"), undefined)
-  assert.equal(nestedCallRefusal("mechanic", "subagent", { agent: "muse-mechanic", task: "Fix",
+  assert.equal(nestedCallRefusal("worker", "subagent", { agent: "muse-worker", task: "Fix",
     options: { agentScope: "user" } }, "muse"), undefined)
+  assert.ok(nestedCallRefusal("worker", "subagent", { agent: "worker", task: "Escalate",
+    options: { agentScope: "user" } }, "muse"))
 })

@@ -13,14 +13,14 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 ## Pinned tiers
 
-| Tier | Command Code first | Effort | Muse SDK middle | OpenCode Go fallback via Pi | Purpose |
-| --- | --- | --- | --- | --- | --- |
-| scout | `meta/muse-ember` | `medium` | `muse-sdk/muse-ember-1.0` (`medium`) | `opencode-go/muse-spark-1.3-contributor` (`medium`) | Read-only exploration |
-| mechanic | `meta/muse-ember` | `xhigh` | `muse-sdk/muse-ember-1.0` (`xhigh`) | `opencode-go/muse-spark-1.3-contributor` (`high`) | Mechanical scoped edits |
-| worker | `deepseek/deepseek-v4.1-flash` | `high` | `muse-sdk/muse-spark-1.3` (`xhigh`) | `opencode-go/deepseek-v4.1-flash` (`high`) | Implementation, debugging, testing |
-| expert | `deepseek/deepseek-v4.1-flash` | `max` | — | `opencode-go/deepseek-v4.1-flash` (`max`) | Difficult architectural or cross-cutting work |
+| Tier | Command Code first | Effort | Pi fallback (in order) | Purpose |
+| --- | --- | --- | --- | --- |
+| scout | `meta/muse-ember` | `medium` | `opencode/inkling-2-small-free` (`low`) | Read-only exploration |
+| mechanic | `meta/muse-ember` | `xhigh` | `opencode/inkling-2-small-free` (`high`) | Mechanical scoped edits |
+| worker | `deepseek/deepseek-v4.1-flash` | `high` | `muse-sdk/muse-spark-1.3` (`xhigh`), then `opencode-go/deepseek-v4.1-flash` (`high`) | Implementation, debugging, testing |
+| expert | `deepseek/deepseek-v4.1-flash` | `max` | `opencode-go/deepseek-v4.1-flash` (`max`) | Difficult architectural or cross-cutting work |
 
-**Hard OpenCode boundary:** only models actually available through the `opencode-go` provider may be delegated via the OpenCode Go fallback; being in standard OpenCode does not count. Never use `opencode/*` (Zen), other metered OpenCode models, or custom endpoints. A model not on Go stays with its other approved provider.
+**OpenCode boundary:** the only permitted `opencode/*` (Zen) model is `opencode/inkling-2-small-free`, the pinned free scout/mechanic option. Every other Zen model, metered OpenCode model, and custom endpoint is forbidden; a model not pinned for its tier stays with its other approved provider.
 
 No Pi god tier is available. **Only Claude Code** may spawn a native `god` on `claude-opus-5-5` at `xhigh`; **only Codex** may spawn a native `god` on `gpt-6.1-sol` at `high`. Other harnesses do not have `god`; do not silently substitute another model or map it to `expert`.
 
@@ -38,7 +38,7 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-**Command Code is the first executor for every non-god tier**, then the Muse SDK for scout/mechanic/worker, then OpenCode Go (through the bridge's embedded Pi SDK) as the final fallback. Only a missing Command Code executable or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models.
+**Command Code is the first executor for every non-god tier**, then the pinned Zen fallback for scout/mechanic, the Muse SDK for worker, then OpenCode Go (through the bridge's embedded Pi SDK) as the final fallback for worker/expert. Only a missing Command Code executable or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models.
 
 **Nesting:** a Pi SDK child may delegate one more generation, at an equal-or-weaker tier, only when its brief calls for it; the bridge's guard rejects anything else (deeper nesting, `god`, model or worktree overrides). Descendants share the original worktree and write budget, and the outer parent still owns acceptance and review. Command Code workers are leaves: no bridge CLI children, no host-native agents.
 

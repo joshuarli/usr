@@ -6,7 +6,7 @@ import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort
 import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
-import { GO_TIER_MODELS, MUSE_TIER_MODELS, museSubscriptionSelected, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
+import { GO_TIER_MODELS, MUSE_TIER_MODELS, ZEN_TIER_MODELS, museSubscriptionSelected, isZenTier, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
 export type { Tier } from "./tier-policy.ts"
 export type Scope = {
@@ -22,14 +22,14 @@ type Session = {
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string
   continuations?: number; steers?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
-  remaining_pi?: Array<"muse" | "go">
+  remaining_pi?: Array<"muse" | "go" | "zen">
   execution_order?: "command-first"; fallback_blocked?: string
 }
 function currentBackend(s: Session): Session["backend"] { return s.backend }
 const EFFORT: Record<Tier, Effort> = {
   scout: "medium", mechanic: "xhigh", worker: "high", expert: "max",
 }
-// Sessions admitted before the Ember migration must retain their original pins.
+// Sessions admitted before the Zen migration must retain their original pins.
 const LEGACY_EFFORT: Record<Tier, Effort> = {
   scout: "low", mechanic: "high", worker: "high", expert: "max",
 }
@@ -135,13 +135,14 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
+// Sessions admitted before the Zen migration must retain their original pins.
 const LEGACY_PI_MODELS: Partial<Record<Tier, ModelRef>> = {
   scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
   mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
 }
 function modelFor(tier: Tier): ModelRef {
-  // Muse is enabled by default for scout/mechanic as a fallback option
-  return museSubscriptionSelected(tier) ? MUSE_TIER_MODELS[tier] : GO_TIER_MODELS[tier]
+  if (isZenTier(tier)) return ZEN_TIER_MODELS[tier]
+  return museSubscriptionSelected(tier) ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier as "worker" | "expert"]
 }
 function primaryFor(s: Session): ModelRef { return s.primary_model ?? LEGACY_PI_MODELS[s.tier] ?? modelFor(s.tier) }
 function fallbackModelFor(s: Session): string {
@@ -191,7 +192,9 @@ function fallbackNotice(s: Session): string {
     "Automatic fallback is expected and needs no parent action.",
     "The worktree was verified untouched before switching, so no work was lost or replayed.",
     "The task continues on " + (s.backend === "pi"
-      ? (primaryFor(s).providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK")
+      ? (primaryFor(s).providerID === "muse-sdk" ? "Muse subscription via the Pi SDK"
+        : primaryFor(s).providerID === "opencode" ? "OpenCode Zen via the Pi SDK"
+        : "OpenCode Go via the Pi SDK")
       : "Command Code") +
       " with the same scope and approved tier pins; verify it normally with worker_status.",
     "Do not retry and do not start a duplicate worker.",
@@ -236,8 +239,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       while (s.remaining_pi.length) {
         const destination = s.remaining_pi.shift()!
         const candidate = destination === "muse" && museSubscriptionSelected(s.tier)
-          ? MUSE_TIER_MODELS[s.tier] : GO_TIER_MODELS[s.tier]
+          ? MUSE_TIER_MODELS.worker
+          : destination === "zen" && isZenTier(s.tier)
+            ? ZEN_TIER_MODELS[s.tier]
+            : destination === "go" && (s.tier === "worker" || s.tier === "expert")
+              ? GO_TIER_MODELS[s.tier]
+              : undefined
         if (destination === "muse") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
+        if (!candidate) continue
         try {
           if ((await makeWorkerBridge(api, candidate).modelCheck(s.cwd)).available) {
             selected = candidate
@@ -289,6 +298,25 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const dir = checkedWorktree(cwd)
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       // Command Code is primary
+      let zenAvailable = false, zenIssue: string | null = null
+      if (isZenTier(tierInput)) {
+        try {
+          zenAvailable = (await makeWorkerBridge(api, ZEN_TIER_MODELS[tierInput]).modelCheck(dir)).available
+        } catch (e) { zenIssue = String(e) }
+        if (!zenAvailable && !zenIssue) {
+          try {
+            const { ensureOpenCodeApiKey } = await import("./opencode-auth.ts")
+            ensureOpenCodeApiKey()
+            const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
+            const runtime = await ModelRuntime.create()
+            const model = ZEN_TIER_MODELS[tierInput]
+            if (!runtime.getModel(model.providerID, model.id))
+              zenIssue = `Pinned OpenCode Zen model ${model.providerID}/${model.id} is not in the Pi SDK catalog (models.json?)`
+            else if (!runtime.hasConfiguredAuth(model.providerID))
+              zenIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
+          } catch { /* keep issue null if diagnosis unavailable */ }
+        }
+      }
       let museAvailable = false, museIssue: string | null = null
       if (museSubscriptionSelected(tierInput)) {
         try {
@@ -298,10 +326,14 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           museIssue = musePreflight().issue ?? "Muse subscription model unavailable; check Muse Code login"
       }
       let goAvailable = false, goIssue: string | null = null
-      try {
-        goAvailable = (await makeWorkerBridge(api, GO_TIER_MODELS[tierInput]).modelCheck(dir)).available
-      } catch (e) { goIssue = String(e) }
-      if (!goAvailable && !goIssue) {
+      if (tierInput === "worker" || tierInput === "expert") {
+        try {
+          goAvailable = (await makeWorkerBridge(api, GO_TIER_MODELS[tierInput]).modelCheck(dir)).available
+        } catch (e) { goIssue = String(e) }
+      } else {
+        goIssue = "OpenCode Go is not a pinned lane for this tier"
+      }
+      if (!goAvailable && !goIssue && (tierInput === "worker" || tierInput === "expert")) {
         try {
           const { ensureOpenCodeApiKey } = await import("./opencode-auth.ts")
           ensureOpenCodeApiKey()
@@ -314,16 +346,19 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             goIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
+      const zenInfo = isZenTier(tierInput) ? { available: zenAvailable, issue: zenIssue } : { available: false, issue: null }
       const museInfo = museSubscriptionSelected(tierInput) ? { available: museAvailable, issue: museIssue } : { available: false, issue: null }
       const goInfo = { available: goAvailable, issue: goIssue }
+      const piLane = { backend: "pi", model: modelFor(tierInput),
+        available: isZenTier(tierInput) ? zenInfo.available : museSubscriptionSelected(tierInput) ? museInfo.available : goInfo.available,
+        issue: isZenTier(tierInput) ? zenInfo.issue : museSubscriptionSelected(tierInput) ? museInfo.issue : goInfo.issue }
       return {
         primary: { backend: "command-code", model: COMMAND_MODELS[tierInput],
           effort: EFFORT[tierInput], available: command.available() },
-        fallback: museSubscriptionSelected(tierInput)
-          ? { backend: "pi", model: modelFor(tierInput), available: museInfo.available, issue: museInfo.issue }
-          : { backend: "pi", model: GO_TIER_MODELS[tierInput], available: goInfo.available, issue: goInfo.issue },
+        fallback: piLane,
+        zen: isZenTier(tierInput) ? zenInfo : undefined,
         muse: museSubscriptionSelected(tierInput) ? { backend: "pi", model: modelFor(tierInput), available: museInfo.available, issue: museInfo.issue } : undefined,
-        opencode_go: { backend: "pi", model: GO_TIER_MODELS[tierInput], available: goInfo.available, issue: goInfo.issue },
+        opencode_go: !isZenTier(tierInput) ? { backend: "pi", model: GO_TIER_MODELS[tierInput as "worker" | "expert"], available: goInfo.available, issue: goInfo.issue } : undefined,
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {
@@ -331,12 +366,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       if (git(dir, "status", "--porcelain", "--untracked-files=all")) throw new Error("Worker worktree must start clean")
       const task = required(brief, "brief", 32000)
-      const useMuse = museSubscriptionSelected(tierInput)
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
         task, backend: "command-transition", attempts: 0,
         execution_order: "command-first" as const,
-        remaining_pi: useMuse ? ["muse", "go"] : ["go"], command_model: COMMAND_MODELS[tierInput],
+        remaining_pi: isZenTier(tierInput) ? ["zen"] : museSubscriptionSelected(tierInput) ? ["muse", "go"] : ["go"],
+        command_model: COMMAND_MODELS[tierInput],
         command_effort: EFFORT[tierInput] }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
@@ -417,7 +452,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
               error = null
               usage = null
             } catch (fallbackError) {
-              s.fallback_blocked = "OpenCode Go fallback blocked: " + String(fallbackError)
+              s.fallback_blocked = "Pi fallback blocked: " + String(fallbackError)
               save(s)
               state = currentBackend(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
               notice = s.fallback_blocked
