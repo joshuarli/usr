@@ -1179,8 +1179,9 @@ class DecideTests(unittest.TestCase):
     def test_orchestrate_skill_uses_the_structured_route_tool_contract(self):
         skill = (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text()
         self.assertIn("decide route --guide", skill)
-        self.assertIn("JSON on stdin", skill)
-        self.assertIn("Never invent measurements or findings", skill)
+        self.assertIn("decide route --baseline worker", skill)
+        self.assertIn("`TaskBrief` from verified facts", skill)
+        self.assertIn("without retrying", skill)
         self.assertNotIn("Sanitized task summary", skill)
 
 
