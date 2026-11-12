@@ -22,6 +22,7 @@ MAJORS = {"libavcodec": 63, "libavdevice": 63, "libavfilter": 12, "libavformat":
 WORKING = b"#!/bin/sh\nexit 0\n"
 TRIPLES = {"linux": "x86_64-unknown-linux-musl", "darwin": "aarch64-apple-darwin"}
 REPO = "https://github.com/laputa-systems/ffmpeg-build"
+R1, R2, R3 = ("release-" + digit * 40 for digit in "123")
 
 
 def elf_library(soname: str) -> bytes:
@@ -46,10 +47,18 @@ def macho_library(install_name: str) -> bytes:
 
 class Spec:
     def __init__(self, os_name, tag, upstream="9.0.2"):
-        self.os_name, self.tag = os_name, tag
+        self.os_name, self.tag, self.upstream = os_name, tag, upstream
         self.triple = TRIPLES[os_name]
-        self.top = f"ffmpeg-{upstream}+{tag}-{self.triple}-runtime"
-        self.asset = self.top + ".tar.gz"
+        self.build_tag = tag.startswith("release-")
+        if self.build_tag:
+            self.top = f"ffmpeg-runtime-{upstream}-{self.triple}"
+            self.asset = self.top + ".tar.xz"
+        else:
+            self.top = f"ffmpeg-{upstream}+{tag}-{self.triple}-runtime"
+            self.asset = self.top + ".tar.gz"
+        self.manifest_overrides = {}
+        self.release_manifest = {"schema_version": 1, "product": "ffmpeg-runtime", "version": upstream,
+                                 "target": self.triple, "source_revision": tag.removeprefix("release-")}
         self.programs = {"ffmpeg": WORKING, "ffprobe": WORKING}
         self.identity = {}
         self.manifest_sha = {}
@@ -79,15 +88,30 @@ class Spec:
                 continue
             entries.append((file, "file", data + (b"x" if name in self.corrupt_after_manifest else b"")))
             entries += [(link, "link", Path(file).name) for link in links]
-        entries.append(("share/ffmpeg-build/manifest.json", "file", json.dumps({"libraries": libraries}).encode()))
+        manifest = {"libraries": libraries, "profile": "runtime", "target": self.triple,
+                    "sources": {"ffmpeg": {"version": self.upstream}},
+                    "producer": {"commit": self.tag.removeprefix("release-"), "repository": "laputa-systems/ffmpeg-build"},
+                    "release": {"archive": self.asset}}
+        manifest.update(self.manifest_overrides)
+        entries.append(("share/ffmpeg-build/manifest.json", "file", json.dumps(manifest).encode()))
         entries += [(f"bin/{name}", "file", data) for name, data in self.programs.items()]
         entries += self.extra
-        return archive(self.top, entries)
+        return archive(self.top, entries, "w:xz" if self.build_tag else "w:gz")
+
+    def sums(self, digest):
+        if not self.build_tag:
+            return f"{digest}  {self.asset}\n".encode()
+        manifest = self.manifest_name()
+        body = json.dumps(self.release_manifest).encode()
+        return f"{hashlib.sha256(body).hexdigest()}  {manifest}\n{digest}  {self.asset}\n".encode()
+
+    def manifest_name(self):
+        return f"ffmpeg-runtime-{self.upstream}-{self.triple}.manifest.json"
 
 
-def archive(top, entries):
+def archive(top, entries, mode="w:gz"):
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+    with tarfile.open(fileobj=buffer, mode=mode) as tar:
         root = tarfile.TarInfo(top)
         root.type = tarfile.DIRTYPE
         root.mode = 0o755
@@ -194,8 +218,10 @@ class RuntimeFixture(unittest.TestCase):
             payload = spec.build()
             digest = hashlib.sha256(payload).hexdigest()
             base = f"{REPO}/releases/download/{spec.tag}"
-            routes[f"{base}/SHA256SUMS"] = f"{digest}  {spec.asset}\n".encode()
+            routes[f"{base}/SHA256SUMS"] = spec.sums(digest)
             routes[f"{base}/{spec.asset.replace('+', '%2B')}"] = (payload, {})
+            if spec.build_tag:
+                routes[f"{base}/{spec.manifest_name()}"] = json.dumps(spec.release_manifest).encode()
         env = {"HOME": str(self.home), "PATH": f"{self.bin}:/usr/bin:/bin", "TMPDIR": str(self.root),
                "MOCK_CODESIGN_STATUS": self.codesign_status}
         return FakeInstaller(self.home, os_name=os_name, arch="aarch64" if os_name == "darwin" else "x86_64",
@@ -219,7 +245,7 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assertTrue((self.home / ".local/bin/ffmpeg").exists())
 
     def test_installs_complete_runtime_and_is_idempotent(self):
-        spec = Spec("linux", "20250101")
+        spec = Spec("linux", R1)
         inst = self.installer([spec])
         inst.install_ffmpeg()
         release = self.release(spec)
@@ -235,7 +261,7 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assertFalse(again.changed)
 
     def test_darwin_runtime_checks_signatures(self):
-        spec = Spec("darwin", "20250101")
+        spec = Spec("darwin", R1)
         inst = self.installer([spec], os_name="darwin")
         inst.install_ffmpeg()
         self.assertEqual(self.current(), self.release(spec))
@@ -243,7 +269,7 @@ class RuntimeInstallTests(RuntimeFixture):
                          "libavutil.61.1.102.dylib")
 
     def test_failed_upgrades_keep_the_previous_install(self):
-        old = Spec("linux", "20250101")
+        old = Spec("linux", R1)
         self.installer([old]).install_ffmpeg()
         names = self.releases()
         broken = {
@@ -257,27 +283,27 @@ class RuntimeInstallTests(RuntimeFixture):
         }
         for label, mutate in broken.items():
             with self.subTest(label):
-                new = Spec("linux", "20250202")
+                new = Spec("linux", R2)
                 mutate(new)
                 with self.assertRaises(SkipInstall):
                     self.installer([old, new]).install_ffmpeg()
                 self.assert_untouched(old, names)
 
     def test_checksum_mismatch_keeps_the_previous_install(self):
-        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        old, new = Spec("linux", R1), Spec("linux", R2)
         self.installer([old]).install_ffmpeg()
         names = self.releases()
         inst = self.installer([old, new])
-        inst.routes[f"{REPO}/releases/download/20250202/SHA256SUMS"] = f"{'0' * 64}  {new.asset}\n".encode()
+        inst.routes[f"{REPO}/releases/download/{R2}/SHA256SUMS"] = new.sums("0" * 64)
         with self.assertRaisesRegex(SkipInstall, "checksum mismatch"):
             inst.install_ffmpeg()
         self.assert_untouched(old, names)
 
     def test_missing_system_libva_is_reported(self):
-        old = Spec("linux", "20250101")
+        old = Spec("linux", R1)
         self.installer([old]).install_ffmpeg()
         names = self.releases()
-        new = Spec("linux", "20250202")
+        new = Spec("linux", R2)
         new.programs["ffmpeg"] = (b"#!/bin/sh\necho 'Error loading shared library libva.so.2: "
                                   b"No such file or directory' >&2\nexit 127\n")
         with self.assertRaisesRegex(SkipInstall, r"libva and libva-drm \(Alpine: apk add libva\)"):
@@ -285,17 +311,17 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assert_untouched(old, names)
 
     def test_failed_signature_check_keeps_the_previous_install(self):
-        old = Spec("darwin", "20250101")
+        old = Spec("darwin", R1)
         self.installer([old], os_name="darwin").install_ffmpeg()
         names = self.releases()
         self.codesign_status = "1"
         with self.assertRaisesRegex(SkipInstall, "code signature"):
-            self.installer([old, Spec("darwin", "20250202")], os_name="darwin").install_ffmpeg()
+            self.installer([old, Spec("darwin", R2)], os_name="darwin").install_ffmpeg()
         self.assertEqual(self.current(), self.release(old))
         self.assertEqual(self.releases(), names)
 
     def test_interrupted_extraction_and_switch_keep_the_previous_install(self):
-        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        old, new = Spec("linux", R1), Spec("linux", R2)
         self.installer([old]).install_ffmpeg()
         names = self.releases()
         with patch.object(ffmpeg_runtime.shutil, "copyfileobj", side_effect=OSError("disk full")):
@@ -311,16 +337,16 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assertEqual(ffmpeg_runtime.verified_libraries(self.release(new), "linux").keys(), MAJORS.keys())
 
     def test_unreachable_release_keeps_the_installed_runtime(self):
-        spec = Spec("linux", "20250101")
+        spec = Spec("linux", R1)
         self.installer([spec]).install_ffmpeg()
-        newer = Spec("linux", "20250202")
+        newer = Spec("linux", R2)
         inst = self.installer([spec, newer])
-        del inst.routes[f"{REPO}/releases/download/20250202/SHA256SUMS"]
+        del inst.routes[f"{REPO}/releases/download/{R2}/SHA256SUMS"]
         inst.install_ffmpeg()
         self.assertEqual(self.current(), self.release(spec))
 
     def test_corrupted_install_is_replaced(self):
-        spec = Spec("linux", "20250101")
+        spec = Spec("linux", R1)
         self.installer([spec]).install_ffmpeg()
         library = self.release(spec) / "lib/libavcodec.so.63.1.102"
         library.write_bytes(library.read_bytes() + b"x")
@@ -330,7 +356,7 @@ class RuntimeInstallTests(RuntimeFixture):
         ffmpeg_runtime.verified_libraries(self.release(spec), "linux")
 
     def test_legacy_static_release_is_retired_after_migration(self):
-        spec = Spec("linux", "20250101")
+        spec = Spec("linux", R1)
         legacy = self.home / ".local/share/ffmpeg/releases" / f"20241231-{spec.triple}"
         (legacy / "bin").mkdir(parents=True)
         (legacy / "bin/ffmpeg").write_bytes(WORKING)
@@ -345,7 +371,7 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assertIn(legacy, inst.removed)
 
     def test_pinned_release_survives_current_moving(self):
-        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        old, new = Spec("linux", R1), Spec("linux", R2)
         self.installer([old]).install_ffmpeg()
         pinned = self.installer([old, new]).ensure_ffmpeg_runtime("player", old.tag)
         self.assertEqual(pinned, self.release(old))
@@ -357,7 +383,7 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assertIn(("F", self.home / ".local/share/ffmpeg/pins/player"), inst.claims)
 
     def test_pin_installs_a_missing_release_without_moving_current(self):
-        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        old, new = Spec("linux", R1), Spec("linux", R2)
         self.installer([old]).install_ffmpeg()
         inst = self.installer([old, new])
         path = inst.ensure_ffmpeg_runtime("player", new.tag)
@@ -369,17 +395,54 @@ class RuntimeInstallTests(RuntimeFixture):
         self.assertFalse(offline.changed)
 
     def test_moving_a_pin_releases_the_old_version(self):
-        old, mid, new = Spec("linux", "20250101"), Spec("linux", "20250202"), Spec("linux", "20250303")
+        old, mid, new = Spec("linux", R1), Spec("linux", R2), Spec("linux", R3)
         self.installer([mid]).install_ffmpeg()
         self.installer([old, mid, new]).ensure_ffmpeg_runtime("player", old.tag)
         self.installer([old, mid, new]).ensure_ffmpeg_runtime("player", new.tag)
         self.assertEqual(self.releases(), sorted([self.release(mid).name, self.release(new).name]))
 
+    def test_in_archive_manifest_must_match_the_release(self):
+        old = Spec("linux", R1)
+        self.installer([old]).install_ffmpeg()
+        names = self.releases()
+        cases = {
+            "producer commit": {"producer": {"commit": "f" * 40}},
+            "archive name": {"release": {"archive": "ffmpeg-runtime-9.0.2-other.tar.xz"}},
+            "ffmpeg version": {"sources": {"ffmpeg": {"version": "9.0.1"}}},
+            "target": {"target": "aarch64-apple-darwin"},
+            "profile": {"profile": "full"},
+        }
+        for label, overrides in cases.items():
+            with self.subTest(label):
+                new = Spec("linux", R2)
+                new.manifest_overrides.update(overrides)
+                with self.assertRaisesRegex(SkipInstall, "manifest"):
+                    self.installer([old, new]).install_ffmpeg()
+                self.assert_untouched(old, names)
+
+    def test_release_manifest_must_describe_the_archive(self):
+        new = Spec("linux", R1)
+        new.release_manifest["source_revision"] = "f" * 40
+        with self.assertRaisesRegex(SkipInstall, "does not describe"):
+            self.installer([new]).install_ffmpeg()
+        self.assertFalse((self.home / ".local/share/ffmpeg/current").exists())
+
+    def test_dated_releases_are_not_installed_as_the_cli_runtime(self):
+        with self.assertRaises(SkipInstall):
+            self.installer([Spec("linux", "20250101")]).install_ffmpeg()
+
+    def test_newest_build_release_without_a_runtime_for_the_target_is_skipped(self):
+        old, new = Spec("linux", R1), Spec("linux", R2)
+        inst = self.installer([old, new])
+        inst.routes[f"{REPO}/releases/download/{R2}/SHA256SUMS"] = b""
+        inst.install_ffmpeg()
+        self.assertEqual(self.current(), self.release(old))
+
     def test_unavailable_pinned_release_is_an_error(self):
-        spec = Spec("linux", "20250101")
+        spec = Spec("linux", R1)
         self.installer([spec]).install_ffmpeg()
         with self.assertRaises(SkipInstall):
-            self.installer([spec]).ensure_ffmpeg_runtime("player", "20240101")
+            self.installer([spec]).ensure_ffmpeg_runtime("player", "release-" + "9" * 40)
         with self.assertRaises(SkipInstall):
             self.installer([spec]).ensure_ffmpeg_runtime("player", "../x")
 
@@ -390,7 +453,7 @@ PLAYER_SCRIPT = (b'#!/bin/sh\ndir=$(dirname "$(readlink -f "$0")")\n'
 
 
 class PlayerInstallTests(RuntimeFixture):
-    def player_installer(self, specs, os_name="linux", player_tags=(), runtime="9.0.2+20250101",
+    def player_installer(self, specs, os_name="linux", player_tags=(), runtime=f"9.0.2+{R1}",
                          readme=True, player_script=PLAYER_SCRIPT):
         inst = self.installer(specs, os_name=os_name)
         for name in ("install_name_tool", "xattr"):
@@ -429,60 +492,73 @@ class PlayerInstallTests(RuntimeFixture):
         return (self.home / ".local/share/ffmpeg/pins/player").read_text().split()
 
     def test_linux_player_links_its_pinned_runtime(self):
-        runtime = Spec("linux", "20250101")
+        runtime = Spec("linux", R1)
         inst = self.player_installer([runtime])
         inst.install_player()
         release = self.release(runtime)
         launcher = self.home / ".local/bin/player"
         self.assertEqual(os.readlink(launcher), str(self.player_current() / "bin/player"))
         self.assertEqual(os.readlink(self.player_current() / "lib"), str(release / "lib"))
-        self.assertEqual(self.pins(), ["20250101"])
+        self.assertEqual(self.pins(), [R1])
         self.assertEqual(self.run_player(launcher), "player")
         self.assertIn(("D", release), inst.claims)
         again = self.player_installer([runtime])
         again.install_player()
         self.assertFalse(again.changed)
 
+    def test_dated_declaration_still_installs_the_dated_runtime(self):
+        runtime = Spec("linux", "20250101")
+        self.player_installer([runtime], runtime="9.0.2+20250101").install_player()
+        self.assertEqual(self.pins(), ["20250101"])
+        self.assertEqual(self.run_player(self.home / ".local/bin/player"), "player")
+
+    def test_declaration_must_use_a_full_commit(self):
+        runtime = Spec("linux", R1)
+        for declared in ("9.0.2+release-" + "1" * 39, "9.0.2+release-" + "G" * 40, "9.0.2+release"):
+            with self.subTest(declared):
+                with self.assertRaisesRegex(SkipInstall, "declare"):
+                    self.player_installer([runtime], runtime=declared).install_player()
+
     def test_player_upgrade_switches_runtime_after_the_player(self):
-        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        old, new = Spec("linux", R1), Spec("linux", R2)
         self.player_installer([old, new]).install_player()
         first = os.path.realpath(self.player_current())
-        failing = self.player_installer([old, new], player_tags=("v1", "v2"), runtime="9.0.2+20250202")
+        failing = self.player_installer([old, new], player_tags=("v1", "v2"), runtime=f"9.0.2+{R2}")
         with patch.object(failing, "switch_symlink", return_value=False):
             with self.assertRaisesRegex(SkipInstall, "could not switch"):
                 failing.install_player()
         self.assertEqual(os.path.realpath(self.player_current()), first)
-        self.assertEqual(self.pins(), ["20250101"])
+        self.assertEqual(self.pins(), [R1])
         self.assertEqual(self.run_player(self.home / ".local/bin/player"), "player")
-        self.player_installer([old, new], player_tags=("v1", "v2"), runtime="9.0.2+20250202").install_player()
+        self.player_installer([old, new], player_tags=("v1", "v2"), runtime=f"9.0.2+{R2}").install_player()
         self.assertNotEqual(os.path.realpath(self.player_current()), first)
-        self.assertEqual(self.pins(), ["20250202"])
+        self.assertEqual(self.pins(), [R2])
         self.assertFalse(self.release(old).exists())
         self.assertEqual(self.run_player(self.home / ".local/bin/player"), "player")
         self.assertEqual(len(list((self.home / ".local/share/player/releases").iterdir())), 1)
 
     def test_player_install_failures_keep_the_previous_player_and_runtime(self):
-        old, new = Spec("linux", "20250101"), Spec("linux", "20250202")
+        old, new = Spec("linux", R1), Spec("linux", R2)
         self.player_installer([old, new]).install_player()
         launcher = self.home / ".local/bin/player"
         cases = {
-            "runtime not published": dict(runtime="9.0.2+20250303"),
-            "runtime from another ffmpeg": dict(runtime="8.0.0+20250202"),
+            "runtime not published": dict(runtime=f"9.0.2+{R3}"),
+            "runtime from another ffmpeg": dict(runtime=f"8.0.0+{R2}"),
             "undeclared runtime": dict(readme=False),
-            "malformed declaration": dict(runtime="20250202"),
-            "player cannot load the runtime": dict(runtime="9.0.2+20250202", player_script=b"#!/bin/sh\nexit 9\n"),
+            "malformed declaration": dict(runtime=R2.removeprefix("release-")),
+            "player cannot load the runtime": dict(runtime=f"9.0.2+{R2}", player_script=b"#!/bin/sh\nexit 9\n"),
         }
         for label, options in cases.items():
             with self.subTest(label):
                 inst = self.player_installer([old, new], player_tags=("v1", "v2"), **options)
                 with self.assertRaises(SkipInstall):
                     inst.install_player()
-                self.assertEqual(self.pins(), ["20250101"])
+                self.assertEqual(self.pins(), [R1])
                 self.assertEqual(self.run_player(launcher), "player")
                 self.assertEqual(len(list((self.home / ".local/share/player/releases").iterdir())), 1)
 
     def test_legacy_player_binary_is_replaced_by_the_layout(self):
-        runtime = Spec("linux", "20250101")
+        runtime = Spec("linux", R1)
         launcher = self.home / ".local/bin/player"
         launcher.parent.mkdir(parents=True)
         launcher.write_bytes(b"old")
@@ -492,7 +568,7 @@ class PlayerInstallTests(RuntimeFixture):
         self.assertTrue(launcher.is_symlink())
 
     def test_macos_player_gets_the_pinned_runtime_rpath(self):
-        runtime = Spec("darwin", "20250101")
+        runtime = Spec("darwin", R1)
         env_apps = self.root / "apps"
         inst = self.player_installer([runtime], os_name="darwin", player_script=b"#!/bin/sh\necho player\n")
         inst.player_apps = env_apps
@@ -502,14 +578,14 @@ class PlayerInstallTests(RuntimeFixture):
         log = (self.root / "install_name_tool.log").read_text()
         self.assertEqual(log.split()[:2], ["-add_rpath", str(self.release(runtime) / "lib")])
         self.assertTrue(inst.player_exec.is_file())
-        self.assertEqual(self.pins(), ["20250101"])
+        self.assertEqual(self.pins(), [R1])
         again = self.player_installer([runtime], os_name="darwin", player_script=b"#!/bin/sh\necho player\n")
         again.player_apps, again.player_app, again.player_exec = inst.player_apps, inst.player_app, inst.player_exec
         again.install_player()
         self.assertFalse(again.changed)
 
     def test_macos_resign_failure_keeps_the_previous_app(self):
-        runtime = Spec("darwin", "20250101")
+        runtime = Spec("darwin", R1)
         script = b"#!/bin/sh\necho player\n"
         inst = self.player_installer([runtime], os_name="darwin", player_script=script)
         apps = self.root / "apps"

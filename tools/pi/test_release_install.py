@@ -52,8 +52,8 @@ class ReleaseTests(unittest.TestCase):
         self.thread.join()
 
     def publish(self, extra=None, version="one") -> pi_release.Pin:
-        name = "darwin-arm64-full.tar.gz"
-        with tarfile.open(self.assets / name, "w:gz") as archive:
+        name = "pi-full-1.5.0-aarch64-apple-darwin.tar.xz"
+        with tarfile.open(self.assets / name, "w:xz") as archive:
             files = {f"node_modules/{name}/package.json": json.dumps({"version": value}).encode()
                      for name, value in pi_offline.PACKAGES.items()}
             files["node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"] = version.encode()
@@ -71,12 +71,13 @@ class ReleaseTests(unittest.TestCase):
         data = (self.assets / name).read_bytes()
         entry: pi_release.Artifact = {"archive": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
         provenance = {"schema": 1, "builder_revision": "a" * 40,
-                      "targets": {"darwin-arm64": {"target": "darwin-arm64", "profile": "full", **entry}}}
+                      "version": "1.5.0",
+                      "targets": {"aarch64-apple-darwin": {"target": "aarch64-apple-darwin", "profile": "full", **entry}}}
         raw = json.dumps(provenance).encode()
         (self.assets / "provenance.json").write_bytes(raw)
         (self.assets / "SHA256SUMS").write_text(f"{entry['sha256']}  {name}\n")
         return {"schema": 1, "release_url": f"http://127.0.0.1:{self.server.server_port}",
-                "builder_revision": "a" * 40, "profile": "full",
+                "builder_revision": "a" * 40, "profile": "full", "version": "1.5.0",
                 "provenance_sha256": hashlib.sha256(raw).hexdigest(), "targets": {"darwin-arm64": entry}}
 
     def install(self, pin=None):
@@ -93,7 +94,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(len(self.requests), count)
 
     def test_missing_asset_retry(self):
-        archive = self.assets / "darwin-arm64-full.tar.gz"
+        archive = self.assets / "pi-full-1.5.0-aarch64-apple-darwin.tar.xz"
         raw = archive.read_bytes()
         archive.unlink()
         with self.assertRaises(OSError):
@@ -106,7 +107,7 @@ class ReleaseTests(unittest.TestCase):
         previous = self.install()
         old = self.pin
         new = self.publish(version="two")
-        archive = self.assets / "darwin-arm64-full.tar.gz"
+        archive = self.assets / "pi-full-1.5.0-aarch64-apple-darwin.tar.xz"
         raw = archive.read_bytes()
         for broken in [raw[:30], bytes([raw[0] ^ 1]) + raw[1:], raw + b"extra"]:
             archive.write_bytes(broken)
@@ -170,12 +171,12 @@ class ReleaseTests(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _: self.install(), range(2)))
         self.assertEqual(results[0], results[1])
-        self.assertEqual(self.requests.count("/darwin-arm64-full.tar.gz"), 1)
+        self.assertEqual(self.requests.count("/pi-full-1.5.0-aarch64-apple-darwin.tar.xz"), 1)
 
     def test_interrupted_acquisition_retry(self):
         original = pi_release.fetch
         def interrupted(url, path, limit):
-            if url.endswith(".tar.gz"):
+            if url.endswith(".tar.xz"):
                 path.write_bytes(b"partial")
                 raise OSError("interrupted")
             original(url, path, limit)
@@ -230,6 +231,7 @@ pi_release.install(Path(sys.argv[2]), json.loads(Path(sys.argv[3]).read_text()),
         pins: list[pi_release.Pin] = [
             {**self.pin, "builder_revision": ""},
             {**self.pin, "profile": "unknown"},
+            {**self.pin, "version": "latest"},
             {**self.pin, "provenance_sha256": ""},
             {**self.pin, "release_url": "http://example.com/latest"},
         ]

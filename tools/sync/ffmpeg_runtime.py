@@ -246,6 +246,21 @@ def verified_libraries(root: Path, os_name: str) -> dict[str, Path]:
     return files
 
 
+def check_identity(root: Path, *, target: str, version: str, commit: str, archive: str) -> None:
+    try:
+        manifest = json.loads(_regular(root, MANIFEST).read_text())
+    except ValueError as exc:
+        raise RuntimeArchiveError(f"{MANIFEST} is not valid JSON") from exc
+    want = {("profile",): "runtime", ("target",): target, ("sources", "ffmpeg", "version"): version,
+            ("producer", "commit"): commit, ("release", "archive"): archive}
+    for keys, value in want.items():
+        found = manifest
+        for key in keys:
+            found = found.get(key) if isinstance(found, dict) else None
+        if found != value:
+            raise RuntimeArchiveError(f"{MANIFEST} {'.'.join(keys)} is {found!r}, expected {value!r}")
+
+
 def verified_programs(root: Path) -> list[Path]:
     programs = []
     for name in PROGRAMS:

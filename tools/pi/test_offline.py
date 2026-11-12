@@ -125,7 +125,7 @@ class OfflineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=self.home) as tmp:
             cache=Path(tmp)
             entry=pi_release.pin_entry(self.pin,self.key)
-            (cache/(entry["sha256"]+".tar.gz")).write_bytes(b"corrupt")
+            (cache/(entry["sha256"]+".tar.xz")).write_bytes(b"corrupt")
             with self.assertRaisesRegex(AssertionError,"network"):
                 pi_release.acquire(self.pin,self.key,cache)
 
