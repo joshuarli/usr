@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""True offline Pi acceptance: real committed closure and hostile npm environment."""
+"""True offline Pi acceptance: real pinned release closure and hostile npm environment."""
 import json
 import os
 from pathlib import Path
@@ -11,7 +11,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"tools/sync"))
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 import pi_offline
+import pi_release
+from release_cache import seed
 
 ROOT=Path(__file__).resolve().parents[2]
 
@@ -20,13 +23,20 @@ class OfflineTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp=tempfile.TemporaryDirectory(prefix="pi-no-npm-")
         cls.home=Path(cls.tmp.name)
-        environment = patch.dict(os.environ, {"XDG_DATA_HOME": str(cls.home / ".local/share")})
+        environment = patch.dict(os.environ, {"XDG_DATA_HOME": str(cls.home / ".local/share"),
+                                              "XDG_CACHE_HOME": str(cls.home / ".cache")})
         environment.start()
         cls.addClassCleanup(environment.stop)
-        cls.root=pi_offline.runtime_dir(cls.home)
-        cls.entry,_=pi_offline.verify_archive()
-        assert pi_offline.install(cls.root)
-        assert pi_offline.current(cls.root)
+        network = patch.object(pi_release.urllib.request, "urlopen", side_effect=AssertionError("network"))
+        network.start()
+        cls.addClassCleanup(network.stop)
+        cls.pin=pi_release.load_pin()
+        cls.key=pi_offline.platform_key()
+        cls.prefix=pi_offline.runtime_dir(cls.home)
+        cls.cache=pi_offline.cache_dir(cls.home)
+        seed(cls.cache)
+        cls.generation=pi_release.install(cls.prefix,cls.pin,cls.key,cls.cache)
+        cls.root=cls.prefix/"current"
 
     @classmethod
     def tearDownClass(cls):
@@ -34,8 +44,9 @@ class OfflineTests(unittest.TestCase):
 
     def test_cli_manifest_and_idempotence(self):
         self.assertTrue(pi_offline.version_matches(self.root))
-        self.assertFalse(pi_offline.install(self.root))
-        self.assertEqual(json.loads((self.root/pi_offline.STAMP).read_text())["sha256"],self.entry["sha256"])
+        self.assertEqual(pi_release.install(self.prefix,self.pin,self.key,self.cache),self.generation)
+        receipt=json.loads((self.root/pi_release.RECEIPT).read_text())
+        self.assertEqual((receipt["pin"],receipt["target"]),(self.pin,self.key))
 
     def test_local_broker_and_no_auto_wakeup(self):
         self.assertTrue(pi_offline.configure_intercom(self.home,self.root))
@@ -47,40 +58,58 @@ class OfflineTests(unittest.TestCase):
         self.assertNotIn("npx",json.dumps(cfg))
 
     def test_bridge_single_closure_and_foreign_preservation(self):
+        legacy=self.home/"legacy-pi"
         project=self.home/"project/tools/pi-subagent-bridge"
-        self.assertTrue(pi_offline.link_bridge(project,self.root))
-        self.assertTrue(pi_offline.bridge_current(project,self.root))
-        self.assertFalse(pi_offline.link_bridge(project,self.root))
+        self.assertTrue(pi_release.link_bridge(project,self.prefix,legacy))
+        self.assertTrue(pi_release.bridge_current(project,self.prefix))
+        self.assertFalse(pi_release.link_bridge(project,self.prefix,legacy))
+        self.assertEqual((project/"node_modules").resolve(),self.generation/"node_modules")
         foreign=self.home/"foreign/node_modules/.pnpm"
         foreign.mkdir(parents=True)
         (foreign/"sentinel").write_text("keep")
         with self.assertRaisesRegex(ValueError,"unmanaged"):
-            pi_offline.link_bridge(foreign.parent.parent,self.root)
+            pi_release.link_bridge(foreign.parent.parent,self.prefix,legacy)
         self.assertEqual((foreign/"sentinel").read_text(),"keep")
 
-    def test_local_wrapper_is_repaired_when_offline_flags_change(self):
+    def test_bridge_link_to_legacy_runtime_migrates_and_foreign_link_is_kept(self):
+        legacy=self.home/"legacy-pi"
+        (legacy/"bin").mkdir(parents=True)
+        (legacy/"node_modules").mkdir()
+        (legacy/"bin/pi").write_text("#!/bin/sh\n")
+        (legacy/pi_offline.LEGACY_STAMP).write_text("{}")
+        migrated=self.home/"migrated"
+        migrated.mkdir()
+        (migrated/"node_modules").symlink_to(legacy/"node_modules")
+        self.assertTrue(pi_release.link_bridge(migrated,self.prefix,legacy))
+        self.assertEqual(os.readlink(migrated/"node_modules"),str(self.prefix/"current/node_modules"))
+        self.assertTrue((legacy/"bin/pi").is_file())
+        kept=self.home/"kept"
+        kept.mkdir()
+        (kept/"node_modules").symlink_to(self.home/"elsewhere")
+        with self.assertRaisesRegex(ValueError,"unmanaged bridge symlink"):
+            pi_release.link_bridge(kept,self.prefix,legacy)
+        self.assertEqual(os.readlink(kept/"node_modules"),str(self.home/"elsewhere"))
+
+    def test_modified_generation_fails_closed_and_is_preserved(self):
         cli = self.root/"bin/pi"
         old = cli.read_text()
         try:
             cli.write_text(old.replace("export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1", ""))
-            self.assertFalse(pi_offline.current(self.root))
-            self.assertTrue(pi_offline.install(self.root))
-            self.assertTrue(pi_offline.current(self.root))
-            self.assertIn("export PI_OFFLINE=1", cli.read_text())
+            self.assertIsNone(pi_release.current(self.prefix,self.pin,self.key))
+            with self.assertRaisesRegex(ValueError,"modified"):
+                pi_release.install(self.prefix,self.pin,self.key,self.cache)
+            self.assertNotIn("PI_OFFLINE=1", cli.read_text())
         finally:
-            if not pi_offline.current(self.root):
-                pi_offline.install(self.root)
+            cli.write_text(old)
+        self.assertEqual(pi_release.current(self.prefix,self.pin,self.key),self.generation)
 
-    def test_corrupt_archive_fails_closed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)
-            data=json.loads((pi_offline.ARCHIVES/"artifacts.json").read_text())
-            (root/"artifacts.json").write_text(json.dumps(data))
-            archive=root/(pi_offline.platform_key()+".tar.gz")
-            archive.write_bytes(b"corrupt")
-            with patch.object(pi_offline,"ARCHIVES",root):
-                with self.assertRaisesRegex(ValueError,"malformed"):
-                    pi_offline.verify_archive()
+    def test_corrupt_cached_archive_is_not_trusted(self):
+        with tempfile.TemporaryDirectory(dir=self.home) as tmp:
+            cache=Path(tmp)
+            entry=pi_release.pin_entry(self.pin,self.key)
+            (cache/(entry["sha256"]+".tar.gz")).write_bytes(b"corrupt")
+            with self.assertRaisesRegex(AssertionError,"network"):
+                pi_release.acquire(self.pin,self.key,cache)
 
     def test_managed_pi_launcher_uses_only_bundle(self):
         node = shutil.which("node")
@@ -164,7 +193,7 @@ class OfflineTests(unittest.TestCase):
         checker = ROOT/"tools/pi/verify-extensions.mjs"
         env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
                    npm_config_registry="http://127.0.0.1:9")
-        p = subprocess.run([node, "--import", str(loader), str(checker), str(self.root), "--baseline-catalog"],
+        p = subprocess.run([node, "--import", str(loader), str(checker), str(self.root)],
                            cwd=self.root, env=env, capture_output=True,
                            text=True, timeout=35)
         self.assertEqual(p.returncode, 0, p.stdout+p.stderr)

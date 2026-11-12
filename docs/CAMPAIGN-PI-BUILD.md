@@ -1,10 +1,10 @@
 # Status
 
 - **Goal:** move Pi producer inputs and archives to `pi-build`, preserve full runtime behavior through pinned releases, then deliver explicit `headless-usr` selection.
-- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44), `f90d6be` (proven pre-admission model-loss race), `292eaa4` (staged consumer), `f1fd64c` (extracted SDK/broker protocol probes), `1e8b38f` (probe intercom shutdown). `pi-build` `9dd4c4c` durably preserves verified sources, notices and existing archives; `46885cc` adds the locked darwin-arm64 full builder (repeat build byte-identical, SDK loader, detached child and intercom probes pass on its archive).
-- **In progress:** Linux x64/arm64 locks and builds on native CI runners. The current vendored archive still performs an automatic Muse catalog probe; the builder candidate patches it out and its verifier rejects the old behavior.
-- **Next:** native Linux prepare/build/verify/repro (glibc and a separate musl execution check), then publication and consumer cutover.
-- **Parked proof:** no release, all-target runtime parity, live-account entitlement or headless acceptance. Performance timing gate deferred while host swap exceeds the gate. No target or release is counted as passed from a skip.
+- **Accepted:** `usr` `cc4963d` (USR-39), `2639eef` (USR-41), `8101cc4` (USR-45), `366fca1` (USR-42/46), `ed3efa0` (supported developer test loader), `f8f99c3` (USR-40/44), `f90d6be` (proven pre-admission model-loss race), `292eaa4` (staged consumer), `f1fd64c` (extracted SDK/broker protocol probes), `1e8b38f` (probe intercom shutdown), then the full-profile cutover commit that consumes the pin. `pi-build` `9dd4c4c` (preserved sources and old archives), `46885cc` (locked darwin builder), `32694f0`..`db041e6` (pinned toolchain, native Linux locks, CI build/musl/release workflow, provenance merge).
+- **Released:** `pi-build` `full-1.5.0-1` (immutable) at builder `db041e61c504dce53483db1aca69cda53a313312`; provenance `a05f7c03…`. All three archives were repeat-built byte-identically on native runners, Linux archives loaded under Alpine musl Node, the local darwin rebuild matched CI bytes, and independently downloaded assets matched the candidate.
+- **Next:** P3 headless profile measurement.
+- **Parked proof:** live-account entitlement, Linux runs of the `usr` SDK/intercom protocol probes (only the builder loader check ran under glibc and musl), headless acceptance. Performance timing gate deferred while host swap exceeds the gate. No target or release is counted as passed from a skip.
 
 # Authority and execution
 
@@ -28,7 +28,7 @@ The agreed consumer pin has `schema: 1`, `release_url`, `builder_revision`, `pro
 
 Release assets include `SHA256SUMS` and `provenance.json`. The latter repeats schema, builder revision and target records containing target/profile/archive/hash/size. Its exact bytes must match the committed provenance digest. Downloaded checksums must agree with the pin. Tags locate assets; they never replace committed digest authority. Never resolve latest.
 
-The staged consumer is `tools/sync/pi_release.py`; its acceptance command is `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py`. It is separate from routine sync until cutover. It retains verified generations and switches one selection symlink. Existing vendored runtime delivery remains active. A legacy prefix is preserved for explicit migration, not silently adopted.
+The staged consumer is `tools/sync/pi_release.py`; its acceptance command is `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py`. Routine sync uses it with `tools/pi/runtime.pin.json`. It retains verified generations and switches one selection symlink that the launcher and bridge both follow. The previous vendored prefix at `share/pi` is preserved for explicit removal, not adopted. Rollback is a revert of the pin commit; the earlier generation or its immutable release remains available.
 
 # Current baseline
 
@@ -73,4 +73,4 @@ Update or retire `tools/pi` tests, `tools/sync/check.sh`, old `vendor.py`/`build
 
 Retain meaningful offline/runtime fixtures. Run `test_sync_bridge_offline.py` only in a disposable checkout. Audit all tracked references to retired paths; historical ticket/plan evidence is not a live caller. `git ls-files vendor/pi` must become empty only after durable provenance preservation and accepted replacement delivery. Never rewrite history to remove old blobs.
 
-Extracted-runtime local proof commands use `node --import RUNTIME/node_modules/tsx/dist/loader.mjs` with `tools/pi/test_sdk_protocol.mjs RUNTIME`, `tools/pi/test_intercom_protocol.mjs RUNTIME`, and `tools/pi/verify-extensions.mjs RUNTIME`. The separate `test_runtime_protocol.mjs RUNTIME [MUSE_EXECUTABLE]` probes the installed Muse host before any model turn. It does not establish account entitlement or close USR-50. Only the old vendored binding diagnostic uses `--baseline-catalog`.
+Extracted-runtime local proof commands use `node --import RUNTIME/node_modules/tsx/dist/loader.mjs` with `tools/pi/test_sdk_protocol.mjs RUNTIME`, `tools/pi/test_intercom_protocol.mjs RUNTIME`, and `tools/pi/verify-extensions.mjs RUNTIME`. The separate `test_runtime_protocol.mjs RUNTIME [MUSE_EXECUTABLE]` probes the installed Muse host before any model turn. It does not establish account entitlement or close USR-50.

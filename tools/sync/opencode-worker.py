@@ -13,6 +13,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pi_offline  # noqa: E402
+import pi_release  # noqa: E402
 
 NAME = "pi-subagent-bridge"
 LEGACY_NAME = "usr-opencode-worker"
@@ -44,7 +45,7 @@ def dependency_version():
 
 
 def dependency_current(root: Path = PROJECT) -> bool:
-    return pi_offline.bridge_current(root, pi_offline.runtime_dir(HOME))
+    return pi_release.bridge_current(root, pi_offline.runtime_dir(HOME))
 
 
 def managed_binary(name):
@@ -178,7 +179,7 @@ def configuration():
 
 def install_dependency():
     """Link bridge to usr's prebuilt offline Pi closure. No npm subprocess."""
-    pi_offline.link_bridge(PROJECT, pi_offline.runtime_dir(HOME))
+    pi_release.link_bridge(PROJECT, pi_offline.runtime_dir(HOME), pi_offline.legacy_dir(HOME))
 
 
 def update_configuration(data, original):

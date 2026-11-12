@@ -62,7 +62,7 @@ Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-t
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `pi-update` | Explicit | Update Pi, the SDK and vendored Pi extensions against current upstream commits, record exact SHAs and prove offline setup before activation. |
+| `pi-update` | Explicit | Update Pi, the SDK and Pi extensions in `pi-build`, publish a verified release, then bump the `usr` pin after proving offline setup. |
 
 ## Verification
 

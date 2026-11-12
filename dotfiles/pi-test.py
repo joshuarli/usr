@@ -9,6 +9,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools/pi"))
+from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
 MODEL = "opencode-go/muse-spark-1.3-contributor"
 TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "xhigh", "god": "xhigh"}
@@ -29,8 +31,11 @@ class PiTests(unittest.TestCase):
             "HOME": str(self.home),
             "PATH": f"{self.bin}:/usr/bin:/bin",
             "TMPDIR": str(self.root),
-            "DL_OWNED_FILE": str(self.root / "owned")
+            "DL_OWNED_FILE": str(self.root / "owned"),
+            # Any request beyond the seeded cache fails instead of reaching the network.
+            "https_proxy": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9",
         }
+        seed(self.home / ".cache/usr/pi-releases")
         self.script("node", '#!/bin/sh\nprintf "%s\\n" "${MOCK_NODE_VERSION:-26.13.0}"\n')
         # Deliberately poison npm: a runtime install MUST NOT use it.
         self.script("npm", '#!/bin/sh\necho unexpected-npm-call >&2\nexit 99\n')
@@ -57,16 +62,36 @@ class PiTests(unittest.TestCase):
         launcher = self.home / ".local/bin/pi"
         self.assertTrue(launcher.is_symlink())
         self.assertTrue(os.access(launcher, os.X_OK))
-        meta = self.home / ".local/share/pi/.usr-pi-runtime.json"
-        self.assertEqual(json.loads(meta.read_text())["pi_version"], "1.5.0")
+        runtime = self.home / ".local/share/pi-runtime/current"
+        self.assertEqual(os.readlink(launcher), str(runtime / "bin/pi"))
+        meta = runtime / ".usr-pi-release.json"
+        pin = json.loads((ROOT / "tools/pi/runtime.pin.json").read_text())
+        self.assertEqual(json.loads(meta.read_text())["pin"], pin)
         broker = json.loads((self.home / ".pi/agent/intercom/config.json").read_text())
         self.assertEqual(broker["brokerCommand"], "node")
         self.assertEqual(broker["inboundTrigger"], "never")
         self.assertTrue(Path(broker["brokerArgs"][-1]).is_file())
         before = meta.read_bytes()
-        self.sync_tools()
+        again = self.sync_tools()
+        self.assertIn("pi is current", again.stdout)
         self.assertEqual(meta.read_bytes(), before)
         self.assertEqual(auth.read_text(), "private sentinel")
+
+    def test_previous_vendored_runtime_is_kept_and_launcher_moves(self):
+        legacy = self.home / ".local/share/pi"
+        (legacy / "bin").mkdir(parents=True)
+        (legacy / "bin/pi").write_text("#!/bin/sh\n")
+        (legacy / ".usr-pi-runtime.json").write_text("{}")
+        launcher = self.home / ".local/bin/pi"
+        launcher.parent.mkdir(parents=True)
+        launcher.symlink_to(legacy / "bin/pi")
+        state = self.home / ".local/state/dl/pi"
+        state.parent.mkdir(parents=True)
+        state.write_text("offline:" + "a" * 64 + "\n")
+        result = self.sync_tools()
+        self.assertEqual(os.readlink(launcher), str(self.home / ".local/share/pi-runtime/current/bin/pi"))
+        self.assertTrue((legacy / "bin/pi").is_file())
+        self.assertIn("Previous vendored Pi runtime kept", result.stderr)
 
     def test_unmanaged_launcher_is_preserved(self):
         launcher = self.home / ".local/bin/pi"
@@ -76,7 +101,7 @@ class PiTests(unittest.TestCase):
         self.assertEqual(launcher.read_text(), "do not replace")
 
     def test_unmanaged_prefix_is_preserved(self):
-        prefix = self.home / ".local/share/pi"
+        prefix = self.home / ".local/share/pi-runtime"
         prefix.mkdir(parents=True)
         (prefix / "sentinel").touch()
         self.sync_tools(False)
@@ -85,7 +110,7 @@ class PiTests(unittest.TestCase):
     def test_old_node_is_rejected_before_install(self):
         self.env["MOCK_NODE_VERSION"] = "25.9.0"
         self.sync_tools(False)
-        self.assertFalse((self.home / ".local/share/pi").exists())
+        self.assertFalse((self.home / ".local/share/pi-runtime").exists())
 
     def test_profile_and_orchestration_agree(self):
         settings = json.loads((PROFILE / "settings.json").read_text())

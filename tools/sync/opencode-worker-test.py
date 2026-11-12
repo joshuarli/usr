@@ -13,6 +13,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "tools/sync/opencode-worker.py"
 OFFLINE = REPO / "tools/sync/pi_offline.py"
+RELEASE = REPO / "tools/sync/pi_release.py"
 PACKAGES = {
     "@earendil-works/pi-coding-agent": "1.5.0",
     "pi-subagents": "0.87.0",
@@ -33,6 +34,7 @@ class OpenCodeWorkerSyncTests(unittest.TestCase):
         sync.mkdir(parents=True)
         shutil.copy2(SCRIPT, sync / SCRIPT.name)
         shutil.copy2(OFFLINE, sync / OFFLINE.name)
+        shutil.copy2(RELEASE, sync / RELEASE.name)
         self.script = sync / SCRIPT.name
         self.project = self.root / "tools/pi-subagent-bridge"
         (self.project / "src").mkdir(parents=True)
@@ -49,6 +51,7 @@ class OpenCodeWorkerSyncTests(unittest.TestCase):
         (bin_dir / "opencode").write_text("#!/bin/sh\nif [ \"$1\" = service ]; then echo stopped; exit 0; fi\nexit 1\n")
         (bin_dir / "opencode").chmod(0o755)
         self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"),
+                        XDG_DATA_HOME=str(self.home / ".local/share"), XDG_CACHE_HOME=str(self.home / ".cache"),
                         PATH=str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
         self.env.pop("OPENCODE", None)
         self.config = self.home / ".config/opencode/opencode.json"
@@ -56,12 +59,13 @@ class OpenCodeWorkerSyncTests(unittest.TestCase):
         sha = "a" * 64
         arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "x64")
         key = platform.system().lower() + "-" + arch
-        vendor = self.root / "vendor/pi/runtime"
-        vendor.mkdir(parents=True)
-        (vendor / "artifacts.json").write_text(json.dumps({
-            "schema":1, "pi_version":"1.5.0", "artifacts":{
-                key: {"path":key+".tar.gz", "sha256":sha, "bytes":0}}}))
-        self.runtime = self.home / ".local/share/pi"
+        pin = {"schema": 1, "release_url": "https://example.invalid/pi/", "builder_revision": "b" * 40,
+               "profile": "full", "provenance_sha256": "c" * 64,
+               "targets": {key: {"archive": key + "-full.tar.gz", "sha256": sha, "bytes": 1}}}
+        (self.root / "tools/pi").mkdir(parents=True)
+        (self.root / "tools/pi/runtime.pin.json").write_text(json.dumps(pin))
+        self.prefix = self.home / ".local/share/pi-runtime"
+        self.runtime = self.prefix / "releases" / sha
         for name, version in PACKAGES.items():
             pkg = self.runtime / "node_modules" / name
             pkg.mkdir(parents=True)
@@ -69,12 +73,9 @@ class OpenCodeWorkerSyncTests(unittest.TestCase):
         cli = self.runtime / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
         cli.parent.mkdir(parents=True)
         cli.write_text("export {}")
-        wrapper = self.runtime / "bin/pi"
-        wrapper.parent.mkdir()
-        wrapper.write_text("#!/bin/sh\nexit 0\n")
-        wrapper.chmod(0o755)
-        (self.runtime / ".usr-pi-runtime.json").write_text(json.dumps({
-            "schema":1,"sha256":sha,"platform":key,"pi_version":"1.5.0"}))
+        (self.runtime / ".usr-pi-release.json").write_text(json.dumps({"pin": pin, "target": key, "files": {}}))
+        (self.prefix / ".usr-pi-releases").touch()
+        (self.prefix / "current").symlink_to("releases/" + sha)
 
     def action(self, cmd, success=True):
         result = subprocess.run([sys.executable, "-I", str(self.script), cmd],
@@ -119,7 +120,7 @@ class OpenCodeWorkerSyncTests(unittest.TestCase):
         self.assertFalse((self.project / "node_modules").exists())
 
     def test_runtime_unavailable_fails_closed(self):
-        (self.runtime / ".usr-pi-runtime.json").unlink()
+        (self.runtime / ".usr-pi-release.json").unlink()
         self.action("install", success=False)
         self.assertFalse((self.project / "node_modules").exists())
 

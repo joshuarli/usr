@@ -82,6 +82,7 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 XDG_CONFIG_HOME=str(home / ".offline-opencode"),
                 XDG_STATE_HOME=str(home / ".local/state"),
                 XDG_DATA_HOME=str(home / ".local/share"),
+                XDG_CACHE_HOME=str(home / ".cache"),
                 PATH=str(bindir) + os.pathsep + env.get("PATH", ""),
                 NPM_FORBIDDEN_LOG=str(marker),
                 npm_config_registry="http://127.0.0.1:9",
@@ -90,6 +91,9 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
             for key in ("OPENCODE", "PI_CODING_AGENT_DIR"):
                 env.pop(key, None)
             sys.path.insert(0, str(ROOT / "tools/sync"))
+            sys.path.insert(0, str(ROOT / "tools/pi"))
+            from release_cache import seed
+            seed(home / ".cache/usr/pi-releases")
             from link_apply import apply
             from link_plan import plan_links
             from links import discover
@@ -120,8 +124,8 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 pi = bindir / "pi"
                 self.assertTrue(pi.is_symlink())
                 self.assertIn("PI_OFFLINE=1", pi.resolve().read_text())
-                self.assertEqual(BRIDGE_LINK.resolve(),
-                                 home / ".local/share/pi/node_modules")
+                self.assertEqual(os.readlink(BRIDGE_LINK),
+                                 str(home / ".local/share/pi-runtime/current/node_modules"))
                 self.assertTrue((home / ".pi/agent/mcp.json").is_file())
                 self.assertTrue((home / ".claude.json").is_file())
                 self.assertIn("pi-subagent-bridge",
@@ -142,7 +146,7 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                     self.assertIn("/pi-update", refused.stderr)
                 self.assertFalse(marker.exists())
             finally:
-                if BRIDGE_LINK.is_symlink() and BRIDGE_LINK.resolve() == home / ".local/share/pi/node_modules":
+                if BRIDGE_LINK.is_symlink() and os.readlink(BRIDGE_LINK) == str(home / ".local/share/pi-runtime/current/node_modules"):
                     BRIDGE_LINK.unlink()
 
 

@@ -1,4 +1,4 @@
-"""Pinned Pi release acquisition, isolated from routine sync until cutover."""
+"""Install the pinned pi-build release closure and bind the Pi bridge to its selection."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import tarfile
 import tempfile
 from uuid import uuid4
@@ -20,6 +21,7 @@ import pi_offline
 HEX = re.compile(r"[0-9a-f]{64}")
 TARGETS = {"darwin-arm64", "linux-x64", "linux-arm64"}
 RECEIPT = ".usr-pi-release.json"
+PIN = Path(__file__).resolve().parents[2] / "tools/pi/runtime.pin.json"
 
 
 class Artifact(TypedDict):
@@ -36,6 +38,15 @@ class Pin(TypedDict):
     provenance_sha256: str
     targets: dict[str, Artifact]
 
+
+def load_pin(path: Path = PIN) -> Pin:
+    try:
+        pin = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise pi_offline.OfflinePiError(f"cannot read Pi release pin {path}: {exc}") from exc
+    if not isinstance(pin, dict):
+        raise pi_offline.OfflinePiError(f"invalid Pi release pin: {path}")
+    return pin
 
 
 def pin_entry(pin: Pin, target: str) -> Artifact:
@@ -264,3 +275,81 @@ def install(prefix: Path, pin: Pin, target: str, cache: Path) -> Path:
             sync_directory(releases)
         select(prefix, entry)
         return destination
+
+
+def selected(prefix: Path, pin: Pin, target: str) -> bool:
+    """Cheap check that the selection names the pinned generation and its receipt."""
+    entry = pin_entry(pin, target)
+    try:
+        if prefix.is_symlink() or os.readlink(prefix / "current") != "releases/" + entry["sha256"]:
+            return False
+        generation_dir = prefix / "releases" / entry["sha256"]
+        receipt = json.loads((generation_dir / RECEIPT).read_text())
+        return not generation_dir.is_symlink() and receipt["pin"] == pin and receipt["target"] == target
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def bridge_target(prefix: Path) -> str:
+    return str(prefix / "current/node_modules")
+
+
+def bridge_current(project: Path, prefix: Path, pin: Pin | None = None) -> bool:
+    link = project / "node_modules"
+    try:
+        return (selected(prefix, pin or load_pin(), pi_offline.platform_key())
+                and link.is_symlink() and os.readlink(link) == bridge_target(prefix))
+    except OSError:
+        return False
+
+
+def _package_version(root: Path, name: str) -> str | None:
+    file = root / name / "package.json"
+    return json.loads(file.read_text())["version"] if file.exists() else None
+
+
+def _replaceable_bridge(link: Path, legacy: Path) -> bool:
+    if link.is_symlink():
+        return os.readlink(link) == str(legacy / "node_modules") and pi_offline.is_legacy_runtime(legacy)
+    if not link.exists():
+        return True
+    try:
+        required = ("@earendil-works/pi-coding-agent", "pi-subagents")
+        return (not (link / ".pnpm").exists()
+                and all(_package_version(link, name) == pi_offline.PACKAGES[name] for name in required)
+                and _package_version(link, "pi-muse-subscription") in (None, pi_offline.PACKAGES["pi-muse-subscription"]))
+    except (OSError, KeyError, ValueError, TypeError):
+        return False
+
+
+def link_bridge(project: Path, prefix: Path, legacy: Path, pin: Pin | None = None) -> bool:
+    """Point the bridge at the selected closure; adopt only usr's own earlier layouts."""
+    pin = pin or load_pin()
+    if not selected(prefix, pin, pi_offline.platform_key()):
+        raise pi_offline.OfflinePiError("Pi runtime is not installed; run sh sync tools pi")
+    if bridge_current(project, prefix, pin):
+        return False
+    link = project / "node_modules"
+    if not _replaceable_bridge(link, legacy):
+        kind = "symlink" if link.is_symlink() else "dependencies"
+        raise pi_offline.OfflinePiError(f"refusing unmanaged bridge {kind}: {link}")
+    project.mkdir(parents=True, exist_ok=True)
+    temporary = project / (".node_modules.release-" + uuid4().hex)
+    temporary.symlink_to(bridge_target(prefix), target_is_directory=True)
+    backup = None
+    try:
+        if link.exists() and not link.is_symlink():
+            backup = project / (".node_modules.previous-" + uuid4().hex)
+            os.replace(link, backup)
+        try:
+            os.replace(temporary, link)
+        except OSError:
+            if backup is not None:
+                os.replace(backup, link)
+                backup = None
+            raise
+        if backup is not None:
+            shutil.rmtree(backup)
+        return True
+    finally:
+        temporary.unlink(missing_ok=True)

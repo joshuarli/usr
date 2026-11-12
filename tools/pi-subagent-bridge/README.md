@@ -13,7 +13,7 @@ No `god` tier. Claude Code and Codex alone use their pinned native `god` agents.
 
 ## Setup
 
-`sh sync` installs Node.js and Command Code as usual, but installs the Pi 1.5.0 CLI/SDK plus pinned subagents/Muse/intercom dependencies **exclusively from the committed SHA-256-verified platform archive** under `vendor/pi/runtime/`. It links the bridge to the same extracted dependency closure (no npm install). The bridge MCP is registered for Claude, Pi and OpenCode; Codex uses tracked config. `sh sync bridge` reconciles MCP registrations; the old recognized `usr-opencode-worker` entry migrates to `pi-subagent-bridge` while foreign servers are preserved.
+`sh sync` installs Node.js and Command Code as usual, but installs the Pi 1.5.0 CLI/SDK plus pinned subagents/Muse/intercom dependencies **exclusively from the pinned, SHA-256-verified `pi-build` release archive** named in `tools/pi/runtime.pin.json`. It links the bridge to the same selected dependency closure (no npm install). The bridge MCP is registered for Claude, Pi and OpenCode; Codex uses tracked config. `sh sync bridge` reconciles MCP registrations; the old recognized `usr-opencode-worker` entry migrates to `pi-subagent-bridge` while foreign servers are preserved.
 
 `sh sync plan`
 `sh sync doctor`

@@ -31,6 +31,7 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ffmpeg_runtime  # noqa: E402
 import pi_offline  # noqa: E402
+import pi_release  # noqa: E402
 
 NODE_MINIMUM = "26.12.0"
 NODEJS_VERSION = "26.13.0"
@@ -128,7 +129,9 @@ class Installer:
         self.grok_home = Path(self.env.get("GROK_HOME") or self.home / ".grok")
         self.opencode2_home = Path(self.env.get("OPENCODE2_HOME") or self.home / ".opencode")
         self.cmd_root = self.data_home / "command-code"
-        self.pi_root = self.data_home / "pi"
+        self.pi_root = self.data_home / "pi-runtime"
+        self.pi_legacy_root = self.data_home / "pi"
+        self.pi_cache = pi_offline.cache_dir(self.home, self.env)
         self.python_build_root = self.data_home / "python-build"
         self.node_build_root = self.data_home / "node-build"
         self.nodejs_root = self.data_home / "nodejs"
@@ -1201,40 +1204,50 @@ class Installer:
                        no_release="could not resolve the latest agent-browser version")
 
     def install_pi(self) -> None:
-        """Install the complete Pi SDK, CLI and extensions from a verified local archive."""
+        """Install the Pi CLI, SDK and extensions from the pinned pi-build release (no npm)."""
         if not self.node_meets_minimum():
             self.skip("pi", f"Node.js {NODE_MINIMUM} or newer is required")
         launcher = self.dest / "pi"
-        target = str(self.pi_root / "bin/pi")
+        target = str(self.pi_root / "current/bin/pi")
+        legacy_target = str(self.pi_legacy_root / "bin/pi")
         if launcher.exists() or launcher.is_symlink():
-            if not launcher.is_symlink() or os.readlink(launcher) != target \
+            if not launcher.is_symlink() or os.readlink(launcher) not in (target, legacy_target) \
                     or not (self.state / "pi").is_file():
                 self.skip("pi", f"{launcher} already exists outside dl management")
-        if self.pi_root.exists() or self.pi_root.is_symlink():
-            if self.pi_root.is_symlink() or not self.pi_root.is_dir() \
-                    or (not (self.state / "pi").is_file() and not pi_offline.current(self.pi_root)):
-                self.skip("pi", f"{self.pi_root} already exists without dl records")
+        cache = self.pi_cache
         try:
-            entry, _ = pi_offline.verify_archive()
-            wanted = "offline:" + entry["sha256"]
-            if (pi_offline.current(self.pi_root) and self._state_text("pi") == wanted
-                    and launcher.is_symlink() and os.readlink(launcher) == target):
-                pi_offline.configure_intercom(self.home, self.pi_root)
-                self.own_dir(self.pi_root)
-                self.own_file(launcher)
-                self.own_file(self.state / "pi")
-                self.current("pi is current (vendored; no npm)")
-                return
-            self.own_missing_dirs(self.pi_root.parent)
-            pi_offline.install(self.pi_root)
-            pi_offline.configure_intercom(self.home, self.pi_root)
-        except (pi_offline.OfflinePiError, OSError, ValueError) as exc:
+            pin = pi_release.load_pin()
+            key = pi_offline.platform_key()
+            entry = pi_release.pin_entry(pin, key)
+            wanted = f"release:{pin['builder_revision']}:{entry['sha256']}"
+            unchanged = (self._state_text("pi") == wanted and launcher.is_symlink()
+                         and os.readlink(launcher) == target
+                         and pi_release.current(self.pi_root, pin, key) is not None)
+            if not unchanged:
+                self.own_missing_dirs(self.pi_root.parent)
+                self.own_missing_dirs(cache.parent)
+                self.fetch_msg(f"Installing Pi runtime {entry['archive']} from {pin['release_url']} ...")
+                pi_release.install(self.pi_root, pin, key, cache)
+            pi_offline.configure_intercom(self.home, self.pi_root / "current")
+        except (pi_offline.OfflinePiError, OSError, ValueError, URLError) as exc:
             self.skip("pi", str(exc))
         self.own_dir(self.pi_root)
+        if cache.is_dir() and not cache.is_symlink():
+            self.own_dir(cache)
+        if pi_offline.is_legacy_runtime(self.pi_legacy_root):
+            self.own_dir(self.pi_legacy_root)
+        if unchanged:
+            self.own_file(launcher)
+            self.own_file(self.state / "pi")
+            self.current("pi is current (pinned release; no npm)")
+            return
         self.link_symlink(launcher, target)
         self.write_state("pi", wanted)
         self.changed = True
-        self.ok("Installed Pi CLI, SDK, subagents and intercom from usr (no npm)")
+        self.ok("Installed Pi CLI, SDK, subagents and intercom from the pinned release (no npm)")
+        if pi_offline.is_legacy_runtime(self.pi_legacy_root):
+            self.warn(f"Previous vendored Pi runtime kept at {self.pi_legacy_root}; "
+                      "remove it once the release runtime is confirmed (sync uninstall also removes it)")
 
     def repair_dsh_tui_patch(self) -> bool:
         patch_path = self.dsh_root / "lib/node_modules/@deepseek-harness-tui/dsh-tui/cordis.patch.yml"
@@ -2805,7 +2818,6 @@ class Installer:
                 if mode_target == f"{target.removesuffix('/bin/codex')}/bin/codex-code-mode-host":
                     self.own_file(mode_host)
         for tool, root, binary in (("cmd", self.cmd_root, "cmd"), ("pnpm", self.pnpm_root, "pnpm"),
-                                   ("pi", self.pi_root, "pi"),
                                    ("agent-browser", self.agent_browser_root, "agent-browser")):
             if (self.state / tool).is_file() and (self.state / tool).stat().st_size > 0:
                 self.own_file(self.state / tool)
@@ -2814,6 +2826,20 @@ class Installer:
                         and (self.dest / binary).is_symlink() and os.readlink(self.dest / binary) == str(root / "bin" / binary):
                     self.own_dir(root)
                     self.own_file(self.dest / binary)
+        if (self.state / "pi").is_file() and (self.state / "pi").stat().st_size > 0:
+            self.own_file(self.state / "pi")
+            launcher = self.dest / "pi"
+            if self.pi_root.is_dir() and not self.pi_root.is_symlink() \
+                    and (self.pi_root / ".usr-pi-releases").is_file():
+                self.own_dir(self.pi_root)
+                if launcher.is_symlink() and os.readlink(launcher) == str(self.pi_root / "current/bin/pi"):
+                    self.own_file(launcher)
+            if self.pi_cache.is_dir() and not self.pi_cache.is_symlink():
+                self.own_dir(self.pi_cache)
+            if pi_offline.is_legacy_runtime(self.pi_legacy_root):
+                self.own_dir(self.pi_legacy_root)
+                if launcher.is_symlink() and os.readlink(launcher) == str(self.pi_legacy_root / "bin/pi"):
+                    self.own_file(launcher)
         self.record_managed_binary("opencode2")
         if (self.state / "opencode2").is_file() and (self.state / "opencode2").stat().st_size > 0 and self.opencode2_managed():
             self.own_file(self.opencode2_home / "bin/opencode2")

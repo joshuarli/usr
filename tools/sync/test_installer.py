@@ -14,6 +14,9 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).parent))
 import installer
+import pi_release
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pi"))
+import release_cache
 from installer import Installer, SkipInstall, default_tools
 
 
@@ -515,12 +518,18 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_cf()
         self.assertEqual(launcher.read_text(), "keep")
+        release_cache.seed(self.home / ".cache/usr/pi-releases")
         inst = self.make()
         inst.env["MOCK_NPM_FAIL"] = "1"
-        # Pi uses the checked-in archive and cannot touch the npm mock.
-        inst.install_pi()
-        self.assertTrue((self.home / ".local/share/pi/node_modules").is_dir())
-        self.assertEqual(self.state("pi").startswith("offline:"), True)
+        with patch.object(pi_release.urllib.request, "urlopen", side_effect=AssertionError("network")):
+            inst.install_pi()
+            runtime = self.home / ".local/share/pi-runtime/current"
+            self.assertTrue((runtime / "node_modules/@earendil-works/pi-coding-agent").is_dir())
+            self.assertEqual(os.readlink(self.dest_path("pi")), str(runtime / "bin/pi"))
+            self.assertTrue(self.state("pi").startswith("release:"))
+            again = self.make()
+            again.install_pi()
+            self.assertFalse(again.changed)
 
     def test_pnpm_beside_polluted_home(self):
         home_bin = self.home / ".local/share/pnpm/bin"

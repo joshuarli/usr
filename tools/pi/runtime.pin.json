@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "release_url": "https://github.com/joshuarli/pi-build/releases/download/full-1.5.0-1/",
+  "builder_revision": "db041e61c504dce53483db1aca69cda53a313312",
+  "profile": "full",
+  "provenance_sha256": "a05f7c0389ae9fcc83b884bd47c3e158b0f1f6a830614fd8e4772f01f7363a9c",
+  "targets": {
+    "darwin-arm64": {"archive": "darwin-arm64-full.tar.gz", "sha256": "5de9de758dc062ebe7b37c4886dc5b244db1a1033343a476f87e2d81675b788c", "bytes": 35524790},
+    "linux-x64": {"archive": "linux-x64-full.tar.gz", "sha256": "38ad40073dab9e57f83ed1172dafa4d08bc54c165d4dc89bd6aa972e26a17fb4", "bytes": 35726656},
+    "linux-arm64": {"archive": "linux-arm64-full.tar.gz", "sha256": "b01198838cf99db877cd4e1d5d435f7aac9128dffadf5ce95d5d0dbea498ff74", "bytes": 35350645}
+  }
+}

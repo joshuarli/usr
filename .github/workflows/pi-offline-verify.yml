@@ -5,8 +5,6 @@ on:
     paths:
       - "tools/sync/**"
       - "tools/pi/**"
-      - "vendor/pi/runtime/**"
-      - "vendor/pi/upstreams.json"
       - "dotfiles/pi-test.py"
       - "dotfiles/doctor-test.sh"
       - "dotfiles/base/.pi/**"
@@ -31,9 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .work
-          python3 -I tools/pi/vendor.py check
-          python3 -I tools/pi/test_vendor.py
+          mkdir -p .work/tmp
+          TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py
           python3 -I tools/pi/test_offline.py
           python3 -I tools/pi/test_sync_bridge_offline.py
           python3 -I dotfiles/pi-test.py

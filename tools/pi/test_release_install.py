@@ -142,10 +142,10 @@ class ReleaseTests(unittest.TestCase):
 
     def test_legacy_runtime_is_preserved_until_explicit_migration(self):
         self.prefix.mkdir(parents=True)
-        (self.prefix / pi_offline.STAMP).write_text('{"schema":1}')
+        (self.prefix / pi_offline.LEGACY_STAMP).write_text('{"schema":1}')
         with self.assertRaisesRegex(ValueError, "foreign"):
             self.install()
-        self.assertTrue((self.prefix / pi_offline.STAMP).exists())
+        self.assertTrue((self.prefix / pi_offline.LEGACY_STAMP).exists())
 
     def test_unsafe_paths_and_chained_links(self):
         for extra in [{"../escape": b"bad"}, {"/absolute": b"bad"},
