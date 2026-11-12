@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 51
+Next: 56
 
 
 
@@ -57,3 +57,52 @@ Next: 51
 - **Recommendation:** Serialize the complete load-modify-save transaction or use a compare-and-retry revision. Preserve state validation and add the two-process disjoint-allowance regression.
 - **Fix with:** `durable-state`
 - **Effort:** S
+
+### USR-51 · P3 · Select local verification for changed files
+
+- **Area:** Tests
+- **Where:** `sync`, `docs/development.md`, `dotfiles/skills-check.sh`, `tools/sync/test_links.py`
+- **Problem:** Agents assemble checks from separate instructions for each change, and fixed check commands do not explain coverage or unmapped changes. The proposed selection would reduce repeated bookkeeping while leaving behavioral judgment with the agent.
+- **Recommendation:** Add a changed-file plan and runner to sync check, with JSON explaining selected checks, reasons, platform and serialization constraints, and unmapped paths. Cover staged, unstaged, untracked, renamed, and deleted paths; generate the corresponding documentation from the same rules. Report selected checks and results without claiming correctness. Exclude caching and automatic proof reuse.
+- **Fix with:** none
+- **Effort:** M
+
+
+### USR-52 · P3 · Generate model policy representations from the authoritative policy
+
+- **Area:** Config
+- **Where:** `tools/pi-subagent-bridge/src/tier-policy.ts`, `tools/pi-subagent-bridge/src/tier-profile.ts`, `tools/pi-subagent-bridge/src/hybrid.ts`, `tools/pi-subagent-bridge/README.md`, `dotfiles/base/.agents/skills/orchestrate/SKILL.md`
+- **Problem:** Model and tier facts appear in policy, profiles, and documentation, requiring coordinated edits and creating opportunities for drift during migrations.
+- **Recommendation:** Expose structured policy inspection and generate bounded owned tables and profile fragments from the approved typed policy, with a check for stale outputs. Include approved models, effort, fallback, nesting, and applicable native exceptions. Preserve unrelated harness settings and pins of admitted workers; keep availability checks in worker_model_check and selection judgment with the owner.
+- **Fix with:** single-source-of-truth
+- **Effort:** M
+
+
+### USR-53 · P3 · Expose structured skill discovery and references
+
+- **Area:** Navigability
+- **Where:** `dotfiles/skills-check.sh`, `dotfiles/base/.agents/skills/`, `SKILLS.md`
+- **Problem:** Agents repeatedly locate skills, interpret invocation metadata, and resolve references using separate searches and shell parsing. The existing structural checker already handles part of this information.
+- **Recommendation:** Provide structured show and direct-reference inspection with canonical paths, descriptions, invocation policy, exact body and content hash; deduplicate resolved references and keep reading bounded. Preserve existing structural checks and derive purely mechanical invocation adapters from canonical frontmatter where feasible. Keep skill files authoritative and do not infer execution authority or automatic workflow selection from links.
+- **Fix with:** none
+- **Effort:** M
+
+
+### USR-54 · P3 · Expose a structured campaign snapshot using bridge inspection
+
+- **Area:** Delegation
+- **Where:** `dotfiles/base/.local/bin/worker-campaign`, `dotfiles/base/.local/bin/worker-watch`, `tools/pi-subagent-bridge/README.md`, `tools/pi-subagent-bridge/src/`
+- **Problem:** A campaign parent gathers worker state and Git facts across multiple inspections, while watcher observations do not provide the bridge process-identity and lease guarantees.
+- **Recommendation:** Extend campaign listing with a detailed JSON snapshot using authoritative bridge inspection for worker identity, actual backend and model, execution state, worktree, revisions, changed paths, scope violations, and available acceptance evidence. Include observation times and represent missing evidence as unknown. Keep execution, acceptance, and integration separate; add no scheduler, daemon, or campaign ledger.
+- **Fix with:** none
+- **Effort:** M
+
+
+### USR-55 · P3 · Provide a paired benchmark comparison runner
+
+- **Area:** Performance
+- **Where:** `dotfiles/base/.agents/skills/benchmark-checklist/SKILL.md`, `dotfiles/base/.local/bin/git-bench`
+- **Problem:** Agents reconstruct the same paired measurement protocol and result calculations, while git-bench addresses a specific Git workload rather than general comparisons.
+- **Recommendation:** Add a narrow runner around existing commands with explicit warmup, alternating order, raw samples and exit statuses, median and spread, and an explicit correctness or work-completion check. Respect perf-gate-ready before and after timed measurements. Leave workload representativeness, tuning, correctness interpretation, and conclusions to the agent; add no profiler or benchmark database.
+- **Fix with:** benchmark-checklist
+- **Effort:** M
