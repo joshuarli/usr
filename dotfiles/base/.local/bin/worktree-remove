@@ -31,6 +31,13 @@ if [ -n "$(git -C "$path" status --porcelain --untracked-files=all)" ]; then
     exit 1
 fi
 
+ignored=$(git -C "$path" status --porcelain --ignored=matching --untracked-files=all)
+case "$ignored" in
+    *"!! "*)
+        printf '%s\n' "worktree-remove: kept $path, which contains ignored files; review them before retirement" >&2
+        exit 1 ;;
+esac
+
 git --git-dir="$common" worktree remove "$path"
 
 case "$branch" in

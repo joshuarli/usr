@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "dotfiles/base/.local/bin/worktree-retire"
+CREATE = ROOT / "dotfiles/base/.local/bin/worktree-create"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 
 
@@ -42,6 +43,21 @@ class WorktreeRetireTests(unittest.TestCase):
 
     def branches(self):
         return self.git(self.repo, "branch", "--format=%(refname:short)").split()
+
+    def test_creation_uses_invoking_worktree_head(self):
+        campaign = self.lane("campaign")
+        (campaign / "campaign-only").write_text("campaign revision\n")
+        self.git(campaign, "add", "campaign-only")
+        self.git(campaign, "commit", "-q", "-m", "campaign")
+        self.commit(self.repo, "main-only", "main revision\n")
+        payload = '{"name":"created","cwd":"' + str(campaign) + '"}'
+        created = subprocess.run([str(CREATE)], input=payload, capture_output=True, text=True,
+                                 env={**os.environ, **GIT_ENV})
+        self.assertEqual(created.returncode, 0, created.stderr)
+        path = Path(created.stdout.strip().splitlines()[-1])
+        self.assertEqual(self.git(path, "rev-parse", "HEAD"), self.git(campaign, "rev-parse", "HEAD"))
+        self.assertTrue((path / "campaign-only").is_file())
+        self.assertFalse((path / "main-only").exists())
 
     def test_merged_lane_is_removed_with_its_branch(self):
         path = self.lane("merged")

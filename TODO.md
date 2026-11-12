@@ -12,14 +12,6 @@ Next: 51
 - **Effort:** S
 
 
-### USR-42 · P2 · Automatic Claude worktree removal deletes ignored artifacts
-
-- **Area:** Data
-- **Where:** `dotfiles/base/.local/bin/worktree-remove:26`, `dotfiles/base/.claude/settings.json:35`, `dotfiles/base/.local/bin/worktree-retire:64`
-- **Problem:** The automatic WorktreeRemove hook checks porcelain status without ignored files, then removes the worktree. A real hook fixture with a clean worktree and an ignored `.env` file exited 0 and deleted both. This can discard local configuration or research/build artifacts worth retaining. The separate `worktree-retire` command already detects ignored files and requires explicit `--discard-ignored`, but the automatic hook bypasses that protection.
-- **Recommendation:** Apply the retirement command's ignored-file preflight to the hook. Retain the worktree and report ignored paths for parent review; leave reviewed disposal to explicit retirement. Cover an otherwise clean worktree containing a valuable ignored file.
-- **Fix with:** `os-boundaries`
-- **Effort:** S
 
 ### USR-43 · P2 · Stale-branch cleanup can delete a newly advanced branch
 
@@ -40,14 +32,6 @@ Next: 51
 - **Effort:** S
 
 
-### USR-46 · P2 · Claude children start from the main checkout instead of the caller's worktree
-
-- **Area:** Concurrency
-- **Where:** `dotfiles/base/.local/bin/worktree-create:20`, `dotfiles/base/.local/bin/worktree-create:28`, `dotfiles/base/.local/bin/worktree-create:39`, `dotfiles/base/.claude/settings.json:24`
-- **Problem:** The hook uses the supplied `cwd` to locate the common Git directory, then resolves `HEAD` through `git -C "$root" worktree add`. A child launched from a campaign worktree therefore starts at the main checkout's revision. A real hook fixture committed a file only in the caller's campaign branch: the child equaled main's HEAD, differed from the caller, and lacked that file. Children silently review or build against the wrong base and omit accepted campaign work.
-- **Recommendation:** Resolve the exact base commit from the supplied `cwd` before creation. Use the common root only for placement. Cover distinct main/caller commits and assert the child inherits the caller's commit.
-- **Fix with:** `os-boundaries`
-- **Effort:** S
 
 ### USR-47 · P2 · Usage RPC reads time out on responses already buffered in Python
 

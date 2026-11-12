@@ -27,6 +27,7 @@ esac
 
 # --git-common-dir is the main repository's .git even when cwd is inside another
 # worktree, so a worktree started from a lane still lands beside its siblings.
+base=$(git -C "$cwd" rev-parse --verify HEAD)
 common=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir)
 root=$(dirname "$common")
 dir="$root/.work/wt/$name"
@@ -36,5 +37,5 @@ exclude=$(git -C "$root" rev-parse --path-format=absolute --git-path info/exclud
 mkdir -p "$(dirname "$exclude")"
 grep -qxF '/.work/' "$exclude" 2>/dev/null || printf '%s\n' '/.work/' >> "$exclude"
 
-git -C "$root" worktree add --no-track -b "worktree-$name" "$dir" HEAD >&2
+git -C "$root" worktree add --no-track -b "worktree-$name" "$dir" "$base" >&2
 printf '%s\n' "$dir"
