@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "note": "Source snapshots only. Runtime/SDK transitive dependencies and full npm-free Pi installation are not yet vendored; do not claim offline setup complete.",
+  "note": "Selected upstream source snapshots plus checked-in, SHA-256-verified Pi 1.5.0 CLI/SDK/intercom/Muse runtime archives. Normal Pi setup uses no npm or package registry. Full transitive JS artifacts are tracked in runtime/artifacts.json.",
   "sources": {
     "pi-subagents": {
       "repository": "nicobailon/pi-subagents",
@@ -514,7 +514,7 @@
       "sha": "f9a26365568127461c47a07a37dcb42c140a3ac5",
       "ref": "v1.5.0",
       "version": "1.5.0",
-      "reason": "Current bridge SDK pin; source and runtime closure are not yet vendored"
+      "reason": "Pi 1.5.0 CLI/SDK JavaScript is included in the committed platform-specific runtime archives, authenticated by runtime/artifacts.json. Upstream source tree is not separately imported; full tagged source commit is recorded here for pi-update."
     }
   }
 }
