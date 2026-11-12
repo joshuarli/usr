@@ -1,7 +1,7 @@
 # Pinned python-build release, verified independently of release metadata.
 # First line: <tag> <repository>
 # Remaining lines: <triple> <asset> <sha256>
-20261107 laputa-systems/python-build
-aarch64-apple-darwin cpython-3.15.1+20261107-aarch64-apple-darwin-install_only_stripped.tar.gz d6c1622eac8354ac64ae0bf0f38ad06e6b0f71c3b64aac5dfcddff67472548bd
-x86_64-unknown-linux-musl cpython-3.15.1+20261107-x86_64-unknown-linux-musl-install_only_stripped.tar.gz f8ecf313bb4b8f9e95dca30e9b3a098c564b691124f9c3f29a7ea9d71ffb5ea3
-aarch64-unknown-linux-musl cpython-3.15.1+20261107-aarch64-unknown-linux-musl-install_only_stripped.tar.gz d166d0e08f423e2d71b767e9c15a402ea7af1896605b87fe3e09dda56a50d7ae
+release-6f7c0d46e2eda7f66c705022f1950034045f74d0 laputa-systems/python-build
+aarch64-apple-darwin cpython-3.15.1+20261112-aarch64-apple-darwin-install_only_stripped.tar.gz 4275e9e864f44e4499f0f1e30437c74d78a2d4ab199ecb4bbf8535e456dd984a
+x86_64-unknown-linux-musl cpython-3.15.1+20261112-x86_64-unknown-linux-musl-install_only_stripped.tar.gz bfd5b50e8c502f74d8a4966f7c84a4afd253a14752da15439b70723c998ae862
+aarch64-unknown-linux-musl cpython-3.15.1+20261112-aarch64-unknown-linux-musl-install_only_stripped.tar.gz 2831c5bbf96da6c5474619d96cab97942b3b807aeb3dae1f4733662da4b996ac
