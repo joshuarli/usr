@@ -1959,12 +1959,12 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("gluon", f"no gluon release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        tag = self.latest_tag("https://github.com/joshuarli/gluon/releases.atom", prefix="release-")
+        tag = self.latest_tag("https://github.com/laputa-systems/gluon/releases.atom", prefix="release-")
         if not tag:
             self.unchecked("gluon", "no release found")
             return
         asset = f"gluon-{triple}.zip"
-        base = f"https://github.com/joshuarli/gluon/releases/download/{tag}"
+        base = f"https://github.com/laputa-systems/gluon/releases/download/{tag}"
         def validate(staged: Path) -> bool:
             for command in GLUON_COMMANDS:
                 path = staged / command
