@@ -1,6 +1,6 @@
 # Chosen stack and migration
 
-This carries the existing stack decisions into the refactoring workflow. Apply only layers needed by the product. Tool facts were checked on 2026-10-24; resolve exact releases, peer compatibility, and version-specific APIs again when changing dependencies. Stable language rules do not require a package upgrade on every invocation.
+This carries the existing stack decisions into the refactoring workflow. Apply only layers needed by the product. Tool facts were checked on 2026-11-11; resolve exact releases, peer compatibility, and version-specific APIs again when changing dependencies. Stable language rules do not require a package upgrade on every invocation.
 
 ## Package and runtime ownership
 
@@ -15,9 +15,9 @@ This carries the existing stack decisions into the refactoring workflow. Apply o
 
 | Owner | Direction |
 | --- | --- |
-| TypeScript 7 | Stable TS7 ships as [`typescript` with native `tsc`](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/); do not install preview-era `@typescript/native-preview`/`tsgo` by habit. Keep strict, environment-correct configs and fix removed TS6/7 options instead of suppressing them. |
-| Oxlint | Use Oxlint plus `oxlint-tsgolint` and the existing JSON-config preference. Enable [type-aware linting](https://oxc.rs/docs/guide/usage/linter/type-aware.html); confirm supported rules and framework coverage before retiring ESLint. |
-| Typecheck gate | Keep a separate compiler check such as `pnpm exec tsc --noEmit -p tsconfig.json`, adapted for project references/declaration builds. This is a deliberate project policy: Oxlint also offers a combined type-check mode, but its lint discovery/configuration must not define the only compiler gate. |
+| TypeScript 7 | [`tsrs`](https://github.com/oxc-project/tsrs) is the type checker, a Rust port of TypeScript 7. Run `pnpm exec tsrs --noEmit --fast`. Keep strict, environment-correct configs and fix removed TS6/7 options instead of suppressing them. |
+| Oxlint | Use Oxlint 1.92 or newer and the existing JSON-config preference. Installing `tsrs` 0.23 or newer makes Oxlint load [`tsrs-lint`](https://github.com/oxc-project/tsrs#lint-and-type-check-in-one-run) for [type-aware linting](https://oxc.rs/docs/guide/usage/linter/type-aware.html). Confirm supported rules and framework coverage before retiring ESLint. |
+| Typecheck gate | Keep a separate `pnpm exec tsrs --noEmit --fast`, adapted for project references and declaration builds. Oxlint can report type errors with `--type-check`, but that run must not be the only compiler gate. |
 | Vite 8 | Use [Vite directly](https://vite.dev/blog/announcing-vite8) with Rolldown/Oxc and the Solid 2 plugin. Remove parallel Webpack/Rollup/esbuild/Babel plumbing after mapping each responsibility. No Vite+/`vp`. |
 | Formatting | Do not install, configure, or run Prettier, Oxfmt, or another formatter, including check-only and indirect runs. Inspect aggregate scripts/hooks and run only permitted checks. Remove obsolete formatter configuration in an in-scope stack migration. |
 
@@ -46,8 +46,8 @@ Keep Playwright directly for existing full journeys. Use Effect test Layers and 
 Inspect entrypoints, packages, routes, network/persistence, existing tests, deployment, and CI before changing their owners. In an in-scope full migration:
 
 1. Establish pnpm and Node ownership, metadata pins, and canonical local scripts.
-2. Move to strict TypeScript 7 and environment-correct ESM; repair all diagnostics.
-3. Establish Oxlint and Vite 8 with confirmed rule/plugin coverage.
+2. Move to strict tsrs (TypeScript 7) and environment-correct ESM; repair all diagnostics.
+3. Establish Oxlint with tsrs-lint and Vite 8 with confirmed rule/plugin coverage.
 4. Port applicable UI to Solid 2, then use Start mode for applications; enable SSR only where useful.
 5. Put meaningful I/O/failure/resource boundaries under Effect 4 without wrapping pure code.
 6. Replace redundant utility layers and migrate existing tests.
