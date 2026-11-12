@@ -56,13 +56,14 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
             marker = base / "forbidden-npm-invocations"
             npm = nodebin / "npm"
             npm.write_text(
-                "#!/bin/sh\\n"
-                "if [ \\"$1\\" = --version ]; then printf '11.20.0\\\\n'; exit 0; fi\\n"
-                "printf '%s\\\\n' \\"$*\\" >> \\"$NPM_FORBIDDEN_LOG\\"\\n"
-                "exit 97\\n")
+                '#!/bin/sh\n'
+                'if [ "$1" = --version ]; then printf "11.20.0\\n"; exit 0; fi\n'
+                'printf "%s\\n" "$*" >> "$NPM_FORBIDDEN_LOG"\n'
+                'exit 97\n'
+            )
             npm.chmod(0o755)
             npx = nodebin / "npx"
-            npx.write_text("#!/bin/sh\\nexit 97\\n")
+            npx.write_text('#!/bin/sh\nexit 97\n')
             npx.chmod(0o755)
             current = home / ".local/share/nodejs/current"
             current.symlink_to(release, target_is_directory=True)
