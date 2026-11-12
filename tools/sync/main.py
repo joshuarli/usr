@@ -312,13 +312,13 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
     nodes.append(Task("pi-extensions", ("links", "tool:pi"),
                       lambda: pi_extensions_status(ctx), lambda: pi_extensions_apply(ctx),
                       lambda: pi_extensions_status(ctx), frozenset({"pi-config"}), reconcile=True))
-    nodes.append(Task("claude-mcp", ("pi-extensions", "tool:nodejs", "tool:claude", "tool:cmd", "tool:opencode2", "tool:pi"),
+    nodes.append(Task("claude-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
                       lambda: bridge_status(ctx), lambda: bridge_apply(ctx),
                       lambda: bridge_status(ctx), frozenset({"claude-config", "pi-sdk-install"})))
-    nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi", "tool:cmd", "tool:opencode2"),
+    nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
                       lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
                       lambda: pi_bridge_status(ctx), frozenset({"pi-config", "pi-sdk-install"})))
-    nodes.append(Task("opencode-mcp", ("pi-extensions", "tool:nodejs", "tool:cmd", "tool:opencode2", "tool:pi"),
+    nodes.append(Task("opencode-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
                       lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
                       lambda: opencode_bridge_status(ctx), frozenset({"opencode-config", "pi-sdk-install"})))
     deps = ("links",)
