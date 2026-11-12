@@ -27,14 +27,14 @@ class OfflineTests(unittest.TestCase):
                                               "XDG_CACHE_HOME": str(cls.home / ".cache")})
         environment.start()
         cls.addClassCleanup(environment.stop)
-        network = patch.object(pi_release.urllib.request, "urlopen", side_effect=AssertionError("network"))
-        network.start()
-        cls.addClassCleanup(network.stop)
         cls.pin=pi_release.load_pin()
         cls.key=pi_offline.platform_key()
         cls.prefix=pi_offline.runtime_dir(cls.home)
         cls.cache=pi_offline.cache_dir(cls.home)
         seed(cls.cache)
+        network = patch.object(pi_release.urllib.request, "urlopen", side_effect=AssertionError("network"))
+        network.start()
+        cls.addClassCleanup(network.stop)
         cls.generation=pi_release.install(cls.prefix,cls.pin,cls.key,cls.cache)
         cls.root=cls.prefix/"current"
 
