@@ -103,4 +103,21 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertIn("intercom-ok",p.stdout)
 
+    def test_sdk_resolves_and_initializes_both_extensions_offline(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node not available")
+        version = subprocess.check_output([node, "-p", "process.versions.node"], text=True)
+        if int(version.split(".")[0]) < 26:
+            self.skipTest("Node 26 required")
+        loader = self.root/"node_modules/tsx/dist/loader.mjs"
+        checker = ROOT/"tools/pi/verify-extensions.mjs"
+        env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
+                   npm_config_registry="http://127.0.0.1:9")
+        p = subprocess.run([node, "--import", str(loader), str(checker), str(self.root)],
+                           cwd=self.root, env=env, capture_output=True,
+                           text=True, timeout=35)
+        self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
+        self.assertIn("ok: Pi SDK loaded", p.stdout)
+
 if __name__=="__main__":unittest.main()
