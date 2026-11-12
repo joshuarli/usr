@@ -1,19 +1,22 @@
 name: Verify Pi offline setup and bridge
 on:
   push:
-    branches: [pi-offline-runtime]
+    branches: [main, pi-offline-runtime]
     paths:
       - "tools/sync/**"
-      - "tools/pi/test_offline.py"
-      - "tools/pi/test_sync_bridge_offline.py"
+      - "tools/pi/**"
+      - "vendor/pi/runtime/**"
+      - "vendor/pi/upstreams.json"
       - "dotfiles/pi-test.py"
       - "dotfiles/doctor-test.sh"
       - "dotfiles/base/.pi/**"
       - ".github/workflows/pi-offline-verify.yml"
   workflow_dispatch:
+concurrency:
+  group: verify-pi-offline-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   offline:
-    if: github.actor != 'github-actions[bot]'
     strategy:
       fail-fast: false
       matrix:
