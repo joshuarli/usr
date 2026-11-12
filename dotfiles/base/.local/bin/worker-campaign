@@ -217,11 +217,11 @@ cmd_wait() {
                 [ -n "$id" ] || continue
                 is_acked "$id" && continue
                 case $state in
-                    succeeded | failed | turn_limit | interrupted)
+                    (succeeded | failed | turn_limit | interrupted)
                         report="$report$id $state $cwd $title$newline"
                         terminal=$((terminal + 1))
                         ;;
-                    *)
+                    (*)
                         running=$((running + 1))
                         ;;
                 esac

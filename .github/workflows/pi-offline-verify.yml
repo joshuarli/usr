@@ -29,6 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          printf '/.work/\n' >> .git/info/exclude
           mkdir -p .work/tmp
           TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py
           python3 -I tools/pi/test_offline.py
