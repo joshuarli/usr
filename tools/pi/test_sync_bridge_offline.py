@@ -113,6 +113,12 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                                       capture_output=True, text=True, timeout=30)
                 self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
                 self.assertIn("1.5.0", proc.stdout)
+                for subcommand in ("update", "install"):
+                    refused = subprocess.run([str(pi), subcommand, "npm:bad@latest"],
+                                             cwd=base, env=env, capture_output=True,
+                                             text=True, timeout=15)
+                    self.assertEqual(refused.returncode, 64)
+                    self.assertIn("/pi-update", refused.stderr)
                 self.assertFalse(marker.exists())
             finally:
                 if BRIDGE_LINK.is_symlink() and BRIDGE_LINK.resolve() == home / ".local/share/pi/node_modules":

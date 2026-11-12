@@ -138,6 +138,9 @@ def wrapper(root: Path) -> str:
             # PI_OFFLINE blocks any project-configured npm/git package auto-installs,
             # and prevents Pi's automatic model catalog/version update requests.
             "export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1\n"
+            'case "${1:-}" in\n'
+            '  install|update) echo "usr-managed Pi: use /pi-update to change packages" >&2; exit 64;;\n'
+            'esac\n'
             f"exec node {shlex.quote(str(sdk))} "
             f"--extension {shlex.quote(str(subagent))} "
             f"--extension {shlex.quote(str(intercom))} \"$@\"\n")

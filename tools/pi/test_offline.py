@@ -116,6 +116,16 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertIn("intercom-ok",p.stdout)
 
+    def test_pi_update_cannot_invoke_online_package_manager(self):
+        env = dict(os.environ, HOME=str(self.home),
+                   npm_config_registry="http://127.0.0.1:9")
+        cmd = str(self.root/"bin/pi")
+        for subcommand in ("update", "install"):
+            p = subprocess.run([cmd, subcommand, "npm:untrusted@latest"],
+                               env=env, capture_output=True, text=True, timeout=15)
+            self.assertEqual(p.returncode, 64)
+            self.assertIn("/pi-update", p.stderr)
+
     def test_sdk_resolves_and_initializes_both_extensions_offline(self):
         node = shutil.which("node")
         if not node:
