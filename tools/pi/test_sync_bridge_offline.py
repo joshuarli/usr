@@ -35,14 +35,39 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
             home = base / "home"
             bindir = home / ".local/bin"
             bindir.mkdir(parents=True)
-            # Node is already available; this test isolates Pi from the separate
-            # Node binary download while poisoning all npm invocations.
-            (bindir / "node").symlink_to(node)
-            npm = bindir / "npm"
+            # Mimic an already-managed Node 26 installation. Node's sync task
+            # reconciles on every run; a foreign launcher would be rejected.
+            # The only npm operation permitted here is --version, which makes
+            # no network request. All npm installs, views and updates are poisoned.
+            import platform
+            osname = platform.system().lower()
+            machine = platform.machine().lower()
+            arch = "arm64" if machine in ("aarch64", "arm64") else "x64"
+            if osname == "darwin":
+                target = "darwin-" + arch
+            else:
+                glibc = subprocess.run(["getconf", "GNU_LIBC_VERSION"],
+                                       capture_output=True, text=True).returncode == 0
+                target = "linux-" + arch + ("" if glibc else "-musl")
+            release = home / ".local/share/nodejs" / f"26.13.0-npm11.20.0-{target}"
+            nodebin = release / "bin"
+            nodebin.mkdir(parents=True)
+            (nodebin / "node").symlink_to(node)
             marker = base / "forbidden-npm-invocations"
+            npm = nodebin / "npm"
             npm.write_text(
-                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$NPM_FORBIDDEN_LOG\"\nexit 97\n")
+                "#!/bin/sh\\n"
+                "if [ \\"$1\\" = --version ]; then printf '11.20.0\\\\n'; exit 0; fi\\n"
+                "printf '%s\\\\n' \\"$*\\" >> \\"$NPM_FORBIDDEN_LOG\\"\\n"
+                "exit 97\\n")
             npm.chmod(0o755)
+            npx = nodebin / "npx"
+            npx.write_text("#!/bin/sh\\nexit 97\\n")
+            npx.chmod(0o755)
+            current = home / ".local/share/nodejs/current"
+            current.symlink_to(release, target_is_directory=True)
+            for tool in ("node", "npm", "npx"):
+                (bindir / tool).symlink_to(current / "bin" / tool)
             config = home / ".offline-opencode/opencode/opencode.json"
             config.parent.mkdir(parents=True)
             config.write_text("{}\n")
