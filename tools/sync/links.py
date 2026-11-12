@@ -47,14 +47,22 @@ def _safe_relative(name: PurePosixPath) -> None:
         raise LinkError(f"unsafe source path {name!s}")
 
 
-def _listing(layer: Path) -> tuple[set[PurePosixPath], set[PurePosixPath]]:
+def _git_toplevel(root: Path) -> Path | None:
+    top = subprocess.run(["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+                         capture_output=True, text=True, check=False)
+    return Path(top.stdout.strip()).resolve() if top.returncode == 0 else None
+
+
+def _listing(root: Path, layer: Path) -> tuple[set[PurePosixPath], set[PurePosixPath]]:
+    # Only the checkout's own index describes its layers. A root nested inside
+    # another repository (or its ignored scratch) must not inherit that repository's view.
     git = subprocess.run(
         ["git", "-C", str(layer), "-c", "core.quotePath=false", "ls-files", "-z",
          "--cached", "--others", "--exclude-standard", "--", "."],
         capture_output=True, check=False,
-    )
+    ) if _git_toplevel(root) == root.resolve() else None
     names: set[PurePosixPath] = set()
-    if git.returncode == 0:
+    if git is not None and git.returncode == 0:
         for raw in git.stdout.split(b"\0"):
             if not raw:
                 continue
@@ -90,7 +98,7 @@ def discover(root: Path, target: Path, platform: str) -> Discovery:
             continue
         source_root = layer.resolve(strict=True)
         sources.append(source_root)
-        names, markers = _listing(layer)
+        names, markers = _listing(root, layer)
         for rel in sorted(markers, key=lambda p: p.as_posix()):
             if rel == PurePosixPath("."):
                 raise LinkError("root .sym-dir would replace the target home")

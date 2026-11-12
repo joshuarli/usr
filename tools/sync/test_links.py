@@ -599,6 +599,17 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(dest.resolve(), self.root / "dotfiles/base/.tracked")
         self.assertEqual(original.resolve(), self.root / "dotfiles/base/.tracked")
 
+    def test_59_root_nested_in_another_repos_ignored_scratch_still_discovers_layers(self):
+        (self.root / ".git/info/exclude").write_text("/scratch/\n")
+        nested = self.root / "scratch/fixture"
+        source = nested / "dotfiles/base/.profile"
+        source.parent.mkdir(parents=True)
+        source.write_text("managed")
+        home = nested / "home"
+        home.mkdir()
+        found = discover(nested, home, "linux")
+        self.assertEqual([spec.source for spec in found.desired], [source.resolve()])
+
     def test_40_internal_parent_symlink_stays_confined(self):
         self.source(".a/f")
         internal = self.home / "inside"
