@@ -115,6 +115,7 @@ try {
       }
     }
   }
+  if (session) await session.extensionRunner.emit({ type: "session_shutdown" });
   session?.dispose();
   await new Promise(resolveClose => server.close(resolveClose));
   if (safeToRemove) rmSync(root, { recursive: true, force: true });

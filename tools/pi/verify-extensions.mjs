@@ -26,6 +26,9 @@ process.env.HOME = agentDir;
 process.env.XDG_DATA_HOME = join(agentDir, ".local", "share");
 process.env.XDG_CONFIG_HOME = join(agentDir, ".config");
 process.env.PI_CODING_AGENT_DIR = join(agentDir, ".pi", "agent");
+const intercomConfig = join(process.env.PI_CODING_AGENT_DIR, "intercom");
+mkdirSync(intercomConfig, { recursive: true });
+writeFileSync(join(intercomConfig, "config.json"), JSON.stringify({ enabled: false, confirmSend: true, inboundTrigger: "never" }));
 process.env.PI_OFFLINE = "1";
 process.env.PI_SKIP_VERSION_CHECK = "1";
 process.env.PI_MUSE_SDK_MUSE_PATH = muse;
@@ -71,6 +74,8 @@ try {
   });
   session = created.session;
   await session.bindExtensions({});
+  if (!session.getAllTools().some(tool => tool.name === "intercom_send"))
+    throw new Error("Intercom tools did not bind to the real SDK");
   if (baselineCatalog && !existsSync(museLog)) {
     await new Promise((resolveWait, rejectWait) => {
       const watcher = watch(agentDir, (_event, name) => {
@@ -104,6 +109,7 @@ try {
     (baselineCatalog ? "known baseline catalog refresh was contained (offline policy remains unverified)" : "offline catalog policy and pinned Muse models verified") +
     "; npm and npx were unused");
 } finally {
+  if (session) await session.extensionRunner.emit({ type: "session_shutdown" });
   session?.dispose();
   rmSync(agentDir, { recursive: true, force: true });
 }
