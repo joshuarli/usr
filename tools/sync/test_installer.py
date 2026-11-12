@@ -361,7 +361,7 @@ sys.exit(1)
             inst.install_nodejs()
         self.assertIn("checksum mismatch", str(ctx.exception))
 
-    def test_nodejs_managed_upgrade_preserves_npm_symlink_and_cleans_staged(self):
+    def test_nodejs_managed_uses_bundled_npm_without_registry(self):
         release = self.home / ".local/share/nodejs/26.13.0-npm12.2.0-darwin-arm64"
         cli_js = release / "lib/node_modules/npm/bin/npm-cli.js"
         cli_js.parent.mkdir(parents=True)
@@ -371,7 +371,7 @@ sys.exit(1)
         (release / "lib/node_modules/npm/lib/cli.js").write_text("")
         bin_dir = release / "bin"
         bin_dir.mkdir()
-        (bin_dir / "node").write_text("#!/bin/sh\nexit 0\n")
+        (bin_dir / "node").write_text("#!/bin/sh\nprintf '26.13.0\\n'\n")
         (bin_dir / "node").chmod(0o755)
         (bin_dir / "npm").symlink_to("../lib/node_modules/npm/bin/npm-cli.js")
         (bin_dir / "npx").symlink_to("../lib/node_modules/npm/bin/npx-cli.js")
@@ -382,24 +382,18 @@ sys.exit(1)
         for command in ("node", "npm", "npx"):
             self.dest_path(command).symlink_to(str(current / "bin" / command))
         inst.env["MOCK_NPM_FAIL"] = "1"
-        seen = {}
-        original_run = inst.run
-        def recording_run(argv, **kwargs):
-            if "install" in argv and "--global" in argv:
-                staged_npm = Path(argv[argv.index("--prefix") + 1]) / "bin/npm"
-                seen["is_symlink"] = staged_npm.is_symlink()
-                seen["target"] = os.readlink(staged_npm) if staged_npm.is_symlink() else ""
-            return original_run(argv, **kwargs)
-        inst.run = recording_run
-        with self.assertRaises(SkipInstall) as ctx:
-            inst.install_nodejs()
-        self.assertIn("npm 11.9.0 install failed", str(ctx.exception))
-        self.assertTrue(seen.get("is_symlink"))
-        self.assertEqual(seen.get("target"), "../lib/node_modules/npm/bin/npm-cli.js")
-        root = self.home / ".local/share/nodejs"
-        self.assertEqual([p.name for p in root.iterdir() if p.name.startswith(".nodejs.")], [])
+        inst.install_nodejs()
+        self.assertEqual(os.readlink(current), str(release))
+        self.assertEqual([p.name for p in (self.home / ".local/share/nodejs").iterdir()
+                          if p.name.startswith(".nodejs.")], [])
+        log = self.root / "npm.log"
+        if log.exists():
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertFalse(any(a and a[0] in ("view", "install") for a in calls),
+                             "Node prerequisite may not fetch from npm")
         for command in ("node", "npm", "npx"):
-            self.assertEqual(os.readlink(self.dest_path(command)), str(current / "bin" / command))
+            self.assertEqual(os.readlink(self.dest_path(command)),
+                             str(current / "bin" / command))
 
     def test_nodejs_relative_current_is_healed_to_absolute(self):
         release = self.home / ".local/share/nodejs/26.13.0-npm11.9.0-darwin-arm64"
