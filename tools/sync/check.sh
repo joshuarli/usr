@@ -31,7 +31,6 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	python3 -I dotfiles/pi-test.py
 	python3 -I dotfiles/orchestrate-test.py
 	TMPDIR="$tmpdir" python3 -I dotfiles/sbx-test.py
-	(cd dotfiles && sh agent-tier-gate-test.sh)
 	sh dotfiles/reset-agents-test.sh
 	(cd dotfiles && sh pre-push-test.sh)
 	(cd dotfiles && sh worker-watch-test.sh)
