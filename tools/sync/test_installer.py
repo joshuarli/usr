@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -14,6 +15,10 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).parent))
 import installer
 from installer import Installer, SkipInstall, default_tools
+
+
+def subprocess_run(args):
+    return subprocess.run(args, capture_output=True, text=True, check=True).stdout.strip()
 
 
 def atom(entries):
@@ -361,8 +366,51 @@ sys.exit(1)
             inst.install_nodejs()
         self.assertIn("checksum mismatch", str(ctx.exception))
 
+    def test_nodejs_failed_upgrade_keeps_old_launchers_and_retry_switches(self):
+        release = self.home / ".local/share/nodejs/26.12.0-npm11.9.0-darwin-arm64"
+        (release / "bin").mkdir(parents=True)
+        (release / "bin/node").write_text("#!/bin/sh\nprintf '26.12.0\\n'\n")
+        (release / "bin/npm").write_text("#!/bin/sh\nprintf '11.9.0\\n'\n")
+        for tool in ("node", "npm", "npx"):
+            path = release / "bin" / tool
+            if tool == "npx": path.write_text("#!/bin/sh\nexit 0\n")
+            path.chmod(0o755)
+        current = self.home / ".local/share/nodejs/current"
+        current.symlink_to(release, target_is_directory=True)
+        self.dest_path("node").parent.mkdir(parents=True)
+        for tool in ("node", "npm", "npx"):
+            self.dest_path(tool).symlink_to(str(current / "bin" / tool))
+        url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz"
+        inst = self.make({}, os_name="darwin", arch="aarch64")
+        with self.assertRaises(SkipInstall):
+            inst.install_nodejs()
+        self.assertEqual(os.readlink(current), str(release))
+        self.assertEqual(subprocess_run([str(self.dest_path("node")), "-p", "process.versions.node"]), "26.12.0")
+        self.assertEqual(subprocess_run([str(self.dest_path("npm")), "--version"]), "11.9.0")
+        subprocess.run([str(self.dest_path("npx")), "--version"], check=True)
+        retry = self.make({url: b"candidate"}, os_name="darwin", arch="aarch64")
+        def extract(_archive, staged, *, strip=0):
+            (staged / "bin").mkdir()
+            for tool, body in (("node", "#!/bin/sh\nprintf '26.13.0\\n'\n"),
+                               ("npm", "#!/bin/sh\nprintf '12.2.2\\n'\n"),
+                               ("npx", "#!/bin/sh\nexit 0\n")):
+                target = staged / "bin" / tool
+                target.write_text(body)
+                target.chmod(0o755)
+            return True
+        with patch.object(retry, "sha256_file", return_value="6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e"), \
+             patch.object(retry, "tar_names", return_value=["root/bin/node"]), \
+             patch.object(retry, "extract_tar", side_effect=extract):
+            retry.install_nodejs()
+        selected = Path(os.readlink(current))
+        self.assertEqual(selected.name, "26.13.0-npm12.2.2-darwin-arm64")
+        self.assertTrue((selected / "bin/node").is_file())
+        self.assertFalse(release.exists())
+        for tool in ("node", "npm", "npx"):
+            self.assertEqual(os.readlink(self.dest_path(tool)), str(current / "bin" / tool))
+
     def test_nodejs_managed_uses_bundled_npm_without_registry(self):
-        release = self.home / ".local/share/nodejs/26.13.0-npm12.2.0-darwin-arm64"
+        release = self.home / ".local/share/nodejs/26.13.0-npm12.2.2-darwin-arm64"
         cli_js = release / "lib/node_modules/npm/bin/npm-cli.js"
         cli_js.parent.mkdir(parents=True)
         cli_js.write_text(f"#!/bin/sh\nexec {self.bin / 'npm'} \"$@\"\n")
@@ -383,6 +431,7 @@ sys.exit(1)
             self.dest_path(command).symlink_to(str(current / "bin" / command))
         inst.env["MOCK_NPM_FAIL"] = "1"
         inst.install_nodejs()
+        self.assertEqual(inst.fetched, [])
         self.assertEqual(os.readlink(current), str(release))
         self.assertEqual([p.name for p in (self.home / ".local/share/nodejs").iterdir()
                           if p.name.startswith(".nodejs.")], [])
@@ -420,7 +469,7 @@ sys.exit(1)
         self.assertEqual(os.readlink(current), str(release))
         self.assertTrue((current / "bin/node").is_file())
 
-    def test_nodejs_relative_foreign_current_is_replaced(self):
+    def test_nodejs_relative_foreign_current_is_preserved(self):
         foreign = self.home / ".local/share/nodejs/26.14.0-darwin-arm64"
         foreign.mkdir(parents=True)
         (foreign / "marker").write_text("keep\n")
@@ -433,7 +482,7 @@ sys.exit(1)
         with self.assertRaises(SkipInstall) as ctx:
             inst.install_nodejs()
         self.assertIn("checksum mismatch", str(ctx.exception))
-        self.assertFalse(current.is_symlink())
+        self.assertEqual(os.readlink(current), foreign.name)
         self.assertTrue((foreign / "marker").is_file())
 
     def test_nodejs_absolute_outside_current_still_skips(self):

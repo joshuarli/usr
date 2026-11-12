@@ -2,16 +2,6 @@ Prefix: USR
 Next: 51
 
 
-### USR-40 · P1 · Failed Node upgrades remove the working runtime and block retry
-
-- **Area:** Build
-- **Where:** `tools/sync/installer.py:1388`, `tools/sync/installer.py:1400`, `tools/sync/installer.py:1439`, `tools/sync/installer.py:1485`
-- **Problem:** The managed-release recognizer embeds the newly pinned `NODEJS_VERSION`. A valid previous-version installation is treated as stale, and `nodejs/current` is unlinked before downloading and validating the replacement. A scratch fixture installed working `26.12.0-npm11.9.0-linux-x64` launchers, then failed only the download edge of the real `install_nodejs()` upgrade to 26.13.0. All three `node`, `npm`, and `npx` launchers became dangling despite the old tree surviving. A second invocation refused the nonempty prefix as outside management and never attempted another download. A routine failed upgrade therefore disables Node-based agent tools and cannot recover by rerunning sync.
-- **Recommendation:** Recognize historical managed releases independently of the desired version. Keep the previous selection until the new release passes validation, switch atomically, and prune only after success. Cover a failed previous-version upgrade and successful retry in the installer fixtures.
-- **Fix with:** `durable-state`
-- **Effort:** S
-
-
 
 ### USR-43 · P2 · Stale-branch cleanup can delete a newly advanced branch
 
@@ -21,16 +11,6 @@ Next: 51
 - **Recommendation:** Capture candidate tip OIDs and use deletion with an expected-tip condition. Refuse changed refs and report them for a later run. A separate read followed by unconditional deletion still races. Preserve dry-run behavior and the protected/default/open-PR exclusions.
 - **Fix with:** `durable-state`
 - **Effort:** S
-
-### USR-44 · P2 · Interrupted link finalization permanently blocks recovery
-
-- **Area:** Data
-- **Where:** `tools/sync/link_recovery.py:117`, `tools/sync/link_apply.py:131`, `tools/sync/link_plan.py:164`
-- **Problem:** Finalization deletes the stage symlink before its journal. An interruption between those operations leaves a correct destination and committed ownership proof, but recovery rejects the remaining journal because the stage inode is missing. A scratch probe invoked real discovery, planning, and apply, failed the journal unlink after stage deletion, and verified both destination and ownership record survived. Two retries then failed with `pending link stage changed`. Sync cannot converge without manual state repair.
-- **Recommendation:** Make finalization idempotent across this crash window. Either retire the journal durably before discarding the stage once destination and ownership are durable, or recognize completed ownership using the recorded destination inode when only the stage is missing. Preserve rejection of foreign replacements. Add a numbered link case interrupting the two cleanup operations.
-- **Fix with:** `durable-state`
-- **Effort:** S
-
 
 
 ### USR-47 · P2 · Usage RPC reads time out on responses already buffered in Python

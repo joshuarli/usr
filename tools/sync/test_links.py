@@ -558,6 +558,47 @@ class LinkTests(unittest.TestCase):
         self.assertTrue(self.plan().converged)
         self.assertTrue((self.home / ".tracked").is_symlink())
 
+    def test_57_deleted_stage_with_journal_finishes_owned_destination(self):
+        self.source(".tracked")
+        unlink = Path.unlink
+        def interrupt_journal(path, *args, **kwargs):
+            if path.parent.name.endswith(".pending-links") and path.suffix == ".json":
+                raise OSError("crash after stage deletion")
+            return unlink(path, *args, **kwargs)
+        with patch.object(Path, "unlink", interrupt_journal):
+            with self.assertRaisesRegex(OSError, "crash after stage deletion"):
+                apply(self.plan(), self.owned)
+        dest = self.home / ".tracked"
+        self.assertTrue(dest.is_symlink())
+        self.assertIn(str(dest), read_manifest(self.owned))
+        pending = self.owned.with_name(self.owned.name + ".pending-links")
+        journal = next(pending.glob("*.json"))
+        import json
+        stage = self.home / json.loads(journal.read_text())["stage"]
+        self.assertFalse(stage.is_symlink())
+        apply(self.plan(), self.owned)
+        self.assertTrue(self.plan().converged)
+        self.assertFalse(journal.exists())
+
+    def test_58_deleted_stage_refuses_same_text_foreign_destination(self):
+        self.source(".tracked")
+        with patch.object(Ownership, "_save_records", side_effect=OSError("crash after link")):
+            with self.assertRaises(OSError):
+                apply(self.plan(), self.owned)
+        dest = self.home / ".tracked"
+        import json
+        pending = self.owned.with_name(self.owned.name + ".pending-links")
+        journal = next(pending.glob("*.json"))
+        (self.home / json.loads(journal.read_text())["stage"]).unlink()
+        original = self.home / "original-link"
+        dest.rename(original)
+        dest.symlink_to(os.readlink(original))
+        self.assertEqual(os.readlink(dest), os.readlink(original))
+        with self.assertRaisesRegex(LinkApplyError, "pending link destination changed"):
+            apply(self.plan(), self.owned)
+        self.assertEqual(dest.resolve(), self.root / "dotfiles/base/.tracked")
+        self.assertEqual(original.resolve(), self.root / "dotfiles/base/.tracked")
+
     def test_40_internal_parent_symlink_stays_confined(self):
         self.source(".a/f")
         internal = self.home / "inside"

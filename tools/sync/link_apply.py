@@ -129,16 +129,20 @@ def _recover_pending(plan: LinkPlan, owner: Ownership, owned_file: Path) -> list
         fd = _directory_fd(plan.target, entry.path.parent, owner)
         try:
             stage = _observed(fd, entry.stage)
-            if (stage.kind != "symlink" or
-                stage.identity is None or stage.identity[:2] != (entry.device, entry.inode) or
-                stage.text != entry.text):
+            if stage.kind == "absent":
+                current = _observed(fd, entry.path.name)
+                if (current.kind != "symlink" or current.identity is None or
+                    current.identity[:2] != (entry.device, entry.inode) or current.text != entry.text):
+                    raise LinkApplyError(f"pending link destination changed: {entry.path}")
+            elif (stage.kind != "symlink" or stage.identity is None or
+                  stage.identity[:2] != (entry.device, entry.inode) or stage.text != entry.text):
                 raise LinkApplyError(f"pending link stage changed: {entry.path}")
             current = _observed(fd, entry.path.name)
             if current.kind == "absent":
                 os.link(entry.stage, entry.path.name, src_dir_fd=fd, dst_dir_fd=fd,
                         follow_symlinks=False)
             elif (current.kind != "symlink" or current.identity is None or
-                  current.identity[:2] != (entry.device, entry.inode)):
+                  current.identity[:2] != (entry.device, entry.inode) or current.text != entry.text):
                 raise LinkApplyError(f"pending link destination changed: {entry.path}")
             owner.add("F", entry.path)
             finish(entry, fd)

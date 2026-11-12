@@ -1378,6 +1378,8 @@ class Installer:
         previous_release = ""
         current_path = self.nodejs_root / "current"
         current_target = os.readlink(current_path) if current_path.is_symlink() else ""
+        previous_node = ""
+        previous_npm = ""
         if current_target:
             root_str = os.path.normpath(str(self.nodejs_root))
             resolved = os.path.normpath(os.path.join(root_str, current_target)) if not os.path.isabs(current_target) else os.path.normpath(current_target)
@@ -1385,7 +1387,9 @@ class Installer:
                 self.skip("nodejs", f"{self.nodejs_root}/current points outside its install directory")
             release_candidate = Path(resolved).name
             previous_dir = self.nodejs_root / release_candidate
-            if os.path.dirname(resolved) == root_str and re.match(rf"^{re.escape(NODEJS_VERSION)}-npm\d+\.\d+\.\d+([.-][A-Za-z0-9.-]+)?-{re.escape(target)}$", release_candidate) and not previous_dir.is_symlink() and previous_dir.is_dir():
+            release_match = re.fullmatch(rf"(\d+\.\d+\.\d+)-npm(\d+\.\d+\.\d+)-{re.escape(target)}", release_candidate)
+            if os.path.dirname(resolved) == root_str and release_match and not previous_dir.is_symlink() and previous_dir.is_dir():
+                previous_node, previous_npm = release_match.groups()
                 previous_release = release_candidate
                 managed = True
                 if current_target != str(previous_dir):
@@ -1394,8 +1398,8 @@ class Installer:
                         self.skip("nodejs", f"could not switch {self.nodejs_root}/current")
                     self.own_file(current_path)
             else:
-                self.warn(f"Warning: replacing stale Node.js current link {current_target} with a managed install")
-                current_path.unlink()
+                self.warn(f"Warning: replacing stale Node.js current link {current_target} after a managed release validates")
+                managed = True
                 healed = True
         elif self.nodejs_root.exists() or self.nodejs_root.is_symlink():
             if self.nodejs_root.is_symlink() or not self.nodejs_root.is_dir() or any(self.nodejs_root.iterdir()):
@@ -1410,13 +1414,14 @@ class Installer:
         # prerequisite of offline Pi setup must never query npm's registry.
         # A separately requested npm upgrade is a maintenance task, not sync.
         npm_latest = ""
-        if managed:
+        installed_node = ""
+        if managed and previous_release:
             current_bin = str(self.nodejs_root / "current/bin")
             installed_npm = self.run([str(self.nodejs_root / "current/bin/npm"), "--version"],
                                      capture=True, extra_env={"PATH": current_bin + os.pathsep + self._path}).stdout.strip()
             installed_node = self.run([str(self.nodejs_root / "current/bin/node"), "-p", "process.versions.node"],
                                       capture=True).stdout.strip()
-            if self.valid_version(installed_npm) and installed_node == NODEJS_VERSION:
+            if self.valid_version(installed_npm) and installed_node == previous_node and installed_npm == previous_npm and installed_node == NODEJS_VERSION:
                 self.own_file(self.nodejs_root / "current")
                 self.own_dir(self.nodejs_root / previous_release)
                 for command in ("node", "npm", "npx"):
@@ -1430,7 +1435,7 @@ class Installer:
         self.nodejs_root.mkdir(parents=True, exist_ok=True)
         staged_bundle = self.stage_dir(self.nodejs_root, ".nodejs.")
         try:
-            if managed:
+            if managed and installed_node == NODEJS_VERSION:
                 try:
                     shutil.copytree(self.nodejs_root / "current", staged_bundle, dirs_exist_ok=True, symlinks=True)
                 except OSError:

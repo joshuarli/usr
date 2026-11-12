@@ -115,10 +115,17 @@ def stage_link(ownership: Path, home: Path, path: Path, text: str, fd: int) -> P
 
 
 def finish(entry: PendingLink, fd: int) -> None:
-    st = os.stat(entry.stage, dir_fd=fd, follow_symlinks=False)
-    if not stat.S_ISLNK(st.st_mode) or (st.st_dev, st.st_ino) != (entry.device, entry.inode):
-        raise ValueError(f"pending link stage changed: {entry.path}")
-    os.unlink(entry.stage, dir_fd=fd)
+    destination = os.stat(entry.path.name, dir_fd=fd, follow_symlinks=False)
+    if not stat.S_ISLNK(destination.st_mode) or (destination.st_dev, destination.st_ino) != (entry.device, entry.inode):
+        raise ValueError(f"pending link destination changed: {entry.path}")
+    try:
+        stage = os.stat(entry.stage, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        stage = None
+    if stage is not None:
+        if not stat.S_ISLNK(stage.st_mode) or (stage.st_dev, stage.st_ino) != (entry.device, entry.inode):
+            raise ValueError(f"pending link stage changed: {entry.path}")
+        os.unlink(entry.stage, dir_fd=fd)
     entry.journal.unlink()
     try:
         entry.journal.parent.rmdir()
