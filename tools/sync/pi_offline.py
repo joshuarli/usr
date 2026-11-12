@@ -126,7 +126,8 @@ def configure_intercom(home: Path, root: Path) -> bool:
     if not desired.get("brokerCommand") or desired.get("brokerCommand") in ("npx", "npm"):
         desired["brokerCommand"] = "node"
         desired["brokerArgs"] = ["--import", str(loader)]
-    elif desired.get("brokerCommand") == "node" and desired.get("brokerArgs", []) == ["--no-install", "tsx"]:
+    elif desired.get("brokerCommand") == "node" and desired.get("brokerArgs", []) in (
+            ["--no-install", "tsx"], ["--import", str(legacy_dir(home) / "node_modules/tsx/dist/loader.mjs")]):
         desired["brokerArgs"] = ["--import", str(loader)]
     desired.setdefault("inboundTrigger", "never")
     desired.setdefault("confirmSend", True)

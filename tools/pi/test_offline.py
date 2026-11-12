@@ -57,6 +57,24 @@ class OfflineTests(unittest.TestCase):
         self.assertTrue(Path(cfg["brokerArgs"][-1]).is_file())
         self.assertNotIn("npx",json.dumps(cfg))
 
+    def test_broker_loader_moves_off_the_vendored_prefix_but_custom_args_stay(self):
+        config=self.home/".pi/agent/intercom/config.json"
+        original=config.read_bytes() if config.exists() else None
+        try:
+            legacy=pi_offline.legacy_dir(self.home)/"node_modules/tsx/dist/loader.mjs"
+            config.parent.mkdir(parents=True,exist_ok=True)
+            config.write_text(json.dumps({"brokerCommand":"node","brokerArgs":["--import",str(legacy)],"confirmSend":False}))
+            self.assertTrue(pi_offline.configure_intercom(self.home,self.root))
+            cfg=json.loads(config.read_text())
+            self.assertEqual(cfg["brokerArgs"],["--import",str(self.root/"node_modules/tsx/dist/loader.mjs")])
+            self.assertFalse(cfg["confirmSend"])
+            config.write_text(json.dumps({"brokerCommand":"node","brokerArgs":["--import","/opt/custom.mjs"]}))
+            pi_offline.configure_intercom(self.home,self.root)
+            self.assertEqual(json.loads(config.read_text())["brokerArgs"],["--import","/opt/custom.mjs"])
+        finally:
+            if original is None: config.unlink(missing_ok=True)
+            else: config.write_bytes(original)
+
     def test_bridge_single_closure_and_foreign_preservation(self):
         legacy=self.home/"legacy-pi"
         project=self.home/"project/tools/pi-subagent-bridge"
