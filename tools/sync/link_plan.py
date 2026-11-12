@@ -97,6 +97,17 @@ def _source_exists(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
 
+def _stale_mirror(path: Path, sources: tuple[Path, ...], target: Path) -> bool:
+    # Sync's link text is relpath(source, path.parent), so an unrecorded
+    # stale link points at source/rel and nothing else; a looser mirror
+    # signature would match live hand-made links.
+    rel = path.relative_to(target)
+    raw = os.readlink(path)
+    pointed = Path(os.path.normpath(os.path.join(path.parent, raw)))
+    return any(pointed == source / rel and not _source_exists(source / rel)
+               for source in sources)
+
+
 def _old_managed_link(path: Path, sources: tuple[Path, ...], target: Path) -> bool:
     if not path.is_symlink():
         return False
@@ -194,6 +205,28 @@ def plan_links(discovery: Discovery, owned_file: Path) -> LinkPlan:
                 actions.append(LinkAction("prune", path, before))
         # An owned record pointing to a still-present source may belong to
         # another deliberately retained link. Do not treat it as stale.
+    # A directory that holds desired links can also hold links whose source
+    # disappeared together with the ownership record that would prune them.
+    # Only sync's exact relpath-of-source signature identifies them safely;
+    # a looser mirror signature would match live hand-made links.
+    records_seen = {action.path for action in actions}
+    for parent in sorted({path.parent for path in desired}, key=str):
+        try:
+            children = list(parent.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child in desired or child in records_seen or child in reserved:
+                continue
+            before = snapshot(child)
+            if before.kind != "symlink":
+                continue
+            if not _parent_safe(child, discovery):
+                continue
+            if not _stale_mirror(child, discovery.sources, discovery.target):
+                continue
+            actions.append(LinkAction("prune", child, before))
+            records_seen.add(child)
     planned = {action.path for action in actions}
     for rel, legacy_text in LEGACY_UNRECORDED_LINKS:
         path = discovery.target / rel

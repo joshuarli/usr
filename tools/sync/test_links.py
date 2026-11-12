@@ -641,6 +641,52 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(self.owned.read_bytes(), prior)
         self.assertEqual(Path(str(self.owned) + ".verified.json").read_bytes(), prior_proof)
 
+    def test_60_unrecorded_stale_mirror_is_pruned(self):
+        self.source(".pi/agent/agents/muse-scout.md")
+        self.source(".pi/agent/agents/scout.md")
+        self.track()
+        self.sync()
+        stale = self.home / ".pi/agent/agents/muse-scout.md"
+        self.assertTrue(stale.is_symlink())
+        (self.root / "dotfiles/base/.pi/agent/agents/muse-scout.md").unlink()
+        self.owned.unlink()
+        Path(str(self.owned) + ".verified.json").unlink()
+        p = self.plan()
+        self.assertIn(("prune", stale), [(a.kind, a.path) for a in p.actions])
+        apply(p, self.owned)
+        self.assertFalse(stale.is_symlink())
+        self.assertTrue((self.home / ".pi/agent/agents/scout.md").is_symlink())
+
+    def test_62_unrecorded_live_home_relative_link_is_kept(self):
+        self.marker(".agents/skills")
+        self.source(".agents/skills/review/SKILL.md")
+        self.source(".gemini/config/AGENTS.md")
+        self.track()
+        self.sync()
+        live = self.home / ".gemini/config/skills"
+        live.symlink_to("../../.agents/skills")
+        self.owned.unlink()
+        Path(str(self.owned) + ".verified.json").unlink()
+        p = self.plan()
+        self.assertNotIn(live, [a.path for a in p.actions])
+        self.assertTrue(live.exists())
+
+    def test_61_unrecorded_stale_prune_ignores_foreign_and_live_links(self):
+        self.source(".pi/agent/agents/scout.md")
+        self.track()
+        self.sync()
+        agents = self.home / ".pi/agent/agents"
+        foreign_elsewhere = agents / "elsewhere.md"
+        foreign_elsewhere.symlink_to(self.root / "elsewhere")
+        foreign_live = agents / "mirror.md"
+        live_source = self.source(".shared/mirror.md")
+        foreign_live.symlink_to(live_source)
+        self.owned.unlink()
+        Path(str(self.owned) + ".verified.json").unlink()
+        p = self.plan()
+        self.assertNotIn(foreign_elsewhere, [a.path for a in p.actions])
+        self.assertNotIn(foreign_live, [a.path for a in p.actions])
+
 
 if __name__ == "__main__":
     unittest.main()
