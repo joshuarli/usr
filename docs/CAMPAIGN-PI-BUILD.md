@@ -1,14 +1,15 @@
 # Status
 
 - **Goal:** Move Pi build inputs, vendored sources, and runtime archives out of `usr` into `pi-build`. First preserve the existing runtime through pinned release artifacts, then produce a smaller `headless-usr` profile.
-- **Last accepted revision / slices:** none; planning revised, campaign not started.
-- **Verdict:** ready for a local implementation pilot after an execution request. Release activation still requires the gates below; the headless default has an explicit product decision.
-- **Next slice:** P0-1. Locate the actual `pi-build` checkout and inspect its Git remote before using a proposed repository URL. Local preparation does not depend on publishing a release.
-- **Resume:** read `AGENTS.md`, this plan, and `TODO.md`; run `python3 -I tools/pi/vendor.py check` in `usr` while the current vendor tree exists. Do not execute the campaign merely because this document is committed.
+- **Last accepted slices:** `pi-build` `9dd4c4c` preserves the verified source snapshots, notices and existing archives. Full migration is not accepted.
+- **Verdict:** implementation authorized, including dependency setup, default-branch pushes and verified versioned releases. Native lanes only by owner instruction; no bridge provider quota.
+- **Next slice:** direct serial USR-39 → USR-41 → USR-45 bridge repair. Independent builder packaging is in progress from `9dd4c4c`.
+- **Parked proof:** no target, release, live-account or headless acceptance yet. Performance timing gate deferred while host swap exceeds the gate.
+- **Resume:** read `AGENTS.md`, this campaign and `TODO.md`. Preserve the active installation and use disposable homes.
 
 # Charter
 
-- Work within the owner's execution grant. This review authorizes the requested `usr` review/plan commit; it does not create or publish `pi-build`. Honor existing permission to push verified work instead of imposing a blanket no-push rule.
+- Work within the owner's execution grant. The owner's execution grant authorizes implementation, tests, dependency setup, CI, direct default-branch commits/pushes and verified versioned Pi releases. Honor existing permission to push verified work instead of imposing a blanket no-push rule.
 - Preserve behavior before reducing dependencies. Packaging equivalence does not excuse the known bridge defects listed below.
 - Use one writer per repository by default. P0-1 builder work and independent bridge repairs may run concurrently only with disjoint ownership; changes to the shared artifact contract are serial.
 - Keep scratch and worktrees under each repository's ignored `.work/`, following `orchestrate`. Run installs only in disposable homes/checkouts, never the operator's real home.
@@ -19,8 +20,8 @@
 
 ## Owner decisions at the affected boundary
 
-- **D1 Release destination:** verify the local `pi-build` origin when execution starts. `joshuarli/pi-build` is the original draft's proposal, not a verified remote. If no destination is configured, resolve the namespace and publication grant before publishing. This does not block building local candidates.
-- **D2 Headless entrypoint:** the smaller profile must preserve the required headless CLI/SDK, subagents, Muse adapter, and intercom behavior. Before making it the default, decide whether bare interactive `pi` remains available through a full profile or explicitly reports unsupported mode. Preserve today's full profile until then. Headless intercom sending also needs an explicit noninteractive authorization contract: keeping `confirmSend: true` is insufficient because the current adapter prompts only when `ctx.hasUI`. Keep scoped SDK children without intercom during this migration.
+- **D1 Release destination:** the existing empty checkout `/Users/josh/d/pi-build` had no origin. Authenticated GitHub access confirmed `joshuarli/pi-build`; its verified SSH origin is now configured. Source preservation is pushed on `main`.
+- **D2 Headless entrypoint:** `full` remains the default and preserves bare interactive `pi`. `headless-usr` requires explicit selection and installs one closure. Keep `confirmSend: true` and `inboundTrigger: "never"`. A headless send requiring confirmation must fail clearly. Explicit `confirmSend: false` may authorize sends, proved only against local fixtures. Scoped SDK children remain without intercom. Making headless the default is outside this grant.
 
 ## Prescribed
 

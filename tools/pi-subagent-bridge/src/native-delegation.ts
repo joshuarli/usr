@@ -1,4 +1,5 @@
-import { renameSync, writeFileSync } from "node:fs"
+import { basename, join } from "node:path"
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { tierForModel, type Tier } from "./tier-policy.ts"
 
 export type Job = {
@@ -14,7 +15,7 @@ export type Job = {
   receiptPath?: string
 }
 export type Result = {
-  state: "succeeded" | "failed" | "cancelled"
+  state: "succeeded" | "failed" | "cancelled" | "unknown_or_interrupted"
   error: string | null
   text: string | null
   sessionFile: string | null
@@ -75,3 +76,57 @@ export function terminal(event: Record<string, unknown>, id: string, sessionFile
   return { state: "succeeded", error: null, text, sessionFile, runId: id, usage: null }
 }
 
+
+export function artifactResult(sessionDir: string, asyncDir: string | null, runId: string, sessionFile: string): Result | null {
+  if (!runId || !/^[a-zA-Z0-9._-]+$/.test(runId)) return null
+  const roots = [asyncDir, join(sessionDir, "subagent-artifacts")].filter((v): v is string => !!v)
+  for (const root of roots) {
+    if (!existsSync(root)) continue
+    let files: string[]
+    try { files = readdirSync(root) } catch { continue }
+    const metaName = files.find((f) => f.startsWith(runId + "_") && f.endsWith("_meta.json"))
+      ?? (files.includes("meta.json") && basename(root) === runId ? "meta.json" : undefined)
+    if (!metaName) continue
+    try {
+      const meta = JSON.parse(readFileSync(join(root, metaName), "utf8")) as Record<string, unknown>
+      if (meta.runId !== runId) continue
+      const outputName = metaName === "meta.json" ? "output.md" : metaName.replace(/_meta\.json$/, "_output.md")
+      const output = outputName ? readFileSync(join(root, outputName), "utf8") : null
+      const error = typeof meta.error === "string" && meta.error ? meta.error : null
+      const text = typeof output === "string" && output.trim() ? output : null
+      const usage = meta.usage ?? null
+      if (meta.exitCode === 0 || meta.success === true) {
+        if (text) return { state: "succeeded", error: null, text, sessionFile, runId, usage }
+        return { state: "failed", error: error ?? "Native subagent completed without a proof record", text, sessionFile, runId, usage }
+      }
+      if (error || meta.exitCode !== undefined || meta.success === false) {
+        return { state: "failed", error: error ?? text ?? "Native subagent failed", text, sessionFile, runId, usage }
+      }
+    } catch { /* keep polling */ }
+  }
+  return null
+}
+
+
+export type Admission = { runId: string; asyncDir: string | null; sessionFile: string }
+export async function executeJob(job: Job, run: (
+  job: Job, started: (admission: Admission) => void, dispatching: () => void,
+) => Promise<Result>): Promise<boolean> {
+  let admission: Admission | null = null
+  let dispatched = false
+  try {
+    const result = await run(job, (value) => { admission = value }, () => { dispatched = true })
+    persist(job.resultPath, result)
+    return false
+  } catch (error) {
+    const owned = admission as Admission | null
+    const recovered = owned && artifactResult(job.sessionDir, owned.asyncDir, owned.runId, owned.sessionFile)
+    persist(job.resultPath, recovered ?? {
+      state: dispatched ? "unknown_or_interrupted" : "failed", text: null,
+      sessionFile: owned?.sessionFile ?? job.priorSessionFile ?? null,
+      runId: owned?.runId ?? null,
+      error: error instanceof Error ? error.message : String(error), usage: null,
+    })
+    return true
+  }
+}

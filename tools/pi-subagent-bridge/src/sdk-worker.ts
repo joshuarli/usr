@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
-import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc } from "./native-delegation.ts"
+import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc, artifactResult, executeJob, type Admission } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { MUSE_AGENT_NAMES, isMuseTier } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
@@ -25,33 +25,6 @@ function ids(event: Record<string, unknown>): string[] {
     .filter((v): v is string => typeof v === "string" && v.length > 0)
 }
 
-function artifactResult(sessionDir: string, asyncDir: string | null, runId: string, sessionFile: string): Result | null {
-  const roots = [asyncDir, join(sessionDir, "subagent-artifacts")].filter((v): v is string => !!v)
-  for (const root of roots) {
-    if (!existsSync(root)) continue
-    let files: string[]
-    try { files = readdirSync(root) } catch { continue }
-    const metaName = files.find((f) => f.includes(runId) && f.endsWith("_meta.json"))
-      ?? (files.includes("meta.json") && root.includes(runId) ? "meta.json" : undefined)
-    if (!metaName) continue
-    try {
-      const meta = JSON.parse(readFileSync(join(root, metaName), "utf8")) as Record<string, unknown>
-      const outputName = files.find((f) => f.includes(runId) && f.endsWith("_output.md"))
-      const output = outputName ? readFileSync(join(root, outputName), "utf8") : null
-      const error = typeof meta.error === "string" && meta.error ? meta.error : null
-      const text = typeof output === "string" && output.trim() ? output : null
-      const usage = meta.usage ?? null
-      if (meta.exitCode === 0 || meta.success === true) {
-        if (text) return { state: "succeeded", error: null, text, sessionFile, runId, usage }
-        return { state: "failed", error: error ?? "Native subagent completed without a proof record", text, sessionFile, runId, usage }
-      }
-      if (error || meta.exitCode !== undefined || meta.success === false) {
-        return { state: "failed", error: error ?? text ?? "Native subagent failed", text, sessionFile, runId, usage }
-      }
-    } catch { /* keep polling */ }
-  }
-  return null
-}
 
 async function statusResult(rpc: Rpc, runId: string, sessionFile: string): Promise<Result | null> {
   for (const params of [{ id: runId }, { runId }]) {
@@ -105,7 +78,7 @@ function drainSteering(controlPath: string, receiptPath: string, offset: number,
   return offset + end + 1
 }
 
-async function run(job: Job, started: (id: string) => void, dispatching: () => void): Promise<Result> {
+async function run(job: Job, started: (admission: Admission) => void, dispatching: () => void): Promise<Result> {
   // Children inherit a no-package-network environment even when the worktree
   // contains an npm/git Pi package declaration.
   process.env.PI_OFFLINE = "1"
@@ -204,7 +177,7 @@ async function run(job: Job, started: (id: string) => void, dispatching: () => v
     dispatching()
     const reply = await rpc(job.priorRunId ? "resume" : "spawn", params)
     const { runId: id, asyncDir } = runDetails(reply)
-    started(id)
+    started({ runId: id, asyncDir, sessionFile })
     const controlPath = job.controlPath, receiptPath = job.receiptPath
     let steerTimer: NodeJS.Timeout | undefined
     const stopSteering = () => {
@@ -269,30 +242,8 @@ async function main(): Promise<void> {
   if (!job || typeof job.cwd !== "string" || typeof job.prompt !== "string" ||
       typeof job.resultPath !== "string" || typeof job.sessionDir !== "string")
     throw new Error("Malformed Pi delegation job")
-  let admitted = false
-  let dispatchAttempted = false
-  try {
-    const result = await run(job, () => { admitted = true }, () => { dispatchAttempted = true })
-    persist(job.resultPath, result)
-  } catch (error) {
-    if (admitted || dispatchAttempted) {
-      try {
-        const fallback = artifactResult(job.sessionDir, null, "", job.priorSessionFile ?? "")
-        if (fallback) { persist(job.resultPath, fallback); process.exitCode = 1; return }
-      } catch { /* fall through */ }
-      persist(job.resultPath, {
-        state: "failed", text: null, sessionFile: job.priorSessionFile ?? null, runId: job.priorRunId ?? null,
-        error: error instanceof Error ? error.message : String(error), usage: null,
-      })
-      process.exitCode = 1
-      return
-    }
-    persist(job.resultPath, {
-      state: "failed", text: null, sessionFile: job.priorSessionFile ?? null, runId: null,
-      error: error instanceof Error ? error.message : String(error), usage: null,
-    })
-    process.exitCode = 1
-  }
+  const failed = await executeJob(job, run)
+  if (failed) process.exitCode = 1
 }
 
 void main().then(() => { process.exit(process.exitCode ?? 0) }, (error) => {

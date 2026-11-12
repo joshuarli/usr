@@ -12,7 +12,7 @@ import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH, TIERS } from "./t
 import { musePreflight } from "./muse-subscription.ts"
 
 type Result = {
-  state: "succeeded" | "failed" | "cancelled"
+  state: "succeeded" | "failed" | "cancelled" | "unknown_or_interrupted"
   text: string | null; error: string | null; usage: unknown; sessionFile: string | null; runId: string | null
 }
 type Run = { pid: number; output: string; errors: string; control?: string; receipts?: string }
@@ -78,6 +78,8 @@ function observe(s: Stored): { state: string; result: Result | null } {
     const result: Result = JSON.parse(readFileSync(s.run.output, "utf8"))
     if (!["succeeded", "failed", "cancelled"].includes(result.state))
       throw new Error("Invalid Pi result state")
+    if (result.state === "succeeded" && (!result.runId?.trim() || !result.sessionFile?.trim()))
+      throw new Error("Pi success has no owned native identity")
     return { state: result.state, result }
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))

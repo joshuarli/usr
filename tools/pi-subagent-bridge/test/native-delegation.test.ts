@@ -57,3 +57,38 @@ test("native terminal receipts require one successful child and actual proof out
   assert.equal(terminal({ state: "stopped", results: [{ stopped: true }] }, "r", "/session").state, "cancelled")
   assert.equal(terminal({ success: false, summary: "quota local assertion", results: [{ success: false }] }, "r", "/session").error, "Native subagent failed")
 })
+
+test("USR-39: timeout recovery cannot inherit an old worker's proof", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs")
+  const { tmpdir } = await import("node:os")
+  const { join } = await import("node:path")
+  const { executeJob, artifactResult } = await import("../src/native-delegation.ts")
+  const dir = mkdtempSync(join(tmpdir(), "identity-"))
+  try {
+    const artifacts = join(dir, "subagent-artifacts")
+    mkdirSync(artifacts)
+    writeFileSync(join(artifacts, "old_worker_meta.json"), JSON.stringify({ runId: "old", exitCode: 0 }))
+    writeFileSync(join(artifacts, "old_worker_output.md"), "old proof")
+    const current = { ...job("deepseek-v4.1-flash", "high"), sessionDir: dir, resultPath: join(dir, "result.json") }
+    await executeJob(current, async (_, started, dispatching) => {
+      dispatching()
+      started({ runId: "new", asyncDir: null, sessionFile: "/new.jsonl" })
+      throw new Error("timeout")
+    })
+    const result = JSON.parse(readFileSync(current.resultPath, "utf8"))
+    assert.equal(result.state, "unknown_or_interrupted")
+    assert.equal(result.runId, "new")
+    assert.equal(result.text, null)
+    assert.equal(artifactResult(dir, null, "", "/new.jsonl"), null)
+    writeFileSync(join(artifacts, "new_worker_meta.json"), JSON.stringify({ runId: "old", exitCode: 0 }))
+    writeFileSync(join(artifacts, "new_worker_output.md"), "wrong identity")
+    assert.equal(artifactResult(dir, null, "new", "/new.jsonl"), null)
+    writeFileSync(join(artifacts, "new_worker_meta.json"), JSON.stringify({ runId: "new", exitCode: 0 }))
+    await executeJob(current, async (_, started) => {
+      started({ runId: "new", asyncDir: null, sessionFile: "/new.jsonl" })
+      throw new Error("timeout")
+    })
+    assert.equal(JSON.parse(readFileSync(current.resultPath, "utf8")).state, "succeeded")
+    assert.equal(JSON.parse(readFileSync(current.resultPath, "utf8")).runId, "new")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
