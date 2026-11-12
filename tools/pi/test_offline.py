@@ -54,6 +54,19 @@ class OfflineTests(unittest.TestCase):
             pi_offline.link_bridge(foreign.parent.parent,self.root)
         self.assertEqual((foreign/"sentinel").read_text(),"keep")
 
+    def test_local_wrapper_is_repaired_when_offline_flags_change(self):
+        cli = self.root/"bin/pi"
+        old = cli.read_text()
+        try:
+            cli.write_text(old.replace("export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1", ""))
+            self.assertFalse(pi_offline.current(self.root))
+            self.assertTrue(pi_offline.install(self.root))
+            self.assertTrue(pi_offline.current(self.root))
+            self.assertIn("export PI_OFFLINE=1", cli.read_text())
+        finally:
+            if not pi_offline.current(self.root):
+                pi_offline.install(self.root)
+
     def test_corrupt_archive_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

@@ -105,7 +105,9 @@ def current(root: Path) -> bool:
                 and record == {"schema": 1, "sha256": entry["sha256"],
                                "platform": platform_key(), "pi_version": "1.5.0"}
                 and version_matches(root)
-                and os.access(root / "bin/pi", os.X_OK))
+                and not (root / "bin/pi").is_symlink()
+                and os.access(root / "bin/pi", os.X_OK)
+                and (root / "bin/pi").read_text() == wrapper(root))
     except (OSError, KeyError, ValueError, TypeError):
         return False
 
