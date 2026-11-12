@@ -59,9 +59,11 @@ class ClaudeWorkerSyncTests(unittest.TestCase):
         sha = "a" * 64
         arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine().lower(), "x64")
         key = platform.system().lower() + "-" + arch
+        triple = {"darwin-arm64": "aarch64-apple-darwin", "linux-x64": "x86_64-unknown-linux-musl",
+                  "linux-arm64": "aarch64-unknown-linux-musl"}[key]
         pin = {"schema": 1, "release_url": "https://example.invalid/pi/", "builder_revision": "b" * 40,
-               "profile": "full", "provenance_sha256": "c" * 64,
-               "targets": {key: {"archive": key + "-full.tar.gz", "sha256": sha, "bytes": 1}}}
+               "profile": "full", "version": "1.5.0", "provenance_sha256": "c" * 64,
+               "targets": {key: {"archive": "pi-full-1.5.0-" + triple + ".tar.xz", "sha256": sha, "bytes": 1}}}
         (self.root / "tools/pi").mkdir(parents=True)
         (self.root / "tools/pi/runtime.pin.json").write_text(json.dumps(pin))
         self.prefix = self.home / ".local/share/pi-runtime"

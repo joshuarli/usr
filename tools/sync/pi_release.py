@@ -19,7 +19,9 @@ import urllib.request
 import pi_offline
 
 HEX = re.compile(r"[0-9a-f]{64}")
-TARGETS = {"darwin-arm64", "linux-x64", "linux-arm64"}
+TRIPLES = {"darwin-arm64": "aarch64-apple-darwin", "linux-x64": "x86_64-unknown-linux-musl",
+           "linux-arm64": "aarch64-unknown-linux-musl"}
+VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 RECEIPT = ".usr-pi-release.json"
 PIN = Path(__file__).resolve().parents[2] / "tools/pi/runtime.pin.json"
 
@@ -35,6 +37,7 @@ class Pin(TypedDict):
     release_url: str
     builder_revision: str
     profile: str
+    version: str
     provenance_sha256: str
     targets: dict[str, Artifact]
 
@@ -49,18 +52,23 @@ def load_pin(path: Path = PIN) -> Pin:
     return pin
 
 
+def archive_name(pin: Pin, target: str) -> str:
+    return f"pi-{pin['profile']}-{pin['version']}-{TRIPLES[target]}.tar.xz"
+
+
 def pin_entry(pin: Pin, target: str) -> Artifact:
     try:
         entry = pin["targets"][target]
         url = urllib.parse.urlsplit(pin["release_url"])
-        if (pin["schema"] != 1 or target not in TARGETS
+        if (pin["schema"] != 1 or target not in TRIPLES
                 or pin["profile"] not in {"full", "headless-usr"}
+                or not VERSION.fullmatch(pin["version"])
                 or not re.fullmatch(r"[0-9a-f]{40}", pin["builder_revision"])
                 or not HEX.fullmatch(pin["provenance_sha256"])
                 or url.scheme not in {"https", "http"} or not url.netloc
                 or url.query or url.fragment or url.username or url.password
                 or (url.scheme == "http" and url.hostname not in {"127.0.0.1", "localhost", "::1"})
-                or entry["archive"] != f"{target}-{pin['profile']}.tar.gz"
+                or entry["archive"] != archive_name(pin, target)
                 or not HEX.fullmatch(entry["sha256"])
                 or type(entry["bytes"]) is not int or entry["bytes"] <= 0):
             raise ValueError("invalid identity")
@@ -115,7 +123,7 @@ def acquire(pin: Pin, target: str, cache: Path) -> Path:
     if cache.is_symlink():
         raise pi_offline.OfflinePiError("refusing symlinked Pi cache")
     cache.mkdir(parents=True, exist_ok=True)
-    archive = cache / (entry["sha256"] + ".tar.gz")
+    archive = cache / (entry["sha256"] + ".tar.xz")
     if verified(archive, entry["sha256"], entry["bytes"]):
         return archive
     with tempfile.TemporaryDirectory(prefix=".download-", dir=cache) as temp:
@@ -126,9 +134,10 @@ def acquire(pin: Pin, target: str, cache: Path) -> Path:
         if pi_offline.digest(provenance) != pin["provenance_sha256"]:
             raise pi_offline.OfflinePiError("Pi provenance digest mismatch")
         data = json.loads(provenance.read_text())
-        expected = {"target": target, "profile": pin["profile"], **entry}
+        expected = {"target": TRIPLES[target], "profile": pin["profile"], **entry}
         if (data.get("schema") != 1 or data.get("builder_revision") != pin["builder_revision"]
-                or data.get("targets", {}).get(target) != expected):
+                or data.get("version") != pin["version"]
+                or data.get("targets", {}).get(TRIPLES[target]) != expected):
             raise pi_offline.OfflinePiError("Pi provenance identity mismatch")
         sums = stage / "SHA256SUMS"
         fetch(base + "SHA256SUMS", sums, 1 << 20)
@@ -136,7 +145,7 @@ def acquire(pin: Pin, target: str, cache: Path) -> Path:
                    if len(line.split()) == 2 and line.split()[1] == entry["archive"]]
         if matches != [[entry["sha256"], entry["archive"]]]:
             raise pi_offline.OfflinePiError("Pi release SHA256SUMS disagrees with pin")
-        candidate = stage / "archive.tar.gz"
+        candidate = stage / "archive.tar.xz"
         fetch(base + entry["archive"], candidate, entry["bytes"])
         if not verified(candidate, entry["sha256"], entry["bytes"]):
             raise pi_offline.OfflinePiError("Pi release archive hash or size mismatch")
@@ -255,7 +264,7 @@ def install(prefix: Path, pin: Pin, target: str, cache: Path) -> Path:
         with tempfile.TemporaryDirectory(prefix=".stage-", dir=releases) as temporary:
             stage = Path(temporary) / "runtime"
             stage.mkdir()
-            with tarfile.open(archive, "r:gz") as stream:
+            with tarfile.open(archive, "r:xz") as stream:
                 members = safe_members(stream)
                 if hasattr(tarfile, "data_filter"):
                     stream.extractall(stage, members, filter="data")

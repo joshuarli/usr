@@ -626,53 +626,121 @@ sys.exit(1)
                   f"{base}/SHA256SUMS": f"{digest}  {sums_asset or asset}\n".encode()}
         return routes, base
 
-    def test_git_bundle_install_current_and_unmanaged(self):
+    def _git_tar(self):
         buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as archive:
-            for name in ("git", "git-shell", "git-submodule", "git-sh-i18n--envsubst"):
-                info = zipfile.ZipInfo(name)
-                info.create_system = 3
-                info.external_attr = 0o100755 << 16
-                archive.writestr(info, b"g")
-            for name in ("git-sh-setup", "git-sh-i18n"):
-                info = zipfile.ZipInfo(name)
-                info.create_system = 3
-                info.external_attr = 0o100644 << 16
-                archive.writestr(info, b"s")
+        with tarfile.open(fileobj=buffer, mode="w:xz") as archive:
+            for name, mode in (("git", 0o755), ("git-shell", 0o755), ("git-submodule", 0o755),
+                               ("git-sh-i18n--envsubst", 0o755), ("git-sh-setup", 0o644), ("git-sh-i18n", 0o644)):
+                info = tarfile.TarInfo(name)
+                info.size = 1
+                info.mode = mode
+                archive.addfile(info, io.BytesIO(b"g"))
             for helper in ("git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule--helper"):
-                info = zipfile.ZipInfo(helper)
-                info.create_system = 3
-                info.external_attr = 0o120777 << 16
-                archive.writestr(info, "git")
-        payload = buffer.getvalue()
-        routes, base = self._bundle_routes("laputa-systems/git-build", "v1", "git-x86_64-unknown-linux-musl.zip", payload)
+                info = tarfile.TarInfo(helper)
+                info.type = tarfile.SYMTYPE
+                info.linkname = "git"
+                info.mode = 0o777
+                archive.addfile(info)
+        return buffer.getvalue()
+
+    def _build_routes(self, repo, product, sha, payload, *, version, etag="e", manifest=None, listed=None):
+        import hashlib
+        triple = "x86_64-unknown-linux-musl"
+        base = f"https://github.com/{repo}/releases/download/release-{sha}"
+        archive = f"{product}-{version}-{triple}.tar.xz"
+        manifest_name = f"{product}-{version}-{triple}.manifest.json"
+        body = json.dumps(manifest or {"schema_version": 1, "product": product, "version": version,
+                                       "target": triple, "source_revision": sha}).encode()
+        digest = listed or hashlib.sha256(payload).hexdigest()
+        sums = f"{hashlib.sha256(body).hexdigest()}  {manifest_name}\n{digest}  {archive}\n".encode()
+        return {f"{base}/{archive}": (payload, {"ETag": etag}), f"{base}/{manifest_name}": body,
+                f"{base}/SHA256SUMS": sums,
+                f"https://github.com/{repo}/releases.atom": atom([("2026-11-12T00:00:00Z", f"release-{sha}")])}
+
+    def _git_routes(self, sha, payload, *, version="2.56.0", **kwargs):
+        routes = self._build_routes("laputa-systems/git-build", "git", sha, payload, version=version, **kwargs)
+        routes.pop("https://github.com/laputa-systems/git-build/releases.atom")
+        return routes
+
+    def test_git_bundle_install_current_and_unmanaged(self):
+        old, new = "1" * 40, "2" * 40
+        payload = self._git_tar()
+        routes = self._git_routes(new, payload)
+        old_base = f"https://github.com/laputa-systems/git-build/releases/download/release-{old}"
+        routes[f"{old_base}/SHA256SUMS"] = f"{'b' * 64}  git-x86_64-unknown-linux-musl.zip\n".encode()
+        feed = atom([("2026-11-09T08:06:37Z", f"release-{old}"), ("2026-11-12T18:37:58Z", f"release-{new}")])
+        routes["https://github.com/laputa-systems/git-build/releases.atom"] = feed
         inst = self.make(routes)
         inst.install_git()
         self.assertTrue(self.dest_path("git").is_symlink())
-        self.assertTrue((self.home / ".local/share/git/current").is_symlink())
-        self.assertTrue((self.home / "share/git-core/templates/info/exclude") if False else (self.dest_path("git").parent.parent / "share/git-core/templates/info/exclude").is_file())
-        routes2, _ = self._bundle_routes("laputa-systems/git-build", "v1", "git-x86_64-unknown-linux-musl.zip", payload)
-        inst = self.make(routes2)
+        current = self.home / ".local/share/git/current"
+        self.assertEqual(os.readlink(current).rsplit("/", 1)[1], f"release-{new}-x86_64-unknown-linux-musl")
+        self.assertTrue((current / "git").is_file())
+        self.assertTrue((current / "git-upload-pack").is_symlink())
+        self.assertTrue((self.dest_path("git").parent.parent / "share/git-core/templates/info/exclude").is_file())
+        inst = self.make(routes)
         inst.install_git()
         self.assertFalse(inst.changed)
 
+    def _git_feed_routes(self, sha, payload, **kwargs):
+        routes = self._git_routes(sha, payload, **kwargs)
+        routes["https://github.com/laputa-systems/git-build/releases.atom"] = atom(
+            [("2026-11-12T00:00:00Z", f"release-{sha}")])
+        return routes
+
+    def test_git_falls_back_past_legacy_zip_release(self):
+        newest, older = "3" * 40, "4" * 40
+        routes = self._git_routes(older, self._git_tar())
+        base = f"https://github.com/laputa-systems/git-build/releases/download/release-{newest}"
+        routes[f"{base}/SHA256SUMS"] = f"{'b' * 64}  git-x86_64-unknown-linux-musl.zip\n".encode()
+        routes["https://github.com/laputa-systems/git-build/releases.atom"] = atom(
+            [("2026-11-12T00:00:00Z", f"release-{newest}"), ("2026-11-01T00:00:00Z", f"release-{older}")])
+        self.make(routes).install_git()
+        self.assertIn(f"release-{older}", os.readlink(self.home / ".local/share/git/current"))
+
+    def test_git_rejects_manifest_for_another_revision(self):
+        sha = "3" * 40
+        routes = self._git_feed_routes(sha, self._git_tar(), manifest={
+            "schema_version": 1, "product": "git", "version": "2.56.0",
+            "target": "x86_64-unknown-linux-musl", "source_revision": "5" * 40})
+        with self.assertRaises(SkipInstall):
+            self.make(routes).install_git()
+        self.assertFalse((self.home / ".local/share/git/current").exists())
+
+    def test_git_rejects_archive_digest_mismatch(self):
+        routes = self._git_feed_routes("3" * 40, self._git_tar(), listed="c" * 64)
+        with self.assertRaises(SkipInstall):
+            self.make(routes).install_git()
+        self.assertFalse((self.home / ".local/share/git/current").exists())
+
+    def test_release_tags_order_by_date_not_name(self):
+        feed = atom([("2026-11-01T00:00:00Z", "release-ffff"), ("2026-11-12T00:00:00Z", "release-0000"),
+                     ("2026-11-05T00:00:00Z", "v9"), ("2026-11-10T00:00:00Z", "release-8888")])
+        inst = self.make({"https://x/feed": feed})
+        self.assertEqual(inst.release_tags("https://x/feed", prefix="release-"),
+                         ["release-0000", "release-8888", "release-ffff"])
+        self.assertEqual(inst.latest_tag("https://x/feed"), "release-0000")
+        self.assertEqual(inst.latest_tag("https://x/feed", exclude_prefix="release-"), "v9")
+
     def test_ssh_bundle_and_traversal_rejected(self):
         members = {name: b"x" for name in ("ssh", "ssh-keygen", "ssh-agent", "ssh-add", "sftp", "scp")}
-        payload = make_zip(members, executable=set(members))
-        routes, base = self._bundle_routes("laputa-systems/ssh-build", "v1", "ssh-x86_64-unknown-linux-musl.zip", payload)
+        sha = "6" * 40
+        routes = self._build_routes("laputa-systems/ssh-build", "ssh", sha, make_tar(members, "w:xz"), version="10.6p1")
         inst = self.make(routes)
         inst.install_ssh()
         self.assertTrue(self.dest_path("ssh").is_symlink())
-        bad_payload = make_zip({"../evil": b"x", **members})
-        routes, base = self._bundle_routes("laputa-systems/ssh-build", "v2", "ssh-x86_64-unknown-linux-musl.zip", bad_payload)
-        routes[f"{base}/ssh-x86_64-unknown-linux-musl.zip"] = (bad_payload, {"ETag": "e2"})
+        self.assertTrue((self.home / ".local/share/ssh/current/ssh").is_file())
+        sha = "7" * 40
+        bad_payload = make_tar({"../evil": b"x", **members}, "w:xz")
+        routes = self._build_routes("laputa-systems/ssh-build", "ssh", sha, bad_payload, version="10.6p1", etag="e2")
         inst = self.make(routes)
         with self.assertRaises(SkipInstall):
             inst.install_ssh()
 
     def test_oxish_bundle(self):
-        payload = make_zip({"bin/oxish-server": b"s", "bin/oxish-session": b"x"}, executable={"bin/oxish-server", "bin/oxish-session"})
-        routes, base = self._bundle_routes("laputa-systems/ssh-build", "v1", "oxish-x86_64-unknown-linux-musl.zip", payload)
+        payload = make_tar({"bin/oxish-server": b"s", "bin/oxish-session": b"x", "LICENSE-MIT": b"l"}, "w:xz")
+        sha = "8" * 40
+        routes = self._build_routes("laputa-systems/ssh-build", "oxish", sha, payload, version="0.2.0")
         inst = self.make(routes)
         inst.install_oxish()
         self.assertTrue(self.dest_path("oxish-server").is_symlink())
