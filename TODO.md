@@ -85,12 +85,11 @@ Next: 51
 - **Fix with:** `durable-state`
 - **Effort:** S
 
-### USR-50 · P1 · Muse Code 1.4.15 rejects the bridge's MCP toolset selector
+### USR-50 · P1 · Muse fallback workers fail because their workspace is untrusted
 
 - **Area:** Delegation
-- **Where:** `tools/pi-subagent-bridge/node_modules/pi-muse-subscription/src/convert.ts:7-8` (`MCP_TOOLSET`), `src/host.ts:162`, `~/.local/bin/muse` (auto-update)
-- **Problem:** pi-muse-subscription 0.1.0 writes `"toolset": ["mcp__pi__*"]` into each Muse host's settings. Muse Code auto-updated to 1.4.15 (R8339.1) on 2026-11-11 and now refuses that run with `invalid run configuration: unknown tool mcp__pi__*`. Every Muse-backed bridge worker fails at startup, so the Muse fallback for scout, mechanic and worker is dead. A worker whose Command Code run hit a usage limit after making edits also stays leased as `blocked_partial_work`, and `worker_cancel` cannot release it, so a parent must recreate the worktree to continue.
-- **Recommendation:** Determine the selector form Muse 1.4.15 accepts, for example the namespaced `mcp__pi.*` that `convert.ts:75` already decodes, or an explicit tool list. Fix `MCP_TOOLSET`, and add a bridge smoke test that starts one real Muse run. Pin the Muse version the bridge supports, or check it in `worker_model_check`, so an auto-update fails visibly instead of at the first launch. Let the parent release a `blocked_partial_work` lease once it has preserved the work.
+- **Where:** `vendor/pi/pi-muse-subscription/src/home.ts` (`writeHostConfig`), `src/host.ts:160-174`, `vendor/pi/runtime/*.tar.gz`
+- **Problem:** Every Muse-backed bridge worker fails at startup with `invalid run configuration: unknown tool mcp__pi__*`. The selector is not the fault: Muse Code 1.4.15 loads MCP servers only in a trusted workspace. pi-muse-subscription gives each host a private `XDG_CONFIG_HOME` and links in only the user's `auth.json`. With no `trust.json` there, the worker's cwd (a bridge worktree) is untrusted, the `pi` MCP server never loads, and Muse treats its tool selector as unknown. Reproduced 2026-11-12 with a stub `pi` stdio server: in an untrusted cwd, `mcp__pi__*` and `mcp__pi__read` are both rejected. With a private `trust.json` that trusts the cwd, the same settings run, though Muse still reports `child tool 'mcp__pi__*' is unavailable` for agent delegation. A worker cut off by a usage limit after making edits also stays leased as `blocked_partial_work`, and `worker_cancel` cannot release it.
+- **Recommendation:** Upstream in jkeskikangas/pi-muse-subscription, have `writeHostConfig` also write a private `muse/trust.json` that marks the host's `spec.cwd` as trusted. Do not link the user's own trust file, so no other projects are trusted. Then advance the vendored SHA and rebuild the runtime archives with `/pi-update`. The vendored source is hash-pinned to upstream, so a local edit would fail `vendor.py check`. Add a bridge smoke test that runs one real Muse turn through the `pi` MCP server, and have `worker_model_check` report the Muse version it was qualified against. Let the parent release a `blocked_partial_work` lease once it has preserved the work.
 - **Fix with:** `root-cause`
 - **Effort:** S
-
