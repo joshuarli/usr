@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from typing import NoReturn
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 import zipfile
@@ -192,7 +193,7 @@ class Installer:
     def fail(self, message: str) -> None:
         print(f"\033[31m✗ {message}\033[0m" if self.color else f"✗ {message}", file=sys.stderr)
 
-    def skip(self, tool: str, reason: str) -> None:
+    def skip(self, tool: str, reason: str) -> NoReturn:
         self.fail(f"Skipping {tool}: {reason}")
         raise SkipInstall(tool, reason)
 
@@ -537,6 +538,51 @@ class Installer:
             staged.unlink(missing_ok=True)
             self.skip(name, "download failed")
         self.install_binary(name, staged, record)
+
+    def install_rimage(self) -> None:
+        if (self.os_name, self.arch) not in (("darwin", "aarch64"), ("linux", "aarch64"), ("linux", "x86_64")):
+            self.skip("rimage", f"no release for {self.os_name}/{self.arch}")
+        if not self.which("gh"):
+            self.skip("rimage", "authenticated gh is required for the private repository")
+        repo = "joshuarli/rimage"
+        response = self.run(["gh", "api", f"repos/{repo}/releases?per_page=100", "--paginate", "--slurp"], capture=True)
+        if response.returncode:
+            self.skip("rimage", "cannot read private releases; authenticate gh with repository access")
+        try:
+            pages = json.loads(response.stdout)
+            releases = [release for page in pages for release in page
+                        if not release.get("draft") and release.get("prerelease")
+                        and re.fullmatch(r"release-[0-9a-f]{40}", release.get("tag_name", ""))]
+            release = max(releases, key=lambda value: value.get("published_at", ""))
+        except (ValueError, TypeError, AttributeError):
+            self.skip("rimage", "no valid published SHA-named prerelease")
+        target = f"{self.arch}-apple-darwin" if self.os_name == "darwin" else f"{self.arch}-unknown-linux-musl-static"
+        member = f"rimage-{target}"
+        asset = member + ".zip"
+        selected = [value for value in release.get("assets", []) if value.get("name") in (asset, "SHA256SUMS")]
+        if len(selected) != 2 or {value["name"] for value in selected} != {asset, "SHA256SUMS"}:
+            self.skip("rimage", f"{asset} and SHA256SUMS are required")
+        record = ":".join([repo, release["tag_name"], *[
+            f'{value["id"]}-{value.get("updated_at", "")}' for value in sorted(selected, key=lambda value: value["name"])]])
+        if self.is_current("rimage", record):
+            self.current(f'rimage is current ({release["tag_name"]})')
+            return
+        with tempfile.TemporaryDirectory(prefix=".rimage.", dir=self.dest) as directory:
+            staged_dir = Path(directory)
+            response = self.run(["gh", "release", "download", release["tag_name"], "--repo", repo,
+                                 "--pattern", asset, "--pattern", "SHA256SUMS", "--dir", str(staged_dir)], capture=True)
+            if response.returncode:
+                self.skip("rimage", "authenticated release download failed")
+            archive = staged_dir / asset
+            expected = self.sums_for((staged_dir / "SHA256SUMS").read_text(), asset)
+            if not re.fullmatch(r"[0-9a-f]{64}", expected) or self.sha256_file(archive) != expected:
+                self.skip("rimage", "release checksum mismatch")
+            payload = self.zip_member(archive, member)
+            if payload is None:
+                self.skip("rimage", f"{asset} does not contain {member}")
+            staged = staged_dir / "rimage"
+            staged.write_bytes(payload)
+            self.install_binary("rimage", staged, record)
 
     def install_release(self, prog: str) -> None:
         owners = {
@@ -2737,6 +2783,7 @@ class Installer:
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
             "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon,
+            "rimage": self.install_rimage,
         }
         if tool in handlers:
             handlers[tool]()
@@ -2756,7 +2803,7 @@ class Installer:
                 self.own_file(self.dest / prog)
 
     def record_managed_installs(self) -> None:
-        for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "stuff", "e", "fz", "fs",
+        for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "rimage", "stuff", "e", "fz", "fs",
                      "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
                      "zzz", "uv", "uvx", "rage", "shellcheck"):
             self.record_managed_binary(prog)
@@ -2914,7 +2961,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
         tools.append("jaq")
     tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fs srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
-        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck"]
+        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "rimage"]
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64")):
         tools.append("gluon")
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):

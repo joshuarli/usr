@@ -22,6 +22,10 @@ class MainTests(unittest.TestCase):
         names = [task.name for task in dag.order()]
         self.assertEqual(names, ["tool:nodejs", "tool:cmd"])
 
+    def test_private_rimage_release_requires_gh_without_host_steps(self):
+        dag = main.graph(self.ctx, ["rimage"], setup=False).select(["tool:rimage"])
+        self.assertEqual([task.name for task in dag.order()], ["tool:gh", "tool:rimage"])
+
     def test_dsh_requires_pnpm_and_node(self):
         dag = main.graph(self.ctx, ["dsh"], setup=False).select(["tool:dsh"])
         self.assertEqual([t.name for t in dag.order()], ["tool:nodejs", "tool:pnpm", "tool:dsh"])
