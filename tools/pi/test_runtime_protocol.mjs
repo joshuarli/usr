@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +9,8 @@ const runtime = process.argv[2];
 const museBin = process.argv[3] || process.env.MUSE_BIN || "muse";
 if (!runtime) throw new Error("usage: node test_runtime_protocol.mjs RUNTIME_DIRECTORY [MUSE_EXECUTABLE]");
 const packageRoot = join(resolve(runtime), "node_modules", "pi-muse-subscription");
+const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
+const suffix = manifest.pi.extensions[0].endsWith(".js") ? "js" : "ts";
 const agent = mkdtempSync(join(tmpdir(), "muse-host-fixture-"));
 const scopedWorkspace = join(agent, "worktree");
 mkdirSync(scopedWorkspace);
@@ -23,8 +25,8 @@ if (version.error || version.status !== 0) {
 }
 
 const [{ MuseHost }, { McpBridge }] = await Promise.all([
-  import(pathToFileURL(join(packageRoot, "src/host.ts")).href),
-  import(pathToFileURL(join(packageRoot, "src/bridge.ts")).href),
+  import(pathToFileURL(join(packageRoot, `src/host.${suffix}`)).href),
+  import(pathToFileURL(join(packageRoot, `src/bridge.${suffix}`)).href),
 ]);
 const bridge = new McpBridge();
 let host;

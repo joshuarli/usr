@@ -74,21 +74,31 @@ def cache_dir(home: Path, environ: dict[str, str] | None = None) -> Path:
     return _base(env, "XDG_CACHE_HOME", home / ".cache") / "usr/pi-releases"
 
 
-def version_matches(root: Path) -> bool:
+def version_matches(root: Path, profile: str = "full") -> bool:
+    if profile not in {"full", "headless-usr"}:
+        return False
     try:
         for name, version in PACKAGES.items():
             actual = json.loads((root / "node_modules" / name / "package.json").read_text())["version"]
             if actual != version:
                 return False
+        if profile == "headless-usr":
+            for name, entry in (("pi-subagents", "index.js"),
+                                ("@dataforxyz/agent-intercom-pi", "index.js"),
+                                ("@dataforxyz/agent-intercom-pi", "broker/broker.js"),
+                                ("pi-muse-subscription", "src/index.js")):
+                if not (root / "node_modules" / name / entry).is_file():
+                    return False
         return (root / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js").is_file()
     except (OSError, KeyError, ValueError, TypeError):
         return False
 
 
-def wrapper(root: Path) -> str:
+def wrapper(root: Path, profile: str = "full") -> str:
+    suffix = {"full": "ts", "headless-usr": "js"}[profile]
     sdk = root / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
-    subagent = root / "node_modules/pi-subagents/index.ts"
-    intercom = root / "node_modules/@dataforxyz/agent-intercom-pi/index.ts"
+    subagent = root / f"node_modules/pi-subagents/index.{suffix}"
+    intercom = root / f"node_modules/@dataforxyz/agent-intercom-pi/index.{suffix}"
     return ("#!/bin/sh\n"
             "# Bundled in usr; never install or update npm dependencies at runtime.\n"
             "set -eu\n"
@@ -103,15 +113,24 @@ def wrapper(root: Path) -> str:
             f"--extension {shlex.quote(str(intercom))} \"$@\"\n")
 
 
-def configure_intercom(home: Path, root: Path) -> bool:
-    """Choose a local TS loader, never npx; preserve explicitly configured user behavior."""
+def configure_intercom(home: Path, root: Path, profile: str = "full") -> bool:
+    """Select the profile's local broker runtime and preserve custom commands."""
     directory = home / ".pi/agent/intercom"
     file = directory / "config.json"
     if directory.is_symlink() or file.is_symlink():
         raise OfflinePiError(f"refusing symlinked intercom configuration: {file}")
     loader = root / "node_modules/tsx/dist/loader.mjs"
-    if not loader.is_file():
-        raise OfflinePiError(f"missing self-contained TS loader: {loader}")
+    if profile == "full":
+        if not loader.is_file():
+            raise OfflinePiError(f"missing self-contained TS loader: {loader}")
+        broker_args = ["--import", str(loader)]
+    elif profile == "headless-usr":
+        broker = root / "node_modules/@dataforxyz/agent-intercom-pi/broker/broker.js"
+        if not broker.is_file():
+            raise OfflinePiError(f"missing compiled intercom broker: {broker}")
+        broker_args = []
+    else:
+        raise OfflinePiError(f"unsupported Pi runtime profile: {profile}")
     if file.exists():
         try:
             data = json.loads(file.read_text())
@@ -122,13 +141,16 @@ def configure_intercom(home: Path, root: Path) -> bool:
     else:
         data = {}
     desired = dict(data)
-    # Any existing explicit non-npm broker remains under the user's control.
-    if not desired.get("brokerCommand") or desired.get("brokerCommand") in ("npx", "npm"):
+    managed = (not desired.get("brokerCommand") or desired.get("brokerCommand") in ("npx", "npm")
+               or (desired.get("brokerCommand") == "node" and (
+                   desired.get("brokerArgs") in (
+                       ["--no-install", "tsx"], ["--import", str(loader)],
+                       ["--import", str(legacy_dir(home) / "node_modules/tsx/dist/loader.mjs")])
+                   or (desired.get("usrBrokerProfile") == "headless-usr" and desired.get("brokerArgs") == []))))
+    if managed:
         desired["brokerCommand"] = "node"
-        desired["brokerArgs"] = ["--import", str(loader)]
-    elif desired.get("brokerCommand") == "node" and desired.get("brokerArgs", []) in (
-            ["--no-install", "tsx"], ["--import", str(legacy_dir(home) / "node_modules/tsx/dist/loader.mjs")]):
-        desired["brokerArgs"] = ["--import", str(loader)]
+        desired["brokerArgs"] = broker_args
+        desired["usrBrokerProfile"] = profile
     desired.setdefault("inboundTrigger", "never")
     desired.setdefault("confirmSend", True)
     if desired == data:

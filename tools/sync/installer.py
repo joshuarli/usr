@@ -1187,8 +1187,12 @@ class Installer:
                     or not (self.state / "pi").is_file():
                 self.skip("pi", f"{launcher} already exists outside dl management")
         cache = self.pi_cache
+        pin_path = self.env.get("USR_PI_RUNTIME_PIN")
+        if pin_path and not Path(pin_path).is_absolute():
+            self.skip("pi", "USR_PI_RUNTIME_PIN must be absolute")
+        pin = None
         try:
-            pin = pi_release.load_pin()
+            pin = pi_release.load_pin(Path(pin_path)) if pin_path else pi_release.load_pin()
             key = pi_offline.platform_key()
             entry = pi_release.pin_entry(pin, key)
             wanted = f"release:{pin['builder_revision']}:{entry['sha256']}"
@@ -1200,9 +1204,10 @@ class Installer:
                 self.own_missing_dirs(cache.parent)
                 self.fetch_msg(f"Installing Pi runtime {entry['archive']} from {pin['release_url']} ...")
                 pi_release.install(self.pi_root, pin, key, cache)
-            pi_offline.configure_intercom(self.home, self.pi_root / "current")
+            pi_offline.configure_intercom(self.home, self.pi_root / "current", pin["profile"])
         except URLError as exc:
-            self.skip("pi", f"cannot download the pinned Pi release from {pin['release_url']} "
+            source = pin["release_url"] if pin is not None else str(pin_path or pi_release.PIN)
+            self.skip("pi", f"cannot download the pinned Pi release from {source} "
                             f"({getattr(exc, 'reason', exc)}); the existing Pi installation is unchanged")
         except (pi_offline.OfflinePiError, OSError, ValueError) as exc:
             self.skip("pi", str(exc))

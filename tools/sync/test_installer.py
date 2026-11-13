@@ -14,6 +14,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).parent))
 import installer
+import pi_offline
 import pi_release
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pi"))
 import release_cache
@@ -79,6 +80,22 @@ class FakeInstaller(Installer):
 
 
 class InstallerTests(unittest.TestCase):
+    def test_pi_explicit_pin_does_not_fall_back_to_default(self):
+        inst = self.make()
+        selected = self.root / "headless.pin.json"
+        inst.env["USR_PI_RUNTIME_PIN"] = str(selected)
+        with patch.object(pi_release, "load_pin", side_effect=pi_offline.OfflinePiError("missing selected pin")) as load:
+            with self.assertRaises(SkipInstall):
+                inst.install_pi()
+        load.assert_called_once_with(selected)
+        self.assertFalse(self.dest_path("pi").exists())
+        inst.env["USR_PI_RUNTIME_PIN"] = "relative.pin.json"
+        with patch.object(pi_release, "load_pin") as load:
+            with self.assertRaises(SkipInstall) as error:
+                inst.install_pi()
+        self.assertIn("must be absolute", str(error.exception))
+        load.assert_not_called()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

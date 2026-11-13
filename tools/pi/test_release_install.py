@@ -51,8 +51,8 @@ class ReleaseTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join()
 
-    def publish(self, extra=None, version="one") -> pi_release.Pin:
-        name = "pi-full-1.5.0-aarch64-apple-darwin.tar.xz"
+    def publish(self, extra=None, version="one", profile="full") -> pi_release.Pin:
+        name = f"pi-{profile}-1.5.0-aarch64-apple-darwin.tar.xz"
         with tarfile.open(self.assets / name, "w:xz") as archive:
             files = {f"node_modules/{name}/package.json": json.dumps({"version": value}).encode()
                      for name, value in pi_offline.PACKAGES.items()}
@@ -72,16 +72,47 @@ class ReleaseTests(unittest.TestCase):
         entry: pi_release.Artifact = {"archive": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
         provenance = {"schema": 1, "builder_revision": "a" * 40,
                       "version": "1.5.0",
-                      "targets": {"aarch64-apple-darwin": {"target": "aarch64-apple-darwin", "profile": "full", **entry}}}
+                      "targets": {"aarch64-apple-darwin": {"target": "aarch64-apple-darwin", "profile": profile, **entry}}}
         raw = json.dumps(provenance).encode()
         (self.assets / "provenance.json").write_bytes(raw)
         (self.assets / "SHA256SUMS").write_text(f"{entry['sha256']}  {name}\n")
         return {"schema": 1, "release_url": f"http://127.0.0.1:{self.server.server_port}",
-                "builder_revision": "a" * 40, "profile": "full", "version": "1.5.0",
+                "builder_revision": "a" * 40, "profile": profile, "version": "1.5.0",
                 "provenance_sha256": hashlib.sha256(raw).hexdigest(), "targets": {"darwin-arm64": entry}}
 
     def install(self, pin=None):
         return pi_release.install(self.prefix, pin or self.pin, "darwin-arm64", self.cache)
+
+    def test_headless_install_requires_compiled_entries_and_selects_js_launcher(self):
+        pin = self.publish(profile="headless-usr")
+        with self.assertRaisesRegex(pi_offline.OfflinePiError, "missing required"):
+            self.install(pin)
+        entries = {"node_modules/pi-subagents/index.js": b"export default () => {}",
+                   "node_modules/@dataforxyz/agent-intercom-pi/index.js": b"export default () => {}",
+                   "node_modules/@dataforxyz/agent-intercom-pi/broker/broker.js": b"",
+                   "node_modules/pi-muse-subscription/src/index.js": b"export default () => {}"}
+        pin = self.publish(entries, profile="headless-usr")
+        generation = self.install(pin)
+        launcher = (generation / "bin/pi").read_text()
+        self.assertIn("pi-subagents/index.js", launcher)
+        self.assertIn("agent-intercom-pi/index.js", launcher)
+        self.assertNotIn("index.ts", launcher)
+        self.assertEqual(pi_release.current(self.prefix, pin, "darwin-arm64"), generation)
+        self.assertEqual(self.install(pin), generation)
+        project = self.root / "bridge"
+        with patch.object(pi_release, "load_pin", side_effect=AssertionError("default pin must not select the bridge")):
+            self.assertTrue(pi_release.link_bridge(project, self.prefix, self.root / "legacy"))
+            self.assertTrue(pi_release.bridge_current(project, self.prefix))
+            self.assertFalse(pi_release.bridge_current(project, self.prefix, self.pin))
+        receipt = generation / pi_release.RECEIPT
+        data = json.loads(receipt.read_text())
+        for invalid in ({**pin, "profile": "unknown"}, {"profile": "headless-usr"},
+                        {**pin, "targets": {"darwin-arm64": {"archive": "x", "sha256": "x", "bytes": "1"}}}):
+            data["pin"] = invalid
+            receipt.write_text(json.dumps(data))
+            self.assertFalse(pi_release.bridge_current(project, self.prefix))
+            with self.assertRaisesRegex(pi_offline.OfflinePiError, "not installed"):
+                pi_release.link_bridge(project, self.prefix, self.root / "legacy")
 
     def test_install_noop_without_fetch_and_verified_cache_reuse(self):
         runtime = self.install()

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -52,6 +52,7 @@ writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { 'open
 writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ packages: [], subagents: { async: true } }));
 writeFileSync(join(agentDir, 'agents/worker.md'), '---\nname: worker\ndescription: local protocol fixture\nmodel: opencode-go/deepseek-v4.1-flash\nthinking: high\ntools: read\n---\nReturn the requested proof.\n');
 const pkg = join(runtime, 'node_modules');
+const subagentsManifest = JSON.parse(readFileSync(join(pkg, 'pi-subagents/package.json'), 'utf8'));
 const { ModelRuntime, DefaultResourceLoader, SettingsManager, SessionManager, createAgentSession } =
   await import(pathToFileURL(join(pkg, '@earendil-works/pi-coding-agent/dist/index.js')).href);
 const responses = new Map();
@@ -64,7 +65,7 @@ try {
   const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: join(agentDir, 'models.json') });
   const settingsManager = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } });
   const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true,
-    noThemes: true, noContextFiles: true, additionalExtensionPaths: [join(pkg, 'pi-subagents/index.ts')], extensionFactories: [pi => {
+    noThemes: true, noContextFiles: true, additionalExtensionPaths: [join(pkg, 'pi-subagents', subagentsManifest.pi.extensions[0])], extensionFactories: [pi => {
       rpc = (method, params) => new Promise((resolveReply, rejectReply) => {
         const requestId = 'fixture-' + responses.size;
         responses.set(requestId, true);

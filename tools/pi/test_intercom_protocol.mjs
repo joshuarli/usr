@@ -10,9 +10,13 @@ const [runtimeArg, scratchArg] = process.argv.slice(2);
 assert(runtimeArg, "usage: test_intercom_protocol.mjs RUNTIME_ROOT [SCRATCH_ROOT]");
 const runtimeRoot = resolve(runtimeArg);
 const packageRoot = join(runtimeRoot, "node_modules/@dataforxyz/agent-intercom-pi");
+const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+const extensionEntry = manifest.pi.extensions[0];
+const compiled = extensionEntry.endsWith(".js");
 const loader = join(runtimeRoot, "node_modules/tsx/dist/loader.mjs");
-const brokerPath = join(packageRoot, "broker/broker.ts");
-for (const path of [loader, brokerPath]) {
+const brokerPath = join(packageRoot, compiled ? "broker/broker.js" : "broker/broker.ts");
+const brokerArgs = compiled ? [] : ["--import", loader];
+for (const path of compiled ? [brokerPath] : [loader, brokerPath]) {
   await readFile(path);
 }
 
@@ -46,16 +50,16 @@ for (const key of ['AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH', 'AGENT_INTERCOM_REMO
 const configPath = join(intercomDir, "config.json");
 await writeFile(configPath, `${JSON.stringify({
   brokerCommand: process.execPath,
-  brokerArgs: ["--import", loader],
+  brokerArgs,
   confirmSend: true,
   inboundTrigger: "never",
 }, null, 2)}\n`, { mode: 0o600 });
 
 const importFromRuntime = async (relativePath) => import(pathToFileURL(join(packageRoot, relativePath)).href);
 const [{ IntercomClient }, { loadConfig }, extensionModule] = await Promise.all([
-  importFromRuntime("broker/client.ts"),
-  importFromRuntime("config.ts"),
-  importFromRuntime("index.ts"),
+  importFromRuntime(compiled ? "broker/client.js" : "broker/client.ts"),
+  importFromRuntime(compiled ? "config.js" : "config.ts"),
+  importFromRuntime(extensionEntry),
 ]);
 const config = loadConfig();
 assert.equal(config.confirmSend, true, "the consumer profile requires confirmation by default");
@@ -106,7 +110,7 @@ const ctx = {
 };
 
 const nodePath = process.execPath;
-const broker = spawn(nodePath, ["--import", loader, brokerPath], {
+const broker = spawn(nodePath, [...brokerArgs, brokerPath], {
   cwd: packageRoot,
   env,
   stdio: ["ignore", "pipe", "pipe"],

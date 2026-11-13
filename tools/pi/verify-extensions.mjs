@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,6 +8,10 @@ const runtimeArg = process.argv[2];
 const runtime = runtimeArg ? resolve(runtimeArg) : undefined;
 if (!runtime) throw new Error("usage: node verify-extensions.mjs RUNTIME_DIRECTORY");
 const pkg = join(runtime, "node_modules");
+function extensionPath(name) {
+  const manifest = JSON.parse(readFileSync(join(pkg, name, "package.json"), "utf8"));
+  return join(pkg, name, manifest.pi.extensions[0]);
+}
 const agentDir = mkdtempSync(join(tmpdir(), "pi-extension-loader-"));
 const binDir = join(agentDir, "bin");
 mkdirSync(binDir);
@@ -51,9 +55,9 @@ const loader = new DefaultResourceLoader({
   noThemes: true,
   noContextFiles: true,
   additionalExtensionPaths: [
-    join(pkg, "pi-subagents/index.ts"),
-    join(pkg, "@dataforxyz/agent-intercom-pi/index.ts"),
-    join(pkg, "pi-muse-subscription/src/index.ts"),
+    extensionPath("pi-subagents"),
+    extensionPath("@dataforxyz/agent-intercom-pi"),
+    extensionPath("pi-muse-subscription"),
   ],
 });
 let session;

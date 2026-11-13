@@ -11,7 +11,7 @@ import shutil
 import tarfile
 import tempfile
 from uuid import uuid4
-from typing import TypedDict
+from typing import TypeGuard, TypedDict
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,12 +42,26 @@ class Pin(TypedDict):
     targets: dict[str, Artifact]
 
 
+def _is_pin(value: object) -> TypeGuard[Pin]:
+    if not isinstance(value, dict):
+        return False
+    targets = value.get("targets")
+    return (type(value.get("schema")) is int
+            and all(isinstance(value.get(key), str) for key in (
+                "release_url", "builder_revision", "profile", "version", "provenance_sha256"))
+            and isinstance(targets, dict)
+            and all(isinstance(target, str) and isinstance(entry, dict)
+                    and isinstance(entry.get("archive"), str) and isinstance(entry.get("sha256"), str)
+                    and type(entry.get("bytes")) is int
+                    for target, entry in targets.items()))
+
+
 def load_pin(path: Path = PIN) -> Pin:
     try:
-        pin = json.loads(path.read_text())
+        pin: object = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
         raise pi_offline.OfflinePiError(f"cannot read Pi release pin {path}: {exc}") from exc
-    if not isinstance(pin, dict):
+    if not _is_pin(pin):
         raise pi_offline.OfflinePiError(f"invalid Pi release pin: {path}")
     return pin
 
@@ -270,11 +284,11 @@ def install(prefix: Path, pin: Pin, target: str, cache: Path) -> Path:
                     stream.extractall(stage, members, filter="data")
                 else:
                     stream.extractall(stage, members)
-            if not pi_offline.version_matches(stage):
+            if not pi_offline.version_matches(stage, pin["profile"]):
                 raise pi_offline.OfflinePiError("Pi release missing required runtime packages")
             (stage / "bin").mkdir()
             launcher = stage / "bin/pi"
-            launcher.write_text(pi_offline.wrapper(destination))
+            launcher.write_text(pi_offline.wrapper(destination, pin["profile"]))
             launcher.chmod(0o755)
             (stage / RECEIPT).write_text(json.dumps({"pin": pin, "target": target, "files": inventory(stage)}, sort_keys=True))
             if destination.exists() or destination.is_symlink():
@@ -303,10 +317,36 @@ def bridge_target(prefix: Path) -> str:
     return str(prefix / "current/node_modules")
 
 
+def _installed_pin(prefix: Path) -> Pin | None:
+    """Read the pin from the selected receipt, independently of the installer override."""
+    try:
+        if prefix.is_symlink() or (prefix / "releases").is_symlink():
+            return None
+        pointer = os.readlink(prefix / "current")
+        if not re.fullmatch(r"releases/[0-9a-f]{64}", pointer):
+            return None
+        root = prefix / pointer
+        receipt = root / RECEIPT
+        if root.is_symlink() or receipt.is_symlink():
+            return None
+        data: object = json.loads(receipt.read_text())
+        if not isinstance(data, dict):
+            return None
+        pin = data.get("pin")
+        if not _is_pin(pin):
+            return None
+        target = pi_offline.platform_key()
+        entry = pin_entry(pin, target)
+        return pin if data.get("target") == target and pointer == "releases/" + entry["sha256"] else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def bridge_current(project: Path, prefix: Path, pin: Pin | None = None) -> bool:
     link = project / "node_modules"
     try:
-        return (selected(prefix, pin or load_pin(), pi_offline.platform_key())
+        valid = selected(prefix, pin, pi_offline.platform_key()) if pin is not None else _installed_pin(prefix) is not None
+        return (valid
                 and link.is_symlink() and os.readlink(link) == bridge_target(prefix))
     except OSError:
         return False
@@ -333,12 +373,12 @@ def _replaceable_bridge(link: Path, legacy: Path) -> bool:
 
 def link_bridge(project: Path, prefix: Path, legacy: Path, pin: Pin | None = None) -> bool:
     """Point the bridge at the selected closure; adopt only usr's own earlier layouts."""
-    pin = pin or load_pin()
-    if not selected(prefix, pin, pi_offline.platform_key()):
+    valid = selected(prefix, pin, pi_offline.platform_key()) if pin is not None else _installed_pin(prefix) is not None
+    if not valid:
         raise pi_offline.OfflinePiError("Pi runtime is not installed; run sh sync tools pi")
-    if bridge_current(project, prefix, pin):
-        return False
     link = project / "node_modules"
+    if link.is_symlink() and os.readlink(link) == bridge_target(prefix):
+        return False
     if not _replaceable_bridge(link, legacy):
         kind = "symlink" if link.is_symlink() else "dependencies"
         raise pi_offline.OfflinePiError(f"refusing unmanaged bridge {kind}: {link}")
