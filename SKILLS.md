@@ -54,7 +54,10 @@ Rule of thumb:
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
+| `brainstorm [focus]` | Explicit | Survey a repository's real state and surface the top evidence-grounded ideas for what to do next, when you are out of ideas. |
 | `ultratriage` | Explicit | Act as the owner: settle every open RFC and unresolved ticket, update docs and tickets, and report each decision with its reason and next action. |
+
+Use `brainstorm` to find candidate work, `ultrareview` to find defects, `ultratriage` to decide the ticket queue, and `burn-down-the-backlog` to implement it. `brainstorm` proposes; only the owner picks what happens next.
 
 Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-the-backlog` to implement it. Each can run on its own. `ultratriage` ends open to feedback or the choice to start burn-down; it continues straight into implementation only when you have already asked for both. Accepted designs remain open until implemented, and prerequisite work lands before its dependents.
 
