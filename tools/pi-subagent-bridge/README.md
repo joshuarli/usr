@@ -94,6 +94,7 @@ State, prompt job files, SDK JSONL transcripts, Codex and Command Code NDJSON re
 
 ```
 cd tools/pi-subagent-bridge
+./dev-install.sh   # once; installs the dev toolchain into .dev/ (never touches node_modules)
 npm test
 cd ../..
 python3 -I dotfiles/pi-test.py
@@ -105,7 +106,7 @@ sh dotfiles/worker-watch-test.sh
 sh dotfiles/worker-campaign-test.sh
 ```
 
-`npm test` is an explicit developer check requiring the package's development dependencies and a supported Node; the production archive does not supply that test toolchain. Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
+`npm test` is an explicit developer check requiring a supported Node; the production archive does not supply that test toolchain, so `./dev-install.sh` installs the exact-pinned dev dependencies (and the pinned runtime closure, for type declarations) into the ignored `.dev/` directory, leaving the runtime `node_modules` symlink untouched. Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
 
 ## Muse Code subscription
 

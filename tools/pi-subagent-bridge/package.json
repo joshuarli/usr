@@ -14,8 +14,8 @@
   },
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
-    "test": "tsrs -p tsconfig.json --noEmit && node --import tsx --test test/*.test.ts",
-    "typecheck": "tsrs -p tsconfig.json --noEmit"
+    "test": ".dev/bin/tsrs -p tsconfig.json --noEmit && TSX_TSCONFIG_PATH=tsconfig.tsx.json node --import ./.dev/lib/node_modules/tsx/dist/loader.mjs --test test/*.test.ts",
+    "typecheck": ".dev/bin/tsrs -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

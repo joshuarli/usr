@@ -1,12 +1,12 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
 
 test("Muse resolution follows the pinned package entry for source and compiled runtimes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "muse-profile-"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "muse-profile-")))
   try {
     for (const extension of ["ts", "js"]) {
       const fixture = join(root, extension)

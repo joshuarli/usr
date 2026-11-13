@@ -10,7 +10,14 @@
     "noEmit": true,
     "strict": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "typeRoots": ["./.dev/lib/node_modules/@types"],
+    "paths": {
+      "@earendil-works/pi-coding-agent": ["./.dev/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.d.ts"],
+      "pi-subagents/capability-ceiling": ["./.dev/lib/node_modules/pi-subagents/src/api/capability-ceiling.d.ts"],
+      "pi-subagents/required-child-extensions": ["./.dev/lib/node_modules/pi-subagents/src/api/required-child-extensions.d.ts"],
+      "yaml": ["./.dev/lib/node_modules/yaml/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

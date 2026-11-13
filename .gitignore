@@ -15,3 +15,5 @@ sessions/
 .cloudflare
 
 node_modules
+
+tools/pi-subagent-bridge/.dev/
