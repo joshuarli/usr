@@ -38,10 +38,11 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, ["codex"], setup=False).select(["tool:codex"])
         self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:codex"])
 
-    def test_mcp_registration_tasks_serialize_their_sdk_install(self):
+    def test_bridge_registration_tasks_serialize_their_sdk_install(self):
         tasks = main.graph(self.ctx, [], setup=True).tasks
-        for name in ("claude-mcp", "pi-mcp", "opencode-mcp"):
+        for name in ("claude-mcp", "pi-mcp"):
             self.assertIn("pi-sdk-install", tasks[name].resources)
+        self.assertNotIn("pi-sdk-install", tasks["opencode-mcp"].resources)
 
     def test_tool_tasks_have_disjoint_resources(self):
         tasks = main.graph(self.ctx, ["cmd", "pnpm", "fd"], setup=False).tasks
@@ -69,12 +70,10 @@ class MainTests(unittest.TestCase):
         self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
                          "bridge registration must not install npm-managed provider harnesses")
 
-    def test_opencode_bridge_requires_only_offline_pi_and_node(self):
+    def test_opencode_task_only_enforces_bridge_absence(self):
         dag = main.graph(self.ctx, [], setup=True).select(["opencode-mcp"])
         names = {task.name for task in dag.order()}
-        self.assertTrue({"links", "tool:nodejs", "tool:pi", "pi-extensions", "opencode-mcp"} <= names)
-        self.assertFalse({"tool:cmd", "tool:opencode2", "tool:claude"} & names,
-                         "bridge registration must not install npm-managed provider harnesses")
+        self.assertEqual(names, {"links", "opencode-mcp"})
 
     def test_alternate_target_links_never_touch_home(self):
         target = self.ctx.root / "fixture-home"

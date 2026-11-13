@@ -30,11 +30,13 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("neither has fallback", self.text)
 
     def test_no_old_mcp_registration(self):
-        for path in ("dotfiles/base/.config/opencode/opencode.json", "dotfiles/base/.codex/config.toml"):
-            content = (ROOT / path).read_text()
-            self.assertIn("pi-subagent-bridge", content)
-            self.assertNotIn("usr-opencode-worker", content)
-        json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
+        codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()
+        self.assertIn("pi-subagent-bridge", codex)
+        self.assertNotIn("usr-opencode-worker", codex)
+        opencode = (ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text()
+        self.assertNotIn("pi-subagent-bridge", opencode)
+        self.assertNotIn("usr-opencode-worker", opencode)
+        json.loads(opencode)
 
     def test_native_subagents_are_the_quota_fallback(self):
         self.assertIn("Quota fallback for scout/mechanic/worker only:", self.text)

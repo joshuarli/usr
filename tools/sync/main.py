@@ -169,12 +169,12 @@ def pi_bridge_apply(ctx: Context) -> None:
 
 
 def opencode_bridge_status(ctx: Context) -> Probe:
-    r = command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "check", capture=True)
-    return Probe(r.returncode == 0, "bridge registered" if r.returncode == 0 else (r.stderr.strip() or "bridge missing"))
+    r = command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "verify-absent", capture=True)
+    return Probe(r.returncode == 0, "bridge absent" if r.returncode == 0 else (r.stderr.strip() or "bridge registered"))
 
 
 def opencode_bridge_apply(ctx: Context) -> None:
-    required(command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "install"), "OpenCode MCP registration")
+    required(command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "remove"), "OpenCode MCP removal")
 
 
 def mac_packages_status(ctx: Context) -> Probe:
@@ -322,9 +322,9 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
     nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
                       lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
                       lambda: pi_bridge_status(ctx), frozenset({"pi-config", "pi-sdk-install"})))
-    nodes.append(Task("opencode-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
+    nodes.append(Task("opencode-mcp", ("links",),
                       lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
-                      lambda: opencode_bridge_status(ctx), frozenset({"opencode-config", "pi-sdk-install"})))
+                      lambda: opencode_bridge_status(ctx), frozenset({"opencode-config"})))
     deps = ("links",)
     if ctx.platform == "darwin":
         deps = ("links", "host:mac-packages")

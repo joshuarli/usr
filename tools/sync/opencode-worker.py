@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage usr's OpenCode MCP bridge as part of sync; never touch OpenCode credentials."""
+"""Remove usr's owned OpenCode MCP bridge entry; never touch OpenCode credentials."""
 import json
 import hashlib
 import os
@@ -10,10 +10,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import pi_offline  # noqa: E402
-import pi_release  # noqa: E402
 
 NAME = "pi-subagent-bridge"
 LEGACY_NAME = "usr-opencode-worker"
@@ -27,45 +23,6 @@ OWNER = Path(os.environ.get("XDG_STATE_HOME", str(HOME / ".local/state"))) / "sy
 
 def die(message):
     raise ValueError(message)
-
-
-def dependency_versions():
-    dependencies = json.loads((PROJECT / "package.json").read_text())["dependencies"]
-    versions = {}
-    for name in ("@earendil-works/pi-coding-agent", "pi-subagents"):
-        version = dependencies[name]
-        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
-            die(f"{name} must be pinned to an exact version")
-        versions[name] = version
-    return versions
-
-
-def dependency_version():
-    return dependency_versions()["@earendil-works/pi-coding-agent"]
-
-
-def dependency_current(root: Path = PROJECT) -> bool:
-    return pi_release.bridge_current(root, pi_offline.runtime_dir(HOME))
-
-
-def managed_binary(name):
-    path = HOME / ".local" / "share" / "nodejs" / "current" / "bin" / name
-    if path.is_file() and os.access(path, os.X_OK):
-        return str(path)
-    return shutil.which(name)
-
-
-def expected_entry():
-    return {
-        "type": "local",
-        "command": ["pi-subagent-bridge", "mcp"],
-        "codemode": False,
-    }
-
-
-def entry_fingerprint(entry):
-    payload = json.dumps(entry, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(payload).hexdigest()
 
 
 def service_is_running(opencode):
@@ -96,6 +53,11 @@ def restart_opencode_service():
     print("sync: restarted opencode service to pick up the new MCP registration")
 
 
+def entry_fingerprint(entry):
+    payload = json.dumps(entry, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
 def load_owner():
     if OWNER.is_symlink():
         die(f"refusing symlinked MCP ownership record: {OWNER}")
@@ -109,27 +71,15 @@ def load_owner():
     return value["fingerprint"]
 
 
-def save_owner(entry):
-    OWNER.parent.mkdir(parents=True, exist_ok=True)
-    if OWNER.is_symlink():
-        die(f"refusing symlinked MCP ownership record: {OWNER}")
-    payload = (json.dumps({"schema": 1, "fingerprint": entry_fingerprint(entry)}, sort_keys=True) + "\n").encode()
-    fd, temporary = tempfile.mkstemp(prefix=".opencode-mcp-owner.", dir=OWNER.parent)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as output:
-            output.write(payload)
-        os.replace(temporary, OWNER)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
 def owned_entry(entry):
-    if entry == expected_entry():
-        return True
     if not isinstance(entry, dict) or entry.get("type", "local") != "local":
         return False
+    if not set(entry).issubset({"type", "command", "codemode"}):
+        return False
+    if entry.get("codemode") not in (None, False):
+        return False
+    if entry.get("command") == ["pi-subagent-bridge", "mcp"]:
+        return True
     command = entry.get("command")
     if not isinstance(command, list) or len(command) != 3 or Path(command[0]).name != "node":
         return False
@@ -142,8 +92,6 @@ def owned_entry(entry):
     ):
         return False
     if entry.get("codemode") not in (None, False):
-        return False
-    if not set(entry).issubset({"type", "command", "codemode"}):
         return False
     username = HOME.name
     home_roots = {HOME, Path("/Users") / username, Path("/home") / username}
@@ -177,9 +125,9 @@ def configuration():
     return value, original
 
 
-def install_dependency():
-    """Link bridge to usr's prebuilt offline Pi closure. No npm subprocess."""
-    pi_release.link_bridge(PROJECT, pi_offline.runtime_dir(HOME), pi_offline.legacy_dir(HOME))
+def pending_owned(servers):
+    return {name for name in (NAME, LEGACY_NAME)
+            if name in servers and owned_entry(servers[name])}
 
 
 def update_configuration(data, original):
@@ -204,72 +152,46 @@ def update_configuration(data, original):
             os.unlink(temporary)
 
 
-def run(action):
+def run_remove():
     data, original = configuration()
     _, servers = servers_in(data)
-    previous = servers.get(NAME)
-    legacy = servers.get(LEGACY_NAME)
-    desired = expected_entry()
-    if previous is not None and not owned_entry(previous):
-        die(f"{NAME} already names a different MCP server; leaving it unchanged")
-    if legacy is not None and not owned_entry(legacy):
-        die(f"{LEGACY_NAME} is not an owned bridge; leaving it unchanged")
-
-    if action == "plan":
-        if legacy is not None:
-            print(f"MCP: migrate owned {LEGACY_NAME} to {NAME}")
-        if not dependency_current():
-            print("OFFLINE: link vendored Pi SDK and extensions")
-        if previous != desired or legacy is not None:
-            print(f"MCP: register {NAME} with OpenCode user scope")
-        elif load_owner() != entry_fingerprint(desired):
-            print(f"MCP: record ownership of {NAME}")
-        return
-
-    if action == "check":
-        if legacy is not None:
-            die(f"legacy {LEGACY_NAME} registration is still active")
-        if not dependency_current():
-            die("Pi SDK worker dependency is not installed")
-        if previous != desired or load_owner() != entry_fingerprint(desired):
-            die(f"{NAME} MCP registration is missing, unowned, or outdated")
-        print(f"ok: {NAME} MCP and dependency current")
-        return
-
-    if action == "remove":
-        if legacy is not None:
-            del servers[LEGACY_NAME]
-        if previous is not None:
-            del servers[NAME]
-        if previous is not None or legacy is not None:
-            update_configuration(data, original)
-            print(f"sync: unregistered {NAME}")
-            restart_opencode_service()
-        OWNER.unlink(missing_ok=True)
-        return
-
-    if action != "install":
-        die("usage: opencode-worker.py {plan|check|install|remove}")
-    install_dependency()
-    desired = expected_entry()
-    if previous != desired or legacy is not None:
-        mcp = data.setdefault("mcp", {})
-        servers = mcp.setdefault("servers", {})
-        servers.pop(LEGACY_NAME, None)
-        servers[NAME] = desired
+    names = pending_owned(servers)
+    for name in names:
+        del servers[name]
+    if not servers and isinstance(data.get("mcp"), dict):
+        del data["mcp"]["servers"]
+        if not data["mcp"]:
+            del data["mcp"]
+    if names:
         update_configuration(data, original)
-        print(f"sync: registered {NAME} for OpenCode")
-        save_owner(desired)
+        print(f"sync: unregistered {', '.join(sorted(names))}")
         restart_opencode_service()
+    OWNER.unlink(missing_ok=True)
+
+
+def run_verify_absent():
+    data, _ = configuration()
+    _, servers = servers_in(data)
+    if pending_owned(servers):
+        die(f"{NAME} MCP registration is still present")
+    print(f"ok: {NAME} not registered with OpenCode")
+
+
+def main():
+    if len(sys.argv) != 2:
+        die("usage: opencode-worker.py {remove|verify-absent}")
+    action = sys.argv[1]
+    if action == "remove":
+        run_remove()
+    elif action == "verify-absent":
+        run_verify_absent()
     else:
-        save_owner(desired)
+        die("usage: opencode-worker.py {remove|verify-absent}")
 
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) != 2:
-            die("usage: opencode-worker.py {plan|check|install|remove}")
-        run(sys.argv[1])
+        main()
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"sync: OpenCode worker bridge: {exc}", file=sys.stderr)
         sys.exit(1)

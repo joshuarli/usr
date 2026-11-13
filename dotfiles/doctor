@@ -97,10 +97,10 @@ if [ -x "$target/.local/bin/pi" ] && [ -f "$root/tools/sync/pi-worker.py" ]; the
     fi
 fi
 if [ -x "$target/.local/bin/opencode2" ] && [ -f "$root/tools/sync/opencode-worker.py" ]; then
-    if python3 -I "$root/tools/sync/opencode-worker.py" check > "$scratch/opencode-bridge" 2>&1; then
-        ok 'OpenCode DeepSeek bridge is configured'
+    if python3 -I "$root/tools/sync/opencode-worker.py" verify-absent > "$scratch/opencode-bridge" 2>&1; then
+        ok 'OpenCode bridge is not registered'
     else
-        problem 'OpenCode DeepSeek MCP bridge is missing or stale'
+        problem 'OpenCode MCP bridge is registered'
         cat "$scratch/opencode-bridge"
     fi
 fi

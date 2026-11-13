@@ -34,7 +34,7 @@ Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its glob
 
 ## Install
 
-Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are symlinked from the SHA-256-verified local Pi runtime into `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude, Pi and OpenCode; Codex uses its tracked MCP entry. Sync migrates recognized legacy `usr-opencode-worker` registrations without disturbing unrelated MCP connections.
+Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are symlinked from the SHA-256-verified local Pi runtime into `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude and Pi; Codex uses its tracked MCP entry. OpenCode never registers the bridge (see `orchestrate`); sync removes an owned OpenCode registration. Sync migrates recognized legacy `usr-opencode-worker` registrations on the Claude and Pi paths without disturbing unrelated MCP connections.
 
 Pi authenticates only to OpenCode Go using the existing OpenCode login. In the **untracked and private** `~/.pi/agent/auth.json`:
 

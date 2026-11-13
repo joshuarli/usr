@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode/inkling-2-small-free#high",
+  "model": "opencode/inkling-2-small-free",
   "shell": "/bin/bash",
   "compaction": {
     "buffer": 600000
@@ -36,18 +36,6 @@
       "description": "Deep reasoning for hard, ambiguous, or high-risk slices",
       "mode": "subagent",
       "model": "opencode/inkling-2-small-free#max"
-    }
-  },
-  "mcp": {
-    "servers": {
-      "pi-subagent-bridge": {
-        "type": "local",
-        "command": [
-          "pi-subagent-bridge",
-          "mcp"
-        ],
-        "codemode": false
-      }
     }
   }
 }
