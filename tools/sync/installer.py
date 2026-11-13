@@ -38,6 +38,7 @@ NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 NODEJS_VERSION = "26.13.0"
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
+NODE_BUILD_REPO = "laputa-systems/node-build"
 PLAYER_REPO = "joshuarli/play"
 MUSE_LAUNCHER_URL = "https://dev.meta.ai/install.sh"
 GHOSTTY_CUSTOM_ASSET = "Ghostty-Custom-aarch64-apple-darwin.dmg"
@@ -934,52 +935,20 @@ class Installer:
         self.ok(f"Installed {self.dest}/fx ({tag})")
 
     def _install_python_build(self, tool: str, root: Path, triples: dict[tuple[str, str], str],
-                              repo: str, inner: str, links: list[tuple[str, str]],
-                              *, exclude_prefix: str = "", run_staged: bool = False,
-                              pin: tuple[str, str, dict[str, tuple[str, str]]] | None = None) -> None:
+                              inner: str, links: list[tuple[str, str]],
+                              *, release: tuple[str, str, dict[str, tuple[str, str]]],
+                              run_staged: bool = False) -> None:
         if (self.os_name, self.arch) not in triples:
             self.skip(tool, f"no {tool} release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        expected = ""
-        if pin is not None:
-            tag, repo, pinned = pin
-            pinned_asset = pinned.get(triple)
-            if not pinned_asset or len(pinned_asset[1]) != 64:
-                self.unchecked(tool, f"pinned python-build release has no {triple} artifact")
-                return
-            asset_name, expected = pinned_asset
-            asset_url = f"https://github.com/{repo}/releases/download/{tag}/" + asset_name.replace("+", "%2B")
-            record = expected
-            sums_url = ""
-        else:
-            if not self.jaq_available():
-                self.install_jaq()
-                if not self.jaq_available():
-                    self.unchecked(tool, f"jaq is required to find the {tool} release")
-                    return
-            tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", exclude_prefix=exclude_prefix)
-            if not tag:
-                self.unchecked(tool, "no release found")
-                return
-            release = self.fetch_json(f"https://api.github.com/repos/{repo}/releases/tags/{tag}")
-            assets = release.get("assets", [])
-            asset_url = ""
-            sums_url = ""
-            for entry in assets if isinstance(assets, list) else []:
-                if not isinstance(entry, dict):
-                    continue
-                name = str(entry.get("name", ""))
-                if name.endswith(f"-{triple}-install_only_stripped.tar.gz"):
-                    asset_url = str(entry.get("browser_download_url", ""))
-                if name == "SHA256SUMS":
-                    sums_url = str(entry.get("browser_download_url", ""))
-            if not asset_url or not sums_url:
-                self.unchecked(tool, f"{tag} has no {triple} release asset")
-                return
-            record = self.asset_id(asset_url)
-            if not record:
-                self.unchecked(tool, "release asset is unreachable")
-                return
+        tag, repo, assets = release
+        found = assets.get(triple)
+        if not found or len(found[1]) != 64:
+            self.unchecked(tool, f"{repo} {tag} has no {triple} artifact")
+            return
+        asset_name, expected = found
+        asset_url = f"https://github.com/{repo}/releases/download/{tag}/" + asset_name.replace("+", "%2B")
+        record = expected
         if self.is_current(tool, record):
             self.current(f"{tool} is current ({tag})")
             return
@@ -1003,15 +972,6 @@ class Installer:
         if not self.download(asset_url, archive_path):
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "download failed")
-        if pin is None:
-            sums_path = Path(tempfile.mkstemp()[1])
-            if not self.download(sums_url, sums_path):
-                archive_path.unlink(missing_ok=True)
-                sums_path.unlink(missing_ok=True)
-                self.skip(tool, "SHA256SUMS download failed")
-            asset_name = Path(asset_url).name.replace("%2B", "+").replace("%2b", "+")
-            expected = self.sums_for(sums_path.read_text(), asset_name)
-            sums_path.unlink(missing_ok=True)
         if len(expected) != 64 or self.sha256_file(archive_path) != expected:
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "checksum mismatch")
@@ -1031,7 +991,7 @@ class Installer:
             self.skip(tool, f"archive is missing {inner}")
         if run_staged and self.run([str(inner_path), "--version"], capture=True).returncode:
             self.skip(tool, "staged node binary does not run")
-        if tool == "python3" and pin is not None and self.run(
+        if tool == "python3" and self.run(
                 [str(inner_path), "-c", PYTHON_SMOKE], capture=True).returncode:
             self.skip(tool, "staged python failed its sqlite3/ssl/subprocess smoke test (built for a newer OS?)")
         os.replace(staged_bundle, release_dir)
@@ -1041,10 +1001,6 @@ class Installer:
         self.write_state(tool, record)
         self.changed = True
         self.ok(f"Installed {self.dest}/{tool}")
-        if tool == "python3" and pin is None and self.run([str(self.dest / "python3"), "-c", PYTHON_SMOKE],
-                                         capture=True).returncode:
-            self.warn(f"Python is installed but sqlite3/ssl imports failed; install libgcc or inspect {release_dir}")
-            raise SkipInstall(tool, "sqlite3/ssl imports failed")
 
     def install_python3(self) -> None:
         self._install_python_build(
@@ -1052,17 +1008,26 @@ class Installer:
             {("darwin", "aarch64"): "aarch64-apple-darwin",
              ("linux", "x86_64"): "x86_64-unknown-linux-musl",
              ("linux", "aarch64"): "aarch64-unknown-linux-musl"},
-            "laputa-systems/python-build", "python/bin/python3.15",
+            "python/bin/python3.15",
             [("python3", "python/bin/python3.15"), ("python3.15", "python/bin/python3.15")],
-            pin=python_build_pin())
+            release=python_build_pin())
 
     def install_nodebuild(self) -> None:
+        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
+                   ("linux", "x86_64"): "x86_64-unknown-linux-musl"}
+        if (self.os_name, self.arch) not in triples:
+            self.skip("node-build", f"no node-build release for {self.os_name}/{self.arch}")
+        triple = triples[(self.os_name, self.arch)]
+        found = self.build_release("node-build", NODE_BUILD_REPO, "node", triple)
+        if found is None:
+            self.unchecked("node-build", "no release found")
+            return
+        tag, asset, base = found
+        expected = self.sums_for(self.fetch_text(f"{base}/SHA256SUMS"), asset)
         self._install_python_build(
-            "node-build", self.node_build_root,
-            {("darwin", "aarch64"): "aarch64-apple-darwin",
-             ("linux", "x86_64"): "x86_64-unknown-linux-musl"},
-            "laputa-systems/node-build", "node/bin/node",
-            [("node-build", "node/bin/node")], run_staged=True)
+            "node-build", self.node_build_root, triples, "node/bin/node",
+            [("node-build", "node/bin/node")],
+            release=(tag, NODE_BUILD_REPO, {triple: (asset, expected)}), run_staged=True)
 
     def jaq_runs(self, argv: list[str]) -> bool:
         return self.run(argv + ["--version"], capture=True).returncode == 0
