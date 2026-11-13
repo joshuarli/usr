@@ -1,6 +1,6 @@
 ---
 name: refactor-ts
-description: "Refactor TypeScript for the chosen Node.js, pnpm, tsrs, Oxlint, Solid, Effect, Vite, and Vitest stack. Use only when explicitly requested by name or for this stack's refactoring or migration workflow."
+description: "Refactor TypeScript for the shared Node.js, pnpm, tsrs/tsrs-lint, Oxlint, Vite, Vitest, and Playwright stack, with Solid and Effect where applicable. Use only when explicitly requested by name or for this stack's refactoring or migration workflow."
 disable-model-invocation: true
 metadata:
   opencode/slash: "true"
@@ -17,7 +17,7 @@ Use the requested paths/packages; an unqualified invocation covers the current r
 
 Keep these decisions: pnpm owns packages; Node.js owns execution; tsrs owns type checking; Oxlint owns linting and uses tsrs-lint from that same `tsrs` package for type-aware rules; Vite owns frontend compilation; Solid owns UI reactivity; Effect owns I/O and typed failures; Vitest and Playwright own tests. Pure computation stays ordinary TypeScript. Apply only relevant layers: a server needs no Solid, a library no application server.
 
-Target these majors: TypeScript 7, Vite 8, Solid 2, Effect 4, and Vitest 5. Use latest stable Node.js and pnpm when migrating, and resolve exact versions from the registry, not from memory. Solid 2's release-candidate channel and tsrs's prerelease channel are intentional choices while they remain prerelease. Do not silently downgrade the stack, switch to other prereleases, or reinterpret latest stable as latest LTS.
+Target these majors: TypeScript 7, Vite 8, Solid 2, Effect 4, and Vitest 5. For participating fleet repositories, use Stuff's `fleet/policy/typescript-tools.toml` for Node/pnpm and `fleet/policy/frontend-toolchain.toml` for shared frontend package pins. Resolve proposed upgrades from registries and validate the coupled set before updating that authority and its consumers. Outside that baseline, use latest stable Node.js and pnpm when migrating. Solid 2's release-candidate channel and tsrs's prerelease channel are intentional choices while they remain prerelease. Do not silently downgrade the stack, switch to other prereleases, or reinterpret latest stable as latest LTS.
 
 Read the relevant references before editing:
 

@@ -7,7 +7,7 @@ This carries the existing stack decisions into the refactoring workflow. Apply o
 - Use pnpm exclusively. Keep `package.json` as the manifest and `pnpm-lock.yaml` as the only lockfile. Use `pnpm add`, `pnpm remove`, `pnpm update`, and `pnpm install`; use neither npm/npx, Yarn, Bun, nor Deno commands.
 - Pin the verified pnpm version in project metadata. Declare dependencies in the package that imports them; repair phantom dependencies rather than enabling hoisting. Add workspace structure only when needed.
 - Follow current [pnpm configuration](https://pnpm.io/configuring): non-auth settings belong in `pnpm-workspace.yaml` where applicable, including in a single-package project. Do not retain obsolete `package.json#pnpm` or non-auth `.npmrc` settings. Keep credentials outside committed configuration.
-- Use latest non-prerelease [Node.js](https://nodejs.org/en/about/previous-releases) for an in-scope runtime migration; do not silently substitute the LTS channel. Pin the runtime reproducibly with the project's mechanism.
+- For participating fleet repositories, pin Node.js and pnpm from Stuff's `fleet/policy/typescript-tools.toml`; pin shared frontend dependencies from `fleet/policy/frontend-toolchain.toml`. These files own versions; this skill owns responsibilities and migration guidance. Outside the baseline, use latest non-prerelease [Node.js](https://nodejs.org/en/about/previous-releases) for an in-scope runtime migration. Pin the runtime reproducibly with the project's mechanism.
 - Node owns execution; package scripts own tasks. Invoke tasks with `pnpm run <script>` and local binaries with `pnpm exec`. Keep `dev`, `build`, `lint`, `typecheck`, `test`, `test:browser`, and `check` only where they serve the project. Make `check` a fast local gate.
 - Use native ESM, explicit package boundaries, and Web/Node built-ins where they fit. Preserve actual deployment/browser requirements during migrations. Native Node type stripping is not a build pipeline for Solid TSX or published libraries.
 
@@ -16,7 +16,7 @@ This carries the existing stack decisions into the refactoring workflow. Apply o
 | Owner | Direction |
 | --- | --- |
 | TypeScript 7 | [`tsrs`](https://github.com/oxc-project/tsrs) is the type checker, a Rust port of TypeScript 7. Run `pnpm exec tsrs --noEmit --fast`. Keep strict, environment-correct configs and fix removed TS6/7 options instead of suppressing them. |
-| Oxlint | Use Oxlint 1.92 or newer and the existing JSON-config preference. Installing `tsrs` 0.23 or newer makes Oxlint load [`tsrs-lint`](https://github.com/oxc-project/tsrs#lint-and-type-check-in-one-run) for [type-aware linting](https://oxc.rs/docs/guide/usage/linter/type-aware.html). Confirm supported rules and framework coverage before retiring ESLint. |
+| Oxlint and tsrs-lint | Oxlint owns lint configuration and invocation; `tsrs-lint` from the same `tsrs` package owns type-aware analysis. Use Oxlint 1.92 or newer and tsrs 0.23 or newer, with the existing JSON-config preference. Remove direct `oxlint-tsgolint` dependencies. Verify an enabled type-aware rule actually reports a violation through [`tsrs-lint`](https://github.com/oxc-project/tsrs#lint-and-type-check-in-one-run). Confirm supported rules and framework coverage before retiring ESLint. |
 | Typecheck gate | Keep a separate `pnpm exec tsrs --noEmit --fast`, adapted for project references and declaration builds. Oxlint can report type errors with `--type-check`, but that run must not be the only compiler gate. |
 | Vite 8 | Use [Vite directly](https://vite.dev/blog/announcing-vite8) with Rolldown/Oxc and the Solid 2 plugin. Remove parallel Webpack/Rollup/esbuild/Babel plumbing after mapping each responsibility. No Vite+/`vp`. |
 | Formatting | Do not install, configure, or run Prettier, Oxfmt, or another formatter, including check-only and indirect runs. Inspect aggregate scripts/hooks and run only permitted checks. Remove obsolete formatter configuration in an in-scope stack migration. |
@@ -37,6 +37,8 @@ Prefer native CSS and progressive enhancement: nesting, layers, container querie
 
 Use [Vitest 5](https://vitest.dev/guide/migration/) for existing pure logic, Node server, and CLI tests. Migrate Jest/ts-jest/Babel-Jest in scope, preserving assertions and test isolation. Check changed mock defaults and inherited project configuration; duplicate setup/plugins can change behavior.
 
+For shared-toolchain alignment, preserve existing Node test suites and project-specific build/test configuration. Align Vitest and its browser provider together, and Playwright with `@playwright/test` wherever both are used. Keep Cloudflare SDK, Miniflare, and workerd as a separately validated compatibility group. Do not add a shared tooling package merely to distribute version pins, or introduce Solid/Effect into a project solely to align tools.
+
 Use [Vitest Browser Mode](https://vitest.dev/guide/browser/) with `@vitest/browser-playwright`, its `playwright()` provider, and configured browser instances for DOM, layout, focus, forms, and navigation. Current browser APIs come from `vitest/browser`; await interactions and retrying element assertions. Keep the Solid 2 plugin even when a testing example still shows `vite-plugin-solid`.
 
 Keep Playwright directly for existing full journeys. Use Effect test Layers and compatible `@effect/vitest` for Effect behavior. Avoid global patching, duplicated test layers, or replacing real-browser coverage with a DOM emulator. Run focused existing checks by default unless explicitly opted out; follow the project's test policy. Add tests only for uncovered observable contracts or invariants, not merely because code moved. An authorized bug fix needs a failing reproducer followed by a passing result.
@@ -48,7 +50,7 @@ Inspect entrypoints, packages, routes, network/persistence, existing tests, depl
 1. Establish pnpm and Node ownership, metadata pins, and canonical local scripts.
 2. Move to strict tsrs (TypeScript 7) and environment-correct ESM; repair all diagnostics.
 3. Establish Oxlint with tsrs-lint and Vite 8 with confirmed rule/plugin coverage.
-4. Port applicable UI to Solid 2, then use Start mode for applications; enable SSR only where useful.
+4. When a UI migration is authorized, port applicable UI to Solid 2; select application routing and SSR only from actual product requirements. Toolchain alignment alone preserves the existing UI framework and rendering model.
 5. Put meaningful I/O/failure/resource boundaries under Effect 4 without wrapping pure code.
 6. Replace redundant utility layers and migrate existing tests.
 7. Remove dead code, packages, configs, imports, commands, and extra lockfiles; verify the real changed paths.
