@@ -19,8 +19,3 @@ On Linux, skip the macOS setup. Run `sh sync plan` on either platform and resolv
 To provision a fresh Alpine edge machine instead, bootstrap it with the one-liner in [`host/alpine/README.md`](host/alpine/README.md), or run `doas sh host/alpine/install.sh` from this checkout and choose a headless server or a dwl + ghostty-custom desktop; both link dotfiles, install the default tool set except `agy`, and leave networking and DNS alone.
 
 Run `sh sync doctor` to inspect installed links, tools, agent configuration, and relevant platform dependencies without applying repairs. See [sync details](docs/sync.md) for what `sh sync` changes and how the layers work, and [AGENTS.md](AGENTS.md) for the repository map and development checks.
-
-
-## Linux CPU power policy
-
-`power-policy` is a daemonless POSIX shell tool installed by the Linux dotfile layer. Run `power-policy status`, preview with `power-policy diff auto`, and apply with `doas "$HOME/.local/bin/power-policy" auto` or `doas "$HOME/.local/bin/power-policy" performance`. It supports Intel N100 (`intel_pstate`/`intel_cpufreq`), AMD Ryzen 2400GE (`acpi-cpufreq`), and modern AMD P-State/EPP. It replaces `threadripper-tune`; boot/event hooks are opt-in. See [Linux CPU power policy](docs/power-policy.md).

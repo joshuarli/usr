@@ -9,7 +9,7 @@ Threat assumption: a compromised or stale node could try to join the tailnet or 
 1. Set the CLI path for this Mac:
 
    ```sh
-   TAILSCALE_CLI=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+   TAILSCALE_CLI=/opt/homebrew/bin/tailscale
    ```
 
 2. Check the current CLI version and supported commands:

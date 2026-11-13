@@ -22,6 +22,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Pi build migration plan | [docs/CAMPAIGN-PI-BUILD.md](docs/CAMPAIGN-PI-BUILD.md) |
 | macOS preference management | [docs/macos-preferences.md](docs/macos-preferences.md) |
 | Linux CPU power policy | [docs/power-policy.md](docs/power-policy.md) |
+| Tailnet hardening runbook | [tailscale/TAILSCALE.md](tailscale/TAILSCALE.md) |
 | Alpine provisioner | [host/alpine/README.md](host/alpine/README.md) |
 | Skills guide | [SKILLS.md](SKILLS.md) |
 | Deferred work | [TODO.md](TODO.md) |
