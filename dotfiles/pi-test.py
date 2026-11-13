@@ -36,7 +36,7 @@ class PiTests(unittest.TestCase):
             "https_proxy": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9",
         }
         seed(self.home / ".cache/usr/pi-releases")
-        self.script("node", '#!/bin/sh\nprintf "%s\\n" "${MOCK_NODE_VERSION:-26.13.0}"\n')
+        self.script("node", '#!/bin/sh\nprintf "%s\\n" "${MOCK_NODE_VERSION:-26.13.1}"\n')
         # Deliberately poison npm: a runtime install MUST NOT use it.
         self.script("npm", '#!/bin/sh\necho unexpected-npm-call >&2\nexit 99\n')
 

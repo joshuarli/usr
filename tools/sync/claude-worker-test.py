@@ -44,7 +44,7 @@ class ClaudeWorkerSyncTests(unittest.TestCase):
         }))
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
-        (bin_dir / "node").write_text("#!/bin/sh\nprintf 'v26.13.0\\n'\n")
+        (bin_dir / "node").write_text("#!/bin/sh\nprintf 'v26.13.1\\n'\n")
         (bin_dir / "node").chmod(0o755)
         (bin_dir / "npm").write_text("#!/bin/sh\necho illegal-npm >&2\nexit 99\n")
         (bin_dir / "npm").chmod(0o755)

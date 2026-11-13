@@ -50,7 +50,7 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 glibc = subprocess.run(["getconf", "GNU_LIBC_VERSION"],
                                        capture_output=True, text=True).returncode == 0
                 target = "linux-" + arch + ("" if glibc else "-musl")
-            release = home / ".local/share/nodejs" / f"26.13.0-npm11.20.0-{target}"
+            release = home / ".local/share/nodejs" / f"26.13.1-npm11.20.0-{target}"
             nodebin = release / "bin"
             nodebin.mkdir(parents=True)
             (nodebin / "node").symlink_to(node)

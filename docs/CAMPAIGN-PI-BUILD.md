@@ -21,7 +21,7 @@ Use disposable homes and checkouts under each repository's ignored `.work/`. Pre
 - Keep tracked `confirmSend: true` and `inboundTrigger: "never"`. Headless sends requiring UI confirmation must fail clearly. Explicit `confirmSend: false` may authorize fixture-proved sends. Scoped SDK children remain without intercom.
 - Preserve current versions and provider behavior during the ownership move. Optimize only after accepted full parity, one measured dependency group per slice.
 - Maintainer dependency installation is permitted. Routine Pi setup/runtime may fetch pinned release assets only, with a digest-addressed cache and no fetch for an unchanged valid installation. No npm/npx, registry resolution, `pi install/update` or automatic catalog/package updates. Provider requests and configured local intercom traffic remain permitted.
-- Node is a separate prerequisite: supported pin 26.13.0, effective minimum 26.12.0. Muse still requires a separately installed executable and login. Use isolated Node for campaign checks.
+- Node is a separate prerequisite: supported pin 26.13.1, effective minimum 26.12.0. Muse still requires a separately installed executable and login. Use isolated Node for campaign checks.
 - Preserve exact tier/model/effort pins, typed descendant ceilings, depth 2, Command Code leaves, owned worktrees, durable leases, result identity and same-scope continuation. Legacy admitted sessions retain their pins.
 
 # Artifact contract
