@@ -37,10 +37,40 @@ import pi_release  # noqa: E402
 NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 NODEJS_VERSION = "26.13.1"
+MIRROR_BASE = "https://mirror.17166969.xyz/current"
+# Zip SHA-256 pins from the static artifact mirror's SHA256SUMS (bump them
+# together with mirror/manifest.toml in the stuff repo).
+NODE_MIRROR_SHA256 = {
+    "darwin-arm64": "0d45363e43fc1e290035d9a85962c62c32e42b70d28ae48b7b7196b335a188aa",
+    "linux-arm64": "852023eaba5a6c2af01b34099c72b91f1c25125c7b3802f44a110f4bba4c25e7",
+    "linux-arm64-musl": "51d0e59cf9461efb38ef78c6654232a530cf27c5960b431869d99957e1ee72c0",
+    "linux-x64": "3536ba2115df0fba8e90374f109da650f0583fed7ab34f22af26f89172be16d7",
+    "linux-x64-musl": "b11cc6b444326723d62a32e666b95550c06f43d98fda09488cee490923e159bc",
+}
+CODEX_VERSION = "0.169.0"
+CODEX_MIRROR_SHA256 = {
+    "aarch64-apple-darwin": "8e482ac7e893cfa0b548742a2f3e6ae81de2ac2891053453b0304b4a8e2f592a",
+    "aarch64-unknown-linux-musl": "40ee0eb85768dd4574cd8b657a69bd872dbfb5776aadac912c1f84c99a69448d",
+    "x86_64-apple-darwin": "3f9b4ace250629325223f185c1fa9baa7d780199730f2c14d0b9e8e82eaa4965",
+    "x86_64-unknown-linux-musl": "45385fb0f8f9704441495d9a3f0464ba53028b8b2696c2baa979bf19119bdbf9",
+}
+OPENCODE_VERSION = "2.3.0"
+OPENCODE_MIRROR_SHA256 = {
+    "darwin-arm64": "a1154db80032754f759aa30d15925170cc28f8a594f3e1cf8bdc78e18534435a",
+    "darwin-x64": "a83eff46face267e51346857f8044677d2a224fcbfd44bd3364c609ca5840d30",
+    "linux-arm64": "cd0a4c946c7a5781099981f961c4daed967a2db294bb826979ff82c3caa64360",
+    "linux-arm64-musl": "0d5123dd83d8cebbcb9b3beeb71b873a074751e4b8c7f1e79a872cfd472f2c4b",
+    "linux-x64": "90f9f923d0cf11105ca74112b4b0b1ba5474a138288e3a23a887bc1de73504c7",
+    "linux-x64-musl": "c8edfb4b6afc49a089d3cb106ba58db319df0c727c2d68e3da3ecd52354fc53c",
+}
+INSTALL_SCRIPT_MIRROR_SHA256 = {
+    "antigravity-install": "bb5d2b9a55f5372b60b82fdf4a3895b023c5bbb956a05ffcf8136d490fa3dd6f",
+    "claude-install": "ff3309b380abe6289c754a2c921ba73846f35b35bde1b768c24663ba2df6d0bb",
+    "muse-install": "6a582900510f3d3e1df03fefa0a397681f7b5ce247a3be62d7dffab0fa52bac0",
+}
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
 NODE_BUILD_REPO = "laputa-systems/node-build"
 PLAYER_REPO = "joshuarli/play"
-MUSE_LAUNCHER_URL = "https://dev.meta.ai/install.sh"
 GHOSTTY_CUSTOM_ASSET = "Ghostty-Custom-aarch64-apple-darwin.dmg"
 GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
 SSH_COMMANDS = "ssh ssh-keygen ssh-agent ssh-add sftp scp".split()
@@ -303,6 +333,24 @@ class Installer:
         Path(target).write_bytes(body)
         return True
 
+    def mirror_script(self, tool: str, artifact_id: str) -> Path:
+        with tempfile.NamedTemporaryFile(delete=False) as stream:
+            archive_path = Path(stream.name)
+        if not self.download(f"{MIRROR_BASE}/{artifact_id}.zip", archive_path):
+            archive_path.unlink(missing_ok=True)
+            self.skip(tool, "the mirror installer is unavailable")
+        if self.sha256_file(archive_path) != INSTALL_SCRIPT_MIRROR_SHA256[artifact_id]:
+            archive_path.unlink(missing_ok=True)
+            self.skip(tool, "the mirror installer checksum mismatch")
+        member = self.zip_member(archive_path, "install.sh")
+        archive_path.unlink(missing_ok=True)
+        if member is None:
+            self.skip(tool, "the mirror installer zip is missing install.sh")
+        fd, path = tempfile.mkstemp(prefix=f"{tool}.install.")
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(member)
+        return Path(path)
+
     def asset_id(self, url: str) -> str:
         try:
             _, headers = self.fetch(url, ranged=True)
@@ -369,14 +417,6 @@ class Installer:
             if found is not None:
                 return tag, found[0], base
         return None
-
-    def fetch_json(self, url: str) -> dict:
-        text = self.fetch_text(url)
-        try:
-            value = json.loads(text)
-        except ValueError:
-            return {}
-        return value if isinstance(value, dict) else {}
 
     @staticmethod
     def sha256_file(path: Path) -> str:
@@ -1031,21 +1071,6 @@ class Installer:
             [("node-build", "node/bin/node")],
             release=(tag, NODE_BUILD_REPO, {triple: (asset, expected)}), run_staged=True)
 
-    def jaq_runs(self, argv: list[str]) -> bool:
-        return self.run(argv + ["--version"], capture=True).returncode == 0
-
-    def jaq_available(self) -> bool:
-        for candidate in (["jaq"], [str(self.dest / "jaq")], ["jq"]):
-            if self.which(candidate[0]) and self.jaq_runs(candidate):
-                return True
-        return False
-
-    def run_jaq(self, argv: list[str]) -> subprocess.CompletedProcess[str] | None:
-        for candidate in (["jaq"], [str(self.dest / "jaq")], ["jq"]):
-            if self.which(candidate[0]) and self.jaq_runs(candidate):
-                return self.run(candidate + argv, capture=True)
-        return None
-
     def _npm_tool(self, tool: str, root: Path, package: str, bin_name: str, *,
                   extra: tuple[str, ...] = (), fetch_msg: str = "", no_release: str = "") -> None:
         if not self.which("npm"):
@@ -1388,32 +1413,21 @@ class Installer:
         self.ok(f"Installed dsh and dsh-tui under {self.dsh_root}")
 
     def install_nodejs(self) -> None:
-        targets = {
-            ("darwin", "aarch64"): ("node-v" + NODEJS_VERSION + "-darwin-arm64.tar.xz",
-                                   "https://nodejs.org/dist/v" + NODEJS_VERSION + "/node-v" + NODEJS_VERSION + "-darwin-arm64.tar.xz",
-                                   "af6202f5370a3a5209e85dc543758dfd9f44c8726626a236730cd603a67a8559",
-                                   "darwin-arm64"),
-        }
         if (self.os_name, self.arch) == ("darwin", "aarch64"):
-            asset, url, sha256, target = targets[("darwin", "aarch64")]
+            target = "darwin-arm64"
         elif self.os_name == "linux" and self.arch in ("x86_64", "aarch64"):
             glibc = self.run(["getconf", "GNU_LIBC_VERSION"], capture=True).returncode == 0
             if glibc:
                 target = "linux-x64" if self.arch == "x86_64" else "linux-arm64"
-                sha256 = "5c063e46bab0fbc1c17cc445d7ff129cbdcd0471be6ed83b6ab864f8143bc864" \
-                    if self.arch == "x86_64" else "89e1853138db51e8b82d3e98ba9c0d3f2956a28e5e55ea1b7e12d25aae92d5dd"
-                url = f"https://nodejs.org/dist/v{NODEJS_VERSION}/node-v{NODEJS_VERSION}-{target}.tar.xz"
             elif self.arch == "x86_64":
                 target = "linux-x64-musl"
-                sha256 = "c2ade3fc8a670f0b110eb68c020026daf1ac57b4fceed1ca471106fc144d8720"
-                url = f"https://nodejs.org/dist/v{NODEJS_VERSION}/node-v{NODEJS_VERSION}-{target}.tar.xz"
             else:
                 target = "linux-arm64-musl"
-                sha256 = "8cc9e687c32c40d6d849a4058fdf4ab8a1248a95b5758fa22eaf1b7069869b76"
-                url = f"https://unofficial-builds.nodejs.org/download/release/v{NODEJS_VERSION}/node-v{NODEJS_VERSION}-{target}.tar.xz"
-            asset = f"node-v{NODEJS_VERSION}-{target}.tar.xz"
         else:
             self.skip("nodejs", f"no Node.js {NODEJS_VERSION} build for {self.os_name}/{self.arch}")
+        asset = f"node-v{NODEJS_VERSION}-{target}.zip"
+        url = f"{MIRROR_BASE}/{asset}"
+        sha256 = NODE_MIRROR_SHA256[target]
         if self.nodejs_root.is_symlink():
             self.skip("nodejs", f"{self.nodejs_root} is a symlink")
         managed = False
@@ -1493,11 +1507,7 @@ class Installer:
                 if self.sha256_file(archive_path) != sha256:
                     archive_path.unlink(missing_ok=True)
                     self.skip("nodejs", f"{asset} checksum mismatch")
-                names = self.tar_names(archive_path)
-                if names is None or self.archive_paths_bad(names):
-                    archive_path.unlink(missing_ok=True)
-                    self.skip("nodejs", f"{asset} contains an invalid path")
-                if not self.extract_tar(archive_path, staged_bundle, strip=1):
+                if not self.extract_zip(archive_path, staged_bundle):
                     archive_path.unlink(missing_ok=True)
                     self.skip("nodejs", f"{asset} could not be extracted")
                 archive_path.unlink(missing_ok=True)
@@ -1546,11 +1556,7 @@ class Installer:
         if self.keep_installed("agy"):
             return
         self.fetch_msg("Installing Antigravity CLI ...")
-        with tempfile.NamedTemporaryFile(delete=False) as stream:
-            script = Path(stream.name)
-        if not self.download("https://antigravity.google/cli/install.sh", script):
-            script.unlink(missing_ok=True)
-            self.skip("antigravity", "official installer is unavailable")
+        script = self.mirror_script("antigravity", "antigravity-install")
         agy_home = Path(tempfile.mkdtemp())
         result = self.run(["bash", str(script), "--dir", str(self.dest)], extra_env={"HOME": str(agy_home)})
         shutil.rmtree(agy_home, ignore_errors=True)
@@ -1574,11 +1580,7 @@ class Installer:
             self.current("muse is installed")
             return
         self.fetch_msg("Installing Muse Code launcher ...")
-        with tempfile.NamedTemporaryFile(delete=False) as stream:
-            script = Path(stream.name)
-        if not self.download(MUSE_LAUNCHER_URL, script):
-            script.unlink(missing_ok=True)
-            self.skip("muse", "official installer is unavailable")
+        script = self.mirror_script("muse", "muse-install")
         result = self.run(["bash", str(script)],
                           extra_env={"MUSE_INSTALL_DIR": str(self.dest), "MUSE_NO_MODIFY_PATH": "1"})
         script.unlink(missing_ok=True)
@@ -1610,11 +1612,7 @@ class Installer:
             self.current("claude is installed")
             return
         self.fetch_msg("Installing Claude Code with the native installer ...")
-        with tempfile.NamedTemporaryFile(delete=False) as stream:
-            script = Path(stream.name)
-        if not self.download("https://claude.ai/install.sh", script):
-            script.unlink(missing_ok=True)
-            self.skip("claude", "official installer is unavailable")
+        script = self.mirror_script("claude", "claude-install")
         output_path = Path(tempfile.mkstemp(prefix="dl.claude.", dir=self.env.get("TMPDIR") or "/tmp")[1])
         with output_path.open("wb") as output:
             result = subprocess.run(["bash", str(script), "latest"], env={**self.env, "PATH": str(self.dest) + os.pathsep + self._path},
@@ -1659,43 +1657,22 @@ class Installer:
         if self.installed("codex") and not self.codex_legacy():
             self.current("codex is installed")
             return
-        if not self.jaq_available():
-            self.install_jaq()
-            if not self.jaq_available():
-                return
         targets = {("darwin", "x86_64"): "x86_64-apple-darwin", ("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl", ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
         if (self.os_name, self.arch) not in targets:
             self.skip("codex", f"no upstream binary for {self.os_name}/{self.arch}")
         target = targets[(self.os_name, self.arch)]
-        release = self.fetch_json("https://releases.openai.com/codex/channels/latest")
-        tag = str(release.get("tag_name", ""))
-        if not tag.startswith("rust-v") or not self.valid_version(tag.removeprefix("rust-v")):
-            self.unchecked("codex", "no release found")
-            return
-        version = tag.removeprefix("rust-v")
-        asset = f"codex-package-{target}.tar.gz"
-        asset_entry = {}
-        assets = release.get("assets", [])
-        for entry in assets if isinstance(assets, list) else []:
-            if isinstance(entry, dict) and entry.get("name") == asset:
-                asset_entry = entry
-        url = str(asset_entry.get("browser_download_url", ""))
-        digest = str(asset_entry.get("digest", "")).removeprefix("sha256:")
-        if len(digest) != 64 or re.search(r"[^0-9a-f]", digest) or not url.startswith(
-                ("https://releases.openai.com/codex/releases/", "https://github.com/openai/codex/releases/download/")):
-            self.unchecked("codex", f"{asset} is missing a SHA-256 digest")
-            return
+        version = CODEX_VERSION
+        asset = f"codex-{version}-{target}.zip"
+        url = f"{MIRROR_BASE}/{asset}"
+        digest = CODEX_MIRROR_SHA256[target]
         codex_root = self.codex_home / "packages/standalone"
         if (self.dest / "codex").is_dir() and not (self.dest / "codex").is_symlink():
             self.skip("codex", f"{self.dest}/codex is a directory")
         releases = codex_root / "releases"
         if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
             self.skip("codex", f"{releases} is not a directory")
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked("codex", f"{asset} is unavailable")
-            return
+        record = f"codex-{version}-{target}"
         if not self.codex_legacy() and self.is_current("codex", record):
             target_path = os.readlink(self.dest / "codex") if (self.dest / "codex").is_symlink() else ""
             if self.own_codex_release_target(target_path):
@@ -1719,12 +1696,12 @@ class Installer:
         if self.sha256_file(archive_path) != digest:
             archive_path.unlink(missing_ok=True)
             self.skip("codex", f"{asset} checksum mismatch")
-        names = self.tar_names(archive_path)
+        names = self.zip_names(archive_path)
         if names is None or self.archive_paths_bad(names):
             archive_path.unlink(missing_ok=True)
             self.skip("codex", f"{asset} contains an invalid path")
         staged = self.stage_dir(releases, ".codex.")
-        if not self.extract_tar(archive_path, staged):
+        if not self.extract_zip(archive_path, staged):
             archive_path.unlink(missing_ok=True)
             self.skip("codex", f"{asset} could not be extracted")
         archive_path.unlink(missing_ok=True)
@@ -2360,20 +2337,19 @@ class Installer:
                 self.warn("Warning: file is required to identify the existing OpenCode 2 launcher; keeping it")
             self.current("opencode2 is installed")
             return
-        assets = {("darwin", "x86_64"): "opencode-darwin-x64.zip", ("darwin", "aarch64"): "opencode-darwin-arm64.zip",
-                  ("linux", "x86_64"): "opencode-linux-x64.tar.gz", ("linux", "aarch64"): "opencode-linux-arm64.tar.gz"}
-        if (self.os_name, self.arch) not in assets:
+        targets = {("darwin", "x86_64"): "darwin-x64", ("darwin", "aarch64"): "darwin-arm64",
+                   ("linux", "x86_64"): "linux-x64", ("linux", "aarch64"): "linux-arm64"}
+        if (self.os_name, self.arch) not in targets:
             self.skip("opencode2", f"no upstream binary for {self.os_name}/{self.arch}")
-        asset = assets[(self.os_name, self.arch)]
+        target = targets[(self.os_name, self.arch)]
         ldd_result = self.run(["ldd", "--version"], capture=True) if self.which("ldd") else None
         if self.os_name == "linux" and (Path("/etc/alpine-release").exists()
                 or (ldd_result is not None and "musl" in (ldd_result.stdout + ldd_result.stderr).lower())):
-            asset = asset.removesuffix(".tar.gz") + "-musl.tar.gz"
-        url = f"https://opencode.ai/update/api/latest/cli/opencode/{asset}"
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked("opencode2", f"{asset} is unavailable")
-            return
+            target += "-musl"
+        asset = f"opencode-{OPENCODE_VERSION}-{target}.zip"
+        url = f"{MIRROR_BASE}/{asset}"
+        digest = OPENCODE_MIRROR_SHA256[target]
+        record = f"opencode2-{OPENCODE_VERSION}-{target}"
         bin_dir = self.opencode2_home / "bin"
         if not self.opencode2_legacy() and self.is_current("opencode2", record):
             self.write_opencode2_shim(bin_dir / "opencode2")
@@ -2394,11 +2370,11 @@ class Installer:
         if not self.download(url, archive_path):
             archive_path.unlink(missing_ok=True)
             self.skip("opencode2", "download failed")
+        if self.sha256_file(archive_path) != digest:
+            archive_path.unlink(missing_ok=True)
+            self.skip("opencode2", "checksum mismatch")
         staged = self.stage_file(bin_dir, ".opencode2.")
-        if asset.endswith(".zip"):
-            member = self.zip_member(archive_path, "opencode")
-        else:
-            member = self.tar_member(archive_path, "opencode")
+        member = self.zip_member(archive_path, "opencode")
         archive_path.unlink(missing_ok=True)
         if not member:
             staged.unlink(missing_ok=True)

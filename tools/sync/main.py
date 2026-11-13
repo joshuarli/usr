@@ -24,7 +24,6 @@ PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 
 NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "pi", "dsh"})
-JQ_TOOLS = frozenset({"codex", "node-build"})
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
     "shuck": ("shellcheck",), "opencode2": ("opencode2",),
@@ -282,8 +281,6 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
         prerequisites = set()
         if tool in NODE_RUNTIME_TOOLS:
             prerequisites.add("nodejs")
-        if tool in JQ_TOOLS:
-            prerequisites.add("jaq")
         if tool == "dsh":
             prerequisites.add("pnpm")
         if tool == "player":
@@ -300,8 +297,6 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
             dependencies.append("host:alpine")
         if tool in NODE_RUNTIME_TOOLS:
             dependencies.append("tool:nodejs")
-        if tool in JQ_TOOLS:
-            dependencies.append("tool:jaq")
         if tool == "dsh":
             dependencies.append("tool:pnpm")
         if tool == "player":

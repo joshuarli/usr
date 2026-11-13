@@ -34,9 +34,9 @@ class MainTests(unittest.TestCase):
         dag = main.graph(self.ctx, ["player"], setup=False).select(["tool:player"])
         self.assertEqual([t.name for t in dag.order()], ["tool:ffmpeg", "tool:player"])
 
-    def test_codex_requires_jaq(self):
+    def test_codex_has_no_tool_prerequisites(self):
         dag = main.graph(self.ctx, ["codex"], setup=False).select(["tool:codex"])
-        self.assertEqual([t.name for t in dag.order()], ["tool:jaq", "tool:codex"])
+        self.assertEqual([t.name for t in dag.order()], ["tool:codex"])
 
     def test_bridge_registration_tasks_serialize_their_sdk_install(self):
         tasks = main.graph(self.ctx, [], setup=True).tasks
