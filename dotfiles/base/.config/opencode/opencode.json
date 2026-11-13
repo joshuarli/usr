@@ -12,6 +12,32 @@
       "effect": "allow"
     }
   ],
+  "agents": {
+    "scout": {
+      "description": "Read-only codebase scout: search and summarize, never edit",
+      "mode": "subagent",
+      "model": "opencode/inkling-2-small-free#low",
+      "permissions": [
+        { "action": "shell", "resource": "*", "effect": "deny" },
+        { "action": "edit", "resource": "*", "effect": "deny" }
+      ]
+    },
+    "mechanic": {
+      "description": "Applies well-specified mechanical changes across files",
+      "mode": "subagent",
+      "model": "opencode/inkling-2-small-free#medium"
+    },
+    "worker": {
+      "description": "Implements coherent, well-specified component-sized slices",
+      "mode": "subagent",
+      "model": "opencode/inkling-2-small-free#high"
+    },
+    "expert": {
+      "description": "Deep reasoning for hard, ambiguous, or high-risk slices",
+      "mode": "subagent",
+      "model": "opencode/inkling-2-small-free#max"
+    }
+  },
   "mcp": {
     "servers": {
       "pi-subagent-bridge": {

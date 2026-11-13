@@ -1,11 +1,22 @@
 ---
 name: orchestrate
-description: "Route all coding subagents through the shared Pi SDK bridge, scope and verify delegated work, and run multi-lane campaigns only when useful. Skip work cheaper to do directly."
+description: "Route coding subagents through the Pi SDK bridge (OpenCode: native subagents only); scope and verify; campaigns only when useful. Skip work cheaper to do directly."
 ---
 
 # Orchestrate
 
-**All coding subagents from any harness use `pi-subagent-bridge`**, including `expert` and `god`. New expert/god jobs MUST use the bridge's pinned Antigravity CLI `gemini-4-carbon-high` backend. Do not spawn native Claude/Codex `god`, or use native subagents while an approved lower-tier bridge backend is available. The only exception is the lower-tier quota fallback below.
+**All coding subagents from any harness use `pi-subagent-bridge`**, including `expert` and `god`. New expert/god jobs MUST use the bridge's pinned Antigravity CLI `gemini-4-carbon-high` backend. Do not spawn native Claude/Codex `god`, or use native subagents while an approved lower-tier bridge backend is available. Exceptions: the OpenCode path below and the lower-tier quota fallback.
+
+**OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge` — any tier, including expert/god, never as a fallback. Delegate only through OpenCode native subagents: the configured `scout`/`mechanic`/`worker`/`expert` agents, or built-in `general`/`explore`. `god` has no OpenCode lane. If the top-level model is free (zero cost, e.g. `opencode/*-free`), every tier must run a free model; never substitute a paid one. All tiers pin `opencode/inkling-2-small-free`:
+
+| Tier | Effort |
+| --- | --- |
+| scout (read-only: no `shell`, no `edit`) | low |
+| mechanic | medium |
+| worker | high |
+| expert | max |
+
+These pins hold regardless of the top-level model. Bridge pins, fallbacks, and nesting rules below do not apply on this path.
 
 **Quota fallback for scout/mechanic/worker only:** When the bridge cannot run any pinned backend, use harness-native subagents with the same brief, isolated worktree, scope, and verification. In Claude Code use `haiku` for scout and `sonnet` for mechanic/worker. Preserve any partial work before relaunch. Never use this fallback for expert or god: Carbon unavailable or exhausted is a blocker, not permission to use Argon, native Opus/Sol, or a cheaper model. No hook gates native subagents. Return to the bridge when it has capacity.
 
@@ -25,13 +36,13 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 **Hydrogen succession:** When a task would previously select Gemini 3.8 Flash, prefer the available `gemini-4-hydrogen-high` or `gemini-4-hydrogen-medium` in Antigravity. Documented CLI slugs are `gemini-4-hydrogen-{low,medium,high,xhigh}`. Existing Codex/Command/Pi pins are not Gemini 3.8 and must not be relabeled. Hydrogen is not a configured bridge backend; use it directly only with an explicit pin and a successful `agy models` check. Never fall back to Gemini 3.8 or Argon.
 
-**OpenCode boundary:** scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The existing Pi expert profile remains only for already-admitted legacy sessions, not new expert dispatches.
+**Pi OpenCode Go boundary:** scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The existing Pi expert profile remains only for already-admitted legacy sessions, not new expert dispatches.
 
 No Pi `god` tier exists. Root `god` is a terminal Carbon lane; no native child fanout. Reserve it for exceptional architectural decisions and independent adversarial review. Expert/god differ by brief and acceptance proof, not by model.
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify `expert`. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
-## The one bridge, everywhere
+## The bridge, except OpenCode
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 

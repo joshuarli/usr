@@ -48,6 +48,31 @@ class OrchestrateTests(unittest.TestCase):
         self.assertNotIn("PreToolUse", settings.get("hooks", {}))
         self.assertFalse((ROOT / "dotfiles/base/.local/bin/agent-tier-gate").exists())
 
+    def test_opencode_exception(self):
+        self.assertIn("OpenCode exception:", self.text)
+        self.assertIn("never uses `pi-subagent-bridge`", self.text)
+        self.assertIn("god` has no OpenCode lane", self.text)
+        self.assertIn("every tier must run a free model", self.text)
+        config = json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
+        agents = config["agents"]
+        self.assertEqual(
+            {tier: agents[tier]["model"] for tier in ("scout", "mechanic", "worker", "expert")},
+            {
+                "scout": "opencode/inkling-2-small-free#low",
+                "mechanic": "opencode/inkling-2-small-free#medium",
+                "worker": "opencode/inkling-2-small-free#high",
+                "expert": "opencode/inkling-2-small-free#max",
+            },
+        )
+        self.assertNotIn("god", agents)
+        scout_rules = agents["scout"]["permissions"]
+        denied = {(r["action"], r["effect"]) for r in scout_rules}
+        self.assertIn(("shell", "deny"), denied)
+        self.assertIn(("edit", "deny"), denied)
+        for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
+            content = (ROOT / path).read_text()
+            self.assertIn("OpenCode", content)
+
     def test_global_rule(self):
         contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()
         self.assertIn("in every harness and skill", contract)
