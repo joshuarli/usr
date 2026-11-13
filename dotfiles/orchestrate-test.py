@@ -39,9 +39,11 @@ class OrchestrateTests(unittest.TestCase):
     def test_native_subagents_are_the_quota_fallback(self):
         self.assertIn("Quota fallback for scout/mechanic/worker only:", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
+        self.assertIn("Host-access exception for scout/mechanic/worker:", self.text)
         for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
             content = (ROOT / path).read_text()
             self.assertIn("quota", content)
+            self.assertIn("host access Codex's sandbox cannot grant", content)
             self.assertNotIn("Missing bridge means no delegation", content)
             self.assertNotIn("blocks delegation rather than authorizing another launcher", content)
         settings = json.loads((ROOT / "dotfiles/base/.claude/settings.json").read_text())
