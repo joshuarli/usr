@@ -162,7 +162,7 @@ sys.exit(1)
                "TMPDIR": str(self.root), "NPM_LOG": str(self.root / "npm.log"),
                "MOCK_NPM_VERSIONS": json.dumps({
                    "command-code@latest": "1.87.3", "pnpm@latest": "12.16.1",
-                   "cf@latest": "3.0.0", "agent-browser@latest": "2.0.0",
+                   "cf@latest": "3.0.0",
                    "@earendil-works/pi-coding-agent@latest": "1.4.0",
                    "@deepseek-ai/dsh@next": "0.2.1", "@deepseek-harness-tui/dsh-tui": "0.16.0",
                    "npm@latest": "11.9.0"})}
@@ -323,6 +323,54 @@ sys.exit(1)
         self.assertIn("SHA256SUMS", str(ctx.exception))
         self.assertEqual(dest.read_bytes(), b"old")
         self.assertEqual(self.state("stuff"), "old-etag")
+
+    def agent_browser_routes(self, payload, digest=None):
+        import hashlib
+        digest = digest or hashlib.sha256(payload).hexdigest()
+        asset = "agent-browser-linux-musl-x64"
+        release = {"tag_name": "v0.43.0", "assets": [{"name": asset, "digest": f"sha256:{digest}"},
+                                                      {"name": "agent-browser-darwin-arm64", "digest": "sha256:" + "b" * 64}]}
+        return {"https://api.github.com/repos/vercel-labs/agent-browser/releases/latest": json.dumps(release).encode(),
+                f"https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/{asset}": payload}
+
+    def test_agent_browser_release_binary_replaces_npm_install(self):
+        payload = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
+        npm_root = self.home / ".local/share/agent-browser"
+        (npm_root / "lib/node_modules/agent-browser/bin").mkdir(parents=True)
+        (npm_root / "bin").mkdir()
+        (npm_root / "bin/agent-browser").symlink_to(npm_root / "lib/node_modules/agent-browser/bin/agent-browser")
+        self.dest_path("agent-browser").parent.mkdir(parents=True, exist_ok=True)
+        self.dest_path("agent-browser").symlink_to(npm_root / "bin/agent-browser")
+        state = self.home / ".local/state/dl/agent-browser"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text("0.42.0\n")
+        routes = self.agent_browser_routes(payload)
+        inst = self.make(routes)
+        inst.install_agent_browser()
+        launcher = self.dest_path("agent-browser")
+        self.assertFalse(launcher.is_symlink())
+        self.assertEqual(launcher.read_bytes(), payload)
+        self.assertTrue(self.state("agent-browser").startswith("v0.43.0:"))
+        self.assertFalse(npm_root.exists())
+        inst = self.make(routes)
+        inst.install_agent_browser()
+        self.assertEqual(inst.fetched, ["https://api.github.com/repos/vercel-labs/agent-browser/releases/latest"])
+
+    def test_agent_browser_refuses_mismatch_unmanaged_and_unsupported(self):
+        payload = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
+        inst = self.make(self.agent_browser_routes(payload, digest="0" * 64))
+        with self.assertRaises(SkipInstall):
+            inst.install_agent_browser()
+        self.assertFalse(self.dest_path("agent-browser").exists())
+        self.assertEqual([path.name for path in self.dest_path("agent-browser").parent.glob(".agent-browser.*")], [])
+        self.dest_path("agent-browser").write_text("mine")
+        inst = self.make(self.agent_browser_routes(payload))
+        with self.assertRaises(SkipInstall):
+            inst.install_agent_browser()
+        self.assertEqual(self.dest_path("agent-browser").read_text(), "mine")
+        inst = self.make({}, os_name="linux", arch="riscv64")
+        with self.assertRaises(SkipInstall):
+            inst.install_agent_browser()
 
     def test_fd_and_zzz_platforms(self):
         inst = self.make({}, os_name="darwin", arch="aarch64")

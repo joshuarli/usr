@@ -1101,8 +1101,6 @@ class Installer:
             self.ok(f"Installed {self.dest}/cmd")
         elif tool == "cf":
             self.ok(f"Installed {self.dest}/cf ({version})")
-        elif tool == "agent-browser":
-            self.ok(f"Installed {self.dest}/agent-browser ({version})")
         elif tool == "pi":
             self.ok(f"Installed {self.dest}/pi")
         else:
@@ -1171,9 +1169,59 @@ class Installer:
                        fetch_msg="Installing Cloudflare cf ...", no_release="could not resolve the latest cf version")
 
     def install_agent_browser(self) -> None:
-        self._npm_tool("agent-browser", self.agent_browser_root, "agent-browser", "agent-browser",
-                       extra=("--ignore-scripts",), fetch_msg="Installing agent-browser ...",
-                       no_release="could not resolve the latest agent-browser version")
+        """Install the latest agent-browser release binary, verified against GitHub's asset digest."""
+        assets = {("darwin", "aarch64"): "agent-browser-darwin-arm64", ("darwin", "x86_64"): "agent-browser-darwin-x64",
+                  ("linux", "x86_64"): "agent-browser-linux-musl-x64",
+                  ("linux", "aarch64"): "agent-browser-linux-musl-arm64"}
+        if (self.os_name, self.arch) not in assets:
+            self.skip("agent-browser", f"no upstream binary for {self.os_name}/{self.arch}")
+        asset = assets[(self.os_name, self.arch)]
+        launcher = self.dest / "agent-browser"
+        if (launcher.exists() or launcher.is_symlink()) and not (self.state / "agent-browser").is_file():
+            self.skip("agent-browser", f"{launcher} already exists outside dl management")
+        try:
+            release = json.loads(self.fetch_text("https://api.github.com/repos/vercel-labs/agent-browser/releases/latest"))
+            tag = release["tag_name"]
+            entry = next(item for item in release["assets"] if item["name"] == asset)
+            algorithm, _, expected = (entry.get("digest") or "").partition(":")
+        except (ValueError, KeyError, TypeError, StopIteration):
+            self.unchecked("agent-browser", f"no {asset} in the latest release")
+            return
+        if algorithm != "sha256" or not re.fullmatch(r"[0-9a-f]{64}", expected) or not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+            self.unchecked("agent-browser", f"the latest release has no usable SHA-256 for {asset}")
+            return
+        record = f"{tag}:{expected}"
+        if launcher.is_file() and not launcher.is_symlink() and self.is_current("agent-browser", record):
+            self.remove_npm_agent_browser()
+            self.current(f"agent-browser is current ({tag})")
+            return
+        self.fetch_msg(f"Downloading agent-browser {tag} ({asset}) ...")
+        staged = self.stage_file(self.dest, ".agent-browser.")
+        url = f"https://github.com/vercel-labs/agent-browser/releases/download/{tag}/{asset}"
+        if not self.download(url, staged):
+            staged.unlink(missing_ok=True)
+            self.skip("agent-browser", f"{asset} download failed")
+        if self.sha256_file(staged) != expected:
+            staged.unlink(missing_ok=True)
+            self.skip("agent-browser", f"{asset} checksum mismatch")
+        staged.chmod(staged.stat().st_mode | 0o111)
+        version = self.run([str(staged), "--version"], capture=True)
+        if version.returncode or version.stdout.strip() != f"agent-browser {tag[1:]}":
+            staged.unlink(missing_ok=True)
+            self.skip("agent-browser", f"{asset} does not report version {tag[1:]}")
+        self.install_binary("agent-browser", staged, record)
+        self.remove_npm_agent_browser()
+
+    def remove_npm_agent_browser(self) -> None:
+        """Remove the npm tree that earlier syncs installed, once the release binary replaces its launcher."""
+        root = self.agent_browser_root
+        if root.is_symlink() or not root.is_dir() or not (root / "lib/node_modules").is_dir():
+            return
+        if set(path.name for path in root.iterdir()) - {"bin", "lib", "etc"}:
+            self.warn(f"Warning: leaving {root}; it holds files the npm install did not create")
+            return
+        shutil.rmtree(root)
+        self.ok(f"Removed the previous npm install at {root}")
 
     def install_pi(self) -> None:
         """Install the Pi CLI, SDK and extensions from the pinned pi-build release (no npm)."""
@@ -2798,8 +2846,7 @@ class Installer:
                 mode_target = os.readlink(mode_host) if mode_host.is_symlink() else ""
                 if mode_target == f"{target.removesuffix('/bin/codex')}/bin/codex-code-mode-host":
                     self.own_file(mode_host)
-        for tool, root, binary in (("cmd", self.cmd_root, "cmd"), ("pnpm", self.pnpm_root, "pnpm"),
-                                   ("agent-browser", self.agent_browser_root, "agent-browser")):
+        for tool, root, binary in (("cmd", self.cmd_root, "cmd"), ("pnpm", self.pnpm_root, "pnpm")):
             if (self.state / tool).is_file() and (self.state / tool).stat().st_size > 0:
                 self.own_file(self.state / tool)
                 if root.is_dir() and not root.is_symlink() and (root / "bin" / binary).is_file() \

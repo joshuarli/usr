@@ -23,7 +23,7 @@ BRIDGE = ROOT / "tools/sync/claude-worker.py"
 PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 
-NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "agent-browser", "pi", "dsh"})
+NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "pi", "dsh"})
 JQ_TOOLS = frozenset({"codex", "node-build"})
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
