@@ -822,6 +822,46 @@ sys.exit(1)
         self.assertTrue((self.home / ".local/share/gluon/current").is_symlink())
         self.assertEqual(self.state("gluon"), "e")
 
+    def _bctl_release(self, tag, script):
+        import hashlib
+        triple = "x86_64-unknown-linux-musl"
+        top = f"bctl-0.1.0-abc-{triple}"
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:xz") as archive:
+            for name in (top, f"{top}/bin"):
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                info.mode = 0o755
+                archive.addfile(info)
+            info = tarfile.TarInfo(f"{top}/bin/bctl")
+            info.size = len(script)
+            info.mode = 0o755
+            archive.addfile(info, io.BytesIO(script))
+        payload = buffer.getvalue()
+        base = f"https://github.com/joshuarli/bctl/releases/download/{tag}"
+        return {"https://github.com/joshuarli/bctl/releases.atom": atom([("2024-01-01", tag)]),
+                f"{base}/{top}.tar.xz": (payload, {"ETag": tag}),
+                f"{base}/SHA256SUMS-{triple}": f"{hashlib.sha256(payload).hexdigest()}  {top}.tar.xz\n".encode()}
+
+    def test_bctl_installs_after_image_pull_and_doctor_pass(self):
+        log = self.root / "bctl.log"
+        routes = self._bctl_release("release-aaa", f"#!/bin/sh\necho \"$*\" >> {log}\n".encode())
+        inst = self.make(routes)
+        inst.install_bctl()
+        self.assertEqual(log.read_text(), "image pull\ndoctor\n")
+        link = self.dest_path("bctl")
+        self.assertEqual(os.readlink(link), str(self.home / ".local/share/bctl/current/bin/bctl"))
+        self.assertTrue((self.home / ".local/share/bctl/current/bin/bctl").is_file())
+
+    def test_bctl_keeps_the_installed_release_when_image_pull_fails(self):
+        self.make(self._bctl_release("release-aaa", b"#!/bin/sh\nexit 0\n")).install_bctl()
+        current = self.home / ".local/share/bctl/current"
+        before = os.readlink(current)
+        with self.assertRaises(Exception):
+            self.make(self._bctl_release("release-bbb", b"#!/bin/sh\n[ \"$1\" = image ] && exit 1\nexit 0\n")).install_bctl()
+        self.assertEqual(os.readlink(current), before)
+        self.assertEqual([p.name for p in (self.home / ".local/share/bctl/releases").iterdir() if not p.name.startswith(".")], ["release-aaa-x86_64-unknown-linux-musl"])
+
     def test_opencode2_zip_shim_and_current(self):
         asset = "opencode-linux-x64.tar.gz"
         url = f"https://opencode.ai/update/api/latest/cli/opencode/{asset}"

@@ -29,7 +29,7 @@ TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
     "shuck": ("shellcheck",), "opencode2": ("opencode2",),
     "ghostty": ("ghostty-custom",), "ghostty-custom": ("ghostty-custom",),
-    "player": ("player",), "antigravity": ("agy",), "gluon": ("meson", "ninja", "gluon-build"),
+    "player": ("player",), "antigravity": ("agy",), "gluon": ("meson", "ninja", "gluon-build"), "bctl": ("bctl",),
     "python3": ("python3",), "ssh": ("ssh",),
 }
 

@@ -46,6 +46,7 @@ GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
 SSH_COMMANDS = "ssh ssh-keygen ssh-agent ssh-add sftp scp".split()
 OXISH_COMMANDS = "oxish-server oxish-session".split()
 GLUON_COMMANDS = "meson ninja gluon-build".split()
+BCTL_COMMANDS = ["bctl"]
 FFMPEG_COMMANDS = "ffmpeg ffprobe".split()
 OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
 GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pack git-submodule git-submodule--helper git-sh-setup git-sh-i18n git-sh-i18n--envsubst".split()
@@ -132,6 +133,7 @@ class Installer:
         self.ffmpeg_home = Path(self.env.get("FFMPEG_HOME") or self.data_home / "ffmpeg")
         self.oxish_home = Path(self.env.get("OXISH_HOME") or self.data_home / "oxish")
         self.gluon_home = Path(self.env.get("GLUON_HOME") or self.data_home / "gluon")
+        self.bctl_releases_home = self.data_home / "bctl"
         self.opencode2_home = Path(self.env.get("OPENCODE2_HOME") or self.home / ".opencode")
         self.cmd_root = self.data_home / "command-code"
         self.pi_root = self.data_home / "pi-runtime"
@@ -1969,6 +1971,65 @@ class Installer:
                 self.removed.add(entry)
                 self.changed = True
 
+    def prune_bctl_releases(self) -> None:
+        releases = self.bctl_releases_home / "releases"
+        current = self.bctl_releases_home / "current"
+        if not releases.is_dir() or releases.is_symlink():
+            return
+        keep = Path(os.readlink(current)).name if current.is_symlink() else ""
+        for entry in sorted(releases.iterdir()):
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            if entry.name == keep:
+                self.own_dir(entry)
+            elif entry.name.startswith(".bctl.") or entry.name.startswith("release-"):
+                shutil.rmtree(entry, ignore_errors=True)
+                self.removed.add(entry)
+                self.changed = True
+
+    def install_bctl(self) -> None:
+        triples = {("darwin", "aarch64"): "aarch64-apple-darwin", ("linux", "x86_64"): "x86_64-unknown-linux-musl"}
+        if (self.os_name, self.arch) not in triples:
+            self.skip("bctl", f"no bctl release for {self.os_name}/{self.arch}")
+        triple = triples[(self.os_name, self.arch)]
+        tag = self.latest_tag("https://github.com/joshuarli/bctl/releases.atom", prefix="release-")
+        if not tag:
+            self.unchecked("bctl", "no release found")
+            return
+        base = f"https://github.com/joshuarli/bctl/releases/download/{tag}"
+        sums_url = f"{base}/SHA256SUMS-{triple}"
+        pattern = re.compile(rf"bctl-[0-9A-Za-z._-]+-{re.escape(triple)}\.tar\.xz")
+        assets = [fields[1] for line in self.fetch_text(sums_url).splitlines()
+                  if len(fields := line.split()) == 2 and pattern.fullmatch(fields[1])]
+        if len(assets) != 1:
+            self.unchecked("bctl", f"{tag} has no {triple} archive")
+            return
+        asset = assets[0]
+        top = asset.removesuffix(".tar.xz")
+
+        def validate(staged: Path) -> bool:
+            bundle = staged / top
+            if sorted(p.name for p in staged.iterdir()) != [top] or not bundle.is_dir() or bundle.is_symlink():
+                return False
+            for entry in bundle.iterdir():
+                entry.rename(staged / entry.name)
+            bundle.rmdir()
+            bctl = staged / "bin/bctl"
+            if not (bctl.is_file() and os.access(bctl, os.X_OK)):
+                return False
+            for argv in ([str(bctl), "image", "pull"], [str(bctl), "doctor"]):
+                if self.run(argv).returncode:
+                    self.warn(f"bctl {' '.join(argv[1:])} failed for {tag}; keeping the installed release")
+                    return False
+            return True
+
+        self._archive_bundle("bctl", self.bctl_releases_home, BCTL_COMMANDS, "bctl", in_bin=True,
+                             asset=asset, url=f"{base}/{asset}", sums_url=sums_url,
+                             release_dir=self.bctl_releases_home / "releases" / f"{tag}-{triple}",
+                             validate=validate, ok_message=f"bctl is current ({tag})",
+                             install_message=f"Installed {self.dest}/bctl ({tag})")
+        self.prune_bctl_releases()
+
     def install_gluon(self) -> None:
         if not self.which("zipinfo"):
             self.skip("gluon", "zipinfo is required to validate the archive")
@@ -2766,7 +2827,7 @@ class Installer:
             "jaq": self.install_jaq, "mold": self.install_mold, "nodejs": self.install_nodejs,
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
-            "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon,
+            "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon, "bctl": self.install_bctl,
             "rimage": self.install_rimage,
         }
         if tool in handlers:
@@ -2907,6 +2968,14 @@ class Installer:
                 for command in GLUON_COMMANDS:
                     if (self.dest / command).is_symlink() and os.readlink(self.dest / command) == str(self.gluon_home / "current" / command):
                         self.own_file(self.dest / command)
+        bctl_current = self.bctl_releases_home / "current"
+        if (self.state / "bctl").is_file() and (self.state / "bctl").stat().st_size > 0 and bctl_current.is_symlink():
+            target = os.readlink(bctl_current)
+            if self._own_release_target(self.bctl_releases_home, BCTL_COMMANDS, f"{target}/bin/bctl", in_bin=True) and Path(target).is_dir():
+                self.own_file(self.state / "bctl")
+                self.own_file(bctl_current)
+                if (self.dest / "bctl").is_symlink() and os.readlink(self.dest / "bctl") == str(bctl_current / "bin/bctl"):
+                    self.own_file(self.dest / "bctl")
         pins = self.ffmpeg_home / "pins"
         if pins.is_dir() and not pins.is_symlink():
             for pin in sorted(pins.iterdir()):
