@@ -1,4 +1,3 @@
-export TERM="tmux-256color"
 export PATH="$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:$PATH"
 export EDITOR="$HOME/.local/bin/e"
 export PAGER="less"
