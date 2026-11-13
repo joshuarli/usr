@@ -17,7 +17,7 @@ Use disposable homes and checkouts under each repository's ignored `.work/`. Pre
 # Decisions
 
 - `pi-build` owns upstream identities, snapshots, local patches, production/build locks, tool pins, packaging, licenses, provenance and archives. `usr` retains first-party bridge code, harness configuration, consumer pins, installation and registration.
-- `full` remains the default and preserves bare interactive `pi`. `headless-usr` requires explicit profile selection and installs one closure. Making headless the default is outside the grant.
+- `headless-usr` is the committed default as of 2026-11-13 (owner-granted). `full` remains available by pin selection and preserves bare interactive `pi`. One closure is installed either way.
 - Keep tracked `confirmSend: true` and `inboundTrigger: "never"`. Headless sends requiring UI confirmation must fail clearly. Explicit `confirmSend: false` may authorize fixture-proved sends. Scoped SDK children remain without intercom.
 - Preserve current versions and provider behavior during the ownership move. Optimize only after accepted full parity, one measured dependency group per slice.
 - Maintainer dependency installation is permitted. Routine Pi setup/runtime may fetch pinned release assets only, with a digest-addressed cache and no fetch for an unchanged valid installation. No npm/npx, registry resolution, `pi install/update` or automatic catalog/package updates. Provider requests and configured local intercom traffic remain permitted.
