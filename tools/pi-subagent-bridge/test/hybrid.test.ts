@@ -59,7 +59,7 @@ function fake(cwd: string) {
     } }),
     active: async () => ({ data: {} }),
     inbox: async () => ({ data: [] }),
-    messages: async () => ({ data: [{ type: "assistant", content: [{ type: "text", text: "PROOF: test exit 0" }] }] }),
+    messages: async () => ({ data: [{ type: "assistant", content: [{ type: "text", text: "PROOF: test exit 0\nACCEPTANCE: met" }] }] }),
     interrupt: async () => ({ data: { interrupted: true } }),
     models: async () => ({ data: [
       { id: "muse-spark-1.3-contributor", providerID: "opencode-go" },
@@ -83,7 +83,7 @@ function fake(cwd: string) {
         sessionId: "cmd-session", error: commandFailure, finalText: commandFinalText ?? "failed" }, stderr: null } :
       commandDone ?
       { state: "succeeded", result: { subtype: "success" as const,
-        sessionId: "cmd-session", finalText: "proof" }, stderr: null } :
+        sessionId: "cmd-session", finalText: "proof\nACCEPTANCE: met" }, stderr: null } :
       { state: "running", result: null, stderr: null },
     cancel: () => true,
   }
@@ -168,7 +168,7 @@ function carbonFake() {
       },
       status: () => failed ?
         { state: "failed", result: { subtype: "error" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", error: "429 quota exhausted" }, stderr: null } :
-        { state: "succeeded", result: { subtype: "success" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", finalText: "PROOF" }, stderr: null },
+        { state: "succeeded", result: { subtype: "success" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", finalText: "PROOF\nACCEPTANCE: met" }, stderr: null },
       cancel: () => true,
       session: () => "7ce10216-708a-4ba7-9128-53789b2ce8ad",
     },
@@ -1023,5 +1023,38 @@ test("an acknowledged Codex cancellation does not fall back on a quota-shaped fa
     assert.equal((await bridge.cancel(f.cwd, started.session_id)).interrupted, true)
     assert.equal((await bridge.status(f.cwd, started.session_id)).state, "cancelled")
     assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("a run without a final ACCEPTANCE: met line is incomplete, and network reaches Codex", async () => {
+  for (const [finalText, state, claim] of [
+    ["proof\nACCEPTANCE: met", "succeeded", "met"],
+    ["proof\n**ACCEPTANCE: not met**", "incomplete", "not_met"],
+    ["partial, no blocker", "incomplete", "missing"],
+  ] as const) {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd), starts: Parameters<typeof startCodex>[] = []
+      const codex = { ...noCodex, available: () => true,
+        start: (...args: Parameters<typeof startCodex>) => { starts.push(args); return { pid: 123, output: "fake", errors: "fake", started_at: "now" } },
+        status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "t", finalText }, stderr: null }) }
+      const bridge = makeHybridBridge(m.api, m.command, codex)
+      const started = await bridge.start(f.cwd, "edit", "worker", { ...f.scope, network: true }, "Do scoped work")
+      assert.match(started.watch, /^worker-watch ".+" usrw_/)
+      assert.equal(starts[0][7], true)
+      const status = await bridge.status(f.cwd, started.session_id)
+      assert.equal(status.state, state)
+      assert.equal(status.acceptance_claim, claim)
+      assert.equal(status.acceptance_blocked, claim !== "met")
+    } finally { f.close() }
+  }
+})
+
+test("scouts cannot request network", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const bridge = makeHybridBridge(m.api, m.command, { ...noCodex, available: () => true })
+    await assert.rejects(bridge.start(f.cwd, "look", "scout", { ...f.scope, writable_paths: [], network: true }, "Read"), /no network/)
   } finally { f.close() }
 })

@@ -18,6 +18,7 @@ export type Scope = {
   acceptance_proof: string
   attempt_limit: 1 | 2
   stop_on: string
+  network?: boolean
 }
 type Session = {
   id: string; cwd: string; title: string; tier: RoutedTier; scope: Scope; task: string
@@ -76,7 +77,9 @@ function scopeFor(value: unknown, tier: RoutedTier, cwd: string, checkHead = tru
   const acceptance_proof = required(raw.acceptance_proof, "acceptance_proof")
   const stop_on = required(raw.stop_on, "stop_on")
   if (raw.attempt_limit !== 1 && raw.attempt_limit !== 2) throw new Error("attempt_limit must be 1 or 2")
-  return { base_revision, writable_paths, acceptance_proof, attempt_limit: raw.attempt_limit, stop_on }
+  if (raw.network !== undefined && typeof raw.network !== "boolean") throw new Error("network must be a boolean")
+  if (raw.network && tier === "scout") throw new Error("scouts are read-only and get no network")
+  return { base_revision, writable_paths, acceptance_proof, attempt_limit: raw.attempt_limit, stop_on, ...(raw.network ? { network: true } : {}) }
 }
 function changes(cwd: string, base: string): string[] {
   const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], { encoding: "utf8" })
@@ -85,6 +88,10 @@ function changes(cwd: string, base: string): string[] {
 }
 function outside(paths: string[], owned: string[]): string[] {
   return paths.filter((p) => !owned.some((w) => w.endsWith("/") ? p.startsWith(w) : p === w))
+}
+/** The command that blocks until the session's executor finishes; run it as a background task. */
+function watchCommand(s: Session): string {
+  return "worker-watch " + JSON.stringify(dirname(dirname(stateDir(s.cwd)))) + " " + s.id
 }
 function stateDir(cwd: string): string {
   const root = dirname(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
@@ -176,7 +183,13 @@ function prompt(s: Session): string {
     "Stop if blocked or if the requirements demand more scope. Do not broaden the task.",
     "Return a PROOF RECORD instead of a summary: changed paths; exact commands, exit codes and decisive output;",
     "file:line evidence for research; and explicit unverified cases and blockers. Never invent a passing check.",
+    "End with exactly one final line: `ACCEPTANCE: met` only when every required acceptance command ran and passed, otherwise `ACCEPTANCE: not met`.",
   ].join("\n")
+}
+/** The worker's own verdict from the final `ACCEPTANCE:` line of its proof record. */
+export function acceptanceClaim(text: string | null): "met" | "not_met" | "missing" {
+  const last = text?.trimEnd().split("\n").at(-1)?.replace(/[`*]/g, "").trim().toLowerCase()
+  return last === "acceptance: met" ? "met" : last === "acceptance: not met" ? "not_met" : "missing"
 }
 function untouched(s: Session): boolean {
   return git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision &&
@@ -288,7 +301,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
   }
   function admission(s: Session) {
     return {
-      session_id: s.id, backend: s.backend, status: "admitted",
+      session_id: s.id, backend: s.backend, status: "admitted", watch: watchCommand(s),
       fallback_reason: s.fallback_reason ?? null,
       fallback_notice: s.fallback_reason ? fallbackNotice(s) : null,
     }
@@ -380,7 +393,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         throw error
       }
       if (codex.available()) {
-        s.command_run = codex.start(s.cwd, leaseDir, prompt(s), s.codex_effort!, s.tier === "scout", undefined, s.codex_model)
+        s.command_run = codex.start(s.cwd, leaseDir, prompt(s), s.codex_effort!, s.tier === "scout", undefined, s.codex_model, !!s.scope.network)
         s.backend = "codex"
         s.attempts = 1
         save(s)
@@ -522,6 +535,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         if (activeWorktreeOwner(directory, s.cwd) === s.id)
           releaseWorktree(directory, s.cwd, s.id)
       }
+      const acceptance_claim = acceptanceClaim(last_assistant_text)
+      if (state === "succeeded" && acceptance_claim !== "met") state = "incomplete"
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
         model: s.backend === "carbon" || s.backend === "carbon-transition" ? CARBON_MODEL :
@@ -531,7 +546,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s).variant :
           s.backend === "codex" || s.backend === "codex-transition" ? s.codex_effort : fallbackEffortFor(s), state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
-        acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0,
+        acceptance_claim, acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0 || acceptance_claim !== "met",
         continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
         steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
         fallback_reason: s.fallback_reason ?? null,
@@ -578,14 +593,16 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         s.command_run = undefined
         s.cancel_requested = false
         save(s)
-        s.command_run = runner.start(s.cwd, stateDir(s.cwd),
-          prompt(s) + (continuation ? "\nCONTINUE THE SAME TASK FROM WHERE THE TURN LIMIT STOPPED IT: " :
-            "\nSAME-SCOPE CORRECTION ONLY: ") + correction,
-          (backend === "carbon" ? CARBON_EFFORT : backend === "codex" ? s.codex_effort! : fallbackEffortFor(s)), s.tier === "scout", previous.result.sessionId, backend === "carbon" ? CARBON_MODEL : backend === "codex" ? s.codex_model : fallbackModelFor(s))
+        const text = prompt(s) + (continuation ? "\nCONTINUE THE SAME TASK FROM WHERE THE TURN LIMIT STOPPED IT: " :
+          "\nSAME-SCOPE CORRECTION ONLY: ") + correction
+        s.command_run = backend === "codex"
+          ? codex.start(s.cwd, stateDir(s.cwd), text, s.codex_effort!, s.tier === "scout", previous.result.sessionId, s.codex_model, !!s.scope.network)
+          : runner.start(s.cwd, stateDir(s.cwd), text, backend === "carbon" ? CARBON_EFFORT : fallbackEffortFor(s), s.tier === "scout",
+            previous.result.sessionId, backend === "carbon" ? CARBON_MODEL : fallbackModelFor(s))
         s.backend = backend
         save(s)
       }
-      return { session_id: s.id, backend: s.backend, status: "admitted" }
+      return { session_id: s.id, backend: s.backend, status: "admitted", watch: watchCommand(s) }
       })
     },
     async cancel(cwd: unknown, id: unknown) {

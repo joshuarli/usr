@@ -48,7 +48,7 @@ function fake(cwd: string) {
     } }),
     active: async () => ({ data: {} }),
     inbox: async () => ({ data: [] }),
-    messages: async () => ({ data: [{ type: "assistant", content: [{ type: "text", text: "PROOF: ok" }] }] }),
+    messages: async () => ({ data: [{ type: "assistant", content: [{ type: "text", text: "PROOF: ok\nACCEPTANCE: met" }] }] }),
     interrupt: async () => ({ data: { interrupted: true } }),
     models: async () => ({ data: [
       { id: "deepseek-v4.1-flash", providerID: "opencode-go", variants: [{ id: "high" }, { id: "max" }], enabled: true, status: "active" },
@@ -58,7 +58,7 @@ function fake(cwd: string) {
   const command: NonNullable<Parameters<typeof makeHybridBridge>[1]> = {
     available: () => true,
     start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "2026-11-09" }),
-    status: () => ({ state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd", finalText: "proof" }, stderr: null }),
+    status: () => ({ state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd", finalText: "proof\nACCEPTANCE: met" }, stderr: null }),
     cancel: () => true,
   }
   return { api, command }
@@ -90,7 +90,7 @@ test("integration: active worktree lease blocks a second start, including higher
     let done = false
     const m = fake(f.cwd)
     m.command.status = () => done
-      ? { state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd", finalText: "proof" }, stderr: null }
+      ? { state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd", finalText: "proof\nACCEPTANCE: met" }, stderr: null }
       : { state: "running" as const, result: null, stderr: null }
     const bridge = makeHybridBridge(m.api, m.command, noCodex)
     const started = await bridge.start(f.cwd, "owner", "mechanic", f.scope, "Hold lease")

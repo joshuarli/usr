@@ -25,6 +25,10 @@ test("Codex captures the thread and completed turn and resumes with the same mod
     for (let i = 0; i < 200 && codexResult(next).state === "running"; i++) await delay()
     assert.match(readFileSync(args, "utf8"), /resume\nthread-1\ncorrection/)
     assert.match(readFileSync(args, "utf8"), /--ignore-user-config/)
+    assert.doesNotMatch(readFileSync(args, "utf8"), /network_access/)
+    const networked = startCodex(root, root, "fetch", "medium", false, undefined, "gpt-6.1-terra", true)
+    for (let i = 0; i < 200 && codexResult(networked).state === "running"; i++) await delay()
+    assert.match(readFileSync(args, "utf8"), /sandbox_workspace_write\.network_access=true\n--add-dir\n\S+cargo/)
   } finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }) }
 })
 

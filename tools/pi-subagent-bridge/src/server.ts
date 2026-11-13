@@ -22,6 +22,7 @@ const scopeSchema = {
     acceptance_proof: { type: "string", minLength: 1, maxLength: 2000 },
     attempt_limit: { type: "integer", minimum: 1, maximum: 2 },
     stop_on: { type: "string", minLength: 1, maxLength: 2000 },
+    network: { type: "boolean", description: "Writers only: give a Codex worker network access and a writable Cargo home, for tasks that fetch dependencies" },
   },
   required: ["base_revision", "writable_paths", "acceptance_proof", "attempt_limit", "stop_on"],
   additionalProperties: false,
@@ -35,7 +36,7 @@ const tools = [
   },
   {
     name: "worker_start",
-    description: "Delegate a scoped task. Scout/mechanic/worker use Codex then approved fallbacks; expert/god use only pinned Antigravity Carbon High. Never start a duplicate. Admission is not completion.",
+    description: "Delegate a scoped task. Scout/mechanic/worker use Codex then approved fallbacks; expert/god use only pinned Antigravity Carbon High. Never start a duplicate. Admission is not completion: run the returned `watch` command as a background task to learn when the worker ends.",
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },
@@ -46,7 +47,7 @@ const tools = [
   },
   {
     name: "worker_status",
-    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A Codex or Command Code run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A run that ends without a final `ACCEPTANCE: met` line reports state incomplete and acceptance_blocked. A Codex or Command Code run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, session_id: idSchema }, required: ["cwd", "session_id"], additionalProperties: false },
   },
   {

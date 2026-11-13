@@ -3,6 +3,8 @@ import { appendFileSync, closeSync, openSync, readSync, fstatSync } from "node:f
 import { randomUUID } from "node:crypto"
 import { processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
 import { fileURLToPath } from "node:url"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { Tier } from "./tier-policy.ts"
 
 export const CODEX_TIER_MODELS: Record<Tier, { model: string; effort: Effort }> = {
@@ -12,6 +14,9 @@ export const CODEX_TIER_MODELS: Record<Tier, { model: string; effort: Effort }> 
   expert: { model: "gpt-6.1-terra", effort: "xhigh" },
 }
 const children = new Map<number, ChildProcess>()
+function cargoHome(): string {
+  return process.env.CARGO_HOME || join(homedir(), ".cargo")
+}
 export function codexAvailable(): boolean {
   try {
     const env = { ...process.env }
@@ -22,7 +27,7 @@ export function codexAvailable(): boolean {
   } catch { return false }
 }
 export function startCodex(directory: string, logDirectory: string, text: string,
-  effort: Effort, readOnly: boolean, resume?: string, model?: string): CommandRun {
+  effort: Effort, readOnly: boolean, resume?: string, model?: string, network = false): CommandRun {
   if (!Object.values(CODEX_TIER_MODELS).some((pin) => pin.model === model && pin.effort === effort))
     throw new Error("Unapproved Codex model and effort")
   const suffix = randomUUID(), output = `${logDirectory}/${suffix}.codex.ndjson`, errors = `${logDirectory}/${suffix}.codex.stderr`
@@ -30,6 +35,7 @@ export function startCodex(directory: string, logDirectory: string, text: string
   const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
     "--sandbox", readOnly ? "read-only" : "workspace-write", "--model", model!,
+    ...(network && !readOnly ? ["-c", "sandbox_workspace_write.network_access=true", "--add-dir", cargoHome()] : []),
     ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec",
       "-c", `mcp_servers.bridge_scout.command=${JSON.stringify(process.execPath)}`,
       "-c", `mcp_servers.bridge_scout.args=${JSON.stringify(["--experimental-strip-types", fileURLToPath(new URL("./codex-scout.ts", import.meta.url))])}`] : []),
