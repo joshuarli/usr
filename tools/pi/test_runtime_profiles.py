@@ -20,7 +20,7 @@ class RuntimeProfileTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.touch()
             config = home / ".pi/agent/intercom/config.json"
-            self.assertTrue(pi_offline.configure_intercom(home, runtime))
+            self.assertTrue(pi_offline.configure_intercom(home, runtime, "full"))
             for profile, expected in (("headless-usr", []), ("full", ["--import", str(loader)])):
                 self.assertTrue(pi_offline.configure_intercom(home, runtime, profile))
                 data = json.loads(config.read_text())

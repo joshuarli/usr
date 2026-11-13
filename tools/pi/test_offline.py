@@ -28,6 +28,7 @@ class OfflineTests(unittest.TestCase):
         environment.start()
         cls.addClassCleanup(environment.stop)
         cls.pin=pi_release.load_pin()
+        cls.profile=cls.pin["profile"]
         cls.key=pi_offline.platform_key()
         cls.prefix=pi_offline.runtime_dir(cls.home)
         cls.cache=pi_offline.cache_dir(cls.home)
@@ -49,12 +50,16 @@ class OfflineTests(unittest.TestCase):
         self.assertEqual((receipt["pin"],receipt["target"]),(self.pin,self.key))
 
     def test_local_broker_and_no_auto_wakeup(self):
-        self.assertTrue(pi_offline.configure_intercom(self.home,self.root))
-        self.assertFalse(pi_offline.configure_intercom(self.home,self.root))
+        self.assertTrue(pi_offline.configure_intercom(self.home,self.root,self.profile))
+        self.assertFalse(pi_offline.configure_intercom(self.home,self.root,self.profile))
         cfg=json.loads((self.home/".pi/agent/intercom/config.json").read_text())
         self.assertEqual(cfg["brokerCommand"],"node")
         self.assertEqual(cfg["inboundTrigger"],"never")
-        self.assertTrue(Path(cfg["brokerArgs"][-1]).is_file())
+        self.assertEqual(cfg.get("usrBrokerProfile"),self.profile)
+        if self.profile == "headless-usr":
+            self.assertEqual(cfg["brokerArgs"],[])
+        else:
+            self.assertTrue(Path(cfg["brokerArgs"][-1]).is_file())
         self.assertNotIn("npx",json.dumps(cfg))
 
     def test_broker_loader_moves_off_the_vendored_prefix_but_custom_args_stay(self):
@@ -64,12 +69,16 @@ class OfflineTests(unittest.TestCase):
             legacy=pi_offline.legacy_dir(self.home)/"node_modules/tsx/dist/loader.mjs"
             config.parent.mkdir(parents=True,exist_ok=True)
             config.write_text(json.dumps({"brokerCommand":"node","brokerArgs":["--import",str(legacy)],"confirmSend":False}))
-            self.assertTrue(pi_offline.configure_intercom(self.home,self.root))
+            self.assertTrue(pi_offline.configure_intercom(self.home,self.root,self.profile))
             cfg=json.loads(config.read_text())
-            self.assertEqual(cfg["brokerArgs"],["--import",str(self.root/"node_modules/tsx/dist/loader.mjs")])
+            if self.profile == "headless-usr":
+                self.assertEqual(cfg["brokerArgs"],[])
+                self.assertEqual(cfg.get("usrBrokerProfile"),"headless-usr")
+            else:
+                self.assertEqual(cfg["brokerArgs"],["--import",str(self.root/"node_modules/tsx/dist/loader.mjs")])
             self.assertFalse(cfg["confirmSend"])
             config.write_text(json.dumps({"brokerCommand":"node","brokerArgs":["--import","/opt/custom.mjs"]}))
-            pi_offline.configure_intercom(self.home,self.root)
+            pi_offline.configure_intercom(self.home,self.root,self.profile)
             self.assertEqual(json.loads(config.read_text())["brokerArgs"],["--import","/opt/custom.mjs"])
         finally:
             if original is None: config.unlink(missing_ok=True)
@@ -149,7 +158,7 @@ class OfflineTests(unittest.TestCase):
             self.assertIn("1.5.0", p.stdout)
             self.assertFalse(marker.exists(), "Pi launcher invoked npm")
 
-    def test_bundled_cli_and_typescript_import_without_npm(self):
+    def test_bundled_cli_and_intercom_extension_import_without_npm(self):
         node=shutil.which("node")
         if not node:self.skipTest("Node not available")
         version=subprocess.check_output([node,"-p","process.versions.node"],text=True)
@@ -159,11 +168,15 @@ class OfflineTests(unittest.TestCase):
         p=subprocess.run([node,str(cli),"--version"],env=env,capture_output=True,text=True,timeout=25)
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertIn("1.5.0",p.stdout)
-        loader=self.root/"node_modules/tsx/dist/loader.mjs"
-        extension=self.root/"node_modules/@dataforxyz/agent-intercom-pi/index.ts"
+        if self.profile == "headless-usr":
+            extension=self.root/"node_modules/@dataforxyz/agent-intercom-pi/index.js"
+            command=[node,"--input-type=module","-e"]
+        else:
+            loader=self.root/"node_modules/tsx/dist/loader.mjs"
+            extension=self.root/"node_modules/@dataforxyz/agent-intercom-pi/index.ts"
+            command=[node,"--import",str(loader),"--input-type=module","-e"]
         code=f"await import({json.dumps(extension.as_uri())});console.log('intercom-ok')"
-        p=subprocess.run([node,"--import",str(loader),"--input-type=module","-e",code],
-                         cwd=self.root,env=env,capture_output=True,text=True,timeout=25)
+        p=subprocess.run([*command,code],cwd=self.root,env=env,capture_output=True,text=True,timeout=25)
         self.assertEqual(p.returncode,0,p.stdout+p.stderr)
         self.assertIn("intercom-ok",p.stdout)
 
@@ -173,12 +186,14 @@ class OfflineTests(unittest.TestCase):
         if not node: self.skipTest("Node not available")
         version = subprocess.check_output([node, "-p", "process.versions.node"], text=True)
         if int(version.split(".")[0]) < 26: self.skipTest("Node 26 required")
-        loader = self.root/"node_modules/tsx/dist/loader.mjs"
         fixture = ROOT/"tools/pi/test_runtime_protocol.mjs"
         env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
                    npm_config_registry="http://127.0.0.1:9")
-        p = subprocess.run([node, "--import", str(loader), str(fixture), str(self.root)],
-                           cwd=self.root, env=env, capture_output=True,
+        command = [node, str(fixture), str(self.root)]
+        if self.profile == "full":
+            command = [node, "--import", str(self.root/"node_modules/tsx/dist/loader.mjs"),
+                       str(fixture), str(self.root)]
+        p = subprocess.run(command, cwd=self.root, env=env, capture_output=True,
                            text=True, timeout=25)
         self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
         self.assertIn("installed Muse accepted scoped session/start", p.stdout)
@@ -207,14 +222,36 @@ class OfflineTests(unittest.TestCase):
         version = subprocess.check_output([node, "-p", "process.versions.node"], text=True)
         if int(version.split(".")[0]) < 26:
             self.skipTest("Node 26 required")
-        loader = self.root/"node_modules/tsx/dist/loader.mjs"
         checker = ROOT/"tools/pi/verify-extensions.mjs"
         env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
                    npm_config_registry="http://127.0.0.1:9")
-        p = subprocess.run([node, "--import", str(loader), str(checker), str(self.root)],
-                           cwd=self.root, env=env, capture_output=True,
+        command = [node, str(checker), str(self.root)]
+        if self.profile == "full":
+            command = [node, "--import", str(self.root/"node_modules/tsx/dist/loader.mjs"),
+                       str(checker), str(self.root)]
+        p = subprocess.run(command, cwd=self.root, env=env, capture_output=True,
                            text=True, timeout=35)
         self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
         self.assertIn("ok: Pi SDK bound subagents, intercom, and Muse", p.stdout)
+
+    def test_opencode_go_protocols_and_bedrock_rejection(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node not available")
+        version = subprocess.check_output([node, "-p", "process.versions.node"], text=True)
+        if int(version.split(".")[0]) < 26:
+            self.skipTest("Node 26 required")
+        checker = ROOT/"tools/pi/test_provider_protocols.mjs"
+        env = dict(os.environ, HOME=str(self.home), PI_OFFLINE="1",
+                   npm_config_registry="http://127.0.0.1:9")
+        p = subprocess.run([node, str(checker), str(self.root), self.profile],
+                           cwd=self.root, env=env, capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
+        for api in ("openai-completions", "anthropic-messages",
+                    "google-generative-ai", "openai-responses"):
+            self.assertIn(f"ok: OpenCode Go {api} returned fixture completion", p.stdout)
+        if self.profile == "headless-usr":
+            self.assertIn("ok: Bedrock fails explicitly", p.stdout)
 
 if __name__=="__main__":unittest.main()
