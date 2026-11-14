@@ -2,7 +2,8 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
-import { COMMAND_MODEL, COMMAND_EMBER_MODEL, isBannedModel, type CliPin, type Effort } from "./policy.ts"
+import type { LaunchRequest } from "./launch.ts"
+import { isBannedModel } from "./policy.ts"
 export { COMMAND_MODEL, COMMAND_EMBER_MODEL, type Effort } from "./policy.ts"
 export type CommandRun = { pid: number; output: string; errors: string; started_at: string; proc_start?: string | null }
 export type CommandResult = {
@@ -17,13 +18,9 @@ export type CommandResult = {
 const children = new Map<number, ChildProcess>()
 const MAX_TURNS = 100_000
 
-export function startCommand(directory: string, logDirectory: string, text: string,
-  effort: Effort, readOnly: boolean, resume?: string, model: string = COMMAND_MODEL, admittedPin?: CliPin): CommandRun {
-  const approved = admittedPin
-    ? admittedPin.model === model && admittedPin.effort === effort
-    : model === COMMAND_MODEL || model === COMMAND_EMBER_MODEL
-  if (!model || isBannedModel(model) || !approved)
-    throw new Error("Unapproved Command Code model and effort" + (admittedPin ? "; preserve the admitted pin or reconcile the session" : ""))
+export function startCommand(request: LaunchRequest): CommandRun {
+  const { directory, logDirectory, prompt: text, resume, selection: { model, effort }, access } = request
+  if (isBannedModel(model)) throw new Error("Prohibited Command Code model: " + model)
   const suffix = randomUUID()
   const output = `${logDirectory}/${suffix}.ndjson`
   const errors = `${logDirectory}/${suffix}.stderr`
@@ -37,7 +34,7 @@ export function startCommand(directory: string, logDirectory: string, text: stri
     "--verbose",
     "--max-turns", String(MAX_TURNS),
     "--skip-onboarding", "--no-auto-update", "--trust", "--no-skills",
-    ...(readOnly ? ["--plan"] : ["--yolo"]),
+    ...(access.kind === "read-only" ? ["--plan"] : ["--yolo"]),
     ...(resume ? ["--resume", resume] : []),
   ]
   try {

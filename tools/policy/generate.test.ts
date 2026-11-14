@@ -188,3 +188,115 @@ test("provider-qualified prohibited models fail before any projection is written
     }
   } finally { f.close() }
 })
+
+type Pin = { providerID: string; id: string; variant: string }
+type MutablePolicy = {
+  rootRoutes: Record<string, Array<{ executor: string; providerID?: string; model: string; effort: string }>>
+  nativePi: {
+    goModels: Record<string, Pin>; museModels: Record<string, Pin>
+    delegation: Record<string, string[]>; museDelegation: Record<string, string[]>; tools: Record<string, string[]>
+    maxSubagentDepth: number; modelAllowlist: string[]
+  }
+  opencode: { model: string; efforts: Record<string, string> }
+  nativeFallback: { tiers: string[]; claudeModels: Record<string, string> }
+  antigravityDirect: { models: string[] }
+  bannedModels: string[]
+}
+type Dimension = { name: string; mutate: (policy: MutablePolicy) => void; rejects?: RegExp }
+
+const FIXTURE_MODEL = "fixture-model"
+const dimensions: Dimension[] = [
+  { name: "expert model", mutate: p => { p.rootRoutes.expert[0].model = FIXTURE_MODEL } },
+  { name: "expert effort", mutate: p => { p.rootRoutes.expert[0].effort = "high" } },
+
+  { name: "codex scout model", mutate: p => { p.rootRoutes.scout[0].model = FIXTURE_MODEL } },
+  { name: "codex scout effort", mutate: p => { p.rootRoutes.scout[0].effort = "xhigh" } },
+  { name: "codex mechanic model", mutate: p => { p.rootRoutes.mechanic[0].model = FIXTURE_MODEL } },
+  { name: "codex mechanic effort", mutate: p => { p.rootRoutes.mechanic[0].effort = "low" } },
+  { name: "codex worker model", mutate: p => { p.rootRoutes.worker[0].model = FIXTURE_MODEL } },
+  { name: "codex worker effort", mutate: p => { p.rootRoutes.worker[0].effort = "max" } },
+
+  { name: "command scout model", mutate: p => { p.rootRoutes.scout[1].model = FIXTURE_MODEL } },
+  { name: "command scout effort", mutate: p => { p.rootRoutes.scout[1].effort = "low" } },
+  { name: "command mechanic model", mutate: p => { p.rootRoutes.mechanic[1].model = FIXTURE_MODEL } },
+  { name: "command mechanic effort", mutate: p => { p.rootRoutes.mechanic[1].effort = "low" } },
+  { name: "command worker model", mutate: p => { p.rootRoutes.worker[1].model = FIXTURE_MODEL } },
+  { name: "command worker effort", mutate: p => { p.rootRoutes.worker[1].effort = "low" } },
+
+  { name: "pi scout model", mutate: p => { p.rootRoutes.scout[2].model = FIXTURE_MODEL } },
+  { name: "pi scout provider", mutate: p => { p.rootRoutes.scout[2].providerID = "fixture-provider" } },
+  { name: "pi scout effort", mutate: p => { p.rootRoutes.scout[2].effort = "low" } },
+  { name: "pi mechanic model", mutate: p => { p.rootRoutes.mechanic[2].model = FIXTURE_MODEL } },
+  { name: "pi mechanic effort", mutate: p => { p.rootRoutes.mechanic[2].effort = "low" } },
+  { name: "pi worker first model", mutate: p => { p.rootRoutes.worker[2].model = FIXTURE_MODEL } },
+  { name: "pi worker second effort", mutate: p => { p.rootRoutes.worker[3].effort = "low" } },
+  { name: "pi worker order", mutate: p => { p.rootRoutes.worker.push(...p.rootRoutes.worker.splice(2, 1)) } },
+  { name: "pi worker list length", mutate: p => { p.rootRoutes.worker.splice(2, 1) } },
+
+  { name: "opencode model", mutate: p => { p.opencode.model = "opencode/fixture-free" } },
+  { name: "opencode scout effort", mutate: p => { p.opencode.efforts.scout = "high" } },
+  { name: "opencode mechanic effort", mutate: p => { p.opencode.efforts.mechanic = "high" } },
+  { name: "opencode worker effort", mutate: p => { p.opencode.efforts.worker = "low" } },
+  { name: "opencode expert effort", mutate: p => { p.opencode.efforts.expert = "low" } },
+
+  { name: "native fallback tiers", mutate: p => { p.nativeFallback.tiers = ["scout", "mechanic"] } },
+  { name: "native fallback scout Claude model", mutate: p => { p.nativeFallback.claudeModels.scout = "opus" } },
+  { name: "native fallback mechanic Claude model", mutate: p => { p.nativeFallback.claudeModels.mechanic = "haiku" } },
+  { name: "native fallback worker Claude model", mutate: p => { p.nativeFallback.claudeModels.worker = "opus" } },
+
+  { name: "antigravity direct first model", mutate: p => { p.antigravityDirect.models[0] = "fixture-direct-a" } },
+  { name: "antigravity direct second model", mutate: p => { p.antigravityDirect.models[1] = "fixture-direct-b" } },
+  { name: "antigravity direct list length", mutate: p => { p.antigravityDirect.models.push("fixture-direct-c") } },
+
+  { name: "banned family list", mutate: p => { p.bannedModels = ["gemini-4-argon"] } },
+  { name: "banned family covering the expert pin", mutate: p => { p.bannedModels.push("gemini-4-hydrogen") }, rejects: /Prohibited model in active policy/ },
+  { name: "banned family covering a Pi route", mutate: p => { p.bannedModels.push("muse-spark-1.3-contributor") }, rejects: /Prohibited model in active policy/ },
+
+  { name: "native scout model", mutate: p => { p.nativePi.goModels.scout.id = FIXTURE_MODEL } },
+  { name: "native scout provider", mutate: p => { p.nativePi.goModels.scout.providerID = "fixture-provider" } },
+  { name: "native scout variant", mutate: p => { p.nativePi.goModels.scout.variant = "low" } },
+  { name: "native mechanic model", mutate: p => { p.nativePi.goModels.mechanic.id = FIXTURE_MODEL } },
+  { name: "native mechanic variant", mutate: p => { p.nativePi.goModels.mechanic.variant = "low" } },
+  { name: "native worker model", mutate: p => { p.nativePi.goModels.worker.id = FIXTURE_MODEL } },
+  { name: "native worker variant", mutate: p => { p.nativePi.goModels.worker.variant = "low" } },
+  { name: "native expert model", mutate: p => { p.nativePi.goModels.expert.id = FIXTURE_MODEL } },
+  { name: "native expert variant", mutate: p => { p.nativePi.goModels.expert.variant = "low" } },
+  { name: "native banned model", mutate: p => { p.nativePi.goModels.worker.id = "gemini-4-argon-high" }, rejects: /Prohibited model in active policy/ },
+  { name: "muse worker model", mutate: p => { p.nativePi.museModels.worker.id = FIXTURE_MODEL } },
+  { name: "muse worker provider", mutate: p => { p.nativePi.museModels.worker.providerID = "fixture-provider" } },
+  { name: "muse worker variant", mutate: p => { p.nativePi.museModels.worker.variant = "low" } },
+
+  { name: "scout delegation", mutate: p => { p.nativePi.delegation.scout.push("mechanic") } },
+  { name: "mechanic delegation", mutate: p => { p.nativePi.delegation.mechanic = ["mechanic"] } },
+  { name: "worker delegation", mutate: p => { p.nativePi.delegation.worker.pop() } },
+  { name: "expert delegation", mutate: p => { p.nativePi.delegation.expert.shift() } },
+  { name: "muse worker delegation", mutate: p => { p.nativePi.museDelegation.worker.splice(1, 1) } },
+  { name: "delegation to an unknown profile", mutate: p => { p.nativePi.delegation.scout.push("unknown-profile") }, rejects: /Unknown descendant in scout/ },
+
+  { name: "scout tools", mutate: p => { p.nativePi.tools.scout.push("fixture-tool") } },
+  { name: "mechanic tools", mutate: p => { p.nativePi.tools.mechanic.push("fixture-tool") } },
+  { name: "worker tools", mutate: p => { p.nativePi.tools.worker.pop() } },
+  { name: "expert tools", mutate: p => { p.nativePi.tools.expert.shift() } },
+
+  { name: "native depth", mutate: p => { p.nativePi.maxSubagentDepth = 3 } },
+  { name: "invalid native depth", mutate: p => { p.nativePi.maxSubagentDepth = 0 }, rejects: /Invalid native Pi depth/ },
+  { name: "native model allowlist", mutate: p => { p.nativePi.modelAllowlist.push("fixture-provider/fixture-model") } },
+]
+
+test("every policy dimension reaches a rendered output or is rejected before generation", () => {
+  assert.equal(new Set(dimensions.map(dimension => dimension.name)).size, dimensions.length)
+  const f = fixture()
+  try {
+    for (const dimension of dimensions) {
+      const mutated: MutablePolicy = JSON.parse(JSON.stringify(POLICY))
+      dimension.mutate(mutated)
+      const policy: Policy = Object.assign({}, POLICY, mutated)
+      if (dimension.rejects) {
+        assert.throws(() => renderOutputs(f.root, policy), dimension.rejects, dimension.name)
+        continue
+      }
+      const changed = renderOutputs(f.root, policy).filter(output => output.content !== output.previous).map(output => output.path)
+      assert.ok(changed.some(path => path !== JSON_PATH), dimension.name + " changed only the JSON export: " + changed.join(", "))
+    }
+  } finally { f.close() }
+})

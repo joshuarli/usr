@@ -1,7 +1,10 @@
 # Model policy projections
 
-Root admission routes and native exceptions are authored in
-[`policy.ts`](../pi-subagent-bridge/src/policy.ts). Nested Pi pins, tool sets and
+Root admission plans and native exceptions are authored in
+[`policy.ts`](../pi-subagent-bridge/src/policy.ts): `ROOT_PLANS` holds one typed
+`RootPlan` per tier (an exclusive terminal executor, or Codex, Command Code and
+an ordered Pi list), and `routesOf` derives the ordered route list that the JSON
+export, the tables and the MCP summary share. Nested Pi pins, tool sets and
 descendant ceilings are authored in
 [`tier-policy.ts`](../pi-subagent-bridge/src/tier-policy.ts). The first module
 composes both domains into one pure `POLICY` value. Runtime code imports these
@@ -57,6 +60,14 @@ node --test tools/policy/generate.test.ts
 python3 -I dotfiles/orchestrate-test.py
 ```
 
-The generator tests prove reproduction, ownership and propagation. Independent
+The generator tests prove reproduction, ownership and propagation. One
+hand-written list names every remaining policy dimension (expert, Codex and
+Command Code pins per lower tier, the Pi fallback list, OpenCode, native
+fallback, direct Antigravity models, banned families and each native Pi field);
+each entry must change a rendered projection other than the JSON export or be
+rejected. Add a line there when a dimension is added. The native-fallback
+reasons, the OpenCode bridge and free-parent rules and the direct-model
+availability check have fixed meaning and are stated in the renderer prose, not
+exported. Independent
 bridge behavior tests establish approved routing and fallback behavior; matching
 generated representations alone does not establish policy correctness.

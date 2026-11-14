@@ -30,6 +30,11 @@ class OrchestrateTests(unittest.TestCase):
                 self.assertTrue(all(route["model"] != family and not route["model"].startswith(family + "-")
                                     for route in routes))
 
+    def test_direct_antigravity_models_require_an_availability_check(self):
+        for model in POLICY["antigravityDirect"]["models"]:
+            self.assertIn(model, self.text)
+        self.assertIn("Verify it with `agy models`", self.text)
+
     def test_no_old_mcp_registration(self):
         codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()
         self.assertIn("pi-subagent-bridge", codex)
@@ -57,11 +62,11 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("OpenCode exception:", self.text)
         self.assertIn("never uses `pi-subagent-bridge`", self.text)
         self.assertIn("every tier must run a free model", self.text)
+        self.assertIn("Bridge pins, fallbacks, and nesting rules do not apply on this path.", self.text)
         config = json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
         agents = config["agents"]
         policy = POLICY["opencode"]
-        self.assertFalse(policy["usesBridge"])
-        self.assertTrue(policy["freeOnlyWhenParentFree"])
+        self.assertIn(f"The configured tier agents use `{policy['model']}` regardless of the top-level model", self.text)
         self.assertEqual(
             {tier: agents[tier]["model"] for tier in POLICY["tiers"]},
             {tier: policy["model"] + "#" + policy["efforts"][tier] for tier in POLICY["tiers"]},

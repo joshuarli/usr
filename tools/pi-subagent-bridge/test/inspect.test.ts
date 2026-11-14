@@ -1,6 +1,6 @@
 import test, { after } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { makeWorkerBridge } from "../src/bridge.ts"
 import { processStartTime } from "../src/command.ts"
@@ -9,7 +9,7 @@ import { inspectStored, type Snapshot } from "../src/inspect.ts"
 import { piPort } from "../src/pi-port.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree } from "../src/worktree-lease.ts"
 import {
-  PI_MODEL, PI_ID, Scratch, commandLane, commandResultLine, piSession, piSuccess, realDeps, runFor, toolQueued,
+  PI_MODEL, PI_ID, Scratch, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, toolQueued,
   treeOf, unusedApi, writeLog, writePiChild, writeSession, type Repo,
 } from "./worker-fixtures.ts"
 
@@ -82,7 +82,7 @@ test("a missing receipt after the executor exits is interrupted", async () => {
 test("an interrupted Pi admission is blocked, never running or succeeded", async () => {
   for (const backend of ["pi-transition", "pi-admitting"]) {
     const repo = scratch.repo()
-    const id = writeSession(repo, 5, { backend, primary_model: PI_MODEL, command_model: undefined, command_effort: undefined })
+    const id = writeSession(repo, 5, { backend, primary_model: PI_MODEL, pi_candidates: [] })
     const snapshot = await inspectReadOnly(repo, id)
     assert.equal(snapshot.execution_state, "blocked_admission", backend)
     assert.match(String(snapshot.error), /Pi admission interrupted or uncertain/)
@@ -146,4 +146,29 @@ test("worker_status advances and releases a terminal lease, which inspection alo
   const response = await makeHybridBridge(unusedApi()).status(repo.cwd, id)
   assert.equal(response.state, "interrupted")
   assert.equal(activeWorktreeOwner(repo.directory, repo.cwd), null)
+})
+
+test("a record saved in the current format inspects exactly like the v1 record it came from", async () => {
+  const strip = ({ observed_at: _at, id: _id, last_activity: _activity, ...rest }: Snapshot) => rest
+  const repo = scratch.repo(), pid = scratch.alive()
+  const run = runFor(repo, "lane-v2", pid, { proc_start: processStartTime(pid) })
+  writeLog(run.output, [toolQueued("Build"), receipt])
+  writePiChild(repo, pid, piSuccess())
+  const lanes: Array<[string, Record<string, unknown>]> = [
+    ["command", { command_run: run }],
+    ["codex", { backend: "codex", command_run: run }],
+    ["pi", { backend: "pi", pi_id: PI_ID, primary_model: PI_MODEL, pi_candidates: [] }],
+    ["pi-transition", { backend: "pi-transition", primary_model: PI_MODEL, pi_candidates: [] }],
+    ["command-transition", { backend: "command-transition" }],
+  ]
+  let n = 40
+  for (const [name, fields] of lanes) {
+    const before = writeSession(repo, n++, { title: "Same lane", ...fields })
+    const after = migrate(repo, writeSession(repo, n++, { title: "Same lane", ...fields }))
+    const path = join(repo.directory, after + ".json")
+    assert.equal(JSON.parse(readFileSync(path, "utf8")).schema_version, 2, name)
+    const old = await inspectStored(repo.directory, before, realDeps(piPort()))
+    const current = await inspectStored(repo.directory, after, realDeps(piPort()))
+    assert.deepEqual(strip(current), strip(old), name)
+  }
 })

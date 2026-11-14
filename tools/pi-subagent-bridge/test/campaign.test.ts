@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { campaign } from "../src/campaign.ts"
 import { piPort } from "../src/pi-port.ts"
 import {
-  Scratch, collect, commandLane, commandResultLine, piSession, piSuccess, realDeps, runFor,
+  Scratch, collect, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor,
   toolQueued, writeLog, writePiChild, writeSession, type Repo,
 } from "./worker-fixtures.ts"
 
@@ -22,12 +22,12 @@ before(async () => {
   repoA = scratch.repo("repo-a")
   repoB = scratch.repo("repo-b")
   env = { XDG_STATE_HOME: join(scratch.path, "home", "state"), HOME: join(scratch.path, "home") }
-  alpha = commandLane(repoA, 1, gone, [succeeded("first done")], { title: "Alpha lane" })
+  alpha = migrate(repoA, commandLane(repoA, 1, gone, [succeeded("first done")], { title: "Alpha lane" }))
   beta = commandLane(repoA, 2, gone, [commandResultLine("error", { error: "compile failed", finalText: "compile failed" })], { title: "Beta lane" })
   gamma = commandLane(repoA, 3, gone, [commandResultLine("max_turns", { finalText: "ran out of turns" })], { title: "Gamma lane" })
   delta = commandLane(repoA, 4, gone, [working("Download kernel")], { title: "Delta lane" })
   epsilon = commandLane(repoA, 5, alive, [working("Still working")], { title: "Epsilon running" })
-  zeta = commandLane(repoB, 6, gone, [succeeded("second repo done")], { title: "Zeta other repo" })
+  zeta = migrate(repoB, commandLane(repoB, 6, gone, [succeeded("second repo done")], { title: "Zeta other repo" }))
 })
 after(() => scratch.close())
 
@@ -142,7 +142,7 @@ test("a timeout accepts minutes, hours and the equals form", async () => {
 test("a Pi SDK terminal result is reported", async () => {
   const pi = scratch.repo("repo-pi")
   writePiChild(pi, gone, piSuccess("SDK proof\nACCEPTANCE: met"))
-  const id = piSession(pi, 10, { title: "Pi lane" })
+  const id = migrate(pi, piSession(pi, 10, { title: "Pi lane" }))
   const { status, out } = await run(["wait", pi.root], { api: piPort() })
   assert.equal(status, 0, out)
   assert.equal(out, `${id} succeeded ${pi.cwd} Pi lane\n`)
@@ -218,7 +218,7 @@ test("an unknown subcommand prints usage", async () => {
 test("list --json is a snapshot array in which missing evidence is the string unknown", async () => {
   const snapshotRepo = scratch.repo("repo-snapshot")
   const finished = commandLane(snapshotRepo, 20, gone, [succeeded("proof\nACCEPTANCE: met")], { title: "Snapshot lane", steers: 1 })
-  const future = writeSession(snapshotRepo, 21, { schema_version: 2, title: "Future lane" })
+  const future = writeSession(snapshotRepo, 21, { schema_version: 3, title: "Future lane" })
   const bare = scratch.repo("repo-snapshot-missing")
   const { status, out } = await run(["list", "--json", snapshotRepo.root, bare.root])
   assert.equal(status, 0)

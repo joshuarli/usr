@@ -1,23 +1,22 @@
 import { randomUUID } from "node:crypto"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs"
-import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
-
-import { ANTIGRAVITY_PIN, isBannedModel, type CliPin } from "./policy.ts"
+import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
+import type { LaunchRequest, WriteAccess } from "./launch.ts"
+import { isBannedModel, type CliPin } from "./policy.ts"
 
 const children = new Map<number, ChildProcess>()
 
-export function antigravityAvailable(pin: CliPin = ANTIGRAVITY_PIN): boolean {
+export function antigravityAvailable(pin: CliPin): boolean {
   try {
     const check = spawnSync("agy", ["models"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] })
     return check.status === 0 && check.stdout.split("\n").some(line => line.trim().split(/\s+/)[0] === pin.model)
   } catch { return false }
 }
 
-export function startAntigravity(directory: string, logDirectory: string, prompt: string, effort: Effort,
-  readOnly: boolean, resume?: string, model?: string, pin: CliPin = ANTIGRAVITY_PIN): CommandRun {
-  if (model !== pin.model || effort !== pin.effort || readOnly || isBannedModel(pin.model))
-    throw new Error("Unapproved Antigravity model, effort, or tool scope; expected " + pin.model + " (" + pin.effort + ")")
+export function startAntigravity(request: LaunchRequest<WriteAccess>): CommandRun {
+  const { directory, logDirectory, prompt, resume, selection: pin } = request
+  if (isBannedModel(pin.model)) throw new Error("Prohibited Antigravity model: " + pin.model)
   if (resume && !/^[a-f0-9-]{36}$/i.test(resume)) throw new Error("Invalid Antigravity conversation ID")
   const suffix = randomUUID()
   const output = logDirectory + "/" + suffix + ".agy.ndjson"
@@ -82,7 +81,7 @@ export function antigravitySession(run: CommandRun): string | null {
   return typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id) ? id : null
 }
 
-export function antigravityResult(run: CommandRun, pin: CliPin = ANTIGRAVITY_PIN): { state: string; result: CommandResult | null; stderr: string | null } {
+export function antigravityResult(run: CommandRun, pin: CliPin): { state: string; result: CommandResult | null; stderr: string | null } {
   const identity = children.has(run.pid) ? "same" : processIdentity(run)
   if (identity === "same" || identity === "unknown" || groupAlive(run.pid))
     return { state: "running", result: null, stderr: null }

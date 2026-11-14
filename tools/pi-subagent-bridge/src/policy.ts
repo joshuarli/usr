@@ -6,10 +6,24 @@ import {
 
 export type { Effort } from "./tier-policy.ts"
 export type Executor = "antigravity" | "codex" | "command-code" | "pi"
+export type CliExecutor = Exclude<Executor, "pi">
 export type CliPin = { readonly model: string; readonly effort: Effort }
+export type PiSelection = { readonly providerID: string; readonly id: string; readonly variant: Effort }
+export type PiDestinations = readonly [PiSelection, ...PiSelection[]]
 export type Route =
-  | (CliPin & { readonly executor: Exclude<Executor, "pi"> })
+  | (CliPin & { readonly executor: CliExecutor })
   | (CliPin & { readonly executor: "pi"; readonly providerID: string })
+
+export type RootPlan =
+  | { readonly kind: "exclusive"; readonly target: CliPin }
+  | {
+    readonly kind: "fallback"
+    readonly codex: CliPin
+    readonly command: CliPin
+    readonly pi: PiDestinations
+  }
+export type ExclusivePlan = Extract<RootPlan, { kind: "exclusive" }>
+export type FallbackPlan = Extract<RootPlan, { kind: "fallback" }>
 
 const antigravityFamily = "gemini-4-hydrogen"
 function antigravityPin<E extends "low" | "medium" | "high" | "xhigh">(effort: E) {
@@ -18,7 +32,6 @@ function antigravityPin<E extends "low" | "medium" | "high" | "xhigh">(effort: E
 export const ANTIGRAVITY_PIN = antigravityPin("xhigh")
 export const ANTIGRAVITY_DIRECT = {
   models: [antigravityPin("high").model, antigravityPin("medium").model],
-  requiresAvailabilityCheck: true,
 } as const
 
 const codexModels = { small: "gpt-6-luna", coding: "gpt-6.1-terra" } as const
@@ -38,36 +51,39 @@ export const COMMAND_TIER_MODELS = {
   expert: { model: COMMAND_MODEL, effort: "max" },
 } as const satisfies Record<Tier, CliPin>
 
-function piRoute(pin: { readonly providerID: string; readonly id: string; readonly variant: Effort }) {
+/** Ordered admission plan per tier. Native Pi/legacy expert profiles are deliberately separate. */
+export const ROOT_PLANS = {
+  scout: {
+    kind: "fallback", codex: CODEX_TIER_MODELS.scout, command: COMMAND_TIER_MODELS.scout, pi: [GO_TIER_MODELS.scout],
+  },
+  mechanic: {
+    kind: "fallback", codex: CODEX_TIER_MODELS.mechanic, command: COMMAND_TIER_MODELS.mechanic, pi: [GO_TIER_MODELS.mechanic],
+  },
+  worker: {
+    kind: "fallback", codex: CODEX_TIER_MODELS.worker, command: COMMAND_TIER_MODELS.worker,
+    pi: [MUSE_TIER_MODELS.worker, GO_TIER_MODELS.worker],
+  },
+  expert: { kind: "exclusive", target: ANTIGRAVITY_PIN },
+} as const satisfies Record<Tier, RootPlan>
+
+function piRoute(pin: PiSelection) {
   return { executor: "pi", providerID: pin.providerID, model: pin.id, effort: pin.variant } as const
 }
-function lowerRoutes<T extends "scout" | "mechanic" | "worker">(tier: T) {
+export function routesOf(plan: RootPlan): readonly [Route, ...Route[]] {
+  if (plan.kind === "exclusive") return [{ executor: "antigravity", ...plan.target }]
   return [
-    { executor: "codex", ...CODEX_TIER_MODELS[tier] },
-    { executor: "command-code", ...COMMAND_TIER_MODELS[tier] },
-    ...(tier === "worker" ? [piRoute(MUSE_TIER_MODELS.worker)] : []),
-    piRoute(GO_TIER_MODELS[tier]),
-  ] as const
+    { executor: "codex", ...plan.codex },
+    { executor: "command-code", ...plan.command },
+    ...plan.pi.map(piRoute),
+  ]
 }
-/** Ordered admission routes. Native Pi/legacy expert profiles are deliberately separate. */
-export const ROOT_ROUTES = {
-  scout: lowerRoutes("scout"),
-  mechanic: lowerRoutes("mechanic"),
-  worker: lowerRoutes("worker"),
-  expert: [{ executor: "antigravity", ...ANTIGRAVITY_PIN }],
-} as const satisfies Record<Tier, readonly [Route, ...Route[]]>
 
 export const OPENCODE_NATIVE = {
   model: "opencode/inkling-2-small-free",
   efforts: { scout: "low", mechanic: "medium", worker: "high", expert: "max" },
-  freeOnlyWhenParentFree: true,
-  usesBridge: false,
-} as const satisfies {
-  model: string; efforts: Record<Tier, Effort>; freeOnlyWhenParentFree: boolean; usesBridge: false
-}
+} as const satisfies { model: string; efforts: Record<Tier, Effort> }
 export const NATIVE_FALLBACK = {
   tiers: ["scout", "mechanic", "worker"],
-  reasons: ["bridge-unavailable", "host-access"],
   claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet" },
 } as const
 /** Family prefixes are prohibited, including all effort-suffixed variants. */
@@ -77,47 +93,16 @@ export function isBannedModel(model: string, families: readonly string[] = BANNE
   return families.some(family => id === family || id.startsWith(family + "-"))
 }
 
-export type RootPlan =
-  | { readonly kind: "exclusive"; readonly pin: CliPin }
-  | {
-    readonly kind: "fallback"
-    readonly codex: CliPin
-    readonly command: CliPin
-    readonly pi: readonly { readonly providerID: string; readonly id: string; readonly variant: Effort }[]
-  }
-
-/** Resolve only supported executor arrangements, before performing admission effects. */
-export function rootPlan(tier: Tier): RootPlan {
-  const routes: readonly Route[] = ROOT_ROUTES[tier]
-  for (const route of routes) {
-    if (isBannedModel(route.model)) throw new Error(`Prohibited model in root route for ${tier}: ${route.model}`)
-  }
-  const first = routes[0]
-  if (first?.executor === "antigravity" && routes.length === 1) {
-    return { kind: "exclusive", pin: { model: first.model, effort: first.effort } }
-  }
-  const second = routes[1]
-  if (first?.executor !== "codex" || second?.executor !== "command-code" || routes.length < 3) {
-    throw new Error(`Unsupported executor order for ${tier}`)
-  }
-  const pi: Array<{ providerID: string; id: string; variant: Effort }> = []
-  for (const route of routes.slice(2)) {
-    if (route.executor !== "pi") throw new Error(`Unsupported fallback executor for ${tier}: ${route.executor}`)
-    pi.push({ providerID: route.providerID, id: route.model, variant: route.effort })
-  }
-  return {
-    kind: "fallback",
-    codex: { model: first.model, effort: first.effort },
-    command: { model: second.model, effort: second.effort },
-    pi,
-  }
-}
-
 /** Build-time JSON projection for Python/harness consumers; never read generated data here. */
 export const POLICY = {
   schema_version: 1,
   tiers: TIERS,
-  rootRoutes: ROOT_ROUTES,
+  rootRoutes: {
+    scout: routesOf(ROOT_PLANS.scout),
+    mechanic: routesOf(ROOT_PLANS.mechanic),
+    worker: routesOf(ROOT_PLANS.worker),
+    expert: routesOf(ROOT_PLANS.expert),
+  },
   nativePi: {
     goModels: GO_TIER_MODELS,
     museModels: MUSE_TIER_MODELS,

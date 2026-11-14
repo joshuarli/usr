@@ -2,21 +2,20 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import {
   ANTIGRAVITY_PIN, BANNED_MODELS, CODEX_TIER_MODELS, COMMAND_TIER_MODELS,
-  NATIVE_FALLBACK, OPENCODE_NATIVE, POLICY, ROOT_ROUTES, isBannedModel, rootPlan,
+  NATIVE_FALLBACK, OPENCODE_NATIVE, POLICY, ROOT_PLANS, isBannedModel, routesOf,
 } from "../src/policy.ts"
 import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, isTier } from "../src/tier-policy.ts"
 
 test("root admission keeps ordered lower-tier fallback and a terminal expert executor", () => {
-  assert.deepEqual(ROOT_ROUTES.scout.map(route => route.executor), ["codex", "command-code", "pi"])
-  assert.deepEqual(ROOT_ROUTES.mechanic.map(route => route.executor), ["codex", "command-code", "pi"])
-  assert.deepEqual(ROOT_ROUTES.worker.map(route => route.executor), ["codex", "command-code", "pi", "pi"])
-  assert.deepEqual(ROOT_ROUTES.expert, [{ executor: "antigravity", model: "gemini-4-hydrogen-xhigh", effort: "xhigh" }])
-  assert.equal(ROOT_ROUTES.worker[2]?.providerID, "muse-sdk")
-  assert.equal(ROOT_ROUTES.worker[3]?.providerID, "opencode-go")
+  assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["codex", "command-code", "pi"])
+  assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["codex", "command-code", "pi"])
+  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["codex", "command-code", "pi", "pi"])
+  assert.deepEqual(routesOf(ROOT_PLANS.expert), [{ executor: "antigravity", model: "gemini-4-hydrogen-xhigh", effort: "xhigh" }])
+  assert.deepEqual(ROOT_PLANS.worker.pi.map(pin => pin.providerID), ["muse-sdk", "opencode-go"])
   assert.equal(isTier("god"), false)
   for (const tier of ["scout", "mechanic", "worker"] as const) {
-    assert.equal(ROOT_ROUTES[tier][0].model, CODEX_TIER_MODELS[tier].model)
-    assert.equal(ROOT_ROUTES[tier][1].effort, COMMAND_TIER_MODELS[tier].effort)
+    assert.deepEqual(ROOT_PLANS[tier].codex, CODEX_TIER_MODELS[tier])
+    assert.deepEqual(ROOT_PLANS[tier].command, COMMAND_TIER_MODELS[tier])
   }
 })
 
@@ -24,21 +23,16 @@ test("native contexts cannot become root expert fallbacks", () => {
   assert.equal(GO_TIER_MODELS.expert.providerID, "opencode-go")
   assert.notEqual(GO_TIER_MODELS.expert.id, ANTIGRAVITY_PIN.model)
   assert.deepEqual(NATIVE_FALLBACK.tiers, ["scout", "mechanic", "worker"])
-  assert.equal(OPENCODE_NATIVE.usesBridge, false)
-  assert.equal(OPENCODE_NATIVE.freeOnlyWhenParentFree, true)
   assert.ok(OPENCODE_NATIVE.model.endsWith("-free"))
   assert.deepEqual(OPENCODE_NATIVE.efforts, { scout: "low", mechanic: "medium", worker: "high", expert: "max" })
 })
 
-test("runtime plans resolve the same ordered routes and keep expert exclusive", () => {
-  const expert = rootPlan("expert")
-  assert.deepEqual(expert, { kind: "exclusive", pin: { model: "gemini-4-hydrogen-xhigh", effort: "xhigh" } })
-  const worker = rootPlan("worker")
-  assert.equal(worker.kind, "fallback")
-  if (worker.kind !== "fallback") throw new Error("worker must retain its approved fallbacks")
-  assert.deepEqual(worker.pi.map(pin => pin.providerID), ["muse-sdk", "opencode-go"])
-  assert.deepEqual(worker.codex, { model: "gpt-6.1-terra", effort: "medium" })
-  assert.deepEqual(worker.command, { model: "deepseek/deepseek-v4.1-flash", effort: "high" })
+test("the plans are the pins the bridge admits, and the exported routes derive from them", () => {
+  assert.deepEqual(ROOT_PLANS.expert, { kind: "exclusive", target: { model: "gemini-4-hydrogen-xhigh", effort: "xhigh" } })
+  assert.equal(ROOT_PLANS.worker.kind, "fallback")
+  assert.deepEqual(ROOT_PLANS.worker.codex, { model: "gpt-6.1-terra", effort: "medium" })
+  assert.deepEqual(ROOT_PLANS.worker.command, { model: "deepseek/deepseek-v4.1-flash", effort: "high" })
+  for (const tier of TIERS) assert.deepEqual(POLICY.rootRoutes[tier], routesOf(ROOT_PLANS[tier]))
 })
 
 test("prohibited model families include every effort variant but not unrelated names", () => {
@@ -46,8 +40,8 @@ test("prohibited model families include every effort variant but not unrelated n
     assert.equal(isBannedModel(model), true, model)
   }
   assert.equal(isBannedModel("gemini-4-carbonite"), false)
-  for (const routes of Object.values(ROOT_ROUTES)) {
-    for (const route of routes) assert.equal(isBannedModel(route.model), false, route.model)
+  for (const tier of TIERS) {
+    for (const route of routesOf(ROOT_PLANS[tier])) assert.equal(isBannedModel(route.model), false, tier + " " + route.model)
   }
   assert.deepEqual(BANNED_MODELS, ["gemini-4-argon", "gemini-4-carbon"])
 })

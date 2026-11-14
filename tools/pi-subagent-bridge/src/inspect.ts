@@ -3,13 +3,13 @@ import { join } from "node:path"
 import { makeWorkerBridge, type ModelRef, type OpenCodePort } from "./bridge.ts"
 import type { CommandResult, CommandRun } from "./command.ts"
 import { changes, git, outside } from "./git.ts"
-import type { CliPin, Executor } from "./policy.ts"
+import type { CliPin, FallbackPlan, PiSelection } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
-  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, antigravityPin, backendOf,
-  decodeSession, primaryFor, type Session,
+  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, backendOf, decodeSession, targetOf,
+  type FallbackUnresolvedPiPlan, type LadderPlan, type PiFirstPlan, type ProcessExecution, type ProcessTarget, type Session,
 } from "./session.ts"
-import type { Tier } from "./tier-policy.ts"
+import type { Effort, Tier } from "./tier-policy.ts"
 
 const QUOTA = /\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
 const PROVIDER_UNAVAILABLE = /\b(model (?:is |was )?(?:unavailable|not available|not found|unsupported)|unknown model|unsupported model|no such model|model does not exist|provider unavailable|provider not found|not logged in|not authenticated|authentication required|missing credentials)\b/i
@@ -18,7 +18,6 @@ const EVENT_LOG_TAIL_BYTES = 65536
 const EVENT_LOG_TAIL_LINES = 50
 const EVENT_DESCRIPTION_CHARS = 160
 
-type CliExecutor = Exclude<Executor, "pi">
 type OrUnknown<T> = T | "unknown"
 
 export type RunnerStatus = { state: string; result: CommandResult | null; stderr: string | null }
@@ -39,10 +38,13 @@ export type Observation = {
   last_event: string
 }
 export type Claim = "met" | "not_met" | "missing"
-export type FallbackSource = "pi" | "codex" | "command-code"
+export type FallbackSource =
+  | { readonly kind: "codex"; readonly from: ProcessTarget; readonly plan: FallbackPlan | FallbackUnresolvedPiPlan }
+  | { readonly kind: "command-code"; readonly from: ProcessTarget; readonly plan: LadderPlan }
+  | { readonly kind: "pi"; readonly plan: PiFirstPlan }
 export type Known = { observation: Observation; blocked?: { state: string; notice: string } }
 
-type Route = { model: string | ModelRef | undefined; effort: string | undefined } | { fault: string }
+type Route = { model: string | PiSelection; effort: Effort }
 type Worktree =
   | { kind: "read"; head: string; changed_paths: string[]; out_of_scope_paths: string[] }
   | { kind: "unreadable"; reason: string }
@@ -105,8 +107,8 @@ export function fallbackNotice(s: Session): string {
     s.fallback_reason,
     "Automatic fallback is expected and needs no parent action.",
     "The worktree was verified untouched before switching, so no work was lost or replayed.",
-    "The task continues on " + (backendOf(s) === "pi"
-      ? (s.primary_model?.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK")
+    "The task continues on " + (s.execution.kind === "pi"
+      ? (s.execution.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK")
       : "Command Code") +
       " with the same scope and approved tier pins; verify it normally with worker_status.",
     "Do not retry and do not start a duplicate worker.",
@@ -119,9 +121,9 @@ export function blockedPartialNotice(): string {
   ].join(" ")
 }
 
-export function runnerStatus(deps: InspectionDeps, s: Session, executor: CliExecutor, run: CommandRun): RunnerStatus {
-  if (executor === "antigravity") return deps.antigravity.status(run, antigravityPin(s))
-  return (executor === "codex" ? deps.codex : deps.command).status(run)
+export function runnerStatus(deps: InspectionDeps, execution: ProcessExecution): RunnerStatus {
+  if (execution.executor === "antigravity") return deps.antigravity.status(execution.run, execution.selection)
+  return (execution.executor === "codex" ? deps.codex : deps.command).status(execution.run)
 }
 
 function modifiedAt(path: string | undefined): number | null {
@@ -175,13 +177,13 @@ function withheld(state: string, error: string, sessionFile: string): Observatio
 export async function observeExecution(s: Session, directory: string, deps: InspectionDeps): Promise<Observation> {
   const sessionFile = join(directory, s.id + ".json")
   const execution = s.execution
-  if (execution.kind === "transition" && execution.executor === "pi")
+  if (execution.kind === "transition" && execution.to.executor === "pi")
     return withheld("blocked_admission", "Pi admission interrupted or uncertain; inspect this session before recovery", sessionFile)
   if (execution.kind === "transition")
     return withheld("blocked_transition",
-      execution.executor + " transition interrupted; inspect persisted state and worktree before recovery", sessionFile)
+      execution.to.executor + " transition interrupted; inspect persisted state and worktree before recovery", sessionFile)
   if (execution.kind === "pi") {
-    const response = await makeWorkerBridge(deps.api, primaryFor(s)).status(s.cwd, execution.session_id)
+    const response = await makeWorkerBridge(deps.api, execution.selection).status(s.cwd, execution.session_id)
     const run = piRun(directory, execution.session_id)
     return {
       state: typeof response.state === "string" ? response.state : "unknown",
@@ -193,7 +195,7 @@ export async function observeExecution(s: Session, directory: string, deps: Insp
     }
   }
   const { run } = execution
-  const response = runnerStatus(deps, s, execution.executor, run)
+  const response = runnerStatus(deps, execution)
   let state = response.state, error: unknown = response.state === "interrupted"
     ? "Worker process is gone or its recorded PID identity changed; the run is terminal and cannot be replayed"
     : response.state === "failed" ? response.result?.error ?? response.stderr : null
@@ -206,15 +208,20 @@ export async function observeExecution(s: Session, directory: string, deps: Insp
 }
 
 export function fallbackSource(s: Session, observation: Observation): FallbackSource | null {
-  const execution = s.execution
+  const execution = s.execution, plan = s.plan
   if (execution.kind === "pi") {
     const finished = !["running", "queued", "succeeded"].includes(observation.state)
-    return s.execution_order === undefined && finished && quota(observation.error) ? "pi" : null
+    return plan.kind === "pi-first" && finished && quota(observation.error) ? { kind: "pi", plan } : null
   }
   if (execution.kind !== "process" || s.fallback_blocked) return null
   if (observation.state !== "failed" || !(quota(observation.error) || providerUnavailable(observation.error))) return null
-  if (execution.executor === "codex") return "codex"
-  return execution.executor === "command-code" && s.execution_order !== undefined ? "command-code" : null
+  const from = { executor: execution.executor, selection: execution.selection }
+  if (execution.executor === "codex")
+    return plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ? { kind: "codex", from, plan } : null
+  if (execution.executor === "command-code" && (plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ||
+      plan.kind === "command-first" || plan.kind === "command-first-unresolved-pi"))
+    return { kind: "command-code", from, plan }
+  return null
 }
 
 export function settledState(s: Session, observation: Observation, clean: boolean | null): { state: string; notice: string | null } {
@@ -227,10 +234,9 @@ export function settledState(s: Session, observation: Observation, clean: boolea
 function inheritedNotice(s: Session, state: string): string | null {
   if (!s.fallback_reason) return null
   if (state.startsWith("blocked")) return "Provider transition blocked; inspect the owned session before retrying."
-  const backend = backendOf(s)
-  if ((backend === "pi" || backend === "pi-admitting" || backend === "pi-transition") &&
-      ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
-    const provider = s.primary_model?.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
+  const target = targetOf(s)
+  if (target.executor === "pi" && ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
+    const provider = target.selection.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
     return "The task was admitted to " + provider + " via Command Code's absence or failure, but that Pi run ended in " + state +
       " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
       " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +
@@ -249,8 +255,7 @@ function readWorktree(s: Session): Worktree {
   }
 }
 function routeOf(s: Session): Route {
-  try { return { model: admittedModel(s), effort: admittedEffort(s) } }
-  catch (error) { return { fault: error instanceof Error ? error.message : String(error) } }
+  return { model: admittedModel(s), effort: admittedEffort(s) }
 }
 
 function compose(s: Session, observation: Observation, blocked?: Known["blocked"]): Inspection {
@@ -276,7 +281,6 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 function inspectionReason(i: Inspection): string | null {
-  if ("fault" in i.route) return i.route.fault
   if (i.worktree.kind === "unreadable") return i.worktree.reason
   return i.observation.state === "unknown" ? describe(i.observation.error ?? "execution state is unknown") : null
 }
@@ -285,12 +289,10 @@ export function toSnapshot(i: Inspection): Snapshot {
   const s = i.session, route = i.route, worktree = i.worktree
   const read = worktree.kind === "read" ? worktree : null
   const activity = i.observation.last_activity_ms
-  const model = "fault" in route ? undefined : route.model
-  const effort = "fault" in route ? undefined : route.effort
   return {
     observed_at: i.observed_at, id: s.id, title: s.title, tier: s.tier, worktree: s.cwd,
     base_revision: s.scope.base_revision, head: read?.head ?? "unknown", backend: backendOf(s),
-    model: model ?? "unknown", effort: effort ?? "unknown",
+    model: route.model, effort: route.effort,
     execution_state: i.state, last_assistant_text: i.observation.final_text?.slice(-5000) ?? null,
     error: i.observation.error, usage: i.observation.usage,
     pid: i.observation.pid ?? "unknown", last_activity: activity === null ? "unknown" : new Date(activity).toISOString(),

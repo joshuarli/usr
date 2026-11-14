@@ -44,7 +44,7 @@ test("MCP discovery shares policy schemas and rejects malformed scopes before lo
   try {
     const source = join(root, "src")
     mkdirSync(source)
-    for (const file of ["server.ts", "policy.ts", "tier-policy.ts", "scope.ts"]) {
+    for (const file of ["server.ts", "commands.ts", "policy.ts", "tier-policy.ts", "scope.ts"]) {
       copyFileSync(fileURLToPath(new URL("../src/" + file, import.meta.url)), join(source, file))
     }
     const scope = { base_revision: "a".repeat(40), writable_paths: ["src/"],

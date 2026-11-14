@@ -1,12 +1,12 @@
 import { spawnSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readSync, fstatSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
+import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
+import type { LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { CODEX_TIER_MODELS, isBannedModel, type CliPin } from "./policy.ts"
-export { CODEX_TIER_MODELS } from "./policy.ts"
+import { isBannedModel } from "./policy.ts"
 const children = new Map<number, ChildProcess>()
 function cargoHome(): string {
   return process.env.CARGO_HOME || join(homedir(), ".cargo")
@@ -20,19 +20,16 @@ export function codexAvailable(): boolean {
     return result.status === 0 && (result.stdout + result.stderr).includes("Logged in using ChatGPT")
   } catch { return false }
 }
-export function startCodex(directory: string, logDirectory: string, text: string,
-  effort: Effort, readOnly: boolean, resume?: string, model?: string, network = false, admittedPin?: CliPin): CommandRun {
-  const approved = admittedPin
-    ? admittedPin.model === model && admittedPin.effort === effort
-    : Object.values(CODEX_TIER_MODELS).some(pin => pin.model === model && pin.effort === effort)
-  if (!model || isBannedModel(model) || !approved)
-    throw new Error("Unapproved Codex model and effort" + (admittedPin ? "; preserve the admitted pin or reconcile the session" : ""))
+export function startCodex(request: LaunchRequest): CommandRun {
+  const { directory, logDirectory, prompt: text, resume, selection: { model, effort }, access } = request
+  if (isBannedModel(model)) throw new Error("Prohibited Codex model: " + model)
+  const readOnly = access.kind === "read-only"
   const suffix = randomUUID(), output = `${logDirectory}/${suffix}.codex.ndjson`, errors = `${logDirectory}/${suffix}.codex.stderr`
   const stdout = openSync(output, "wx", 0o600), stderr = openSync(errors, "wx", 0o600)
   const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
     "--sandbox", readOnly ? "read-only" : "workspace-write", "--model", model,
-    ...(network && !readOnly ? ["-c", "sandbox_workspace_write.network_access=true", "--add-dir", cargoHome()] : []),
+    ...(access.kind === "write" && access.network ? ["-c", "sandbox_workspace_write.network_access=true", "--add-dir", cargoHome()] : []),
     ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec",
       "-c", `mcp_servers.bridge_scout.command=${JSON.stringify(process.execPath)}`,
       "-c", `mcp_servers.bridge_scout.args=${JSON.stringify(["--experimental-strip-types", fileURLToPath(new URL("./codex-scout.ts", import.meta.url))])}`] : []),

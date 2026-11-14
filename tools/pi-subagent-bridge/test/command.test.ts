@@ -4,9 +4,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSy
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { COMMAND_EMBER_MODEL, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
+import { COMMAND_EMBER_MODEL, COMMAND_MODEL, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
+import type { LaunchRequest } from "../src/launch.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+function request(root: string, logs: string, overrides: Partial<LaunchRequest> = {}): LaunchRequest {
+  return { directory: root, logDirectory: logs, prompt: "test", selection: { model: COMMAND_MODEL, effort: "high" }, access: { kind: "write", network: false }, ...overrides }
+}
 test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-worker-")))
   const bin = join(root, "bin"), logs = join(root, "logs")
@@ -18,7 +22,7 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
       '\nprintf \'{"type":"event","event":{"type":"tool_running"}}\\n\'\nprintf \'{"type":"result","subtype":"success","sessionId":"cmd-session","finalText":"proof","usage":{"input":3}}\\n\'\n',
       { mode: 0o755 })
     process.env.PATH = bin + ":" + oldPath
-    const first = startCommand(root, logs, "change README", "high", false)
+    const first = startCommand(request(root, logs, { prompt: "change README" }))
     let output = commandResult(first)
     for (let i = 0; i < 100 && !output.result; i++) { await delay(10); output = commandResult(first) }
     assert.equal(output.state, "succeeded")
@@ -29,20 +33,19 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.match(args, /--yolo/)
     assert.match(args, /--verbose/)
     assert.match(args, /--max-turns\n100000\n/)
-    const second = startCommand(root, logs, "cite lines", "xhigh", true, output.result?.sessionId, COMMAND_EMBER_MODEL)
+    const second = startCommand(request(root, logs, { prompt: "cite lines", selection: { model: COMMAND_EMBER_MODEL, effort: "xhigh" },
+      access: { kind: "read-only" }, resume: output.result?.sessionId }))
     let next = commandResult(second)
     for (let i = 0; i < 100 && !next.result; i++) { await delay(10); next = commandResult(second) }
     assert.equal(next.state, "succeeded")
     assert.match(readFileSync(argsFile, "utf8"), /--plan/)
     assert.ok(readFileSync(argsFile, "utf8").includes("--model\nmeta/muse-ember\n"))
     assert.ok(readFileSync(argsFile, "utf8").includes("--effort\nxhigh\n"))
-    assert.throws(() => startCommand(root, logs, "bad", "medium", true, undefined, "unapproved"), /Unapproved/)
     assert.match(readFileSync(argsFile, "utf8"), /--resume\ncmd-session/)
     assert.equal(commandSession(first), "cmd-session")
     assert.equal(commandSession(second), "cmd-session")
     const admittedPin = { model: "fixture/historical-command", effort: "low" } as const
-    assert.throws(() => startCommand(root, logs, "resume", "low", true, "cmd-session", admittedPin.model), /Unapproved/)
-    const retained = startCommand(root, logs, "retain pin", "low", true, "cmd-session", admittedPin.model, admittedPin)
+    const retained = startCommand(request(root, logs, { prompt: "retain pin", selection: admittedPin, access: { kind: "read-only" }, resume: "cmd-session" }))
     let retainedResult = commandResult(retained)
     for (let i = 0; i < 100 && !retainedResult.result; i++) { await delay(10); retainedResult = commandResult(retained) }
     assert.equal(retainedResult.state, "succeeded")
@@ -53,12 +56,9 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
   }
 })
 
-test("Command Code cannot change an admitted pair or restore a forbidden family", () => {
-  const pin = { model: "fixture/historical-command", effort: "low" } as const
-  assert.throws(() => startCommand("/absent", "/absent", "test", "high", false, "session", pin.model, pin), /preserve the admitted pin/)
-  assert.throws(() => startCommand("/absent", "/absent", "test", "low", false, "session", COMMAND_EMBER_MODEL, pin), /preserve the admitted pin/)
+test("Command Code refuses a forbidden family", () => {
   for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
-    assert.throws(() => startCommand("/absent", "/absent", "test", "high", false, "session", model, { model, effort: "high" }), /Unapproved/)
+    assert.throws(() => startCommand(request("/absent", "/absent", { selection: { model, effort: "high" } })), /Prohibited Command Code model/)
   }
 })
 
@@ -100,7 +100,7 @@ test("spawn failure with an invalid cmd shebang is handled without crashing the 
     writeFileSync(join(bin, "cmd"), "#!/nonexistent/interpreter/for-cmd\n", { mode: 0o755 })
     process.env.PATH = bin
     let run: ReturnType<typeof startCommand> | null = null
-    try { run = startCommand(root, logs, "test", "low", true) }
+    try { run = startCommand(request(root, logs, { selection: { model: COMMAND_MODEL, effort: "low" }, access: { kind: "read-only" } })) }
     catch (error) { assert.match(String(error), /Cannot start Command Code/) }
     if (run) {
       let state = commandResult(run).state
