@@ -27,8 +27,6 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 **Quota fallback for scout/mechanic/worker only:** When no approved bridge backend can run because it is unavailable or exhausted, use tier-matched native subagents with the same brief, worktree, scope, and independent verification. In Claude Code use scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. Preserve partial work before relaunch. Expert unavailability or quota exhaustion is a blocker; never substitute another model. No hook gates native subagents. Return to the bridge when capacity recovers.
-
-**Host-access exception for scout/mechanic/worker:** use the same native mapping when the slice's proof needs host access Codex's sandbox cannot grant (Docker, VMs, `taskpolicy`, hardware), with unchanged scope and parent review. Dependency fetching uses scope `network: true` and does not qualify.
 <!-- policy:end native-fallback -->
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.
@@ -60,7 +58,7 @@ Expert is a terminal Antigravity lane; no native child fanout beyond the typed c
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 
-Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. Set scope `network: true` when the slice adds or fetches dependencies; Codex's sandbox otherwise has no network and cannot write the Cargo home. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether one level of Pi fanout is justified.
+Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether one level of Pi fanout is justified.
 
 **Admission is not completion.** Run the `watch` command that `worker_start` returns as a background task, so the harness wakes you when the worker ends; never end a turn on an admitted worker without one. Then read `worker_status`. State `incomplete` means the worker exited without a final `ACCEPTANCE: met`; treat it as unaccepted work, not success. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
 

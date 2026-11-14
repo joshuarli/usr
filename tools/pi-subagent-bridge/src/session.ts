@@ -306,6 +306,13 @@ function decodeCurrent(value: Record<string, unknown>): { plan: AdmittedPlan; ex
   return { plan: decodePlan(value.plan), execution: decodeExecution(value.execution) }
 }
 
+// Sessions admitted before Codex ran unsandboxed may carry the retired `network` scope flag.
+function withoutRetiredScopeFields(scope: unknown): unknown {
+  if (!isRecord(scope) || !Object.hasOwn(scope, "network")) return scope
+  const { network: _network, ...rest } = scope
+  return rest
+}
+
 export function decodeSession(value: unknown, cwd: string, id: string): Session {
   if (!isRecord(value)) throw new Error("Invalid persisted worker session")
   const version = value.schema_version
@@ -317,7 +324,7 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
     throw new Error("Execution leaves the admitted plan; manual reconciliation required")
   const s: Session = {
     id, cwd, tier: value.tier, title: requiredText(value.title, "title", 100), task: requiredText(value.task, "task", 32000),
-    scope: parseScope(value.scope, value.tier), plan, execution, attempts: counter(value.attempts, "attempts"),
+    scope: parseScope(withoutRetiredScopeFields(value.scope), value.tier), plan, execution, attempts: counter(value.attempts, "attempts"),
   }
   for (const key of ["fallback_reason", "fallback_detail", "fallback_blocked"] as const) {
     if (value[key] !== undefined) {

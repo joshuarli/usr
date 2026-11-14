@@ -9,7 +9,7 @@ import type { LaunchRequest } from "../src/launch.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 function request(root: string, logs: string, overrides: Partial<LaunchRequest> = {}): LaunchRequest {
-  return { directory: root, logDirectory: logs, prompt: "test", selection: { model: COMMAND_MODEL, effort: "high" }, access: { kind: "write", network: false }, ...overrides }
+  return { directory: root, logDirectory: logs, prompt: "test", selection: { model: COMMAND_MODEL, effort: "high" }, access: { kind: "write" }, ...overrides }
 }
 test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-worker-")))

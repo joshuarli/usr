@@ -70,9 +70,7 @@ function nativeFallback(policy: Policy): string {
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
   return `**Quota fallback for ${tiers} only:** When no approved bridge backend can run because it is unavailable or exhausted, ` +
     `use tier-matched native subagents with the same brief, worktree, scope, and independent verification. In Claude Code use ${mappings}. ` +
-    "Preserve partial work before relaunch. Expert unavailability or quota exhaustion is a blocker; never substitute another model. No hook gates native subagents. Return to the bridge when capacity recovers.\n\n" +
-    `**Host-access exception for ${tiers}:** use the same native mapping when the slice's proof needs host access Codex's sandbox cannot grant ` +
-    "(Docker, VMs, `taskpolicy`, hardware), with unchanged scope and parent review. Dependency fetching uses scope `network: true` and does not qualify."
+    "Preserve partial work before relaunch. Expert unavailability or quota exhaustion is a blocker; never substitute another model. No hook gates native subagents. Return to the bridge when capacity recovers."
 }
 
 function delegation(policy: Policy, lean: boolean): string {
@@ -82,8 +80,8 @@ function delegation(policy: Policy, lean: boolean): string {
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     `Expert pins ${code(pin.model)} at ${code(pin.effort)} without fallback. No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
-    `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion or when proof needs host access Codex's sandbox cannot grant ` +
-    "(Docker, VMs, `taskpolicy`, hardware); retain the same scope, worktree and independent parent review. Expert failures block rather than downgrade." +
+    `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion, ` +
+    "with the same scope, worktree and independent parent review. Expert failures block rather than downgrade." +
     (lean ? " With verified, safely shareable evidence and meaningful tier uncertainty, consult `decide`; unavailable advice does not block." :
       " The parent scopes, verifies, reviews and integrates.")
 }

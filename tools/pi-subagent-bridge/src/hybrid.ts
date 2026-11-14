@@ -120,12 +120,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     return runnerStatus(inspection, execution)
   }
   function accessFor(s: Session): Access {
-    return s.tier === "scout" ? { kind: "read-only" } : { kind: "write", network: !!s.scope.network }
+    return s.tier === "scout" ? { kind: "read-only" } : { kind: "write" }
   }
   function launch(s: Session, target: ProcessTarget, text: string, resume?: string): CommandRun {
     const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume }
     switch (target.executor) {
-      case "antigravity": return antigravity.start({ ...request, access: { kind: "write", network: false } })
+      case "antigravity": return antigravity.start({ ...request, access: { kind: "write" } })
       case "codex": return codex.start({ ...request, access: accessFor(s) })
       case "command-code": return command.start({ ...request, access: accessFor(s) })
     }

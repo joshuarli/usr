@@ -1,7 +1,7 @@
 import type { CliPin } from "./policy.ts"
 
 export type ReadOnlyAccess = { readonly kind: "read-only" }
-export type WriteAccess = { readonly kind: "write"; readonly network: boolean }
+export type WriteAccess = { readonly kind: "write" }
 export type Access = ReadOnlyAccess | WriteAccess
 
 export type LaunchRequest<A extends Access = Access> = {
