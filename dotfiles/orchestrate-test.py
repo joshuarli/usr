@@ -31,9 +31,15 @@ class OrchestrateTests(unittest.TestCase):
                                     for route in routes))
 
     def test_direct_antigravity_models_require_an_availability_check(self):
+        contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()
         for model in POLICY["antigravityDirect"]["models"]:
-            self.assertIn(model, self.text)
-        self.assertIn("Verify it with `agy models`", self.text)
+            self.assertIn(model, contract)
+            self.assertNotIn(model, self.text)
+        self.assertIn("Verify it with `agy models`", contract)
+
+    def test_orchestrate_defers_exact_pins_to_model_check(self):
+        self.assertIn("Call `worker_model_check` for the tier you are about to assign", self.text)
+        self.assertNotIn("| Tier | Primary | Fallback (in order) |", self.text)
 
     def test_no_old_mcp_registration(self):
         codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()

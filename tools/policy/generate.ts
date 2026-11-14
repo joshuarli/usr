@@ -257,8 +257,6 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     "routing-intro": "**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode and native exceptions below. " + summary(policy),
     "opencode": openCode(policy),
     "native-fallback": nativeFallback(policy),
-    "routing-table": table,
-    "direct-models": direct,
   })
   document("dotfiles/base/.codex/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
   document("dotfiles/base/.agents/instructions/lean.md", { delegation: delegation(policy, true) })
