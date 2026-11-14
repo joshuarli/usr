@@ -1,6 +1,8 @@
 ---
 name: mechanic
 description: Mechanical implementation with specified acceptance.
+# policy:begin native-profile
+# Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: opencode-go/muse-spark-1.3-contributor
 thinking: high
 tools:
@@ -18,6 +20,7 @@ maxSubagentDepth: 2
 allowedAgents:
   - scout
   - mechanic
+# policy:end native-profile
 ---
 
 Apply only the specified change, run the named check, and report proof.

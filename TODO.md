@@ -60,14 +60,6 @@ Next: 56
 - **Effort:** M
 
 
-### USR-52 · P3 · Generate model policy representations from the authoritative policy
-
-- **Area:** Config
-- **Where:** `tools/pi-subagent-bridge/src/tier-policy.ts`, `tools/pi-subagent-bridge/src/tier-profile.ts`, `tools/pi-subagent-bridge/src/hybrid.ts`, `tools/pi-subagent-bridge/README.md`, `dotfiles/base/.agents/skills/orchestrate/SKILL.md`
-- **Problem:** Model and tier facts appear in policy, profiles, and documentation, requiring coordinated edits and creating opportunities for drift during migrations.
-- **Recommendation:** Expose structured policy inspection and generate bounded owned tables and profile fragments from the approved typed policy, with a check for stale outputs. Include approved models, effort, fallback, nesting, and applicable native exceptions. Preserve unrelated harness settings and pins of admitted workers; keep availability checks in worker_model_check and selection judgment with the owner.
-- **Fix with:** single-source-of-truth
-- **Effort:** M
 
 
 ### USR-53 · P3 · Expose structured skill discovery and references

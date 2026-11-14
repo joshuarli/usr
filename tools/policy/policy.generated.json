@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "tiers": [
+    "scout",
+    "mechanic",
+    "worker",
+    "expert"
+  ],
+  "rootRoutes": {
+    "scout": [
+      {
+        "executor": "codex",
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      },
+      {
+        "executor": "command-code",
+        "model": "meta/muse-ember",
+        "effort": "medium"
+      },
+      {
+        "executor": "pi",
+        "providerID": "opencode-go",
+        "model": "muse-spark-1.3-contributor",
+        "effort": "medium"
+      }
+    ],
+    "mechanic": [
+      {
+        "executor": "codex",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      },
+      {
+        "executor": "command-code",
+        "model": "meta/muse-ember",
+        "effort": "xhigh"
+      },
+      {
+        "executor": "pi",
+        "providerID": "opencode-go",
+        "model": "muse-spark-1.3-contributor",
+        "effort": "high"
+      }
+    ],
+    "worker": [
+      {
+        "executor": "codex",
+        "model": "gpt-6.1-terra",
+        "effort": "medium"
+      },
+      {
+        "executor": "command-code",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "effort": "high"
+      },
+      {
+        "executor": "pi",
+        "providerID": "muse-sdk",
+        "model": "muse-spark-1.3",
+        "effort": "xhigh"
+      },
+      {
+        "executor": "pi",
+        "providerID": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "effort": "high"
+      }
+    ],
+    "expert": [
+      {
+        "executor": "antigravity",
+        "model": "gemini-4-hydrogen-xhigh",
+        "effort": "xhigh"
+      }
+    ]
+  },
+  "nativePi": {
+    "goModels": {
+      "scout": {
+        "providerID": "opencode-go",
+        "id": "muse-spark-1.3-contributor",
+        "variant": "medium"
+      },
+      "mechanic": {
+        "providerID": "opencode-go",
+        "id": "muse-spark-1.3-contributor",
+        "variant": "high"
+      },
+      "worker": {
+        "providerID": "opencode-go",
+        "id": "deepseek-v4.1-flash",
+        "variant": "high"
+      },
+      "expert": {
+        "providerID": "opencode-go",
+        "id": "deepseek-v4.1-flash",
+        "variant": "max"
+      }
+    },
+    "museModels": {
+      "worker": {
+        "providerID": "muse-sdk",
+        "id": "muse-spark-1.3",
+        "variant": "xhigh"
+      }
+    },
+    "agentNames": {
+      "worker": "muse-worker"
+    },
+    "delegation": {
+      "scout": [
+        "scout"
+      ],
+      "mechanic": [
+        "scout",
+        "mechanic"
+      ],
+      "worker": [
+        "scout",
+        "mechanic",
+        "worker"
+      ],
+      "expert": [
+        "scout",
+        "mechanic",
+        "worker",
+        "expert"
+      ]
+    },
+    "museDelegation": {
+      "worker": [
+        "scout",
+        "mechanic",
+        "muse-worker"
+      ]
+    },
+    "tools": {
+      "scout": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "subagent",
+        "subagent_supervisor"
+      ],
+      "mechanic": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+        "subagent",
+        "subagent_supervisor"
+      ],
+      "worker": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+        "subagent",
+        "subagent_supervisor"
+      ],
+      "expert": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+        "subagent",
+        "subagent_supervisor"
+      ]
+    },
+    "maxSubagentDepth": 2,
+    "modelAllowlist": [
+      "opencode-go/deepseek-v4.1-flash",
+      "opencode-go/muse-spark-1.3-contributor",
+      "muse-sdk/muse-spark-1.3"
+    ]
+  },
+  "opencode": {
+    "model": "opencode/inkling-2-small-free",
+    "efforts": {
+      "scout": "low",
+      "mechanic": "medium",
+      "worker": "high",
+      "expert": "max"
+    },
+    "freeOnlyWhenParentFree": true,
+    "usesBridge": false
+  },
+  "nativeFallback": {
+    "tiers": [
+      "scout",
+      "mechanic",
+      "worker"
+    ],
+    "reasons": [
+      "bridge-unavailable",
+      "host-access"
+    ],
+    "claudeModels": {
+      "scout": "haiku",
+      "mechanic": "sonnet",
+      "worker": "sonnet"
+    }
+  },
+  "antigravityDirect": {
+    "models": [
+      "gemini-4-hydrogen-high",
+      "gemini-4-hydrogen-medium"
+    ],
+    "requiresAvailabilityCheck": true
+  },
+  "bannedModels": [
+    "gemini-4-argon",
+    "gemini-4-carbon"
+  ]
+}

@@ -1,17 +1,22 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state. New `expert` tasks run **only** Antigravity CLI `gemini-4-hydrogen-xhigh`; no Argon, native Opus/Sol, or fallback. There is no `god` tier. Scout, mechanic and worker retain the existing Codex → Command Code → Pi backend chain. Already-admitted legacy sessions retain their original models.
+One shared delegation bridge for every coding harness except OpenCode. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state.
+
+<!-- policy:begin routing-summary -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) exclusively, with no fallback. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant. Already-admitted sessions retain their recorded models and routes.
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
-| scout | Codex `gpt-6-luna` (medium) | Command Code `meta/muse-ember` (medium), Pi `opencode-go/muse-spark-1.3-contributor` (medium) |
-| mechanic | Codex `gpt-6-luna` (high) | Command Code `meta/muse-ember` (xhigh), Pi `opencode-go/muse-spark-1.3-contributor` (high) |
-| worker | Codex `gpt-6.1-terra` (medium) | Command Code `deepseek/deepseek-v4.1-flash` (high), Pi `muse-sdk/muse-spark-1.3` (xhigh), Pi `opencode-go/deepseek-v4.1-flash` (high) |
-| expert | Antigravity `gemini-4-hydrogen-xhigh` (xhigh) | **None** |
+| scout | Codex `gpt-6-luna` (`medium`) | Command Code `meta/muse-ember` (`medium`); Pi `opencode-go/muse-spark-1.3-contributor` (`medium`) |
+| mechanic | Codex `gpt-6-luna` (`high`) | Command Code `meta/muse-ember` (`xhigh`); Pi `opencode-go/muse-spark-1.3-contributor` (`high`) |
+| worker | Codex `gpt-6.1-terra` (`medium`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`) |
+| expert | Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) | **None. Fail closed.** |
+<!-- policy:end routing-summary -->
 
-The bridge validates `agy models` for the exact Hydrogen slug before admission and pins it on every launch and resume. Its streaming JSON `init` record must confirm the same model before success is accepted. Antigravity access must list the Hydrogen slug for the account; absence, quota or authentication errors stop the lane. This repository does not purchase API credits. Gemini 4 Carbon is not accessible on this account and is not an approved model anywhere. Direct Antigravity use should pin available Hydrogen and must never select Argon or fall back to 3.8. See [Google's headless CLI reference](https://antigravity.google/docs/cli/headless/).
+The bridge verifies the exact Antigravity model with `agy models` before admission, pins it on launch and resume, and checks the streaming `init` model before accepting success. Missing entitlement, authentication failures and quota exhaustion stop the terminal lane. This repository does not purchase API credits. Direct Antigravity selection follows the approved pins in [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
-The lower-tier Pi route retains bounded native Pi nesting. There is **no Pi `god` tier** and no `god` lane anywhere. The Hydrogen backend is a root executor, not a Pi agent; it may not use bridge nesting and must not start separate native subagents. Hydrogen invokes `agy` headlessly with tool permissions allowed, so independent diff/scope verification remains mandatory; this does **not** provide an OS sandbox.
+The Antigravity executor is a leaf and may not launch native subagents. It runs headlessly with tool permissions allowed; independent diff/scope verification remains mandatory. This does not provide an OS sandbox.
 
 ## Setup
 
@@ -26,18 +31,21 @@ The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No Open
 
 The Pi fallback is a real subagent runtime, not a prompt-only coordination promise. Its required child extension registers an inherited `allowedAgents` capability ceiling for each tier and blocks unapproved `subagent` launches (model/cwd/worktree overrides, workflow scripting, higher tiers). Upstream Pi separately enforces the depth cap at launch; an inner child cannot spawn a third layer. The bridge validates the typed tier contract against parsed agent YAML and the exact model scope **before a new child starts**. Nested calls must use `options: { agentScope: "user" }` to prevent project-scoped agent shadows; per-call model, worktree, and tool overrides fail before delegation. The central rules are `src/tier-policy.ts`, the required guard is `src/nested-guard.ts`, and the profile validator is `src/tier-profile.ts`.
 
+<!-- policy:begin pi-nesting -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 | Pi parent | Allowed nested child |
 | --- | --- |
 | scout | scout |
 | mechanic | scout, mechanic |
 | worker | scout, mechanic, worker |
-| expert | scout, mechanic, worker, expert |
+| expert (native Pi) | scout, mechanic, worker, expert |
+<!-- policy:end pi-nesting -->
 
 **Codex and Command Code workers are leaves.** Nested Pi children share their first-level worktree and scope; native restrictions do not replace OS sandboxing, worktree diff review or acceptance proof. The CLI/MCP entrypoint is not an authorized child launcher.
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` reports pinned Hydrogen and no fallback for expert; for scout/mechanic/worker it reports Codex first, then Command Code and the pinned Pi fallback.
+`worker_model_check(cwd, tier)` reports the approved routes and current availability for the requested tier. `make policy` exports the approved policy offline without probing account availability.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -68,6 +76,7 @@ Identical actions are available to harnesses without MCP:
 
 ```
 pi-subagent-bridge mcp
+pi-subagent-bridge policy
 pi-subagent-bridge model-check CWD TIER
 pi-subagent-bridge start CWD TITLE TIER SCOPE_JSON_FILE BRIEF_FILE
 pi-subagent-bridge status CWD SESSION_ID
@@ -78,13 +87,30 @@ pi-subagent-bridge cancel CWD SESSION_ID
 
 The CLI prints one JSON result to stdout on success and a diagnostic on stderr on error. Pass a scope file rather than interpolating JSON into a shell command. Do not put credentials or private source into task briefs.
 
+`pi-subagent-bridge policy` exports approved routes, native Pi restrictions and
+harness exceptions without loading the SDK, probing a provider, or reading home
+configuration. `make policy` provides the same inspection directly from a checkout.
+Edit the typed policy and run `make generate`; [policy projections](../policy/README.md)
+explains generated ownership and read-only drift checks.
+
 ## Safety and durability
 
 Codex and Command Code record process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
 
-Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker go from Codex to Command Code and their approved Pi fallbacks. Expert runs Hydrogen only; provider failure cannot switch it to another model. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
+Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker go from Codex to Command Code and their approved Pi fallbacks. The terminal expert lane cannot switch to another model after a provider failure. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
 
-Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins. New expert sessions pin Hydrogen as their only provider; there is no god session.
+Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins. New expert sessions retain their admitted Antigravity pin; removed tiers cannot be admitted.
+
+Versioned sessions (`schema_version: 1`) use the stable `antigravity` backend,
+record its exact `antigravity_pin`, and snapshot pending `pi_candidates` at
+admission. Status, resume and steering use those saved pins. An unversioned
+`hydrogen` record maps to its historical exact pin, never the current default;
+records missing required pin history refuse replay or fallback with a manual
+reconciliation diagnostic. CLI continuations preserve complete snapshots.
+Native Pi still validates its installed capability policy: a retired native
+model may be refused on continuation or pending fallback, never replaced with
+the current pin. The top-level `backend`, `command_run` and `pi_id` fields remain
+for watchers. Unknown scope fields are rejected, matching the published schema.
 
 ## Reloading the server
 
@@ -114,9 +140,8 @@ sh dotfiles/worker-campaign-test.sh
 
 The bridge uses the exact-pinned
 [`pi-muse-subscription`](https://github.com/jkeskikangas/pi-muse-subscription) extension
-as the Pi fallback for **worker (xhigh)** when Command Code is unavailable or fails
-conclusively before edits. Scout and mechanic use the pinned Contributor Spark models instead;
-expert has no Muse route and stays on Command Code then OpenCode Go. The provider is
+as the Pi fallback listed in the generated routing table, after earlier approved routes
+are unavailable or fail conclusively before edits. Expert has no Muse route. The provider is
 loaded only inside Muse SDK workers, never globally into ordinary Pi sessions.
 This is subscription usage via the official Muse Code SDK, **not** the metered Meta API.
 

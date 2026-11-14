@@ -2,9 +2,8 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
-export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
-export const COMMAND_EMBER_MODEL = "meta/muse-ember"
-export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
+import { COMMAND_MODEL, COMMAND_EMBER_MODEL, isBannedModel, type CliPin, type Effort } from "./policy.ts"
+export { COMMAND_MODEL, COMMAND_EMBER_MODEL, type Effort } from "./policy.ts"
 export type CommandRun = { pid: number; output: string; errors: string; started_at: string; proc_start?: string | null }
 export type CommandResult = {
   subtype: "success" | "error" | "max_turns"
@@ -19,8 +18,12 @@ const children = new Map<number, ChildProcess>()
 const MAX_TURNS = 100_000
 
 export function startCommand(directory: string, logDirectory: string, text: string,
-  effort: Effort, readOnly: boolean, resume?: string, model: string = COMMAND_MODEL): CommandRun {
-  if (model !== COMMAND_MODEL && model !== COMMAND_EMBER_MODEL) throw new Error("Unapproved Command Code model")
+  effort: Effort, readOnly: boolean, resume?: string, model: string = COMMAND_MODEL, admittedPin?: CliPin): CommandRun {
+  const approved = admittedPin
+    ? admittedPin.model === model && admittedPin.effort === effort
+    : model === COMMAND_MODEL || model === COMMAND_EMBER_MODEL
+  if (!model || isBannedModel(model) || !approved)
+    throw new Error("Unapproved Command Code model and effort" + (admittedPin ? "; preserve the admitted pin or reconcile the session" : ""))
   const suffix = randomUUID()
   const output = `${logDirectory}/${suffix}.ndjson`
   const errors = `${logDirectory}/${suffix}.stderr`

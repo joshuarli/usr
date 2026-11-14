@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools/pi"))
 from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
-MODEL = "opencode-go/muse-spark-1.3-contributor"
+POLICY = json.loads((ROOT / "tools/policy/policy.generated.json").read_text())
 
 
 
@@ -123,50 +123,27 @@ class PiTests(unittest.TestCase):
         depth_settings = json.loads((PROFILE / "extensions/subagent/config.json").read_text())
         self.assertEqual(depth_settings["maxSubagentDepth"], 2)
         self.assertTrue(sub["modelScope"]["strict"])
-        self.assertEqual(set(sub["modelScope"]["allow"]), {
-            "opencode-go/deepseek-v4.1-flash", MODEL,
-            "muse-sdk/muse-spark-1.3"})
-        expected = {"scout": (MODEL, "medium"),
-                    "mechanic": (MODEL, "high"),
-                    "worker": ("opencode-go/deepseek-v4.1-flash", "high"),
-                    "expert": ("opencode-go/deepseek-v4.1-flash", "max")}
-        nested = {
-            "scout": ["scout"],
-            "mechanic": ["scout", "mechanic"],
-            "worker": ["scout", "mechanic", "worker"],
-            "expert": ["scout", "mechanic", "worker", "expert"],
+        native = POLICY["nativePi"]
+        self.assertEqual(sub["modelScope"]["allow"], native["modelAllowlist"])
+        profiles = {
+            tier: (pin, native["delegation"][tier], native["tools"][tier])
+            for tier, pin in native["goModels"].items()
         }
-        for tier, (model, effort) in expected.items():
-            self.assertEqual(sub["agentOverrides"][tier], {"model": model, "thinking": effort})
-            self.assertEqual(sub["modelScope"]["agents"][tier]["allow"], [model])
-            agent = (PROFILE / "agents" / (tier + ".md")).read_text()
-            self.assertIn("name: " + tier, agent)
-            self.assertIn("model: " + model, agent)
-            self.assertIn("thinking: " + effort, agent)
-            self.assertIn("  - subagent\n", agent)
-            self.assertIn("  - subagent_supervisor\n", agent)
-            self.assertIn("maxSubagentDepth: 2", agent)
-            self.assertIn("allowNestedSubagents: true", agent)
-            for child in nested[tier]:
-                self.assertIn("  - " + child + "\n", agent)
-            self.assertNotIn("  - god\n", agent)
-        muse_expected = {"muse-worker": ("muse-sdk/muse-spark-1.3", "xhigh")}
-        muse_nested = {
-            "muse-worker": ["scout", "mechanic", "muse-worker"],
-        }
-        for tier, (model, effort) in muse_expected.items():
-            self.assertEqual(sub["agentOverrides"][tier], {"model": model, "thinking": effort})
-            self.assertEqual(sub["modelScope"]["agents"][tier]["allow"], [model])
-            agent = (PROFILE / "agents" / (tier + ".md")).read_text()
-            self.assertIn("name: " + tier, agent)
-            self.assertIn("model: " + model, agent)
-            self.assertIn("thinking: " + effort, agent)
-            self.assertIn("  - subagent\n", agent)
-            self.assertIn("  - subagent_supervisor\n", agent)
-            self.assertIn("maxSubagentDepth: 2", agent)
-            self.assertIn("allowNestedSubagents: true", agent)
-            for child in muse_nested[tier]:
-                self.assertIn("  - " + child + "\n", agent)
+        for tier, pin in native["museModels"].items():
+            profiles[native["agentNames"][tier]] = (pin, native["museDelegation"][tier], native["tools"][tier])
+        for name, (pin, children, tools) in profiles.items():
+            model = pin["providerID"] + "/" + pin["id"]
+            self.assertEqual(sub["agentOverrides"][name], {"model": model, "thinking": pin["variant"]})
+            self.assertEqual(sub["modelScope"]["agents"][name]["allow"], [model])
+            agent = (PROFILE / "agents" / (name + ".md")).read_text()
+            self.assertIn("name: " + name, agent)
+            expected = "\n".join([
+                "model: " + model, "thinking: " + pin["variant"], "tools:",
+                *["  - " + tool for tool in tools], "allowNestedSubagents: true",
+                "maxSubagentDepth: " + str(native["maxSubagentDepth"]), "allowedAgents:",
+                *["  - " + child for child in children],
+            ])
+            self.assertIn(expected + "\n# policy:end native-profile", agent)
             self.assertNotIn("  - god\n", agent)
         for deleted in ("muse-scout", "muse-mechanic"):
             self.assertFalse((PROFILE / "agents" / (deleted + ".md")).exists(),

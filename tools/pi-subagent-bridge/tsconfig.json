@@ -19,5 +19,5 @@
       "yaml": ["./.dev/lib/node_modules/yaml/dist/index.d.ts"]
     }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../policy/*.ts"]
 }

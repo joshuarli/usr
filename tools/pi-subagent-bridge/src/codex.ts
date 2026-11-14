@@ -5,14 +5,8 @@ import { processIdentity, processStartTime, type CommandResult, type CommandRun,
 import { fileURLToPath } from "node:url"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import type { Tier } from "./tier-policy.ts"
-
-export const CODEX_TIER_MODELS: Record<Tier, { model: string; effort: Effort }> = {
-  scout: { model: "gpt-6-luna", effort: "medium" },
-  mechanic: { model: "gpt-6-luna", effort: "high" },
-  worker: { model: "gpt-6.1-terra", effort: "medium" },
-  expert: { model: "gpt-6.1-terra", effort: "xhigh" },
-}
+import { CODEX_TIER_MODELS, isBannedModel, type CliPin } from "./policy.ts"
+export { CODEX_TIER_MODELS } from "./policy.ts"
 const children = new Map<number, ChildProcess>()
 function cargoHome(): string {
   return process.env.CARGO_HOME || join(homedir(), ".cargo")
@@ -27,14 +21,17 @@ export function codexAvailable(): boolean {
   } catch { return false }
 }
 export function startCodex(directory: string, logDirectory: string, text: string,
-  effort: Effort, readOnly: boolean, resume?: string, model?: string, network = false): CommandRun {
-  if (!Object.values(CODEX_TIER_MODELS).some((pin) => pin.model === model && pin.effort === effort))
-    throw new Error("Unapproved Codex model and effort")
+  effort: Effort, readOnly: boolean, resume?: string, model?: string, network = false, admittedPin?: CliPin): CommandRun {
+  const approved = admittedPin
+    ? admittedPin.model === model && admittedPin.effort === effort
+    : Object.values(CODEX_TIER_MODELS).some(pin => pin.model === model && pin.effort === effort)
+  if (!model || isBannedModel(model) || !approved)
+    throw new Error("Unapproved Codex model and effort" + (admittedPin ? "; preserve the admitted pin or reconcile the session" : ""))
   const suffix = randomUUID(), output = `${logDirectory}/${suffix}.codex.ndjson`, errors = `${logDirectory}/${suffix}.codex.stderr`
   const stdout = openSync(output, "wx", 0o600), stderr = openSync(errors, "wx", 0o600)
   const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
-    "--sandbox", readOnly ? "read-only" : "workspace-write", "--model", model!,
+    "--sandbox", readOnly ? "read-only" : "workspace-write", "--model", model,
     ...(network && !readOnly ? ["-c", "sandbox_workspace_write.network_access=true", "--add-dir", cargoHome()] : []),
     ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec",
       "-c", `mcp_servers.bridge_scout.command=${JSON.stringify(process.execPath)}`,

@@ -1,6 +1,8 @@
 ---
 name: expert
 description: Difficult scoped debugging and architectural investigation.
+# policy:begin native-profile
+# Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: opencode-go/deepseek-v4.1-flash
 thinking: max
 tools:
@@ -20,6 +22,7 @@ allowedAgents:
   - mechanic
   - worker
   - expert
+# policy:end native-profile
 ---
 
 Resolve the difficult uncertainty with evidence, then change only approved files and report proof.

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { GO_TIER_MODELS } from "./tier-policy.ts"
 
 export type ModelRef = { id: string; providerID: string; variant?: string }
 export type SessionArgs = { sessionID: string; cwd?: string }
@@ -20,7 +21,7 @@ export class PreAdmissionError extends Error {}
 
 const SESSION_PREFIX = "usr-worker: "
 const MAX_BRIEF = 32_000
-export const GO_MODEL: ModelRef = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
+export const GO_MODEL: ModelRef = GO_TIER_MODELS.worker
 export const DEFAULT_MODEL = GO_MODEL
 const SESSION_METADATA_KEY = "usr_worker_v1" as const
 export function selectedModel(value = process.env.USR_PI_SUBAGENT_MODEL): ModelRef {

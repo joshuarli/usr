@@ -153,6 +153,13 @@ printf '{"id":"%s","cwd":"%s","run":{"pid":%s,"output":"%s/pi.result.json","erro
 printf '{"state":"succeeded","text":"SDK proof"}\n' > "$pi_repo/.work/worker-bridge/pi.result.json"
 expect 0 "a Pi SDK terminal result is reported" "${prefix}10 succeeded $pi_repo Pi lane" wait "$pi_repo"
 
+agy_repo="$scratch/agy"
+mkdir -p "$agy_repo/.work/worker-bridge"
+printf '{"schema_version":1,"id":"%s12","title":"Expert lane","cwd":"%s","backend":"antigravity","antigravity_pin":{"model":"fixture-model","effort":"xhigh"},"command_run":{"pid":%s,"output":"%s/agy.ndjson"}}\n' \
+    "$prefix" "$agy_repo" "$gone" "$agy_repo" > "$agy_repo/.work/worker-bridge/${prefix}12.json"
+printf '{"event":"init","init":{"model":"fixture-model"}}\n{"event":"result","result":{"status":"SUCCESS","response":"Expert proof"}}\n' > "$agy_repo/agy.ndjson"
+expect 0 "an Antigravity terminal result is reported" "${prefix}12 succeeded $agy_repo Expert lane" wait --timeout 1s "$agy_repo"
+
 live_repo="$scratch/repo-live"
 mkdir -p "$live_repo/.work/worker-bridge"
 sleep 600 &

@@ -3,22 +3,21 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs"
 import { processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
 
-export const HYDROGEN_MODEL = "gemini-4-hydrogen-xhigh"
-export const HYDROGEN_EFFORT: Effort = "xhigh"
+import { ANTIGRAVITY_PIN, isBannedModel, type CliPin } from "./policy.ts"
 
 const children = new Map<number, ChildProcess>()
 
-export function hydrogenAvailable(): boolean {
+export function antigravityAvailable(pin: CliPin = ANTIGRAVITY_PIN): boolean {
   try {
     const check = spawnSync("agy", ["models"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] })
-    return check.status === 0 && check.stdout.split("\n").some(line => line.trim().split(/\s+/)[0] === HYDROGEN_MODEL)
+    return check.status === 0 && check.stdout.split("\n").some(line => line.trim().split(/\s+/)[0] === pin.model)
   } catch { return false }
 }
 
-export function startHydrogen(directory: string, logDirectory: string, prompt: string, effort: Effort,
-  readOnly: boolean, resume?: string, model?: string): CommandRun {
-  if (model !== HYDROGEN_MODEL || effort !== HYDROGEN_EFFORT || readOnly)
-    throw new Error("Unapproved Antigravity model, effort, or tool scope; Hydrogen XHigh only")
+export function startAntigravity(directory: string, logDirectory: string, prompt: string, effort: Effort,
+  readOnly: boolean, resume?: string, model?: string, pin: CliPin = ANTIGRAVITY_PIN): CommandRun {
+  if (model !== pin.model || effort !== pin.effort || readOnly || isBannedModel(pin.model))
+    throw new Error("Unapproved Antigravity model, effort, or tool scope; expected " + pin.model + " (" + pin.effort + ")")
   if (resume && !/^[a-f0-9-]{36}$/i.test(resume)) throw new Error("Invalid Antigravity conversation ID")
   const suffix = randomUUID()
   const output = logDirectory + "/" + suffix + ".agy.ndjson"
@@ -26,7 +25,7 @@ export function startHydrogen(directory: string, logDirectory: string, prompt: s
   const stdout = openSync(output, "wx", 0o600)
   const stderr = openSync(errors, "wx", 0o600)
   const args = [
-    "-p", prompt, "--output-format", "stream-json", "--model", HYDROGEN_MODEL,
+    "-p", prompt, "--output-format", "stream-json", "--model", pin.model,
     "--dangerously-skip-permissions",
     ...(resume ? ["--conversation", resume] : []),
   ]
@@ -77,7 +76,7 @@ function events(run: CommandRun): Event[] {
   } catch { return [] }
 }
 
-export function hydrogenSession(run: CommandRun): string | null {
+export function antigravitySession(run: CommandRun): string | null {
   const event = events(run).find(value => value.event === "init")
   const id = event?.conversation_id
   return typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id) ? id : null
@@ -88,7 +87,7 @@ function groupAlive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH" }
 }
 
-export function hydrogenResult(run: CommandRun): { state: string; result: CommandResult | null; stderr: string | null } {
+export function antigravityResult(run: CommandRun, pin: CliPin = ANTIGRAVITY_PIN): { state: string; result: CommandResult | null; stderr: string | null } {
   const identity = children.has(run.pid) ? "same" : processIdentity(run)
   if (identity === "same" || identity === "unknown" || groupAlive(run.pid))
     return { state: "running", result: null, stderr: null }
@@ -96,20 +95,20 @@ export function hydrogenResult(run: CommandRun): { state: string; result: Comman
   const init = stream.find(value => value.event === "init")
   const terminal = stream.findLast(value => value.event === "result")?.result
   if (!terminal) return { state: "interrupted", result: null, stderr: null }
-  const pinMatches = init?.init?.model === HYDROGEN_MODEL
+  const pinMatches = init?.init?.model === pin.model && !isBannedModel(pin.model)
   const succeeded = terminal.status === "SUCCESS" && pinMatches
   const result: CommandResult = {
     subtype: succeeded ? "success" : "error",
-    sessionId: terminal.conversation_id ?? hydrogenSession(run) ?? undefined,
+    sessionId: terminal.conversation_id ?? antigravitySession(run) ?? undefined,
     finalText: terminal.response,
     error: pinMatches ? terminal.error ?? (succeeded ? undefined : "Antigravity ended with " + terminal.status) :
-      "Antigravity failed to confirm the pinned Hydrogen model",
+      "Antigravity failed to confirm the admitted model " + pin.model,
     usage: terminal.usage,
   }
   return { state: succeeded ? "succeeded" : "failed", result, stderr: null }
 }
 
-export function cancelHydrogen(run: CommandRun): boolean {
+export function cancelAntigravity(run: CommandRun): boolean {
   const child = children.get(run.pid)
   if (!child) return false
   try { process.kill(-run.pid, "SIGTERM"); return true }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MUSE_TIER_MODELS, MUSE_AGENT_NAMES,
-  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH,
+  MUSE_DELEGATION, museSubscriptionSelected, MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST,
   TIER_TOOLS, TIERS, tierForModel, type ChildOf, type Tier,
 } from "../src/tier-policy.ts"
 import { nestedCallRefusal, registerTierGuard } from "../src/nested-guard.ts"
@@ -36,7 +36,7 @@ function profile(tier: Tier, family: "go" | "muse" = "go"): string {
     "---", "name: " + name, "description: Fixed profile",
     "model: " + pin.providerID + "/" + pin.id,
     "thinking: " + pin.variant,
-    "tools:", ...(TIER_TOOLS as any)[tier].map((tool: string) => "  - " + tool),
+    "tools:", ...TIER_TOOLS[tier].map(tool => "  - " + tool),
     "allowNestedSubagents: true",
     "maxSubagentDepth: " + MAX_SUBAGENT_DEPTH,
     "allowedAgents:", ...(children as readonly string[]).map((child) => "  - " + child),
@@ -53,9 +53,7 @@ function profileSettings(): object {
         thinking: MUSE_TIER_MODELS.worker.variant }],
     ]),
     modelScope: { enforce: true, strict: true,
-      allow: ["opencode-go/deepseek-v4.1-flash",
-        "opencode-go/muse-spark-1.3-contributor",
-        "muse-sdk/muse-spark-1.3"],
+      allow: [...PI_MODEL_ALLOWLIST],
       agents: Object.fromEntries([
         ...TIERS.map((tier) => [tier, { allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id] }]),
         [MUSE_AGENT_NAMES.worker, { allow: [MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id] }],

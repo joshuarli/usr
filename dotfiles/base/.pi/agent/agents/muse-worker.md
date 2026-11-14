@@ -1,6 +1,8 @@
 ---
 name: muse-worker
 description: Scoped coding and debugging on Muse Code subscription.
+# policy:begin native-profile
+# Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: muse-sdk/muse-spark-1.3
 thinking: xhigh
 tools:
@@ -19,6 +21,7 @@ allowedAgents:
   - scout
   - mechanic
   - muse-worker
+# policy:end native-profile
 ---
 
 Implement the assigned outcome in the approved files, validate it, and report proof.

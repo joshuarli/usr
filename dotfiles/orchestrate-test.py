@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+POLICY = json.loads((ROOT / "tools/policy/policy.generated.json").read_text())
 
 class OrchestrateTests(unittest.TestCase):
     @classmethod
@@ -17,17 +18,17 @@ class OrchestrateTests(unittest.TestCase):
         for method in ("worker_model_check", "worker_start", "worker_status", "worker_resume"):
             self.assertIn(method, self.text)
 
-    def test_codex_first_and_contributor_pin_only(self):
-        self.assertIn("Codex subscription is first for scout/mechanic/worker", self.text)
-        self.assertIn("followed by Command Code", self.text)
-        self.assertIn("scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`", self.text)
-        self.assertNotIn("opencode/muse-ember-1.0", self.text)
-
-    def test_hydrogen_expert_only(self):
-        self.assertIn("gemini-4-hydrogen-xhigh", self.text)
-        self.assertIn("No `god` tier exists anywhere.", self.text)
-        self.assertIn("Gemini 4 Argon and Gemini 4 Carbon are banned", self.text)
-        self.assertIn("no fallback", self.text)
+    def test_generated_policy_has_distinct_root_and_native_domains(self):
+        self.assertEqual(POLICY["tiers"], ["scout", "mechanic", "worker", "expert"])
+        self.assertEqual(len(POLICY["rootRoutes"]["expert"]), 1)
+        self.assertEqual(POLICY["rootRoutes"]["expert"][0]["executor"], "antigravity")
+        self.assertIn(POLICY["rootRoutes"]["expert"][0]["model"], self.text)
+        self.assertIn("expert", POLICY["nativePi"]["goModels"])
+        self.assertNotIn("god", POLICY["rootRoutes"])
+        for family in POLICY["bannedModels"]:
+            for routes in POLICY["rootRoutes"].values():
+                self.assertTrue(all(route["model"] != family and not route["model"].startswith(family + "-")
+                                    for route in routes))
 
     def test_no_old_mcp_registration(self):
         codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()
@@ -58,14 +59,12 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("every tier must run a free model", self.text)
         config = json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
         agents = config["agents"]
+        policy = POLICY["opencode"]
+        self.assertFalse(policy["usesBridge"])
+        self.assertTrue(policy["freeOnlyWhenParentFree"])
         self.assertEqual(
-            {tier: agents[tier]["model"] for tier in ("scout", "mechanic", "worker", "expert")},
-            {
-                "scout": "opencode/inkling-2-small-free#low",
-                "mechanic": "opencode/inkling-2-small-free#medium",
-                "worker": "opencode/inkling-2-small-free#high",
-                "expert": "opencode/inkling-2-small-free#max",
-            },
+            {tier: agents[tier]["model"] for tier in POLICY["tiers"]},
+            {tier: policy["model"] + "#" + policy["efforts"][tier] for tier in POLICY["tiers"]},
         )
         self.assertNotIn("god", agents)
         scout_rules = agents["scout"]["permissions"]
