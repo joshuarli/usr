@@ -1,6 +1,7 @@
 """Kache install/ownership/uninstall round-trip, with no real toolchain or downloads."""
 
 from pathlib import Path
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,7 @@ class KacheTests(unittest.TestCase):
         self.ctx = main.Context(self.root, self.home, "linux", "desktop", {"HOME": str(self.home)})
         self.called = []
         self.write_on_install = True
+        self.installs = 0
         self.patcher = patch.object(main, "command", side_effect=self.command)
         self.patcher.start()
         self.addCleanup(self.patcher.stop)
@@ -34,11 +36,34 @@ class KacheTests(unittest.TestCase):
     def command(self, _ctx, *args, **kwargs):
         self.called.append(args)
         if args and str(args[-1]).endswith("setup-kache") and self.write_on_install:
+            self.installs += 1
             self.binary.write_text("#!/bin/sh\necho kache 1.0.0\n")
             self.binary.chmod(0o755)
+            engine = self.binary.parent / "kache-engine"
+            engine.write_text("#!/bin/sh\n")
+            engine.chmod(0o755)
+            self.write_record(self.binary, engine)
         if args and args[-2:] == ("uninstall", "--purge"):
             self.binary.unlink()
         return type("Completed", (), {"returncode": 0})()
+
+    def write_record(self, *binaries, tag="release-" + "a" * 40):
+        lines = [tag] + [f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}" for path in binaries]
+        (self.binary.parent / ".kache-release").write_text("".join(line + "\n" for line in lines))
+
+    def test_sync_reinstalls_when_the_release_record_does_not_vouch_for_the_binaries(self):
+        main.kache_apply(self.ctx)
+        self.assertEqual(main.kache_status(self.ctx).detail, "kache installed")
+        record = self.binary.parent / ".kache-release"
+        record.write_text("release-" + "a" * 40 + "\n")
+        status = main.kache_status(self.ctx)
+        self.assertFalse(status.current)
+        self.assertEqual(status.detail, "kache release record lists no digest for kache")
+        main.kache_apply(self.ctx)
+        self.assertEqual(self.installs, 2)
+        self.assertTrue(main.kache_status(self.ctx).current)
+        (self.binary.parent / "kache-engine").write_text("replaced")
+        self.assertEqual(main.kache_status(self.ctx).detail, "kache-engine does not match the kache release record")
 
     def test_managed_install_uninstall_round_trip(self):
         main.kache_apply(self.ctx)
@@ -54,7 +79,9 @@ class KacheTests(unittest.TestCase):
     def test_foreign_existing_install_not_adopted(self):
         self.binary.write_text("foreign")
         self.binary.chmod(0o755)
-        self.assertTrue(main.kache_status(self.ctx).current)
+        status = main.kache_status(self.ctx)
+        self.assertTrue(status.current)
+        self.assertEqual(status.detail, "kache installed outside sync; left unmanaged")
         with self.assertRaisesRegex(RuntimeError, "pre-existing"):
             main.kache_apply(self.ctx)
         self.assertFalse(self.ctx.state.exists())

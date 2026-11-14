@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -232,9 +234,39 @@ def kache_install_path(ctx: Context) -> Path:
     return binary
 
 
+def kache_record_problem(binary: Path) -> str | None:
+    """Return why setup-kache's release record does not vouch for the installed binaries."""
+    record = binary.parent / ".kache-release"
+    try:
+        lines = record.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return "kache release record missing"
+    if not lines or not re.fullmatch(r"release-[0-9a-f]{40}", lines[0]):
+        return "kache release record has no release tag"
+    digests = {
+        name: digest
+        for digest, name in (line.split("  ", 1) for line in lines[1:] if re.fullmatch(r"[0-9a-f]{64}  \S+", line))
+    }
+    for name in ("kache", "kache-engine"):
+        if name not in digests:
+            return f"kache release record lists no digest for {name}"
+        try:
+            actual = hashlib.sha256((binary.parent / name).read_bytes()).hexdigest()
+        except OSError:
+            return f"{name} is missing"
+        if actual != digests[name]:
+            return f"{name} does not match the kache release record"
+    return None
+
+
 def kache_status(ctx: Context) -> Probe:
     binary = Path(ctx.env.get("KACHE", str(kache_install_path(ctx))))
-    return Probe(os.access(binary, os.X_OK), "kache installed" if binary.is_file() else "kache missing")
+    if not binary.is_file():
+        return Probe(False, "kache missing")
+    if read_manifest(ctx.state).get(str(binary)) != {"kind": "K", "fingerprint": fingerprint(binary, "K")}:
+        return Probe(os.access(binary, os.X_OK), "kache installed outside sync; left unmanaged")
+    problem = kache_record_problem(binary)
+    return Probe(problem is None, problem or "kache installed")
 
 
 def kache_apply(ctx: Context) -> None:
