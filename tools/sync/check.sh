@@ -41,6 +41,6 @@ tmpdir=$(CDPATH='' cd -- "$tmpdir" && pwd -P)
 	(cd dotfiles && sh zsh-shim-test.sh)
 	sh tools/mdtool/tests/mdtool-test.sh
 	python3 -I tools/decide/tests/test_decide.py
-	sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
-	sh dotfiles/skills-check.sh .agents/skills
+	node tools/skills/skills.ts check
+	node tools/skills/skills.ts check --root .agents/skills
 	python3 -I dotfiles/skills-campaign-test.py

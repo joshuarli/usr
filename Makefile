@@ -4,7 +4,7 @@ SHELL := /bin/sh
 CF ?= cf
 NODE ?= node
 
-.PHONY: help deploy-setup.sh generate check-generated policy
+.PHONY: help deploy-setup.sh generate check-generated policy skills-check skills-generate
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-z][a-z0-9.-]*:.*## / {printf "%-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -20,3 +20,10 @@ check-generated: ## Check policy projections without changing files
 
 policy: ## Export approved model policy as JSON without provider probes
 	@$(NODE) tools/policy/generate.ts --json
+
+skills-check: ## Check skill metadata and generated adapters
+	@$(NODE) tools/skills/skills.ts check
+	@$(NODE) tools/skills/skills.ts check --root .agents/skills
+
+skills-generate: ## Refresh skill invocation adapters
+	@$(NODE) tools/skills/skills.ts generate

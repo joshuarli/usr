@@ -3,7 +3,6 @@ name: blast-radius
 description: "Use when a consequential change has a downstream safety question that source search cannot settle; trace and exercise the assumption against relevant callers or runtime. Skip routine changes, clear local repairs, and broad repository audits."
 metadata:
   opencode/slash: "true"
-  opencode/autoinvoke: "true"
 ---
 
 # Blast Radius

@@ -19,7 +19,7 @@ Instructions drift as they grow: two skills give opposite orders, a rule is rest
 
 ## Audit (read-only)
 
-1. **Inventory.** Run `sh dotfiles/skills-check.sh` and `sh dotfiles/skills-check.sh .agents/skills` for current warnings. Rank every file in scope by bytes, and every skill by description length, since descriptions load in every session of every harness.
+1. **Inventory.** Run `node tools/skills/skills.ts check` and `node tools/skills/skills.ts check --root .agents/skills` for current warnings. Rank every file in scope by bytes, and every skill by description length, since descriptions load in every session of every harness.
 2. **Fan out by cluster** when the inventory shows work across many skills; a pass with a handful of findings is cheaper done directly. Use [orchestrate](../../../dotfiles/base/.agents/skills/orchestrate/SKILL.md) with one read-only lane each for the contract with its index and agent definitions, workflow and campaign skills, review, test, and performance skills, code-design skills, and language, writing, and repo skills. Rebalance clusters as skills are added. Each lane reads the global contract first, since anything a skill restates from it is redundant.
 3. **Brief each lane with the priorities in order.**
    - Contradictions between files, quoted on both sides with `file:line`.
@@ -42,7 +42,7 @@ Instructions drift as they grow: two skills give opposite orders, a rule is rest
 - **Preserve every decision.** Per file, compare backticked tokens with `git show HEAD:<file> | rg -o '\`[^\`]+\`' | sort -u`; every token removed must be named as moved or deliberately dropped.
 - **Find tests that pin instruction text before committing.** `rg -l 'SKILL\.md|AGENTS\.md|agents/skills' --glob '*test*'` lists them; run each.
 - **Review each lane's diff, then commit it alone** with a body naming the contradictions it resolves. New rule owners go into the list in `dotfiles-health` in the same change.
-- **Run the shared checks once all lanes stop**, not while they edit: `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills`, `sh dotfiles/skills-check.sh .agents/skills`, and `python3 -I dotfiles/skills-campaign-test.py`. Concurrent runs collide on fixtures and fail spuriously.
+- **Run the shared checks once all lanes stop**, not while they edit: `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, and `python3 -I dotfiles/skills-campaign-test.py`. Concurrent runs collide on fixtures and fail spuriously.
 - **A new tool lands before the skill that points at it**, in its own commit with tests registered in `tools/sync/check.sh`. When a check fails, rerun it on the stashed tree to tell a pre-existing failure from a new one.
 - **Expect modest savings.** Once contradictions and duplicates are gone, most remaining text is a specific rule. Stop there instead of compressing rules away.
 

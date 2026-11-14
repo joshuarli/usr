@@ -41,7 +41,7 @@ jobs:
           python3 -I tools/sync/opencode-worker-test.py
           python3 -I tools/sync/test_main.py
           python3 -I tools/sync/test_installer.py
-          sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
+          node tools/skills/skills.ts check
           # The full repository suite expects no system PyYAML C extension; isolate it
           # from GitHub runner site-packages without installing any pip packages.
           python3 -m venv --without-pip .work/isolated-python

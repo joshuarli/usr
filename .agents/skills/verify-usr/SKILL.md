@@ -44,8 +44,8 @@ Check only the `verify-usr.*` fixture directory from this run if the helper is i
 Use these read-only checks for skill and Markdown changes:
 
 ```sh
-sh dotfiles/skills-check.sh dotfiles/base/.agents/skills
-sh dotfiles/skills-check.sh .agents/skills
+node tools/skills/skills.ts check
+node tools/skills/skills.ts check --root .agents/skills
 python3 -I dotfiles/base/.local/bin/mdtool check --untracked
 ```
 

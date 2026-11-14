@@ -3,7 +3,6 @@ name: do
 description: "Route substantial work with meaningful uncertainty, dependent steps, consequential changes, or nontrivial acceptance through a proportionate workflow; preserve scope and authority through execution, then verify the outcome. Skip straightforward small edits and one-step information requests."
 metadata:
   opencode/slash: "true"
-  opencode/autoinvoke: "true"
 ---
 
 # Do

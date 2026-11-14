@@ -3,7 +3,6 @@ name: architect
 description: "Use for consequential, genuinely uncertain design or boundary changes, including design-only requests; compare structurally different options against existing caller and invariant constraints. Skip routine edits and clear local repairs."
 metadata:
   opencode/slash: "true"
-  opencode/autoinvoke: "true"
 ---
 
 # Architect
