@@ -11,8 +11,12 @@ on:
       - ".github/workflows/pi-offline-verify.yml"
   workflow_dispatch:
 concurrency:
-  group: verify-pi-offline-${{ github.ref }}
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
   cancel-in-progress: true
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
 jobs:
   offline:
     strategy:
