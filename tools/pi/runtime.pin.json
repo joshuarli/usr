@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-38e2dad523f7233b12b23b412b86292857a4ffca/",
-  "builder_revision": "38e2dad523f7233b12b23b412b86292857a4ffca",
+  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-d3620b3662de7ab4daffabd45b3bb3d65d2b6016/",
+  "builder_revision": "d3620b3662de7ab4daffabd45b3bb3d65d2b6016",
   "profile": "headless-usr",
   "version": "1.5.0",
-  "provenance_sha256": "0253c107d7d531a92c0011abb26824c9ca049cc57afbea1853ee3acc9641fc29",
+  "provenance_sha256": "b00d1fce62c3114694cee2b3479e4b73c01f5de7d2485a6a0b0a02616c23f928",
   "targets": {
     "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "b33eba78b646dbb93f4431166a1b502bf535267e9d80d4b2c8dddaac7b8f8917", "bytes": 12793608},
     "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "c12190515257d334289192f7009d34494a66e20941477ecbdb7dfe521613694d", "bytes": 12778644},
@@ -13,6 +13,6 @@
   "companions": {
     "agent-intercom-claude": {"archive": "agent-intercom-claude-0.10.0.tgz", "version": "0.10.0", "sha256": "f60e27f4d142a0ed3109fd78d984aa05800aa2d5b233c4de96402697c8d504ba", "bytes": 138837, "source_sha": "134baec78523d2a648a35506694455bb1c56104f"},
     "agent-intercom-codex": {"archive": "agent-intercom-codex-0.10.0.tgz", "version": "0.10.0", "sha256": "acca68eac6ed908c9356a9ad0ad7413a1a1854cce14b3e507073aed32a3e3f67", "bytes": 148396, "source_sha": "dd7182cb4fab2df0dfadaec65cf9d65b8713455a"},
-    "agent-intercom-opencode": {"archive": "agent-intercom-opencode-0.10.0.tgz", "version": "0.10.0", "sha256": "ec499599e3016b48652e00eab7592b315e19cddcca6809a68c24d8ca306e4daa", "bytes": 10514318, "source_sha": "13ec2a75d680afcd5ae8af544f341848b3a881c4"}
+    "agent-intercom-opencode": {"archive": "agent-intercom-opencode-0.10.0.tgz", "version": "0.10.0", "sha256": "3253ce5ed631b5957f082cc58aa01d74d583c79767567e0045db293a87bcf387", "bytes": 10826197, "source_sha": "163df7659c051b8e2dc0eeca4bddd510822a286c"}
   }
 }
