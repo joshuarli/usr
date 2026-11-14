@@ -355,8 +355,8 @@ def main(argv: list[str]) -> int:
         uninstall(ctx)
         return 0
     if command_name == "check":
-        required(command(ctx, "sh", str(ctx.root / "tools/sync/check.sh")), "repository checks")
-        return 0
+        import checks
+        return checks.main(argv, ctx.root)
     if command_name == "check-parallel":
         required(command(ctx, "sh", "-c", "uvx --python 3.15 --with joshuarli-pytest-parallel==0.4.0 pytest tools dotfiles host/macos"), "parallel checks")
         return 0

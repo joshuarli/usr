@@ -71,7 +71,7 @@ Total compressed baseline: 111,101,952 bytes. Symlink targets are not counted tw
 
 # Cutover callers
 
-Update or retire `tools/pi` tests, `tools/sync/check.sh`, old `vendor.py`/`build-runtime.sh`, Pi build/verify/Alpine workflows, sync/worker registration, the actual `/pi-update` SKILL.md and its SKILLS.md description, and current operator docs in the same cutover. `/pi-update` must build/verify/publish in the builder and bump the consumer only after compatibility proof. Routine sync consumes the existing pin.
+Update or retire `tools/pi` tests, `tools/sync/checks.py`, old `vendor.py`/`build-runtime.sh`, Pi build/verify/Alpine workflows, sync/worker registration, the actual `/pi-update` SKILL.md and its SKILLS.md description, and current operator docs in the same cutover. `/pi-update` must build/verify/publish in the builder and bump the consumer only after compatibility proof. Routine sync consumes the existing pin.
 
 Retain meaningful offline/runtime fixtures. Run `test_sync_bridge_offline.py` only in a disposable checkout. Audit all tracked references to retired paths; historical ticket/plan evidence is not a live caller. `git ls-files vendor/pi` must become empty only after durable provenance preservation and accepted replacement delivery. Never rewrite history to remove old blobs.
 
