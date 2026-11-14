@@ -26,7 +26,7 @@ OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
 NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "pi", "dsh"})
 TOOL_EXECUTABLES = {
     "nodejs": ("node", "npm"), "ffmpeg": ("ffmpeg", "ffprobe"),
-    "shuck": ("shellcheck",), "opencode2": ("opencode2",),
+    "shuck": ("shellcheck",), "opencode2": ("opencode2",), "lz": ("less",),
     "ghostty": ("ghostty-custom",), "ghostty-custom": ("ghostty-custom",),
     "player": ("player",), "antigravity": ("agy",), "gluon": ("meson", "ninja", "gluon-build"), "bctl": ("bctl",),
     "python3": ("python3",), "ssh": ("ssh",),

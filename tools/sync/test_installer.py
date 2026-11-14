@@ -275,6 +275,49 @@ sys.exit(1)
             inst.install_release("shuck")
         self.assertTrue(self.dest_path("shellcheck").is_file())
 
+    def lz_routes(self, payload, digest=None, sums_asset=None):
+        import hashlib
+        asset = "lz-aarch64-apple-darwin"
+        zip_bytes = make_zip({asset: payload}, executable=[asset])
+        digest = digest or hashlib.sha256(zip_bytes).hexdigest()
+        tag = "release-" + "a" * 40
+        base = f"https://github.com/joshuarli/lz/releases/download/{tag}"
+        routes = {"https://github.com/joshuarli/lz/releases.atom": atom([("2024-01-01", tag)]),
+                  f"{base}/{asset}.zip": (zip_bytes, {"ETag": "lz-etag"}),
+                  f"{base}/SHA256SUMS": f"{digest}  {sums_asset or asset + '.zip'}\n".encode()}
+        return routes, base, asset, tag
+
+    def test_lz_installs_as_less(self):
+        payload = b"binary"
+        routes, base, asset, tag = self.lz_routes(payload)
+        inst = self.make(routes, os_name="darwin", arch="aarch64")
+        inst.install("lz")
+        self.assertEqual(self.dest_path("less").read_bytes(), payload)
+        self.assertTrue(os.access(self.dest_path("less"), os.X_OK))
+        self.assertEqual(self.state("less"), f"{tag}:lz-etag")
+        self.assertIn(("F", self.dest_path("less")), inst.claims)
+
+    def test_lz_bad_checksum_preserves_existing_binary(self):
+        payload = b"binary"
+        routes, base, asset, tag = self.lz_routes(payload, digest="0" * 64)
+        inst = self.make(routes, os_name="darwin", arch="aarch64")
+        dest = self.dest_path("less")
+        dest.write_bytes(b"old")
+        (self.home / ".local/state/dl/less").write_text("old-etag\n")
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install("lz")
+        self.assertIn("checksum mismatch", str(ctx.exception))
+        self.assertEqual(dest.read_bytes(), b"old")
+        self.assertEqual(self.state("less"), "old-etag")
+
+    def test_lz_skips_unsupported_platforms(self):
+        inst = self.make({}, os_name="darwin", arch="x86_64")
+        with self.assertRaises(SkipInstall):
+            inst.install("lz")
+        inst = self.make({}, os_name="linux", arch="arm64")
+        with self.assertRaises(SkipInstall):
+            inst.install("lz")
+
     def _stuff_routes(self, payload, target="x86_64-unknown-linux-musl", digest=None, sums_asset=None):
         import hashlib
         digest = digest or hashlib.sha256(payload).hexdigest()
@@ -958,14 +1001,18 @@ sys.exit(1)
         darwin = default_tools("darwin", "aarch64", "")
         self.assertIn("ffmpeg", darwin)
         self.assertIn("rimage", darwin)
+        self.assertIn("lz", darwin)
         self.assertNotIn("rimage", default_tools("darwin", "x86_64", ""))
+        self.assertNotIn("lz", default_tools("darwin", "x86_64", ""))
         self.assertIn("ghostty-custom", darwin)
         self.assertIn("jaq", darwin)
         linux_arm = default_tools("linux", "aarch64", "")
         self.assertNotIn("jaq", linux_arm)
+        self.assertIn("lz", linux_arm)
         self.assertIn("mold", linux_arm)
         self.assertNotIn("player", linux_arm)
         self.assertIn("gluon", linux_arm)
+        self.assertIn("lz", default_tools("linux", "x86_64", ""))
         server_file = self.root / "server.txt"
         server_file.write_text("fd\nrg\n")
         self.assertEqual(default_tools("linux", "x86_64", "server", server_file), ["fd", "rg"])

@@ -649,6 +649,49 @@ class Installer:
             staged.write_bytes(payload)
             self.install_binary("rimage", staged, record)
 
+    def install_lz(self) -> None:
+        if (self.os_name, self.arch) not in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
+            self.skip("lz", f"no release for {self.os_name}/{self.arch}")
+            return
+        repo = "joshuarli/lz"
+        tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", prefix="release-")
+        if not re.fullmatch(r"release-[0-9a-f]{40}", tag):
+            self.unchecked("lz", "no valid release-<sha> prerelease found")
+            return
+        asset = (f"lz-{self.arch}-apple-darwin" if self.os_name == "darwin"
+                 else f"lz-{self.arch}-unknown-linux-musl-static")
+        base = f"https://github.com/{repo}/releases/download/{tag}"
+        record = f"{tag}:{self.asset_id(f'{base}/{asset}.zip')}"
+        if ":" not in record or not record.split(":", 1)[1]:
+            self.unchecked("lz", f"{base}/{asset}.zip is unreachable")
+            return
+        if self.is_current("less", record):
+            self.current(f"less is current ({tag})")
+            return
+        sums_path = Path(tempfile.mkstemp()[1])
+        if not self.download(f"{base}/SHA256SUMS", sums_path):
+            sums_path.unlink(missing_ok=True)
+            self.skip("lz", "SHA256SUMS download failed")
+        expected = self.sums_for(sums_path.read_text(), f"{asset}.zip")
+        sums_path.unlink(missing_ok=True)
+        if len(expected) != 64:
+            self.skip("lz", f"{asset}.zip is not listed in SHA256SUMS")
+        with tempfile.NamedTemporaryFile(delete=False) as stream:
+            archive_path = Path(stream.name)
+        if not self.download(f"{base}/{asset}.zip", archive_path):
+            archive_path.unlink(missing_ok=True)
+            self.skip("lz", f"{asset}.zip download failed")
+        if self.sha256_file(archive_path) != expected:
+            archive_path.unlink(missing_ok=True)
+            self.skip("lz", "release checksum mismatch")
+        member = self.zip_member(archive_path, asset)
+        archive_path.unlink(missing_ok=True)
+        if member is None:
+            self.skip("lz", f"{asset}.zip does not contain {asset}")
+        staged = self.stage_file(self.dest, ".less.")
+        staged.write_bytes(member)
+        self.install_binary("less", staged, record)
+
     def install_release(self, prog: str) -> None:
         owners = {
             **{name: "laputa-systems" for name in
@@ -2805,6 +2848,7 @@ class Installer:
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
             "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon, "bctl": self.install_bctl,
             "rimage": self.install_rimage,
+            "lz": self.install_lz,
         }
         if tool in handlers:
             handlers[tool]()
@@ -2826,7 +2870,7 @@ class Installer:
     def record_managed_installs(self) -> None:
         for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "rimage", "stuff", "e", "fz", "fs",
                      "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
-                     "zzz", "uv", "uvx", "rage", "shellcheck"):
+                     "zzz", "uv", "uvx", "rage", "shellcheck", "less"):
             self.record_managed_binary(prog)
         if self.installed("rage") and (self.dest / "rage-keygen").is_symlink():
             self.own_file(self.dest / "rage-keygen")
@@ -2983,7 +3027,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
         tools.append("jaq")
     tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fs srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
-        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "rimage", "gluon"]
+        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "rimage", "gluon", "lz"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("zzz")
     if os_name == "darwin":
