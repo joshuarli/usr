@@ -5,54 +5,61 @@ description: "Apply when asked to audit or tighten types, remove typing escape h
 
 # Typing Audit
 
-A type contract must describe every value the implementation can accept or produce. A green checker or fewer escape hatches is not proof. Audit the requested scope; do not turn a local request into a repository sweep. Review-only requests do not authorize edits.
+A type contract is true when every value the code can accept or produce at runtime fits it. A green checker reached through escape hatches is not success. Tighten contracts; never loosen one to make a patch fit. Audit the requested scope; a local request is not a repository sweep. Review-only requests do not authorize edits.
 
-Each change should leave the codebase with more that the checker proves and fewer things a reader must trust. Model work is probabilistic; a type that rejects bad programs keeps working deterministically after the session ends. The point of an audit is to add to those deterministic guarantees, not to make code look more principled.
+Model work is probabilistic; a type that rejects bad programs keeps working after the session ends. Each change should leave more that the checker proves and less that a reader must trust.
 
 ## Evidence the checker can use
 
 A change counts only if it does at least one of these:
 
-- **Rejects a program:** some program the checker accepts today, such as a forbidden construction, an unvalidated value reaching a decision, or a missing variant, becomes a type error. Write that program down as the witness.
-- **Deletes trust:** a cast, an unchecked assertion, a suppression, `any`, a runtime "should never happen" check, or a repeated guard becomes unnecessary because the checker now proves the invariant. Delete it in the same change.
+- **Rejects a program:** something the checker accepts today, such as a forbidden construction, an unvalidated value reaching a decision, or a missing variant, becomes a type error. Write that program down as the witness.
+- **Deletes trust:** a cast, an unchecked assertion, a suppression, `any`, a "should never happen" check, or a repeated guard becomes unnecessary. Delete it in the same change.
 
-Readability, symmetry, or resemblance to a state machine is not evidence. A renamed or restructured type that rejects no new program and deletes nothing is churn: do not make it.
+Readability, symmetry, or resemblance to a state machine is not evidence. A rename or restructure that rejects nothing new and deletes nothing is churn.
 
-## Pick the most critical violation, then stop
+## Classify each finding
 
-Rank leads by how much unchecked trust they carry into decisions:
+- **False contract:** the annotation promises values the code never produces or rejects values it does produce. Examples: `cast(Item, None)`, a dict advertised as a sequence of rows, a serializer that deletes required keys and then claims the full type.
+- **Lost inference:** a precise type already exists and an escape hatch drops it, for example an `Any` receiver that erases a typed return. A plain annotation fed by `Any` is as false as a cast, so removing the word `cast` is not enough.
+- **Behavior regression:** an earlier typing change altered runtime behavior, for example an added `assert` that turns a supported `None` into a crash.
+- **Latent bug:** a truthful type exposes a defect that predates the audit.
+- **Stub stronger than the dependency:** a vendored or owned stub promises more than the pinned version returns. Check it against the installed version.
+- **Test hides a supported state:** a test casts away a state the code supports, such as `cast(str, None)` standing in for "no release".
+- **Not a bug:** examined, and the runtime is fine. Change only the type, or nothing. Earlier validation often already constrains a suspicious fallthrough, and some assertions state real internal invariants. Read the producer before calling either a bug.
 
-1. Untrusted or persisted data reaching control flow through a cast, `any`, or a partial check.
-2. Escape hatches on values that select behavior: authority, routing, lifecycle state, money, paths.
-3. Option soups and loose closed sets that callers guard by hand.
-4. Imprecise but owned internal types.
+## Pick the most critical, then stop
 
-Fix one contract and its consumers per change, so each step compiles and can be reviewed. Leave the rest as a ranked list for the next pass. Do not try to tighten everything at once.
+Rank leads by how much unchecked trust reaches decisions. Untrusted or persisted data reaching control flow comes first. Escape hatches on values that select behavior (authority, routing, lifecycle, money, paths) come next, then option soups and loose closed sets guarded by hand, then imprecise internal types. Fix one contract per change: the producer, its consumers, and their tests. A reviewer should see in a minute why the new type is truer than the old one. If a contract cannot be split, say why. Leave the rest as a ranked list.
+
+## Escape hatches
+
+- **Cast:** effectively banned. Restructure with stable local bindings, early returns, branch-local variables, typed accumulators, `isinstance`, or typed constructors. Keep one only for an invariant that is true, cannot be expressed, and no restructuring preserves, and state it. A helper that returns a caller-chosen type is a cast.
+- **Generics that reshape:** `f(x: T) -> T` is false when `f` renames keys or changes shape. A `default: T` fallback that picks the claimed type of `Any` data is also false.
+- **`Any`:** never for first-party data shapes: payloads, responses, validated data, known `**kwargs`, our own return types. Allow it only where a dependency's types fix it as `Any` and we cannot reshape it, or where a test double is the value. Use `object` for unknown data and parse it.
+- **Ignore comments:** only for a wrong third-party stub we do not own, scoped to the error code, with a one-line reason. Fix owned stubs instead.
+- **Non-null assertions:** only for an internal invariant already established, never on a value the model, field, or API allows to be null.
+- **Banned:** fixed-name `getattr`/`setattr` around a known attribute, blanket stub `__getattr__`, disabling checks for a function, and weaker checker settings.
 
 ## Follow the values
 
-1. Read the producer, its callers and consumers, relevant tests, and dependency implementations or stubs when their behavior matters. Compare declared types with actual branches, mutations, exceptions, and supported inputs. Check both the type of a receiver and the result: an unchecked receiver can erase an otherwise precise return type.
-2. Investigate casts, unchecked assertions, suppressions, broad types, reflection used for known attributes, and generic helpers that promise a caller-selected result. Also look for false annotations that pass because their source is untyped. These are leads, not automatic defects; establish the runtime invariant before changing one.
-3. Repair the producer and carry its real type through consumers. Parse unknown external data at the boundary into a checked representation; preserve required versus absent, null versus empty, raw versus validated, and in-memory versus wire values. Reuse an existing precise type rather than reparsing it. Verify dependency types against the version actually used; fix owned stubs when they are wrong.
-4. Preserve runtime behavior by default, including coercion, errors, mutation and aliasing. Do not invent defaults, add a crash, or narrow a supported state to satisfy the checker. If a truthful contract exposes a real behavior bug, identify it and separate its fix where practical. Keep overrides substitutable; redesign an incompatible relationship rather than suppressing the error.
-5. Keep changes small and coherent: one contract and its consumers. Retain an escape hatch only when the invariant is true, cannot reasonably be expressed or preserved by restructuring, and is supported by evidence; explain it in the report. Do not weaken checker settings to make an audit pass.
+1. Read the producer, its callers and consumers, the tests, and dependency implementations or stubs when their behavior matters. Compare the declared types with the actual branches, mutations, and exceptions. Check receivers as well as results.
+2. Parse, don't validate. At HTTP, RPC, JSON, config, queue, database-JSON, and untyped-dependency boundaries, parse `object` into a precise record or discriminated union and pass the parsed value on. Validators return what they established. Keep raw input, validated data, in-memory values, and wire JSON as separate types. Keep missing vs null, create vs partial update, empty vs absent, and unsaved vs complete distinct.
+3. Fix the producer, not the consumer. Don't reparse a value that already has a precise type. Known keyword arguments become explicit parameters or a typed options record.
+4. Preserve runtime behavior: coercions, error types, mutation, and aliasing. Never turn `None` into `""`, `0`, `{}`, `"None"`, or a fake timestamp to satisfy a type. Copying a mapping is a behavior change. A runtime change that a truthful type needs ships separately when possible, called out, with a test that fails before it.
+5. When `None` vs `[]` or a similar question decides the type, read the consumers and test it. If the values behave differently, keep both states. If you cannot settle it cheaply, keep the runtime value, type it honestly, and record the question.
+6. Keep overrides substitutable. Redesign an incompatible relationship rather than suppressing the error.
 
-## Language-specific checks
-
-### Python with ty
-
-Use the project's configured ty command and Python version. Prefer `object` for genuinely unknown values and parse them; use precise `TypedDict`, dataclass, union, or protocol types for known shapes. Model known keyword arguments with explicit parameters or `Unpack[TypedDict]`, and transparent forwarding with `ParamSpec`. Distinguish `NotRequired[T]` from a required `T | None`. Treat `Any`, `cast`, ignores, and annotations fed by `Any` as potential lost checks, including in tests and dependency stubs. Use narrowing and stable local bindings before casts. A `TypeGuard` must check the full promised positive shape; `TypeIs` must classify both branches correctly. A content predicate is not necessarily a type predicate. Retain `Any` where an external API or test double genuinely requires it, with the boundary made clear.
-
-### TypeScript
-
-Trace `any` through receivers, generics, and assertions; an annotation or `as` does not validate runtime data. Prefer `unknown` at untrusted boundaries, validate the full shape, and return a typed value. Use discriminated unions and exhaustive handling for real variants; distinguish optional properties, `undefined`, and `null` according to runtime and compiler settings. Check that type predicates really establish their claimed shape and that assertion functions do not turn supported input into a new throw. Prefer narrowing and correctly typed producers to `as`, non-null assertions, and suppression directives. Treat generated declarations and external types as claims to verify, not runtime validation.
-
-### Rust
-
-Trace `Option`, `Result`, enums, conversions, and ownership through producers and consumers. Use variants and validated constructors for actual domain invariants, but retain valid partial states and preserve wire formats. Examine `unwrap`, `expect`, `unreachable!`, unchecked conversions, and `unsafe` assumptions for invariants that callers actually establish; a panic or an unchecked operation is not type evidence. Prefer exhaustive matches, fallible conversions, and precise types to fabricated values or erased errors. Check trait bounds and public signatures against real callers, and avoid adding allocations or changing borrowing and aliasing merely to satisfy a type.
+Then read [the language notes](references/languages.md) for the checker in use.
 
 ## Verify and report
 
-Run the project's relevant type checker or compiler on the affected contract and consumers, expanding only when a concrete integration risk requires it. Keep each witness as a type-level regression test. Put it in an expected-error marker that the checker itself reports once the error disappears, so loosening the type later fails the build. Use TypeScript `// @ts-expect-error` in a file the typecheck covers, a Rust `compile_fail` doctest, or for Python a `# ty: ignore[code]` comment with ty's `unused-ignore-comment` rule set to error. If the project cannot run such a test, say so. Check existing coverage first. Add focused tests when runtime behavior changes, a parser or type predicate needs malformed and negative cases, or safety depends on an otherwise untested runtime invariant. A behavior-fix test should fail before the fix; type-level regression tests are useful when inference could silently decay to an unchecked type. Do not add tests that merely repeat annotations or cover unchanged dependency behavior.
+Run the project's type checker on the affected contract and consumers. The checker run is the proof of a typing change. Tests are proportional to regression risk:
 
-**Report:** the old claim and actual behavior, the corrected contract, each witness the checker now rejects and the trust it let you delete, any runtime or public API change, remaining escape hatches and their justification, the deferred leads in rank order, and checks run or not run. For review-only work, report supported findings with a witness program for each, and distinguish uncertainty from a demonstrated defect.
+- **Witnesses:** keep each one as a negative type test that asserts the intended diagnostic. Use an expected-error marker the checker reports once the error disappears, or the project's checker harness. Keep it minimal so no other error can satisfy it.
+- **Runtime tests only when needed:** add one when behavior changes (it must fail before the fix), when you add a parser or type predicate (test the false branch and one malformed input), or when safety depends on a runtime fact the types don't show. Search existing coverage first, in every spelling of the input.
+- **Mutation check:** break the guarded line and confirm the test fails, then revert. Delete a test that still passes.
+- **`assert_type`:** only where a precise type could decay to `Any` unnoticed.
+- **Don't add:** tests of dependency behavior, smoke tests, or a type assertion for every annotation.
+
+**Report:** each finding with its class, the old claim and actual behavior, the corrected contract, the witnesses now rejected and the trust deleted, each escape hatch kept with its justification, any runtime or public API change, the deferred leads in rank order, and the checks run or not run. For review-only work, give each finding a witness and separate uncertainty from demonstrated defects.
