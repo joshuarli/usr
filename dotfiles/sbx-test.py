@@ -6,6 +6,7 @@ import importlib.machinery
 import importlib.util
 import io
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -46,6 +47,9 @@ class LocalFixture(unittest.TestCase):
         skill = base / ".agents/skills/review"
         skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text("skill", encoding="utf-8")
+        procedures = base / ".agents/instructions"
+        procedures.mkdir(parents=True)
+        (procedures / "owned-tools.md").write_text("procedure", encoding="utf-8")
         codex = base / ".codex"
         codex.mkdir(parents=True)
         (codex / "AGENTS.md").write_text("instructions", encoding="utf-8")
@@ -120,6 +124,7 @@ class PolicyTests(LocalFixture):
         base = self.make_sources()
         s = self.plan().sources
         self.assertEqual(s.skills, base / ".agents/skills")
+        self.assertEqual(s.agent_instructions, base / ".agents/instructions")
         self.assertEqual(s.instructions, base / ".codex/AGENTS.md")
         self.assertEqual(s.claude_agents, base / ".claude/agents")
         self.assertIsNone(self.plan("--no-skills").sources)
@@ -268,6 +273,21 @@ class PolicyTests(LocalFixture):
             self.assertEqual((home / ".claude/skills/review/SKILL.md").read_text(), "skill")
             self.assertEqual((home / ".config/muse/AGENTS.md").read_text(), "instructions")
             self.assertEqual((home / ".claude/agents/worker.md").read_text(), "worker")
+            self.assertEqual((home / ".agents/instructions/owned-tools.md").read_text(), "procedure")
+
+    def test_installed_contracts_reach_every_referenced_instruction(self):
+        (self.home / "usr").symlink_to(SCRIPT.resolve().parents[4])
+        with tempfile.TemporaryDirectory(prefix="sbx-home-test-") as name:
+            scratch = Path(name)
+            SBX.prepare_private_home(self.plan(backend="Darwin"), scratch)
+            home = scratch / "home"
+            contracts = [home / ".codex/AGENTS.md", home / ".agents/instructions/lean.md"]
+            references = {match for contract in contracts
+                          for match in re.findall(r"~/(\.agents/instructions/[\w.-]+\.md)", contract.read_text())}
+            self.assertIn(".agents/instructions/owned-tools.md", references)
+            for reference in sorted(references):
+                with self.subTest(reference=reference):
+                    self.assertTrue((home / reference).is_file())
 
     def test_explain_does_not_execute(self):
         plan = self.plan("--explain", "--", "echo", "hello")

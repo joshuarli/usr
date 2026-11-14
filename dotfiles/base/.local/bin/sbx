@@ -28,6 +28,7 @@ class Grant:
 @dataclass(frozen=True)
 class Sources:
     skills: Path
+    agent_instructions: Path
     instructions: Path
     claude_agents: Path | None
 
@@ -122,10 +123,11 @@ def get_sources(home: Path, enabled: bool) -> Sources | None:
     if not base.is_dir():
         return None
     skills = canonical_dir(str(base / ".agents" / "skills"))
+    agent_instructions = canonical_dir(str(base / ".agents" / "instructions"))
     instructions = (base / ".codex" / "AGENTS.md").resolve(strict=True)
     if not instructions.is_file():
         raise SandboxError(f"not a file: {instructions}")
-    if not contained(skills, base.resolve()) or not contained(instructions, base.resolve()):
+    if not all(contained(path, base.resolve()) for path in (skills, agent_instructions, instructions)):
         raise SandboxError("tracked skill or instruction source resolves outside usr")
     def agents(rel: str) -> Path | None:
         p = base / rel
@@ -135,7 +137,7 @@ def get_sources(home: Path, enabled: bool) -> Sources | None:
                 raise SandboxError(f"agent definition source resolves outside usr: {found}")
             return found
         return None
-    return Sources(skills, instructions, agents(".claude/agents"))
+    return Sources(skills, agent_instructions, instructions, agents(".claude/agents"))
 
 
 def parse(argv: list[str], *, backend: str | None = None, home: Path | None = None,
@@ -199,6 +201,7 @@ def alias_map() -> dict[str, str]:
 def skill_bindings(sources: Sources, home: Path) -> list[tuple[Path, Path]]:
     bindings = [
         (sources.skills, home / ".agents/skills"),
+        (sources.agent_instructions, home / ".agents/instructions"),
         (sources.instructions, home / ".codex/AGENTS.md"),
     ]
     if sources.claude_agents:
