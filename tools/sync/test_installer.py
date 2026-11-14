@@ -194,56 +194,6 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_release("nope")
 
-    def rimage_commands(self, inst, payload, *, corrupt=False, authenticated=True):
-        import hashlib
-        tag = "release-" + "a" * 40
-        target = f"{inst.arch}-apple-darwin" if inst.os_name == "darwin" else f"{inst.arch}-unknown-linux-musl-static"
-        member = f"rimage-{target}"
-        archive = make_zip({member: payload})
-        digest = "0" * 64 if corrupt else hashlib.sha256(archive).hexdigest()
-        release = {"tag_name": tag, "prerelease": True, "draft": False, "published_at": "2026-11-11",
-                   "assets": [{"name": member + ".zip", "id": member}, {"name": "SHA256SUMS", "id": 2}]}
-        def run(args, **kwargs):
-            if args[1] == "api":
-                pages = [[release, dict(release, prerelease=False, published_at="2027-01-01"),
-                          dict(release, draft=True, published_at="2027-02-01")]]
-                return subprocess.CompletedProcess(args, 0 if authenticated else 1, json.dumps(pages), "")
-            self.assertEqual(args[:4], ["gh", "release", "download", tag])
-            destination = Path(args[args.index("--dir") + 1])
-            (destination / (member + ".zip")).write_bytes(archive)
-            (destination / "SHA256SUMS").write_text(f"{digest}  {member}.zip\n")
-            return subprocess.CompletedProcess(args, 0, "", "")
-        return run
-
-    def test_rimage_private_prerelease_targets_and_current(self):
-        self.script("gh", "#!/bin/sh\nexit 1\n")
-        for os_name, arch in [("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")]:
-            with self.subTest(os_name=os_name, arch=arch):
-                inst = self.make(os_name=os_name, arch=arch)
-                payload = f"binary-{os_name}-{arch}".encode()
-                original = inst.run
-                commands = self.rimage_commands(inst, payload)
-                with patch.object(inst, "run", side_effect=lambda args, _commands=commands, _original=original, **kwargs: _commands(args, **kwargs) if args[0] == "gh" else _original(args, **kwargs)):
-                    inst.install("rimage")
-                    self.assertEqual(self.dest_path("rimage").read_bytes(), payload)
-                    self.assertIn(("F", self.dest_path("rimage")), inst.claims)
-                    inst.changed = False
-                    inst.install("rimage")
-                    self.assertFalse(inst.changed)
-
-    def test_rimage_bad_checksum_or_auth_preserves_existing_binary(self):
-        self.script("gh", "#!/bin/sh\nexit 1\n")
-        self.dest_path("rimage").parent.mkdir(parents=True, exist_ok=True)
-        self.dest_path("rimage").write_bytes(b"previous")
-        for mode in ("checksum", "auth"):
-            inst = self.make()
-            with patch.object(inst, "run", side_effect=self.rimage_commands(inst, b"new", corrupt=mode == "checksum", authenticated=mode != "auth")):
-                with self.assertRaises(SkipInstall):
-                    inst.install("rimage")
-            self.assertEqual(self.dest_path("rimage").read_bytes(), b"previous")
-            self.assertFalse((self.home / ".local/state/dl/rimage").exists())
-            self.assertFalse(list(self.dest_path("rimage").parent.glob(".rimage.*")))
-
     def test_release_missing_asset_keeps_installed_and_skips_uninstalled(self):
         routes = {"https://github.com/laputa-systems/srv/releases.atom": atom([("2024-01-01", "release-1")])}
         inst = self.make(routes, os_name="darwin", arch="aarch64")
@@ -275,17 +225,50 @@ sys.exit(1)
             inst.install_release("shuck")
         self.assertTrue(self.dest_path("shellcheck").is_file())
 
-    def lz_routes(self, payload, digest=None, sums_asset=None):
+    def sha_prerelease_routes(self, tool, payload, *, target="aarch64-apple-darwin", digest=None, sums_asset=None):
         import hashlib
-        asset = "lz-aarch64-apple-darwin"
+        asset = f"{tool}-{target}"
         zip_bytes = make_zip({asset: payload}, executable=[asset])
         digest = digest or hashlib.sha256(zip_bytes).hexdigest()
         tag = "release-" + "a" * 40
-        base = f"https://github.com/joshuarli/lz/releases/download/{tag}"
-        routes = {"https://github.com/joshuarli/lz/releases.atom": atom([("2024-01-01", tag)]),
-                  f"{base}/{asset}.zip": (zip_bytes, {"ETag": "lz-etag"}),
+        base = f"https://github.com/joshuarli/{tool}/releases/download/{tag}"
+        routes = {f"https://github.com/joshuarli/{tool}/releases.atom": atom([("2024-01-01", tag)]),
+                  f"{base}/{asset}.zip": (zip_bytes, {"ETag": f"{tool}-etag"}),
                   f"{base}/SHA256SUMS": f"{digest}  {sums_asset or asset + '.zip'}\n".encode()}
         return routes, base, asset, tag
+
+    def lz_routes(self, payload, digest=None, sums_asset=None):
+        return self.sha_prerelease_routes("lz", payload, digest=digest, sums_asset=sums_asset)
+
+    def test_img_public_prerelease_targets_and_current(self):
+        for os_name, arch, target in [("darwin", "aarch64", "aarch64-apple-darwin"),
+                                      ("linux", "x86_64", "x86_64-unknown-linux-musl-static"),
+                                      ("linux", "aarch64", "aarch64-unknown-linux-musl-static")]:
+            with self.subTest(os_name=os_name, arch=arch):
+                payload = f"binary-{os_name}-{arch}".encode()
+                routes, base, asset, tag = self.sha_prerelease_routes("img", payload, target=target)
+                inst = self.make(routes, os_name=os_name, arch=arch)
+                (self.home / ".local/state/dl/img").unlink(missing_ok=True)
+                inst.install("img")
+                self.assertEqual(self.dest_path("img").read_bytes(), payload)
+                self.assertEqual(self.state("img"), f"{tag}:img-etag")
+                self.assertIn(("F", self.dest_path("img")), inst.claims)
+                inst.changed = False
+                inst.install("img")
+                self.assertFalse(inst.changed)
+
+    def test_img_bad_checksum_preserves_existing_binary(self):
+        routes, base, asset, tag = self.sha_prerelease_routes("img", b"new", digest="0" * 64)
+        inst = self.make(routes, os_name="darwin", arch="aarch64")
+        dest = self.dest_path("img")
+        dest.write_bytes(b"previous")
+        (self.home / ".local/state/dl/img").write_text("old-etag\n")
+        with self.assertRaises(SkipInstall) as ctx:
+            inst.install("img")
+        self.assertIn("checksum mismatch", str(ctx.exception))
+        self.assertEqual(dest.read_bytes(), b"previous")
+        self.assertEqual(self.state("img"), "old-etag")
+        self.assertFalse(list(dest.parent.glob(".img.*")))
 
     def test_lz_installs_as_less(self):
         payload = b"binary"
@@ -1146,9 +1129,10 @@ sys.exit(1)
     def test_default_tools_platforms_and_server(self):
         darwin = default_tools("darwin", "aarch64", "")
         self.assertIn("ffmpeg", darwin)
-        self.assertIn("rimage", darwin)
+        self.assertIn("img", darwin)
+        self.assertNotIn("fs", darwin)
         self.assertIn("lz", darwin)
-        self.assertNotIn("rimage", default_tools("darwin", "x86_64", ""))
+        self.assertNotIn("img", default_tools("darwin", "x86_64", ""))
         self.assertNotIn("lz", default_tools("darwin", "x86_64", ""))
         self.assertIn("ghostty-custom", darwin)
         self.assertIn("jaq", darwin)

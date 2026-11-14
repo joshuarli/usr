@@ -607,98 +607,52 @@ class Installer:
             self.skip(name, "download failed")
         self.install_binary(name, staged, record)
 
-    def install_rimage(self) -> None:
-        if (self.os_name, self.arch) not in (("darwin", "aarch64"), ("linux", "aarch64"), ("linux", "x86_64")):
-            self.skip("rimage", f"no release for {self.os_name}/{self.arch}")
-        if not self.which("gh"):
-            self.skip("rimage", "authenticated gh is required for the private repository")
-        repo = "joshuarli/rimage"
-        response = self.run(["gh", "api", f"repos/{repo}/releases?per_page=100", "--paginate", "--slurp"], capture=True)
-        if response.returncode:
-            self.skip("rimage", "cannot read private releases; authenticate gh with repository access")
-        try:
-            pages = json.loads(response.stdout)
-            releases = [release for page in pages for release in page
-                        if not release.get("draft") and release.get("prerelease")
-                        and re.fullmatch(r"release-[0-9a-f]{40}", release.get("tag_name", ""))]
-            release = max(releases, key=lambda value: value.get("published_at", ""))
-        except (ValueError, TypeError, AttributeError):
-            self.skip("rimage", "no valid published SHA-named prerelease")
-        target = f"{self.arch}-apple-darwin" if self.os_name == "darwin" else f"{self.arch}-unknown-linux-musl-static"
-        member = f"rimage-{target}"
-        asset = member + ".zip"
-        selected = [value for value in release.get("assets", []) if value.get("name") in (asset, "SHA256SUMS")]
-        if len(selected) != 2 or {value["name"] for value in selected} != {asset, "SHA256SUMS"}:
-            self.skip("rimage", f"{asset} and SHA256SUMS are required")
-        record = ":".join([repo, release["tag_name"], *[
-            f'{value["id"]}-{value.get("updated_at", "")}' for value in sorted(selected, key=lambda value: value["name"])]])
-        if self.is_current("rimage", record):
-            self.current(f'rimage is current ({release["tag_name"]})')
-            return
-        with tempfile.TemporaryDirectory(prefix=".rimage.", dir=self.dest) as directory:
-            staged_dir = Path(directory)
-            response = self.run(["gh", "release", "download", release["tag_name"], "--repo", repo,
-                                 "--pattern", asset, "--pattern", "SHA256SUMS", "--dir", str(staged_dir)], capture=True)
-            if response.returncode:
-                self.skip("rimage", "authenticated release download failed")
-            archive = staged_dir / asset
-            expected = self.sums_for((staged_dir / "SHA256SUMS").read_text(), asset)
-            if not re.fullmatch(r"[0-9a-f]{64}", expected) or self.sha256_file(archive) != expected:
-                self.skip("rimage", "release checksum mismatch")
-            payload = self.zip_member(archive, member)
-            if payload is None:
-                self.skip("rimage", f"{asset} does not contain {member}")
-            staged = staged_dir / "rimage"
-            staged.write_bytes(payload)
-            self.install_binary("rimage", staged, record)
-
-    def install_lz(self) -> None:
+    def install_sha_prerelease(self, tool: str, repo: str, install_name: str) -> None:
         if (self.os_name, self.arch) not in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
-            self.skip("lz", f"no release for {self.os_name}/{self.arch}")
+            self.skip(tool, f"no release for {self.os_name}/{self.arch}")
             return
-        repo = "joshuarli/lz"
         tag = self.latest_tag(f"https://github.com/{repo}/releases.atom", prefix="release-")
         if not re.fullmatch(r"release-[0-9a-f]{40}", tag):
-            self.unchecked("lz", "no valid release-<sha> prerelease found")
+            self.unchecked(tool, "no valid release-<sha> prerelease found")
             return
-        asset = (f"lz-{self.arch}-apple-darwin" if self.os_name == "darwin"
-                 else f"lz-{self.arch}-unknown-linux-musl-static")
+        asset = (f"{tool}-{self.arch}-apple-darwin" if self.os_name == "darwin"
+                 else f"{tool}-{self.arch}-unknown-linux-musl-static")
         base = f"https://github.com/{repo}/releases/download/{tag}"
         record = f"{tag}:{self.asset_id(f'{base}/{asset}.zip')}"
         if ":" not in record or not record.split(":", 1)[1]:
-            self.unchecked("lz", f"{base}/{asset}.zip is unreachable")
+            self.unchecked(tool, f"{base}/{asset}.zip is unreachable")
             return
-        if self.is_current("less", record):
-            self.current(f"less is current ({tag})")
+        if self.is_current(install_name, record):
+            self.current(f"{install_name} is current ({tag})")
             return
         sums_path = Path(tempfile.mkstemp()[1])
         if not self.download(f"{base}/SHA256SUMS", sums_path):
             sums_path.unlink(missing_ok=True)
-            self.skip("lz", "SHA256SUMS download failed")
+            self.skip(tool, "SHA256SUMS download failed")
         expected = self.sums_for(sums_path.read_text(), f"{asset}.zip")
         sums_path.unlink(missing_ok=True)
         if len(expected) != 64:
-            self.skip("lz", f"{asset}.zip is not listed in SHA256SUMS")
+            self.skip(tool, f"{asset}.zip is not listed in SHA256SUMS")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
             archive_path = Path(stream.name)
         if not self.download(f"{base}/{asset}.zip", archive_path):
             archive_path.unlink(missing_ok=True)
-            self.skip("lz", f"{asset}.zip download failed")
+            self.skip(tool, f"{asset}.zip download failed")
         if self.sha256_file(archive_path) != expected:
             archive_path.unlink(missing_ok=True)
-            self.skip("lz", "release checksum mismatch")
+            self.skip(tool, "release checksum mismatch")
         member = self.zip_member(archive_path, asset)
         archive_path.unlink(missing_ok=True)
         if member is None:
-            self.skip("lz", f"{asset}.zip does not contain {asset}")
-        staged = self.stage_file(self.dest, ".less.")
+            self.skip(tool, f"{asset}.zip does not contain {asset}")
+        staged = self.stage_file(self.dest, f".{install_name}.")
         staged.write_bytes(member)
-        self.install_binary("less", staged, record)
+        self.install_binary(install_name, staged, record)
 
     def install_release(self, prog: str) -> None:
         owners = {
             **{name: "laputa-systems" for name in
-               ("e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty", "vault", "rage", "stuff")},
+               ("e", "fz", "fastermod", "tm", "srv", "diff-pretty", "vault", "rage", "stuff")},
             **{name: "joshuarli" for name in ("ish", "mactop", "view", "gh", "syncthing", "soulseek-rs")},
             "bylaws": "joshuarli",
             "shuck": "joshuarli",
@@ -716,7 +670,7 @@ class Installer:
         if self.os_name == "linux" and prog in ("ish", "rage", "soulseek-rs", "shuck"):
             artifact_target = f"{self.arch}-unknown-linux-musl-static"
         elif self.os_name == "linux" and prog in (
-                "e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty",
+                "e", "fz", "fastermod", "tm", "srv", "diff-pretty",
                 "vault", "syncthing", "stuff", "gh"):
             artifact_target = f"{self.arch}-unknown-linux-musl"
         elif self.os_name == "linux":
@@ -2991,8 +2945,8 @@ class Installer:
             "python3": self.install_python3, "uv": self.install_uv, "node-build": self.install_nodebuild,
             "git": self.install_git, "ffmpeg": self.install_ffmpeg, "ssh": self.install_ssh,
             "oxish": self.install_oxish, "zzz": self.install_zzz, "gluon": self.install_gluon, "bctl": self.install_bctl,
-            "rimage": self.install_rimage,
-            "lz": self.install_lz,
+            "img": lambda: self.install_sha_prerelease("img", "joshuarli/img", "img"),
+            "lz": lambda: self.install_sha_prerelease("lz", "joshuarli/lz", "less"),
         }
         if tool in handlers:
             handlers[tool]()
@@ -3012,7 +2966,7 @@ class Installer:
                 self.own_file(self.dest / prog)
 
     def record_managed_installs(self) -> None:
-        for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "rimage", "stuff", "e", "fz", "fs",
+        for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "img", "stuff", "e", "fz",
                      "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
                      "zzz", "uv", "uvx", "rage", "shellcheck", "less"):
             self.record_managed_binary(prog)
@@ -3169,9 +3123,9 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
-    tools += "codex claude opencode2 pi fastermod tm ish stuff e fz fs srv git python3 uv cf agent-browser rage".split()
+    tools += "codex claude opencode2 pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
-        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "rimage", "gluon", "lz"]
+        tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "img", "gluon", "lz"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):
         tools.append("zzz")
     if os_name == "darwin":
