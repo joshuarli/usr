@@ -4,8 +4,6 @@ import { isSessionId } from "./session.ts"
 
 export const WATCH_POLL_MS = 15_000
 const TEXT_LIMIT = 2000
-const FINISHED = ["succeeded", "failed", "turn_limit", "cancelled"]
-const GONE = ["interrupted", "unknown_or_interrupted"]
 
 export const EXIT_STALLED = 2
 export const EXIT_GONE = 3
@@ -46,14 +44,14 @@ export async function watchSession(
     const snapshot = await inspectStored(directory, id, deps)
     const state = snapshot.execution_state
     if (options.stateOnly) { stdout(state + "\n"); return 0 }
-    if (state === "unknown" || state.startsWith("blocked"))
+    if (snapshot.attention === "unknown" || snapshot.attention === "needs_attention")
       return refuse(snapshot.reason ?? (text(snapshot.error) || state))
-    if (FINISHED.includes(state)) {
+    if (snapshot.attention === "finished") {
       const evidence = snapshot.last_assistant_text === "unknown" ? null : snapshot.last_assistant_text
       stdout("finished: " + state + "\n" + (text(evidence) || text(snapshot.error)).slice(0, TEXT_LIMIT) + "\n")
       return 0
     }
-    if (GONE.includes(state)) {
+    if (snapshot.attention === "gone") {
       stdout("exited without terminal result (pid " + snapshot.pid + "); last event: " + snapshot.last_event + "\n")
       return EXIT_GONE
     }

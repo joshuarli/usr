@@ -264,3 +264,14 @@ test("snapshot scope facts are reported separately from execution state and the 
   assert.equal(snapshot!.head_unchanged, true)
 })
 
+
+test("wait reports quota-blocked partial work without counting it as running", async () => {
+  const blocked = scratch.repo("repo-blocked")
+  writeFileSync(join(blocked.cwd, "README"), "edited\n")
+  const id = commandLane(blocked, 30, gone, [commandResultLine("error", { error: "quota exhausted" })], { title: "Blocked lane" })
+  let now = 0
+  const clock = { now: () => now, sleep: async (ms: number) => { now += ms } }
+  const result = await run(["wait", "--timeout", "1s", blocked.root], { clock })
+  assert.equal(result.status, 0, result.out)
+  assert.equal(result.out, `${id} blocked_partial_work ${blocked.cwd} Blocked lane\n`)
+})

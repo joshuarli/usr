@@ -13,16 +13,22 @@ export type CommandName = Command["name"]
 export const COMMAND_NAMES = ["model_check", "start", "status", "resume", "steer", "cancel"] as const satisfies readonly CommandName[]
 
 type Field = "cwd" | "title" | "tier" | "scope" | "brief" | "session_id" | "feedback" | "note"
-const FIELDS: Record<Field, { readonly schema: object; readonly label: string; readonly file?: "text" | "json" }> = {
-  cwd: { label: "CWD", schema: { type: "string", description: "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it." } },
-  title: { label: "TITLE", schema: { type: "string", maxLength: 100, description: "Short scoped task name" } },
-  tier: { label: "TIER", schema: { type: "string", enum: TIERS } },
-  scope: { label: "SCOPE_JSON_FILE", file: "json", schema: SCOPE_SCHEMA },
-  brief: { label: "BRIEF_FILE", file: "text", schema: { type: "string", maxLength: 32000, description: "One bounded outcome and only the context needed" } },
-  session_id: { label: "SESSION_ID", schema: { type: "string", description: "usrw_ session ID returned by worker_start; never guess another session." } },
-  feedback: { label: "FEEDBACK_FILE", file: "text", schema: { type: "string", maxLength: 32000 } },
-  note: { label: "NOTE_FILE", file: "text", schema: { type: "string", minLength: 1, maxLength: 32000 } },
+function textField(label: string, name: string, maxLength: number, description?: string, file?: "text") {
+  const minLength = 1
+  return { label, file, schema: { type: "string", minLength, maxLength, ...(description ? { description } : {}) },
+    decode: (value: unknown) => requiredText(value, name, maxLength) }
 }
+const FIELDS = {
+  cwd: textField("CWD", "cwd", 32000, "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it."),
+  title: textField("TITLE", "title", 100, "Short scoped task name"),
+  tier: { label: "TIER", schema: { type: "string", minLength: 1, maxLength: Math.max(...TIERS.map(value => value.length)), enum: TIERS }, file: undefined,
+    decode: (value: unknown): Tier => { if (!isTier(value)) throw new Error("Unknown Pi tier"); return value } },
+  scope: { label: "SCOPE_JSON_FILE", file: "json" as const, schema: SCOPE_SCHEMA },
+  brief: textField("BRIEF_FILE", "brief", 32000, "One bounded outcome and only the context needed", "text"),
+  session_id: textField("SESSION_ID", "session_id", 64, "usrw_ session ID returned by worker_start; never guess another session."),
+  feedback: textField("FEEDBACK_FILE", "feedback", 32000, undefined, "text"),
+  note: textField("NOTE_FILE", "note", 32000, undefined, "text"),
+} satisfies Record<Field, { readonly schema: object; readonly label: string; readonly file?: "text" | "json"; readonly decode?: (value: unknown) => unknown }>
 
 const routingSummary = TIERS.map(name => {
   const routes = routesOf(ROOT_PLANS[name])
@@ -71,14 +77,6 @@ export function usage(name: CommandName): string {
 function parseJson(text: string): unknown {
   return JSON.parse(text)
 }
-function cwd(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error("Invalid cwd")
-  return value
-}
-function tier(value: unknown): Tier {
-  if (!isTier(value)) throw new Error("Unknown Pi tier")
-  return value
-}
 
 export function decodeCommand(name: CommandName, args: unknown): Command {
   if (!isRecord(args)) throw new Error("Tool arguments must be an object")
@@ -89,20 +87,20 @@ export function decodeCommand(name: CommandName, args: unknown): Command {
   for (const key of Object.keys(args)) {
     if (!fields.some(field => field === key)) throw new Error("Unknown tool argument: " + key)
   }
-  const dir = cwd(args.cwd)
+  const dir = FIELDS.cwd.decode(args.cwd)
   switch (name) {
-    case "model_check": return { name, cwd: dir, tier: tier(args.tier) }
+    case "model_check": return { name, cwd: dir, tier: FIELDS.tier.decode(args.tier) }
     case "start": {
-      const requested = tier(args.tier)
-      return { name, cwd: dir, title: requiredText(args.title, "title", 100), tier: requested,
-        scope: parseScope(args.scope, requested), brief: requiredText(args.brief, "brief", 32000) }
+      const requested = FIELDS.tier.decode(args.tier)
+      return { name, cwd: dir, title: FIELDS.title.decode(args.title), tier: requested,
+        scope: parseScope(args.scope, requested), brief: FIELDS.brief.decode(args.brief) }
     }
-    case "status": return { name, cwd: dir, session_id: requiredText(args.session_id, "session_id", 64) }
+    case "status": return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id) }
     case "resume":
-      return { name, cwd: dir, session_id: requiredText(args.session_id, "session_id", 64), feedback: requiredText(args.feedback, "feedback", 32000) }
+      return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id), feedback: FIELDS.feedback.decode(args.feedback) }
     case "steer":
-      return { name, cwd: dir, session_id: requiredText(args.session_id, "session_id", 64), note: requiredText(args.note, "note", 32000) }
-    case "cancel": return { name, cwd: dir, session_id: requiredText(args.session_id, "session_id", 64) }
+      return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id), note: FIELDS.note.decode(args.note) }
+    case "cancel": return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id) }
   }
 }
 

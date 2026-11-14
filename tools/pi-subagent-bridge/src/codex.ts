@@ -1,7 +1,7 @@
 import { spawnSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readSync, fstatSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
+import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
 import { isBannedModel } from "./policy.ts"
@@ -68,8 +68,7 @@ export function codexSession(run: CommandRun): string | null {
   return events(run).find((event) => event.type === "thread.started")?.thread_id ?? null
 }
 export function codexResult(run: CommandRun): { state: string; result: CommandResult | null; stderr: string | null } {
-  const identity = children.has(run.pid) ? "same" : processIdentity(run)
-  if (identity === "same" || identity === "unknown" || groupAlive(run.pid)) return { state: "running", result: null, stderr: null }
+  if (workerAlive(run, children.has(run.pid))) return { state: "running", result: null, stderr: null }
   const stream = events(run), terminal = stream.findLast((event) => event.type === "turn.completed" || event.type === "turn.failed")
   if (!terminal) return { state: "interrupted", result: null, stderr: null }
   const sessionId = stream.find((event) => event.type === "thread.started")?.thread_id
