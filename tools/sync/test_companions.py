@@ -278,6 +278,14 @@ class CompanionFixture(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.call("install", pin=pin)
 
+    def test_foreign_install_root_is_refused(self):
+        root = Path(self.env["XDG_DATA_HOME"]) / "agent-intercom/agent-intercom-claude"
+        root.mkdir(parents=True)
+        (root / "stray.txt").write_text("not ours\n")
+        with self.assertRaises(ValueError):
+            self.call("install")
+        self.assertTrue((root / "stray.txt").is_file())
+
     def test_modified_install_fails_check(self):
         self.assertEqual(self.call("install"), 0)
         target = (Path(self.env["XDG_DATA_HOME"]) / "agent-intercom"

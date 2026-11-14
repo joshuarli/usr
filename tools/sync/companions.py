@@ -106,26 +106,18 @@ def inventory(root: Path) -> dict[str, dict[str, str | int]]:
     return result
 
 
-def current_payload(destination: Path, pin: dict, name: str) -> dict | None:
+def install_status(destination: Path, pin: dict, name: str) -> str:
+    if destination.is_symlink() or not destination.is_dir():
+        return "foreign" if destination.exists() or destination.is_symlink() else "absent"
     try:
-        receipt = json.loads((destination / RECEIPT).read_text())
-    except (OSError, ValueError):
-        return None
-    return receipt
-
-
-def already_current(destination: Path, pin: dict, name: str) -> bool:
-    try:
-        if destination.is_symlink() or not destination.is_dir():
-            return False
         current = json.loads((destination / RECEIPT).read_text())
     except (OSError, ValueError):
-        return False
+        return "foreign"
     wanted = payload_for(pin, name, current.get("files", {}))
     if (current.get("pin") != wanted["pin"] or current.get("archive") != wanted["archive"]
             or current.get("sha256") != wanted["sha256"]):
-        return False
-    return current["files"] == inventory(destination)
+        return "stale"
+    return "current" if current.get("files") == inventory(destination) else "modified"
 
 
 def safe_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
@@ -247,9 +239,14 @@ def _extract(archive: Path, stage: Path) -> dict:
 
 def install_companion(pin: dict, cache: Path, destination: Path, name: str) -> bool:
     entry = pin["companions"][name]
-    if already_current(destination, pin, name):
-        return False
     destination.parent.mkdir(parents=True, exist_ok=True)
+    status = install_status(destination, pin, name)
+    if status == "current":
+        return False
+    if status == "modified":
+        die(f"companion {name} installation is modified; preserve it and inspect before retrying")
+    if status == "foreign":
+        die(f"refusing foreign companion install root: {destination}")
     archive = acquire(pin, cache)[name]
     with tempfile.TemporaryDirectory(prefix=f".{name}-", dir=destination.parent) as temporary:
         stage = Path(temporary) / name
@@ -506,15 +503,9 @@ def command_check(env: dict) -> int:
     root = prefix(env)
     for name in COMPANIONS:
         destination = root / name
-        if destination.is_symlink() or not destination.is_dir():
-            die(f"companion {name} is not installed")
-        manifest = json.loads((destination / "package.json").read_text())
-        if manifest.get("version") != pin["companions"][name]["version"]:
-            die(f"companion {name} version is out of date")
-        wanted = payload_for(pin, name, inventory(destination))
-        current = current_payload(destination, pin, name)
-        if current != wanted:
-            die(f"companion {name} installation is modified or outdated")
+        status = install_status(destination, pin, name)
+        if status != "current":
+            die(f"companion {name} installation is {status}")
     sync_claude(root / "agent-intercom-claude", "check", env)
     sync_opencode("check", env)
     return 0
@@ -524,14 +515,9 @@ def command_plan(env: dict) -> int:
     pin = load_pin_for_sync()
     root = prefix(env)
     for name in COMPANIONS:
-        destination = root / name
-        wanted = pin["companions"][name]
-        try:
-            receipt = json.loads((destination / RECEIPT).read_text())
-        except (OSError, ValueError):
-            receipt = None
-        if receipt is None or receipt.get("sha256") != wanted["sha256"]:
-            print(f"companions: install {name} {wanted['version']}")
+        status = install_status(root / name, pin, name)
+        if status in ("absent", "stale"):
+            print(f"companions: install {name} {pin['companions'][name]['version']}")
     print("companions: ensure shims, Claude MCP entry and OpenCode plugin entries")
     return 0
 
