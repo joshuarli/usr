@@ -41,15 +41,14 @@ Check only the `verify-usr.*` fixture directory from this run if the helper is i
 
 ## Repository checks
 
-Use these read-only checks for skill and Markdown changes:
+Let the planner choose the checks for the current changes, then run them:
 
 ```sh
-node tools/skills/skills.ts check
-node tools/skills/skills.ts check --root .agents/skills
-python3 -I dotfiles/base/.local/bin/mdtool check --untracked
+sh sync check --plan
+sh sync check --changed
 ```
 
-`mdtool` checks links, references, and repository documentation. Neither command proves tool behavior outside its own checks.
+The plan names each selected check, the changed paths that selected it, checks this host cannot run, and changed paths no check covers. The results record each check's exit code against the tested HEAD and tree; they prove only what each check exercises. Use `python3 -I dotfiles/base/.local/bin/mdtool check --untracked` for a whole-repository Markdown audit.
 
 ## Evidence and cleanup
 

@@ -39,6 +39,18 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual((("dotfiles/doctor", "dotfiles/doctor"),), doctor.reasons)
         self.assertEqual((), plan.unmapped)
 
+    def test_instruction_text_selects_every_test_that_pins_it(self):
+        pins = {
+            "dotfiles/base/.agents/instructions/lean.md": {"decide", "orchestrate", "policy-generated", "instructions"},
+            "dotfiles/base/.codex/AGENTS.md": {"decide", "orchestrate", "policy-generated", "instructions"},
+            "dotfiles/base/.agents/instructions/bootstrap.md": {"decide", "skills-campaign", "instructions"},
+            "dotfiles/base/.agents/skills/do/SKILL.md": {"decide", "skills"},
+            "dotfiles/base/.agents/skills/orchestrate/SKILL.md": {"decide", "orchestrate", "policy-generated", "pi-profile"},
+        }
+        for path, expected in pins.items():
+            selected = set(ids(checks.plan([Change(path)], LINUX, no_shebang)))
+            self.assertLessEqual(expected, selected, path)
+
     def test_rename_contributes_old_and_new_paths(self):
         changes = checks.parse_name_status(b"R100\0dotfiles/pk-test.py\0dotfiles/zz-new.py\0", b"")
         self.assertEqual([Change("dotfiles/pk-test.py", deleted=True), Change("dotfiles/zz-new.py")], changes)
