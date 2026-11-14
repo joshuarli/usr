@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Find, and optionally delete, old remote branches associated with closed PRs.
 
-The only external command used by this script is ``gh``. Branch tip dates come
-from GitHub's API, so a local checkout and a separate ``git`` command are not
-required.
-
-The default behavior is a dry run. A branch is eligible for deletion only when:
+Branch tip dates come from GitHub's API; branch deletion is performed with
+``git push --force-with-lease`` so GitHub's own receive-pack verifies the
+branch is still at the observed tip OID before the delete is applied. The
+default behavior is a dry run. A branch is eligible for deletion only when:
 
 * it is a branch in the current repository, not a fork's branch;
 * it has no open pull request;
@@ -13,19 +12,24 @@ The default behavior is a dry run. A branch is eligible for deletion only when:
 * its latest commit is at least one calendar year old; and
 * it is neither the default nor a protected branch.
 
-Closed but unmerged pull requests are printed for review but are never deleted.
+A branch whose tip moved after the snapshot is refused, reported, and left
+for a later run; closed but unmerged pull requests are printed for review but
+are never deleted. ``gh`` is used for all API reads; ``git`` is used only for
+the lease-protected deletion.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
-from urllib.parse import quote
 
 
 @dataclass(frozen=True)
@@ -43,6 +47,7 @@ class PullRequest:
 class Branch:
     name: str
     last_commit_at: datetime
+    tip_oid: str
     protected: bool
     associated_pull_requests: tuple[PullRequest, ...]
     associated_pull_requests_complete: bool
@@ -213,6 +218,7 @@ def branches(repository: str, names: set[str]) -> dict[str, Branch]:
                   }}
                   target {{
                     ... on Commit {{
+                      oid
                       committedDate
                     }}
                   }}
@@ -259,6 +265,13 @@ def branches(repository: str, names: set[str]) -> dict[str, Branch]:
                 if isinstance(branch_target, dict)
                 else None
             )
+            tip_oid = branch_target.get("oid") if isinstance(branch_target, dict) else None
+            if not isinstance(tip_oid, str) or len(tip_oid) != 40 or any(
+                character not in "0123456789abcdef" for character in tip_oid
+            ):
+                raise RuntimeError(
+                    f"GitHub returned an invalid branch tip OID for {branch_name!r}"
+                )
             protection = branch_data.get("branchProtectionRule")
             associated = branch_data.get("associatedPullRequests")
             associated_nodes = (
@@ -313,6 +326,7 @@ def branches(repository: str, names: set[str]) -> dict[str, Branch]:
             result[branch_name] = Branch(
                 name=branch_name,
                 last_commit_at=parse_timestamp(committed_date, "commit date"),
+                tip_oid=tip_oid,
                 protected=protection is not None,
                 associated_pull_requests=tuple(associated_pull_requests),
                 associated_pull_requests_complete=(
@@ -322,10 +336,130 @@ def branches(repository: str, names: set[str]) -> dict[str, Branch]:
     return result
 
 
-def delete_branch(repository: str, branch: str) -> None:
-    # Preserve slashes in branch names: the GitHub endpoint expects heads/foo/bar.
-    ref = quote(f"heads/{branch}", safe="/")
-    run_gh(["api", "--method", "DELETE", f"repos/{repository}/git/refs/{ref}"])
+def _git(arguments: Sequence[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+    }
+    try:
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("git CLI is not installed or is not on PATH") from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("git push timed out") from None
+
+
+def repository_remote() -> tuple[str, list[str]]:
+    data = run_gh_json(["repo", "view", "--json", "url,sshUrl"])
+    if not isinstance(data, dict):
+        raise RuntimeError("could not determine the repository remote URL")
+    protocol = run_gh(["config", "get", "git_protocol"]).strip() or "https"
+    if protocol == "ssh":
+        ssh_url = data.get("sshUrl")
+        if not isinstance(ssh_url, str) or not ssh_url:
+            raise RuntimeError("could not determine the repository SSH URL")
+        return ssh_url, []
+    url = data.get("url")
+    if not isinstance(url, str) or not url:
+        raise RuntimeError("could not determine the repository HTTPS URL")
+    return url, ["-c", "credential.helper=!gh auth git-credential"]
+
+
+def branch_tip(repository: str, branch: str) -> str | None:
+    """Return the current tip OID, or None if the branch no longer exists."""
+    owner, name = repository.split("/", 1)
+    query = """
+      query($owner: String!, $name: String!, $ref: String!) {
+        repository(owner: $owner, name: $name) {
+          ref(qualifiedName: $ref) {
+            target {
+              ... on Commit {
+                oid
+              }
+            }
+          }
+        }
+      }
+    """
+    response = run_gh_json(
+        [
+            "api",
+            "graphql",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"ref=refs/heads/{branch}",
+            "-f",
+            f"query={query}",
+        ]
+    )
+    data = response.get("data") if isinstance(response, dict) else None
+    repository_data = data.get("repository") if isinstance(data, dict) else None
+    if not isinstance(repository_data, dict):
+        raise RuntimeError("GitHub returned invalid branch ref data")
+    ref = repository_data.get("ref")
+    if ref is None:
+        return None
+    if not isinstance(ref, dict):
+        raise RuntimeError("GitHub returned an invalid branch ref object")
+    target = ref.get("target")
+    oid = target.get("oid") if isinstance(target, dict) else None
+    if not isinstance(oid, str):
+        raise RuntimeError("GitHub returned an invalid branch tip OID")
+    return oid
+
+
+def delete_branch(repository: str, branch: str, expected_oid: str) -> str:
+    """Delete ``branch`` only if the remote tip is still ``expected_oid``.
+
+    Returns "deleted", "advanced" (tip moved; reported for a later run), or
+    "already-gone". Raises RuntimeError when the delete cannot be performed
+    and the ref's state cannot explain the failure.
+    """
+    if len(expected_oid) != 40 or any(
+        character not in "0123456789abcdef" for character in expected_oid
+    ):
+        raise RuntimeError(f"refusing to delete {branch!r}: invalid tip OID")
+
+    url, extra = repository_remote()
+    ref = f"refs/heads/{branch}"
+    scratch = tempfile.mkdtemp(prefix="close-stale-prs-")
+    try:
+        init = _git(["init", "-q"], cwd=scratch)
+        if init.returncode:
+            raise RuntimeError(f"git init failed: {init.stderr.strip()}")
+        push = _git(
+            [*extra, "push", f"--force-with-lease={ref}:{expected_oid}", url, "--delete", ref],
+            cwd=scratch,
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    if push.returncode == 0:
+        return "deleted"
+    detail = push.stderr.strip() or push.stdout.strip() or "git push failed"
+    try:
+        tip = branch_tip(repository, branch)
+    except RuntimeError as error:
+        raise RuntimeError(
+            f"git push failed to delete {branch}: {detail}; "
+            f"could not re-check the branch tip: {error}"
+        ) from error
+    if tip is None:
+        return "already-gone"
+    if tip != expected_oid:
+        return "advanced"
+    raise RuntimeError(f"git push failed to delete {branch}: {detail}")
 
 
 def print_pull_request(pull: PullRequest) -> None:
@@ -413,12 +547,19 @@ def main() -> int:
             print("    DRY RUN: would delete")
         else:
             try:
-                delete_branch(repository, branch_name)
+                outcome = delete_branch(repository, branch_name, branch.tip_oid)
             except RuntimeError as error:
                 print(f"    ERROR: {error}", file=sys.stderr)
                 deletion_failed = True
                 continue
-            print("    DELETED")
+            if outcome == "deleted":
+                print("    DELETED")
+            elif outcome == "advanced":
+                skipped += 1
+                print("    SKIP: branch advanced since the snapshot; left for a later run")
+            else:
+                skipped += 1
+                print("    SKIP: branch no longer exists")
 
     print(f"\nEligible branches: {candidates}")
     print(f"Skipped branches:  {skipped}")
