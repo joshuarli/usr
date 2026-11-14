@@ -31,6 +31,10 @@ jobs:
           set -euo pipefail
           printf '/.work/\n' >> .git/info/exclude
           mkdir -p .work/tmp
+          # Exercise the native agent-browser installer and skill adapters first,
+          # even when an unrelated Pi acceptance gate fails later.
+          python3 -I tools/sync/test_installer.py
+          node tools/skills/skills.ts check
           TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py
           python3 -I tools/pi/test_offline.py
           python3 -I tools/pi/test_sync_bridge_offline.py
@@ -40,8 +44,6 @@ jobs:
           python3 -I tools/sync/claude-worker-test.py
           python3 -I tools/sync/opencode-worker-test.py
           python3 -I tools/sync/test_main.py
-          python3 -I tools/sync/test_installer.py
-          node tools/skills/skills.ts check
           # The full repository suite expects no system PyYAML C extension; isolate it
           # from GitHub runner site-packages without installing any pip packages.
           python3 -m venv --without-pip .work/isolated-python
