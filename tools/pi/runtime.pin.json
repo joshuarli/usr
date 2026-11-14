@@ -1,18 +1,18 @@
 {
   "schema": 1,
-  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-d3620b3662de7ab4daffabd45b3bb3d65d2b6016/",
-  "builder_revision": "d3620b3662de7ab4daffabd45b3bb3d65d2b6016",
+  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-46c3702f2c160fe79ebdc4354dcdeb8c9950f5f7/",
+  "builder_revision": "46c3702f2c160fe79ebdc4354dcdeb8c9950f5f7",
   "profile": "headless-usr",
   "version": "1.5.0",
-  "provenance_sha256": "b00d1fce62c3114694cee2b3479e4b73c01f5de7d2485a6a0b0a02616c23f928",
+  "provenance_sha256": "5c83a46ff395ee0fb00c0a5596f291aa3f3630f2a06619638713bed990b6124d",
   "targets": {
-    "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "b33eba78b646dbb93f4431166a1b502bf535267e9d80d4b2c8dddaac7b8f8917", "bytes": 12793608},
-    "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "c12190515257d334289192f7009d34494a66e20941477ecbdb7dfe521613694d", "bytes": 12778644},
-    "linux-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-unknown-linux-musl.tar.xz", "sha256": "ee5a3971c22645ee2e6d9d2ef7a347993bca8a6e5653479f9fa604427da330f6", "bytes": 12779384}
+    "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "264d78d08514c0161b4b8cf2f772b246804620550f1a7f031a6de29db5efe6a7", "bytes": 12797796},
+    "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "2da5cc9eb071985f9582ab6b925ba40f5e62dd8d9a529738923fc1de825b9b8f", "bytes": 12783364},
+    "linux-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-unknown-linux-musl.tar.xz", "sha256": "0cf13e155ae428418d4c62137a135b182ab27e8ef152be2f242ecea79fbc8867", "bytes": 12784256}
   },
   "companions": {
-    "agent-intercom-claude": {"archive": "agent-intercom-claude-0.10.0.tgz", "version": "0.10.0", "sha256": "f60e27f4d142a0ed3109fd78d984aa05800aa2d5b233c4de96402697c8d504ba", "bytes": 138837, "source_sha": "134baec78523d2a648a35506694455bb1c56104f"},
-    "agent-intercom-codex": {"archive": "agent-intercom-codex-0.10.0.tgz", "version": "0.10.0", "sha256": "acca68eac6ed908c9356a9ad0ad7413a1a1854cce14b3e507073aed32a3e3f67", "bytes": 148396, "source_sha": "dd7182cb4fab2df0dfadaec65cf9d65b8713455a"},
-    "agent-intercom-opencode": {"archive": "agent-intercom-opencode-0.10.0.tgz", "version": "0.10.0", "sha256": "3253ce5ed631b5957f082cc58aa01d74d583c79767567e0045db293a87bcf387", "bytes": 10826197, "source_sha": "163df7659c051b8e2dc0eeca4bddd510822a286c"}
+    "agent-intercom-claude": {"archive": "agent-intercom-claude-0.10.0.tgz", "version": "0.10.0", "sha256": "232ba02561765525e84ee9eb1d18d944af07155755ebfca9bf634b0977f04830", "bytes": 154885, "source_sha": "134baec78523d2a648a35506694455bb1c56104f"},
+    "agent-intercom-codex": {"archive": "agent-intercom-codex-0.10.0.tgz", "version": "0.10.0", "sha256": "ab32fe3bf82a0078add65c4216c5e836cda7f6e5ea71d4b65d1320c163ac5811", "bytes": 161690, "source_sha": "dd7182cb4fab2df0dfadaec65cf9d65b8713455a"},
+    "agent-intercom-opencode": {"archive": "agent-intercom-opencode-0.10.0.tgz", "version": "0.10.0", "sha256": "b822e203fca8197f4f7d854a9f88646a3b5e11382f832b6c1f37f2d975ac5006", "bytes": 10833036, "source_sha": "163df7659c051b8e2dc0eeca4bddd510822a286c"}
   }
 }
