@@ -5,6 +5,7 @@ import hashlib
 import http.server
 import io
 import json
+import shutil
 import subprocess
 from pathlib import Path
 import sys
@@ -123,6 +124,25 @@ class ReleaseTests(unittest.TestCase):
         other = pi_release.install(self.root / "other", self.pin, "darwin-arm64", self.cache)
         self.assertTrue((other / "bin/pi").is_file())
         self.assertEqual(len(self.requests), count)
+
+    def test_metadata_changes_reuse_cached_generation_and_reject_modification(self):
+        entry = self.pin["targets"]["darwin-arm64"]
+        self.cache.mkdir()
+        shutil.copyfile(self.assets / entry["archive"], self.cache / (entry["sha256"] + ".tar.xz"))
+        with patch.object(pi_release, "fetch", side_effect=AssertionError("network access")):
+            runtime = self.install()
+            other = {**self.pin, "targets": {**self.pin["targets"], "linux-x64": {
+                "archive": "pi-full-1.5.0-x86_64-unknown-linux-musl.tar.xz",
+                "sha256": "b" * 64, "bytes": 1}}}
+            metadata = {**other, "release_url": "https://example.org/releases",
+                        "builder_revision": "c" * 40, "provenance_sha256": "d" * 64}
+            for pin in (other, metadata):
+                self.assertEqual(self.install(pin), runtime)
+                self.assertEqual(json.loads((runtime / pi_release.RECEIPT).read_text())["pin"], pin)
+                self.assertTrue(pi_release.selected(self.prefix, pin, "darwin-arm64"))
+            (runtime / "bin/pi").write_text("modified")
+            with self.assertRaisesRegex(pi_offline.OfflinePiError, "existing Pi release is modified"):
+                self.install(self.pin)
 
     def test_missing_asset_retry(self):
         archive = self.assets / "pi-full-1.5.0-aarch64-apple-darwin.tar.xz"

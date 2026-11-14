@@ -11,7 +11,7 @@ import shutil
 import tarfile
 import tempfile
 from uuid import uuid4
-from typing import TypeGuard, TypedDict
+from typing import TypeGuard, TypedDict, cast
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -219,9 +219,35 @@ def generation(path: Path, pin: Pin, target: str) -> bool:
         if path.is_symlink() or not path.is_dir():
             return False
         receipt = json.loads((path / RECEIPT).read_text())
-        return bool(receipt["pin"] == pin and receipt["target"] == target and receipt["files"] == inventory(path))
-    except (OSError, ValueError, KeyError):
+        old = receipt["pin"]
+        return bool(_is_pin(old) and receipt["target"] == target
+                    and old["profile"] == pin["profile"] and old["version"] == pin["version"]
+                    and pin_entry(old, target) == pin_entry(pin, target)
+                    and receipt["files"] == inventory(path))
+    except (OSError, ValueError, KeyError, TypeError):
         return False
+
+
+def update_selection(path: Path, pin: Pin) -> None:
+    receipt = path / RECEIPT
+    data = json.loads(receipt.read_text())
+    if data["pin"] == pin:
+        return
+    data["pin"] = pin
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=".receipt-", delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            json.dump(data, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+    try:
+        os.replace(temporary, receipt)
+        sync_directory(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def select(prefix: Path, entry: Artifact) -> None:
@@ -257,6 +283,7 @@ def install(prefix: Path, pin: Pin, target: str, cache: Path) -> Path:
             raise pi_offline.OfflinePiError("refusing foreign symlink in Pi release prefix")
         installed = current(prefix, pin, target)
         if installed:
+            update_selection(installed, pin)
             return installed
         if prefix.is_symlink() or (prefix.exists() and not (prefix / ".usr-pi-releases").is_file()):
             raise pi_offline.OfflinePiError(f"refusing foreign Pi release prefix: {prefix}")
@@ -265,6 +292,7 @@ def install(prefix: Path, pin: Pin, target: str, cache: Path) -> Path:
             raise pi_offline.OfflinePiError("refusing foreign Pi selection")
         destination = prefix / "releases" / entry["sha256"]
         if generation(destination, pin, target):
+            update_selection(destination, pin)
             select(prefix, entry)
             return destination
         archive = acquire(pin, target, cache)
@@ -308,7 +336,7 @@ def selected(prefix: Path, pin: Pin, target: str) -> bool:
             return False
         generation_dir = prefix / "releases" / entry["sha256"]
         receipt = json.loads((generation_dir / RECEIPT).read_text())
-        return not generation_dir.is_symlink() and receipt["pin"] == pin and receipt["target"] == target
+        return bool(not generation_dir.is_symlink() and receipt["pin"] == pin and receipt["target"] == target)
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -354,7 +382,7 @@ def bridge_current(project: Path, prefix: Path, pin: Pin | None = None) -> bool:
 
 def _package_version(root: Path, name: str) -> str | None:
     file = root / name / "package.json"
-    return json.loads(file.read_text())["version"] if file.exists() else None
+    return cast(str, json.loads(file.read_text())["version"]) if file.exists() else None
 
 
 def _replaceable_bridge(link: Path, legacy: Path) -> bool:
