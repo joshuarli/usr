@@ -4,11 +4,13 @@
 The Claude, Codex and OpenCode intercom adapters ship as separate archives in
 the pinned pi-build release alongside the Pi runtime. This tool installs them
 into ~/.local/share/agent-intercom, creates the PATH shims their command-line
-tools need, and registers the MCP server with Claude Code and the server/TUI
-plugins with OpenCode, all with owned-entry semantics: entries that do not
-point into our install prefix are never adopted, overwritten or removed.
-Codex registers through the tracked ~/.codex/config.toml entry, which needs
-no machine state.
+tools need, and registers the MCP server with Claude Code and the plugins with
+OpenCode, all with owned-entry semantics: entries that do not point into our
+install prefix are never adopted, overwritten or removed. OpenCode merges
+plugin arrays from opencode.json and opencode.jsonc, so OpenCode registration
+goes in a sync-managed opencode.jsonc and the tracked, symlinked opencode.json
+is never read or written through. Codex registers through the tracked
+~/.codex/config.toml entry, which needs no machine state.
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ import pi_release  # noqa: E402
 COMPANIONS = pi_release.COMPANIONS
 CLAUDE_MCP_NAME = "claude-intercom"
 RECEIPT = ".usr-companion.json"
+OPENCODE_SCHEMA = "https://opencode.ai/config.json"
 
 
 def die(message):
@@ -62,9 +65,9 @@ def claude_config(env: dict[str, str]) -> Path:
     return home_of(env) / ".claude.json"
 
 
-def opencode_config(env: dict[str, str]) -> tuple[Path, Path]:
+def opencode_config(env: dict[str, str]) -> Path:
     base = _base(env, "XDG_CONFIG_HOME", home_of(env) / ".config") / "opencode"
-    return base / "opencode.json", base / "tui.json"
+    return base / "opencode.jsonc"
 
 
 def managed_binary(name: str, env: dict[str, str]) -> str | None:
@@ -423,58 +426,54 @@ def sync_claude(destination: Path, action: str, env: dict[str, str]) -> str:
     return "registered"
 
 
-def opencode_entries(env: dict[str, str]) -> tuple[str, str]:
-    base = prefix(env) / "agent-intercom-opencode"
-    return str(base / "dist" / "plugin.mjs"), str(base / "dist" / "tui.mjs")
+def opencode_entries(env: dict[str, str]) -> str:
+    return str(prefix(env) / "agent-intercom-opencode" / "dist" / "plugin.mjs")
 
 
 def opencode_ours(item: str, env: dict[str, str]) -> bool:
     root = str(prefix(env) / "agent-intercom-opencode") + "/dist/"
-    return item.startswith(root) and item.endswith(("plugin.mjs", "tui.mjs"))
+    return item.startswith(root) and item.endswith("plugin.mjs")
 
 
 def sync_opencode(action: str, env: dict[str, str]) -> str:
-    file, tui = opencode_config(env)
-    plugin, tui_entry = opencode_entries(env)
-    changed = False
-    for target, entry in ((file, plugin), (tui, tui_entry)):
-        data, original = _read_json(target)
-        if original is None and action == "install":
-            data = {"$schema": "https://opencode.ai/tui.json" if target == tui else "https://opencode.ai/config.json"}
-            values = []
-        else:
-            values = data.get("plugin", [])
-        if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
-            die(f"{target} plugin must be a list of paths")
-        ours = [item for item in values if opencode_ours(item, env)]
-        if action == "check":
-            if entry not in values:
-                die(f"{target} plugin registration is missing or outdated")
-            continue
-        if action in ("remove", "verify-absent"):
-            residue = [item for item in values if item == entry]
-            if action == "verify-absent":
-                if residue:
-                    die(f"{target} still registers the intercom companion plugin")
-                continue
-            kept = [item for item in values if item not in residue and not opencode_ours(item, env)]
-            if len(kept) != len(values):
-                if kept:
-                    data["plugin"] = kept
-                else:
-                    data.pop("plugin", None)
-                _write_json(target, data, original)
-                changed = True
-            continue
+    target = opencode_config(env)
+    entry = opencode_entries(env)
+    data, original = _read_json(target)
+    if original is None and action == "install":
+        data = {"$schema": OPENCODE_SCHEMA}
+        values = []
+    else:
+        values = data.get("plugins", [])
+    if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+        die(f"{target} plugins must be a list of paths")
+    if action == "check":
         if entry not in values:
-            values = values + [entry]
-            data["plugin"] = values
+            die(f"{target} plugin registration is missing or outdated")
+        return "current"
+    if action in ("remove", "verify-absent"):
+        residue = [item for item in values if opencode_ours(item, env)]
+        if action == "verify-absent":
+            if residue:
+                die(f"{target} still registers the intercom companion plugin")
+            return "current"
+        kept = [item for item in values if not opencode_ours(item, env)]
+        if len(kept) == len(values):
+            return "absent"
+        if kept:
+            data["plugins"] = kept
+        else:
+            data.pop("plugins", None)
+        if data == {"$schema": OPENCODE_SCHEMA}:
+            if original is not None and target.read_bytes() != original:
+                die(f"{target} changed concurrently; retry sync")
+            target.unlink()
+        else:
             _write_json(target, data, original)
-            changed = True
-    if action == "install":
-        return "registered" if changed else "current"
-    if action == "remove":
-        return "removed" if changed else "absent"
+        return "removed"
+    if entry not in values:
+        data["plugins"] = values + [entry]
+        _write_json(target, data, original)
+        return "registered"
     return "current"
 
 
@@ -518,7 +517,7 @@ def command_plan(env: dict) -> int:
         status = install_status(root / name, pin, name)
         if status in ("absent", "stale"):
             print(f"companions: install {name} {pin['companions'][name]['version']}")
-    print("companions: ensure shims, Claude MCP entry and OpenCode plugin entries")
+    print("companions: ensure shims, Claude MCP entry and OpenCode plugin registration")
     return 0
 
 
