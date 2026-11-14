@@ -43,8 +43,9 @@ class PiExtensionsTests(unittest.TestCase):
     def test_graph_keeps_runtime_before_bridge(self):
         tasks = main.graph(self.ctx, [], setup=True).tasks
         self.assertIn("tool:pi", tasks["pi-extensions"].needs)
-        for name in ("claude-mcp", "pi-mcp", "opencode-mcp"):
+        for name in ("claude-mcp", "pi-mcp"):
             self.assertIn("pi-extensions", tasks[name].needs)
+        self.assertEqual(("links",), tasks["opencode-mcp"].needs)
 
 
 if __name__ == "__main__":

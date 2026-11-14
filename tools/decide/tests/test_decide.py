@@ -1206,7 +1206,7 @@ class DecideTests(unittest.TestCase):
         lean = (ROOT / "dotfiles/base/.agents/instructions/lean.md").read_text()
         self.assertIn("Before delegation, read `orchestrate`", lean)
         self.assertIn("pi-subagent-bridge", lean)
-        self.assertIn("`decide` routing", lean)
+        self.assertIn("consult `decide`", lean)
         instructions = canonical.read_text()
         self.assertIn("Before assigning nontrivial work to any coding subagent", instructions)
         self.assertIn("decide route --guide", instructions)
