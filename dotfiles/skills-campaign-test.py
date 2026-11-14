@@ -242,15 +242,25 @@ class SkillCampaignTests(unittest.TestCase):
             shutil.rmtree(work)
 
     def test_skill_checker_follows_source_links_in_installed_layout(self):
-        work = Path(tempfile.mkdtemp(prefix="skills-layout-", dir=WORK_TMP))
+        work = Path(tempfile.mkdtemp(prefix="skills-layout-", dir="/Users/josh/usr/.work/tmp"))
         try:
             skills = work / ".agents" / "skills"
             skills.mkdir(parents=True)
-            for name in ("do", "create-verification-skill"):
+            names = ("do", "create-verification-skill")
+            for name in names:
                 target = ROOT / "dotfiles" / "base" / ".agents" / "skills" / name
                 (skills / name).symlink_to(target, target_is_directory=True)
-            result = run("node", str(CHECKER), "check", "--root", str(skills))
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            listed = run("node", str(CHECKER), "list", "--json", "--root", str(skills))
+            self.assertEqual(0, listed.returncode, listed.stderr)
+            self.assertEqual(set(names), {record["id"] for record in json.loads(listed.stdout)})
+            source = work / "source" / "do"
+            shutil.copytree((skills / "do").resolve(), source)
+            (source / "SKILL.md").write_text("invalid frontmatter\n", encoding="utf-8")
+            (skills / "do").unlink()
+            (skills / "do").symlink_to(source, target_is_directory=True)
+            broken = run("node", str(CHECKER), "check", "--root", str(skills))
+            self.assertNotEqual(0, broken.returncode)
+            self.assertIn("SKILL.md:1: expected frontmatter", broken.stderr)
         finally:
             shutil.rmtree(work)
 

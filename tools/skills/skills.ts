@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync, realpathSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -11,7 +11,14 @@ const globalRoot = resolve(repo, 'dotfiles/base/.agents/skills')
 const rel = (path: string) => relative(repo, path)
 const read = (path: string) => readFileSync(path, 'utf8')
 function parse(root: string): Skill[] {
-  return readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => {
+  const entries = readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory() || e.isSymbolicLink()).map(e => {
+    const path = join(root, e.name)
+    let directory: boolean
+    try { directory = statSync(path).isDirectory() } catch (error) { throw Error(`${rel(path)}: ${error instanceof Error ? error.message : String(error)}`) }
+    return { name: e.name, path, directory, target: realpathSync(path) }
+  }).filter(e => e.directory).sort((a, b) => Number(b.name === basename(b.target)) - Number(a.name === basename(a.target)) || a.name.localeCompare(b.name))
+  const seen = new Set<string>()
+  return entries.filter(e => { if (seen.has(e.target)) return false; seen.add(e.target); return true }).map(e => {
     const id = e.name, file = join(root, id, 'SKILL.md'), text = read(file), lines = text.split('\n')
     if (lines[0] !== '---') throw Error(`${rel(file)}:1: expected frontmatter`)
     const end = lines.indexOf('---', 1)
@@ -31,7 +38,7 @@ function parse(root: string): Skill[] {
     const description = scalar(fields.get('description') ?? '')
     if (fields.get('disable-model-invocation') && fields.get('disable-model-invocation') !== 'true') throw Error(`${rel(file)}: invalid disable-model-invocation`)
     const body = lines.slice(end + 1).join('\n'), yamlFile = join(root, id, 'agents/openai.yaml')
-    const record: Record = { id, description, invocation: fields.has('disable-model-invocation') ? 'explicit' : 'auto', path: rel(file), body, references: [], sha256: createHash('sha256').update(readFileSync(file)).digest('hex') }
+    const record: Record = { id, description, invocation: fields.has('disable-model-invocation') ? 'explicit' : 'auto', path: rel(realpathSync(file)).startsWith('..' + '/') ? rel(file) : rel(realpathSync(file)), body, references: [], sha256: createHash('sha256').update(readFileSync(file)).digest('hex') }
     if (fields.get('name') !== id) throw Error(`${rel(file)}: name does not match directory: ${id}`)
     if (!description) throw Error(`${rel(file)}: missing description`)
     return { record, text, front, yaml: existsSync(yamlFile) ? read(yamlFile) : null, file, yamlFile, missing: [] }
@@ -69,14 +76,31 @@ function outputs(s: Skill): { file: string; old: string | null; content: string 
   else if (meta >= 0 && !(lines[meta + 1] ?? '').startsWith('  ')) lines.splice(meta, 1)
   const text = ['---', ...lines, '---', s.record.body].join('\n')
   let yaml = s.yaml ?? '', yl = yaml ? yaml.split('\n') : []
-  const policy = yl.findIndex(x => x === 'policy:')
+  let section = '', keys = new Set<string>(), sections = new Set<string>()
+  for (let i = 0; i < yl.length; i++) {
+    const line = yl[i]
+    if (line === '') continue
+    const top = line.match(/^([a-zA-Z_][\w-]*):$/)
+    const child = line.match(/^  ([a-zA-Z_][\w-]*): (true|false|"(?:[^"\\]|\\["\\/bfnrt]|\\u[0-9a-fA-F]{4})*")$/)
+    if (top) {
+      section = top[1]; keys = new Set()
+      if (sections.has(section)) throw Error(`${rel(s.yamlFile)}:${i + 1}: duplicate key ${section}`)
+      sections.add(section)
+    } else if (child && section) {
+      if (keys.has(child[1])) throw Error(`${rel(s.yamlFile)}:${i + 1}: duplicate key ${child[1]}`)
+      keys.add(child[1])
+      if (section === 'policy' && child[1] === 'allow_implicit_invocation' && !/^(true|false)$/.test(child[2])) throw Error(`${rel(s.yamlFile)}:${i + 1}: invalid invocation value`)
+    } else throw Error(`${rel(s.yamlFile)}:${i + 1}: unsupported YAML layout`)
+  }
+  const policy = yl.indexOf('policy:')
   if (policy >= 0) {
-    let end = policy + 1; while (end < yl.length && /^  /.test(yl[end])) end++
-    const block = yl.slice(policy + 1, end)
-    const invocation = block.findIndex(x => /^  allow_implicit_invocation:/.test(x))
+    let end = policy + 1; while (end < yl.length && (yl[end] === '' || /^  /.test(yl[end]))) end++
+    const trailing = end === yl.length && yl.at(-1) === ''
+    const block = yl.slice(policy + 1, end).filter(x => x !== '')
+    const invocation = block.findIndex(x => /^  allow_implicit_invocation: /.test(x))
     if (invocation >= 0) { if (explicit) block[invocation] = '  allow_implicit_invocation: false'; else block.splice(invocation, 1) }
     else if (explicit) block.push('  allow_implicit_invocation: false')
-    yl.splice(policy, end - policy, ...(block.length ? ['policy:', ...block] : []))
+    yl.splice(policy, end - policy, ...(block.length ? ['policy:', ...block] : []), ...(trailing ? [''] : []))
   } else if (explicit) { if (yl.at(-1) === '') yl.pop(); yl.push('policy:', '  allow_implicit_invocation: false', '') }
   yaml = yl.join('\n')
   return [{ file: s.file, old: s.text, content: text }, { file: s.yamlFile, old: s.yaml, content: yaml.trim() ? yaml : null }]
