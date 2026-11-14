@@ -21,10 +21,11 @@ esac
 
 # The smoke test runs a subprocess: a python-build release built for a newer
 # macOS starts, but crashes in os.pipe on the first subprocess it spawns.
-smoke='import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
+# Importing the executor rejects interpreters that lack APIs it needs.
+smoke='import sqlite3, ssl, subprocess, sys; subprocess.run(["/bin/sh", "-c", ":"], check=True); sys.path.insert(0, sys.argv[1]); import main'
 choose_python() {
   for candidate in "$home/.local/bin/python3" "$(command -v python3 || :)" /usr/bin/python3; do
-    if [ -n "$candidate" ] && [ -x "$candidate" ] && "$candidate" -I -c "$smoke" >/dev/null 2>&1; then
+    if [ -n "$candidate" ] && [ -x "$candidate" ] && "$candidate" -I -c "$smoke" "$root/tools/sync" >/dev/null 2>&1; then
       printf '%s\n' "$candidate"
       return
     fi
@@ -60,7 +61,7 @@ case $(uname -s) in
     ;;
 esac
 [ -n "$python" ] && [ -x "$python" ] || {
-  printf '%s\n' 'sync: no working Python 3.9+ found. macOS and Alpine bootstrap the pinned python-build automatically, but it needs a host OS at least as new as the one it was built for; otherwise provide an existing Python 3.9+.' >&2
+  printf '%s\n' 'sync: no working Python 3.9+ that can import tools/sync/main.py found. macOS and Alpine bootstrap the pinned python-build automatically, but it needs a host OS at least as new as the one it was built for; otherwise provide an existing Python 3.9+.' >&2
   exit 1
 }
 exec "$python" -I "$root/tools/sync/main.py" "$@"

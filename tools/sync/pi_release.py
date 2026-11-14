@@ -11,10 +11,13 @@ import shutil
 import tarfile
 import tempfile
 from uuid import uuid4
-from typing import TypeGuard, TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 import urllib.error
 import urllib.parse
 import urllib.request
+
+if TYPE_CHECKING:
+    from typing import TypeGuard
 
 import pi_offline
 

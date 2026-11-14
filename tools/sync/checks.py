@@ -116,6 +116,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),
     Check("sync-dag", (DAG,), py("tools/sync/test_dag.py"), ("tools/sync/dag.py", "tools/sync/test_dag.py")),
     Check("sync-sh-syntax", (DAG,), ("sh", "-n", "sync"), ("sync",)),
+    Check("sync-launcher", (DAG,), py("tools/sync/test_launcher.py"), (*SYNC_CORE, "tools/sync/installer.py", "tools/sync/pi_release.py", "tools/sync/test_launcher.py")),
     Check("installer", (INSTALLER,), py("tools/sync/test_installer.py"), ("tools/sync/installer.py", "tools/sync/test_installer.py", "tools/sync/tools.json")),
     Check("ffmpeg-runtime", (INSTALLER,), py("tools/sync/test_ffmpeg_runtime.py"), ("tools/sync/ffmpeg_runtime.py", "tools/sync/test_ffmpeg_runtime.py", "tools/sync/installer.py")),
     Check("bootstrap", (INSTALLER,), ("sh", "tools/sync/bootstrap-test.sh"), ("tools/sync/bootstrap.sh", "tools/sync/bootstrap-test.sh")),

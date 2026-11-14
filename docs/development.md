@@ -13,7 +13,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | --- | --- |
 | `dotfiles/base/.local/bin/sbx` or its policy spec | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py` and on macOS `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/sbx-test.py --live` |
 | Python link discovery, planning or apply | `python3 -I tools/sync/test_links.py`, `python3 -I tools/sync/test_main.py`, and `python3 -I tools/sync/test_integration.py` |
-| `sync` DAG/bootstrap | `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh dotfiles/doctor-test.sh`, `python3 -I tools/sync/test_dag.py`, and `sh -n sync` |
+| `sync` DAG/bootstrap | `python3 -I tools/sync/test_main.py`, `python3 -I tools/sync/test_integration.py`, `sh dotfiles/doctor-test.sh`, `python3 -I tools/sync/test_dag.py`, `sh -n sync`, and `python3 -I tools/sync/test_launcher.py` |
 | `tools/decide` | `TMPDIR="$PWD/.work/tmp" python3 -I tools/decide/tests/test_decide.py` and `uvx ruff check tools/decide/src/decide.py tools/decide/tests/test_decide.py` |
 | `sync doctor` and default tool inventory | `sh dotfiles/doctor-test.sh`, `sh -n dotfiles/doctor`, `sh -n dotfiles/doctor-test.sh`, `dash -n dotfiles/doctor`, and `dash -n dotfiles/doctor-test.sh` |
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
