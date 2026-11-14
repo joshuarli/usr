@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -207,6 +208,7 @@ class Planned:
 class Plan:
     checks: tuple[Planned, ...]
     unmapped: tuple[str, ...]
+    index_differs: tuple[str, ...] = ()
 
 
 def matches(pattern: str, path: str) -> bool:
@@ -225,7 +227,7 @@ def unmet(check: Check, host: Host) -> Optional[str]:
 
 
 def plan(changes: Sequence[Change], host: Host, first_line: Callable[[str], str],
-         registry: Sequence[Check] = REGISTRY) -> Plan:
+         registry: Sequence[Check] = REGISTRY, index_differs: tuple[str, ...] = ()) -> Plan:
     planned: list[Planned] = []
     covered: set[str] = set()
     for check in registry:
@@ -244,7 +246,7 @@ def plan(changes: Sequence[Change], host: Host, first_line: Callable[[str], str]
             reasons = tuple(dict.fromkeys((c.path, p) for c, p in hits))
             planned.append(Planned(check, check.argv, reasons, skip))
     unmapped = tuple(sorted({c.path for c in changes} - covered))
-    return Plan(tuple(planned), unmapped)
+    return Plan(tuple(planned), unmapped, index_differs)
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -271,9 +273,21 @@ def parse_name_status(diff: bytes, untracked: bytes) -> list[Change]:
 
 
 def changed(root: Path, base: Optional[str]) -> list[Change]:
-    return parse_name_status(
-        git(root, "diff", "-M", "--name-status", "-z", base or "HEAD"),
-        git(root, "ls-files", "--others", "--exclude-standard", "-z"))
+    sources = [
+        git(root, "diff", "--cached", "-M", "--name-status", "-z", "HEAD"),
+        git(root, "diff", "-M", "--name-status", "-z"),
+    ]
+    if base:
+        sources.append(git(root, "diff", "-M", "--name-status", "-z", base, "HEAD"))
+    untracked = git(root, "ls-files", "--others", "--exclude-standard", "-z")
+    paths = {change.path for source in sources for change in parse_name_status(source, b"")}
+    paths.update(change.path for change in parse_name_status(b"", untracked))
+    return [Change(path, deleted=not os.path.lexists(root / path)) for path in sorted(paths)]
+
+
+def index_differs(root: Path) -> tuple[str, ...]:
+    output = git(root, "diff", "--no-renames", "--name-only", "-z")
+    return tuple(sorted(os.fsdecode(path) for path in output.split(b"\0") if path))
 
 
 def host_facts(registry: Iterable[Check] = REGISTRY) -> Host:
@@ -300,6 +314,7 @@ def plan_json(result: Plan) -> dict[str, object]:
             "runnable": p.skip is None, "skip_reason": p.skip,
         } for p in result.checks],
         "unmapped": list(result.unmapped),
+        "index_differs": list(result.index_differs),
     }
 
 
@@ -314,9 +329,24 @@ def environment(root: Path, check: Check) -> dict[str, str]:
 
 def fingerprint(root: Path) -> str:
     digest = hashlib.sha256()
-    digest.update(git(root, "status", "--porcelain=v1", "-z"))
-    digest.update(b"\0")
-    digest.update(git(root, "diff", "HEAD"))
+    def add(data: bytes) -> None:
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+
+    add(git(root, "rev-parse", "HEAD"))
+    add(git(root, "status", "--porcelain=v1", "-z"))
+    add(git(root, "diff", "HEAD", "--binary"))
+    add(git(root, "diff", "--cached", "--binary"))
+    paths = git(root, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
+    for raw_path in sorted(path for path in paths if path):
+        path = root / os.fsdecode(raw_path)
+        mode = path.lstat().st_mode
+        add(raw_path)
+        add(str(stat.S_IFMT(mode)).encode())
+        if stat.S_ISLNK(mode):
+            add(os.fsencode(os.readlink(path)))
+        elif stat.S_ISREG(mode):
+            add(path.read_bytes())
     return digest.hexdigest()
 
 
@@ -351,7 +381,7 @@ def run_suite(root: Path) -> int:
 
 
 def run_changed(root: Path, base: Optional[str], as_json: bool) -> int:
-    result = plan(changed(root, base), host_facts(), first_line_of(root))
+    result = plan(changed(root, base), host_facts(), first_line_of(root), index_differs=index_differs(root))
     records: list[dict[str, object]] = []
     for p in result.checks:
         if p.skip:
@@ -374,7 +404,7 @@ def run_changed(root: Path, base: Optional[str], as_json: bool) -> int:
 
 
 def show_plan(root: Path, base: Optional[str], as_json: bool) -> int:
-    result = plan(changed(root, base), host_facts(), first_line_of(root))
+    result = plan(changed(root, base), host_facts(), first_line_of(root), index_differs=index_differs(root))
     if as_json:
         print(json.dumps(plan_json(result), indent=2))
         return 0
@@ -385,6 +415,8 @@ def show_plan(root: Path, base: Optional[str], as_json: bool) -> int:
         print(f"{p.check.id}: {' '.join(p.argv)}{state}\n  because {why}")
     for path in result.unmapped:
         print(f"unmapped: {path}")
+    for path in result.index_differs:
+        print(f"index differs from working tree: {path}")
     return 0
 
 

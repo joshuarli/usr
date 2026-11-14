@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import shutil
 import subprocess
@@ -200,7 +202,61 @@ class RunnerTests(unittest.TestCase):
             Change("a.txt"), Change("b.txt", deleted=True), Change("c.txt"), Change("d.txt"), Change("e.txt"),
         ], working)
         since = {c.path for c in checks.changed(self.root, "HEAD~1")}
-        self.assertEqual({"a.txt", "c.txt", "d.txt", "e.txt"}, since)
+        self.assertEqual({"a.txt", "b.txt", "c.txt", "d.txt", "e.txt"}, since)
+
+    def test_cancelled_staged_change_is_planned_and_reported(self):
+        path = self.root / "sample.py"
+        path.write_text("original\n")
+        subprocess.run(["git", "add", "sample.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "sample"], cwd=self.root, check=True)
+        path.write_text("staged\n")
+        subprocess.run(["git", "add", "sample.py"], cwd=self.root, check=True)
+        path.write_text("original\n")
+        self.assertIn(Change("sample.py"), checks.changed(self.root, None))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            checks.show_plan(self.root, None, True)
+        self.assertEqual(["sample.py"], json.loads(output.getvalue())["index_differs"])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            checks.show_plan(self.root, None, False)
+        self.assertIn("index differs from working tree: sample.py", output.getvalue())
+
+    def test_staged_rename_and_cancelled_unstaged_edit_are_selected(self):
+        subprocess.run(["git", "mv", "a.txt", "renamed.txt"], cwd=self.root, check=True)
+        (self.root / "edit.py").write_text("original\n")
+        subprocess.run(["git", "add", "edit.py"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "rename and file"], cwd=self.root, check=True)
+        subprocess.run(["git", "mv", "renamed.txt", "new.txt"], cwd=self.root, check=True)
+        (self.root / "edit.py").write_text("staged\n")
+        subprocess.run(["git", "add", "edit.py"], cwd=self.root, check=True)
+        (self.root / "edit.py").write_text("original\n")
+        self.assertEqual({Change("renamed.txt", deleted=True), Change("new.txt"), Change("edit.py")},
+                         set(checks.changed(self.root, None)))
+
+    def test_fingerprint_tracks_untracked_bytes_but_not_ignored_bytes(self):
+        (self.root / ".gitignore").write_text("ignored.txt\n")
+        path = self.root / "new.py"
+        path.write_text("raise SystemExit(0)\n")
+        first = checks.fingerprint(self.root)
+        (self.root / "ignored.txt").write_text("ignored one\n")
+        self.assertEqual(first, checks.fingerprint(self.root))
+        path.write_text("raise SystemExit(9)\n")
+        self.assertNotEqual(first, checks.fingerprint(self.root))
+        second = checks.fingerprint(self.root)
+        (self.root / "ignored.txt").write_text("ignored two\n")
+        self.assertEqual(second, checks.fingerprint(self.root))
+
+    def test_fingerprint_tracks_index_when_worktree_is_restored(self):
+        (self.root / "a.txt").write_text("staged\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=self.root, check=True)
+        (self.root / "a.txt").write_text("one\n")
+        first = checks.fingerprint(self.root)
+        subprocess.run(["git", "reset", "-q", "HEAD", "--", "a.txt"], cwd=self.root, check=True)
+        (self.root / "a.txt").write_text("other\n")
+        subprocess.run(["git", "add", "a.txt"], cwd=self.root, check=True)
+        (self.root / "a.txt").write_text("one\n")
+        self.assertNotEqual(first, checks.fingerprint(self.root))
 
     def test_plan_json_shape(self):
         out = json.loads(json.dumps(checks.plan_json(checks.plan([Change("dotfiles/doctor"), Change("LICENSE")], LINUX, no_shebang))))
