@@ -9,7 +9,9 @@ default behavior is a dry run. A branch is eligible for deletion only when:
 * it is a branch in the current repository, not a fork's branch;
 * it has no open pull request;
 * every associated pull request is closed, merged, and at least one year old;
-* its latest commit is at least one calendar year old; and
+* its latest commit is at least one calendar year old;
+* its tip is the final head of a merged pull request or an ancestor of the
+  default branch; and
 * it is neither the default nor a protected branch.
 
 A branch whose tip moved after the snapshot is refused, reported, and left
@@ -41,6 +43,7 @@ class PullRequest:
     closed_at: datetime | None
     merged_at: datetime | None
     url: str
+    head_oid: str | None
 
 
 @dataclass(frozen=True)
@@ -137,7 +140,7 @@ def closed_pull_requests(
             "--search",
             f"closed:<{cutoff.date().isoformat()}",
             "--json",
-            "number,title,headRefName,isCrossRepository,closedAt,mergedAt,url",
+            "number,title,headRefName,headRefOid,isCrossRepository,closedAt,mergedAt,url",
         ]
     )
     if not isinstance(pulls, list):
@@ -179,10 +182,22 @@ def closed_pull_requests(
                 closed_at,
                 merged_at,
                 url,
+                head_oid(pull),
             )
         )
 
     return by_branch
+
+
+def head_oid(pull: dict[str, object]) -> str | None:
+    value = pull.get("headRefOid")
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) != 40 or any(
+        character not in "0123456789abcdef" for character in value
+    ):
+        raise RuntimeError("GitHub returned a pull request with an invalid head OID")
+    return value
 
 
 def branches(repository: str, names: set[str]) -> dict[str, Branch]:
@@ -211,6 +226,7 @@ def branches(repository: str, names: set[str]) -> dict[str, Branch]:
                       closedAt
                       mergedAt
                       url
+                      headRefOid
                     }}
                     pageInfo {{
                       hasNextPage
@@ -321,6 +337,7 @@ def branches(repository: str, names: set[str]) -> dict[str, Branch]:
                             else None
                         ),
                         url=url,
+                        head_oid=head_oid(pull),
                     )
                 )
             result[branch_name] = Branch(
@@ -493,6 +510,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def tip_integrated(repository: str, default_branch: str, branch: Branch) -> bool:
+    if any(
+        pull.state == "MERGED" and pull.head_oid == branch.tip_oid
+        for pull in branch.associated_pull_requests
+    ):
+        return True
+    comparison = run_gh_json(
+        ["api", f"repos/{repository}/compare/{branch.tip_oid}...{default_branch}"]
+    )
+    if not isinstance(comparison, dict) or comparison.get("status") not in (
+        "ahead", "identical", "behind", "diverged"
+    ):
+        raise RuntimeError("GitHub returned invalid comparison data")
+    return comparison["status"] in ("ahead", "identical")
+
+
 def main() -> int:
     arguments = parse_args()
     dry_run = not arguments.delete
@@ -540,6 +573,11 @@ def main() -> int:
         if reasons:
             skipped += 1
             print(f"    SKIP: {'; '.join(reasons)}")
+            continue
+
+        if not tip_integrated(repository, default_branch, branch):
+            skipped += 1
+            print("    SKIP: tip is neither a merged pull request head nor in the default branch")
             continue
 
         candidates += 1
