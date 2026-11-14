@@ -1,6 +1,7 @@
+import { readBoundedLog } from "./bounded-log.ts"
 import { randomUUID } from "node:crypto"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
-import { appendFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs"
+import { appendFileSync, closeSync, openSync } from "node:fs"
 import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest, WriteAccess } from "./launch.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
@@ -55,23 +56,12 @@ type Event = {
 
 function events(run: CommandRun): Event[] {
   try {
-    const fd = openSync(run.output, "r")
-    try {
-      const size = fstatSync(fd).size
-      const prefixSize = Math.min(size, 65536)
-      const tailStart = Math.max(prefixSize, size - 1024 * 1024)
-      const prefix = Buffer.alloc(prefixSize)
-      const tail = Buffer.alloc(size - tailStart)
-      const a = readSync(fd, prefix, 0, prefix.length, 0)
-      const b = readSync(fd, tail, 0, tail.length, tailStart)
-      return (prefix.subarray(0, a).toString("utf8") + "\n" + tail.subarray(0, b).toString("utf8"))
-        .split("\n").flatMap(line => {
-          try {
-            const value: unknown = JSON.parse(line)
-            return value && typeof value === "object" ? [value as Event] : []
-          } catch { return [] }
-        })
-    } finally { closeSync(fd) }
+    return readBoundedLog(run.output).split("\n").flatMap(line => {
+      try {
+        const value: unknown = JSON.parse(line)
+        return value && typeof value === "object" ? [value as Event] : []
+      } catch { return [] }
+    })
   } catch { return [] }
 }
 

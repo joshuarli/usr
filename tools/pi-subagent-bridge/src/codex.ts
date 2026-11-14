@@ -1,5 +1,6 @@
+import { readBoundedLog } from "./bounded-log.ts"
 import { spawnSync, spawn, type ChildProcess } from "node:child_process"
-import { appendFileSync, closeSync, openSync, readSync, fstatSync } from "node:fs"
+import { appendFileSync, closeSync, openSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest } from "./launch.ts"
@@ -50,14 +51,7 @@ type Event = { type?: string; thread_id?: string; item?: { type?: string; text?:
 function events(run: CommandRun): Event[] {
   let content: string
   try {
-    const fd = openSync(run.output, "r")
-    try {
-      const size = fstatSync(fd).size, prefixSize = Math.min(size, 65536), tailStart = Math.max(prefixSize, size - 1024 * 1024)
-      const prefix = Buffer.alloc(prefixSize), tail = Buffer.alloc(size - tailStart)
-      const prefixRead = readSync(fd, prefix, 0, prefix.length, 0)
-      const tailRead = readSync(fd, tail, 0, tail.length, tailStart)
-      content = prefix.subarray(0, prefixRead).toString("utf8") + "\n" + tail.subarray(0, tailRead).toString("utf8")
-    } finally { closeSync(fd) }
+    content = readBoundedLog(run.output)
   } catch { return [] }
   return content.split("\n").flatMap((line) => {
     try { const event: unknown = JSON.parse(line); return event && typeof event === "object" ? [event as Event] : [] }
