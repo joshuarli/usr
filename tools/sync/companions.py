@@ -427,12 +427,12 @@ def sync_claude(destination: Path, action: str, env: dict[str, str]) -> str:
 
 
 def opencode_entries(env: dict[str, str]) -> str:
-    return str(prefix(env) / "agent-intercom-opencode" / "dist" / "plugin.mjs")
+    return str(prefix(env) / "agent-intercom-opencode")
 
 
 def opencode_ours(item: str, env: dict[str, str]) -> bool:
-    root = str(prefix(env) / "agent-intercom-opencode") + "/dist/"
-    return item.startswith(root) and item.endswith("plugin.mjs")
+    root = str(prefix(env) / "agent-intercom-opencode")
+    return item == root or (item.startswith(root + "/dist/") and item.endswith("plugin.mjs"))
 
 
 def sync_opencode(action: str, env: dict[str, str]) -> str:
@@ -448,6 +448,8 @@ def sync_opencode(action: str, env: dict[str, str]) -> str:
         die(f"{target} plugins must be a list of paths")
     if action == "check":
         if entry not in values:
+            die(f"{target} plugin registration is missing or outdated")
+        if any(item != entry and opencode_ours(item, env) for item in values):
             die(f"{target} plugin registration is missing or outdated")
         return "current"
     if action in ("remove", "verify-absent"):
@@ -470,11 +472,14 @@ def sync_opencode(action: str, env: dict[str, str]) -> str:
         else:
             _write_json(target, data, original)
         return "removed"
-    if entry not in values:
-        data["plugins"] = values + [entry]
-        _write_json(target, data, original)
-        return "registered"
-    return "current"
+    cleaned = [item for item in values if not opencode_ours(item, env) or item == entry]
+    if entry not in cleaned:
+        cleaned.append(entry)
+    if cleaned == values:
+        return "current"
+    data["plugins"] = cleaned
+    _write_json(target, data, original)
+    return "registered"
 
 
 def load_pin_for_sync() -> dict:
