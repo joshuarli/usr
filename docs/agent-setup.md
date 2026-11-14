@@ -55,7 +55,7 @@ Codex native memories are enabled for advisory cross-session hints. Native extra
 
 Antigravity CLI reads skill descriptions and may activate eligible skills automatically, and its skill frontmatter allows only `name` and `description`. Keep explicit-only workflows out of its automatic selection; the user requests one in plain language or with `/<skill-name>`.
 
-Harnesses use native skill metadata and discovery paths. The checker at [`skills-check.sh`](../dotfiles/skills-check.sh) validates tracked skill metadata. See [the skills guide](../SKILLS.md) for invocation rules.
+Harnesses use native skill metadata and discovery paths. The checker at [`skills.ts`](../tools/skills/skills.ts) validates tracked skill metadata. See [the skills guide](../SKILLS.md) for invocation rules.
 
 ## Harness configuration
 

@@ -20,7 +20,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
 | `ghostty-fda-check` | `sh dotfiles/ghostty-fda-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/ghostty-fda-check dotfiles/ghostty-fda-test.sh` |
-| a skill or agent definition | `sh dotfiles/skills-check.sh dotfiles/base/.agents/skills` (or `.agents/skills` for repo-only skills); use the focused check for other agent configuration |
+| a skill or agent definition | `node tools/skills/skills.ts check` (add `--root .agents/skills` for repo-only skills; `node tools/skills/skills.ts generate` refreshes invocation adapters); use the focused check for other agent configuration |
 | model routes, native Pi policy, or generated policy blocks | `make check-generated`, `node --test tools/policy/generate.test.ts`, and the affected [bridge checks](../tools/pi-subagent-bridge/README.md#tests); use `make generate` to refresh projections |
 | local workflow composition | Read the directly composed procedures and applicable global rules; check the affected transitions and effects. A short composition instruction is a behavior change, not wording-only. |
 | skill invocation or discovery metadata, global instruction adapters, checker behavior, or fixture behavior | Run the named `SkillCampaignTests` cases that cover the changed mechanism, plus relevant metadata and link checks. Do not run the full suite only because a campaign skill changed. |

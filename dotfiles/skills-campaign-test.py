@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORK_TMP = ROOT / ".work" / "tmp"
-CHECKER = ROOT / "dotfiles" / "skills-check.sh"
+CHECKER = ROOT / "tools" / "skills" / "skills.ts"
 MDTOOL = ROOT / "dotfiles" / "base" / ".local" / "bin" / "mdtool"
 FIXTURE_TOOL = ROOT / "dotfiles" / "skill-evals" / "fixtures.py"
 VERIFY_SKILL = ROOT / ".agents" / "skills" / "verify-usr"
@@ -121,11 +121,10 @@ class SkillCampaignTests(unittest.TestCase):
         for name in automatic:
             skill = source / name
             content = (skill / "SKILL.md").read_text(encoding="utf-8")
-            codex = (skill / "agents" / "openai.yaml").read_text(encoding="utf-8")
             self.assertNotIn("disable-model-invocation: true", content)
             self.assertIn('opencode/slash: "true"', content)
-            self.assertIn('opencode/autoinvoke: "true"', content)
-            self.assertIn("allow_implicit_invocation: true", codex)
+            self.assertNotIn("opencode/autoinvoke:", content)
+            self.assertFalse((skill / "agents" / "openai.yaml").exists())
         for name in explicit:
             skill = source / name
             content = (skill / "SKILL.md").read_text(encoding="utf-8")
@@ -182,7 +181,7 @@ class SkillCampaignTests(unittest.TestCase):
             ROOT / "dotfiles" / "base" / ".agents" / "skills",
             ROOT / ".agents" / "skills",
         ):
-            result = run("sh", str(CHECKER), str(skills))
+            result = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_skill_checker_rejects_name_drift_and_missing_invocation_flag(self):
@@ -190,16 +189,16 @@ class SkillCampaignTests(unittest.TestCase):
         try:
             skills = work / "skills"
             skill = install_fixture_skill(skills)
-            valid = run("sh", str(CHECKER), str(skills))
+            valid = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertEqual(0, valid.returncode, valid.stdout + valid.stderr)
             drifted = skills / "renamed"
             skill.rename(drifted)
-            invalid_name = run("sh", str(CHECKER), str(skills))
+            invalid_name = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertNotEqual(0, invalid_name.returncode)
             drifted.rename(skill)
             policy = skill / "agents" / "openai.yaml"
             policy.write_text("policy:\n  allow_implicit_invocation: true\n", encoding="utf-8")
-            invalid_policy = run("sh", str(CHECKER), str(skills))
+            invalid_policy = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertNotEqual(0, invalid_policy.returncode)
         finally:
             shutil.rmtree(work)
@@ -219,7 +218,7 @@ class SkillCampaignTests(unittest.TestCase):
                 current = path.read_text(encoding="utf-8")
                 self.assertIn(original, current, step)
                 path.write_text(current.replace(original, replacement), encoding="utf-8")
-                result = run("sh", str(CHECKER), str(skills))
+                result = run("node", str(CHECKER), "check", "--root", str(skills))
                 self.assertNotEqual(0, result.returncode, step)
                 path.write_text(current, encoding="utf-8")
         finally:
@@ -230,13 +229,13 @@ class SkillCampaignTests(unittest.TestCase):
         try:
             skills = work / "skills"
             skill = install_fixture_skill(skills)
-            report = run("sh", str(CHECKER), str(skills))
+            report = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertEqual(0, report.returncode, report.stdout + report.stderr)
             self.assertNotIn("no closing **Report:**", report.stdout)
 
             skill_file = skill / "SKILL.md"
             skill_file.write_text(EXPLICIT_SKILL.replace("**Report:**", "**Reply:**"), encoding="utf-8")
-            reply = run("sh", str(CHECKER), str(skills))
+            reply = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertEqual(0, reply.returncode, reply.stdout + reply.stderr)
             self.assertIn("warning: sample has no closing **Report:**", reply.stdout)
         finally:
@@ -250,7 +249,7 @@ class SkillCampaignTests(unittest.TestCase):
             for name in ("do", "create-verification-skill"):
                 target = ROOT / "dotfiles" / "base" / ".agents" / "skills" / name
                 (skills / name).symlink_to(target, target_is_directory=True)
-            result = run("sh", str(CHECKER), str(skills))
+            result = run("node", str(CHECKER), "check", "--root", str(skills))
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         finally:
             shutil.rmtree(work)

@@ -53,23 +53,13 @@ Next: 56
 ### USR-51 · P3 · Select local verification for changed files
 
 - **Area:** Tests
-- **Where:** `sync`, `docs/development.md`, `dotfiles/skills-check.sh`, `tools/sync/test_links.py`
+- **Where:** `sync`, `docs/development.md`, `tools/skills/skills.ts`, `tools/sync/test_links.py`
 - **Problem:** Agents assemble checks from separate instructions for each change, and fixed check commands do not explain coverage or unmapped changes. The proposed selection would reduce repeated bookkeeping while leaving behavioral judgment with the agent.
 - **Recommendation:** Add a changed-file plan and runner to sync check, with JSON explaining selected checks, reasons, platform and serialization constraints, and unmapped paths. Cover staged, unstaged, untracked, renamed, and deleted paths; generate the corresponding documentation from the same rules. Report selected checks and results without claiming correctness. Exclude caching and automatic proof reuse.
 - **Fix with:** none
 - **Effort:** M
 
 
-
-
-### USR-53 · P3 · Expose structured skill discovery and references
-
-- **Area:** Navigability
-- **Where:** `dotfiles/skills-check.sh`, `dotfiles/base/.agents/skills/`, `SKILLS.md`
-- **Problem:** Agents repeatedly locate skills, interpret invocation metadata, and resolve references using separate searches and shell parsing. The existing structural checker already handles part of this information.
-- **Recommendation:** Provide structured show and direct-reference inspection with canonical paths, descriptions, invocation policy, exact body and content hash; deduplicate resolved references and keep reading bounded. Preserve existing structural checks and derive purely mechanical invocation adapters from canonical frontmatter where feasible. Keep skill files authoritative and do not infer execution authority or automatic workflow selection from links.
-- **Fix with:** none
-- **Effort:** M
 
 
 ### USR-54 · P3 · Expose a structured campaign snapshot using bridge inspection

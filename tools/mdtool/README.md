@@ -1,6 +1,6 @@
 # mdtool
 
-`mdtool` is a read-only audit of a repository's Markdown, MDX, reStructuredText, and the code that depends on those docs. It is one standard-library Python 3.9+ module (`src/mdtool.py`), installed on `PATH` as `mdtool` via a shim in `dotfiles/base/.local/bin/mdtool`. The docs skills call `mdtool check`, and `dotfiles/skills-check.sh` rejects a skill that names a subcommand missing from `mdtool commands`.
+`mdtool` is a read-only audit of a repository's Markdown, MDX, reStructuredText, and the code that depends on those docs. It is one standard-library Python 3.9+ module (`src/mdtool.py`), installed on `PATH` as `mdtool` via a shim in `dotfiles/base/.local/bin/mdtool`. The docs skills call `mdtool check`, and `tools/skills/skills.ts check` rejects a skill that names a subcommand missing from `mdtool commands`.
 
 ## Use
 

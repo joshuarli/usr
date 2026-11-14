@@ -3,7 +3,6 @@ name: review
 description: "Use for a requested read-only review of a change, or an independent completion review of a consequential, high-risk implementation. Report demonstrated defects and supported risks. Skip routine implementation requests and repository-wide audits."
 metadata:
   opencode/slash: "true"
-  opencode/autoinvoke: "true"
 ---
 
 # Review
