@@ -51,7 +51,9 @@ function requiredText(value: unknown, label: string, max = MAX_BRIEF): string {
   return value
 }
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10_000, maxBuffer: 1_000_000 }).trim()
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf8", timeout: 10_000, maxBuffer: 1_000_000, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+  }).trim()
 }
 
 /** Never create, reset, clean, merge, or delete a worktree here: the parent owns that lifecycle. */

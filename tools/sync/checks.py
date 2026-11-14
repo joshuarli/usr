@@ -70,7 +70,6 @@ SKILLS = Area("a skill or agent definition", "`node tools/skills/skills.ts gener
 POLICY = Area("model routes, native Pi policy, or generated policy blocks", "use `make generate` to refresh projections")
 ORCHESTRATE = Area("`orchestrate` skill")
 HOOKS = Area("git hooks and worktree helpers")
-WORKERS = Area("worker watch and campaign helpers")
 ZSH = Area("zsh shim")
 MDTOOL = Area("a hook or `mdtool`")
 PERF_GATE = Area("`perf-gate-ready`")
@@ -149,8 +148,6 @@ REGISTRY: tuple[Check, ...] = (
     Check("pre-push", (HOOKS,), ("sh", "pre-push-test.sh"), ("dotfiles/base/.config/git/hooks/", "dotfiles/pre-push-test.sh"), cwd="dotfiles"),
     Check("worktree-remove", (HOOKS,), ("sh", "worktree-remove-test.sh"), ("dotfiles/base/.local/bin/worktree-remove", "dotfiles/worktree-remove-test.sh"), cwd="dotfiles"),
     Check("worktree-retire", (HOOKS,), py("dotfiles/worktree-retire-test.py"), ("dotfiles/base/.local/bin/worktree-retire", "dotfiles/worktree-retire-test.py")),
-    Check("worker-watch", (WORKERS,), ("sh", "worker-watch-test.sh"), ("dotfiles/base/.local/bin/worker-watch", "dotfiles/worker-watch-test.sh"), cwd="dotfiles"),
-    Check("worker-campaign", (WORKERS,), ("sh", "worker-campaign-test.sh"), ("dotfiles/base/.local/bin/worker-campaign", "dotfiles/base/.local/bin/worker-watch", "dotfiles/worker-campaign-test.sh"), cwd="dotfiles"),
     Check("zsh-shim", (ZSH,), ("sh", "zsh-shim-test.sh"), ("dotfiles/darwin/.local/bin/zsh", "dotfiles/zsh-shim-test.sh"), cwd="dotfiles"),
     Check("mdtool-selftest", (MDTOOL,), py("tools/mdtool/src/mdtool.py", "selftest"), ("tools/mdtool/", "dotfiles/base/.local/bin/mdtool")),
     Check("mdtool-suite", (MDTOOL,), ("sh", "tools/mdtool/tests/mdtool-test.sh"), ("tools/mdtool/src/", "tools/mdtool/tests/mdtool-test.sh", "dotfiles/base/.local/bin/mdtool")),
@@ -179,7 +176,7 @@ SUITE: tuple[str, ...] = (
     "uninstall", "kache", "installer", "ffmpeg-runtime", "bootstrap", "sync-integration", "doctor",
     "pi-git-guard", "pinact", "pinact-yaml", "pinact-lint-rules", "pinact-expressions", "pinact-security",
     "pinact-fix", "pinact-pins", "pi-profile", "policy-generated", "policy-generator", "orchestrate", "sbx",
-    "reset-agents", "pre-push", "worker-watch", "worker-campaign", "worktree-remove", "worktree-retire",
+    "reset-agents", "pre-push", "worktree-remove", "worktree-retire",
     "zsh-shim", "mdtool-suite", "decide", "skills", "project-skills", "skills-campaign",
 )
 

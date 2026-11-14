@@ -45,11 +45,6 @@ jobs:
           # The full repository suite expects no system PyYAML C extension; isolate it
           # from GitHub runner site-packages without installing any pip packages.
           python3 -m venv --without-pip .work/isolated-python
-          # worker-watch requires jaq; jq is compatible with the expressions
-          # used by its regression tests on platforms without a jaq release.
-          command -v jq >/dev/null || { echo "jq missing on runner" >&2; exit 1; }
-          mkdir -p .work/test-bin
-          ln -sf "$(command -v jq)" .work/test-bin/jaq
-          PATH="$PWD/.work/test-bin:$PWD/.work/isolated-python/bin:$PATH" \
+          PATH="$PWD/.work/isolated-python/bin:$PATH" \
             GIT_AUTHOR_NAME=CI GIT_AUTHOR_EMAIL=ci@example.invalid \
             GIT_COMMITTER_NAME=CI GIT_COMMITTER_EMAIL=ci@example.invalid sh sync check

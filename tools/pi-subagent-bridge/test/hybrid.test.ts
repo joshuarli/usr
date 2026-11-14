@@ -4,7 +4,8 @@ import { execFileSync, spawn } from "node:child_process"
 import { appendFileSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeHybridBridge, STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, type Scope } from "../src/hybrid.ts"
+import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
+import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import { ANTIGRAVITY_PIN, rootPlan, type CliPin, type RootPlan } from "../src/policy.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
@@ -348,7 +349,7 @@ test("Command quota failure on a clean worktree switches once to OpenCode Go", a
     m.failCommand("quota exceeded, allowance exhausted")
     const result = await bridge.status(f.cwd, started.session_id)
     assert.equal(result.backend, "pi")
-    assert.equal(result.state, "running")
+    assert.equal(result.state, "succeeded")
     assert.equal(result.error, null)
     assert.equal(commandCalls(m.calls).length, 1)
     assert.equal(piCreates(m.calls).length, 1)
@@ -1107,7 +1108,7 @@ test("a run without a final ACCEPTANCE: met line is incomplete, and network reac
         status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "t", finalText }, stderr: null }) }
       const bridge = makeHybridBridge(m.api, m.command, codex)
       const started = await bridge.start(f.cwd, "edit", "worker", { ...f.scope, network: true }, "Do scoped work")
-      assert.match(started.watch, /^worker-watch ".+" usrw_/)
+      assert.match(started.watch, /^pi-subagent-bridge watch ".+" usrw_/)
       assert.equal(starts[0][7], true)
       const status = await bridge.status(f.cwd, started.session_id)
       assert.equal(status.state, state)

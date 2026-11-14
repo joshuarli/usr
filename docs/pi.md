@@ -64,17 +64,21 @@ This is a Git write-scope check, not an OS sandbox. Ignored paths and host-side 
 
 ## Coordinating a campaign
 
-Sessions are recorded per repository under `.work/worker-bridge/`, so a parent does not need a hand-maintained lane table. `worker-watch` follows one session and exits on its terminal evidence. `worker-campaign` discovers every `usrw_*.json` under one or more repository roots and blocks until any unacknowledged session becomes terminal:
+Sessions are recorded per repository under `.work/worker-bridge/`, so a parent does not need a hand-maintained lane table. Every consumer reads them through one read-only interpretation, `inspect`: it combines the saved admission, the provider receipts (Pi child records included), the recorded process identity (start time, so a reused PID is `interrupted`), and Git facts. Inspection never saves a session, creates a directory, changes a lease, signals a process, or launches a provider. Only `worker_status` advances a session (fallbacks and releasing a terminal lease) before it inspects.
 
 ```
-worker-campaign wait [--timeout DURATION] [ROOT...]
-worker-campaign ack ID...
-worker-campaign list [ROOT...]
+pi-subagent-bridge inspect PATH SESSION_ID
+pi-subagent-bridge watch [--state] ROOT SESSION_ID [IDLE_MINUTES]
+pi-subagent-bridge campaign wait [--timeout DURATION] [ROOT...]
+pi-subagent-bridge campaign ack ID...
+pi-subagent-bridge campaign list [--json] [ROOT...]
 ```
 
-`wait` exits 0 and prints one `<id> <state> <cwd> <title>` line per newly terminal session (`succeeded`, `failed`, `turn_limit`, `interrupted`), or exits 2 with a one-line `tick: N running` summary after `--timeout` (for example `30m`). Roots may instead be given colon-separated in `$WORKER_CAMPAIGN_ROOTS`. `ack` records IDs under `${XDG_STATE_HOME:-$HOME/.local/state}/worker-campaign/acked`; it is idempotent. `list` prints state, age, worktree, and continuation/steer budgets.
+`inspect` prints one JSON snapshot; `PATH` may be the repository root or the worktree. `watch` follows one session, polling every 15 seconds. It prints `finished: <state>` and up to 2000 characters of the final text or error and exits 0 on terminal evidence; exits 3 with `exited without terminal result (pid N); last event: ...` when the executor is gone without a receipt (or its PID was reused); exits 2 with `stalled: no executor output for M min; ...` after `IDLE_MINUTES` (default 10) without output; and exits 4 with a reason when the session cannot be inspected or is blocked. A live process is `running` even if a receipt already exists. `--state` prints one state word and exits 0.
 
-These commands use the shell `worker-watch --state ROOT ID` as a notification aid. It checks PID existence without the bridge's process-start identity check and maps a dead Pi host without a result to `interrupted`; `worker_status` retains an uncertain Pi state and lease. Check bridge status and the actual proof before reusing a worktree. Watcher output does not release a lease.
+`campaign wait` exits 0 and prints one `<id> <state> <cwd> <title>` line per newly terminal session (`succeeded`, `failed`, `turn_limit`, `cancelled`, `interrupted`, `unknown_or_interrupted`), or exits 2 with a one-line `tick: N running` summary after `--timeout` (for example `30m`). Roots may instead be given colon-separated in `$WORKER_CAMPAIGN_ROOTS`. `campaign ack` records IDs under `${XDG_STATE_HOME:-$HOME/.local/state}/worker-campaign/acked`; it is idempotent. `campaign list` prints state, age, worktree, and any continuation/steer budgets used. `campaign list --json` prints an array of inspection snapshots: observation time, session identity, worktree, base revision and current HEAD, backend, model and effort, execution state, changed and out-of-scope paths, the worker's acceptance claim, and continuation and steer budgets. Evidence that cannot be established is the string `"unknown"`, never omitted. Execution state, the acceptance claim, and scope facts are separate fields; the snapshot is a point-in-time observation, not a scheduler, daemon, or ledger.
+
+Watch and campaign output does not release a lease or authorize reusing a worktree: a dead Pi host without a result is `unknown_or_interrupted`, and `worker_status` keeps its lease. Check `worker_status` and the actual proof before reusing a worktree.
 
 ## One-level native Pi nesting
 
