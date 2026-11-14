@@ -385,7 +385,7 @@ class Installer:
     def release_asset(self, tool: str, base: str, tag: str, product: str, triple: str,
                       version: str = "") -> tuple[str, str, str] | None:
         version_re = re.escape(version) if version else r"[0-9][^\s/]*"
-        pattern = re.compile(rf"{re.escape(product)}-({version_re})-{re.escape(triple)}\.tar\.xz")
+        pattern = re.compile(rf"{re.escape(product)}-({version_re})-{re.escape(triple)}\.(?:tar\.xz|zip)")
         sums = self.fetch_text(f"{base}/SHA256SUMS")
         assets = [fields[1] for line in sums.splitlines()
                   if len(fields := line.split()) == 2 and pattern.fullmatch(fields[1])]
@@ -2099,7 +2099,7 @@ class Installer:
             if found is None or len(found[2]) != 64:
                 raise FfmpegReleaseUnavailable(f"the {triple} runtime archive is not listed in {tag}")
             asset, _, expected = found
-            return asset, f"{base}/{asset}", expected, asset.removesuffix(".tar.xz")
+            return asset, f"{base}/{asset}", expected, asset.removesuffix(".tar.xz").removesuffix(".zip")
         sums_path = Path(tempfile.mkstemp()[1])
         try:
             if not self.download(f"{base}/SHA256SUMS", sums_path):
