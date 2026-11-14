@@ -1,4 +1,15 @@
 #!/bin/sh
+
+owned_help() {
+cat <<'OWNED_HELP'
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+OWNED_HELP
+}
 # setup-kache - install Kache from the joshuarli/kache GitHub releases and set it up.
 #
 # Usage:
@@ -42,6 +53,10 @@ mode=install
 purge=0
 
 die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+help_usage() {
+    printf 'usage: %s [--version release-<sha>] [--nightly nightly-2026-09-15] [--force]\n' "$prog"
+    printf '       %s uninstall [--purge]\n' "$prog"
+}
 usage() {
     printf 'usage: %s [--version release-<sha>] [--nightly nightly-2026-09-15] [--force]\n' "$prog" >&2
     printf '       %s uninstall [--purge]\n' "$prog" >&2
@@ -192,7 +207,7 @@ if [ "${1:-}" = "uninstall" ]; then
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --purge) purge=1; shift ;;
-            -h|--help) usage ;;
+            -h|--help) help_usage; owned_help; exit 0 ;;
             *) usage ;;
         esac
     done
@@ -202,7 +217,7 @@ else
             --version) [ "$#" -ge 2 ] || usage; version=$2; shift 2 ;;
             --nightly) [ "$#" -ge 2 ] || usage; nightly=$2; shift 2 ;;
             --force) force=1; shift ;;
-            -h|--help) usage ;;
+            -h|--help) help_usage; owned_help; exit 0 ;;
             --*) usage ;;
             *) usage ;;
         esac

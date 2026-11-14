@@ -61,6 +61,7 @@ PI_PROFILE = Area("Pi profile and extensions")
 DAG = Area("`sync` DAG/bootstrap")
 INSTALLER = Area("Private tool installer")
 UNINSTALL = Area("`sync uninstall`")
+OWNED_HELP = Area("owned shell tool help")
 KACHE = Area("`kache` setup")
 PINACT = Area("`pinact` and workflow pins")
 YTDLP = Area("`yt-dlp` shim")
@@ -127,6 +128,26 @@ REGISTRY: tuple[Check, ...] = (
     Check("bootstrap-sh-syntax", (INSTALLER,), ("sh", "-n", "tools/sync/bootstrap.sh"), ("tools/sync/bootstrap.sh",)),
     Check("bootstrap-shellcheck", (INSTALLER,), ("shellcheck", "-s", "sh", "tools/sync/bootstrap.sh"), ("tools/sync/bootstrap.sh",), needs=("shellcheck",)),
     Check("uninstall", (UNINSTALL,), py("tools/sync/test_uninstall.py"), ("tools/sync/uninstall.py", "tools/sync/test_uninstall.py")),
+    Check("owned-help", (OWNED_HELP,), ("sh", "dotfiles/owned-help-test.sh"), (
+        "dotfiles/base/.local/bin/pk",
+        "dotfiles/base/.local/bin/memtop",
+        "dotfiles/base/.local/bin/ecount",
+        "dotfiles/base/.local/bin/gr",
+        "dotfiles/base/.local/bin/git-bench",
+        "dotfiles/base/.local/bin/git-branch-consolidation",
+        "dotfiles/base/.local/bin/git-tune",
+        "dotfiles/base/.local/bin/gh-cancel-pr-runs",
+        "dotfiles/base/.local/bin/ghostty-fda-check",
+        "dotfiles/base/.local/bin/perf-gate-ready",
+        "dotfiles/base/.local/bin/reset-agent-home",
+        "dotfiles/base/.local/bin/reset-agents",
+        "dotfiles/base/.local/bin/setup-git-client.sh",
+        "dotfiles/base/.local/bin/setup-kache",
+        "dotfiles/base/.local/bin/worktree-create",
+        "dotfiles/base/.local/bin/worktree-remove",
+        "dotfiles/linux/.local/bin/setup-mold",
+        "dotfiles/owned-help-test.sh",
+    )),
     Check("kache", (KACHE,), py("tools/sync/test_kache.py"), ("tools/sync/test_kache.py", "tools/sync/main.py", "dotfiles/base/.local/bin/setup-kache")),
     Check("pinact", (PINACT,), py("tools/pinact/test_pinact.py"), ("tools/pinact/", "dotfiles/base/.local/bin/pinact"), tmpdir=True),
     Check("pinact-yaml", (PINACT,), py("tools/pinact/tests/test_yaml.py"), ("tools/pinact/",), tmpdir=True),

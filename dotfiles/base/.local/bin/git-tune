@@ -1,4 +1,15 @@
 #!/bin/sh
+
+owned_help() {
+cat <<'OWNED_HELP'
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+OWNED_HELP
+}
 set -eu
 
 readonly VERSION="2.0.0"
@@ -213,7 +224,7 @@ parse_args() {
       --globals-only) GLOBALS_ONLY=true; shift ;;
       --no-globals) shift ;;
       --version) printf "git-tune %s\n" "$VERSION"; exit 0 ;;
-      -h|--help) usage; exit 0 ;;
+      -h|--help) usage; owned_help; exit 0 ;;
       *) die "Unknown option: $1" ;;
     esac
   done

@@ -1,4 +1,15 @@
 #!/bin/sh
+
+owned_help() {
+cat <<'OWNED_HELP'
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+OWNED_HELP
+}
 # ghostty-fda-check: report whether Ghostty.app holds Full Disk Access.
 #
 # macOS keeps the TCC database out of reach, so this probes files that only
@@ -20,7 +31,7 @@ no_open=${GHOSTTY_FDA_NO_OPEN:-0}
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-open) no_open=1; shift ;;
-        -h|--help) printf 'usage: ghostty-fda-check [--no-open]\n'; exit 0 ;;
+        -h|--help) printf 'usage: ghostty-fda-check [--no-open]\n'; owned_help; exit 0 ;;
         *) printf 'ghostty-fda-check: unknown argument: %s\n' "$1" >&2; exit 2 ;;
     esac
 done

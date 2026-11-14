@@ -9,6 +9,17 @@ mkdir -p "${PWD}/../.work/tmp"
 scratch=$(mktemp -d "${PWD}/../.work/tmp/perf-gate-ready.XXXXXX") || exit 1
 trap 'rm -rf "$scratch"' 0
 
+# Help must exit before reading host state or invoking external commands.
+ln -s /bin/cat "$scratch/cat"
+for option in -h --help; do
+    out=$(PATH="$scratch" /bin/sh "$script" "$option" 2>&1)
+    got=$?
+    case "$got:$out" in
+        0:*'usage: perf-gate-ready'*) printf 'ok: help %s\n' "$option" ;;
+        *) printf 'FAIL: help %s (exit %s: %s)\n' "$option" "$got" "$out"; nfailed=$((nfailed + 1)) ;;
+    esac
+done
+
 # proc <name> <MemAvailable kB> <SwapFree kB>: a 32 GiB host with 8 GiB of swap
 proc () {
     mkdir -p "$scratch/$1"

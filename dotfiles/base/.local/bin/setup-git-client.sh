@@ -1,4 +1,15 @@
 #!/bin/sh
+
+owned_help() {
+cat <<'OWNED_HELP'
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+OWNED_HELP
+}
 set -eu
 
 usage() {
@@ -51,6 +62,7 @@ while [ "$#" -gt 0 ]; do
             ;;
         -h|--help)
             usage
+            owned_help
             exit 0
             ;;
         *)
