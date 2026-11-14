@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
-import { cancelCommand, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
+import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort } from "./bridge.ts"
+import { cancelCommand, commandResult, commandSession, startCommand, type CommandRun } from "./command.ts"
 import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
 import { antigravityAvailable, antigravityResult, antigravitySession, cancelAntigravity, startAntigravity } from "./antigravity.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
@@ -15,10 +15,12 @@ import {
   type Inspection, type InspectionDeps, type Known,
 } from "./inspect.ts"
 import {
-  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, antigravityPin, backendOf, commandPin,
-  decodeSession, encodeSession, isSessionId, primaryFor, processRun, transition, type Session,
+  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, backendOf, decodeSession, encodeSession,
+  executorOf, isSessionId, piFallbackPlan, processRun, transition, type PiFallbackPlan, type ProcessExecution,
+  type ProcessTarget, type Session,
 } from "./session.ts"
-import { rootPlan, type Executor, type RootPlan } from "./policy.ts"
+import type { Access } from "./launch.ts"
+import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
 export type { Tier } from "./tier-policy.ts"
 export type RoutedTier = Tier
@@ -71,8 +73,6 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
-function fallbackModelFor(s: Session): string { return commandPin(s).model }
-function fallbackEffortFor(s: Session): Effort { return commandPin(s).effort }
 function cmdAvailable(): boolean {
   for (const part of (process.env.PATH || "").split(":")) {
     if (!part) continue
@@ -88,7 +88,7 @@ function prompt(s: Session): string {
     "Writable paths: " + (s.scope.writable_paths.join(", ") || "NONE: READ ONLY"),
     "Required acceptance proof: " + s.scope.acceptance_proof,
     "Attempt limit: " + s.scope.attempt_limit + ". Stop on: " + s.scope.stop_on,
-    ...(s.tier === "scout" && (backendOf(s) === "codex" || backendOf(s) === "codex-transition") ? ["Use bridge_scout tools to inspect the actual files. Never claim a shell command ran; report only tool output you observed."] : []),
+    ...(s.tier === "scout" && executorOf(s) === "codex" ? ["Use bridge_scout tools to inspect the actual files. Never claim a shell command ran; report only tool output you observed."] : []),
     "Native Pi workers may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
     "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
     "Codex and Command Code workers remain leaves: do not spawn subagents.",
@@ -107,97 +107,88 @@ export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
   antigravity = { start: startAntigravity, status: antigravityResult, cancel: cancelAntigravity, available: antigravityAvailable, session: antigravitySession },
-  resolvePolicy: (tier: Tier) => RootPlan = rootPlan) {
+  resolvePolicy: (tier: Tier) => RootPlan = tier => ROOT_PLANS[tier]) {
   const inspection: InspectionDeps = { api, command, codex, antigravity }
-  function runnerFor(executor: Exclude<Executor, "pi">) {
+  function runnerFor(executor: CliExecutor) {
     switch (executor) {
       case "antigravity": return antigravity
       case "codex": return codex
       case "command-code": return command
     }
   }
-  function observe(s: Session, executor: Exclude<Executor, "pi">, run: CommandRun) {
-    return runnerStatus(inspection, s, executor, run)
+  function observe(execution: ProcessExecution) {
+    return runnerStatus(inspection, execution)
   }
-  function launch(s: Session, executor: Exclude<Executor, "pi">, text: string, resume?: string): CommandRun {
-    const dir = stateDir(s.cwd)
-    switch (executor) {
-      case "antigravity": {
-        const pin = antigravityPin(s)
-        return antigravity.start(s.cwd, dir, text, pin.effort, false, resume, pin.model, pin)
-      }
-      case "codex":
-        if (!s.codex_model || !s.codex_effort) throw new Error("Missing admitted Codex pin; manual reconciliation required")
-        return codex.start(s.cwd, dir, text, s.codex_effort, s.tier === "scout", resume, s.codex_model, !!s.scope.network, { model: s.codex_model, effort: s.codex_effort })
-      case "command-code":
-        return command.start(s.cwd, dir, text, fallbackEffortFor(s), s.tier === "scout", resume, fallbackModelFor(s), commandPin(s))
+  function accessFor(s: Session): Access {
+    return s.tier === "scout" ? { kind: "read-only" } : { kind: "write", network: !!s.scope.network }
+  }
+  function launch(s: Session, target: ProcessTarget, text: string, resume?: string): CommandRun {
+    const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume }
+    switch (target.executor) {
+      case "antigravity": return antigravity.start({ ...request, access: { kind: "write", network: false } })
+      case "codex": return codex.start({ ...request, access: accessFor(s) })
+      case "command-code": return command.start({ ...request, access: accessFor(s) })
     }
   }
-  function fallbackToCommand(s: Session, reason: string, detail?: unknown): Session {
+  function fallbackToCommand(s: Session, pin: CliPin, reason: string, detail?: unknown): Session {
     if (!command.available()) throw new Error(reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-    const dir = stateDir(s.cwd)
-    const pin = commandPin(s)
-    transition(s, "command-code")
+    const target: ProcessTarget = { executor: "command-code", selection: pin }
+    transition(s, target)
     s.fallback_reason = reason
     if (detail !== undefined) s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
     s.attempts = 1
     save(s)
-    activateProcess(s, "command-code", command.start(s.cwd, dir, prompt(s), pin.effort, s.tier === "scout", undefined, pin.model, pin))
+    activateProcess(s, target, launch(s, target, prompt(s)))
     save(s)
     return s
   }
-  async function fallbackToPi(s: Session, reason: string, detail?: unknown): Promise<Session> {
+  async function availablePi(plan: PiFallbackPlan, from: number, cwd: string): Promise<{ selection: PiSelection; next: number } | null> {
+    for (let index = from; index < plan.pi.length; index++) {
+      const candidate = plan.pi[index]
+      if (candidate.providerID === "muse-sdk") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
+      try {
+        if ((await makeWorkerBridge(api, candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
+      } catch { }
+    }
+    return null
+  }
+  async function fallbackToPi(s: Session, plan: PiFallbackPlan, reason: string, detail?: unknown): Promise<Session> {
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     // An in-flight, interrupted, or ambiguous Command Code process must never be duplicated.
     const previousRun = processRun(s)
     if (previousRun && command.status(previousRun).state !== "failed")
       throw new Error("Command Code is not known terminal; OpenCode Go fallback refused")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-    if (!s.pi_candidates && s.remaining_pi?.length)
-      throw new Error("Legacy Pi fallback has no exact model snapshot; manual reconciliation required")
-    if (s.pi_candidates) {
-      let selected: ModelRef | undefined
-      while (s.pi_candidates.length) {
-        const candidate = s.pi_candidates.shift()!
-        if (candidate.providerID === "muse-sdk") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
-        try {
-          if ((await makeWorkerBridge(api, candidate).modelCheck(s.cwd)).available) {
-            selected = candidate
-            break
-          }
-        } catch { }
-      }
-      if (!selected) {
-        save(s)
-        throw new Error("Pinned Pi fallback models are unavailable")
-      }
-      s.primary_model = selected
-    }
-    const worker = makeWorkerBridge(api, primaryFor(s))
-    if (!s.pi_candidates && !(await worker.modelCheck(s.cwd)).available)
-      throw new Error("Pinned Pi fallback model is unavailable")
-    transition(s, "pi", true)
-    s.fallback_reason = reason
-    if (detail !== undefined)
-      s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
-    s.attempts = 1
-    save(s)
-    try {
-      const admitted = await worker.start(s.cwd, s.title, prompt(s), s.tier === "scout")
-      activatePi(s, admitted.session_id)
+    let next = 0
+    for (;;) {
+      const available = await availablePi(plan, next, s.cwd)
+      if (!available) throw new Error("Pinned Pi fallback models are unavailable")
+      const { selection } = available
+      next = available.next
+      const worker = makeWorkerBridge(api, selection)
+      transition(s, { executor: "pi", selection }, true)
+      s.fallback_reason = reason
+      if (detail !== undefined)
+        s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
+      s.attempts = 1
       save(s)
-      return s
-    } catch (error) {
-      if (error instanceof PreAdmissionError && s.pi_candidates?.length) {
-        transition(s, "command-code")
+      try {
+        const admitted = await worker.start(s.cwd, s.title, prompt(s), s.tier === "scout")
+        activatePi(s, selection, admitted.session_id)
         save(s)
-        return fallbackToPi(s, reason, detail)
+        return s
+      } catch (error) {
+        if (error instanceof PreAdmissionError && next < plan.pi.length) {
+          transition(s, { executor: "command-code", selection: plan.command })
+          save(s)
+          continue
+        }
+        if (String(error).includes("created but prompt admission failed"))
+          throw new Error(String(error) + "; worktree lease retained for session " + s.id)
+        throw error
       }
-      if (String(error).includes("created but prompt admission failed"))
-        throw new Error(String(error) + "; worktree lease retained for session " + s.id)
-      throw error
     }
   }
   async function advance(cwd: unknown, id: unknown): Promise<{ session: Session; known?: Known }> {
@@ -207,35 +198,34 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const clean = source === null || untouched(s)
       let state = settledState(s, observation, clean).state
       let known: Known | undefined = { observation }
-      if (source === "pi" && clean) {
-        fallbackToCommand(s, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", observation.error)
+      if (source?.kind === "pi" && clean) {
+        fallbackToCommand(s, source.plan.command, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", observation.error)
         state = "running"
         known = undefined
-      } else if (source === "codex" && clean) {
+      } else if (source?.kind === "codex" && clean) {
         try {
-          transition(s, "codex")
+          transition(s, source.from)
           save(s)
-          if (command.available()) fallbackToCommand(s, "Codex provider/model unavailable; continued on Command Code before edits.", observation.error)
-          else await fallbackToPi(s, "Codex and Command Code unavailable; continued on an approved Pi provider.", observation.error)
+          if (command.available()) fallbackToCommand(s, source.plan.command, "Codex provider/model unavailable; continued on Command Code before edits.", observation.error)
+          else await fallbackToPi(s, piFallbackPlan(source.plan), "Codex and Command Code unavailable; continued on an approved Pi provider.", observation.error)
           state = "running"
           known = undefined
         } catch (fallbackError) {
           s.fallback_blocked = "Fallback blocked: " + String(fallbackError)
           save(s)
-          const backend = backendOf(s)
-          state = backend === "pi-transition" || backend === "command-transition" || backend === "codex-transition" ? "blocked_admission" : "blocked_fallback"
+          state = s.execution.kind === "transition" ? "blocked_admission" : "blocked_fallback"
           known = { observation, blocked: { state, notice: s.fallback_blocked } }
         }
-      } else if (source === "command-code" && clean) {
+      } else if (source?.kind === "command-code" && clean) {
         try {
-          await fallbackToPi(s,
+          await fallbackToPi(s, piFallbackPlan(source.plan),
             "Primary Command Code provider/model unavailable; continued on an approved Pi provider before edits.", observation.error)
           state = "running"
           known = undefined
         } catch (fallbackError) {
           s.fallback_blocked = "Pi fallback blocked: " + String(fallbackError)
           save(s)
-          state = backendOf(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
+          state = s.execution.kind === "transition" && s.execution.to.executor === "pi" ? "blocked_admission" : "blocked_fallback"
           known = { observation, blocked: { state, notice: s.fallback_blocked } }
         }
       }
@@ -249,7 +239,6 @@ export function makeHybridBridge(api: OpenCodePort, command = {
   }
   function statusResponse(i: Inspection) {
     const s = i.session
-    if ("fault" in i.route) throw new Error(i.route.fault)
     if (i.worktree.kind === "unreadable") throw new Error(i.worktree.reason)
     const { head, changed_paths, out_of_scope_paths } = i.worktree
     const head_unchanged = head === s.scope.base_revision
@@ -282,11 +271,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       const plan = resolvePolicy(tierInput)
       if (plan.kind === "exclusive") {
-        return { primary: { backend: "antigravity", ...plan.pin, available: antigravity.available(plan.pin) },
+        return { primary: { backend: "antigravity", ...plan.target, available: antigravity.available(plan.target) },
           fallback: null, command_code: null, pi_fallback: null, muse: undefined, opencode_go: null }
       }
-      const firstPi = plan.pi[0]
-      if (!firstPi) throw new Error("Policy has no Pi fallback")
+      const [firstPi] = plan.pi
       const museModel = plan.pi.find(pin => pin.providerID === "muse-sdk")
       const goModel = plan.pi.find(pin => pin.providerID === "opencode-go")
       let museAvailable = false, museIssue: string | null = null
@@ -338,29 +326,27 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const plan = resolvePolicy(tierInput)
       if (plan.kind === "exclusive") {
         if (activeWorktreeOwner(stateDir(dir), dir)) throw new Error("Worktree already has an active worker")
-        if (!antigravity.available(plan.pin))
-          throw new Error("Pinned Antigravity model " + plan.pin.model + " unavailable; run agy models and check account access. No fallback.")
-        const s: Session = { wire_version: 1, id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
+        if (!antigravity.available(plan.target))
+          throw new Error("Pinned Antigravity model " + plan.target.model + " unavailable; run agy models and check account access. No fallback.")
+        const target: ProcessTarget = { executor: "antigravity", selection: plan.target }
+        const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-          task, execution: { kind: "transition", executor: "antigravity" }, attempts: 0, antigravity_pin: { ...plan.pin } }
+          task, plan, execution: { kind: "transition", to: target }, attempts: 0 }
         const leaseDir = stateDir(dir)
         claimWorktree(leaseDir, dir, s.id)
         try { save(s) } catch (error) {
           releaseWorktree(leaseDir, dir, s.id)
           throw error
         }
-        activateProcess(s, "antigravity", antigravity.start(s.cwd, leaseDir, prompt(s), plan.pin.effort, false, undefined, plan.pin.model, plan.pin))
+        activateProcess(s, target, launch(s, target, prompt(s)))
         s.attempts = 1
         save(s)
         return admission(s)
       }
-      const s: Session = { wire_version: 1, id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
+      const codexTarget: ProcessTarget = { executor: "codex", selection: plan.codex }
+      const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, execution: { kind: "transition", executor: "codex" }, attempts: 0,
-        execution_order: "codex-first" as const,
-        codex_model: plan.codex.model, codex_effort: plan.codex.effort,
-        pi_candidates: plan.pi.map(pin => ({ ...pin })),
-        command_model: plan.command.model, command_effort: plan.command.effort }
+        task, plan, execution: { kind: "transition", to: codexTarget }, attempts: 0 }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
       try { save(s) } catch (error) {
@@ -368,23 +354,23 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         throw error
       }
       if (codex.available()) {
-        activateProcess(s, "codex", codex.start(s.cwd, leaseDir, prompt(s), plan.codex.effort, s.tier === "scout", undefined, plan.codex.model, !!s.scope.network, plan.codex))
+        activateProcess(s, codexTarget, launch(s, codexTarget, prompt(s)))
         s.attempts = 1
         save(s)
         return admission(s)
       }
       s.fallback_reason = "Codex subscription unavailable; continued on the next approved provider."
       if (command.available()) {
-        transition(s, "command-code")
+        const commandTarget: ProcessTarget = { executor: "command-code", selection: plan.command }
+        transition(s, commandTarget)
         save(s)
         // Commit an admission transition before spawning. If the launch is ambiguous, retain the lease.
-        activateProcess(s, "command-code", command.start(s.cwd, leaseDir, prompt(s),
-          fallbackEffortFor(s), s.tier === "scout", undefined, fallbackModelFor(s), commandPin(s)))
+        activateProcess(s, commandTarget, launch(s, commandTarget, prompt(s)))
         s.attempts = 1
         save(s)
         return admission(s)
       }
-      await fallbackToPi(s, "Command Code CLI is unavailable; continued on an approved Pi provider.")
+      await fallbackToPi(s, plan, "Command Code CLI is unavailable; continued on an approved Pi provider.")
       return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
@@ -405,29 +391,30 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.execution.kind === "pi") {
-        const sessionId = s.execution.session_id
+        const { selection, session_id: sessionId } = s.execution
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
-        transition(s, "pi", true)
+        transition(s, { executor: "pi", selection }, true)
         save(s)
-        await makeWorkerBridge(api, primaryFor(s)).resume(s.cwd, sessionId, "Same-scope correction only: " + correction)
-        activatePi(s, sessionId)
+        await makeWorkerBridge(api, selection).resume(s.cwd, sessionId, "Same-scope correction only: " + correction)
+        activatePi(s, selection, sessionId)
         save(s)
       } else {
-        const { executor: backend, run } = s.execution
-        const previous = observe(s, backend, run)
+        const execution = s.execution
+        const previous = observe(execution)
         if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
         else s.attempts++
-        transition(s, backend)
+        const target: ProcessTarget = { executor: execution.executor, selection: execution.selection }
+        transition(s, target)
         s.cancel_requested = false
         save(s)
         const text = prompt(s) + (continuation ? "\nCONTINUE THE SAME TASK FROM WHERE THE TURN LIMIT STOPPED IT: " :
           "\nSAME-SCOPE CORRECTION ONLY: ") + correction
-        activateProcess(s, backend, launch(s, backend, text, previous.result.sessionId))
+        activateProcess(s, target, launch(s, target, text, previous.result.sessionId))
         save(s)
       }
       return { session_id: s.id, backend: backendOf(s), status: "admitted", watch: watchCommand(s) }
@@ -437,10 +424,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       return withSessionLock(cwd, id, async (s) => {
       let interrupted = false
       if (s.execution.kind === "pi") {
-        interrupted = (await makeWorkerBridge(api, primaryFor(s)).cancel(s.cwd, s.execution.session_id)).interrupted
+        interrupted = (await makeWorkerBridge(api, s.execution.selection).cancel(s.cwd, s.execution.session_id)).interrupted
       } else {
         const run = processRun(s)
-        const executor = s.execution.executor
+        const executor = executorOf(s)
         if (run && executor !== "pi") {
           s.cancel_requested = true
           save(s)
@@ -463,7 +450,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         throw new Error("Cannot steer changed HEAD or out-of-scope work")
       if (s.execution.kind === "pi") {
         const sessionId = s.execution.session_id
-        const worker = makeWorkerBridge(api, primaryFor(s))
+        const worker = makeWorkerBridge(api, s.execution.selection)
         const observed = await worker.status(s.cwd, sessionId)
         const observedState = typeof observed.state === "string" ? observed.state : "unknown"
         if (observedState !== "running" && observedState !== "queued")
@@ -475,9 +462,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: false,
           steers: s.steers, steer_limit: STEER_LIMIT, receipt }
       }
-      const { executor: backend, run } = s.execution
+      const execution = s.execution
+      const { executor: backend, run } = execution
       const runner = runnerFor(backend)
-      const previous = observe(s, backend, run)
+      const previous = observe(execution)
       if (previous.state !== "running")
         throw new Error("Command Code run is not running (state " + previous.state +
           "); use worker_resume for a finished session")
@@ -487,18 +475,19 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
       if (!runner.cancel(run))
         throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
-      let state = observe(s, backend, run).state
+      let state = observe(execution).state
       const deadline = Date.now() + TERMINATION_WAIT_MS
       while (state === "running" && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 100))
-        state = observe(s, backend, run).state
+        state = observe(execution).state
       }
       if (state === "running")
         throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
       s.steers = (s.steers ?? 0) + 1
-      transition(s, backend)
+      const target: ProcessTarget = { executor: backend, selection: execution.selection }
+      transition(s, target)
       save(s)
-      activateProcess(s, backend, launch(s, backend,
+      activateProcess(s, target, launch(s, target,
         prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering, sessionId))
       save(s)
       return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: true,

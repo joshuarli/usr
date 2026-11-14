@@ -8,6 +8,7 @@ import { antigravityResult } from "../src/antigravity.ts"
 import { codexResult } from "../src/codex.ts"
 import { commandResult } from "../src/command.ts"
 import type { InspectionDeps } from "../src/inspect.ts"
+import { decodeSession, encodeSession } from "../src/session.ts"
 
 export const PI_MODEL = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" }
 export const PI_ID = "ses_0123456789abcdef0123456789abcdef"
@@ -82,9 +83,18 @@ export function writeSession(repo: Repo, n: number, fields: Record<string, unkno
     schema_version: 1, id, cwd: repo.cwd, title: "Lane " + n, task: "Do the task", tier: "worker",
     scope: { base_revision: repo.base, writable_paths: ["README"], acceptance_proof: "Run the check", attempt_limit: 2, stop_on: "Scope change" },
     attempts: 1, backend: "command-code", command_model: "deepseek/deepseek-v4.1-flash", command_effort: "high",
+    codex_model: "gpt-6.1-terra", codex_effort: "medium", execution_order: "codex-first", pi_candidates: [PI_MODEL],
     ...fields,
   }
   writeFileSync(join(repo.directory, id + ".json"), JSON.stringify(record))
+  return id
+}
+
+/** Rewrite a stored v1 record in the current format, exactly as the bridge would save it. */
+export function migrate(repo: Repo, id: string): string {
+  const path = join(repo.directory, id + ".json")
+  const session = decodeSession(JSON.parse(readFileSync(path, "utf8")), repo.cwd, id)
+  writeFileSync(path, JSON.stringify(encodeSession(session)))
   return id
 }
 
@@ -120,7 +130,7 @@ export function writePiChild(repo: Repo, pid: number, result?: Record<string, un
 
 export function piSession(repo: Repo, n: number, fields: Record<string, unknown> = {}): string {
   return writeSession(repo, n, {
-    backend: "pi", pi_id: PI_ID, primary_model: PI_MODEL, command_model: undefined, command_effort: undefined, ...fields,
+    backend: "pi", pi_id: PI_ID, primary_model: PI_MODEL, pi_candidates: [], ...fields,
   })
 }
 

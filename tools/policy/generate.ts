@@ -57,8 +57,6 @@ function summary(policy: Policy): string {
 }
 
 function openCode(policy: Policy): string {
-  if (policy.opencode.usesBridge || !policy.opencode.freeOnlyWhenParentFree)
-    throw new Error("OpenCode projection requires the native-only, free-parent policy")
   return "**OpenCode exception:** A top-level OpenCode session never uses `pi-subagent-bridge`, at any tier or as a fallback. " +
     "Delegate only through its configured native agents or built-in `general`/`explore`. When the top-level model is free, every tier must run a free model. " +
     `The configured tier agents use ${code(policy.opencode.model)} regardless of the top-level model:\n\n` +

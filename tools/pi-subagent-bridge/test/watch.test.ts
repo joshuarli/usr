@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { piPort } from "../src/pi-port.ts"
 import { watchSession } from "../src/watch.ts"
 import {
-  Scratch, collect, commandLane, commandResultLine, piSession, piSuccess, realDeps, runFor, sessionId,
+  Scratch, collect, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, sessionId,
   toolQueued, writeLog, writePiChild, writeSession, type Repo,
 } from "./worker-fixtures.ts"
 
@@ -37,6 +37,15 @@ const queued = toolQueued("Download kernel")
 test("a final result record ends the wait", async () => {
   const id = commandLane(repo, 1, gone, [queued, commandResultLine("success", { finalText: "report written" })])
   await expectExit(0, id, "finished: succeeded\nreport written")
+})
+
+test("a session saved in the current format ends the wait the same way", async () => {
+  const id = migrate(repo, commandLane(repo, 45, gone, [queued, commandResultLine("success", { finalText: "report written" })]))
+  await expectExit(0, id, "finished: succeeded\nreport written")
+  await expectState(migrate(repo, commandLane(repo, 46, alive, [queued])), "running")
+  await expectState(migrate(repo, codexLane(47, gone)), "succeeded")
+  await expectState(migrate(repo, agyLane(48, gone, [init("fixture-model"), agyResult("SUCCESS")])), "succeeded")
+  await expectState(migrate(repo, agyLane(49, gone, [init("wrong-model"), agyResult("SUCCESS")])), "failed")
 })
 
 test("an executor gone without a result is reported", async () => {
@@ -112,8 +121,7 @@ const codexLines = [
 function codexLane(n: number, pid: number) {
   const run = runFor(repo, "codex-" + n, pid)
   writeLog(run.output, codexLines)
-  return writeSession(repo, n, { backend: "codex", command_run: run, codex_model: "gpt-6.1-terra", codex_effort: "medium",
-    command_model: undefined, command_effort: undefined })
+  return writeSession(repo, n, { backend: "codex", command_run: run })
 }
 
 test("Codex receipt does not precede process termination", async () => {
@@ -205,7 +213,7 @@ test("legacy Hydrogen cannot adopt a newly attached pin", async () => {
 test("a future session schema is not interpreted as successful", async () => {
   const run = runFor(repo, "future", gone)
   writeLog(run.output, [init(HYDROGEN), agyResult("SUCCESS")])
-  const id = writeSession(repo, 43, { ...EXPERT, schema_version: 2, antigravity_pin: { model: HYDROGEN, effort: "xhigh" }, command_run: run })
+  const id = writeSession(repo, 43, { ...EXPERT, schema_version: 3, antigravity_pin: { model: HYDROGEN, effort: "xhigh" }, command_run: run })
   await expectState(id, "unknown")
 })
 

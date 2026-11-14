@@ -192,19 +192,13 @@
       "mechanic": "medium",
       "worker": "high",
       "expert": "max"
-    },
-    "freeOnlyWhenParentFree": true,
-    "usesBridge": false
+    }
   },
   "nativeFallback": {
     "tiers": [
       "scout",
       "mechanic",
       "worker"
-    ],
-    "reasons": [
-      "bridge-unavailable",
-      "host-access"
     ],
     "claudeModels": {
       "scout": "haiku",
@@ -216,8 +210,7 @@
     "models": [
       "gemini-4-hydrogen-high",
       "gemini-4-hydrogen-medium"
-    ],
-    "requiresAvailabilityCheck": true
+    ]
   },
   "bannedModels": [
     "gemini-4-argon",

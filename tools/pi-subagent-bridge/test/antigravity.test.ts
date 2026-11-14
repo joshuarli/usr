@@ -26,7 +26,7 @@ test("Antigravity stream exposes the conversation and accepts a pinned successfu
   const f = fixture(ANTIGRAVITY_PIN.model, "SUCCESS")
   try {
     assert.equal(antigravitySession(f.run), ID)
-    const result = antigravityResult(f.run)
+    const result = antigravityResult(f.run, ANTIGRAVITY_PIN)
     assert.equal(result.state, "succeeded")
     assert.equal(result.result?.sessionId, ID)
     assert.equal(result.result?.usage && typeof result.result.usage, "object")
@@ -36,7 +36,7 @@ test("Antigravity stream exposes the conversation and accepts a pinned successfu
 test("even a successful response cannot accept Argon as a Antigravity run", () => {
   const f = fixture("gemini-4-argon-high", "SUCCESS")
   try {
-    const result = antigravityResult(f.run)
+    const result = antigravityResult(f.run, ANTIGRAVITY_PIN)
     assert.equal(result.state, "failed")
     assert.match(String(result.result?.error), /admitted model/)
   } finally { f.close() }
@@ -45,22 +45,20 @@ test("even a successful response cannot accept Argon as a Antigravity run", () =
 test("Antigravity terminal errors never masquerade as success", () => {
   const f = fixture(ANTIGRAVITY_PIN.model, "ERROR")
   try {
-    const result = antigravityResult(f.run)
+    const result = antigravityResult(f.run, ANTIGRAVITY_PIN)
     assert.equal(result.state, "failed")
     assert.match(String(result.result?.error), /quota exhausted/)
   } finally { f.close() }
 })
 
-test("Antigravity launcher rejects any other model or effort before launching a process", () => {
+test("Antigravity launcher refuses a forbidden family before launching a process", () => {
   const f = fixture(ANTIGRAVITY_PIN.model, "SUCCESS")
   try {
-    for (const model of ["gemini-4-argon-high", "gemini-3.8-flash-medium", "gemini-4-hydrogen-high"]) {
-      assert.throws(() => startAntigravity(f.run.output, f.run.output, "Work", ANTIGRAVITY_PIN.effort, false, undefined, model),
-        /Unapproved Antigravity/)
+    for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
+      assert.throws(() => startAntigravity({ directory: f.run.output, logDirectory: f.run.output, prompt: "Work",
+        selection: { model, effort: "high" }, access: { kind: "write", network: false } }), /Prohibited Antigravity model/)
     }
-    assert.throws(() => startAntigravity(f.run.output, f.run.output, "Work", "high", false, undefined, ANTIGRAVITY_PIN.model),
-      /Unapproved Antigravity/)
-    assert.throws(() => startAntigravity(f.run.output, f.run.output, "Work", ANTIGRAVITY_PIN.effort, true, undefined, ANTIGRAVITY_PIN.model),
-      /Unapproved Antigravity/)
+    assert.throws(() => startAntigravity({ directory: f.run.output, logDirectory: f.run.output, prompt: "Work",
+      selection: ANTIGRAVITY_PIN, access: { kind: "write", network: false }, resume: "not-a-conversation" }), /Invalid Antigravity conversation ID/)
   } finally { f.close() }
 })
