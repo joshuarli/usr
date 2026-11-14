@@ -53,14 +53,14 @@ def _git_toplevel(root: Path) -> Path | None:
     return Path(top.stdout.strip()).resolve() if top.returncode == 0 else None
 
 
-def _listing(root: Path, layer: Path) -> tuple[set[PurePosixPath], set[PurePosixPath]]:
+def _listing(root: Path, layer: Path, toplevel: Path | None) -> tuple[set[PurePosixPath], set[PurePosixPath]]:
     # Only the checkout's own index describes its layers. A root nested inside
     # another repository (or its ignored scratch) must not inherit that repository's view.
     git = subprocess.run(
         ["git", "-C", str(layer), "-c", "core.quotePath=false", "ls-files", "-z",
          "--cached", "--others", "--exclude-standard", "--", "."],
         capture_output=True, check=False,
-    ) if _git_toplevel(root) == root.resolve() else None
+    ) if toplevel == root.resolve() else None
     names: set[PurePosixPath] = set()
     if git is not None and git.returncode == 0:
         for raw in git.stdout.split(b"\0"):
@@ -93,12 +93,13 @@ def discover(root: Path, target: Path, platform: str) -> Discovery:
         raise LinkError("target directory contains a tab")
     specs: dict[PurePosixPath, LinkSpec] = {}
     sources: list[Path] = []
+    toplevel = _git_toplevel(root)
     for layer in (root / "dotfiles/base", root / "dotfiles" / platform):
         if not layer.is_dir():
             continue
         source_root = layer.resolve(strict=True)
         sources.append(source_root)
-        names, markers = _listing(root, layer)
+        names, markers = _listing(root, layer, toplevel)
         for rel in sorted(markers, key=lambda p: p.as_posix()):
             if rel == PurePosixPath("."):
                 raise LinkError("root .sym-dir would replace the target home")

@@ -76,7 +76,10 @@ class Graph:
         return [self.tasks[name] for name in names]
 
     def inspect(self) -> list[tuple[Task, Probe]]:
-        return [(task, task.probe()) for task in self.order()]
+        tasks = self.order()
+        with ThreadPoolExecutor(max_workers=min(len(tasks), default_jobs()) or 1) as pool:
+            probes = list(pool.map(lambda task: task.probe(), tasks))
+        return list(zip(tasks, probes))
 
     def _priority(self) -> dict[str, int]:
         dependents: dict[str, list[str]] = {name: [] for name in self.tasks}
