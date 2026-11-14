@@ -891,6 +891,9 @@ sys.exit(1)
             self.assertTrue(self.dest_path(command).is_symlink())
         self.assertTrue((self.home / ".local/share/gluon/current").is_symlink())
         self.assertEqual(self.state("gluon"), "e")
+        again = self.make(routes)
+        again.install_gluon()
+        self.assertFalse(again.changed)
 
     def _bctl_release(self, tag, script):
         import hashlib
