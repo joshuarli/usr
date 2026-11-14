@@ -56,8 +56,9 @@ test("Codex refuses a forbidden family and a read-only run is unsandboxed but ha
     for (let i = 0; i < 200 && codexResult(run).state === "running"; i++) await delay()
     const recorded = readFileSync(args, "utf8")
     assert.match(recorded, /--sandbox\ndanger-full-access/)
-    for (const feature of ["shell_tool", "unified_exec", "code_mode_host", "computer_use", "browser_use", "in_app_browser"])
+    for (const feature of ["shell_tool", "unified_exec", "computer_use", "browser_use", "in_app_browser"])
       assert.match(recorded, new RegExp("--disable\n" + feature + "\n"), feature)
+    assert.doesNotMatch(recorded, /--disable\ncode_mode_host\n/)
   } finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }) }
 })
 
