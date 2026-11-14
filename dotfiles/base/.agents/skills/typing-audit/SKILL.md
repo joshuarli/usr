@@ -7,13 +7,35 @@ description: "Apply when asked to audit or tighten types, remove typing escape h
 
 A type contract must describe every value the implementation can accept or produce. A green checker or fewer escape hatches is not proof. Audit the requested scope; do not turn a local request into a repository sweep. Review-only requests do not authorize edits.
 
+Each change should leave the codebase with more that the checker proves and fewer things a reader must trust. Model work is probabilistic; a type that rejects bad programs keeps working deterministically after the session ends. The point of an audit is to add to those deterministic guarantees, not to make code look more principled.
+
+## Evidence the checker can use
+
+A change counts only if it does at least one of these:
+
+- **Rejects a program:** some program the checker accepts today, such as a forbidden construction, an unvalidated value reaching a decision, or a missing variant, becomes a type error. Write that program down as the witness.
+- **Deletes trust:** a cast, an unchecked assertion, a suppression, `any`, a runtime "should never happen" check, or a repeated guard becomes unnecessary because the checker now proves the invariant. Delete it in the same change.
+
+Readability, symmetry, or resemblance to a state machine is not evidence. A renamed or restructured type that rejects no new program and deletes nothing is churn: do not make it.
+
+## Pick the most critical violation, then stop
+
+Rank leads by how much unchecked trust they carry into decisions:
+
+1. Untrusted or persisted data reaching control flow through a cast, `any`, or a partial check.
+2. Escape hatches on values that select behavior: authority, routing, lifecycle state, money, paths.
+3. Option soups and loose closed sets that callers guard by hand.
+4. Imprecise but owned internal types.
+
+Fix one contract and its consumers per change, so each step compiles and can be reviewed. Leave the rest as a ranked list for the next pass. Do not try to tighten everything at once.
+
 ## Follow the values
 
 1. Read the producer, its callers and consumers, relevant tests, and dependency implementations or stubs when their behavior matters. Compare declared types with actual branches, mutations, exceptions, and supported inputs. Check both the type of a receiver and the result: an unchecked receiver can erase an otherwise precise return type.
 2. Investigate casts, unchecked assertions, suppressions, broad types, reflection used for known attributes, and generic helpers that promise a caller-selected result. Also look for false annotations that pass because their source is untyped. These are leads, not automatic defects; establish the runtime invariant before changing one.
 3. Repair the producer and carry its real type through consumers. Parse unknown external data at the boundary into a checked representation; preserve required versus absent, null versus empty, raw versus validated, and in-memory versus wire values. Reuse an existing precise type rather than reparsing it. Verify dependency types against the version actually used; fix owned stubs when they are wrong.
 4. Preserve runtime behavior by default, including coercion, errors, mutation and aliasing. Do not invent defaults, add a crash, or narrow a supported state to satisfy the checker. If a truthful contract exposes a real behavior bug, identify it and separate its fix where practical. Keep overrides substitutable; redesign an incompatible relationship rather than suppressing the error.
-5. Prefer small, coherent changes around a contract and its consumers. Retain an escape hatch only when the invariant is true, cannot reasonably be expressed or preserved by restructuring, and is supported by evidence; explain it in the report. Do not weaken checker settings to make an audit pass.
+5. Keep changes small and coherent: one contract and its consumers. Retain an escape hatch only when the invariant is true, cannot reasonably be expressed or preserved by restructuring, and is supported by evidence; explain it in the report. Do not weaken checker settings to make an audit pass.
 
 ## Language-specific checks
 
@@ -31,6 +53,6 @@ Trace `Option`, `Result`, enums, conversions, and ownership through producers an
 
 ## Verify and report
 
-Run the project's relevant type checker or compiler on the affected contract and consumers, expanding only when a concrete integration risk requires it. Check existing coverage first. Add focused tests when runtime behavior changes, a parser or type predicate needs malformed and negative cases, or safety depends on an otherwise untested runtime invariant. A behavior-fix test should fail before the fix; type-level regression tests are useful when inference could silently decay to an unchecked type. Do not add tests that merely repeat annotations or cover unchanged dependency behavior.
+Run the project's relevant type checker or compiler on the affected contract and consumers, expanding only when a concrete integration risk requires it. Keep each witness as a type-level regression test. Put it in an expected-error marker that the checker itself reports once the error disappears, so loosening the type later fails the build. Use TypeScript `// @ts-expect-error` in a file the typecheck covers, a Rust `compile_fail` doctest, or for Python a `# ty: ignore[code]` comment with ty's `unused-ignore-comment` rule set to error. If the project cannot run such a test, say so. Check existing coverage first. Add focused tests when runtime behavior changes, a parser or type predicate needs malformed and negative cases, or safety depends on an otherwise untested runtime invariant. A behavior-fix test should fail before the fix; type-level regression tests are useful when inference could silently decay to an unchecked type. Do not add tests that merely repeat annotations or cover unchanged dependency behavior.
 
-**Report:** the old claim and actual behavior, the corrected contract, any runtime or public API change, remaining escape hatches and their justification, and checks run or not run. For review-only work, report supported findings with evidence and distinguish uncertainty from a demonstrated defect.
+**Report:** the old claim and actual behavior, the corrected contract, each witness the checker now rejects and the trust it let you delete, any runtime or public API change, remaining escape hatches and their justification, the deferred leads in rank order, and checks run or not run. For review-only work, report supported findings with a witness program for each, and distinguish uncertainty from a demonstrated defect.
