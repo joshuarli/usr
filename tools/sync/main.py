@@ -341,8 +341,12 @@ def default_goals(ctx: Context) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    ctx = context()
     command_name = argv.pop(0) if argv else "apply"
+    if command_name == "launchers":
+        for tool in argv:
+            print(tool, *TOOL_EXECUTABLES.get(tool, (tool,)))
+        return 0
+    ctx = context()
     if ctx.link_target.resolve() != ctx.home.resolve() and command_name in {"apply", "tools", "bridge", "uninstall"}:
         raise GraphError(f"{command_name} cannot mutate host tools with TARGET different from HOME; use sync links")
     if command_name == "list":

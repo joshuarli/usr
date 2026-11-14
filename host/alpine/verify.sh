@@ -78,13 +78,16 @@ check 'passwordless doas works for user' su -s /bin/sh "$user" -c 'doas -n true'
 check 'unencrypted Ed25519 GitHub key matches user and modes' github_key_matches_user
 check "install profile is $mode" install_profile_matches
 default_tools=$(DL_PROFILE="$mode" sh "$usr_root/sync" list) || fail 'cannot read the default sync tool list'
-for tool in $default_tools; do
-	[ "$tool" = agy ] && continue
-	case $tool in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; *) launchers=$tool ;; esac
+# shellcheck disable=SC2086
+tool_launchers=$(python3 -I "$usr_root/tools/sync/main.py" launchers $default_tools) || fail 'cannot read the sync tool launchers'
+while read -r tool launchers; do
+	[ -n "$tool" ] && [ "$tool" != agy ] || continue
 	for launcher in $launchers; do
 		check "$launcher installed for $user" test -x "$home/.local/bin/$launcher"
 	done
-done
+done <<EOF
+$tool_launchers
+EOF
 case " $default_tools " in
 	*" ffmpeg "*)
 		for launcher in ffmpeg ffprobe; do

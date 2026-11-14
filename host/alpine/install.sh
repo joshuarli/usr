@@ -324,15 +324,20 @@ chmod 0644 /etc/home/install-mode
 
 as_user "sh '$usr_root/sync' links >/dev/null" || die "linking dotfiles from $usr_root failed"
 default_tools=$(as_user "DL_PROFILE='$mode' sh '$usr_root/sync' list") || die "reading the default tool list from $usr_root failed"
+# shellcheck disable=SC2086
+tool_launchers=$(as_user "python3 -I '$usr_root/tools/sync/main.py' launchers $(printf '%s ' $default_tools)") || die "reading tool launchers from $usr_root failed"
 missing_tools=
-for tool in $default_tools; do
-	[ "$tool" = agy ] && continue
-	case $tool in
-		nodejs) [ -x "$home/.local/bin/node" ] && [ -x "$home/.local/bin/npm" ] ;;
-		ffmpeg) [ -x "$home/.local/bin/ffmpeg" ] && [ -x "$home/.local/bin/ffprobe" ] ;;
-		*) [ -x "$home/.local/bin/$tool" ] ;;
-	esac || missing_tools="$missing_tools $tool"
-done
+while read -r tool launchers; do
+	[ -n "$tool" ] && [ "$tool" != agy ] || continue
+	for launcher in $launchers; do
+		if [ ! -x "$home/.local/bin/$launcher" ]; then
+			missing_tools="$missing_tools $tool"
+			break
+		fi
+	done
+done <<EOF
+$tool_launchers
+EOF
 if [ -n "$missing_tools" ]; then
 	# shellcheck disable=SC2086
 	as_user "sh '$usr_root/sync' tools$missing_tools" >/dev/null || die "installing$missing_tools from $usr_root failed"

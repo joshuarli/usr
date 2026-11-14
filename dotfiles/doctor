@@ -55,16 +55,19 @@ fi
 printf 'default tools:\n'
 if sh "$root/sync" list > "$scratch/tools" 2> "$scratch/tool-errors"; then
     tool_missing=0
-    while IFS= read -r tool; do
+    # shellcheck disable=SC2046
+    if ! python3 -I "$root/tools/sync/main.py" launchers $(cat "$scratch/tools") > "$scratch/launchers"; then
+        problem 'could not read sync tool launchers'
+    fi
+    while read -r tool launchers; do
         [ -n "$tool" ] || continue
-        case "$tool" in nodejs) launchers=node ;; ffmpeg) launchers='ffmpeg ffprobe' ;; shuck) launchers=shellcheck ;; gluon) launchers='meson ninja gluon-build' ;; lz) launchers=less ;; *) launchers=$tool ;; esac
         for launcher in $launchers; do
             if [ ! -x "$target/.local/bin/$launcher" ]; then
                 printf 'missing: %s (~/.local/bin/%s)\n' "$tool" "$launcher"
                 tool_missing=$((tool_missing + 1))
             fi
         done
-    done < "$scratch/tools"
+    done < "$scratch/launchers"
     if [ "$tool_missing" -eq 0 ]; then ok 'default tool launchers exist';
     else problem "$tool_missing default tool launchers are missing"; fi
 else
