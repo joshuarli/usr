@@ -1197,6 +1197,13 @@ class Installer:
             self.unchecked("pnpm", "could not resolve the latest pnpm version")
             return
         launcher = self.dest / "pnpm"
+        if launcher.exists() or launcher.is_symlink():
+            actual = os.readlink(launcher) if launcher.is_symlink() else ""
+            if actual != str(extra_root / "bin/pnpm") or not (self.state / "pnpm").is_file():
+                self.skip("pnpm", f"{launcher} already exists outside dl management")
+        if extra_root.exists() or extra_root.is_symlink():
+            if extra_root.is_symlink() or not extra_root.is_dir() or not (self.state / "pnpm").is_file():
+                self.skip("pnpm", f"{extra_root} already exists without dl install records")
         if self._state_text("pnpm") == version and (extra_root / "bin/pnpm").is_file() \
                 and os.access(extra_root / "bin/pnpm", os.X_OK) \
                 and launcher.is_symlink() and os.readlink(launcher) == str(extra_root / "bin/pnpm"):
@@ -1205,10 +1212,6 @@ class Installer:
             self.own_file(self.state / "pnpm")
             self.current(f"pnpm is current ({version})")
             return
-        if extra_root.is_symlink() or (extra_root.exists() and not extra_root.is_dir()):
-            extra_root.unlink()
-        if launcher.is_dir() and not launcher.is_symlink():
-            shutil.rmtree(launcher)
         self.own_missing_dirs(extra_root.parent)
         extra_root.parent.mkdir(parents=True, exist_ok=True)
         prefix = extra_root
@@ -1934,6 +1937,27 @@ class Installer:
         self.own_file(self.state / state_name)
         return True
 
+    def _same_bundle(self, expected: Path, actual: Path) -> bool:
+        try:
+            expected_names = {p.name for p in expected.iterdir()}
+            if expected_names != {p.name for p in actual.iterdir()}:
+                return False
+            for name in expected_names:
+                left, right = expected / name, actual / name
+                if left.is_symlink():
+                    if not right.is_symlink() or os.readlink(left) != os.readlink(right):
+                        return False
+                elif right.is_symlink() or (left.stat().st_mode & 0o7777) != (right.stat().st_mode & 0o7777):
+                    return False
+                elif left.is_dir():
+                    if not right.is_dir() or not self._same_bundle(left, right):
+                        return False
+                elif not left.is_file() or not right.is_file() or self.sha256_file(left) != self.sha256_file(right):
+                    return False
+            return True
+        except OSError:
+            return False
+
     def _archive_bundle(self, tool: str, home: Path, commands: list[str], state_name: str, *,
                         in_bin: bool, asset: str, url: str, sums_url: str, release_dir: Path,
                         validate, ok_message: str, install_message: str, on_current=None) -> None:
@@ -1970,15 +1994,6 @@ class Installer:
                     on_current()
                 self.current(ok_message)
                 return
-        if release_dir.exists() or release_dir.is_symlink():
-            if current.is_symlink() and os.readlink(current) == str(release_dir) and self._bundle_recorded(state_name, record):
-                for command in commands:
-                    self._ensure_bundle_link(tool, home, commands, in_bin=in_bin, command=command)
-                if on_current is not None:
-                    on_current()
-                self.current(ok_message)
-                return
-            self.skip(tool, f"{release_dir} already exists")
         self.own_missing_dirs(releases)
         releases.mkdir(parents=True, exist_ok=True)
         self.fetch_msg(f"Downloading {asset} ...")
@@ -2011,7 +2026,13 @@ class Installer:
         if not validate(staged):
             shutil.rmtree(staged, ignore_errors=True)
             self.skip(tool, f"{asset} is missing the {tool} bundle")
-        os.replace(staged, release_dir)
+        if release_dir.exists() or release_dir.is_symlink():
+            if release_dir.is_symlink() or not release_dir.is_dir() or not self._same_bundle(staged, release_dir):
+                shutil.rmtree(staged, ignore_errors=True)
+                self.skip(tool, f"{release_dir} already exists")
+            shutil.rmtree(staged)
+        else:
+            os.replace(staged, release_dir)
         self.own_dir(release_dir)
         if not self.switch_symlink(release_dir, current):
             self.skip(tool, f"could not switch {current}")

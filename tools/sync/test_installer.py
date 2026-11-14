@@ -765,6 +765,38 @@ sys.exit(1)
         self.assertEqual(os.readlink(self.dest_path("pnpm")), str(self.home / ".local/share/pnpm-npm/bin/pnpm"))
         self.assertEqual((home_bin / "pn").read_text(), "#!/bin/sh\nexec pnpm \"$@\"\n")
 
+    def test_pnpm_rejects_foreign_paths_before_install(self):
+        for fail in (False, True):
+            for kind in ("launcher_file", "launcher_dir", "launcher_link", "prefix_file", "prefix_dir", "prefix_link"):
+                with self.subTest(fail=fail, kind=kind), tempfile.TemporaryDirectory(dir=self.root) as scratch:
+                    old_home = self.home
+                    self.home = Path(scratch) / "home"
+                    try:
+                        inst = self.make()
+                        inst.env["MOCK_NPM_FAIL"] = "1" if fail else "0"
+                        path = self.dest_path("pnpm") if kind.startswith("launcher") else inst.pnpm_root
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        if kind.endswith("file"):
+                            path.write_text("foreign")
+                            path.chmod(0o755)
+                        elif kind.endswith("dir"):
+                            path.mkdir()
+                            (path / "sentinel").write_text("foreign")
+                        else:
+                            path.symlink_to("foreign-target")
+                        with self.assertRaises(SkipInstall):
+                            inst.install_pnpm()
+                        if kind.endswith("file"):
+                            self.assertEqual(path.read_text(), "foreign")
+                        elif kind.endswith("dir"):
+                            self.assertEqual((path / "sentinel").read_text(), "foreign")
+                        else:
+                            self.assertEqual(os.readlink(path), "foreign-target")
+                        self.assertFalse(any(json.loads(line)[0] == "install" for line in
+                                             (self.root / "npm.log").read_text().splitlines()))
+                    finally:
+                        self.home = old_home
+
     def test_dsh_install_and_patch_repair(self):
         inst = self.make()
         inst.install_dsh()
@@ -871,6 +903,41 @@ sys.exit(1)
         routes["https://github.com/laputa-systems/git-build/releases.atom"] = atom(
             [("2026-11-12T00:00:00Z", f"release-{sha}")])
         return routes
+
+    def test_git_interrupted_activation_resumes_and_rejects_modified(self):
+        sha = "7" * 40
+        routes = self._git_feed_routes(sha, self._git_tar())
+        for interruption in ("publication", "selection", "launcher", "modified"):
+            with self.subTest(interruption=interruption), tempfile.TemporaryDirectory(dir=self.root) as scratch:
+                old_home = self.home
+                self.home = Path(scratch) / "home"
+                try:
+                    inst = self.make(routes)
+                    if interruption in ("publication", "modified"):
+                        patcher = patch.object(inst, "switch_symlink", return_value=False)
+                    elif interruption == "selection":
+                        patcher = patch.object(inst, "_ensure_bundle_link", side_effect=SkipInstall("git", "interrupted"))
+                    else:
+                        patcher = patch.object(inst, "write_state", side_effect=SkipInstall("git", "interrupted"))
+                    with patcher, self.assertRaises(SkipInstall):
+                        inst.install_git()
+                    release = inst.git_home / "releases" / f"release-{sha}-x86_64-unknown-linux-musl"
+                    self.assertTrue(release.is_dir())
+                    if interruption == "modified":
+                        (release / "git").write_text("modified")
+                        with self.assertRaises(SkipInstall):
+                            self.make(routes).install_git()
+                        self.assertEqual((release / "git").read_text(), "modified")
+                        self.assertFalse((inst.git_home / "current").is_symlink())
+                    else:
+                        fresh = self.make(routes)
+                        fresh.install_git()
+                        self.assertEqual(os.readlink(inst.git_home / "current"), str(release))
+                        self.assertTrue(self.dest_path("git").is_symlink())
+                        self.assertTrue(self.state("git"))
+                        self.assertIn(("D", release), fresh.claims)
+                finally:
+                    self.home = old_home
 
     def test_git_falls_back_past_a_release_without_supported_assets(self):
         newest, older = "3" * 40, "4" * 40
