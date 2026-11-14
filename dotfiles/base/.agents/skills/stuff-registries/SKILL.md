@@ -5,7 +5,7 @@ description: "Apply when publishing or consuming packages through the 17166969.x
 
 # stuff registries
 
-`stuff` is one installed CLI that publishes Cargo, npm, PyPI, OCI and the artifact mirror. OpenOrange on Lisa serves the registries over tailnet HTTPS. Each publication is an immutable generation; the shared coordinator selects `current` and serializes writers across machines.
+`stuff` is one installed CLI that publishes Cargo, npm, PyPI, OCI and the artifact mirror. OpenOrange on Lisa serves anonymous public HTTPS pulls; publishing requires Tailscale access to its private HTTPS endpoint. Each publication is an immutable generation; the shared coordinator selects `current` and serializes writers across machines.
 
 | Registry | Public root |
 | --- | --- |
@@ -34,7 +34,7 @@ Consumer repos call `stuff` from their `Makefile` publish-* targets with `STUFF 
 
 ## Auth and state
 
-- Install the current native CLI and an owner-only `${XDG_CONFIG_HOME:-$HOME/.config}/stuff/credentials.json` (mode 600). Its endpoint is `https://stuff.17166969.xyz`; it contains the publishing service keys and coordinator token. Keep backing-store keys on Lisa. Never print the file or put its secrets in argv. `STUFF_CREDENTIAL_FILE` selects a different protected file. The retired `cf_profile` field is rejected; Cloudflare login is unnecessary.
+- Install the current native CLI and an owner-only `${XDG_CONFIG_HOME:-$HOME/.config}/stuff/credentials.json` (mode 600). Its endpoint is `https://stuff-publish.17166969.xyz`; it contains the publishing service keys and coordinator token. Keep backing-store keys on Lisa. Never print the file or put its secrets in argv. `STUFF_CREDENTIAL_FILE` selects a different protected file. The retired `cf_profile` field is rejected; Cloudflare login is unnecessary.
 - Scripts that need `R2_S3_*` (`deploy/r2-pull.py`, `make gc`, the OCI writer host) obtain service gateway exports with `eval "$(stuff credentials BUCKET)"`. This does not grant a write lease; the supported writer and GC helpers acquire their own coordinator leases.
 - Promotion uses a renewable server lease and a conditional coordinator revision. A competing writer gets exit `3`; wait for it to finish and retry against the new live generation. Explicit maintenance `R2_S3_*` credentials cannot override a configured publishing service.
 - The remote service is authoritative. Publishes fetch its live generation and manifest, stage locally in `${XDG_STATE_HOME:-$HOME/.local/state}/stuff/<registry>/` (with caching in `${XDG_CACHE_HOME:-$HOME/.cache}/stuff/<registry>/`), upload missing immutable objects, and activate through the coordinator. A fresh machine needs the CLI, service credential file and Tailscale access, without copied local publication state. Lisa can publish through the same HTTPS endpoint.
