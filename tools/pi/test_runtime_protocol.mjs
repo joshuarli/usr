@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -58,11 +58,16 @@ try {
   if (!hostXdg) throw new Error("Muse host did not create its private XDG config");
   const trustPath = join(hostXdg, "muse", "trust.json");
   const authPath = join(hostXdg, "muse", "auth.json");
-  if (existsSync(trustPath)) throw new Error("Muse host unexpectedly created private workspace trust");
+  const trust = existsSync(trustPath) ? JSON.parse(readFileSync(trustPath, "utf8")) : null;
+  const scopedEntries = Object.entries(trust?.projects ?? {});
+  if (!trust || scopedEntries.length !== 1 || scopedEntries[0][0] !== scopedWorkspace || scopedEntries[0][1]?.decision !== "trusted")
+    throw new Error(`Muse host trust.json does not trust exactly the scoped workspace: ${JSON.stringify(trust)}`);
+  if ((statSync(trustPath).mode & 0o777) !== 0o600)
+    throw new Error(`Muse host trust.json mode ${(statSync(trustPath).mode & 0o777).toString(8)} != 600`);
   if (existsSync(authPath)) throw new Error("Muse fixture unexpectedly linked account authentication");
   if (host.busy || !host.sessionId) throw new Error("Muse host did not stop at session/start");
   await host.close();
-  console.log("ok: installed Muse accepted scoped session/start before turn/start, with no trust.json or auth.json");
+  console.log("ok: installed Muse accepted scoped session/start before turn/start, trusting only the scoped workspace");
 } finally {
   if (host) await host.close();
   bridge.close();

@@ -75,7 +75,17 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 (bindir / tool).symlink_to(current / "bin" / tool)
             config = home / ".offline-opencode/opencode/opencode.json"
             config.parent.mkdir(parents=True)
-            config.write_text("{}\n")
+            config.write_text(json.dumps({
+                "mcp": {
+                    "servers": {
+                        "pi-subagent-bridge": {
+                            "type": "local",
+                            "command": ["node", "--experimental-strip-types", str(ROOT / "tools/pi-subagent-bridge/src/server.ts")],
+                        },
+                        "unrelated": {"type": "local", "command": ["node", "other.js"]},
+                    },
+                },
+            }) + "\n")
             env = dict(os.environ)
             env.update(
                 HOME=str(home), TARGET=str(home),
@@ -128,8 +138,13 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                                  str(home / ".local/share/pi-runtime/current/node_modules"))
                 self.assertTrue((home / ".pi/agent/mcp.json").is_file())
                 self.assertTrue((home / ".claude.json").is_file())
-                self.assertIn("pi-subagent-bridge",
-                              json.loads(config.read_text())["mcp"]["servers"])
+                # OpenCode never registers the bridge; an owned entry is removed, unrelated entries preserved.
+                opencode_data = json.loads(config.read_text())
+                opencode_servers = opencode_data.get("mcp", {}).get("servers", {})
+                self.assertNotIn("pi-subagent-bridge", opencode_servers)
+                self.assertNotIn("usr-opencode-worker", opencode_servers)
+                self.assertEqual({"type": "local", "command": ["node", "other.js"]},
+                                 opencode_servers.get("unrelated"))
                 intercom = json.loads((home / ".pi/agent/intercom/config.json").read_text())
                 self.assertEqual(intercom["inboundTrigger"], "never")
                 self.assertEqual(intercom["brokerCommand"], "node")
