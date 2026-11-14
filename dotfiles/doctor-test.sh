@@ -86,4 +86,19 @@ chmod +x "$HOME/.local/bin/ffprobe"
 sh "$fixture/sync" doctor > "$fixture/full-pair"
 grep -q 'ok: doctor passed' "$fixture/full-pair"
 
+printf '%s\n' 'def default_tools(os_name, arch, profile, server_tools=None):' '    return ["gluon", "lz"]' '' 'class SkipInstall(Exception):' '    pass' '' 'class Installer:' '    def __init__(self, home, env=None):' '        self.claims = []' '        self.removed = set()' '        self.changed = False' '    def install(self, tool):' '        raise SkipInstall(tool, "fixture")' > "$fixture/tools/sync/installer.py"
+for launcher in meson ninja gluon-build less; do
+    printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/$launcher"
+    chmod +x "$HOME/.local/bin/$launcher"
+done
+sh "$fixture/sync" doctor > "$fixture/renamed-launchers"
+if ! grep -q 'ok: doctor passed' "$fixture/renamed-launchers"; then
+    echo 'doctor rejected the launchers gluon and lz actually install' >&2; cat "$fixture/renamed-launchers" >&2; exit 1
+fi
+rm "$HOME/.local/bin/gluon-build"
+if sh "$fixture/sync" doctor > "$fixture/missing-gluon-build"; then
+    echo 'doctor accepted gluon without gluon-build' >&2; exit 1
+fi
+grep -q 'missing: gluon (~/.local/bin/gluon-build)' "$fixture/missing-gluon-build"
+
 printf 'doctor: fixture checks passed\n'
