@@ -39,6 +39,13 @@ The same pinned [`pi-build`](https://github.com/joshuarli/pi-build) release carr
 
 Shims for the companions' command-line tools (`claude-intercom-mcp`, `claude-intercom-worker`, `cci`, `ccim`, `codex-intercom-mcp`, `codex-intercom-bridge`, `coi`) live in `~/.local/bin`. The OpenCode companion vendors `@opencode-ai/plugin` and `@dataforxyz/agent-intercom-core`; installing any companion never invokes npm. The three adapters share one broker, spawned on demand by whichever harness needs it. Scoped SDK children intentionally do not inherit intercom capabilities. `sh sync uninstall` removes owned registrations, shims and install trees (the tracked wrapper file is a layer link, removed with the layer). Live cross-harness round trips and bounded supervisor consultation are tracked as separate feature work.
 
+For explicitly enrolled top-level coordinators on different hosts, the
+[`intercom-tailnet` launcher](intercom-tailnet.md) configures one private tailnet
+hub and per-session credentials. It requires a supporting reviewed `pi-build`
+release and does not change the pin. Scoped bridge workers remain outside
+Intercom; their process environments exclude coordinator credentials and
+transport settings. Two-host harness acceptance remains a separate live check.
+
 ## Pinned models
 
 The generated [bridge model table](../tools/pi-subagent-bridge/README.md) lists exact models, efforts and ordered fallbacks. `make policy` exports the same approved policy as JSON without live account checks.

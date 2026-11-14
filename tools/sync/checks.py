@@ -56,6 +56,7 @@ GUARD = Area("Pi Git tool-call guard")
 PI_RELEASE = Area("Pi release pin, installer, launcher, or SDK closure")
 PI_BRIDGE_INSTALL = Area("Pi bridge installation or MCP registration")
 COMPANIONS = Area("Intercom companion installation or MCP/plugin registration")
+INTERCOM_TAILNET = Area("Tailnet Intercom coordinator launcher")
 BRIDGE = Area("`tools/pi-subagent-bridge`", "run `./dev-install.sh` once first")
 PI_PROFILE = Area("Pi profile and extensions")
 DAG = Area("`sync` DAG/bootstrap")
@@ -116,6 +117,13 @@ REGISTRY: tuple[Check, ...] = (
     Check("companions", (COMPANIONS,), py("tools/sync/test_companions.py"),
           ("tools/sync/companions.py", "tools/sync/test_companions.py", "tools/sync/pi_release.py",
            "tools/sync/pi_offline.py", "tools/pi/runtime.pin.json"), tmpdir=True),
+    Check("intercom-tailnet", (INTERCOM_TAILNET,), py("tools/intercom-tailnet/test_intercom_tailnet.py"),
+          ("tools/intercom-tailnet/", "dotfiles/base/.local/bin/intercom-tailnet", "dotfiles/base/.codex/config.toml",
+           "tools/sync/companions.py", "tools/sync/pi_release.py", "tools/sync/pi_offline.py")),
+    Check("worker-env", (INTERCOM_TAILNET, BRIDGE), ("node", "--experimental-strip-types", "--test", "tools/pi-subagent-bridge/test/worker-env.test.ts"),
+          ("tools/pi-subagent-bridge/src/worker-env.ts", "tools/pi-subagent-bridge/src/pi-port.ts", "tools/pi-subagent-bridge/src/sdk-worker.ts",
+           "tools/pi-subagent-bridge/src/codex.ts", "tools/pi-subagent-bridge/src/command.ts", "tools/pi-subagent-bridge/src/antigravity.ts",
+           "tools/pi-subagent-bridge/test/worker-env.test.ts"), needs=("node",)),
     Check("bridge", (BRIDGE,), ("npm", "test"), ("tools/pi-subagent-bridge/",), cwd="tools/pi-subagent-bridge", tmpdir=True, needs=("npm",)),
     Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),

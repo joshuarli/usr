@@ -384,3 +384,4 @@ args = ["mcp"]
 [mcp_servers.codex-intercom]
 command = "codex-intercom-mcp"
 args = []
+env_vars = ["AGENT_INTERCOM_REMOTE_ENDPOINT", "AGENT_INTERCOM_ACCESS_CREDENTIAL_PATH"]

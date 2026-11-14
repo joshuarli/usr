@@ -20,6 +20,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
+| Tailnet Intercom coordinators | [docs/intercom-tailnet.md](docs/intercom-tailnet.md) |
 | Pi build migration plan | [docs/CAMPAIGN-PI-BUILD.md](docs/CAMPAIGN-PI-BUILD.md) |
 | macOS preference management | [docs/macos-preferences.md](docs/macos-preferences.md) |
 | Linux CPU power policy | [docs/power-policy.md](docs/power-policy.md) |

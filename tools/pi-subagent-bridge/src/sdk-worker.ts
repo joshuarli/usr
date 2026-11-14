@@ -7,6 +7,7 @@ import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, u
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { MUSE_AGENT_NAMES, isMuseTier } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
+import { stripIntercomEnvironment } from "./worker-env.ts"
 
 import { assertTierProfiles, tierGuardPath } from "./tier-profile.ts"
 import {
@@ -80,6 +81,8 @@ function drainSteering(controlPath: string, receiptPath: string, offset: number,
 }
 
 async function run(job: Job, started: (admission: Admission) => void, dispatching: () => void): Promise<Result> {
+  stripIntercomEnvironment(process.env)
+  process.env.USR_SCOPED_WORKER = "1"
   // Children inherit a no-package-network environment even when the worktree
   // contains an npm/git Pi package declaration.
   process.env.PI_OFFLINE = "1"

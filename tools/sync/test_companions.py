@@ -75,6 +75,29 @@ def companion_tgz(name: str, version: str) -> bytes:
     return buffer.getvalue()
 
 
+class CompanionPinSelectionTests(unittest.TestCase):
+    def test_reviewed_absolute_override_selects_all_companions_with_its_runtime(self):
+        with tempfile.TemporaryDirectory(prefix="usr-companion-pin-") as directory:
+            override = Path(directory) / "reviewed.json"
+            pin = json.loads(pi_release.PIN.read_text())
+            pin["builder_revision"] = "b" * 40
+            pin["companions"]["agent-intercom-codex"]["sha256"] = "c" * 64
+            override.write_text(json.dumps(pin))
+            selected = companions.load_pin_for_sync({"USR_PI_RUNTIME_PIN": str(override)})
+            self.assertEqual(selected, pin)
+            self.assertNotEqual(selected["builder_revision"], pi_release.load_pin()["builder_revision"])
+
+    def test_missing_explicit_override_does_not_fall_back(self):
+        with tempfile.TemporaryDirectory(prefix="usr-companion-pin-") as directory:
+            with self.assertRaisesRegex(pi_offline.OfflinePiError, "cannot read Pi release pin"):
+                companions.load_pin_for_sync({"USR_PI_RUNTIME_PIN": str(Path(directory) / "missing.json")})
+
+    def test_relative_override_is_rejected_before_any_pin_read(self):
+        with patch.object(pi_release, "load_pin", side_effect=AssertionError("must reject before reading")):
+            with self.assertRaisesRegex(ValueError, "USR_PI_RUNTIME_PIN must be absolute"):
+                companions.load_pin_for_sync({"USR_PI_RUNTIME_PIN": "relative.json"})
+
+
 class CompanionFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="usr-companions-")

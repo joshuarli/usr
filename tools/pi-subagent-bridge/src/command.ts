@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto"
 
 import type { LaunchRequest } from "./launch.ts"
 import { isBannedModel } from "./policy.ts"
+import { workerEnvironment } from "./worker-env.ts"
 export { COMMAND_MODEL, COMMAND_EMBER_MODEL, type Effort } from "./policy.ts"
 export type CommandRun = { pid: number; output: string; errors: string; started_at: string; proc_start?: string | null }
 export type CommandResult = {
@@ -40,6 +41,7 @@ export function startCommand(request: LaunchRequest): CommandRun {
   try {
     const child = spawn("cmd", args, {
       cwd: directory, detached: true,
+      env: workerEnvironment(),
       stdio: ["ignore", stdout, stderr],
     })
     const pid = child.pid

@@ -5,12 +5,13 @@ import { appendFileSync, closeSync, openSync } from "node:fs"
 import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest, WriteAccess } from "./launch.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
+import { workerEnvironment } from "./worker-env.ts"
 
 const children = new Map<number, ChildProcess>()
 
 export function antigravityAvailable(pin: CliPin): boolean {
   try {
-    const check = spawnSync("agy", ["models"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] })
+    const check = spawnSync("agy", ["models"], { encoding: "utf8", timeout: 5000, env: workerEnvironment(), stdio: ["ignore", "pipe", "pipe"] })
     return check.status === 0 && check.stdout.split("\n").some(line => line.trim().split(/\s+/)[0] === pin.model)
   } catch { return false }
 }
@@ -30,7 +31,7 @@ export function startAntigravity(request: LaunchRequest<WriteAccess>): CommandRu
     ...(resume ? ["--conversation", resume] : []),
   ]
   try {
-    const child = spawn("agy", args, { cwd: directory, detached: true, stdio: ["ignore", stdout, stderr] })
+    const child = spawn("agy", args, { cwd: directory, env: workerEnvironment(), detached: true, stdio: ["ignore", stdout, stderr] })
     const pid = child.pid
     child.on("error", (error: Error) => {
       if (pid !== undefined) children.delete(pid)

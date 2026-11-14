@@ -468,14 +468,17 @@ def verify_absent_opencode(env: dict[str, str]) -> None:
         die(f"{target} still registers the intercom companion plugin")
 
 
-def load_pin_for_sync() -> dict:
-    pin = pi_release.load_pin()
+def load_pin_for_sync(env: dict[str, str]) -> dict:
+    override = env.get("USR_PI_RUNTIME_PIN")
+    if override and not Path(override).is_absolute():
+        die("USR_PI_RUNTIME_PIN must be absolute")
+    pin = pi_release.load_pin(Path(override)) if override else pi_release.load_pin()
     pi_release.companions(pin)
     return pin
 
 
 def command_install(env: dict) -> int:
-    pin = load_pin_for_sync()
+    pin = load_pin_for_sync(env)
     root = prefix(env)
     root.mkdir(parents=True, exist_ok=True)
     cache = pi_offline.cache_dir(home_of(env), env)
@@ -489,7 +492,7 @@ def command_install(env: dict) -> int:
 
 
 def command_check(env: dict) -> int:
-    pin = load_pin_for_sync()
+    pin = load_pin_for_sync(env)
     root = prefix(env)
     for name in COMPANIONS:
         destination = root / name
@@ -501,7 +504,7 @@ def command_check(env: dict) -> int:
 
 
 def command_plan(env: dict) -> int:
-    pin = load_pin_for_sync()
+    pin = load_pin_for_sync(env)
     root = prefix(env)
     for name in COMPANIONS:
         status = install_status(root / name, pin, name)

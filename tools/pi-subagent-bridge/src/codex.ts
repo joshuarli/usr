@@ -6,10 +6,11 @@ import { workerAlive, processStartTime, type CommandResult, type CommandRun } fr
 import type { LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
 import { isBannedModel } from "./policy.ts"
+import { workerEnvironment } from "./worker-env.ts"
 const children = new Map<number, ChildProcess>()
 export function codexAvailable(): boolean {
   try {
-    const env = { ...process.env }
+    const env = workerEnvironment()
     delete env.OPENAI_API_KEY
     delete env.CODEX_API_KEY
     const result = spawnSync("codex", ["login", "status"], { encoding: "utf8", timeout: 5000, env, stdio: ["ignore", "pipe", "pipe"] })
@@ -30,7 +31,7 @@ export function startCodex(request: LaunchRequest): CommandRun {
       "-c", `mcp_servers.bridge_scout.command=${JSON.stringify(process.execPath)}`,
       "-c", `mcp_servers.bridge_scout.args=${JSON.stringify(["--experimental-strip-types", fileURLToPath(new URL("./codex-scout.ts", import.meta.url))])}`] : []),
     ...(resume ? ["resume", resume, text] : [text])]
-  const env = { ...process.env }
+  const env = workerEnvironment()
   delete env.OPENAI_API_KEY
   delete env.CODEX_API_KEY
   try {

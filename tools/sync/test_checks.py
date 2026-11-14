@@ -102,6 +102,7 @@ class SuiteAndDocsTests(unittest.TestCase):
             "python3 -I host/macos/sync-test.py",
             "python3 -I tools/sync/claude-worker-test.py",
             "python3 -I tools/sync/pi-worker-test.py",
+            'TMPDIR="$PWD/.work/tmp" python3 -I tools/sync/test_companions.py',
             "python3 -I tools/sync/test_dag.py",
             "python3 -I tools/sync/test_main.py",
             "python3 -I tools/sync/test_pi_extensions.py",

@@ -11,6 +11,7 @@ import { readStateDir, stateDir } from "./git.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
+import { workerEnvironment } from "./worker-env.ts"
 
 type Result = {
   state: "succeeded" | "failed" | "cancelled" | "unknown_or_interrupted"
@@ -94,7 +95,7 @@ function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: 
   try {
     const child = spawn(process.execPath, ["--experimental-strip-types", worker, jobPath], {
       cwd: s.cwd, stdio: ["ignore", "ignore", fd],
-      env: { ...process.env, PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_SUBAGENT_MAX_DEPTH: String(MAX_SUBAGENT_DEPTH) },
+      env: { ...workerEnvironment(), PI_OFFLINE: "1", PI_SKIP_VERSION_CHECK: "1", PI_SUBAGENT_MAX_DEPTH: String(MAX_SUBAGENT_DEPTH) },
     })
     const pid = child.pid
     child.on("error", (error) => {
