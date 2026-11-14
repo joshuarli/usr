@@ -50,7 +50,7 @@ test("MCP input schemas are derived from the shared field list", () => {
   assert.deepEqual(start.required, ["cwd", "title", "tier", "scope", "brief"])
   assert.equal(start.additionalProperties, false)
   assert.deepEqual(start.properties.scope, SCOPE_SCHEMA)
-  assert.deepEqual(start.properties.tier, { type: "string", enum: TIERS })
+  assert.deepEqual(start.properties.tier, { type: "string", minLength: 1, maxLength: 8, enum: TIERS })
   assert.match(COMMANDS.start.description, /scout: codex then command-code then pi; mechanic: .*; worker: codex then command-code then pi then pi; expert: antigravity, no fallback\)/)
   assert.deepEqual(toolSchema("steer").required, ["cwd", "session_id", "note"])
   for (const name of COMMAND_NAMES) {
@@ -71,4 +71,16 @@ test("CLI arguments become the same named arguments, reading file-valued ones", 
   for (const rest of [[], ["/w"], ["/w", "scout", "extra"], ["", "scout"]])
     assert.throws(() => cliArguments("model_check", rest, read), /^Error: usage: pi-subagent-bridge model-check CWD TIER$/)
   assert.throws(() => cliArguments("start", ["/w", "t", "worker", "missing.json", "brief.txt"], read), /no such file/)
+})
+
+test("string field bounds agree between schema and decoder", () => {
+  const sample = { cwd: "/w", title: "t", tier: "worker", scope, brief: "b", session_id, feedback: "f", note: "n" }
+  for (const [name, field, max] of [["start", "cwd", 32000], ["model_check", "tier", 8], ["start", "title", 100], ["start", "brief", 32000], ["status", "session_id", 64], ["resume", "feedback", 32000], ["steer", "note", 32000]] as const) {
+    const args = Object.fromEntries(toolSchema(name).required.map(key => [key, sample[key]]))
+    const schema = toolSchema(name).properties[field] as { minLength?: number; maxLength?: number }
+    assert.throws(() => decodeCommand(name, { ...args, [field]: "" }), field)
+    assert.throws(() => decodeCommand(name, { ...args, [field]: "x".repeat(max + 1) }), field)
+    assert.equal(schema.minLength, 1, field)
+    assert.equal(schema.maxLength, max, field)
+  }
 })

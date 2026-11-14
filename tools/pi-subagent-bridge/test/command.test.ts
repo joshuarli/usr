@@ -4,7 +4,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSy
 import { spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { COMMAND_EMBER_MODEL, COMMAND_MODEL, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
+import { COMMAND_EMBER_MODEL, COMMAND_MODEL, cancelCommand, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
+import { codexResult } from "../src/codex.ts"
+import { antigravityResult } from "../src/antigravity.ts"
+import { ANTIGRAVITY_PIN } from "../src/policy.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -153,6 +156,48 @@ test("a terminal receipt from a still-live Command Code process is not terminal 
     assert.equal(commandResult({ ...run, proc_start: "0" }).state, "failed")
   } finally {
     child.kill("SIGKILL")
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("cancellation terminates the entire Command Code process group", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-cancel-")))
+  const bin = join(root, "bin"), logs = join(root, "logs")
+  mkdirSync(bin); mkdirSync(logs)
+  const oldPath = process.env.PATH
+  let pid = 0
+  try {
+    writeFileSync(join(bin, "cmd"), "#!/bin/sh\nsleep 30 &\nsleep 30\n", { mode: 0o755 })
+    process.env.PATH = bin + ":" + oldPath
+    const run = startCommand(request(root, logs)); pid = run.pid
+    await delay(100)
+    assert.equal(cancelCommand(run), true)
+    let alive = true
+    for (let i = 0; i < 150 && alive; i++) {
+      await delay(20)
+      try { process.kill(-pid, 0) } catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false; else throw error }
+    }
+    assert.equal(alive, false, "process group remains alive after cancellation")
+    assert.notEqual(commandResult(run).state, "running")
+  } finally {
+    if (pid) { try { process.kill(-pid, "SIGKILL") } catch {} }
+    process.env.PATH = oldPath
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("all observers reject a different identity even when its detached group is alive", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-reused-group-")))
+  const child = spawn("sh", ["-c", "sleep 30 & wait"], { detached: true, stdio: "ignore" })
+  try {
+    await delay(100)
+    const run = { pid: child.pid!, output: join(root, "out"), errors: join(root, "err"), started_at: "now", proc_start: "0" }
+    assert.ok(processStartTime(run.pid))
+    assert.deepEqual([commandResult(run).state, codexResult(run).state, antigravityResult(run, ANTIGRAVITY_PIN).state],
+      ["interrupted", "interrupted", "interrupted"])
+  } finally {
+    try { process.kill(-child.pid!, "SIGKILL") } catch {}
+    await new Promise<void>(resolve => child.exitCode !== null || child.signalCode !== null ? resolve() : child.once("exit", () => resolve()))
     rmSync(root, { recursive: true, force: true })
   }
 })

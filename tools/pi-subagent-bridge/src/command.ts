@@ -65,9 +65,13 @@ export function groupAlive(pid: number): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH" }
 }
 
+export function workerAlive(run: CommandRun, owned: boolean): boolean {
+  const identity = owned ? "same" : processIdentity(run)
+  return identity === "same" || identity === "unknown" || (identity === "gone" && groupAlive(run.pid))
+}
+
 export function commandResult(run: CommandRun): { state: string; result: CommandResult | null; stderr: string | null } {
-  const identity = children.has(run.pid) ? "same" : processIdentity(run)
-  if (identity === "same" || identity === "unknown" || groupAlive(run.pid)) return { state: "running", result: null, stderr: null }
+  if (workerAlive(run, children.has(run.pid))) return { state: "running", result: null, stderr: null }
   let tail = ""
   try {
     const fs = statSync(run.output)
@@ -148,5 +152,6 @@ function processAlive(pid: number): boolean {
 export function cancelCommand(run: CommandRun): boolean {
   const child = children.get(run.pid)
   if (!child) return false
-  return child.kill("SIGTERM")
+  try { process.kill(-run.pid, "SIGTERM"); return true }
+  catch { return false }
 }

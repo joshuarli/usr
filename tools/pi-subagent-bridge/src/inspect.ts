@@ -20,6 +20,20 @@ const EVENT_DESCRIPTION_CHARS = 160
 
 type OrUnknown<T> = T | "unknown"
 
+type DetailedState = "running" | "queued" | "idle_or_queued" | "succeeded" | "failed" | "turn_limit" | "cancelled" | "canceled" | "interrupted" | "unknown_or_interrupted" | "blocked_partial_work" | "blocked_admission" | "blocked_transition" | "blocked_fallback" | "unknown"
+export type Attention = "active" | "finished" | "gone" | "needs_attention" | "unknown"
+function classifyState(state: string): Attention {
+  const detailed = state as DetailedState
+  switch (detailed) {
+    case "running": case "queued": case "idle_or_queued": return "active"
+    case "succeeded": case "failed": case "turn_limit": case "cancelled": case "canceled": return "finished"
+    case "interrupted": case "unknown_or_interrupted": return "gone"
+    case "blocked_partial_work": case "blocked_admission": case "blocked_transition": case "blocked_fallback": return "needs_attention"
+    case "unknown": return "unknown"
+    default: { const exhaustive: never = detailed; void exhaustive; return "unknown" }
+  }
+}
+
 export type RunnerStatus = { state: string; result: CommandResult | null; stderr: string | null }
 export type InspectionDeps = {
   api: OpenCodePort
@@ -70,6 +84,7 @@ export type Snapshot = {
   model: OrUnknown<string | ModelRef>
   effort: OrUnknown<string>
   execution_state: string
+  attention: Attention
   last_assistant_text: OrUnknown<string | null>
   error: unknown
   usage: unknown
@@ -293,7 +308,7 @@ export function toSnapshot(i: Inspection): Snapshot {
     observed_at: i.observed_at, id: s.id, title: s.title, tier: s.tier, worktree: s.cwd,
     base_revision: s.scope.base_revision, head: read?.head ?? "unknown", backend: backendOf(s),
     model: route.model, effort: route.effort,
-    execution_state: i.state, last_assistant_text: i.observation.final_text?.slice(-5000) ?? null,
+    execution_state: i.state, attention: classifyState(i.state), last_assistant_text: i.observation.final_text?.slice(-5000) ?? null,
     error: i.observation.error, usage: i.observation.usage,
     pid: i.observation.pid ?? "unknown", last_activity: activity === null ? "unknown" : new Date(activity).toISOString(),
     last_event: i.observation.last_event,
@@ -313,7 +328,7 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
   return {
     observed_at: new Date().toISOString(), id, title: text(record.title), tier: "unknown", worktree: text(record.cwd),
     base_revision: "unknown", head: "unknown", backend: text(record.backend), model: "unknown", effort: "unknown",
-    execution_state: "unknown", last_assistant_text: "unknown", error: reason, usage: "unknown", pid: "unknown",
+    execution_state: "unknown", attention: "unknown", last_assistant_text: "unknown", error: reason, usage: "unknown", pid: "unknown",
     last_activity: "unknown", last_event: "unknown", changed_paths: "unknown", out_of_scope_paths: "unknown",
     head_unchanged: "unknown", acceptance_claim: "unknown", continuations: "unknown",
     continuation_limit: TURN_LIMIT_CONTINUATIONS, steers: "unknown", steer_limit: STEER_LIMIT,

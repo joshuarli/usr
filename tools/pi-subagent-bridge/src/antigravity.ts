@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs"
-import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
+import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest, WriteAccess } from "./launch.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
 
@@ -82,8 +82,7 @@ export function antigravitySession(run: CommandRun): string | null {
 }
 
 export function antigravityResult(run: CommandRun, pin: CliPin): { state: string; result: CommandResult | null; stderr: string | null } {
-  const identity = children.has(run.pid) ? "same" : processIdentity(run)
-  if (identity === "same" || identity === "unknown" || groupAlive(run.pid))
+  if (workerAlive(run, children.has(run.pid)))
     return { state: "running", result: null, stderr: null }
   const stream = events(run)
   const init = stream.find(value => value.event === "init")

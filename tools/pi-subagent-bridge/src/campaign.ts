@@ -8,7 +8,6 @@ import { systemClock, type Clock } from "./watch.ts"
 
 export const CAMPAIGN_POLL_MS = 10_000
 export const EXIT_TICK = 2
-const REPORTED = ["succeeded", "failed", "turn_limit", "cancelled", "interrupted", "unknown_or_interrupted"]
 const USAGE = [
   "usage: pi-subagent-bridge campaign wait [--timeout DURATION] [ROOT...]",
   "       pi-subagent-bridge campaign ack ID...",
@@ -108,7 +107,7 @@ async function wait(arguments_: string[], context: CampaignContext): Promise<num
   for (;;) {
     const acked = readAcked(context.env)
     const pending = (await discover(directories, context.deps)).filter(({ snapshot }) => !acked.has(snapshot.id))
-    const finished = pending.filter(({ snapshot }) => REPORTED.includes(snapshot.execution_state))
+    const finished = pending.filter(({ snapshot }) => snapshot.attention !== "active")
     if (finished.length) {
       for (const { snapshot } of finished)
         context.stdout([snapshot.id, snapshot.execution_state, snapshot.worktree, cell(snapshot.title)].join(" ") + "\n")
@@ -118,7 +117,7 @@ async function wait(arguments_: string[], context: CampaignContext): Promise<num
     if (deadline !== undefined) {
       const remaining = deadline - clock.now()
       if (remaining <= 0) {
-        context.stdout("tick: " + pending.length + " running\n")
+        context.stdout("tick: " + pending.filter(({ snapshot }) => snapshot.attention === "active").length + " running\n")
         return EXIT_TICK
       }
       nap = Math.min(pollMs, remaining)
