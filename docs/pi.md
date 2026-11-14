@@ -15,7 +15,7 @@ Pi 1.5.0, its SDK, `pi-subagents`, the Muse provider and `agent-intercom-pi` are
 
 Pi setup and bridge registration do not invoke npm, npx, or `pi install/update`. `/pi-update` is the explicit maintainer update workflow.
 
-Pi's launcher loads `pi-subagents` and `agent-intercom-pi` from the installed local directory. Intercom's broker launches natively (compiled JavaScript under `headless-usr`, the bundled TypeScript loader under `full`), with automatic model wakeups disabled by default (`inboundTrigger: "never"`). Interactive Pi can communicate with compatible peers; Claude/Codex/OpenCode companion adapters are not installed by this Pi-only runtime. Scoped SDK children intentionally do not inherit intercom capabilities.
+Pi's launcher loads `pi-subagents` and `agent-intercom-pi` from the installed local directory. Intercom's broker launches natively (compiled JavaScript under `headless-usr`, the bundled TypeScript loader under `full`), with automatic model wakeups disabled by default (`inboundTrigger: "never"`). Interactive Pi can communicate with compatible peers; the Claude/Codex/OpenCode intercom companions are installed by `sh sync` alongside this runtime (see [Intercom companions](#intercom-companions-claude-codex-opencode)). Scoped SDK children intentionally do not inherit intercom capabilities.
 
 The committed pin selects the `headless-usr` profile. To select another reviewed release (for example the `full` profile or a newer headless build), set `USR_PI_RUNTIME_PIN` to the absolute path of its pin file before running `sh sync tools pi`; a reviewed `full` pin can be taken from Git history. A missing selected pin fails installation without falling back. Both profiles share one runtime selection and the same bridge dependency link. Reverting a pin reuses its retained verified generation without downloading it.
 
@@ -29,6 +29,16 @@ The first-party bridge, harness configuration, the consumer pin, installation an
 
 **Scope:** unrelated `usr` tools may still install or update themselves with npm. This guarantee is about the Pi executable, SDK, bridge dependencies, and Pi extension setup, not every tool in full `sh sync`.
 
+## Intercom companions (Claude, Codex, OpenCode)
+
+The same pinned [`pi-build`](https://github.com/joshuarli/pi-build) release carries the Claude, Codex and OpenCode intercom adapters (`agent-intercom-claude`, `agent-intercom-codex`, `agent-intercom-opencode` 0.10.0) as separate `.tgz` archives beside the Pi runtime. `sh sync` installs them into `${XDG_DATA_HOME:-$HOME/.local/share}/agent-intercom/<name>` and verifies the pinned SHA-256, size, provenance record and file inventory exactly like the runtime; an unchanged valid installation makes no network request. Companion registration is owned-entry-only:
+
+- **Claude Code**: `claude-intercom` is registered in `~/.claude.json` as `{command: node, args: [.../agent-intercom-claude/dist/claude-server.mjs]}`. A foreign entry under that name is never adopted, overwritten or removed.
+- **Codex**: the tracked `[mcp_servers.codex-intercom]` entry in `~/.codex/config.toml` invokes the `codex-intercom-mcp` shim by name, mirroring the Pi bridge entry.
+- **OpenCode**: the server plugin (`dist/plugin.mjs`) and the separate TUI plugin (`dist/tui.mjs`) are appended to `plugin` in `~/.config/opencode/opencode.json` and `~/.config/opencode/tui.json`; only the exact installed absolute paths are ever removed.
+
+Shims for the companions' command-line tools (`claude-intercom-mcp`, `claude-intercom-worker`, `cci`, `ccim`, `codex-intercom-mcp`, `codex-intercom-bridge`, `coi`) live in `~/.local/bin`. The OpenCode companion vendors `@opencode-ai/plugin`; installing any companion never invokes npm. The three adapters share one broker, spawned on demand by whichever harness needs it. Scoped SDK children intentionally do not inherit intercom capabilities. `sh sync uninstall` removes owned registrations, shims and install trees. Live cross-harness round trips and bounded supervisor consultation are tracked as separate feature work.
+
 ## Pinned models
 
 The generated [bridge model table](../tools/pi-subagent-bridge/README.md) lists exact models, efforts and ordered fallbacks. `make policy` exports the same approved policy as JSON without live account checks.
@@ -41,7 +51,7 @@ Pi parent session defaults remain in its tracked settings. The generated subagen
 
 ## Install
 
-Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are symlinked from the SHA-256-verified local Pi runtime into `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude and Pi; Codex uses its tracked MCP entry. OpenCode never registers the bridge (see `orchestrate`); sync removes an owned OpenCode registration. Sync migrates recognized legacy `usr-opencode-worker` registrations on the Claude and Pi paths without disturbing unrelated MCP connections.
+Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are symlinked from the SHA-256-verified local Pi runtime into `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude and Pi; Codex uses its tracked MCP entry. The intercom companions install alongside and register Claude (`~/.claude.json`), Codex (tracked `codex-intercom` entry) and OpenCode (plugins). OpenCode never registers the bridge (see `orchestrate`); sync removes an owned OpenCode registration. Sync migrates recognized legacy `usr-opencode-worker` registrations on the Claude and Pi paths without disturbing unrelated MCP connections.
 
 Pi authenticates only to OpenCode Go using the existing OpenCode login. In the **untracked and private** `~/.pi/agent/auth.json`:
 

@@ -35,6 +35,14 @@ class Artifact(TypedDict):
     bytes: int
 
 
+class CompanionEntry(TypedDict):
+    archive: str
+    version: str
+    sha256: str
+    bytes: int
+    source_sha: str
+
+
 class Pin(TypedDict):
     schema: int
     release_url: str
@@ -43,20 +51,53 @@ class Pin(TypedDict):
     version: str
     provenance_sha256: str
     targets: dict[str, Artifact]
+    companions: dict[str, CompanionEntry]
+
+
+COMPANIONS = ("agent-intercom-claude", "agent-intercom-codex", "agent-intercom-opencode")
+
+
+def _is_artifact(value: object) -> bool:
+    return (isinstance(value, dict)
+            and isinstance(value.get("archive"), str) and isinstance(value.get("sha256"), str)
+            and type(value.get("bytes")) is int)
+
+
+def _is_companion_entry(value: object) -> TypeGuard[CompanionEntry]:
+    if not isinstance(value, dict):
+        return False
+    return (isinstance(value.get("archive"), str) and isinstance(value.get("version"), str)
+            and HEX.fullmatch(value.get("sha256", "")) is not None
+            and isinstance(value.get("source_sha"), str)
+            and type(value.get("bytes")) is int and value["bytes"] > 0)
 
 
 def _is_pin(value: object) -> TypeGuard[Pin]:
     if not isinstance(value, dict):
         return False
     targets = value.get("targets")
+    companions = value.get("companions")
+    if companions is not None:
+        if not isinstance(companions, dict):
+            return False
+        if set(companions) != set(COMPANIONS):
+            return False
+        if not all(_is_companion_entry(entry) for entry in companions.values()):
+            return False
     return (type(value.get("schema")) is int
             and all(isinstance(value.get(key), str) for key in (
                 "release_url", "builder_revision", "profile", "version", "provenance_sha256"))
             and isinstance(targets, dict)
-            and all(isinstance(target, str) and isinstance(entry, dict)
-                    and isinstance(entry.get("archive"), str) and isinstance(entry.get("sha256"), str)
-                    and type(entry.get("bytes")) is int
+            and all(isinstance(target, str) and _is_artifact(entry)
                     for target, entry in targets.items()))
+
+
+def companions(pin: Pin) -> dict[str, CompanionEntry]:
+    try:
+        entries = pin["companions"]
+    except KeyError as exc:
+        raise pi_offline.OfflinePiError("Pi release pin does not carry companion archives") from exc
+    return cast(dict[str, CompanionEntry], {name: dict(entries[name]) for name in COMPANIONS})
 
 
 def load_pin(path: Path = PIN) -> Pin:

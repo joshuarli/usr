@@ -55,6 +55,7 @@ DOCTOR = Area("`sync doctor` and default tool inventory")
 GUARD = Area("Pi Git tool-call guard")
 PI_RELEASE = Area("Pi release pin, installer, launcher, or SDK closure")
 PI_BRIDGE_INSTALL = Area("Pi bridge installation or MCP registration")
+COMPANIONS = Area("Intercom companion installation or MCP/plugin registration")
 BRIDGE = Area("`tools/pi-subagent-bridge`", "run `./dev-install.sh` once first")
 PI_PROFILE = Area("Pi profile and extensions")
 DAG = Area("`sync` DAG/bootstrap")
@@ -111,6 +112,9 @@ REGISTRY: tuple[Check, ...] = (
     Check("claude-worker", (PI_BRIDGE_INSTALL,), py("tools/sync/claude-worker-test.py"), ("tools/sync/claude-worker.py", "tools/sync/claude-worker-test.py")),
     Check("pi-worker", (PI_BRIDGE_INSTALL,), py("tools/sync/pi-worker-test.py"), ("tools/sync/pi-worker.py", "tools/sync/pi-worker-test.py")),
     Check("opencode-worker", (PI_BRIDGE_INSTALL,), py("tools/sync/opencode-worker-test.py"), ("tools/sync/opencode-worker.py", "tools/sync/opencode-worker-test.py")),
+    Check("companions", (COMPANIONS,), py("tools/sync/test_companions.py"),
+          ("tools/sync/companions.py", "tools/sync/test_companions.py", "tools/sync/pi_release.py",
+           "tools/sync/pi_offline.py", "tools/pi/runtime.pin.json"), tmpdir=True),
     Check("bridge", (BRIDGE,), ("npm", "test"), ("tools/pi-subagent-bridge/",), cwd="tools/pi-subagent-bridge", tmpdir=True, needs=("npm",)),
     Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),
@@ -179,7 +183,7 @@ REGISTRY: tuple[Check, ...] = (
 )
 
 SUITE: tuple[str, ...] = (
-    "macos-sync", "claude-worker", "pi-worker", "sync-dag", "sync-main", "pi-extensions", "sync-links",
+    "macos-sync", "claude-worker", "pi-worker", "companions", "sync-dag", "sync-main", "pi-extensions", "sync-links",
     "uninstall", "kache", "installer", "ffmpeg-runtime", "bootstrap", "sync-integration", "doctor",
     "pi-git-guard", "pinact", "pinact-yaml", "pinact-lint-rules", "pinact-expressions", "pinact-security",
     "pinact-fix", "pinact-pins", "pi-profile", "policy-generated", "policy-generator", "orchestrate", "sbx",

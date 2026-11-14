@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = ROOT / "tools/sync/claude-worker.py"
 PI_BRIDGE = ROOT / "tools/sync/pi-worker.py"
 OPENCODE_BRIDGE = ROOT / "tools/sync/opencode-worker.py"
+COMPANIONS = ROOT / "tools/sync/companions.py"
 
 NODE_RUNTIME_TOOLS = frozenset({"cmd", "pnpm", "cf", "pi", "dsh"})
 TOOL_EXECUTABLES = {
@@ -176,6 +177,15 @@ def opencode_bridge_apply(ctx: Context) -> None:
     required(command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "remove"), "OpenCode MCP removal")
 
 
+def companions_status(ctx: Context) -> Probe:
+    r = command(ctx, sys.executable, "-I", str(COMPANIONS), "check", capture=True)
+    return Probe(r.returncode == 0, "companions installed" if r.returncode == 0 else (r.stderr.strip() or "companions missing"))
+
+
+def companions_apply(ctx: Context) -> None:
+    required(command(ctx, sys.executable, "-I", str(COMPANIONS), "install"), "Intercom companion install")
+
+
 def mac_packages_status(ctx: Context) -> Probe:
     brew = next((str(path) for path in (Path("/opt/homebrew/bin/brew"), Path("/usr/local/bin/brew")) if path.is_file()), None) or shutil.which("brew")
     if brew is None:
@@ -320,6 +330,9 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
     nodes.append(Task("opencode-mcp", ("links",),
                       lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
                       lambda: opencode_bridge_status(ctx), frozenset({"opencode-config"})))
+    nodes.append(Task("companions-mcp", ("links", "tool:nodejs"),
+                      lambda: companions_status(ctx), lambda: companions_apply(ctx),
+                      lambda: companions_status(ctx), frozenset({"claude-config", "opencode-config", "pi-sdk-install"})))
     deps = ("links",)
     if ctx.platform == "darwin":
         deps = ("links", "host:mac-packages")
@@ -334,7 +347,7 @@ def default_goals(ctx: Context) -> list[str]:
     if ctx.platform == "darwin":
         goals.append("host:mac-packages")
     if ctx.profile != "server":
-        goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp"])
+        goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp", "companions-mcp"])
     if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
         goals.append("kache")
     return goals
@@ -385,7 +398,7 @@ def main(argv: list[str]) -> int:
     if command_name == "links":
         selected = full.select(["links"])
     elif command_name == "bridge":
-        selected = full.select(["claude-mcp", "pi-mcp", "opencode-mcp"])
+        selected = full.select(["claude-mcp", "pi-mcp", "opencode-mcp", "companions-mcp"])
     elif command_name == "tools":
         selected = full.select(["tool:" + name for name in chosen])
     elif command_name in {"apply", "plan", "doctor"}:

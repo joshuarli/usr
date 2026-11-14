@@ -19,6 +19,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Pi Git tool-call guard | `node dotfiles/pi-git-guard-test.mjs` (no Pi login or network) |
 | Pi release pin, installer, launcher, or SDK closure | `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py` and `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_offline.py` |
 | Pi bridge installation or MCP registration | `python3 -I tools/pi/test_sync_bridge_offline.py` (in a disposable checkout), `python3 -I tools/sync/claude-worker-test.py`, `python3 -I tools/sync/pi-worker-test.py`, and `python3 -I tools/sync/opencode-worker-test.py` |
+| Intercom companion installation or MCP/plugin registration | `TMPDIR="$PWD/.work/tmp" python3 -I tools/sync/test_companions.py` |
 | `tools/pi-subagent-bridge` | `(export TMPDIR="$PWD/.work/tmp"; cd tools/pi-subagent-bridge && npm test)`; run `./dev-install.sh` once first |
 | Pi profile and extensions | `python3 -I dotfiles/pi-test.py` and `python3 -I tools/sync/test_pi_extensions.py` |
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |

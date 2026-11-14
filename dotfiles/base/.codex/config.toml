@@ -380,3 +380,7 @@ enabled = false
 [mcp_servers.pi-subagent-bridge]
 command = "pi-subagent-bridge"
 args = ["mcp"]
+
+[mcp_servers.codex-intercom]
+command = "codex-intercom-mcp"
+args = []

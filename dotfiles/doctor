@@ -90,6 +90,19 @@ if [ -f "$target/.codex/config.toml" ]; then
     else
         problem 'Codex DeepSeek MCP bridge is missing from config.toml'
     fi
+    if grep -q '^\[mcp_servers.codex-intercom\]' "$target/.codex/config.toml"; then
+        ok 'Codex intercom is configured'
+    else
+        problem 'Codex intercom is missing from config.toml'
+    fi
+fi
+if [ -x "$target/.local/bin/codex-intercom-mcp" ] && [ -f "$root/tools/sync/companions.py" ]; then
+    if python3 -I "$root/tools/sync/companions.py" check > "$scratch/companions" 2>&1; then
+        ok 'Intercom companions are installed and registered'
+    else
+        problem 'Intercom companions are missing, modified or unregistered'
+        cat "$scratch/companions"
+    fi
 fi
 if [ -x "$target/.local/bin/pi" ] && [ -f "$root/tools/sync/pi-worker.py" ]; then
     if python3 -I "$root/tools/sync/pi-worker.py" check > "$scratch/pi-bridge" 2>&1; then

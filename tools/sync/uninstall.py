@@ -19,7 +19,7 @@ def uninstall(ctx: Context) -> None:
 
 
 def _uninstall_locked(ctx: Context) -> None:
-    from main import BRIDGE, OPENCODE_BRIDGE, PI_BRIDGE, command, required
+    from main import BRIDGE, COMPANIONS, OPENCODE_BRIDGE, PI_BRIDGE, command, required
 
     owner = ctx.state
     entries = read_manifest(owner)
@@ -48,6 +48,7 @@ def _uninstall_locked(ctx: Context) -> None:
     required(command(ctx, os.sys.executable, "-I", str(BRIDGE), "remove"), "Claude MCP removal")
     required(command(ctx, os.sys.executable, "-I", str(PI_BRIDGE), "remove"), "Pi MCP removal")
     required(command(ctx, os.sys.executable, "-I", str(OPENCODE_BRIDGE), "remove"), "OpenCode MCP removal")
+    required(command(ctx, os.sys.executable, "-I", str(COMPANIONS), "remove"), "companion removal")
     removed_directories: list[Path] = []
     directories = sorted((path for kind, path in inventory if kind == "D"), key=lambda p: len(p.parts))
     for path in directories:
