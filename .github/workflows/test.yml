@@ -27,7 +27,7 @@ jobs:
           PATH="$GITHUB_WORKSPACE/.work/ci-home/.local/bin:$PATH" HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" ./lint
 
   macos:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
