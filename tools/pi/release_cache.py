@@ -30,4 +30,28 @@ def seed(cache: Path) -> Path:
             os.link(archive, seeded)
         except OSError:
             shutil.copy2(archive, seeded)
+    seed_companions(cache, pin)
     return seeded
+
+
+def seed_companions(cache: Path, pin: dict) -> None:
+    try:
+        entries = pi_release.companions(pin)
+    except Exception:
+        return
+    import hashlib
+    import companions
+
+    companions.acquire(pin, MAINTAINER_CACHE)
+    key = hashlib.sha256(pin["provenance_sha256"].encode()).hexdigest()
+    names = [f"companions-{key}.json", f"companions-{key}.SHA256SUMS"]
+    names.extend(entries[name]["sha256"] + ".tgz" for name in pi_release.COMPANIONS)
+    for name in names:
+        source = MAINTAINER_CACHE / name
+        target = cache / name
+        if target.exists():
+            continue
+        try:
+            os.link(source, target)
+        except OSError:
+            shutil.copy2(source, target)
