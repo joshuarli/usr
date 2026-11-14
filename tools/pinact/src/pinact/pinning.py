@@ -264,8 +264,8 @@ def write_file(path: Path, original: str, content: str) -> None:
             os.unlink(temp)
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Pin GitHub Actions to immutable commits using git, without third-party packages.")
+def main(argv: list[str], *, primary: bool = False) -> int:
+    parser = argparse.ArgumentParser(description="Pin GitHub Actions to immutable commits using git, without third-party packages.", epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md" if primary else None, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="offline check; never writes or uses network")
     parser.add_argument("--refresh", action="store_true", help="re-resolve pinned version comments")
     parser.add_argument("--allow-branches", action="store_true", help="permit mutable branch refs")

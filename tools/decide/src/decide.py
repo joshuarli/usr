@@ -1282,7 +1282,8 @@ def build_parser():
         "  decide eval --live --max-calls 5 cases.jsonl\n"
         "\n"
         f"Full setup (cf login, optional REST credentials, budgets): {readme}\n"
-        f"and {setup}.",
+        f"and {setup}."
+        "\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--model", choices=tuple(MODELS), default="clef-flash", help="model to ask (default %(default)s)")

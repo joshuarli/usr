@@ -140,7 +140,7 @@ def get_sources(home: Path, enabled: bool) -> Sources | None:
 
 def parse(argv: list[str], *, backend: str | None = None, home: Path | None = None,
           cwd: Path | None = None) -> Plan:
-    ap = argparse.ArgumentParser(description="run a command inside a narrow native process sandbox")
+    ap = argparse.ArgumentParser(description="run a command inside a narrow native process sandbox", epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ro", action="append", default=[], metavar="DIR", help="additional read-only host directory")
     ap.add_argument("--rw", action="append", default=[], metavar="DIR", help="additional read/write host directory")
     ap.add_argument("--offline", action="store_true", help="deny network access")

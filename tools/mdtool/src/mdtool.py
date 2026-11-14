@@ -1941,7 +1941,8 @@ def build_parser():
                "  mdtool refs --json\n"
                "  mdtool consumers skills/mine/SKILL.md\n"
                "Exit status is 0 for no error findings, 1 for at least one, and 2 for a usage, root, or git failure. "
-               f"Warnings and notes never change it. Full docs: {Path(__file__).resolve().parents[1]/'README.md'}.",
+               f"Warnings and notes never change it. Full docs: {Path(__file__).resolve().parents[1]/'README.md'}."
+        "\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("command",choices=COMMANDS+ ("commands","selftest"),nargs="?",default="check",help="check (default): all checks; commands: print check names; selftest: embedded tests")

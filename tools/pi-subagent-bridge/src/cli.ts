@@ -48,6 +48,10 @@ async function runCampaign(rest: string[]): Promise<void> {
 
 async function main(args: string[]): Promise<void> {
   const [op, ...rest] = args
+  if (args.length === 1 && (op === "--help" || op === "-h")) {
+    process.stdout.write("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|inspect|watch|campaign}\n\n" + "Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md" + "\n")
+    return
+  }
   if (op === "policy") {
     if (rest.length) throw new Error("usage: pi-subagent-bridge policy")
     process.stdout.write(JSON.stringify(POLICY) + "\n")

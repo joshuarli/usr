@@ -20,4 +20,4 @@ def main(argv: list[str] | None = None) -> int:
         return lint_main(rest)
     if command == "fix":
         return fix_main(rest)
-    return pinning.main(rest)
+    return pinning.main(rest, primary=not argv or argv[0] not in ("pin", "lint", "fix"))

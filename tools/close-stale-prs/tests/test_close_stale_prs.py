@@ -323,5 +323,15 @@ class CliDeleteTests(unittest.TestCase):
             self.assertEqual(new_tip, ls_remote_tip(remote, "refs/heads/stale"))
 
 
+class OwnedHelpTests(unittest.TestCase):
+    def test_primary_help_footer(self):
+        import subprocess
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        result = subprocess.run([str(root / "dotfiles/base/.local/bin/close-stale-prs.py"), "--help"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.rstrip().endswith("Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"), result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -195,7 +195,7 @@ def run(args, path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Manage a Markdown TODO backlog')
+    parser = argparse.ArgumentParser(description='Manage a Markdown TODO backlog', epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest='command', required=True)
     listing = sub.add_parser('list')
     listing.add_argument('--priority')
