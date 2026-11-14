@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tests for the zsh shim: it execs the real zsh with unchanged arguments, and refuses to run a command when no zsh exists.
+# Tests for the zsh and bash shims: they exec the real shell with unchanged arguments, refuse to run a command when no shell exists, and keep the caller's PATH order.
 
 shim="${PWD}/darwin/.local/bin/zsh"
 nfailed=0
@@ -33,6 +33,23 @@ expect () {
 expect 'a real zsh receives the arguments unchanged' 0 'real-zsh [-c] [-l] [echo hi]' "$scratch/withzsh" -c -l 'echo hi'
 expect 'a command is refused when no zsh exists' 127 '' "$scratch/empty" -c 'echo ran'
 expect 'a login command is refused when no zsh exists' 127 '' "$scratch/empty" -lc 'echo ran'
+
+# The shared config must not move user directories ahead of a caller's PATH.
+mkdir -p "$scratch/home/.local/bin" "$scratch/first"
+for name in zsh bash; do
+    printf '#!/bin/sh\nprintf %%s "${PATH%%%%:*}"\n' > "$scratch/first/$name"
+    chmod +x "$scratch/first/$name"
+done
+managed=$(HOME="$scratch/home" PATH=/usr/bin:/bin sh -c '. "$1"; printf %s "$PATH"' sh "${PWD}/base/.config/sh/config.sh")
+for shell in "${PWD}/darwin/.local/bin/zsh" "${PWD}/base/.local/bin/bash"; do
+    out=$(HOME="$scratch/home" XDG_CONFIG_HOME="${PWD}/base/.config" PATH="$scratch/first:$managed" "$shell" -c : 2>/dev/null)
+    if [ "$out" = "$scratch/first" ]; then
+        printf 'ok: %s keeps the caller PATH order\n' "${shell##*/}"
+    else
+        printf 'FAIL: %s moved %s ahead of the caller PATH\n' "${shell##*/}" "$out"
+        nfailed=$((nfailed + 1))
+    fi
+done
 
 echo "testing finished."
 [ "$nfailed" -eq 0 ]

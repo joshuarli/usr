@@ -1,4 +1,17 @@
-export PATH="$HOME/.local/bin:/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$HOME/go/bin:$HOME/.cache/.bun/bin:/Applications/OrbStack.app/Contents/MacOS/xbin:/opt/homebrew/bin:$PATH"
+# Nested shells source this file too; prepending only missing directories
+# keeps a caller's PATH order (such as a pinned toolchain first) intact.
+_usr_path_prepend() {
+    for _usr_dir in "$@"; do
+        case ":$PATH:" in
+            *":$_usr_dir:"*) ;;
+            *) PATH="$_usr_dir:$PATH" ;;
+        esac
+    done
+    unset _usr_dir
+}
+_usr_path_prepend /opt/homebrew/bin /Applications/OrbStack.app/Contents/MacOS/xbin "$HOME/.cache/.bun/bin" "$HOME/go/bin" "$HOME/.cargo/bin" /opt/homebrew/opt/rustup/bin "$HOME/.local/bin" "$HOME/.local/share/sentry-devenv/bin" /opt/homebrew/share/google-cloud-sdk/bin
+unset -f _usr_path_prepend
+export PATH
 export EDITOR="$HOME/.local/bin/e"
 export PAGER="less"
 export LS_COLORS="su=00:sg=00:ca=00:or=40;31;01:"
@@ -12,5 +25,3 @@ export HOMEBREW_NO_ANALYTICS="1"
 export CARGO_NET_GIT_FETCH_WITH_CLI="true"
 export CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION="9001"
 export OPENCODE_DISABLE_FFF="1"
-export PATH="$HOME/.local/share/sentry-devenv/bin:$PATH"
-export PATH="/opt/homebrew/share/google-cloud-sdk/bin:$PATH"

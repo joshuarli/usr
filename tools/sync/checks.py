@@ -189,7 +189,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("pre-push", (HOOKS,), ("sh", "pre-push-test.sh"), ("dotfiles/base/.config/git/hooks/", "dotfiles/pre-push-test.sh"), cwd="dotfiles"),
     Check("worktree-remove", (HOOKS,), ("sh", "worktree-remove-test.sh"), ("dotfiles/base/.local/bin/worktree-remove", "dotfiles/worktree-remove-test.sh"), cwd="dotfiles"),
     Check("worktree-retire", (HOOKS,), py("dotfiles/worktree-retire-test.py"), ("dotfiles/base/.local/bin/worktree-retire", "dotfiles/worktree-retire-test.py")),
-    Check("zsh-shim", (ZSH,), ("sh", "zsh-shim-test.sh"), ("dotfiles/darwin/.local/bin/zsh", "dotfiles/zsh-shim-test.sh"), cwd="dotfiles"),
+    Check("zsh-shim", (ZSH,), ("sh", "zsh-shim-test.sh"), ("dotfiles/darwin/.local/bin/zsh", "dotfiles/base/.local/bin/bash", "dotfiles/base/.config/sh/config.sh", "dotfiles/zsh-shim-test.sh"), cwd="dotfiles"),
     Check("mdtool-selftest", (MDTOOL,), py("tools/mdtool/src/mdtool.py", "selftest"), ("tools/mdtool/", "dotfiles/base/.local/bin/mdtool")),
     Check("mdtool-suite", (MDTOOL,), ("sh", "tools/mdtool/tests/mdtool-test.sh"), ("tools/mdtool/src/", "tools/mdtool/tests/mdtool-test.sh", "dotfiles/base/.local/bin/mdtool")),
     Check("mdtool-hook-test", (MDTOOL,), ("sh", "{file}"), ("tools/mdtool/tests/*-test.sh",), per_file=True),
