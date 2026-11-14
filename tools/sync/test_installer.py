@@ -367,17 +367,39 @@ sys.exit(1)
         self.assertEqual(dest.read_bytes(), b"old")
         self.assertEqual(self.state("stuff"), "old-etag")
 
-    def agent_browser_routes(self, payload, digest=None):
+    def agent_browser_payload(self, version="0.43.0"):
+        return (f'#!/bin/sh\n'
+                f'if [ "$1" = "--version" ]; then echo "agent-browser {version}"; '
+                f'elif [ "$1" = "skills" ] && [ "$2" = "get" ]; then '
+                f'cat "$(dirname "$0")/../skill-data/$3/SKILL.md"; '
+                f'else exit 2; fi\n').encode()
+
+    def agent_browser_routes(self, payload, digest=None, *, version="0.43.0", corrupt_skills=False, skills_archive=None):
+        import base64
         import hashlib
         digest = digest or hashlib.sha256(payload).hexdigest()
         asset = "agent-browser-linux-musl-x64"
-        release = {"tag_name": "v0.43.0", "assets": [{"name": asset, "digest": f"sha256:{digest}"},
-                                                      {"name": "agent-browser-darwin-arm64", "digest": "sha256:" + "b" * 64}]}
+        tag = f"v{version}"
+        skill_files = {
+            f"package/skill-data/{name}/SKILL.md": f"---\nname: {name}\n---\n# {name}\n".encode()
+            for name in ("core", "webmcp-gen", "modern-web-guidance")
+        }
+        skill_files["package/skill-data/core/references/commands.md"] = b"# Commands\n"
+        archive = skills_archive if skills_archive is not None else make_tar(skill_files)
+        integrity = base64.b64encode(hashlib.sha512(archive).digest()).decode()
+        if corrupt_skills:
+            integrity = base64.b64encode(b"\0" * 64).decode()
+        npm_url = f"https://registry.npmjs.org/agent-browser/-/agent-browser-{version}.tgz"
+        release = {"tag_name": tag, "assets": [{"name": asset, "digest": f"sha256:{digest}"},
+                                                  {"name": "agent-browser-darwin-arm64", "digest": "sha256:" + "b" * 64}]}
+        metadata = {"version": version, "dist": {"integrity": f"sha512-{integrity}", "tarball": npm_url}}
         return {"https://api.github.com/repos/vercel-labs/agent-browser/releases/latest": json.dumps(release).encode(),
-                f"https://github.com/vercel-labs/agent-browser/releases/download/v0.43.0/{asset}": payload}
+                f"https://github.com/vercel-labs/agent-browser/releases/download/{tag}/{asset}": payload,
+                f"https://registry.npmjs.org/agent-browser/{version}": json.dumps(metadata).encode(),
+                npm_url: archive}
 
     def test_agent_browser_release_binary_replaces_npm_install(self):
-        payload = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
+        payload = self.agent_browser_payload()
         npm_root = self.home / ".local/share/agent-browser"
         (npm_root / "lib/node_modules/agent-browser/bin").mkdir(parents=True)
         (npm_root / "bin").mkdir()
@@ -391,21 +413,67 @@ sys.exit(1)
         inst = self.make(routes)
         inst.install_agent_browser()
         launcher = self.dest_path("agent-browser")
-        self.assertFalse(launcher.is_symlink())
-        self.assertEqual(launcher.read_bytes(), payload)
+        self.assertTrue(launcher.is_symlink())
+        self.assertEqual(launcher.resolve().read_bytes(), payload)
+        self.assertEqual(subprocess_run([str(launcher), "--version"]), "agent-browser 0.43.0")
+        release_root = launcher.resolve().parent.parent
+        self.assertTrue((release_root / "skill-data/core/references/commands.md").is_file())
+        for name in ("core", "webmcp-gen", "modern-web-guidance"):
+            self.assertIn(f"name: {name}", subprocess_run([str(launcher), "skills", "get", name]))
         self.assertTrue(self.state("agent-browser").startswith("v0.43.0:"))
         self.assertFalse(npm_root.exists())
         inst = self.make(routes)
         inst.install_agent_browser()
+        self.assertFalse(inst.changed)
         self.assertEqual(inst.fetched, ["https://api.github.com/repos/vercel-labs/agent-browser/releases/latest"])
 
+    def test_agent_browser_release_migrates_existing_native_binary(self):
+        payload = self.agent_browser_payload()
+        dest = self.dest_path("agent-browser")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload)
+        state = self.home / ".local/state/dl/agent-browser"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text("v0.43.0:" + "f" * 64 + "\n")
+        inst = self.make(self.agent_browser_routes(payload))
+        inst.install_agent_browser()
+        self.assertTrue(dest.is_symlink())
+        self.assertIn("name: core", subprocess_run([str(dest), "skills", "get", "core"]))
+
+    def test_agent_browser_bad_skill_bundle_keeps_existing_binary(self):
+        payload = self.agent_browser_payload()
+        dest = self.dest_path("agent-browser")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload)
+        state = self.home / ".local/state/dl/agent-browser"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text("v0.42.0:" + "f" * 64 + "\n")
+        for mode in ("checksum", "missing", "traversal"):
+            if mode == "traversal":
+                archive = make_tar({"package/skill-data/../../escape": b"bad"})
+            elif mode == "missing":
+                archive = make_tar({"package/skill-data/core/SKILL.md": b"core"})
+            else:
+                archive = None
+            routes = self.agent_browser_routes(payload, corrupt_skills=mode == "checksum", skills_archive=archive)
+            inst = self.make(routes)
+            with self.subTest(mode=mode), self.assertRaises(SkipInstall):
+                inst.install_agent_browser()
+            self.assertEqual(dest.read_bytes(), payload)
+            self.assertFalse(dest.is_symlink())
+            self.assertEqual(self.state("agent-browser"), "v0.42.0:" + "f" * 64)
+            self.assertFalse((self.home / "escape").exists())
+            releases = self.home / ".local/share/agent-browser-native/releases"
+            if releases.exists():
+                self.assertFalse(list(releases.iterdir()))
+
     def test_agent_browser_refuses_mismatch_unmanaged_and_unsupported(self):
-        payload = b"#!/bin/sh\necho 'agent-browser 0.43.0'\n"
+        payload = self.agent_browser_payload()
         inst = self.make(self.agent_browser_routes(payload, digest="0" * 64))
         with self.assertRaises(SkipInstall):
             inst.install_agent_browser()
         self.assertFalse(self.dest_path("agent-browser").exists())
-        self.assertEqual([path.name for path in self.dest_path("agent-browser").parent.glob(".agent-browser.*")], [])
+        self.assertEqual(list(self.dest_path("agent-browser").parent.glob(".agent-browser.*")), [])
         self.dest_path("agent-browser").write_text("mine")
         inst = self.make(self.agent_browser_routes(payload))
         with self.assertRaises(SkipInstall):
@@ -414,6 +482,13 @@ sys.exit(1)
         inst = self.make({}, os_name="linux", arch="riscv64")
         with self.assertRaises(SkipInstall):
             inst.install_agent_browser()
+
+    def test_agent_browser_rejects_downgrade_below_v043(self):
+        payload = self.agent_browser_payload("0.42.0")
+        inst = self.make(self.agent_browser_routes(payload, version="0.42.0"))
+        with self.assertRaises(SkipInstall):
+            inst.install_agent_browser()
+        self.assertFalse(self.dest_path("agent-browser").exists())
 
     def test_fd_and_zzz_platforms(self):
         inst = self.make({}, os_name="darwin", arch="aarch64")

@@ -16,8 +16,11 @@ with `sh sync tools agent-browser` (after normal approval to change the host).
 It requires no Node.js runtime. `agent-browser install` is only for a managed
 Chrome for Testing browser; the system Chromium can be used instead.
 
-Confirm the installed version with `agent-browser --version`. If it is
-missing and host installation is not authorized, report that limitation.
+Confirm `agent-browser --version` reports **0.43.0 or newer**. The managed
+installation bundles upstream `skill-data/` alongside its binary, so
+`agent-browser skills get core` works without installing the npm CLI or Node.
+If the command is missing and host installation is not authorized, report
+that limitation.
 Do not silently switch to a different browser automation stack.
 
 ## Start here
@@ -36,12 +39,17 @@ between releases, which is why it just points at `skills get core`.
 
 ## Specialized skills
 
-Load a specialized skill when the task falls outside browser web pages:
+Version 0.43 adds snapshot hints for ambiguous controls, faster large-page
+snapshots, and prompt failure when a tab closes. Do not parse these hints as
+stable selectors; keep using element refs and re-snapshot after navigation.
+Load specialized upstream skills when appropriate:
 
 ```bash
 agent-browser skills get electron          # Electron desktop apps (VS Code, Slack, Discord, Figma, ...)
 agent-browser skills get slack             # Slack workspace automation
 agent-browser skills get dogfood           # Exploratory testing / QA / bug hunts
+agent-browser skills get webmcp-gen        # Generate/validate experimental WebMCP tools
+agent-browser skills get modern-web-guidance  # Chrome best practices, verified in browser
 ```
 
 Run `agent-browser skills list` to see everything available on the

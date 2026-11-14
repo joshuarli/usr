@@ -12,6 +12,8 @@ the shell installer's contract.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -174,7 +176,8 @@ class Installer:
         self.nodejs_root = self.data_home / "nodejs"
         self.pnpm_root = self.data_home / "pnpm-npm"
         self.cf_root = self.data_home / "cf"
-        self.agent_browser_root = self.data_home / "agent-browser"
+        self.agent_browser_root = self.data_home / "agent-browser"  # legacy npm prefix
+        self.agent_browser_native_root = self.data_home / "agent-browser-native"
         self.ghostty_apps = Path(self.env.get("GHOSTTY_APPLICATIONS_DIR") or "/Applications")
         self.ghostty_app = self.ghostty_apps / "Ghostty Custom.app"
         self.ghostty_exec = self.ghostty_app / "Contents/MacOS/ghostty"
@@ -1238,8 +1241,40 @@ class Installer:
         self._npm_tool("cf", self.cf_root, "cf", "cf", extra=("--ignore-scripts",),
                        fetch_msg="Installing Cloudflare cf ...", no_release="could not resolve the latest cf version")
 
+    @staticmethod
+    def unpack_agent_browser_skills(archive_path: Path, release_root: Path) -> bool:
+        """Extract only npm's skill markdown/resources, never scripts or dependencies."""
+        required = ("core", "webmcp-gen", "modern-web-guidance")
+        count = total = 0
+        try:
+            with tarfile.open(archive_path, "r:gz") as archive:
+                for member in archive:
+                    parts = member.name.split("/")
+                    if member.name.startswith("/") or ".." in parts:
+                        return False
+                    if len(parts) < 3 or parts[0] != "package" or parts[1] not in ("skill-data", "skills"):
+                        continue
+                    if member.isdir():
+                        continue
+                    if not member.isfile() or len(parts) < 4 or member.size > 2 * 1024 * 1024:
+                        return False
+                    count += 1
+                    total += member.size
+                    if count > 500 or total > 16 * 1024 * 1024:
+                        return False
+                    source = archive.extractfile(member)
+                    if source is None:
+                        return False
+                    target = release_root.joinpath(*parts[1:])
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with source, target.open("wb") as output:
+                        shutil.copyfileobj(source, output)
+        except (tarfile.TarError, OSError, ValueError):
+            return False
+        return all((release_root / "skill-data" / name / "SKILL.md").is_file() for name in required)
+
     def install_agent_browser(self) -> None:
-        """Install the latest agent-browser release binary, verified against GitHub's asset digest."""
+        """Install the newest native binary plus version-matched skills, without Node."""
         assets = {("darwin", "aarch64"): "agent-browser-darwin-arm64", ("darwin", "x86_64"): "agent-browser-darwin-x64",
                   ("linux", "x86_64"): "agent-browser-linux-musl-x64",
                   ("linux", "aarch64"): "agent-browser-linux-musl-arm64"}
@@ -1247,8 +1282,24 @@ class Installer:
             self.skip("agent-browser", f"no upstream binary for {self.os_name}/{self.arch}")
         asset = assets[(self.os_name, self.arch)]
         launcher = self.dest / "agent-browser"
-        if (launcher.exists() or launcher.is_symlink()) and not (self.state / "agent-browser").is_file():
-            self.skip("agent-browser", f"{launcher} already exists outside dl management")
+        home = self.agent_browser_native_root
+        current = home / "current"
+        target = str(current / "bin/agent-browser")
+        state_file = self.state / "agent-browser"
+        if launcher.exists() or launcher.is_symlink():
+            if not state_file.is_file():
+                self.skip("agent-browser", f"{launcher} already exists outside dl management")
+            if launcher.is_symlink():
+                permitted = {target, str(self.agent_browser_root / "bin/agent-browser")}
+                if os.readlink(launcher) not in permitted:
+                    self.skip("agent-browser", f"{launcher} is not a recognized managed link")
+            elif not launcher.is_file():
+                self.skip("agent-browser", f"{launcher} is not a managed file")
+        if home.is_symlink() or (home.exists() and (not home.is_dir() or not state_file.is_file())):
+            self.skip("agent-browser", f"{home} already exists outside dl management")
+        if current.exists() and not current.is_symlink():
+            self.skip("agent-browser", f"{current} is not a managed link")
+
         try:
             release = json.loads(self.fetch_text("https://api.github.com/repos/vercel-labs/agent-browser/releases/latest"))
             tag = release["tag_name"]
@@ -1257,30 +1308,94 @@ class Installer:
         except (ValueError, KeyError, TypeError, StopIteration):
             self.unchecked("agent-browser", f"no {asset} in the latest release")
             return
-        if algorithm != "sha256" or not re.fullmatch(r"[0-9a-f]{64}", expected) or not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+        if (algorithm != "sha256" or not re.fullmatch(r"[0-9a-f]{64}", expected)
+                or not re.fullmatch(r"v\d+\.\d+\.\d+", tag)):
             self.unchecked("agent-browser", f"the latest release has no usable SHA-256 for {asset}")
             return
-        record = f"{tag}:{expected}"
-        if launcher.is_file() and not launcher.is_symlink() and self.is_current("agent-browser", record):
-            self.remove_npm_agent_browser()
-            self.current(f"agent-browser is current ({tag})")
+        if not version_at_least(tag[1:], "0.43.0"):
+            self.unchecked("agent-browser", f"latest release {tag} is older than the required v0.43.0")
             return
-        self.fetch_msg(f"Downloading agent-browser {tag} ({asset}) ...")
-        staged = self.stage_file(self.dest, ".agent-browser.")
-        url = f"https://github.com/vercel-labs/agent-browser/releases/download/{tag}/{asset}"
-        if not self.download(url, staged):
-            staged.unlink(missing_ok=True)
-            self.skip("agent-browser", f"{asset} download failed")
-        if self.sha256_file(staged) != expected:
-            staged.unlink(missing_ok=True)
-            self.skip("agent-browser", f"{asset} checksum mismatch")
-        staged.chmod(staged.stat().st_mode | 0o111)
-        version = self.run([str(staged), "--version"], capture=True)
-        if version.returncode or version.stdout.strip() != f"agent-browser {tag[1:]}":
-            staged.unlink(missing_ok=True)
-            self.skip("agent-browser", f"{asset} does not report version {tag[1:]}")
-        self.install_binary("agent-browser", staged, record)
+        record = f"{tag}:{expected}"
+        required = ("core", "webmcp-gen", "modern-web-guidance")
+        if (self._state_text("agent-browser") == record and launcher.is_symlink()
+                and os.readlink(launcher) == target and current.is_symlink()
+                and (current / "bin/agent-browser").is_file()
+                and all((current / "skill-data" / name / "SKILL.md").is_file() for name in required)):
+            self.own_file(launcher)
+            self.own_file(current)
+            self.own_file(state_file)
+            self.own_dir(current.resolve())
+            self.remove_npm_agent_browser()
+            self.current(f"agent-browser is current ({tag}, with skills)")
+            return
+
+        releases = home / "releases"
+        if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
+            self.skip("agent-browser", f"{releases} is not a directory")
+        release_dir = releases / f"{tag}-{expected[:12]}"
+        if release_dir.exists() or release_dir.is_symlink():
+            self.skip("agent-browser", f"{release_dir} already exists; refusing to overwrite it")
+        self.own_missing_dirs(releases)
+        releases.mkdir(parents=True, exist_ok=True)
+        staged = self.stage_dir(releases, ".agent-browser.")
+        try:
+            binary = staged / "bin/agent-browser"
+            binary.parent.mkdir(parents=True)
+            self.fetch_msg(f"Downloading agent-browser {tag} ({asset}) ...")
+            url = f"https://github.com/vercel-labs/agent-browser/releases/download/{tag}/{asset}"
+            if not self.download(url, binary):
+                self.skip("agent-browser", f"{asset} download failed")
+            if self.sha256_file(binary) != expected:
+                self.skip("agent-browser", f"{asset} checksum mismatch")
+            binary.chmod(0o755)
+            version = self.run([str(binary), "--version"], capture=True)
+            if version.returncode or version.stdout.strip() != f"agent-browser {tag[1:]}":
+                self.skip("agent-browser", f"{asset} does not report version {tag[1:]}")
+
+            # npm distributes the version-matched skill-data files, not just the executable.
+            # Use the tarball only as an authenticated archive; never invoke npm or postinstall.
+            npm_version = tag[1:]
+            npm_url = f"https://registry.npmjs.org/agent-browser/-/agent-browser-{npm_version}.tgz"
+            try:
+                metadata = json.loads(self.fetch_text(f"https://registry.npmjs.org/agent-browser/{npm_version}"))
+                integrity = metadata["dist"]["integrity"]
+                if metadata["version"] != npm_version or metadata["dist"]["tarball"] != npm_url:
+                    raise ValueError("npm package version or URL mismatch")
+                if not re.fullmatch(r"sha512-[A-Za-z0-9+/]+={0,2}", integrity):
+                    raise ValueError("npm SHA-512 integrity is missing")
+                expected_skills = base64.b64decode(integrity[7:], validate=True)
+                if len(expected_skills) != 64:
+                    raise ValueError("npm SHA-512 digest is invalid")
+            except (ValueError, KeyError, TypeError, binascii.Error):
+                self.skip("agent-browser", f"no trustworthy skill bundle for {tag}")
+            archive = staged / ".skills.tgz"
+            if not self.download(npm_url, archive):
+                self.skip("agent-browser", f"{tag} skill bundle download failed")
+            if hashlib.sha512(archive.read_bytes()).digest() != expected_skills:
+                self.skip("agent-browser", f"{tag} skill bundle checksum mismatch")
+            if not self.unpack_agent_browser_skills(archive, staged):
+                self.skip("agent-browser", f"{tag} skill bundle is invalid")
+            archive.unlink()
+            for name in required:
+                result = self.run([str(binary), "skills", "get", name], capture=True)
+                if result.returncode or f"name: {name}" not in result.stdout:
+                    self.skip("agent-browser", f"{tag} does not load {name} from its bundle")
+            if self.os_name == "darwin":
+                self.run(["xattr", "-d", "com.apple.quarantine", str(binary)])
+                self.run(["codesign", "-fs", "-", str(binary)], check=True)
+            os.replace(staged, release_dir)
+        finally:
+            if staged.exists():
+                shutil.rmtree(staged, ignore_errors=True)
+        self.own_dir(release_dir)
+        if not self.switch_symlink(release_dir, current):
+            self.skip("agent-browser", f"could not switch {current}")
+        self.own_file(current)
+        self.link_symlink(launcher, target)
+        self.write_state("agent-browser", record)
+        self.changed = True
         self.remove_npm_agent_browser()
+        self.ok(f"Installed agent-browser {tag} with verified skills")
 
     def remove_npm_agent_browser(self) -> None:
         """Remove the npm tree that earlier syncs installed, once the release binary replaces its launcher."""
