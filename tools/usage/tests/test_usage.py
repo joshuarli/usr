@@ -6,6 +6,8 @@ Run with: TMPDIR="$PWD/.work/tmp" python3 -I tools/usage/tests/test_usage.py
 
 import io
 import json
+import sys
+import time
 import time as real_time
 from typing import Any
 import unittest
@@ -224,6 +226,126 @@ class StreamingTest(unittest.TestCase):
         self.assertEqual(rendered[0], "fast")
         out = buffer.getvalue()
         self.assertLess(out.index("fast"), out.index("slow"))
+
+
+def spawn_child(script: str):
+    return NS["subprocess"].Popen(
+        [sys.executable, "-c", script],
+        stdin=NS["subprocess"].PIPE,
+        stdout=NS["subprocess"].PIPE,
+        bufsize=0,
+    )
+
+
+CHILD_ONE_WRITE = """
+import sys
+sys.stdout.buffer.write(
+    b'{"jsonrpc":"2.0","method":"progress","params":{}}\\n'
+    b'{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\\n'
+)
+sys.stdout.buffer.flush()
+"""
+
+CHILD_TWO_RESPONSES = """
+import sys
+sys.stdout.buffer.write(
+    b'{"jsonrpc":"2.0","id":1,"result":{"first":true}}\\n'
+    b'{"jsonrpc":"2.0","id":2,"result":{"second":true}}\\n'
+)
+sys.stdout.buffer.flush()
+"""
+
+CHILD_FRAGMENTED = """
+import sys, time
+sys.stdout.buffer.write(b'{"jsonrpc":"2.0","id":1,"res')
+sys.stdout.buffer.flush()
+time.sleep(0.3)
+sys.stdout.buffer.write(b'ult":{"ok":true}}\\n')
+sys.stdout.buffer.flush()
+"""
+
+CHILD_STAYS_ALIVE = """
+import sys, time
+sys.stdout.buffer.write(b'{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\\n')
+sys.stdout.buffer.flush()
+time.sleep(30)
+"""
+
+CHILD_SILENT = "import time\ntime.sleep(30)\n"
+
+CHILD_RPC_SERVER = """
+import sys, json
+for raw in sys.stdin.buffer:
+    msg = json.loads(raw)
+    mid = msg.get("id")
+    if mid == 1:
+        sys.stdout.buffer.write(b'{"jsonrpc":"2.0","id":1,"result":{}}\\n')
+        sys.stdout.buffer.flush()
+    elif mid == 2:
+        sys.stdout.buffer.write(
+            b'{"jsonrpc":"2.0","method":"progress","params":{}}\\n'
+            b'{"jsonrpc":"2.0","id":2,"result":{"windows":[]}}\\n'
+        )
+        sys.stdout.buffer.flush()
+"""
+
+
+class ReadRpcResponseTest(unittest.TestCase):
+    def read(self, process, request_id=1, timeout=10):
+        deadline = time.monotonic() + timeout
+        reader = NS["ResponseReader"](process)
+        return NS["read_rpc_response"](reader, request_id, deadline), reader
+
+    def test_notification_and_response_in_one_write(self):
+        process = spawn_child(CHILD_ONE_WRITE)
+        try:
+            result, _ = self.read(process)
+            self.assertEqual(result, {"ok": True})
+        finally:
+            NS["stop_process"](process)
+
+    def test_several_json_lines_in_one_write_survive_two_reads(self):
+        process = spawn_child(CHILD_TWO_RESPONSES)
+        try:
+            deadline = time.monotonic() + 10
+            reader = NS["ResponseReader"](process)
+            first = NS["read_rpc_response"](reader, 1, deadline)
+            second = NS["read_rpc_response"](reader, 2, deadline)
+            self.assertEqual(first, {"first": True})
+            self.assertEqual(second, {"second": True})
+        finally:
+            NS["stop_process"](process)
+
+    def test_fragmented_line(self):
+        process = spawn_child(CHILD_FRAGMENTED)
+        try:
+            result, _ = self.read(process)
+            self.assertEqual(result, {"ok": True})
+        finally:
+            NS["stop_process"](process)
+
+    def test_child_staying_alive_after_response_does_not_block_read(self):
+        process = spawn_child(CHILD_STAYS_ALIVE)
+        try:
+            result, _ = self.read(process, timeout=10)
+            self.assertEqual(result, {"ok": True})
+            self.assertIsNone(process.poll())
+        finally:
+            NS["stop_process"](process)
+
+    def test_silent_child_times_out(self):
+        process = spawn_child(CHILD_SILENT)
+        try:
+            deadline = time.monotonic() + 0.5
+            reader = NS["ResponseReader"](process)
+            with self.assertRaises(TimeoutError):
+                NS["read_rpc_response"](reader, 1, deadline)
+        finally:
+            NS["stop_process"](process)
+
+    def test_query_rpc_round_trip_with_coalesced_notification(self):
+        result = NS["query_rpc"](sys.executable, ["-c", CHILD_RPC_SERVER], "usage/read", True)
+        self.assertEqual(result, {"windows": []})
 
 
 if __name__ == "__main__":

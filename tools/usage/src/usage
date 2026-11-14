@@ -43,6 +43,12 @@ def stop_process(process):
             process.stdin.close()
         except BrokenPipeError:
             pass
+    for stream in (process.stdout, process.stderr):
+        if stream is not None and not stream.closed:
+            try:
+                stream.close()
+            except OSError:
+                pass
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
@@ -53,21 +59,46 @@ def stop_process(process):
             process.kill()
             process.wait()
 
-def read_rpc_response(process, request_id, deadline):
+class ResponseReader:
+    """Frames complete JSON lines from a child's unbuffered stdout.
+
+    select() observes the raw descriptor while readline-style buffering is
+    done here, so bytes already read from the pipe are never reported as
+    absent by the kernel. Several lines arriving in one write, and lines
+    split across writes, are both handled by this one buffer.
+    """
+
+    def __init__(self, process):
+        self.process = process
+        self.buffer = b""
+
+    def read_message(self, deadline):
+        while True:
+            index = self.buffer.find(b"\n")
+            if index >= 0:
+                line = self.buffer[:index]
+                self.buffer = self.buffer[index + 1:]
+                return line
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("timed out waiting for the CLI response")
+            ready, _, _ = select.select([self.process.stdout], [], [], remaining)
+            if not ready:
+                raise TimeoutError("timed out waiting for the CLI response")
+            chunk = os.read(self.process.stdout.fileno(), 65536)
+            if not chunk:
+                raise RuntimeError("the CLI closed its protocol output")
+            self.buffer += chunk
+
+def read_rpc_response(reader, request_id, deadline):
     while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("timed out waiting for the CLI response")
-        ready, _, _ = select.select([process.stdout], [], [], remaining)
-        if not ready:
-            raise TimeoutError("timed out waiting for the CLI response")
-        line = process.stdout.readline()
-        if not line:
-            raise RuntimeError("the CLI closed its protocol output")
+        line = reader.read_message(deadline)
         try:
             message = json.loads(line)
         except json.JSONDecodeError as error:
             raise RuntimeError("the CLI returned invalid protocol JSON") from error
+        if not isinstance(message, dict):
+            raise RuntimeError("the CLI returned a non-object protocol message")
         if message.get("id") != request_id:
             continue
         if "error" in message:
@@ -76,7 +107,7 @@ def read_rpc_response(process, request_id, deadline):
         return message.get("result")
 
 def send_rpc(process, request):
-    process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+    process.stdin.write(json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n")
     process.stdin.flush()
 
 def query_rpc(binary, arguments, method, experimental=False):
@@ -84,10 +115,10 @@ def query_rpc(binary, arguments, method, experimental=False):
         [binary, *arguments],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        text=True,
-        bufsize=1,
+        bufsize=0,
     )
     deadline = time.monotonic() + 35
+    reader = ResponseReader(process)
     try:
         send_rpc(
             process,
@@ -101,7 +132,7 @@ def query_rpc(binary, arguments, method, experimental=False):
                 },
             },
         )
-        read_rpc_response(process, 1, deadline)
+        read_rpc_response(reader, 1, deadline)
         send_rpc(
             process,
             {"jsonrpc": "2.0", "method": "initialized", "params": {}},
@@ -110,7 +141,7 @@ def query_rpc(binary, arguments, method, experimental=False):
             process,
             {"jsonrpc": "2.0", "id": 2, "method": method, "params": {}},
         )
-        return read_rpc_response(process, 2, deadline)
+        return read_rpc_response(reader, 2, deadline)
     finally:
         stop_process(process)
 
