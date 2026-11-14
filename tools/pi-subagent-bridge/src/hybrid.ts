@@ -392,11 +392,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.execution.kind === "pi") {
         const { selection, session_id: sessionId } = s.execution
+        const dispatch = await makeWorkerBridge(api, selection).preflightResume(s.cwd, sessionId, "Same-scope correction only: " + correction)
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
         transition(s, { executor: "pi", selection }, true)
         save(s)
-        await makeWorkerBridge(api, selection).resume(s.cwd, sessionId, "Same-scope correction only: " + correction)
+        await dispatch()
         activatePi(s, selection, sessionId)
         save(s)
       } else {

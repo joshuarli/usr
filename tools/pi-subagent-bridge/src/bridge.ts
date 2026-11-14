@@ -159,7 +159,18 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
     }
     return { id, directory, info }
   }
+  async function preflightResume(cwd: unknown, sessionID: unknown, feedback: unknown) {
+    const { id, directory } = await ownedSession(sessionID, cwd)
+    const text = requiredText(feedback, "feedback")
+    const [active, inbox] = await Promise.all([api.active({ cwd: directory }), api.inbox({ sessionID: id, cwd: directory })])
+    if (activeSession(active, id) || queuedInputs(inbox)) throw new Error("Worker is running or has queued input; do not enqueue competing feedback")
+    return async () => {
+      await api.prompt({ sessionID: id, cwd: directory, text: `Parent feedback (same scope and write boundaries):\n${text}` })
+      return { session_id: id, cwd: directory, status: "admitted" }
+    }
+  }
   return {
+    preflightResume,
     async modelCheck(cwd: unknown) {
       const directory = checkedWorktree(cwd)
       return { model, available: modelAvailable(await api.models({ location: { directory } }), model) }
@@ -210,12 +221,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       }
     },
     async resume(cwd: unknown, sessionID: unknown, feedback: unknown) {
-      const { id, directory } = await ownedSession(sessionID, cwd)
-      requiredText(feedback, "feedback")
-      const [active, inbox] = await Promise.all([api.active({ cwd: directory }), api.inbox({ sessionID: id, cwd: directory })])
-      if (activeSession(active, id) || queuedInputs(inbox)) throw new Error("Worker is running or has queued input; do not enqueue competing feedback")
-      await api.prompt({ sessionID: id, cwd: directory, text: `Parent feedback (same scope and write boundaries):\n${feedback}` })
-      return { session_id: id, cwd: directory, status: "admitted" }
+      return (await preflightResume(cwd, sessionID, feedback))()
     },
     async steer(cwd: unknown, sessionID: unknown, note: unknown) {
       const { id, directory } = await ownedSession(sessionID, cwd)

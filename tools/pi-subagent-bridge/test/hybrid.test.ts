@@ -870,6 +870,37 @@ test("cancel acknowledgement cannot release a lease until a terminal backend res
   } finally { f.close() }
 })
 
+for (const rejected of ["running", "queued"] as const) {
+  test(`rejected Pi resume with ${rejected} child preserves execution and permits cancellation`, async () => {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd)
+      m.noCommand()
+      let active = rejected === "running", queued = rejected === "queued", interrupts = 0
+      const api: OpenCodePort = { ...m.api,
+        active: async () => ({ data: active ? { ses_fixture: {} } : {} }),
+        inbox: async () => ({ data: queued ? [{ text: "pending" }] : [] }),
+        interrupt: async () => { interrupts++; return { data: { interrupted: true } } },
+      }
+      const bridge = makeHybridBridge(api, m.command, noCodex)
+      const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+      const path = join(f.root, ".work", "worker-bridge", task.session_id + ".json")
+      const before = JSON.parse(readFileSync(path, "utf8"))
+      await assert.rejects(bridge.resume(f.cwd, task.session_id, "correct"), /running or has queued input/)
+      const after = JSON.parse(readFileSync(path, "utf8"))
+      assert.deepEqual(after.execution, before.execution)
+      assert.equal(after.attempts, before.attempts)
+      assert.equal(after.attempts, 1)
+      assert.equal((await bridge.cancel(f.cwd, task.session_id)).interrupted, true)
+      assert.equal(interrupts, 1)
+      active = false
+      queued = false
+      assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
+      assert.equal(activeWorktreeOwner(stateDir(f.cwd), f.cwd), null)
+    } finally { f.close() }
+  })
+}
+
 test("interrupted Pi resume remains blocked without exposing an old success", async () => {
   const f = fixture()
   try {
