@@ -5,12 +5,13 @@ import { appendFileSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSy
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
+import { stateDir } from "../src/git.ts"
 import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 import { ANTIGRAVITY_PIN, ROOT_PLANS, type CliPin, type FallbackPlan, type RootPlan } from "../src/policy.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
-import { claimWorktree } from "../src/worktree-lease.ts"
+import { activeWorktreeOwner, claimWorktree } from "../src/worktree-lease.ts"
 import { commandResult, processStartTime, type CommandRun } from "../src/command.ts"
 
 const git = (cwd: string, ...args: string[]) =>
@@ -397,6 +398,28 @@ test("Command quota after edits cannot replay partial work on Go", async () => {
     assert.equal(result.state, "blocked_partial_work")
     assert.match(result.fallback_notice ?? "", /decide manually/)
     assert.equal(piCreates(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("cancel releases a blocked_partial_work lease after the parent preserves the work", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command, noCodex)
+    const task = await bridge.start(f.cwd, "fix", "worker", f.scope, "Edit README")
+    writeFileSync(join(f.cwd, "README"), "partial\n")
+    m.failCommand("rate limit exceeded")
+    const blocked = await bridge.status(f.cwd, task.session_id)
+    assert.equal(blocked.state, "blocked_partial_work")
+    const leaseDir = stateDir(f.cwd)
+    assert.equal(activeWorktreeOwner(leaseDir, f.cwd), task.session_id)
+    const cancel = await bridge.cancel(f.cwd, task.session_id)
+    assert.equal(cancel.released, true)
+    assert.equal(cancel.interrupted, false)
+    assert.equal(activeWorktreeOwner(leaseDir, f.cwd), null)
+    assert.equal((await bridge.status(f.cwd, task.session_id)).state, "cancelled")
+    git(f.cwd, "checkout", "--", "README")
+    const again = await bridge.start(f.cwd, "next", "worker", f.scope, "Edit README")
+    assert.ok(again.session_id)
   } finally { f.close() }
 })
 

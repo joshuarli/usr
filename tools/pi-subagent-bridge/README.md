@@ -45,7 +45,7 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` reports the approved routes and current availability for the requested tier. `make policy` exports the approved policy offline without probing account availability.
+`worker_model_check(cwd, tier)` reports the approved routes and current availability for the requested tier. When the Muse route is probed it also reports the `Muse Code` version of the installed `muse` binary it was qualified against. `make policy` exports the approved policy offline without probing account availability.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -65,7 +65,7 @@ The admission result includes `watch`, a `pi-subagent-bridge watch` command that
 
 `worker_steer(cwd,session_id,note)` redirects a **running** worker without changing its scope or write boundaries. On the Pi backend it forwards the note to the native pi-subagents `steer` RPC for the owned run. On Codex and Command Code it verifies HEAD and the write boundary exactly as `worker_resume` does, interrupts the run, waits until the recorded process is proven gone, then resumes the same session and the original prompt plus `PARENT STEERING (same scope and write boundaries): <note>`. It never changes `attempts`; it is bounded by its own `steer_limit`, and it refuses to signal a PID that this bridge process does not own. A finished or non-running session is refused with a pointer to `worker_resume`.
 
-`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination. For Codex and Command Code, a later `worker_status` can report `cancelled` and release the lease after proving the recorded process gone. Pi requires a terminal result: a dead host without one remains `unknown_or_interrupted` and keeps its lease.
+`worker_cancel(cwd,session_id)` interrupts only a child owned by the current process. Never signal a stale PID after restart. Cancellation is not proof of termination. For Codex and Command Code, a later `worker_status` can report `cancelled` and release the lease after proving the recorded process gone. Pi requires a terminal result: a dead host without one remains `unknown_or_interrupted` and keeps its lease. A worker that already ended at a provider usage limit with partial edits (`blocked_partial_work`) is not signaled; once the parent has preserved the work, the call releases the worktree lease instead.
 
 ## Coordinating many workers
 

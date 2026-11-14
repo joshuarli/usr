@@ -8,7 +8,7 @@ import { antigravityAvailable, antigravityResult, antigravitySession, cancelAnti
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 import { isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
-import { musePreflight } from "./muse-subscription.ts"
+import { musePreflight, museVersion } from "./muse-subscription.ts"
 import { changes, git, outside, readStateDir, stateDir } from "./git.ts"
 import {
   fallbackNotice, fallbackSource, inspectSession, observeExecution, runnerStatus, settledState,
@@ -303,7 +303,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             goIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
-      const museInfo = museModel ? { available: museAvailable, issue: museIssue } : { available: false, issue: null }
+      const museInfo = museModel ? { available: museAvailable, issue: museIssue, version: museVersion() } : { available: false, issue: null, version: null }
       const goInfo = { available: goAvailable, issue: goIssue }
       const piLane = { backend: "pi", model: firstPi,
         available: firstPi.providerID === "muse-sdk" ? museInfo.available : goInfo.available,
@@ -314,7 +314,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         fallback: commandLane,
         command_code: commandLane,
         pi_fallback: piLane,
-        muse: museModel ? { backend: "pi", model: museModel, available: museInfo.available, issue: museInfo.issue } : undefined,
+        muse: museModel ? { backend: "pi", model: museModel, available: museInfo.available, issue: museInfo.issue, version: museInfo.version } : undefined,
         opencode_go: goModel ? { backend: "pi", model: goModel, available: goInfo.available, issue: goInfo.issue } : null,
       }
     },
@@ -422,6 +422,17 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     },
     async cancel(cwd: unknown, id: unknown) {
       return withSessionLock(cwd, id, async (s) => {
+      const observation = await observeExecution(s, stateDir(s.cwd), inspection)
+      if (settledState(s, observation, untouched(s)).state === "blocked_partial_work") {
+        s.cancel_requested = true
+        save(s)
+        const leaseDir = stateDir(s.cwd)
+        const released = activeWorktreeOwner(leaseDir, s.cwd) === s.id
+          ? releaseWorktree(leaseDir, s.cwd, s.id)
+          : false
+        return { session_id: s.id, interrupted: false, released,
+          note: "Worker already ended at a provider usage limit with partial edits; the worktree lease is released and the edits are left untouched. Preserve the work before dispatching again." }
+      }
       let interrupted = false
       if (s.execution.kind === "pi") {
         interrupted = (await makeWorkerBridge(api, s.execution.selection).cancel(s.cwd, s.execution.session_id)).interrupted

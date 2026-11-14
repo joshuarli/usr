@@ -1,13 +1,13 @@
 {
   "schema": 1,
-  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-e5a8702f89fb7745c6221de5f21a22d2d36a932f/",
-  "builder_revision": "e5a8702f89fb7745c6221de5f21a22d2d36a932f",
+  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-e20a7211c9aa7552024ae28046e5e3651e097033/",
+  "builder_revision": "e20a7211c9aa7552024ae28046e5e3651e097033",
   "profile": "headless-usr",
   "version": "1.5.0",
-  "provenance_sha256": "8a1b32a5e2bd10b378465b5fe1c87a403e33a89c7c4ad65261fc428a510173f8",
+  "provenance_sha256": "06f31f114df84f58d2f59f512629de9bc6634715b2f3788b43148d129a7fc64d",
   "targets": {
-    "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "57d77b441630aec259fb21dbd85ff1e14a128af62bcaa1698c6e0b25a739b341", "bytes": 12228732},
-    "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "67a576b26857afb03fb29da4c6dda3be0572105e2a91d49c6f5469426c6d93a9", "bytes": 12215564},
-    "linux-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-unknown-linux-musl.tar.xz", "sha256": "395dfe3cb61939b7ea184888e27bf5b2c62f66b726b124070295a2dbf1822f3d", "bytes": 12214900}
+    "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "05e802f2bfbc81d9a040f75a3262973856efddbd34eee3e32a0c9c63f88728a9", "bytes": 12229596},
+    "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "947d14ea186ab645d990fc29b7a36f110d5ed6d926a76a6b858adaf34b01cff8", "bytes": 12215380},
+    "linux-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-unknown-linux-musl.tar.xz", "sha256": "10890e9d7c6fc668763c09ef1dc06df89bb89e670b9597dff91b8bc3b5a2470e", "bytes": 12214388}
   }
 }

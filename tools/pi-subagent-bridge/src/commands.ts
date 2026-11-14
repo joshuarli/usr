@@ -60,7 +60,7 @@ export const COMMANDS: Record<CommandName, {
   },
   cancel: {
     tool: "worker_cancel", cli: "cancel", fields: ["cwd", "session_id"],
-    description: "Interrupt this owned usr worker session. Never delete the worktree or branch; parent preserves and reviews its changes.",
+    description: "Interrupt this owned usr worker session. Never delete the worktree or branch; parent preserves and reviews its changes. A worker that already ended at a provider usage limit with partial edits (blocked_partial_work) is not signaled; the call releases the worktree lease instead, after you preserve the work.",
   },
 }
 
