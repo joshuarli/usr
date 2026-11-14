@@ -1,12 +1,12 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, symlinkSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 const repo = resolve(import.meta.dirname, '../..'), cli = join(repo, 'tools/skills/skills.ts')
 const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { cwd: repo, encoding: 'utf8' })
 function fixture(fn: (root: string, skill: string) => void) {
-  const tmp = join(repo, '.work/tmp'); mkdirSync(tmp, { recursive: true }); const root = mkdtempSync(join(tmp, 'skills-'))
+  const tmp = '/Users/josh/usr/.work/tmp'; mkdirSync(tmp, { recursive: true }); const root = mkdtempSync(join(tmp, 'skills-'))
   try { const skill = join(root, 'alpha'); mkdirSync(skill); writeFileSync(join(skill, 'SKILL.md'), '---\nname: alpha\ndescription: "Use it. Skip other work."\nmetadata:\n  opencode/slash: "true"\n---\n\n**Report:** Done.\n'); fn(root, skill) } finally { rmSync(root, { recursive: true, force: true }) }
 }
 test('generation derives and removes adapters, detects drift and is idempotent', () => fixture((root, skill) => {
@@ -34,3 +34,32 @@ test('links do not change invocation', () => fixture((root, skill) => {
   const refs = JSON.parse(run('refs', 'alpha', '--json', '--root', root).stdout); assert.equal(refs[0].invocation, 'explicit')
 }))
 test('real tree is current', () => { assert.equal(run('check').status, 0); assert.equal(run('generate', '--check').status, 0) })
+
+test('blank lines inside policy are normalized', () => fixture((root, skill) => {
+  const file = join(skill, 'SKILL.md'), yaml = join(skill, 'agents/openai.yaml')
+  writeFileSync(file, readFileSync(file, 'utf8').replace('metadata:', 'disable-model-invocation: true\nmetadata:'))
+  mkdirSync(join(skill, 'agents')); writeFileSync(yaml, 'policy:\n\n  allow_implicit_invocation: true\n')
+  assert.equal(run('generate', '--root', root).status, 0)
+  assert.equal(readFileSync(yaml, 'utf8'), 'policy:\n  allow_implicit_invocation: false\n')
+}))
+for (const [name, content] of [['duplicate policy keys', 'policy:\n  allow_implicit_invocation: false\n  allow_implicit_invocation: true\n'], ['flow policy', 'policy: {allow_implicit_invocation: true}\n']]) {
+  test(name + ' is rejected without writing', () => fixture((root, skill) => {
+    const yaml = join(skill, 'agents/openai.yaml'); mkdirSync(join(skill, 'agents')); writeFileSync(yaml, content)
+    for (const command of ['generate', 'check']) {
+      const result = run(command, '--root', root)
+      assert.equal(result.status, 1); assert.match(result.stderr, /openai\.yaml:\d+:/); assert.equal(readFileSync(yaml, 'utf8'), content)
+    }
+  }))
+}
+test('linked invalid skill is checked', () => fixture((root, skill) => {
+  writeFileSync(join(skill, 'SKILL.md'), 'invalid\n'); const installed = join(root, 'installed'); mkdirSync(installed); symlinkSync(skill, join(installed, 'alpha'))
+  const result = run('check', '--root', installed); assert.equal(result.status, 1); assert.match(result.stderr, /SKILL.md:1: expected frontmatter/)
+}))
+test('dangling skill link is rejected', () => fixture((root) => {
+  const installed = join(root, 'installed'); mkdirSync(installed); symlinkSync(join(root, 'missing'), join(installed, 'broken'))
+  const result = run('check', '--root', installed); assert.equal(result.status, 1); assert.match(result.stderr, /broken/)
+}))
+test('links to the same skill are deduplicated', () => fixture((root, skill) => {
+  const installed = join(root, 'installed'); mkdirSync(installed); symlinkSync(skill, join(installed, 'alpha')); symlinkSync(skill, join(installed, 'alias'))
+  const result = run('list', '--json', '--root', installed); assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).length, 1)
+}))
