@@ -49,6 +49,8 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 
 `sh sync check` and `./lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from `sync`.
 
+The [Alpine VM journey](../host/alpine/tests/vm.sh) requires `qemu-system-aarch64`, `qemu-img`, and AArch64 UEFI firmware on the test host. It provisions the committed HEAD in a disposable VM and requires a clean checkout.
+
 ## Agent setup changes
 
 | Change | Default proof |

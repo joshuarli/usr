@@ -16,6 +16,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Development checks and conventions | [docs/development.md](docs/development.md) |
 | Agent setup and harness configuration | [docs/agent-setup.md](docs/agent-setup.md) |
 | Instruction profiles | [docs/model-profiles.md](docs/model-profiles.md) |
+| Model policy ownership and generation | [tools/policy/README.md](tools/policy/README.md) |
 | Markdown audit | [tools/mdtool/README.md](tools/mdtool/README.md) |
 | macOS process sandbox | [docs/sbx-spec.md](docs/sbx-spec.md) |
 | Pi profile | [docs/pi.md](docs/pi.md) |
@@ -26,6 +27,7 @@ Each path belongs to one sync layer (see [sync](docs/sync.md)). Do not `cat` or 
 | Alpine provisioner | [host/alpine/README.md](host/alpine/README.md) |
 | Skills guide | [SKILLS.md](SKILLS.md) |
 | Deferred work | [TODO.md](TODO.md) |
+| Backlog commands and record format | [tools/todo/README.md](tools/todo/README.md) |
 
 ## Background work
 

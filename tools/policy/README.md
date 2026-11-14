@@ -10,6 +10,11 @@ descendant ceilings are authored in
 composes both domains into one pure `POLICY` value. Runtime code imports these
 typed sources; it never imports generated JSON or parses Markdown.
 
+The [bridge safety contract](../pi-subagent-bridge/README.md#safety-and-durability)
+owns admitted model snapshots, legacy decoding, request validation and worktree
+leases. Policy changes preserve those contracts. Session defaults and
+instruction-profile selection remain outside the policy generator's ownership.
+
 From the repository root, with the supported Node runtime:
 
 ```
