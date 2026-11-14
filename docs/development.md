@@ -6,6 +6,8 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 
 `sh sync check --plan` lists the checks that cover your uncommitted changes (add `--base REV` to include commits since REV), why each was selected, which cannot run on this host, and which changed paths no check covers; `sh sync check --changed` runs them and reports each exit code. The table is generated from `tools/sync/checks.py`; run `python3 -I tools/sync/checks.py docs` after editing the registry.
 
+`--changed --json` records a `tree_fingerprint` for each executed check. It covers HEAD, staged and unstaged tracked changes, and untracked non-ignored files; it excludes ignored files, dependencies, and the environment.
+
 <!-- checks:begin -->
 | Changed | Run |
 | --- | --- |
