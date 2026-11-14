@@ -371,7 +371,8 @@ sys.exit(1)
         return (f'#!/bin/sh\n'
                 f'if [ "$1" = "--version" ]; then echo "agent-browser {version}"; '
                 f'elif [ "$1" = "skills" ] && [ "$2" = "get" ]; then '
-                f'cat "$(dirname "$0")/../skill-data/$3/SKILL.md"; '
+                f'binary="$0"; if [ -L "$binary" ]; then binary="$(readlink "$binary")"; fi; '
+                f'cat "$(dirname "$binary")/../skill-data/$3/SKILL.md"; '
                 f'else exit 2; fi\n').encode()
 
     def agent_browser_routes(self, payload, digest=None, *, version="0.43.0", corrupt_skills=False, skills_archive=None):
