@@ -216,8 +216,7 @@ class CompanionFixture(unittest.TestCase):
         self.assertEqual(entry["command"], str(Path(self.env["HOME"]) / ".local/share/nodejs/current/bin/node"))
         self.assertEqual(entry["args"], [str(root / "agent-intercom-claude/dist/claude-server.mjs")])
         opencode_dir = Path(self.env["XDG_CONFIG_HOME"]) / "opencode"
-        opencode = json.loads((opencode_dir / "opencode.jsonc").read_text())
-        self.assertEqual(opencode["plugins"], [str(root / "agent-intercom-opencode")])
+        self.assertFalse((opencode_dir / "opencode.jsonc").exists())
         self.assertFalse((opencode_dir / "opencode.json").exists())
         self.assertFalse((opencode_dir / "tui.json").exists())
         self.assertEqual(self.call("check"), 0)
@@ -255,21 +254,21 @@ class CompanionFixture(unittest.TestCase):
         for name in companions.COMPANIONS:
             self.assertFalse((Path(self.env["XDG_DATA_HOME"]) / "agent-intercom" / name).exists())
 
-    def test_install_replaces_legacy_file_entry_with_package_directory(self):
+    def test_install_removes_retired_opencode_registration(self):
         root = Path(self.env["XDG_DATA_HOME"]) / "agent-intercom"
         legacy = str(root / "agent-intercom-opencode/dist/plugin.mjs")
+        current = str(root / "agent-intercom-opencode")
         opencode_dir = Path(self.env["XDG_CONFIG_HOME"]) / "opencode"
         opencode_dir.mkdir(parents=True)
         (opencode_dir / "opencode.jsonc").write_text(json.dumps({
             "$schema": "https://opencode.ai/config.json",
-            "plugins": ["/foreign/path/plugin.mjs", legacy],
+            "plugins": ["/foreign/path/plugin.mjs", legacy, current],
         }) + "\n")
         self.assertEqual(self.call("install"), 0)
         opencode = json.loads((opencode_dir / "opencode.jsonc").read_text())
-        self.assertEqual(opencode["plugins"], [
-            "/foreign/path/plugin.mjs", str(root / "agent-intercom-opencode")])
-        self.assertEqual(self.call("check"), 0)
+        self.assertEqual(opencode["plugins"], ["/foreign/path/plugin.mjs"])
         self.assertEqual(self.call("remove"), 0)
+        self.assertEqual(self.call("verify-absent"), 0)
         opencode = json.loads((opencode_dir / "opencode.jsonc").read_text())
         self.assertEqual(opencode["plugins"], ["/foreign/path/plugin.mjs"])
 
@@ -284,15 +283,16 @@ class CompanionFixture(unittest.TestCase):
         opencode_dir = Path(self.env["XDG_CONFIG_HOME"]) / "opencode"
         opencode_dir.mkdir(parents=True)
         (opencode_dir / "opencode.json").symlink_to(tracked)
+        (opencode_dir / "opencode.jsonc").write_text(json.dumps({
+            "$schema": "https://opencode.ai/config.json",
+            "plugins": [str(Path(self.env["XDG_DATA_HOME"]) / "agent-intercom/agent-intercom-opencode")],
+        }) + "\n")
         self.assertEqual(self.call("install"), 0)
         self.assertEqual(tracked.read_bytes(), before)
-        registered = json.loads((opencode_dir / "opencode.jsonc").read_text())
-        self.assertEqual(registered["plugins"], [
-            str(Path(self.env["XDG_DATA_HOME"]) / "agent-intercom/agent-intercom-opencode")])
+        self.assertFalse((opencode_dir / "opencode.jsonc").exists())
         self.assertEqual(self.call("remove"), 0)
         self.assertEqual(self.call("verify-absent"), 0)
         self.assertEqual(tracked.read_bytes(), before)
-        self.assertFalse((opencode_dir / "opencode.jsonc").exists())
 
     def test_foreign_claude_entry_blocks_install_and_removal_is_retained(self):
         home = Path(self.env["HOME"])

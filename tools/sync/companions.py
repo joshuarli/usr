@@ -4,13 +4,13 @@
 The Claude, Codex and OpenCode intercom adapters ship as separate archives in
 the pinned pi-build release alongside the Pi runtime. This tool installs them
 into ~/.local/share/agent-intercom, creates the PATH shims their command-line
-tools need, and registers the MCP server with Claude Code and the plugins with
-OpenCode, all with owned-entry semantics: entries that do not point into our
-install prefix are never adopted, overwritten or removed. OpenCode merges
-plugin arrays from opencode.json and opencode.jsonc, so OpenCode registration
-goes in a sync-managed opencode.jsonc and the tracked, symlinked opencode.json
-is never read or written through. Codex registers through the tracked
-~/.codex/config.toml entry, which needs no machine state.
+tools need, and registers the MCP server with Claude Code, with owned-entry
+semantics: entries that do not point into our install prefix are never adopted,
+overwritten or removed. The OpenCode adapter is not registered: it exports the
+OpenCode v1 plugin API and OpenCode 2 refuses it, so install removes any owned
+registration from a sync-managed opencode.jsonc instead of writing one. Codex
+registers through the tracked ~/.codex/config.toml entry, which needs no
+machine state.
 """
 from __future__ import annotations
 
@@ -426,60 +426,46 @@ def sync_claude(destination: Path, action: str, env: dict[str, str]) -> str:
     return "registered"
 
 
-def opencode_entries(env: dict[str, str]) -> str:
-    return str(prefix(env) / "agent-intercom-opencode")
-
-
 def opencode_ours(item: str, env: dict[str, str]) -> bool:
     root = str(prefix(env) / "agent-intercom-opencode")
     return item == root or (item.startswith(root + "/dist/") and item.endswith("plugin.mjs"))
 
 
-def sync_opencode(action: str, env: dict[str, str]) -> str:
+def remove_opencode(env: dict[str, str]) -> bool:
     target = opencode_config(env)
-    entry = opencode_entries(env)
     data, original = _read_json(target)
-    if original is None and action == "install":
-        data = {"$schema": OPENCODE_SCHEMA}
-        values = []
-    else:
-        values = data.get("plugins", [])
+    if original is None:
+        return False
+    values = data.get("plugins", [])
     if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
         die(f"{target} plugins must be a list of paths")
-    if action == "check":
-        if entry not in values:
-            die(f"{target} plugin registration is missing or outdated")
-        if any(item != entry and opencode_ours(item, env) for item in values):
-            die(f"{target} plugin registration is missing or outdated")
-        return "current"
-    if action in ("remove", "verify-absent"):
-        residue = [item for item in values if opencode_ours(item, env)]
-        if action == "verify-absent":
-            if residue:
-                die(f"{target} still registers the intercom companion plugin")
-            return "current"
-        kept = [item for item in values if not opencode_ours(item, env)]
-        if len(kept) == len(values):
-            return "absent"
-        if kept:
-            data["plugins"] = kept
-        else:
-            data.pop("plugins", None)
-        if data == {"$schema": OPENCODE_SCHEMA}:
-            if original is not None and target.read_bytes() != original:
-                die(f"{target} changed concurrently; retry sync")
-            target.unlink()
-        else:
-            _write_json(target, data, original)
-        return "removed"
-    cleaned = [item for item in values if not opencode_ours(item, env) or item == entry]
-    if entry not in cleaned:
-        cleaned.append(entry)
-    if cleaned == values:
-        return "current"
-    data["plugins"] = cleaned
-    _write_json(target, data, original)
-    return "registered"
+    kept = [item for item in values if not opencode_ours(item, env)]
+    if len(kept) == len(values):
+        return False
+    if kept:
+        data["plugins"] = kept
+    else:
+        data.pop("plugins", None)
+    if data == {"$schema": OPENCODE_SCHEMA}:
+        if target.read_bytes() != original:
+            die(f"{target} changed concurrently; retry sync")
+        target.unlink()
+    else:
+        _write_json(target, data, original)
+    return True
+
+
+def verify_absent_opencode(env: dict[str, str]) -> None:
+    target = opencode_config(env)
+    data, original = _read_json(target)
+    if original is None:
+        return
+    values = data.get("plugins", [])
+    if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
+        die(f"{target} plugins must be a list of paths")
+    residue = [item for item in values if opencode_ours(item, env)]
+    if residue:
+        die(f"{target} still registers the intercom companion plugin")
 
 
 def load_pin_for_sync() -> dict:
@@ -498,7 +484,7 @@ def command_install(env: dict) -> int:
     for name in COMPANIONS:
         install_shims(root / name, name, env)
     sync_claude(root / "agent-intercom-claude", "install", env)
-    sync_opencode("install", env)
+    remove_opencode(env)
     return 0
 
 
@@ -511,7 +497,6 @@ def command_check(env: dict) -> int:
         if status != "current":
             die(f"companion {name} installation is {status}")
     sync_claude(root / "agent-intercom-claude", "check", env)
-    sync_opencode("check", env)
     return 0
 
 
@@ -522,7 +507,7 @@ def command_plan(env: dict) -> int:
         status = install_status(root / name, pin, name)
         if status in ("absent", "stale"):
             print(f"companions: install {name} {pin['companions'][name]['version']}")
-    print("companions: ensure shims, Claude MCP entry and OpenCode plugin registration")
+    print("companions: ensure shims, Claude MCP entry and OpenCode plugin cleanup")
     return 0
 
 
@@ -531,7 +516,8 @@ def command_remove(env: dict) -> int:
     result = sync_claude(root / "agent-intercom-claude", "remove", env)
     if result == "kept-foreign":
         print("companions: keeping foreign Claude intercom MCP entry")
-    sync_opencode("remove", env)
+    if remove_opencode(env):
+        print("companions: removed retired OpenCode plugin registration")
     for name in COMPANIONS:
         destination = root / name
         if destination.is_symlink():
@@ -546,7 +532,7 @@ def command_remove(env: dict) -> int:
 def command_verify_absent(env: dict) -> int:
     root = prefix(env)
     sync_claude(root / "agent-intercom-claude", "verify-absent", env)
-    sync_opencode("verify-absent", env)
+    verify_absent_opencode(env)
     return 0
 
 
