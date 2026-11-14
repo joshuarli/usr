@@ -56,9 +56,9 @@ test("Antigravity launcher refuses a forbidden family before launching a process
   try {
     for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
       assert.throws(() => startAntigravity({ directory: f.run.output, logDirectory: f.run.output, prompt: "Work",
-        selection: { model, effort: "high" }, access: { kind: "write", network: false } }), /Prohibited Antigravity model/)
+        selection: { model, effort: "high" }, access: { kind: "write" } }), /Prohibited Antigravity model/)
     }
     assert.throws(() => startAntigravity({ directory: f.run.output, logDirectory: f.run.output, prompt: "Work",
-      selection: ANTIGRAVITY_PIN, access: { kind: "write", network: false }, resume: "not-a-conversation" }), /Invalid Antigravity conversation ID/)
+      selection: ANTIGRAVITY_PIN, access: { kind: "write" }, resume: "not-a-conversation" }), /Invalid Antigravity conversation ID/)
   } finally { f.close() }
 })

@@ -27,30 +27,15 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
 **Quota fallback for scout/mechanic/worker only:** When no approved bridge backend can run because it is unavailable or exhausted, use tier-matched native subagents with the same brief, worktree, scope, and independent verification. In Claude Code use scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. Preserve partial work before relaunch. Expert unavailability or quota exhaustion is a blocker; never substitute another model. No hook gates native subagents. Return to the bridge when capacity recovers.
-
-**Host-access exception for scout/mechanic/worker:** use the same native mapping when the slice's proof needs host access Codex's sandbox cannot grant (Docker, VMs, `taskpolicy`, hardware), with unchanged scope and parent review. Dependency fetching uses scope `network: true` and does not qualify.
 <!-- policy:end native-fallback -->
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.
 
 ## Pinned tiers
 
-<!-- policy:begin routing-table -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-| Tier | Primary | Fallback (in order) |
-| --- | --- | --- |
-| scout | Codex `gpt-6-luna` (`medium`) | Command Code `meta/muse-ember` (`medium`); Pi `opencode-go/muse-spark-1.3-contributor` (`medium`) |
-| mechanic | Codex `gpt-6-luna` (`high`) | Command Code `meta/muse-ember` (`xhigh`); Pi `opencode-go/muse-spark-1.3-contributor` (`high`) |
-| worker | Codex `gpt-6.1-terra` (`medium`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`) |
-| expert | Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) | **None. Fail closed.** |
-<!-- policy:end routing-table -->
+Call `worker_model_check` for the tier you are about to assign: it returns the exact pins, efforts, fallback order and availability. The full table is in `tools/pi-subagent-bridge/README.md`.
 
-<!-- policy:begin direct-models -->
-<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-Antigravity main sessions replacing Gemini 3.8 Flash must explicitly select an available approved model: `gemini-4-hydrogen-high` or `gemini-4-hydrogen-medium`. Verify it with `agy models`; never silently substitute a model or purchase API credits. Delegated expert assignments use the exact root pin above.
-<!-- policy:end direct-models -->
-
-**Pi OpenCode Go boundary:** scout and mechanic use the pinned OpenCode Go models in the routing table; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The Pi expert profile belongs to the native/nested domain and supports already-admitted legacy sessions; it does not authorize new root expert dispatches.
+**Pi OpenCode Go boundary:** scout and mechanic Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The Pi expert profile belongs to the native/nested domain and supports already-admitted legacy sessions; it does not authorize new root expert dispatches.
 
 Expert is a terminal Antigravity lane; no native child fanout beyond the typed ceilings. Reserve it for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert.
 
@@ -60,7 +45,7 @@ Expert is a terminal Antigravity lane; no native child fanout beyond the typed c
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 
-Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. Set scope `network: true` when the slice adds or fetches dependencies; Codex's sandbox otherwise has no network and cannot write the Cargo home. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether one level of Pi fanout is justified.
+Create a clean worktree under `.work/wt/<slice>`, call `worker_model_check`, then `worker_start`. The schema enforces the scope's shape; the judgment is yours: `acceptance_proof` is a named command with its expected result (or a source file:line for research), `attempt_limit` is 1 unless one same-scope correction is justified, and `stop_on` covers ambiguity, scope expansion, new dependencies, contract changes, and unavailable proof. The `brief` states one outcome, the relevant facts, prohibited changes, and whether one level of Pi fanout is justified.
 
 **Admission is not completion.** Run the `watch` command that `worker_start` returns as a background task, so the harness wakes you when the worker ends; never end a turn on an admitted worker without one. Then read `worker_status`. State `incomplete` means the worker exited without a final `ACCEPTANCE: met`; treat it as unaccepted work, not success. It reports the actual backend, model, thinking/effort, changed paths, out-of-scope changes, and whether HEAD stayed pinned. Require exact commands, exit codes and decisive output; prose is only a claim.
 
@@ -68,13 +53,13 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-**Follow the ordered routing table.** Expert has no fallback. Only an unavailable executor or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models, including prior Pi/Command/Codex expert sessions.
+**Follow the tier's ordered routes.** Expert has no fallback. Only an unavailable executor or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models, including prior Pi/Command/Codex expert sessions.
 
 **Nesting:** a Pi SDK child may delegate one more generation, at an equal-or-weaker tier, only when its brief calls for it; the bridge's guard rejects anything else (deeper nesting, model or worktree overrides). Descendants share the original worktree and write budget, and the outer parent still owns acceptance and review. Codex and Command Code workers are leaves: no bridge CLI children, no host-native agents.
 
 **Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
 
-**Clef-flash advice** (per the global contract): build the `TaskBrief` from verified facts and call `decide route --guide`, then `decide route --baseline worker` once. On any failure, choose from the table without retrying.
+**Clef-flash advice** (per the global contract): build the `TaskBrief` from verified facts and call `decide route --guide`, then `decide route --baseline worker` once. On any failure, choose the tier yourself without retrying.
 
 ## Delegation
 

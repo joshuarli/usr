@@ -7,7 +7,7 @@ import { codexResult, codexSession, startCodex } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 
 const delay = () => new Promise((resolve) => setTimeout(resolve, 10))
-const WRITE = { kind: "write", network: false } as const
+const WRITE = { kind: "write" } as const
 const luna = { model: "gpt-6-luna", effort: "high" } as const
 const terra = { model: "gpt-6.1-terra", effort: "medium" } as const
 function request(root: string, overrides: Partial<LaunchRequest> = {}): LaunchRequest {
@@ -32,10 +32,8 @@ test("Codex captures the thread and completed turn and resumes with the same mod
     for (let i = 0; i < 200 && codexResult(next).state === "running"; i++) await delay()
     assert.match(readFileSync(args, "utf8"), /resume\nthread-1\ncorrection/)
     assert.match(readFileSync(args, "utf8"), /--ignore-user-config/)
-    assert.doesNotMatch(readFileSync(args, "utf8"), /network_access/)
-    const networked = startCodex(request(root, { prompt: "fetch", access: { kind: "write", network: true } }))
-    for (let i = 0; i < 200 && codexResult(networked).state === "running"; i++) await delay()
-    assert.match(readFileSync(args, "utf8"), /sandbox_workspace_write\.network_access=true\n--add-dir\n\S+cargo/)
+    assert.match(readFileSync(args, "utf8"), /--sandbox\ndanger-full-access/)
+    assert.doesNotMatch(readFileSync(args, "utf8"), /workspace-write|network_access/)
     const admittedPin = { model: "fixture-historical-codex", effort: "high" } as const
     const retained = startCodex(request(root, { prompt: "retain pin", resume: "thread-1", selection: admittedPin }))
     for (let i = 0; i < 200 && codexResult(retained).state === "running"; i++) await delay()
@@ -44,7 +42,7 @@ test("Codex captures the thread and completed turn and resumes with the same mod
   } finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }) }
 })
 
-test("Codex refuses a forbidden family and a read-only run never gets network", async () => {
+test("Codex refuses a forbidden family and a read-only run is unsandboxed but has no execution tools", async () => {
   for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
     assert.throws(() => startCodex(request("/absent", { selection: { model, effort: "high" } })), /Prohibited Codex model/)
   }
@@ -57,8 +55,9 @@ test("Codex refuses a forbidden family and a read-only run never gets network", 
     const run = startCodex(request(root, { access: { kind: "read-only" } }))
     for (let i = 0; i < 200 && codexResult(run).state === "running"; i++) await delay()
     const recorded = readFileSync(args, "utf8")
-    assert.match(recorded, /--sandbox\nread-only/)
-    assert.doesNotMatch(recorded, /network_access/)
+    assert.match(recorded, /--sandbox\ndanger-full-access/)
+    for (const feature of ["shell_tool", "unified_exec", "code_mode_host", "computer_use", "browser_use", "in_app_browser"])
+      assert.match(recorded, new RegExp("--disable\n" + feature + "\n"), feature)
   } finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }) }
 })
 

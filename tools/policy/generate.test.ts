@@ -39,7 +39,7 @@ test("one expert pin change propagates to every representation and leaves other 
       assert.match(output.content, /fixture-expert-model/, output.path)
       assert.ok(!output.content.includes(POLICY.rootRoutes.expert[0].model), output.path)
     }
-    const table = changed.find(output => output.path.endsWith("orchestrate/SKILL.md"))!
+    const table = changed.find(output => output.path === "tools/pi-subagent-bridge/README.md")!
     assert.ok(table.content.includes("| expert | Antigravity CLI `fixture-expert-model` (`high`) | **None. Fail closed.** |"))
     const exported = JSON.parse(changed.find(output => output.path === JSON_PATH)!.content)
     assert.deepEqual(exported.rootRoutes.expert, [{ executor: "antigravity", model: "fixture-expert-model", effort: "high" }])

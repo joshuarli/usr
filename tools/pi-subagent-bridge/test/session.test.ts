@@ -81,6 +81,15 @@ test("v1 lower-tier records convert to a typed fallback plan on every executor",
   assert.equal(backendOf(transitional), "command-transition")
 })
 
+test("records admitted with the retired network scope flag still decode, and re-encode without it", () => {
+  for (const schema_version of [1, 2, undefined]) {
+    const legacy = schema_version === 2 ? JSON.parse(JSON.stringify(encodeSession(decode(lower())))) : lower({ schema_version })
+    const parsed = decode({ ...legacy, scope: { ...scope, network: true } })
+    assert.deepEqual(parsed.scope, scope)
+    assert.equal("network" in (encodeSession(parsed).scope as object), false)
+  }
+})
+
 test("a v1 Pi record keeps its selected destination first in the plan and its pending candidates after it", () => {
   const parsed = roundTrip(lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: MUSE, pi_candidates: [GO] }))
   assert.deepEqual(parsed.plan, { kind: "fallback", codex: CODEX, command: COMMAND, pi: [MUSE, GO] })

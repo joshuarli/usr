@@ -22,7 +22,6 @@ test("scope construction preserves read-only and write-boundary restrictions", (
   assert.throws(() => parseScope(scope(), "scout"), /scouts are read-only/)
   const readOnly = { ...scope(), writable_paths: [] }
   assert.deepEqual(parseScope(readOnly, "scout"), readOnly)
-  assert.throws(() => parseScope({ ...readOnly, network: true }, "scout"), /no network/)
   assert.throws(() => parseScope(readOnly, "worker"), /writers need specific writable_paths/)
   for (const path of ["", "/tmp/", "../outside", "src/../outside", ".git/config", ".work/state", "src/*", "src\\file"]) {
     assert.throws(() => parseScope({ ...scope(), writable_paths: [path] }, "worker"), /Invalid writable path/, path)
@@ -40,7 +39,7 @@ test("scope decoder applies its public field bounds", () => {
     assert.throws(() => parseScope({ ...scope(), attempt_limit }, "worker"), /attempt_limit/)
   }
   assert.throws(() => parseScope({ ...scope(), acceptance_proof: " " }, "worker"), /Invalid acceptance_proof/)
-  assert.throws(() => parseScope({ ...scope(), network: "true" }, "worker"), /network must be a boolean/)
+  assert.throws(() => parseScope({ ...scope(), network: true }, "worker"), /Unknown scope field: network/)
   const max = SCOPE_SCHEMA.properties.writable_paths.maxItems
   assert.throws(() => parseScope({ ...scope(), writable_paths: Array.from({ length: max + 1 }, (_, i) => `src/${i}`) }, "worker"), /writable_paths must name at most/)
 })

@@ -1093,7 +1093,7 @@ test("an acknowledged Codex cancellation does not fall back on a quota-shaped fa
   } finally { f.close() }
 })
 
-test("a run without a final ACCEPTANCE: met line is incomplete, and network reaches Codex", async () => {
+test("a run without a final ACCEPTANCE: met line is incomplete", async () => {
   for (const [finalText, state, claim] of [
     ["proof\nACCEPTANCE: met", "succeeded", "met"],
     ["proof\n**ACCEPTANCE: not met**", "incomplete", "not_met"],
@@ -1106,9 +1106,9 @@ test("a run without a final ACCEPTANCE: met line is incomplete, and network reac
         start: (request: LaunchRequest) => { starts.push(request); return { pid: 123, output: "fake", errors: "fake", started_at: "now" } },
         status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "t", finalText }, stderr: null }) }
       const bridge = makeHybridBridge(m.api, m.command, codex)
-      const started = await bridge.start(f.cwd, "edit", "worker", { ...f.scope, network: true }, "Do scoped work")
+      const started = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
       assert.match(started.watch, /^pi-subagent-bridge watch ".+" usrw_/)
-      assert.deepEqual(starts[0].access, { kind: "write", network: true })
+      assert.deepEqual(starts[0].access, { kind: "write" })
       const status = await bridge.status(f.cwd, started.session_id)
       assert.equal(status.state, state)
       assert.equal(status.acceptance_claim, claim)
@@ -1117,12 +1117,12 @@ test("a run without a final ACCEPTANCE: met line is incomplete, and network reac
   }
 })
 
-test("scouts cannot request network", async () => {
+test("the retired network scope flag is rejected for new work", async () => {
   const f = fixture()
   try {
     const m = fake(f.cwd)
     const bridge = makeHybridBridge(m.api, m.command, { ...noCodex, available: () => true })
-    await assert.rejects(bridge.start(f.cwd, "look", "scout", { ...f.scope, writable_paths: [], network: true }, "Read"), /no network/)
+    await assert.rejects(bridge.start(f.cwd, "edit", "worker", { ...f.scope, network: true }, "Edit"), /Unknown scope field: network/)
   } finally { f.close() }
 })
 

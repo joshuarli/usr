@@ -15,7 +15,6 @@ export const SCOPE_SCHEMA = {
     acceptance_proof: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S" },
     attempt_limit: { type: "integer", enum: ATTEMPT_LIMITS },
     stop_on: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S" },
-    network: { type: "boolean", description: "Writers only: give a Codex worker network access and a writable Cargo home, for tasks that fetch dependencies" },
   },
   required: ["base_revision", "writable_paths", "acceptance_proof", "attempt_limit", "stop_on"],
   additionalProperties: false,
@@ -62,9 +61,6 @@ export function parseScope(value: unknown, tier: Tier, expectedRevision?: string
   const acceptance_proof = requiredText(value.acceptance_proof, "acceptance_proof", fields.acceptance_proof.maxLength)
   const stop_on = requiredText(value.stop_on, "stop_on", fields.stop_on.maxLength)
   if (!isAttemptLimit(value.attempt_limit)) throw new Error("attempt_limit must be " + ATTEMPT_LIMITS.join(" or "))
-  if (value.network !== undefined && typeof value.network !== "boolean") throw new Error("network must be a boolean")
-  if (value.network && tier === "scout") throw new Error("scouts are read-only and get no network")
-  const network: { network?: boolean } = value.network ? { network: true } : {}
-  return { base_revision, writable_paths, acceptance_proof, attempt_limit: value.attempt_limit, stop_on, ...network }
+  return { base_revision, writable_paths, acceptance_proof, attempt_limit: value.attempt_limit, stop_on }
 }
 export type Scope = ReturnType<typeof parseScope>

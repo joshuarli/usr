@@ -2,7 +2,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import type { Command } from "../src/commands.ts"
 import type { CommandRun } from "../src/command.ts"
-import type { Access, LaunchRequest, WriteAccess } from "../src/launch.ts"
+import type { LaunchRequest, WriteAccess } from "../src/launch.ts"
 import type { CliPin, PiSelection, RootPlan } from "../src/policy.ts"
 import type { Execution, PiFallbackPlan, Target } from "../src/session.ts"
 
@@ -54,9 +54,6 @@ export function witnesses(): void {
   // @ts-expect-error a launch request needs its selection
   const noRequestSelection = { directory: "/w", logDirectory: "/l", prompt: "p", access: { kind: "read-only" } } satisfies LaunchRequest
 
-  // @ts-expect-error a read-only launch has no network setting
-  const readOnlyNetwork = { kind: "read-only", network: true } satisfies Access
-
   // @ts-expect-error Antigravity launches are never read-only
   const readOnlyAntigravity = { ...validRequest, access: { kind: "read-only" } } satisfies LaunchRequest<WriteAccess>
 
@@ -66,7 +63,7 @@ export function witnesses(): void {
 
   void [validProcess, noSelection, piProcess, validPi, noVariant, cliPinOnPi, validTransition, noDestination,
     wrongDestination, validPlan, emptyPi, resolvedPiFallback, unresolvedPiFallback, piInCodexSlot, extraExecutor, routeList, validRequest, noRequestSelection,
-    readOnlyNetwork, readOnlyAntigravity, validStart, noScope]
+    readOnlyAntigravity, validStart, noScope]
 }
 
 test("type witnesses are checked by the compiler, not at runtime", () => {

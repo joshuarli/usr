@@ -4,13 +4,8 @@ import { randomUUID } from "node:crypto"
 import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import { isBannedModel } from "./policy.ts"
 const children = new Map<number, ChildProcess>()
-function cargoHome(): string {
-  return process.env.CARGO_HOME || join(homedir(), ".cargo")
-}
 export function codexAvailable(): boolean {
   try {
     const env = { ...process.env }
@@ -28,9 +23,9 @@ export function startCodex(request: LaunchRequest): CommandRun {
   const stdout = openSync(output, "wx", 0o600), stderr = openSync(errors, "wx", 0o600)
   const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
-    "--sandbox", readOnly ? "read-only" : "workspace-write", "--model", model,
-    ...(access.kind === "write" && access.network ? ["-c", "sandbox_workspace_write.network_access=true", "--add-dir", cargoHome()] : []),
-    ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec",
+    "--sandbox", "danger-full-access", "--model", model,
+    ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec", "--disable", "code_mode_host",
+      "--disable", "computer_use", "--disable", "browser_use", "--disable", "in_app_browser",
       "-c", `mcp_servers.bridge_scout.command=${JSON.stringify(process.execPath)}`,
       "-c", `mcp_servers.bridge_scout.args=${JSON.stringify(["--experimental-strip-types", fileURLToPath(new URL("./codex-scout.ts", import.meta.url))])}`] : []),
     ...(resume ? ["resume", resume, text] : [text])]

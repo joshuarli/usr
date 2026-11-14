@@ -31,9 +31,15 @@ class OrchestrateTests(unittest.TestCase):
                                     for route in routes))
 
     def test_direct_antigravity_models_require_an_availability_check(self):
+        contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()
         for model in POLICY["antigravityDirect"]["models"]:
-            self.assertIn(model, self.text)
-        self.assertIn("Verify it with `agy models`", self.text)
+            self.assertIn(model, contract)
+            self.assertNotIn(model, self.text)
+        self.assertIn("Verify it with `agy models`", contract)
+
+    def test_orchestrate_defers_exact_pins_to_model_check(self):
+        self.assertIn("Call `worker_model_check` for the tier you are about to assign", self.text)
+        self.assertNotIn("| Tier | Primary | Fallback (in order) |", self.text)
 
     def test_no_old_mcp_registration(self):
         codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()
@@ -47,11 +53,12 @@ class OrchestrateTests(unittest.TestCase):
     def test_native_subagents_are_the_quota_fallback(self):
         self.assertIn("Quota fallback for scout/mechanic/worker only:", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
-        self.assertIn("Host-access exception for scout/mechanic/worker:", self.text)
+        self.assertNotIn("Host-access exception", self.text)
+        self.assertNotIn("sandbox cannot grant", self.text)
         for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
             content = (ROOT / path).read_text()
             self.assertIn("quota", content)
-            self.assertIn("host access Codex's sandbox cannot grant", content)
+            self.assertNotIn("sandbox cannot grant", content)
             self.assertNotIn("Missing bridge means no delegation", content)
             self.assertNotIn("blocks delegation rather than authorizing another launcher", content)
         settings = json.loads((ROOT / "dotfiles/base/.claude/settings.json").read_text())
