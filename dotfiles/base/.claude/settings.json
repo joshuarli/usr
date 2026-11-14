@@ -12,16 +12,6 @@
   },
   "model": "opus",
   "hooks": {
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "notify-sound"
-          }
-        ]
-      }
-    ],
     "WorktreeCreate": [
       {
         "hooks": [

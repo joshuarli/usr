@@ -32,14 +32,18 @@ reset_agent() {
         "$reset_agents" "$@"
 }
 
-mkdir -p "$home/.claude"
+mkdir -p "$home/.claude" "$home/.claude/agents"
 : > "$home/.claude/settings.json"
 : > "$home/.claude/.credentials.json"
 : > "$home/.claude/history.jsonl"
+: > "$home/.claude/agents/.gitignore"
+: > "$home/.claude/agents/untracked.md"
 reset_agent claude
 present "$home/.claude/settings.json"
 present "$home/.claude/.credentials.json"
+present "$home/.claude/agents/.gitignore"
 absent "$home/.claude/history.jsonl"
+absent "$home/.claude/agents/untracked.md"
 
 mkdir -p "$home/.config/muse" "$home/.local/share/muse/sessions"
 : > "$home/.config/muse/settings.json"
@@ -67,7 +71,6 @@ mkdir -p "$home/.config/opencode/plugins" "$home/.local/share/opencode" "$home/.
 : > "$home/.config/opencode/opencode.json"
 : > "$home/.config/opencode/tui.json"
 : > "$home/.config/opencode/cli.json"
-: > "$home/.config/opencode/plugins/notification.js"
 : > "$home/.config/opencode/plugins/untracked.js"
 : > "$home/.local/share/opencode/auth.json"
 : > "$home/.local/share/opencode/opencode.db"
@@ -75,7 +78,6 @@ mkdir -p "$home/.config/opencode/plugins" "$home/.local/share/opencode" "$home/.
 reset_agent opencode
 present "$home/.config/opencode/opencode.json"
 present "$home/.config/opencode/cli.json"
-present "$home/.config/opencode/plugins/notification.js"
 present "$home/.local/share/opencode/auth.json"
 absent "$home/.config/opencode/tui.json"
 absent "$home/.config/opencode/plugins/untracked.js"

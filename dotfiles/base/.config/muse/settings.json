@@ -20,30 +20,6 @@
   },
   "contributor_mode_enabled": true,
   "contributor_mode_disclosure_acknowledged": true,
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "notify-sound",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "notify-sound",
-            "timeout": 5
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "schema_version": 1,
     "default_profile": ":unrestricted"

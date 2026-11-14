@@ -25,7 +25,7 @@ Some configured commands require separately installed tools:
 | [imv configuration](../dotfiles/linux/.config/imv/config) | A separately installed `imv`; it is absent from the Alpine desktop package list. |
 | xshi's `wol` alias | A separately installed `~/.local/bin/wol`. [`src/wol.py`](../src/wol.py) is available to run directly, but sync does not create that launcher. |
 
-Linux [`notify-sound`](../dotfiles/linux/.local/bin/notify-sound) uses the terminal bell and optionally `paplay` when that executable and its sound file exist. It does not require installing a PulseAudio stack. macOS memory inspection treats Watchman as optional. Linux sandbox prerequisites remain in the [sbx reference](sbx-spec.md#linux-backend-out-of-scope).
+macOS memory inspection treats Watchman as optional. Linux sandbox prerequisites remain in the [sbx reference](sbx-spec.md#linux-backend-out-of-scope).
 
 `sh sync` also runs host setup: macOS installs Homebrew packages, while Alpine Linux installs the sync prerequisites and configures Unbound and DNS. These steps can use `sudo`. Other Linux distributions skip Unbound setup. Touch ID, macOS DNS, and Tailscale SSH setup are manual; the packages step installs Homebrew's `tailscale`, the only macOS variant that serves Tailscale SSH. See [`setup-macos`](../host/macos/setup-macos) and [macOS preferences](macos-preferences.md).
 

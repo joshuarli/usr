@@ -152,5 +152,4 @@ fi
 	git -C "$root" diff --stat
 	printf '```\n'
 }
-notify-sound || true
 exit "$rc"

@@ -40,12 +40,7 @@ printf '%s\n' called >>"$CLAUDE_API_CALLS"
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"completed","num_turns":1,"duration_ms":0,"total_cost_usd":0}'
 EOF
 
-cat >"$bin/notify-sound" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-
-chmod +x "$bin/vault" "$bin/claude" "$bin/notify-sound"
+chmod +x "$bin/vault" "$bin/claude"
 
 run() {
 	(
