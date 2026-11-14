@@ -152,7 +152,9 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 self.assertTrue((companions / "agent-intercom-claude/dist/claude-server.mjs").is_file())
                 self.assertTrue((companions / "agent-intercom-codex/dist/codex-server.mjs").is_file())
                 self.assertTrue((companions / "agent-intercom-opencode/dist/plugin.mjs").is_file())
+                self.assertTrue((companions / "agent-intercom-opencode/dist/plugin-v2.mjs").is_file())
                 self.assertTrue((companions / "agent-intercom-opencode/node_modules/@opencode-ai/plugin/dist/index.js").is_file())
+                self.assertTrue((companions / "agent-intercom-opencode/node_modules/@dataforxyz/agent-intercom-core/dist/index.js").is_file())
                 shim = bindir / "claude-intercom-mcp"
                 self.assertTrue(shim.is_file() and os.access(shim, os.X_OK))
                 shim = bindir / "codex-intercom-mcp"
@@ -161,11 +163,15 @@ class BridgeOfflineEndToEnd(unittest.TestCase):
                 self.assertIn("claude-intercom", claude.get("mcpServers", {}))
                 codex_config = (home / ".codex/config.toml").read_text()
                 self.assertIn("[mcp_servers.codex-intercom]", codex_config)
+                # OpenCode loads the companion through the tracked plugins-dir
+                # wrapper linked by the links layer; sync writes no config entry.
                 opencode_data = json.loads(config.read_text())
-                plugin = opencode_data.get("plugin", [])
-                self.assertIn(str(companions / "agent-intercom-opencode/dist/plugin.mjs"), plugin)
-                tui = json.loads((home / ".offline-opencode/opencode/tui.json").read_text())
-                self.assertIn(str(companions / "agent-intercom-opencode/dist/tui.mjs"), tui.get("plugin", []))
+                self.assertNotIn("plugin", opencode_data)
+                self.assertFalse((home / ".offline-opencode/opencode/tui.json").exists())
+                wrapper = home / ".config/opencode/plugins/agent-intercom.js"
+                self.assertTrue(wrapper.is_symlink())
+                self.assertEqual(wrapper.resolve(),
+                                 (ROOT / "dotfiles/base/.config/opencode/plugins/agent-intercom.js").resolve())
                 proc = subprocess.run([str(pi), "--version"],
                                       cwd=base, env=env,
                                       capture_output=True, text=True, timeout=30)

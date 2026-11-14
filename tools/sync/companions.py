@@ -6,11 +6,11 @@ the pinned pi-build release alongside the Pi runtime. This tool installs them
 into ~/.local/share/agent-intercom, creates the PATH shims their command-line
 tools need, and registers the MCP server with Claude Code, with owned-entry
 semantics: entries that do not point into our install prefix are never adopted,
-overwritten or removed. The OpenCode adapter is not registered: it exports the
-OpenCode v1 plugin API and OpenCode 2 refuses it, so install removes any owned
-registration from a sync-managed opencode.jsonc instead of writing one. Codex
-registers through the tracked ~/.codex/config.toml entry, which needs no
-machine state.
+overwritten or removed. The OpenCode adapter is loaded by OpenCode itself from
+the tracked plugins directory (dotfiles/base/.config/opencode/plugins/), so no
+config entry is written; install removes any owned registration from a
+sync-managed opencode.jsonc left by earlier builds instead. Codex registers
+through the tracked ~/.codex/config.toml entry, which needs no machine state.
 """
 from __future__ import annotations
 
