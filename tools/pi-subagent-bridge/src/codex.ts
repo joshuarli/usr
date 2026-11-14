@@ -1,7 +1,7 @@
 import { spawnSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readSync, fstatSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
+import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
 import { fileURLToPath } from "node:url"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -74,10 +74,6 @@ function events(run: CommandRun): Event[] {
 }
 export function codexSession(run: CommandRun): string | null {
   return events(run).find((event) => event.type === "thread.started")?.thread_id ?? null
-}
-function groupAlive(pid: number): boolean {
-  try { process.kill(-pid, 0); return true }
-  catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH" }
 }
 export function codexResult(run: CommandRun): { state: string; result: CommandResult | null; stderr: string | null } {
   const identity = children.has(run.pid) ? "same" : processIdentity(run)

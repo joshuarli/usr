@@ -135,3 +135,24 @@ test("a recorded process start time keeps a live foreign run running and makes a
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("a terminal receipt from a still-live Command Code process is not terminal until the process ends", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-live-receipt-")))
+  const output = join(root, "out.ndjson"), errors = join(root, "err.stderr")
+  writeFileSync(output, '{"type":"result","subtype":"error","sessionId":"cmd-session","error":"quota"}\n')
+  writeFileSync(errors, "")
+  const child = spawn("sleep", ["30"], { stdio: "ignore" })
+  try {
+    const recorded = processStartTime(child.pid!)
+    assert.ok(recorded)
+    const run = { pid: child.pid!, output, errors, started_at: new Date().toISOString(), proc_start: recorded }
+    assert.deepEqual(commandResult(run), { state: "running", result: null, stderr: null })
+    child.kill("SIGKILL")
+    await new Promise((resolve) => child.on("exit", resolve))
+    assert.equal(commandResult(run).state, "failed")
+    assert.equal(commandResult({ ...run, proc_start: "0" }).state, "failed")
+  } finally {
+    child.kill("SIGKILL")
+    rmSync(root, { recursive: true, force: true })
+  }
+})
