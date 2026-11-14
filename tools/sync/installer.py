@@ -698,8 +698,8 @@ class Installer:
     def install_release(self, prog: str) -> None:
         owners = {
             **{name: "laputa-systems" for name in
-               ("e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty", "vault", "rage")},
-            **{name: "joshuarli" for name in ("ish", "stuff", "mactop", "view", "gh", "syncthing", "soulseek-rs")},
+               ("e", "fz", "fastermod", "tm", "fs", "srv", "diff-pretty", "vault", "rage", "stuff")},
+            **{name: "joshuarli" for name in ("ish", "mactop", "view", "gh", "syncthing", "soulseek-rs")},
             "bylaws": "joshuarli",
             "shuck": "joshuarli",
         }

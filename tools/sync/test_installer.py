@@ -322,8 +322,8 @@ sys.exit(1)
         import hashlib
         digest = digest or hashlib.sha256(payload).hexdigest()
         asset = f"stuff-{target}"
-        base = "https://github.com/joshuarli/stuff/releases/download/v1"
-        routes = {"https://github.com/joshuarli/stuff/releases.atom": atom([("2024-01-01", "v1")]),
+        base = "https://github.com/laputa-systems/stuff/releases/download/v1"
+        routes = {"https://github.com/laputa-systems/stuff/releases.atom": atom([("2024-01-01", "v1")]),
                   f"{base}/{asset}": (payload, {"ETag": "e"}),
                   f"{base}/SHA256SUMS": f"{digest}  {sums_asset or asset}\n".encode()}
         return routes, base, asset
