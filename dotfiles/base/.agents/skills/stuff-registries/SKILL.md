@@ -5,7 +5,7 @@ description: "Apply when publishing or consuming packages through the 17166969.x
 
 # stuff registries
 
-`stuff` is one installed CLI that publishes four static registries: `crates` (Cargo sparse), `npm`, `pypi`, and `oci`. Each publication is an immutable generation and `current` points at one. The Worker serves the site layout from R2, so a publish is build state → publish site → sync R2, done by the CLI in one transaction under the registry's publish lock.
+`stuff` is one installed CLI that publishes Cargo, npm, PyPI, OCI and the artifact mirror. OpenOrange on Lisa serves the registries over tailnet HTTPS. Each publication is an immutable generation; the shared coordinator selects `current` and serializes writers across machines.
 
 | Registry | Public root |
 | --- | --- |
@@ -34,10 +34,10 @@ Consumer repos call `stuff` from their `Makefile` publish-* targets with `STUFF 
 
 ## Auth and state
 
-- Minting goes through the `cf` profile named by `cf_profile` in `~/.config/stuff/config.json` (default `stuff`); `stuff` passes `--profile` itself, so publishing works from any repo without `cf auth activate`. If minting fails, log the profile in with `cf auth create stuff` and check with `cf --profile stuff auth whoami`; do not bind consumer directories.
-- Scripts that need `R2_S3_*` themselves (`deploy/r2-pull.py`, `make gc`, the OCI writer host) mint them with `eval "$(stuff credentials BUCKET)"`; the old `deploy/publish` and `r2-sync.sh` wrappers are gone.
-- Promotion uses the S3 transport with a conditional `If-Match` write, so a competing publisher gets exit `3`. It reads `R2_S3_ENDPOINT`, `R2_S3_ACCESS_KEY_ID`, and `R2_S3_SECRET_ACCESS_KEY`; when those are unset the CLI mints short-lived bucket-scoped values itself and stops before building if minting fails.
-- Remote R2 is the authoritative source of truth. Publishes fetch the live generation and manifest directly, stage locally in `${XDG_STATE_HOME:-$HOME/.local/state}/stuff/<registry>/` (with caching in `${XDG_CACHE_HOME:-$HOME/.cache}/stuff/<registry>/`), upload missing immutable objects, and conditionally promote `current`. A fresh machine can publish immediately without copied local state.
+- Install the current native CLI and an owner-only `${XDG_CONFIG_HOME:-$HOME/.config}/stuff/credentials.json` (mode 600). Its endpoint is `https://stuff.17166969.xyz`; it contains the publishing service keys and coordinator token. Keep backing-store keys on Lisa. Never print the file or put its secrets in argv. `STUFF_CREDENTIAL_FILE` selects a different protected file. The retired `cf_profile` field is rejected; Cloudflare login is unnecessary.
+- Scripts that need `R2_S3_*` (`deploy/r2-pull.py`, `make gc`, the OCI writer host) obtain service gateway exports with `eval "$(stuff credentials BUCKET)"`. This does not grant a write lease; the supported writer and GC helpers acquire their own coordinator leases.
+- Promotion uses a renewable server lease and a conditional coordinator revision. A competing writer gets exit `3`; wait for it to finish and retry against the new live generation. Explicit maintenance `R2_S3_*` credentials cannot override a configured publishing service.
+- The remote service is authoritative. Publishes fetch its live generation and manifest, stage locally in `${XDG_STATE_HOME:-$HOME/.local/state}/stuff/<registry>/` (with caching in `${XDG_CACHE_HOME:-$HOME/.cache}/stuff/<registry>/`), upload missing immutable objects, and activate through the coordinator. A fresh machine needs the CLI, service credential file and Tailscale access, without copied local publication state. Lisa can publish through the same HTTPS endpoint.
 
 ## Procedures
 
