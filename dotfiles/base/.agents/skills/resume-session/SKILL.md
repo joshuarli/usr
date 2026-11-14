@@ -11,6 +11,8 @@ metadata:
 
 `/resume-session <agent> <session-id>` is a **cross-agent work handoff**, not a way to replace this process or import another agent's private conversation state. Recover the source conversation, reconcile it with the actual repository, and continue the unfinished task **here**. Do not launch or resume the source CLI, clone its authentication, import its permissions, or create a transcript copy in Git. Native reopening is a separate option below.
 
+**Resume the objectives, not just the context.** Recovering the session is preparation for continuing its authorized work. Carry forward every unfinished original objective and its acceptance criteria, including dependent verification and integration. Do not end the turn merely because the handoff is reconstructed, one slice lands, or remaining work has been listed. Keep working toward those objectives until they are complete, the user explicitly pauses or changes them, or a concrete blocker prevents further authorized progress. A progress report is not a stopping condition; if one objective is blocked, continue independent authorized work on the others.
+
 ## Locate the exact session
 
 Both arguments are required. Normalize the agent name, but never guess the session ID:
@@ -59,6 +61,6 @@ If the user explicitly wants to reopen the original agent, provide the correct h
 
 These commands require the relevant CLI, its own surviving session data/service, and often the original workspace. Do not try to run an interactive nested agent through a non-interactive shell tool.
 
-**The test:** the named session is identified unambiguously; the work and next step agree with source evidence *and* current repository state; no completed step is blindly replayed and no other harness's authority is inherited.
+**The test:** the named session is identified unambiguously; the work and next step agree with source evidence *and* current repository state; unfinished objectives are actively pursued rather than left as a handoff report; no completed step is blindly replayed and no other harness's authority is inherited.
 
-**Report:** source harness and exact session ID, verified project/worktree, recovered goal and progress, what you continued (or why it cannot continue), checks, and any missing transcript coverage. Never claim the original native session ID was resumed inside this harness.
+**Report:** source harness and exact session ID, verified project/worktree, recovered goal and progress, what you continued (or why it cannot continue), checks, and any missing transcript coverage. Report these as progress while work remains actionable; reserve the final reply for completion or a concrete blocker after independent work is exhausted. Never claim the original native session ID was resumed inside this harness.
