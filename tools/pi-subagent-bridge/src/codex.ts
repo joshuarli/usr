@@ -24,7 +24,7 @@ export function startCodex(request: LaunchRequest): CommandRun {
   const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
     "--sandbox", "danger-full-access", "--model", model,
-    ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec", "--disable", "code_mode_host",
+    ...(readOnly ? ["--disable", "shell_tool", "--disable", "unified_exec",
       "--disable", "computer_use", "--disable", "browser_use", "--disable", "in_app_browser",
       "-c", `mcp_servers.bridge_scout.command=${JSON.stringify(process.execPath)}`,
       "-c", `mcp_servers.bridge_scout.args=${JSON.stringify(["--experimental-strip-types", fileURLToPath(new URL("./codex-scout.ts", import.meta.url))])}`] : []),
