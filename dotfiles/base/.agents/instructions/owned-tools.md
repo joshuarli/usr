@@ -4,13 +4,13 @@ Joshua Li owns the maintained repositories in the `joshuarli` and `laputa-system
 
 ## Establish ownership
 
-Resolve the producer offline, even when the tool cannot start:
+Resolve the producer offline, even when the tool cannot start. This needs only a Python 3.15 interpreter and the standard library; it does not sync or install anything:
 
 ```sh
-uv run --project ~/repos/laputa-systems/stuff repomod tools which COMMAND --json
+python3 -I "${REPOMOD_ROOT:-$HOME/repos}/laputa-systems/stuff/repomod/which.py" COMMAND --json
 ```
 
-The result names the maintained repository, its upstream and owned source forks, its canonical checkout, the resolved executable, its install record, and a status. Only `owned` establishes that the executable on `PATH` is the recorded install of a verified checkout. `unknown`, `ambiguous`, `missing-checkout`, `uncatalogued`, `origin-mismatch`, `not-installed`, `shadowed`, `unrecorded`, and `upstream-install` are distinct answers; act on what they say and never infer ownership from an executable's basename or banner. Owned tools also name their repository at the end of `--help`. A build distribution's producer (for example `laputa-systems/python-build`) is the first triage destination even when the source fix belongs in an owned fork it references.
+The result names the maintained repository, its upstream and owned source forks, its canonical checkout, the resolved executable, the `evidence` tying that executable to the producer (`source-link`, `installer-manifest`, or `install-record`), its `revision` (null when unknown), and a status. Only `owned` establishes that the executable on `PATH` is verifiably the producer's. `unknown`, `ambiguous`, `missing-checkout`, `uncatalogued`, `origin-mismatch`, `not-installed`, `shadowed`, `unverified`, and `upstream-install` are distinct answers; act on what they say, read `detail` for why, and never infer ownership from an executable's basename or banner. Owned tools also name their repository at the end of `--help`. A build distribution's producer (for example `laputa-systems/python-build`) is the first triage destination even when the source fix belongs in an owned fork it references.
 
 ## Diagnose first
 

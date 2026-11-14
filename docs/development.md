@@ -26,7 +26,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `sync uninstall` | `python3 -I tools/sync/test_uninstall.py` |
 | owned shell tool help | `sh dotfiles/owned-help-test.sh` |
-| `kache` setup | `python3 -I tools/sync/test_kache.py` |
+| `kache` setup | `python3 -I tools/sync/test_kache.py` and `python3 -I dotfiles/setup-kache-test.py` |
 | `pinact` and workflow pins | `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/test_pinact.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_yaml.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_lint_rules.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_expressions.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_security.py`, `TMPDIR="$PWD/.work/tmp" python3 -I tools/pinact/tests/test_fix.py`, and `python3 -I dotfiles/base/.local/bin/pinact --check` |
 | `yt-dlp` shim | `sh dotfiles/yt-dlp-shim-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/yt-dlp dotfiles/yt-dlp-shim-test.sh` |
 | `pk` process picker | `python3 -I dotfiles/pk-test.py`, `sh -n dotfiles/base/.local/bin/pk`, `dash -n dotfiles/base/.local/bin/pk`, and `shellcheck -s sh dotfiles/base/.local/bin/pk` |

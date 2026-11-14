@@ -41,7 +41,10 @@ OWNED_HELP
 #
 # The kache binary reports its own version (e.g. kache 2.0.0-rc.2), which
 # differs from the release-* tag. Currency is tracked in
-# ${CARGO_HOME:-~/.cargo}/bin/.kache-release, not by comparing versions.
+# ${CARGO_HOME:-~/.cargo}/bin/.kache-release, not by comparing versions: its
+# first line is the release tag, followed by "<sha256>  kache" and
+# "<sha256>  kache-engine" for the installed binaries. stuff's
+# `repomod tools which` reads those digests as install evidence.
 
 set -eu
 
@@ -337,9 +340,14 @@ dest="${cargo_bin}/kache"
 engine="${cargo_bin}/kache-engine"
 tagfile="${cargo_bin}/.kache-release"
 
-# Skip re-download when the release tag file matches and both binaries run.
-if [ "$force" -eq 0 ] && [ -f "$tagfile" ] && [ "$(cat "$tagfile")" = "$tag" ] \
-    && [ -x "$dest" ] && [ -x "$engine" ] \
+release_record() {
+    printf '%s\n%s  kache\n%s  kache-engine\n' "$1" "$(checksum_of "$dest")" "$(checksum_of "$engine")"
+}
+
+# Skip re-download when the release record names this tag and both installed
+# binaries still match its digests and run.
+if [ "$force" -eq 0 ] && [ -f "$tagfile" ] && [ -x "$dest" ] && [ -x "$engine" ] \
+    && [ "$(cat "$tagfile")" = "$(release_record "$tag")" ] \
     && "$dest" --version 2>/dev/null | grep -q "kache "; then
     log "$dest already at $tag, continuing to setup"
     asset=""
@@ -379,7 +387,7 @@ if [ -n "$asset" ]; then
 
     "$dest" --version 2>/dev/null | grep -q "kache " \
         || die "installed binary does not report kache"
-    printf '%s\n' "$tag" > "${tagfile}.tmp"
+    release_record "$tag" > "${tagfile}.tmp"
     install -m 644 "${tagfile}.tmp" "$tagfile"
     rm -f "${tagfile}.tmp"
     log "installed $("$dest" --version) ($tag)"

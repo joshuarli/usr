@@ -157,6 +157,7 @@ REGISTRY: tuple[Check, ...] = (
         "dotfiles/owned-help-test.sh",
     )),
     Check("kache", (KACHE,), py("tools/sync/test_kache.py"), ("tools/sync/test_kache.py", "tools/sync/main.py", "dotfiles/base/.local/bin/setup-kache")),
+    Check("setup-kache", (KACHE,), py("dotfiles/setup-kache-test.py"), ("dotfiles/base/.local/bin/setup-kache", "dotfiles/setup-kache-test.py")),
     Check("pinact", (PINACT,), py("tools/pinact/test_pinact.py"), ("tools/pinact/", "dotfiles/base/.local/bin/pinact"), tmpdir=True),
     Check("pinact-yaml", (PINACT,), py("tools/pinact/tests/test_yaml.py"), ("tools/pinact/",), tmpdir=True),
     Check("pinact-lint-rules", (PINACT,), py("tools/pinact/tests/test_lint_rules.py"), ("tools/pinact/",), tmpdir=True),
