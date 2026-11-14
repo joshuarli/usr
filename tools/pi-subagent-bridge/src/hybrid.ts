@@ -190,14 +190,13 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
     const dir = stateDir(s.cwd)
+    const pin = commandPin(s)
     transition(s, "command-code")
-    s.command_model = fallbackModelFor(s)
-    s.command_effort = fallbackEffortFor(s)
     s.fallback_reason = reason
     if (detail !== undefined) s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
     s.attempts = 1
     save(s)
-    activateProcess(s, "command-code", command.start(s.cwd, dir, prompt(s), fallbackEffortFor(s), s.tier === "scout", undefined, fallbackModelFor(s), commandPin(s)))
+    activateProcess(s, "command-code", command.start(s.cwd, dir, prompt(s), pin.effort, s.tier === "scout", undefined, pin.model, pin))
     save(s)
     return s
   }
