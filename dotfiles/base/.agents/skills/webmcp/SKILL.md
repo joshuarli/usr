@@ -14,6 +14,14 @@ Use this skill when the task targets an existing bctl-managed session or
 site and WebMCP offers a direct semantic action. Do not require WebMCP for
 ordinary browser tasks or change Chromium flags globally to enable it.
 
+## UI SDK support
+
+UI SDK's `registerTools(agent, { allow })` is one implementation of this
+standard. It exposes `snapshot`, `query` and `act` from the component bridge.
+`snapshot` and `query` have `readOnlyHint: true`; `act` is state-changing
+and needs `--allow-write` plus any site-side per-step approval. Read each
+tool's actual schema from `list` instead of inventing arguments. Neither
+UI SDK nor WebMCP itself needs to be installed into the agent harness.
 ## Discover
 
 1. Use `sh sync tools bctl` to install the bctl release if it is not present
