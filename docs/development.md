@@ -33,6 +33,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | a skill or agent definition | `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, `node --test tools/skills/skills.test.ts`, and `python3 -I dotfiles/skills-campaign-test.py`; `node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration |
 | model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check` and `node --test tools/policy/generate.test.ts`; use `make generate` to refresh projections |
 | `orchestrate` skill | `python3 -I dotfiles/orchestrate-test.py` |
+| instruction profiles and their harness adapters | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/instructions-test.py` |
 | git hooks and worktree helpers | `sh dotfiles/reset-agents-test.sh`, `(cd dotfiles && sh pre-push-test.sh)`, `(cd dotfiles && sh worktree-remove-test.sh)`, and `python3 -I dotfiles/worktree-retire-test.py` |
 | zsh shim | `(cd dotfiles && sh zsh-shim-test.sh)` |
 | a hook or `mdtool` | `python3 -I tools/mdtool/src/mdtool.py selftest`, `sh tools/mdtool/tests/mdtool-test.sh`, and `sh FILE` for each changed match |

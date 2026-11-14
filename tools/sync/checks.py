@@ -70,6 +70,7 @@ GHOSTTY = Area("`ghostty-fda-check`")
 SKILLS = Area("a skill or agent definition", "`node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration")
 POLICY = Area("model routes, native Pi policy, or generated policy blocks", "use `make generate` to refresh projections")
 ORCHESTRATE = Area("`orchestrate` skill")
+INSTRUCTIONS = Area("instruction profiles and their harness adapters")
 HOOKS = Area("git hooks and worktree helpers")
 ZSH = Area("zsh shim")
 MDTOOL = Area("a hook or `mdtool`")
@@ -83,6 +84,9 @@ MACOS_TOOLS = Area("macOS tools")
 MARKDOWN = Area("Markdown", "see below for `mdtool refs`, `router`, and `check`")
 
 SKILL_PATHS = ("dotfiles/base/.agents/skills/", ".agents/skills/", "tools/skills/", "SKILLS.md")
+CONTRACTS = ("dotfiles/base/.agents/instructions/", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.codex/AGENTS.override.md", "dotfiles/base/.claude/CLAUDE.md")
+GENERATED_POLICY = ("dotfiles/base/.agents/instructions/lean.md", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/skills/orchestrate/SKILL.md",
+                    "dotfiles/base/.pi/agent/", "dotfiles/base/.config/opencode/opencode.json", "tools/pi-subagent-bridge/README.md", "docs/pi.md", "docs/agent-setup.md")
 LINK_CODE = ("tools/sync/links.py", "tools/sync/link_plan.py", "tools/sync/link_apply.py", "tools/sync/link_recovery.py", "tools/sync/ownership.py")
 SYNC_CORE = ("sync", "tools/sync/main.py", "tools/sync/dag.py", "tools/sync/bootstrap.sh")
 WORKER_REG = ("tools/sync/claude-worker.py", "tools/sync/pi-worker.py", "tools/sync/opencode-worker.py", "tools/pi/sync_bridge.py")
@@ -93,7 +97,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("sync-links", (LINKS,), py("tools/sync/test_links.py"), (*LINK_CODE, "tools/sync/test_links.py")),
     Check("sync-main", (LINKS, DAG), py("tools/sync/test_main.py"), (*LINK_CODE, *SYNC_CORE, "tools/sync/test_main.py")),
     Check("sync-integration", (LINKS, DAG), py("tools/sync/test_integration.py"), (*LINK_CODE, *SYNC_CORE, "tools/sync/test_integration.py")),
-    Check("decide", (DECIDE,), py("tools/decide/tests/test_decide.py"), ("tools/decide/", "dotfiles/base/.local/bin/decide"), tmpdir=True),
+    Check("decide", (DECIDE,), py("tools/decide/tests/test_decide.py"), ("tools/decide/", "dotfiles/base/.local/bin/decide", *CONTRACTS, "dotfiles/base/.agents/skills/do/", "dotfiles/base/.agents/skills/orchestrate/"), tmpdir=True),
     Check("decide-ruff", (DECIDE,), ("uvx", "ruff", "check", "tools/decide/src/decide.py", "tools/decide/tests/test_decide.py"), ("tools/decide/",), needs=("uvx",)),
     Check("doctor", (DOCTOR, DAG), ("sh", "dotfiles/doctor-test.sh"), ("dotfiles/doctor", "dotfiles/doctor-test.sh", "tools/sync/installer.py", "tools/sync/main.py", "sync")),
     Check("doctor-sh-syntax", (DOCTOR,), ("sh", "-n", "dotfiles/doctor"), ("dotfiles/doctor",)),
@@ -108,7 +112,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("pi-worker", (PI_BRIDGE_INSTALL,), py("tools/sync/pi-worker-test.py"), ("tools/sync/pi-worker.py", "tools/sync/pi-worker-test.py")),
     Check("opencode-worker", (PI_BRIDGE_INSTALL,), py("tools/sync/opencode-worker-test.py"), ("tools/sync/opencode-worker.py", "tools/sync/opencode-worker-test.py")),
     Check("bridge", (BRIDGE,), ("npm", "test"), ("tools/pi-subagent-bridge/",), cwd="tools/pi-subagent-bridge", tmpdir=True, needs=("npm",)),
-    Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json")),
+    Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),
     Check("sync-dag", (DAG,), py("tools/sync/test_dag.py"), ("tools/sync/dag.py", "tools/sync/test_dag.py")),
     Check("sync-sh-syntax", (DAG,), ("sh", "-n", "sync"), ("sync",)),
@@ -141,10 +145,11 @@ REGISTRY: tuple[Check, ...] = (
     Check("skills", (SKILLS,), ("node", "tools/skills/skills.ts", "check"), SKILL_PATHS, needs=("node",)),
     Check("project-skills", (SKILLS,), ("node", "tools/skills/skills.ts", "check", "--root", ".agents/skills"), SKILL_PATHS, needs=("node",)),
     Check("skills-tool", (SKILLS,), ("node", "--test", "tools/skills/skills.test.ts"), ("tools/skills/",), needs=("node",)),
-    Check("skills-campaign", (SKILLS,), py("dotfiles/skills-campaign-test.py"), (*SKILL_PATHS, "dotfiles/skills-campaign-test.py", "dotfiles/skill-evals/")),
-    Check("policy-generated", (POLICY,), ("node", "tools/policy/generate.ts", "--check"), ("tools/policy/", "tools/pi-subagent-bridge/src/policy.ts", "tools/pi-subagent-bridge/src/tier-policy.ts"), needs=("node",)),
+    Check("skills-campaign", (SKILLS,), py("dotfiles/skills-campaign-test.py"), (*SKILL_PATHS, "dotfiles/skills-campaign-test.py", "dotfiles/skill-evals/", "dotfiles/base/.agents/instructions/bootstrap.md")),
+    Check("policy-generated", (POLICY,), ("node", "tools/policy/generate.ts", "--check"), ("tools/policy/", "tools/pi-subagent-bridge/src/policy.ts", "tools/pi-subagent-bridge/src/tier-policy.ts", *GENERATED_POLICY), needs=("node",)),
     Check("policy-generator", (POLICY,), ("node", "--test", "tools/policy/generate.test.ts"), ("tools/policy/",), needs=("node",)),
-    Check("orchestrate", (ORCHESTRATE,), py("dotfiles/orchestrate-test.py"), ("dotfiles/base/.agents/skills/orchestrate/", "dotfiles/orchestrate-test.py")),
+    Check("orchestrate", (ORCHESTRATE,), py("dotfiles/orchestrate-test.py"), ("dotfiles/base/.agents/skills/orchestrate/", "dotfiles/orchestrate-test.py", *CONTRACTS)),
+    Check("instructions", (INSTRUCTIONS,), py("dotfiles/instructions-test.py"), (*CONTRACTS, "dotfiles/base/.local/bin/agent-instructions.py", "dotfiles/instructions-test.py"), tmpdir=True),
     Check("reset-agents", (HOOKS,), ("sh", "dotfiles/reset-agents-test.sh"), ("dotfiles/base/.local/bin/reset-agents", "dotfiles/base/.local/bin/reset-agent-home", "dotfiles/reset-agents-test.sh")),
     Check("pre-push", (HOOKS,), ("sh", "pre-push-test.sh"), ("dotfiles/base/.config/git/hooks/", "dotfiles/pre-push-test.sh"), cwd="dotfiles"),
     Check("worktree-remove", (HOOKS,), ("sh", "worktree-remove-test.sh"), ("dotfiles/base/.local/bin/worktree-remove", "dotfiles/worktree-remove-test.sh"), cwd="dotfiles"),

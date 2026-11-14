@@ -53,11 +53,9 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-**Follow the tier's ordered routes.** Expert has no fallback. Only an unavailable executor or a confirmed provider/model/usage failure may switch, before any edits and with unambiguous termination. Never switch after Go, and never return to Command Code. Legacy sessions keep their admitted backend and models, including prior Pi/Command/Codex expert sessions.
+**The bridge owns provider fallback.** `worker_status` switches only along the tier's admitted routes, only before edits and with unambiguous termination, never for expert, and admitted sessions keep their recorded models. Never start a replacement worker yourself: a task failure, rejected acceptance check, or changed path is not a provider failure. A session whose `attention` is `needs_attention` (any `blocked_*` state) or `unknown` needs you to inspect the session and worktree before deciding anything; do not launch a second paid worker over it. Cancellation acknowledgement is not proof of termination; wait until `watch` or `inspect` shows the run gone. The scope check is Git-based; ignored files and host writes are not contained.
 
-**Nesting:** a Pi SDK child may delegate one more generation, at an equal-or-weaker tier, only when its brief calls for it; the bridge's guard rejects anything else (deeper nesting, model or worktree overrides). Descendants share the original worktree and write budget, and the outer parent still owns acceptance and review. Codex and Command Code workers are leaves: no bridge CLI children, no host-native agents.
-
-**Never fallback after any tracked/untracked edit, changed HEAD, uncertain prompt admission, unknown process termination or potentially running worker.** Retain durable leases and inspect uncertain sessions; do not launch a second paid worker. A generic task failure, rejected acceptance check, or changed path is not a provider failure. Cancellation acknowledgement alone is not proof of termination. The scope check is Git-based, not an OS sandbox; ignored files and host writes require separate containment.
+**Nesting:** grant one level of Pi fanout in the brief only when the slice needs it; the bridge's guard enforces the rest. Codex and Command Code workers are leaves.
 
 **Clef-flash advice** (per the global contract): build the `TaskBrief` from verified facts and call `decide route --guide`, then `decide route --baseline worker` once. On any failure, choose the tier yourself without retrying.
 
