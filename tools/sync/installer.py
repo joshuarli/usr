@@ -1811,6 +1811,12 @@ class Installer:
             self.skip(tool, f"{link} is not a dl-managed symlink")
         self.link_symlink(link, want)
 
+    def _bundle_recorded(self, state_name: str, record: str) -> bool:
+        if self._state_text(state_name) != record:
+            return False
+        self.own_file(self.state / state_name)
+        return True
+
     def _archive_bundle(self, tool: str, home: Path, commands: list[str], state_name: str, *,
                         in_bin: bool, asset: str, url: str, sums_url: str, release_dir: Path,
                         validate, ok_message: str, install_message: str, on_current=None) -> None:
@@ -1831,7 +1837,7 @@ class Installer:
         if not record:
             self.unchecked(tool, f"{asset} is unavailable")
             return
-        if self.is_current(state_name, record) and current.is_symlink():
+        if self._bundle_recorded(state_name, record) and current.is_symlink():
             pointed = os.readlink(current)
             current_ok = Path(pointed).is_dir()
             for command in commands:
@@ -1848,7 +1854,7 @@ class Installer:
                 self.current(ok_message)
                 return
         if release_dir.exists() or release_dir.is_symlink():
-            if current.is_symlink() and os.readlink(current) == str(release_dir) and self.is_current(state_name, record):
+            if current.is_symlink() and os.readlink(current) == str(release_dir) and self._bundle_recorded(state_name, record):
                 for command in commands:
                     self._ensure_bundle_link(tool, home, commands, in_bin=in_bin, command=command)
                 if on_current is not None:
