@@ -4,13 +4,7 @@
  */
 export const TIERS = ["scout", "mechanic", "worker", "expert"] as const
 export type Tier = (typeof TIERS)[number]
-export type AllowedChild = {
-  scout: "scout"
-  mechanic: "scout" | "mechanic"
-  worker: "scout" | "mechanic" | "worker"
-  expert: Tier
-}
-export type ChildOf<P extends Tier> = AllowedChild[P]
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
 
 export const MAX_SUBAGENT_DEPTH = 2 as const
 
@@ -19,28 +13,37 @@ export const DELEGATION = {
   mechanic: ["scout", "mechanic"],
   worker: ["scout", "mechanic", "worker"],
   expert: ["scout", "mechanic", "worker", "expert"],
-} as const satisfies { readonly [P in Tier]: readonly AllowedChild[P][] }
+} as const satisfies Record<Tier, readonly Tier[]>
+export type ChildOf<P extends Tier> = (typeof DELEGATION)[P][number]
+export type AllowedChild = { readonly [P in Tier]: ChildOf<P> }
+
+const PI_MODELS = {
+  goDeepSeek: { providerID: "opencode-go", id: "deepseek-v4.1-flash" },
+  goSpark: { providerID: "opencode-go", id: "muse-spark-1.3-contributor" },
+  museSpark: { providerID: "muse-sdk", id: "muse-spark-1.3" },
+} as const
+export const PI_MODEL_ALLOWLIST = Object.values(PI_MODELS).map(({ providerID, id }) => `${providerID}/${id}`)
 
 /** OpenCode Go serves the subsidized Contributor-Spark models under the same subscription as DeepSeek. */
 export const GO_TIER_MODELS = {
-  scout: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" },
-  mechanic: { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" },
-  worker: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "high" },
-  expert: { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "max" },
+  scout: { ...PI_MODELS.goSpark, variant: "medium" },
+  mechanic: { ...PI_MODELS.goSpark, variant: "high" },
+  worker: { ...PI_MODELS.goDeepSeek, variant: "high" },
+  expert: { ...PI_MODELS.goDeepSeek, variant: "max" },
 } as const satisfies { readonly [P in Tier]: {
   readonly providerID: "opencode-go"
-  readonly id: "muse-spark-1.3-contributor" | "deepseek-v4.1-flash"
-  readonly variant: "medium" | "high" | "max"
+  readonly id: string
+  readonly variant: Effort
 } }
 
 export const MUSE_TIER_MODELS = {
-  worker: { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "xhigh" },
+  worker: { ...PI_MODELS.museSpark, variant: "xhigh" },
 } as const satisfies {
-  readonly worker: { readonly providerID: "muse-sdk"; readonly id: "muse-spark-1.3"; readonly variant: "xhigh" }
+  readonly worker: { readonly providerID: "muse-sdk"; readonly id: string; readonly variant: Effort }
 }
 export const MUSE_AGENT_NAMES = { worker: "muse-worker" } as const
 export const MUSE_DELEGATION = {
-  worker: ["scout", "mechanic", "muse-worker"],
+  worker: DELEGATION.worker.map(tier => tier === "worker" ? MUSE_AGENT_NAMES.worker : tier),
 } as const satisfies { readonly worker: readonly string[] }
 export function isMuseTier(tier: Tier): tier is "worker" {
   return tier === "worker"
@@ -49,11 +52,13 @@ export function museSubscriptionSelected(tier: Tier, _enabled?: boolean): tier i
   return isMuseTier(tier)
 }
 
+const DISCOVERY_TOOLS = ["grep", "find", "ls", "subagent", "subagent_supervisor"] as const
+const WRITER_TOOLS = ["read", "bash", "edit", "write", ...DISCOVERY_TOOLS] as const
 export const TIER_TOOLS = {
-  scout: ["read", "grep", "find", "ls", "subagent", "subagent_supervisor"],
-  mechanic: ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"],
-  worker: ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"],
-  expert: ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"],
+  scout: ["read", ...DISCOVERY_TOOLS],
+  mechanic: WRITER_TOOLS,
+  worker: WRITER_TOOLS,
+  expert: WRITER_TOOLS,
 } as const satisfies { readonly [P in Tier]: readonly string[] }
 
 export function isTier(value: unknown): value is Tier {

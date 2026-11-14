@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, type Scope } from "../src/hybrid.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
-import { HYDROGEN_MODEL, HYDROGEN_EFFORT } from "../src/antigravity.ts"
+import { ANTIGRAVITY_PIN, rootPlan, type CliPin, type RootPlan } from "../src/policy.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { commandResult, processStartTime, type CommandRun, type Effort } from "../src/command.ts"
 
@@ -144,12 +144,12 @@ test("model check reports Codex primary and Command Code pins", async () => {
       assert.equal(status.command_code.effort, effort)
       assert.equal(status.command_code.available, true)
     }
-    assert.equal((await bridge.modelCheck(f.cwd, "expert")).primary.model, HYDROGEN_MODEL)
+    assert.equal((await bridge.modelCheck(f.cwd, "expert")).primary.model, ANTIGRAVITY_PIN.model)
   } finally { f.close() }
 })
 
 
-function hydrogenFake() {
+function antigravityFake(pin: CliPin = ANTIGRAVITY_PIN) {
   const starts: Array<{ model?: string; effort: Effort; resume?: string; readOnly: boolean }> = []
   let available = true
   let failed = false
@@ -161,53 +161,56 @@ function hydrogenFake() {
     runner: {
       available: () => available,
       start: (_dir: string, _log: string, _prompt: string, effort: Effort, readOnly: boolean, resume?: string, model?: string): CommandRun => {
-        if (model !== HYDROGEN_MODEL || effort !== HYDROGEN_EFFORT || readOnly) throw new Error("Unapproved Hydrogen dispatch")
+        if (model !== pin.model || effort !== pin.effort || readOnly) throw new Error("Unapproved Antigravity dispatch")
         starts.push({ model, effort, readOnly, resume })
         return run
       },
-      status: () => failed ?
+      status: (_run?: CommandRun, admitted?: CliPin) => {
+        if (admitted) assert.deepEqual(admitted, pin)
+        return failed ?
         { state: "failed", result: { subtype: "error" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", error: "429 quota exhausted" }, stderr: null } :
-        { state: "succeeded", result: { subtype: "success" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", finalText: "PROOF\nACCEPTANCE: met" }, stderr: null },
+        { state: "succeeded", result: { subtype: "success" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", finalText: "PROOF\nACCEPTANCE: met" }, stderr: null }
+      },
       cancel: () => true,
       session: () => "7ce10216-708a-4ba7-9128-53789b2ce8ad",
     },
   }
 }
 
-test("expert uses only pinned Hydrogen XHigh, persists it, and never falls back on quota", async () => {
+test("expert uses only pinned Antigravity XHigh, persists it, and never falls back on quota", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd), hydrogen = hydrogenFake()
-    const bridge = makeHybridBridge(m.api, m.command, noCodex, hydrogen.runner)
+    const m = fake(f.cwd), antigravity = antigravityFake()
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, antigravity.runner)
     const check = await bridge.modelCheck(f.cwd, "expert")
-    assert.deepEqual(check.primary, { backend: "hydrogen", model: HYDROGEN_MODEL, effort: HYDROGEN_EFFORT, available: true })
+    assert.deepEqual(check.primary, { backend: "antigravity", model: ANTIGRAVITY_PIN.model, effort: ANTIGRAVITY_PIN.effort, available: true })
     assert.equal(check.fallback, null)
     const task = await bridge.start(f.cwd, "expert", "expert", f.scope, "Inspect source and prove behavior")
-    assert.equal(task.backend, "hydrogen")
-    assert.deepEqual(hydrogen.starts, [{ model: HYDROGEN_MODEL, effort: "xhigh", readOnly: false, resume: undefined }])
+    assert.equal(task.backend, "antigravity")
+    assert.deepEqual(antigravity.starts, [{ model: ANTIGRAVITY_PIN.model, effort: "xhigh", readOnly: false, resume: undefined }])
     const persisted = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
-    assert.equal(persisted.backend, "hydrogen")
+    assert.equal(persisted.backend, "antigravity")
     assert.equal(persisted.tier, "expert")
     assert.equal(persisted.command_model, undefined)
-    hydrogen.fail()
+    antigravity.fail()
     const status = await bridge.status(f.cwd, task.session_id)
     assert.equal(status.state, "failed")
-    assert.equal(status.model, HYDROGEN_MODEL)
+    assert.equal(status.model, ANTIGRAVITY_PIN.model)
     assert.equal(status.fallback_reason, null)
-    assert.equal(hydrogen.starts.length, 1)
+    assert.equal(antigravity.starts.length, 1)
     assert.equal(commandCalls(m.calls).length, 0)
     assert.equal(piCreates(m.calls).length, 0)
   } finally { f.close() }
 })
 
-test("unavailable Hydrogen blocks expert before starting any other model or claiming a lease", async () => {
+test("unavailable Antigravity blocks expert before starting any other model or claiming a lease", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd), hydrogen = hydrogenFake()
-    hydrogen.setAvailable(false)
-    const bridge = makeHybridBridge(m.api, m.command, noCodex, hydrogen.runner)
-    await assert.rejects(bridge.start(f.cwd, "expert", "expert", f.scope, "Work"), /Hydrogen XHigh unavailable.*No fallback/)
-    assert.equal(hydrogen.starts.length, 0)
+    const m = fake(f.cwd), antigravity = antigravityFake()
+    antigravity.setAvailable(false)
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, antigravity.runner)
+    await assert.rejects(bridge.start(f.cwd, "expert", "expert", f.scope, "Work"), /Antigravity model .* unavailable.*No fallback/)
+    assert.equal(antigravity.starts.length, 0)
     assert.equal(commandCalls(m.calls).length, 0)
     assert.equal(piCreates(m.calls).length, 0)
     const task = await bridge.start(f.cwd, "safe", "worker", f.scope, "Work")
@@ -215,16 +218,85 @@ test("unavailable Hydrogen blocks expert before starting any other model or clai
   } finally { f.close() }
 })
 
-test("Hydrogen corrections preserve the exact model and conversation", async () => {
+test("Antigravity corrections preserve the exact model and conversation", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd), hydrogen = hydrogenFake()
-    const bridge = makeHybridBridge(m.api, m.command, noCodex, hydrogen.runner)
+    const m = fake(f.cwd), antigravity = antigravityFake()
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, antigravity.runner)
     const task = await bridge.start(f.cwd, "review", "expert", f.scope, "Work")
     assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
     await bridge.resume(f.cwd, task.session_id, "Verify a second edge case")
-    assert.deepEqual(hydrogen.starts[1], { model: HYDROGEN_MODEL, effort: "xhigh", readOnly: false,
+    assert.deepEqual(antigravity.starts[1], { model: ANTIGRAVITY_PIN.model, effort: "xhigh", readOnly: false,
       resume: "7ce10216-708a-4ba7-9128-53789b2ce8ad" })
+  } finally { f.close() }
+})
+
+test("a restarted expert keeps its admitted model when current policy changes", async () => {
+  const f = fixture()
+  try {
+    const oldPin: CliPin = { model: "fixture-expert-v1", effort: "high" }
+    const newPin: CliPin = { model: "fixture-expert-v2", effort: "xhigh" }
+    const m = fake(f.cwd), executor = antigravityFake(oldPin)
+    const before = makeHybridBridge(m.api, m.command, noCodex, executor.runner,
+      () => ({ kind: "exclusive", pin: oldPin }))
+    const task = await before.start(f.cwd, "snapshot", "expert", f.scope, "Verify the pin")
+    const stored = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
+    assert.deepEqual(stored.antigravity_pin, oldPin)
+    assert.equal(stored.schema_version, 1)
+    const after = makeHybridBridge(m.api, m.command, noCodex, executor.runner,
+      () => ({ kind: "exclusive", pin: newPin }))
+    assert.equal((await after.modelCheck(f.cwd, "expert")).primary.model, "fixture-expert-v2")
+    assert.equal((await after.status(f.cwd, task.session_id)).model, "fixture-expert-v1")
+    await after.resume(f.cwd, task.session_id, "Recheck the same work")
+    assert.deepEqual(executor.starts.map(({ model, effort }) => ({ model, effort })), [oldPin, oldPin])
+    assert.equal(commandCalls(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+for (const executor of ["codex", "command-code"] as const) {
+  test(`a restarted ${executor} retains its admitted pair after a policy change`, async () => {
+    const f = fixture()
+    try {
+      const oldPin: CliPin = { model: "fixture-before", effort: "high" }
+      const newPin: CliPin = { model: "fixture-after", effort: "medium" }
+      const plan = rootPlan("worker")
+      assert.equal(plan.kind, "fallback")
+      if (plan.kind !== "fallback") throw new Error("Expected lower-tier policy")
+      const withPin = (pin: CliPin): RootPlan => ({ ...plan, [executor === "codex" ? "codex" : "command"]: pin })
+      const m = fake(f.cwd)
+      const codex = executor === "codex" ? { ...m.command, session: () => "cmd-session" } : noCodex
+      const before = makeHybridBridge(m.api, m.command, codex, undefined, () => withPin(oldPin))
+      const task = await before.start(f.cwd, "snapshot", "worker", f.scope, "Verify the pin")
+      assert.equal(task.backend, executor)
+      m.done()
+      const after = makeHybridBridge(m.api, m.command, codex, undefined, () => withPin(newPin))
+      assert.equal((await after.status(f.cwd, task.session_id)).model, "fixture-before")
+      await after.resume(f.cwd, task.session_id, "Recheck the same work")
+      const launches = commandCalls(m.calls)
+      assert.equal(launches.length, 2)
+      for (const launch of launches) {
+        assert.match(JSON.stringify(launch), /"model":"fixture-before"/)
+        assert.match(JSON.stringify(launch), /"effort":"high"/)
+      }
+    } finally { f.close() }
+  })
+}
+
+test("pending Pi fallback uses its admitted plan after restart, not the new policy", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    const before = makeHybridBridge(m.api, m.command, noCodex)
+    const task = await before.start(f.cwd, "snapshot", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
+    m.failCommand("quota exhausted")
+    const changedPlan = rootPlan("scout")
+    if (changedPlan.kind !== "fallback") throw new Error("Expected lower-tier policy")
+    const after = makeHybridBridge(m.api, m.command, noCodex, undefined,
+      () => ({ ...changedPlan, pi: [{ providerID: "opencode-go", id: "unavailable-new-model", variant: "high" }] }))
+    const status = await after.status(f.cwd, task.session_id)
+    assert.equal(status.backend, "pi")
+    assert.deepEqual(status.model, { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" })
+    assert.equal(piCreates(m.calls).length, 1)
   } finally { f.close() }
 })
 
@@ -887,7 +959,7 @@ for (const tier of ["scout", "mechanic", "worker"] as const) {
         assert.equal(piCreates(m.calls).length, 1)
         const stored = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", started.session_id + ".json"), "utf8"))
         assert.deepEqual(stored.primary_model, GO_TIER_MODELS[tier])
-        assert.deepEqual(stored.remaining_pi, [])
+        assert.deepEqual(stored.pi_candidates, [])
         assert.deepEqual((await makeHybridBridge(m.api, m.command, noCodex).status(f.cwd, started.session_id)).model, GO_TIER_MODELS[tier])
       } finally { f.close() }
     })

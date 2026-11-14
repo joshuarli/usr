@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { parseDocument } from "yaml"
 import {
   DELEGATION, GO_TIER_MODELS, isMuseTier, MUSE_AGENT_NAMES, MUSE_DELEGATION, MUSE_TIER_MODELS,
-  MAX_SUBAGENT_DEPTH, TIER_TOOLS, TIERS, type Tier,
+  MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, type Tier,
 } from "./tier-policy.ts"
 
 const TIER_GUARDS = {
@@ -78,11 +78,7 @@ export function assertTierProfiles(agentDir: string): void {
   if (extensionConfig.maxSubagentDepth !== MAX_SUBAGENT_DEPTH ||
       modelScope.enforce !== true || modelScope.strict !== true)
     throw new Error("Pi subagent depth/model scope must be enforced")
-  exactList(modelScope.allow, [
-    "opencode-go/deepseek-v4.1-flash",
-    "opencode-go/muse-spark-1.3-contributor",
-    "muse-sdk/muse-spark-1.3",
-  ], "global.modelScope.allow")
+  exactList(modelScope.allow, PI_MODEL_ALLOWLIST, "global.modelScope.allow")
   const overrides = record(sub.agentOverrides)
   const agents = record(modelScope.agents)
   for (const tier of TIERS) {

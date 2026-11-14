@@ -41,9 +41,9 @@ sh -c 'exit 0' &
 gone=$!
 wait "$gone"
 
-session done "$alive" "$queued
+session 'done' "$alive" "$queued
 {\"type\":\"result\",\"subtype\":\"success\",\"result\":\"report written\"}"
-expect 0 "a final result record ends the wait" done 10 "report written"
+expect 0 "a final result record ends the wait" 'done' 10 "report written"
 
 session crashed "$gone" "$queued"
 expect 3 "an executor gone without a result is reported" crashed 10 "Download kernel"
@@ -67,7 +67,7 @@ state () {
     fi
 }
 
-state 0 "--state names a finished run without blocking" done succeeded
+state 0 "--state names a finished run without blocking" 'done' succeeded
 state 0 "--state names a gone executor" crashed interrupted
 state 0 "--state names a live executor" quiet running
 state 0 "--state names a backend it cannot follow" remote unknown
@@ -83,4 +83,34 @@ state 0 "Codex receipt does not precede process termination" codex running
 printf '{"backend":"codex","command_run":{"pid":%s,"output":"%s/codex.ndjson"}}\n' "$gone" "$bridge" > "$bridge/codex.json"
 state 0 "Codex completed turn is observed after termination" codex succeeded
 expect 0 "Codex proof is displayed" codex 10 "Codex proof"
+
+# The executor is stable; its admitted model is data, including after a policy update.
+printf '{"schema_version":1,"backend":"antigravity","antigravity_pin":{"model":"fixture-model","effort":"xhigh"},"command_run":{"pid":%s,"output":"%s/agy.ndjson"}}\n' "$alive" "$bridge" > "$bridge/agy.json"
+printf '{"event":"init","conversation_id":"conversation","init":{"model":"fixture-model"}}\n{"event":"result","result":{"status":"SUCCESS","response":"Antigravity proof"}}\n' > "$bridge/agy.ndjson"
+state 0 "Antigravity receipt does not precede process termination" agy running
+printf '{"schema_version":1,"backend":"antigravity","antigravity_pin":{"model":"fixture-model","effort":"xhigh"},"command_run":{"pid":%s,"output":"%s/agy.ndjson"}}\n' "$gone" "$bridge" > "$bridge/agy.json"
+state 0 "Antigravity success uses the admitted model pin" agy succeeded
+expect 0 "Antigravity proof is displayed" agy 10 "Antigravity proof"
+printf '{"event":"init","init":{"model":"wrong-model"}}\n{"event":"result","result":{"status":"SUCCESS"}}\n' > "$bridge/agy.ndjson"
+state 0 "Antigravity cannot succeed with a mismatched model" agy failed
+printf '{"event":"result","result":{"status":"SUCCESS"}}\n' > "$bridge/agy.ndjson"
+state 0 "Antigravity cannot succeed without an init model" agy failed
+printf '{"event":"init","init":{"model":"fixture-model"}}\n{"event":"result","result":{"status":"ERROR","error":"quota exhausted"}}\n' > "$bridge/agy.ndjson"
+state 0 "Antigravity provider failure remains failed" agy failed
+expect 0 "Antigravity error is displayed" agy 10 "quota exhausted"
+printf '{"event":"init","init":{"model":"fixture-model"}}\n' > "$bridge/agy.ndjson"
+state 0 "Antigravity without a terminal receipt is interrupted" agy interrupted
+printf '{"backend":"antigravity","command_run":{"pid":%s,"output":"%s/agy.ndjson"}}\n' "$gone" "$bridge" > "$bridge/agy-unpinned.json"
+state 0 "Antigravity without an admitted pin is unknown" agy-unpinned unknown
+printf '{"backend":"antigravity-transition","command_run":{"pid":%s,"output":"%s/agy.ndjson"}}\n' "$gone" "$bridge" > "$bridge/agy-transition.json"
+state 0 "Antigravity interrupted admission stays unknown" agy-transition unknown
+printf '{"backend":"hydrogen","command_run":{"pid":%s,"output":"%s/legacy.ndjson"}}\n' "$gone" "$bridge" > "$bridge/agy-legacy.json"
+printf '{"event":"init","init":{"model":"gemini-4-hydrogen-xhigh"}}\n{"event":"result","result":{"status":"SUCCESS","response":"Legacy proof"}}\n' > "$bridge/legacy.ndjson"
+state 0 "legacy Hydrogen records retain their historical pin" agy-legacy succeeded
+printf '{"backend":"hydrogen","antigravity_pin":{"model":"different-model","effort":"xhigh"},"command_run":{"pid":%s,"output":"%s/legacy.ndjson"}}\n' "$gone" "$bridge" > "$bridge/agy-ambiguous.json"
+state 0 "legacy Hydrogen cannot adopt a newly attached pin" agy-ambiguous unknown
+printf '{"schema_version":2,"backend":"antigravity","antigravity_pin":{"model":"gemini-4-hydrogen-xhigh","effort":"xhigh"},"command_run":{"pid":%s,"output":"%s/legacy.ndjson"}}\n' "$gone" "$bridge" > "$bridge/agy-future.json"
+state 0 "a future session schema is not interpreted as successful" agy-future unknown
+printf '{"event":"init","init":{"model":"wrong-model"}}\n{"event":"result","result":{"status":"SUCCESS"}}\n' > "$bridge/legacy.ndjson"
+state 0 "legacy Hydrogen does not adopt a different model" agy-legacy failed
 [ "$nfailed" -eq 0 ]

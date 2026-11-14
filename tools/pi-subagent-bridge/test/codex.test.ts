@@ -29,7 +29,22 @@ test("Codex captures the thread and completed turn and resumes with the same mod
     const networked = startCodex(root, root, "fetch", "medium", false, undefined, "gpt-6.1-terra", true)
     for (let i = 0; i < 200 && codexResult(networked).state === "running"; i++) await delay()
     assert.match(readFileSync(args, "utf8"), /sandbox_workspace_write\.network_access=true\n--add-dir\n\S+cargo/)
+    const admittedPin = { model: "fixture-historical-codex", effort: "high" } as const
+    assert.throws(() => startCodex(root, root, "resume", "high", false, "thread-1", admittedPin.model), /Unapproved/)
+    const retained = startCodex(root, root, "retain pin", "high", false, "thread-1", admittedPin.model, false, admittedPin)
+    for (let i = 0; i < 200 && codexResult(retained).state === "running"; i++) await delay()
+    assert.equal(codexResult(retained).state, "succeeded")
+    assert.match(readFileSync(args, "utf8"), /model_reasoning_effort="high"[\s\S]*--model\nfixture-historical-codex\nresume\nthread-1\nretain pin/)
   } finally { process.env.PATH = oldPath; rmSync(root, { recursive: true, force: true }) }
+})
+
+test("Codex cannot change an admitted pair or restore a forbidden family", () => {
+  const pin = { model: "fixture-historical-codex", effort: "high" } as const
+  assert.throws(() => startCodex("/absent", "/absent", "test", "medium", false, "thread-1", pin.model, false, pin), /preserve the admitted pin/)
+  assert.throws(() => startCodex("/absent", "/absent", "test", "high", false, "thread-1", "gpt-6-luna", false, pin), /preserve the admitted pin/)
+  for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
+    assert.throws(() => startCodex("/absent", "/absent", "test", "high", false, "thread-1", model, false, { model, effort: "high" }), /Unapproved/)
+  }
 })
 
 test("an unreceipted exit is interrupted, never a provider failure", () => {

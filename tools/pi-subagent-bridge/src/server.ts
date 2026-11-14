@@ -1,47 +1,34 @@
 #!/usr/bin/env -S node --experimental-strip-types
-for (const p of ["/opt/homebrew/opt/rustup/bin", "/opt/homebrew/bin", "/Users/josh/.local/bin"]) {
-  if (!process.env.PATH?.split(":").includes(p)) {
-    process.env.PATH = `${p}:${process.env.PATH ?? ""}`
-  }
-}
 import { createInterface } from "node:readline"
-import { piPort } from "./pi-port.ts"
-import { makeHybridBridge } from "./hybrid.ts"
+import { ROOT_ROUTES } from "./policy.ts"
+import { TIERS, isTier } from "./tier-policy.ts"
+import { SCOPE_SCHEMA, isRecord, parseScope, requiredText } from "./scope.ts"
 
 const VERSION = "0.3.0"
 const PROTOCOL = "2025-06-18"
 const MAX_LINE = 100_000
 
 const cwdSchema = { type: "string", description: "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it." }
-const tierSchema = { type: "string", enum: ["scout", "mechanic", "worker", "expert"] }
-const scopeSchema = {
-  type: "object",
-  properties: {
-    base_revision: { type: "string", pattern: "^[a-f0-9]{40}$" },
-    writable_paths: { type: "array", maxItems: 20, items: { type: "string" }, description: "Exact files or directory prefixes ending in /; empty only for scout" },
-    acceptance_proof: { type: "string", minLength: 1, maxLength: 2000 },
-    attempt_limit: { type: "integer", minimum: 1, maximum: 2 },
-    stop_on: { type: "string", minLength: 1, maxLength: 2000 },
-    network: { type: "boolean", description: "Writers only: give a Codex worker network access and a writable Cargo home, for tasks that fetch dependencies" },
-  },
-  required: ["base_revision", "writable_paths", "acceptance_proof", "attempt_limit", "stop_on"],
-  additionalProperties: false,
-}
+const tierSchema = { type: "string", enum: TIERS }
+const routingSummary = TIERS.map(tier => {
+  const routes = ROOT_ROUTES[tier]
+  return `${tier}: ${routes.map(route => route.executor).join(" then ")}${routes.length === 1 ? ", no fallback" : ""}`
+}).join("; ")
 const idSchema = { type: "string", description: "usrw_ session ID returned by worker_start; never guess another session." }
 const tools = [
   {
     name: "worker_model_check",
-    description: "Read-only: inspect the pinned model and provider for this tier. Expert requires Antigravity Hydrogen XHigh with no fallback.",
+    description: "Read-only: inspect this tier's pinned models, provider availability and approved fallbacks.",
     inputSchema: { type: "object", properties: { cwd: cwdSchema, tier: tierSchema }, required: ["cwd", "tier"], additionalProperties: false },
   },
   {
     name: "worker_start",
-    description: "Delegate a scoped task. Scout/mechanic/worker use Codex then approved fallbacks; expert uses only pinned Antigravity Hydrogen XHigh. Never start a duplicate. Admission is not completion: run the returned `watch` command as a background task to learn when the worker ends.",
+    description: `Delegate a scoped task using policy routes (${routingSummary}). Never start a duplicate. Admission is not completion: run the returned watch command as a background task to learn when the worker ends.`,
     inputSchema: { type: "object", properties: {
       cwd: cwdSchema,
       title: { type: "string", maxLength: 100, description: "Short scoped task name" },
       tier: tierSchema,
-      scope: scopeSchema,
+      scope: SCOPE_SCHEMA,
       brief: { type: "string", maxLength: 32000, description: "One bounded outcome and only the context needed" },
     }, required: ["cwd", "title", "tier", "scope", "brief"], additionalProperties: false },
   },
@@ -73,13 +60,37 @@ const tools = [
   },
 ] as const
 
-type Bridge = ReturnType<typeof makeHybridBridge>
+export type Bridge = ReturnType<typeof import("./hybrid.ts").makeHybridBridge>
 type Message = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: unknown }
-function isObject(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value)
+
+export async function connect(): Promise<Bridge> {
+  for (const path of ["/opt/homebrew/opt/rustup/bin", "/opt/homebrew/bin", "/Users/josh/.local/bin"]) {
+    if (!process.env.PATH?.split(":").includes(path)) process.env.PATH = `${path}:${process.env.PATH ?? ""}`
+  }
+  const [{ piPort }, { makeHybridBridge }] = await Promise.all([import("./pi-port.ts"), import("./hybrid.ts")])
+  return makeHybridBridge(piPort())
 }
 
-export async function connect(): Promise<Bridge> { return makeHybridBridge(piPort()) }
+function toolArguments(tool: (typeof tools)[number], value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error("Tool arguments must be an object")
+  for (const name of tool.inputSchema.required) {
+    if (!Object.hasOwn(value, name)) throw new Error("Missing tool argument: " + name)
+  }
+  for (const name of Object.keys(value)) {
+    if (!Object.hasOwn(tool.inputSchema.properties, name)) throw new Error("Unknown tool argument: " + name)
+  }
+  if (typeof value.cwd !== "string" || !value.cwd.trim()) throw new Error("Invalid cwd")
+  if ("tier" in tool.inputSchema.properties && !isTier(value.tier)) throw new Error("Unknown Pi tier")
+  if (tool.name === "worker_start") {
+    if (!isTier(value.tier)) throw new Error("Unknown Pi tier")
+    return { ...value, title: requiredText(value.title, "title", 100),
+      scope: parseScope(value.scope, value.tier), brief: requiredText(value.brief, "brief", 32000) }
+  }
+  if ("session_id" in tool.inputSchema.properties) requiredText(value.session_id, "session_id", 64)
+  if (tool.name === "worker_resume") requiredText(value.feedback, "feedback", 32000)
+  if (tool.name === "worker_steer") requiredText(value.note, "note", 32000)
+  return value
+}
 
 export function serve(load: () => Promise<Bridge> = connect): void {
   let cached: Promise<Bridge> | undefined
@@ -106,12 +117,13 @@ export function serve(load: () => Promise<Bridge> = connect): void {
     if (method === "tools/list") { write({ jsonrpc: "2.0", id, result: { tools } }); return }
     if (method !== "tools/call") { rpcError(id, -32601, `Method not found: ${method}`); return }
     try {
-      const params = isObject(message.params) ? message.params : {}
-      const args = isObject(params.arguments) ? params.arguments : {}
-      if (typeof params.name !== "string" || !tools.some((tool) => tool.name === params.name)) {
+      const params = isRecord(message.params) ? message.params : {}
+      const tool = tools.find(tool => tool.name === params.name)
+      if (!tool) {
         rpcError(id, -32602, "Unknown tool")
         return
       }
+      const args = toolArguments(tool, params.arguments)
       const worker = await bridge()
       let result: unknown
       switch (params.name) {
@@ -135,7 +147,7 @@ export function serve(load: () => Promise<Bridge> = connect): void {
     if (Buffer.byteLength(line) > MAX_LINE) { console.error("pi-subagent-bridge: oversized MCP request"); return }
     try {
       const data: unknown = JSON.parse(line)
-      if (!isObject(data) || data.jsonrpc !== "2.0") return
+      if (!isRecord(data) || data.jsonrpc !== "2.0") return
       void handle(data as Message).catch((error) => console.error("pi-subagent-bridge:", error))
     } catch { console.error("pi-subagent-bridge: invalid MCP JSON") }
   })

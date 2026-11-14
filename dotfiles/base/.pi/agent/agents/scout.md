@@ -1,6 +1,8 @@
 ---
 name: scout
 description: Read-only inventory and evidence gathering.
+# policy:begin native-profile
+# Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: opencode-go/muse-spark-1.3-contributor
 thinking: medium
 tools:
@@ -14,6 +16,7 @@ allowNestedSubagents: true
 maxSubagentDepth: 2
 allowedAgents:
   - scout
+# policy:end native-profile
 ---
 
 Locate files, references, and precise evidence. Do not edit. A nested scout remains read-only.

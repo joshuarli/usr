@@ -1,8 +1,11 @@
 # Pi
 
-Every coding harness delegates through the shared `pi-subagent-bridge` MCP tools or CLI shim. New expert assignments use Antigravity CLI Gemini 4 Hydrogen XHigh exclusively; scout/mechanic/worker retain Codex → Command Code → pinned Pi fallback models through Pi SDK and [`pi-subagents`](https://github.com/nicobailon/pi-subagents). The bridge invokes the versioned delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native child execution, completion events, and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability) for known result-identity and fallback defects.
+Every coding harness except OpenCode delegates through `pi-subagent-bridge`. The bridge invokes the versioned Pi SDK delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native execution, completion events and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability).
 
-**Gemini policy (November 2026):** Gemini 4 Argon is prohibited in all agent routing, and Gemini 4 Carbon is not available on this account. The expert tier requires `gemini-4-hydrogen-xhigh` through `agy`, without fallback. There is no `god` tier and no `god` lane. For direct Antigravity tasks previously using Gemini 3.8 Flash, explicitly select available `gemini-4-hydrogen-high` or `gemini-4-hydrogen-medium`; no tracked Gemini 3.8 bridge pins exist. `agy models` must list the selected model. See [Antigravity headless models](https://antigravity.google/docs/cli/headless/).
+<!-- policy:begin routing-summary -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) exclusively, with no fallback. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant. Already-admitted sessions retain their recorded models and routes.
+<!-- policy:end routing-summary -->
 
 ## Pinned, npm-free Pi runtime
 
@@ -24,9 +27,9 @@ The first-party bridge, harness configuration, the consumer pin, installation an
 
 ## Pinned models
 
-The [bridge model table](../tools/pi-subagent-bridge/README.md) owns the exact role/model/effort mapping for the Antigravity Hydrogen lane and the lower-tier providers.
+The generated [bridge model table](../tools/pi-subagent-bridge/README.md) lists exact models, efforts and ordered fallbacks. `make policy` exports the same approved policy as JSON without live account checks.
 
-Pi's default parent model is `opencode-go/deepseek-v4.1-flash` at high. Its global `subagents.modelScope` allows only the pinned OpenCode Go models and the pinned Muse SDK model. Scout and mechanic run on `opencode-go/muse-spark-1.3-contributor` (scout `medium`, mechanic `high`), the subsidized Contributor Spark variant; Meta may use prompts, code and outputs for training. A free `opencode/*` Zen pin was tried for those tiers and abandoned, see [Why Zen is not a pin](#why-zen-is-not-a-pin). No Pi `god` role exists. The root bridge supports expert only via pinned Antigravity Hydrogen XHigh; native Claude/Codex god dispatch is retired and Gemini 4 Carbon is not available on this account. The SDK bridge independently enforces the role pins and the effective model, effort, and tool allowlists, so Pi settings or a project override cannot silently select another model for bridge workers.
+Pi parent session defaults remain in its tracked settings. The generated subagent fields and native profile frontmatter follow the typed nested policy. The native Pi expert profile belongs to the nested domain and supports already-admitted legacy sessions; it does not authorize new root expert dispatches through Pi. The SDK validates model, effort and tool allowlists independently of project overrides. Contributor Muse routes permit Meta to use prompts, code and outputs for training.
 
 ## Why Zen is not a pin
 
@@ -77,7 +80,7 @@ These commands use the shell `worker-watch --state ROOT ID` as a notification ai
 
 The tracked native Pi profiles (scout, mechanic, worker, expert, and the Muse-only `muse-worker`) expose `subagent` and declare ordered descendant allowlists. A required child extension registers the capability ceiling from the typed [`tier-policy.ts`](../tools/pi-subagent-bridge/src/tier-policy.ts) graph in each first-level child and its descendants. The SDK checks parsed YAML profile parity and the exact modelScope before a new root launch. Nested/async children inherit that ceiling and `maxSubagentDepth = 2`; second-level agents cannot delegate again. A permitted nested launch uses `subagent({ agent: "mechanic", task: "...", options: { agentScope: "user" } })`; all other nested options are rejected.
 
-Scout → scout; mechanic → scout/mechanic; worker → scout/mechanic/worker; legacy Pi expert → scout/mechanic/worker/expert. No Pi God. A nested call cannot select a model, override tools/provider, create a new worktree, change cwd or use workflow-script launch modes: a code-installed tool-call guard rejects those paths, alongside the upstream `allowedAgents` and depth admission checks. Nested children remain in the assigned worktree; the outer parent must check the combined diff and acceptance proof. This is *not* an OS sandbox against arbitrary shell commands.
+The generated [nesting table](../tools/pi-subagent-bridge/README.md#bounded-native-pi-nesting) lists the permitted descendants, including legacy Pi expert sessions. A nested call cannot select a model, override tools/provider, create a new worktree, change cwd or use workflow-script launch modes: a code-installed tool-call guard rejects those paths, alongside the upstream `allowedAgents` and depth admission checks. Nested children remain in the assigned worktree; the outer parent must check the combined diff and acceptance proof. This is *not* an OS sandbox against arbitrary shell commands.
 
 **Codex is the primary backend. Codex and Command Code remain leaves.** This change enables nesting in the Pi fallback (Muse or OpenCode Go) only, not Command Code's standalone CLI process; do not claim universal bridge nesting without implementing a separate typed, authenticated child-delegation interface.
 
@@ -103,14 +106,6 @@ Pi SDK: https://pi.dev/docs/latest/sdk · pi-subagents RPC: https://github.com/n
 
 ## Muse subscription integration
 
-After `sh sync` and `muse` → `/login`, the bridge uses the pinned Muse SDK model as
-the Pi fallback for the worker tier when Command Code is unavailable or fails before
-edits: `muse-sdk/muse-spark-1.3` (xhigh). Scout and mechanic run on the pinned
-`opencode-go/muse-spark-1.3-contributor` (scout `medium`, mechanic `high`); expert runs on
-`opencode-go/deepseek-v4.1-flash` (max). No environment flag is required and
-`USR_PI_MUSE_SUBSCRIPTION` is ignored. Muse-only nested child profiles preserve
-type-checked tier limits and the two-level depth cap. The bridge sets
-`PI_MUSE_SDK_CONTRIBUTOR=on` for its Muse workers, so Meta may use prompts, code and
-outputs for training.
+After `sh sync` and `muse` → `/login`, the bridge uses the Muse SDK fallback from the generated routing table when earlier approved routes cannot run before edits. Native Muse child profiles preserve the typed tier limits and depth cap. No environment flag selects the route; `USR_PI_MUSE_SUBSCRIPTION` is ignored. The bridge sets `PI_MUSE_SDK_CONTRIBUTOR=on`, so Meta may use prompts, code and outputs for training.
 For a disposable real-account verification and Contributor-mode privacy details,
 read [the bridge documentation](../tools/pi-subagent-bridge/README.md).

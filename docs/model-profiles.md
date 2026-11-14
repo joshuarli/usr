@@ -1,6 +1,6 @@
 # Instruction profiles
 
-Load one user contract, not a normal contract plus model-specific corrections. Native harness prompts, project instructions, model/effort defaults, and permissions remain unchanged. The shared bridge now pins new expert work to Hydrogen XHigh; instruction profile selection remains separate.
+Load one user contract, not a normal contract plus model-specific corrections. Native harness prompts, project instructions, model/effort defaults, and permissions remain unchanged. Delegation follows the generated [routing policy](../tools/pi-subagent-bridge/README.md); instruction profile selection remains separate.
 
 | Harness and reported model | Contract |
 | --- | --- |
@@ -15,7 +15,7 @@ The lean version keeps owner preferences and boundaries rather than general coac
 
 [Claude's `CLAUDE.md`](../dotfiles/base/.claude/CLAUDE.md) and [Codex's `AGENTS.override.md`](../dotfiles/base/.codex/AGENTS.override.md) are relative symlinks to the same short [bootstrap](../dotfiles/base/.agents/instructions/bootstrap.md). Codex reads the override instead of the adjacent normal `AGENTS.md`; keeping the latter in place preserves other harness adapters, evaluation fixtures, and the private sandbox layout.
 
-The stateless [selector](../dotfiles/base/.local/bin/agent-instructions.py) emits exactly one complete contract from `SessionStart`. Codex also uses `SubagentStart`, selecting from the child's own reported model, never the parent's model or a tier name. Claude child hooks do not guarantee that model field, so they are not registered. No per-prompt injection, model-switch reset notice, session database, launcher wrapper, or generated prompt file is needed.
+The stateless [selector](../dotfiles/base/.local/bin/agent-instructions.py) emits exactly one complete contract from `SessionStart`. Codex also uses `SubagentStart`, selecting from the child's own reported model, never the parent's model or a tier name. Claude child hooks do not guarantee that model field, so they are not registered. The checked-in contract contains a generated routing block, but generation runs only during development. No renderer runs at session startup, and no per-prompt injection, model-switch reset notice, session database or launcher wrapper is needed.
 
 The hook reads fixed tracked paths through its resolved source location, not paths supplied in the event. Input is limited to 1 MiB and a contract to 32 KiB. Invalid input and unreadable selected contracts report errors without echoing private payloads. Codex sets `additionalContextLimit = 0` only on these bounded handlers so the complete normal contract is not replaced by a spill-file notice. Python runs with `-I -S` and a five-second hook timeout.
 

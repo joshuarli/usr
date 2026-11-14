@@ -1,5 +1,5 @@
 #!/bin/sh
-# worker-watch - observe a pi-subagent-bridge SDK/Command Code session.
+# worker-watch - observe a pi-subagent-bridge executor session.
 #
 # Usage:
 #   worker-watch <repo-root> <usrw_session_id> [idle-minutes]
@@ -49,11 +49,28 @@ case $backend in
         errors=$(jaq -r '.run.errors // empty' "$child_record")
         [ -n "$pid" ] && [ -n "$log" ] || unknown "Pi SDK worker admission is incomplete"
         ;;
-    command-code|codex)
+    command-code|codex|antigravity|hydrogen)
         pid=$(jaq -r '.command_run.pid // empty' "$record")
         log=$(jaq -r '.command_run.output // empty' "$record")
         errors=$(jaq -r '.command_run.errors // empty' "$record")
         [ -n "$pid" ] && [ -n "$log" ] || unknown "Session has no active runner"
+        case $backend in
+            antigravity|hydrogen)
+                jaq -e '(has("schema_version") | not) or .schema_version == 1' "$record" >/dev/null 2>&1 ||
+                    unknown "Unsupported Antigravity session version"
+                expected_model=$(jaq -r '.antigravity_pin.model | strings | select(length > 0)' "$record" 2>/dev/null)
+                # Unversioned Hydrogen sessions predate admitted pin snapshots.
+                if [ "$backend" = hydrogen ]; then
+                    expected_model=gemini-4-hydrogen-xhigh
+                    # shellcheck disable=SC2016 # $model is a jaq variable.
+                    jaq -e --arg model "$expected_model" '(has("schema_version") | not) and
+                        (if has("antigravity_pin") then .antigravity_pin.model == $model and .antigravity_pin.effort == "xhigh" else true end)' \
+                        "$record" >/dev/null 2>&1 || unknown "Ambiguous legacy Antigravity pin"
+                fi
+                [ -n "$expected_model" ] || unknown "Antigravity session has no admitted model pin"
+                backend=antigravity
+                ;;
+        esac
         ;;
     *)
         [ "$state_only" -eq 1 ] && { printf 'unknown\n'; exit 0; }
@@ -92,6 +109,18 @@ inspect() {
         esac
         return 0
     fi
+    if [ "$backend" = antigravity ]; then
+        kill -0 "$pid" 2>/dev/null && return 1
+        result=$(jaq -sc '[.[] | select(.event == "result" and (.result | type == "object"))] | last // empty' "$log" 2>/dev/null)
+        [ -n "$result" ] || return 1
+        actual_model=$(jaq -sr '[.[] | select(.event == "init")] | first | .init.model // empty' "$log" 2>/dev/null)
+        state=failed
+        if [ "$actual_model" = "$expected_model" ] &&
+            [ "$(printf '%s\n' "$result" | jaq -r '.result.status')" = SUCCESS ]; then
+            state=succeeded
+        fi
+        return 0
+    fi
     result=$(rg '"type":"result"' "$log" 2>/dev/null | tail -n 1)
     [ -n "$result" ] || return 1
     case $(printf '%s\n' "$result" | jaq -r '.subtype') in
@@ -106,6 +135,9 @@ terminal_print() {
     elif [ "$backend" = codex ]; then
         printf 'finished: %s\n' "$state"
         jaq -sr '[.[] | select(.type == "item.completed" and .item.type == "agent_message") | .item.text] | last // "" | .[0:2000]' "$log"
+    elif [ "$backend" = antigravity ]; then
+        printf 'finished: %s\n' "$state"
+        printf '%s\n' "$result" | jaq -r '.result.response // .result.error // "" | tostring | .[0:2000]'
     else
         printf '%s\n' "$result" | jaq -r '"finished: \(.subtype)\n\(.result // "" | tostring | .[0:2000])"'
     fi

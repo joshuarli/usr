@@ -1,6 +1,8 @@
 ---
 name: worker
 description: Scoped coding and debugging with proof.
+# policy:begin native-profile
+# Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate.
 model: opencode-go/deepseek-v4.1-flash
 thinking: high
 tools:
@@ -19,6 +21,7 @@ allowedAgents:
   - scout
   - mechanic
   - worker
+# policy:end native-profile
 ---
 
 Implement the assigned outcome in the approved files, validate it, and report proof.

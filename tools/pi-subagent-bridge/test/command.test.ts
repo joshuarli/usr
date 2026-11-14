@@ -40,9 +40,25 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
     assert.match(readFileSync(argsFile, "utf8"), /--resume\ncmd-session/)
     assert.equal(commandSession(first), "cmd-session")
     assert.equal(commandSession(second), "cmd-session")
+    const admittedPin = { model: "fixture/historical-command", effort: "low" } as const
+    assert.throws(() => startCommand(root, logs, "resume", "low", true, "cmd-session", admittedPin.model), /Unapproved/)
+    const retained = startCommand(root, logs, "retain pin", "low", true, "cmd-session", admittedPin.model, admittedPin)
+    let retainedResult = commandResult(retained)
+    for (let i = 0; i < 100 && !retainedResult.result; i++) { await delay(10); retainedResult = commandResult(retained) }
+    assert.equal(retainedResult.state, "succeeded")
+    assert.match(readFileSync(argsFile, "utf8"), /--model\nfixture\/historical-command\n--effort\nlow/)
   } finally {
     process.env.PATH = oldPath
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("Command Code cannot change an admitted pair or restore a forbidden family", () => {
+  const pin = { model: "fixture/historical-command", effort: "low" } as const
+  assert.throws(() => startCommand("/absent", "/absent", "test", "high", false, "session", pin.model, pin), /preserve the admitted pin/)
+  assert.throws(() => startCommand("/absent", "/absent", "test", "low", false, "session", COMMAND_EMBER_MODEL, pin), /preserve the admitted pin/)
+  for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
+    assert.throws(() => startCommand("/absent", "/absent", "test", "high", false, "session", model, { model, effort: "high" }), /Unapproved/)
   }
 })
 

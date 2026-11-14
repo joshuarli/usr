@@ -18,8 +18,16 @@
       "mode": "subagent",
       "model": "opencode/inkling-2-small-free#low",
       "permissions": [
-        { "action": "shell", "resource": "*", "effect": "deny" },
-        { "action": "edit", "resource": "*", "effect": "deny" }
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        }
       ]
     },
     "mechanic": {
