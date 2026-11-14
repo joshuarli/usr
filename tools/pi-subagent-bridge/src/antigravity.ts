@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, fstatSync, openSync, readSync } from "node:fs"
-import { processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
+import { groupAlive, processIdentity, processStartTime, type CommandResult, type CommandRun, type Effort } from "./command.ts"
 
 import { ANTIGRAVITY_PIN, isBannedModel, type CliPin } from "./policy.ts"
 
@@ -80,11 +80,6 @@ export function antigravitySession(run: CommandRun): string | null {
   const event = events(run).find(value => value.event === "init")
   const id = event?.conversation_id
   return typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id) ? id : null
-}
-
-function groupAlive(pid: number): boolean {
-  try { process.kill(-pid, 0); return true }
-  catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH" }
 }
 
 export function antigravityResult(run: CommandRun, pin: CliPin = ANTIGRAVITY_PIN): { state: string; result: CommandResult | null; stderr: string | null } {

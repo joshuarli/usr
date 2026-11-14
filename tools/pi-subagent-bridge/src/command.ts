@@ -63,7 +63,14 @@ export function startCommand(directory: string, logDirectory: string, text: stri
   }
 }
 
+export function groupAlive(pid: number): boolean {
+  try { process.kill(-pid, 0); return true }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH" }
+}
+
 export function commandResult(run: CommandRun): { state: string; result: CommandResult | null; stderr: string | null } {
+  const identity = children.has(run.pid) ? "same" : processIdentity(run)
+  if (identity === "same" || identity === "unknown" || groupAlive(run.pid)) return { state: "running", result: null, stderr: null }
   let tail = ""
   try {
     const fs = statSync(run.output)
@@ -95,8 +102,6 @@ export function commandResult(run: CommandRun): { state: string; result: Command
     const state = last.subtype === "success" ? "succeeded" : last.subtype === "max_turns" ? "turn_limit" : "failed"
     return { state, result: last, stderr }
   }
-  const identity = children.has(run.pid) ? "same" : processIdentity(run)
-  if (identity === "same" || identity === "unknown") return { state: "running", result: null, stderr }
   if (stderr?.includes("spawn error:")) return { state: "failed", result: null, stderr }
   return { state: "interrupted", result: null, stderr }
 }
