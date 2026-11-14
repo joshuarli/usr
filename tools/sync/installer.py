@@ -1317,22 +1317,23 @@ class Installer:
             return
         record = f"{tag}:{expected}"
         required = ("core", "webmcp-gen", "modern-web-guidance")
+        releases = home / "releases"
+        release_dir = releases / f"{tag}-{expected[:12]}"
         if (self._state_text("agent-browser") == record and launcher.is_symlink()
                 and os.readlink(launcher) == target and current.is_symlink()
+                and os.readlink(current) == str(release_dir)
                 and (current / "bin/agent-browser").is_file()
                 and all((current / "skill-data" / name / "SKILL.md").is_file() for name in required)):
             self.own_file(launcher)
             self.own_file(current)
             self.own_file(state_file)
-            self.own_dir(current.resolve())
+            self.own_dir(release_dir)
             self.remove_npm_agent_browser()
             self.current(f"agent-browser is current ({tag}, with skills)")
             return
 
-        releases = home / "releases"
         if releases.is_symlink() or (releases.exists() and not releases.is_dir()):
             self.skip("agent-browser", f"{releases} is not a directory")
-        release_dir = releases / f"{tag}-{expected[:12]}"
         if release_dir.exists() or release_dir.is_symlink():
             self.skip("agent-browser", f"{release_dir} already exists; refusing to overwrite it")
         self.own_missing_dirs(releases)
@@ -1377,7 +1378,8 @@ class Installer:
                 self.skip("agent-browser", f"{tag} skill bundle is invalid")
             archive.unlink()
             for name in required:
-                result = self.run([str(binary), "skills", "get", name], capture=True)
+                result = self.run([str(binary), "skills", "get", name], capture=True,
+                                  extra_env={"AGENT_BROWSER_SKILLS_DIR": str(staged / "skill-data")})
                 if result.returncode or f"name: {name}" not in result.stdout:
                     self.skip("agent-browser", f"{tag} does not load {name} from its bundle")
             if self.os_name == "darwin":
