@@ -214,7 +214,7 @@ def plan_pin_edits(doc: SourceDocument, source: bytes,
                          + use.quote + separator + annotation)
         replacement = new_line_text.encode("utf-8")
         rule = "unpinned-uses"
-        if entries is not None and upgrade:
+        if entries is not None and upgrade and SHA.fullmatch(use.ref):
             rule = "unapproved-pin"
         edits.append(Edit(start, end, expected, replacement, rule))
     return edits, notes

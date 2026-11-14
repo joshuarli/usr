@@ -393,6 +393,68 @@ class CatalogValidationTests(unittest.TestCase):
             temp.cleanup()
 
 
+class CatalogUpgradeFixTests(unittest.TestCase):
+    def test_upgrade_rewrites_same_major_mutable_ref(self) -> None:
+        content = BASE.format(steps="      - uses: actions/checkout@v4.1.0\n")
+        temp = write_tree({"w.yml": content, "cat.toml": CATALOG})
+        try:
+            root = Path(temp.name)
+            path = root / "w.yml"
+            code, _, err = run_fix(["--catalog", str(root / "cat.toml"),
+                                    "--upgrade", str(path)])
+            self.assertEqual(code, 0, err)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("actions/checkout@" + PIN_SHA + " # v4.2.2", text)
+        finally:
+            temp.cleanup()
+
+    def test_upgrade_rewrites_pinned_sha_not_matching_catalog(self) -> None:
+        other_sha = "b" * 40
+        content = BASE.format(steps=f"      - uses: actions/checkout@{other_sha} # v4.1.0\n")
+        temp = write_tree({"w.yml": content, "cat.toml": CATALOG})
+        try:
+            root = Path(temp.name)
+            path = root / "w.yml"
+            code, _, err = run_fix(["--catalog", str(root / "cat.toml"),
+                                    "--upgrade", str(path)])
+            self.assertEqual(code, 0, err)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("actions/checkout@" + PIN_SHA + " # v4.1.0 [pin:v4.2.2]", text)
+        finally:
+            temp.cleanup()
+
+    def test_upgrade_rewrites_cross_major_mutable_ref(self) -> None:
+        content = BASE.format(steps="      - uses: actions/checkout@v9\n")
+        temp = write_tree({"w.yml": content, "cat.toml": CATALOG})
+        try:
+            root = Path(temp.name)
+            path = root / "w.yml"
+            code, _, err = run_fix(["--catalog", str(root / "cat.toml"),
+                                    "--upgrade", str(path)])
+            self.assertEqual(code, 0, err)
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("actions/checkout@" + PIN_SHA + " # v4.2.2", text)
+        finally:
+            temp.cleanup()
+
+    def test_upgrade_rerun_is_idempotent(self) -> None:
+        content = BASE.format(steps="      - uses: actions/checkout@v4.1.0\n")
+        temp = write_tree({"w.yml": content, "cat.toml": CATALOG})
+        try:
+            root = Path(temp.name)
+            path = root / "w.yml"
+            code, _, err = run_fix(["--catalog", str(root / "cat.toml"),
+                                    "--upgrade", str(path)])
+            self.assertEqual(code, 0, err)
+            snapshot = path.read_bytes()
+            code, out, err = run_fix(["--catalog", str(root / "cat.toml"),
+                                      "--upgrade", str(path)])
+            self.assertEqual(code, 0, err)
+            self.assertEqual(path.read_bytes(), snapshot)
+        finally:
+            temp.cleanup()
+
+
 class ObsoleteCommandFixTests(unittest.TestCase):
     def test_single_line_rewrite_verified(self) -> None:
         content = BASE.format(steps="      - run: echo \"::set-output name=foo::bar\"\n")
