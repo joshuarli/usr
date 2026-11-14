@@ -70,7 +70,10 @@ class PiTests(unittest.TestCase):
         broker = json.loads((self.home / ".pi/agent/intercom/config.json").read_text())
         self.assertEqual(broker["brokerCommand"], "node")
         self.assertEqual(broker["inboundTrigger"], "never")
-        self.assertTrue(Path(broker["brokerArgs"][-1]).is_file())
+        if broker.get("usrBrokerProfile") == "headless-usr":
+            self.assertEqual(broker["brokerArgs"], [])
+        else:
+            self.assertTrue(Path(broker["brokerArgs"][-1]).is_file())
         before = meta.read_bytes()
         again = self.sync_tools()
         self.assertIn("pi is current", again.stdout)
