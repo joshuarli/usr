@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, type Scope } from "../src/hybrid.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
-import { CARBON_MODEL, CARBON_EFFORT } from "../src/antigravity.ts"
+import { HYDROGEN_MODEL, HYDROGEN_EFFORT } from "../src/antigravity.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { commandResult, processStartTime, type CommandRun, type Effort } from "../src/command.ts"
 
@@ -144,13 +144,12 @@ test("model check reports Codex primary and Command Code pins", async () => {
       assert.equal(status.command_code.effort, effort)
       assert.equal(status.command_code.available, true)
     }
-    assert.equal((await bridge.modelCheck(f.cwd, "expert")).primary.model, CARBON_MODEL)
-    assert.equal((await bridge.modelCheck(f.cwd, "god")).primary.model, CARBON_MODEL)
+    assert.equal((await bridge.modelCheck(f.cwd, "expert")).primary.model, HYDROGEN_MODEL)
   } finally { f.close() }
 })
 
 
-function carbonFake() {
+function hydrogenFake() {
   const starts: Array<{ model?: string; effort: Effort; resume?: string; readOnly: boolean }> = []
   let available = true
   let failed = false
@@ -162,7 +161,7 @@ function carbonFake() {
     runner: {
       available: () => available,
       start: (_dir: string, _log: string, _prompt: string, effort: Effort, readOnly: boolean, resume?: string, model?: string): CommandRun => {
-        if (model !== CARBON_MODEL || effort !== CARBON_EFFORT || readOnly) throw new Error("Unapproved Carbon dispatch")
+        if (model !== HYDROGEN_MODEL || effort !== HYDROGEN_EFFORT || readOnly) throw new Error("Unapproved Hydrogen dispatch")
         starts.push({ model, effort, readOnly, resume })
         return run
       },
@@ -175,44 +174,40 @@ function carbonFake() {
   }
 }
 
-for (const tier of ["expert", "god"] as const) {
-  test(`${tier} uses only pinned Carbon High, persists it, and never falls back on quota`, async () => {
-    const f = fixture()
-    try {
-      const m = fake(f.cwd), carbon = carbonFake()
-      const bridge = makeHybridBridge(m.api, m.command, noCodex, carbon.runner)
-      const check = await bridge.modelCheck(f.cwd, tier)
-      assert.deepEqual(check.primary, { backend: "carbon", model: CARBON_MODEL, effort: CARBON_EFFORT, available: true })
-      assert.equal(check.fallback, null)
-      const task = await bridge.start(f.cwd, tier, tier, f.scope, "Inspect source and prove behavior")
-      assert.equal(task.backend, "carbon")
-      assert.deepEqual(carbon.starts, [{ model: CARBON_MODEL, effort: "high", readOnly: false, resume: undefined }])
-      const persisted = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
-      assert.equal(persisted.backend, "carbon")
-      assert.equal(persisted.tier, tier)
-      assert.equal(persisted.command_model, undefined)
-      carbon.fail()
-      const status = await bridge.status(f.cwd, task.session_id)
-      assert.equal(status.state, "failed")
-      assert.equal(status.model, CARBON_MODEL)
-      assert.equal(status.fallback_reason, null)
-      assert.equal(carbon.starts.length, 1)
-      assert.equal(commandCalls(m.calls).length, 0)
-      assert.equal(piCreates(m.calls).length, 0)
-    } finally { f.close() }
-  })
-}
-
-test("unavailable Carbon blocks expert/god before starting any other model or claiming a lease", async () => {
+test("expert uses only pinned Hydrogen XHigh, persists it, and never falls back on quota", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd), carbon = carbonFake()
-    carbon.setAvailable(false)
-    const bridge = makeHybridBridge(m.api, m.command, noCodex, carbon.runner)
-    for (const tier of ["expert", "god"] as const) {
-      await assert.rejects(bridge.start(f.cwd, tier, tier, f.scope, "Work"), /Carbon High unavailable.*No fallback/)
-    }
-    assert.equal(carbon.starts.length, 0)
+    const m = fake(f.cwd), hydrogen = hydrogenFake()
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, hydrogen.runner)
+    const check = await bridge.modelCheck(f.cwd, "expert")
+    assert.deepEqual(check.primary, { backend: "hydrogen", model: HYDROGEN_MODEL, effort: HYDROGEN_EFFORT, available: true })
+    assert.equal(check.fallback, null)
+    const task = await bridge.start(f.cwd, "expert", "expert", f.scope, "Inspect source and prove behavior")
+    assert.equal(task.backend, "hydrogen")
+    assert.deepEqual(hydrogen.starts, [{ model: HYDROGEN_MODEL, effort: "xhigh", readOnly: false, resume: undefined }])
+    const persisted = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
+    assert.equal(persisted.backend, "hydrogen")
+    assert.equal(persisted.tier, "expert")
+    assert.equal(persisted.command_model, undefined)
+    hydrogen.fail()
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.state, "failed")
+    assert.equal(status.model, HYDROGEN_MODEL)
+    assert.equal(status.fallback_reason, null)
+    assert.equal(hydrogen.starts.length, 1)
+    assert.equal(commandCalls(m.calls).length, 0)
+    assert.equal(piCreates(m.calls).length, 0)
+  } finally { f.close() }
+})
+
+test("unavailable Hydrogen blocks expert before starting any other model or claiming a lease", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), hydrogen = hydrogenFake()
+    hydrogen.setAvailable(false)
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, hydrogen.runner)
+    await assert.rejects(bridge.start(f.cwd, "expert", "expert", f.scope, "Work"), /Hydrogen XHigh unavailable.*No fallback/)
+    assert.equal(hydrogen.starts.length, 0)
     assert.equal(commandCalls(m.calls).length, 0)
     assert.equal(piCreates(m.calls).length, 0)
     const task = await bridge.start(f.cwd, "safe", "worker", f.scope, "Work")
@@ -220,15 +215,15 @@ test("unavailable Carbon blocks expert/god before starting any other model or cl
   } finally { f.close() }
 })
 
-test("Carbon corrections preserve the exact model and conversation", async () => {
+test("Hydrogen corrections preserve the exact model and conversation", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd), carbon = carbonFake()
-    const bridge = makeHybridBridge(m.api, m.command, noCodex, carbon.runner)
+    const m = fake(f.cwd), hydrogen = hydrogenFake()
+    const bridge = makeHybridBridge(m.api, m.command, noCodex, hydrogen.runner)
     const task = await bridge.start(f.cwd, "review", "expert", f.scope, "Work")
     assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
     await bridge.resume(f.cwd, task.session_id, "Verify a second edge case")
-    assert.deepEqual(carbon.starts[1], { model: CARBON_MODEL, effort: "high", readOnly: false,
+    assert.deepEqual(hydrogen.starts[1], { model: HYDROGEN_MODEL, effort: "xhigh", readOnly: false,
       resume: "7ce10216-708a-4ba7-9128-53789b2ce8ad" })
   } finally { f.close() }
 })

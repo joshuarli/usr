@@ -23,11 +23,11 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("scout and mechanic pin `opencode-go/muse-spark-1.3-contributor`", self.text)
         self.assertNotIn("opencode/muse-ember-1.0", self.text)
 
-    def test_carbon_expert_and_god_only(self):
-        self.assertIn("gemini-4-carbon-high", self.text)
-        self.assertIn("No Pi `god` tier", self.text)
-        self.assertIn("Gemini 4 Argon is banned", self.text)
-        self.assertIn("neither has fallback", self.text)
+    def test_hydrogen_expert_only(self):
+        self.assertIn("gemini-4-hydrogen-xhigh", self.text)
+        self.assertIn("No `god` tier exists anywhere.", self.text)
+        self.assertIn("Gemini 4 Argon and Gemini 4 Carbon are banned", self.text)
+        self.assertIn("no fallback", self.text)
 
     def test_no_old_mcp_registration(self):
         codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()
@@ -55,7 +55,6 @@ class OrchestrateTests(unittest.TestCase):
     def test_opencode_exception(self):
         self.assertIn("OpenCode exception:", self.text)
         self.assertIn("never uses `pi-subagent-bridge`", self.text)
-        self.assertIn("god` has no OpenCode lane", self.text)
         self.assertIn("every tier must run a free model", self.text)
         config = json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
         agents = config["agents"]

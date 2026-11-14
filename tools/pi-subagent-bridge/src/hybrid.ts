@@ -5,13 +5,13 @@ import { dirname, join, resolve } from "node:path"
 import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort, type ModelRef } from "./bridge.ts"
 import { cancelCommand, COMMAND_MODEL, COMMAND_EMBER_MODEL, commandResult, commandSession, startCommand, type CommandRun, type Effort } from "./command.ts"
 import { CODEX_TIER_MODELS, codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
-import { CARBON_MODEL, CARBON_EFFORT, carbonAvailable, carbonResult, carbonSession, cancelCarbon, startCarbon } from "./antigravity.ts"
+import { HYDROGEN_MODEL, HYDROGEN_EFFORT, hydrogenAvailable, hydrogenResult, hydrogenSession, cancelHydrogen, startHydrogen } from "./antigravity.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 import { GO_TIER_MODELS, MUSE_TIER_MODELS, museSubscriptionSelected, isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
 export type { Tier } from "./tier-policy.ts"
-export type RoutedTier = Tier | "god"
+export type RoutedTier = Tier
 export type Scope = {
   base_revision: string
   writable_paths: string[]
@@ -22,7 +22,7 @@ export type Scope = {
 }
 type Session = {
   id: string; cwd: string; title: string; tier: RoutedTier; scope: Scope; task: string
-  backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition" | "codex" | "codex-transition" | "carbon" | "carbon-transition"; attempts: number
+  backend: "pi" | "pi-admitting" | "pi-transition" | "command-code" | "command-transition" | "codex" | "codex-transition" | "hydrogen" | "hydrogen-transition"; attempts: number
   pi_id?: string; command_run?: CommandRun; fallback_reason?: string; fallback_detail?: string
   continuations?: number; steers?: number
   primary_model?: ModelRef; command_model?: string; command_effort?: Effort
@@ -53,9 +53,7 @@ function required(value: unknown, name: string, max = 2000): string {
   if (typeof value !== "string" || !value.trim() || value.length > max) throw new Error("Invalid " + name)
   return value
 }
-function isTier(value: unknown): value is RoutedTier {
-  return value === "god" || isBridgeTier(value)
-}
+const isTier = isBridgeTier
 function scopeFor(value: unknown, tier: RoutedTier, cwd: string, checkHead = true): Scope {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("scope must be an object")
   const raw = value as Record<string, unknown>
@@ -121,8 +119,8 @@ function load(cwd: unknown, id: unknown): Session {
   if (!Number.isInteger(s.attempts) || s.attempts < 0 ||
     (s.steers !== undefined && (!Number.isInteger(s.steers) || s.steers < 0)) ||
     (s.backend === "pi" && typeof s.pi_id !== "string") ||
-    ((s.backend === "command-code" || s.backend === "codex" || s.backend === "carbon") && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
-    !["pi", "pi-admitting", "pi-transition", "command-code", "command-transition", "codex", "codex-transition", "carbon", "carbon-transition"].includes(s.backend)) {
+    ((s.backend === "command-code" || s.backend === "codex" || s.backend === "hydrogen") && (!s.command_run || !Number.isInteger(s.command_run.pid))) ||
+    !["pi", "pi-admitting", "pi-transition", "command-code", "command-transition", "codex", "codex-transition", "hydrogen", "hydrogen-transition"].includes(s.backend)) {
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   }
   return s
@@ -149,16 +147,12 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
 function modelFor(tier: Tier): ModelRef {
   return museSubscriptionSelected(tier) ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier]
 }
-function piTier(s: Session): Tier {
-  if (s.tier === "god") throw new Error("God has no Pi or Command Code fallback")
-  return s.tier
-}
-function primaryFor(s: Session): ModelRef { return s.primary_model ?? modelFor(piTier(s)) }
+function primaryFor(s: Session): ModelRef { return s.primary_model ?? modelFor(s.tier) }
 function fallbackModelFor(s: Session): string {
-  return s.command_model ?? (s.primary_model ? COMMAND_MODELS[piTier(s)] : COMMAND_MODEL)
+  return s.command_model ?? (s.primary_model ? COMMAND_MODELS[s.tier] : COMMAND_MODEL)
 }
 function fallbackEffortFor(s: Session): Effort {
-  return s.command_effort ?? (s.primary_model ? EFFORT[piTier(s)] : LEGACY_EFFORT[piTier(s)])
+  return s.command_effort ?? (s.primary_model ? EFFORT[s.tier] : LEGACY_EFFORT[s.tier])
 }
 function cmdAvailable(): boolean {
   for (const part of (process.env.PATH || "").split(":")) {
@@ -224,7 +218,7 @@ function blockedPartialNotice(): string {
 export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
-  carbon = { start: startCarbon, status: carbonResult, cancel: cancelCarbon, available: carbonAvailable, session: carbonSession }) {
+  hydrogen = { start: startHydrogen, status: hydrogenResult, cancel: cancelHydrogen, available: hydrogenAvailable, session: hydrogenSession }) {
   function fallbackToCommand(s: Session, reason: string, detail?: unknown): Session {
     if (!command.available()) throw new Error(reason + "; Command Code cmd unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
@@ -253,10 +247,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let selected: ModelRef | undefined
       while (s.remaining_pi.length) {
         const destination = s.remaining_pi.shift()!
-        const candidate = destination === "muse" && museSubscriptionSelected(piTier(s))
+        const candidate = destination === "muse" && museSubscriptionSelected(s.tier)
           ? MUSE_TIER_MODELS.worker
           : destination === "go"
-            ? GO_TIER_MODELS[piTier(s)]
+            ? GO_TIER_MODELS[s.tier]
             : undefined
         if (destination === "muse") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
         if (!candidate) continue
@@ -310,8 +304,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async modelCheck(cwd: unknown, tierInput: unknown) {
       const dir = checkedWorktree(cwd)
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
-      if (tierInput === "expert" || tierInput === "god") {
-        return { primary: { backend: "carbon", model: CARBON_MODEL, effort: CARBON_EFFORT, available: carbon.available() },
+      if (tierInput === "expert") {
+        return { primary: { backend: "hydrogen", model: HYDROGEN_MODEL, effort: HYDROGEN_EFFORT, available: hydrogen.available() },
           fallback: null, command_code: null, pi_fallback: null, muse: undefined, opencode_go: null }
       }
       let museAvailable = false, museIssue: string | null = null
@@ -359,21 +353,21 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       if (git(dir, "status", "--porcelain", "--untracked-files=all")) throw new Error("Worker worktree must start clean")
       const task = required(brief, "brief", 32000)
-      if (tierInput === "expert" || tierInput === "god") {
+      if (tierInput === "expert") {
         if (activeWorktreeOwner(stateDir(dir), dir)) throw new Error("Worktree already has an active worker")
-        if (!carbon.available())
-          throw new Error("Pinned Gemini 4 Carbon High unavailable in Antigravity CLI; run agy models and check account access. No fallback.")
+        if (!hydrogen.available())
+          throw new Error("Pinned Gemini 4 Hydrogen XHigh unavailable in Antigravity CLI; run agy models and check account access. No fallback.")
         const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-          task, backend: "carbon-transition", attempts: 0 }
+          task, backend: "hydrogen-transition", attempts: 0 }
         const leaseDir = stateDir(dir)
         claimWorktree(leaseDir, dir, s.id)
         try { save(s) } catch (error) {
           releaseWorktree(leaseDir, dir, s.id)
           throw error
         }
-        s.command_run = carbon.start(s.cwd, leaseDir, prompt(s), CARBON_EFFORT, false, undefined, CARBON_MODEL)
-        s.backend = "carbon"
+        s.command_run = hydrogen.start(s.cwd, leaseDir, prompt(s), HYDROGEN_EFFORT, false, undefined, HYDROGEN_MODEL)
+        s.backend = "hydrogen"
         s.attempts = 1
         save(s)
         return admission(s)
@@ -441,10 +435,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             error = null
           }
         }
-      } else if (s.backend === "carbon-transition") {
+      } else if (s.backend === "hydrogen-transition") {
         state = "blocked_transition"
         last_assistant_text = null
-        error = "Carbon transition interrupted; inspect persisted state and worktree before recovery"
+        error = "Hydrogen transition interrupted; inspect persisted state and worktree before recovery"
       } else if (s.backend === "codex-transition") {
         state = "blocked_transition"
         last_assistant_text = null
@@ -455,7 +449,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         error = "Command Code transition interrupted; inspect persisted state and worktree before recovery"
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
-        const response = s.backend === "carbon" ? carbon.status(s.command_run) :
+        const response = s.backend === "hydrogen" ? hydrogen.status(s.command_run) :
           s.backend === "codex" ? codex.status(s.command_run) : command.status(s.command_run)
         state = response.state
         last_assistant_text = response.result?.finalText?.slice(-5000) ?? null
@@ -539,10 +533,10 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (state === "succeeded" && acceptance_claim !== "met") state = "incomplete"
       return {
         session_id: s.id, backend: s.backend, tier: s.tier,
-        model: s.backend === "carbon" || s.backend === "carbon-transition" ? CARBON_MODEL :
+        model: s.backend === "hydrogen" || s.backend === "hydrogen-transition" ? HYDROGEN_MODEL :
           s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s) :
           s.backend === "codex" || s.backend === "codex-transition" ? s.codex_model : fallbackModelFor(s),
-        effort: s.backend === "carbon" || s.backend === "carbon-transition" ? CARBON_EFFORT :
+        effort: s.backend === "hydrogen" || s.backend === "hydrogen-transition" ? HYDROGEN_EFFORT :
           s.backend === "pi" || s.backend === "pi-admitting" || s.backend === "pi-transition" ? primaryFor(s).variant :
           s.backend === "codex" || s.backend === "codex-transition" ? s.codex_effort : fallbackEffortFor(s), state, last_assistant_text, error, usage,
         changed_paths, out_of_scope_paths, head_unchanged,
@@ -566,7 +560,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
         throw new Error("Cannot resume changed HEAD or out-of-scope work")
-      if (s.backend === "codex-transition" || s.backend === "command-transition" || s.backend === "carbon-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition" || s.fallback_blocked)
+      if (s.backend === "codex-transition" || s.backend === "command-transition" || s.backend === "hydrogen-transition" || s.backend === "pi-admitting" || s.backend === "pi-transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.backend === "pi") {
@@ -580,7 +574,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         save(s)
       } else {
         if (!s.command_run) throw new Error("Missing Command Code process")
-        const runner = s.backend === "carbon" ? carbon : s.backend === "codex" ? codex : command
+        const runner = s.backend === "hydrogen" ? hydrogen : s.backend === "codex" ? codex : command
         const backend = s.backend
         const previous = runner.status(s.command_run)
         if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
@@ -589,7 +583,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
         else s.attempts++
-        s.backend = backend === "carbon" ? "carbon-transition" : backend === "codex" ? "codex-transition" : "command-transition"
+        s.backend = backend === "hydrogen" ? "hydrogen-transition" : backend === "codex" ? "codex-transition" : "command-transition"
         s.command_run = undefined
         s.cancel_requested = false
         save(s)
@@ -597,8 +591,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           "\nSAME-SCOPE CORRECTION ONLY: ") + correction
         s.command_run = backend === "codex"
           ? codex.start(s.cwd, stateDir(s.cwd), text, s.codex_effort!, s.tier === "scout", previous.result.sessionId, s.codex_model, !!s.scope.network)
-          : runner.start(s.cwd, stateDir(s.cwd), text, backend === "carbon" ? CARBON_EFFORT : fallbackEffortFor(s), s.tier === "scout",
-            previous.result.sessionId, backend === "carbon" ? CARBON_MODEL : fallbackModelFor(s))
+          : runner.start(s.cwd, stateDir(s.cwd), text, backend === "hydrogen" ? HYDROGEN_EFFORT : fallbackEffortFor(s), s.tier === "scout",
+            previous.result.sessionId, backend === "hydrogen" ? HYDROGEN_MODEL : fallbackModelFor(s))
         s.backend = backend
         save(s)
       }
@@ -614,7 +608,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       } else if (s.command_run) {
         s.cancel_requested = true
         save(s)
-        interrupted = s.backend === "carbon" ? carbon.cancel(s.command_run) : s.backend === "codex" ? codex.cancel(s.command_run) : command.cancel(s.command_run)
+        interrupted = s.backend === "hydrogen" ? hydrogen.cancel(s.command_run) : s.backend === "codex" ? codex.cancel(s.command_run) : command.cancel(s.command_run)
         if (!interrupted) { s.cancel_requested = false; save(s) }
       }
       return { session_id: s.id, interrupted,
@@ -624,7 +618,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     async steer(cwd: unknown, id: unknown, note: unknown) {
       return withSessionLock(cwd, id, async (s) => {
       const steering = required(note, "note", 32000)
-      if (s.backend === "codex-transition" || s.backend === "command-transition" || s.backend === "carbon-transition" || s.backend === "pi-admitting" ||
+      if (s.backend === "codex-transition" || s.backend === "command-transition" || s.backend === "hydrogen-transition" || s.backend === "pi-admitting" ||
           s.backend === "pi-transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before steering")
       if ((s.steers ?? 0) >= STEER_LIMIT) throw new Error("Steer limit reached for this session")
@@ -646,13 +640,13 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           steers: s.steers, steer_limit: STEER_LIMIT, receipt }
       }
       if (!s.command_run) throw new Error("Missing Command Code process")
-      const runner = s.backend === "carbon" ? carbon : s.backend === "codex" ? codex : command
+      const runner = s.backend === "hydrogen" ? hydrogen : s.backend === "codex" ? codex : command
       const backend = s.backend
       const previous = runner.status(s.command_run)
       if (previous.state !== "running")
         throw new Error("Command Code run is not running (state " + previous.state +
           "); use worker_resume for a finished session")
-      const sessionId = backend === "carbon" ? carbon.session(s.command_run) : backend === "codex" ? codex.session(s.command_run) : commandSession(s.command_run)
+      const sessionId = backend === "hydrogen" ? hydrogen.session(s.command_run) : backend === "codex" ? codex.session(s.command_run) : commandSession(s.command_run)
       if (!sessionId)
         throw new Error("Command Code session identity is not recorded; cannot restart after steering")
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
@@ -667,12 +661,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (state === "running")
         throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
       s.steers = (s.steers ?? 0) + 1
-      s.backend = backend === "carbon" ? "carbon-transition" : backend === "codex" ? "codex-transition" : "command-transition"
+      s.backend = backend === "hydrogen" ? "hydrogen-transition" : backend === "codex" ? "codex-transition" : "command-transition"
       s.command_run = undefined
       save(s)
       s.command_run = runner.start(s.cwd, stateDir(s.cwd),
         prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering,
-        (backend === "carbon" ? CARBON_EFFORT : backend === "codex" ? s.codex_effort! : fallbackEffortFor(s)), s.tier === "scout", sessionId, backend === "carbon" ? CARBON_MODEL : backend === "codex" ? s.codex_model : fallbackModelFor(s))
+        (backend === "hydrogen" ? HYDROGEN_EFFORT : backend === "codex" ? s.codex_effort! : fallbackEffortFor(s)), s.tier === "scout", sessionId, backend === "hydrogen" ? HYDROGEN_MODEL : backend === "codex" ? s.codex_model : fallbackModelFor(s))
       s.backend = backend
       save(s)
       return { session_id: s.id, backend: s.backend, status: "steered", interrupted: true,

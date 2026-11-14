@@ -1,18 +1,17 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state. New `expert` and `god` tasks run **only** Antigravity CLI `gemini-4-carbon-high`; no Argon, native Opus/Sol, or fallback. Scout, mechanic and worker retain the existing Codex → Command Code → Pi backend chain. Already-admitted legacy sessions retain their original models.
+One shared delegation bridge for every coding harness. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state. New `expert` tasks run **only** Antigravity CLI `gemini-4-hydrogen-xhigh`; no Argon, native Opus/Sol, or fallback. There is no `god` tier. Scout, mechanic and worker retain the existing Codex → Command Code → Pi backend chain. Already-admitted legacy sessions retain their original models.
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
 | scout | Codex `gpt-6-luna` (medium) | Command Code `meta/muse-ember` (medium), Pi `opencode-go/muse-spark-1.3-contributor` (medium) |
 | mechanic | Codex `gpt-6-luna` (high) | Command Code `meta/muse-ember` (xhigh), Pi `opencode-go/muse-spark-1.3-contributor` (high) |
 | worker | Codex `gpt-6.1-terra` (medium) | Command Code `deepseek/deepseek-v4.1-flash` (high), Pi `muse-sdk/muse-spark-1.3` (xhigh), Pi `opencode-go/deepseek-v4.1-flash` (high) |
-| expert | Antigravity `gemini-4-carbon-high` (high) | **None** |
-| god | Antigravity `gemini-4-carbon-high` (high) | **None** |
+| expert | Antigravity `gemini-4-hydrogen-xhigh` (xhigh) | **None** |
 
-The bridge validates `agy models` for the exact Carbon slug before admission and pins it on every launch and resume. Its streaming JSON `init` record must confirm the same model before success is accepted. Carbon entitlement is required (Google AI Ultra or eligible enterprise); absence, quota or authentication errors stop the lane. This repository does not purchase API credits. For tasks formerly using Gemini 3.8 Flash in Antigravity, the documented successor slugs are `gemini-4-hydrogen-{low,medium,high,xhigh}`; no tracked Gemini 3.8 bridge pin exists to migrate. Direct Antigravity use should pin available Hydrogen and must never select Argon or fall back to 3.8. See [Google's headless CLI reference](https://antigravity.google/docs/cli/headless/).
+The bridge validates `agy models` for the exact Hydrogen slug before admission and pins it on every launch and resume. Its streaming JSON `init` record must confirm the same model before success is accepted. Antigravity access must list the Hydrogen slug for the account; absence, quota or authentication errors stop the lane. This repository does not purchase API credits. Gemini 4 Carbon is not accessible on this account and is not an approved model anywhere. Direct Antigravity use should pin available Hydrogen and must never select Argon or fall back to 3.8. See [Google's headless CLI reference](https://antigravity.google/docs/cli/headless/).
 
-The lower-tier Pi route retains bounded native Pi nesting. There is **no Pi `god` tier**. The Carbon backend is a root executor, not a Pi agent; it may not use bridge nesting and must not start separate native subagents. Carbon invokes `agy` headlessly with tool permissions allowed, so independent diff/scope verification remains mandatory; this does **not** provide an OS sandbox.
+The lower-tier Pi route retains bounded native Pi nesting. There is **no Pi `god` tier** and no `god` lane anywhere. The Hydrogen backend is a root executor, not a Pi agent; it may not use bridge nesting and must not start separate native subagents. Hydrogen invokes `agy` headlessly with tool permissions allowed, so independent diff/scope verification remains mandatory; this does **not** provide an OS sandbox.
 
 ## Setup
 
@@ -38,7 +37,7 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 
 ## MCP tools
 
-`worker_model_check(cwd, tier)` reports pinned Carbon and no fallback for expert/god; for scout/mechanic/worker it reports Codex first, then Command Code and the pinned Pi fallback.
+`worker_model_check(cwd, tier)` reports pinned Hydrogen and no fallback for expert; for scout/mechanic/worker it reports Codex first, then Command Code and the pinned Pi fallback.
 
 `worker_start(cwd, title, tier, scope, brief)` admits exactly one scoped assignment in a **clean linked worktree** at `<repo>/.work/wt/<name>`. It returns `usrw_*`; this means **admitted**, not complete. Its scope:
 
@@ -83,9 +82,9 @@ The CLI prints one JSON result to stdout on success and a diagnostic on stderr o
 
 Codex and Command Code record process start time (Linux `/proc/<pid>/stat` field 22; macOS `ps -o lstart=`) to distinguish the owned child from a reused PID. An alive process with that identity keeps its lease; proven interruption releases it. `--verbose` records the Command Code session identity before the result so steering can resume the same session. Cross-process worktree leases and locks sit at the MCP/CLI boundary.
 
-Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker go from Codex to Command Code and their approved Pi fallbacks. Expert/god run Carbon only; provider failure cannot switch them to another model. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
+Codex runs use the signed-in ChatGPT account and do not use API keys. Codex scouts disable shell execution and expose read-only tools through a dedicated local MCP server. Codex writers use the workspace-write sandbox. The routing policy permits switching only for a missing executable, unavailable exact model/provider, or recognized usage limit before edits and with unambiguous admission. Scout/mechanic/worker go from Codex to Command Code and their approved Pi fallbacks. Expert runs Hydrogen only; provider failure cannot switch it to another model. An admitted Pi session retains its provider. Task failures, uncertain admissions, missing completion receipts, and partial work do not authorize another start. `fallback_reason` summarizes a switch, `fallback_notice` describes its automatic handling, and `fallback_detail` retains the original provider diagnostic; a successful switch clears `error`.
 
-Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins. New expert/god sessions pin Carbon as their only provider.
+Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions persist remaining Muse/Go destinations and the exact selected model; legacy admitted sessions retain their pins. New expert sessions pin Hydrogen as their only provider; there is no god session.
 
 ## Reloading the server
 

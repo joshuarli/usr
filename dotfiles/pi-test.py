@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "tools/pi"))
 from release_cache import seed  # noqa: E402
 PROFILE = ROOT / "dotfiles/base/.pi/agent"
 MODEL = "opencode-go/muse-spark-1.3-contributor"
-TIERS = {"scout": "low", "mechanic": "medium", "worker": "high", "expert": "xhigh", "god": "xhigh"}
+
 
 
 class PiTests(unittest.TestCase):
