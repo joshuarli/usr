@@ -47,6 +47,16 @@ The [Pi SDK + pi-subagents bridge](../tools/pi-subagent-bridge/README.md) owns a
 
 For cross-harness continuation, `/resume-session <agent> <session-id>` recovers a named local transcript and continues work in the **current** agent; it does not reopen the old agent's native process. It reads each harness's local transcripts directly; DeepSeek TUI and fx use their local files when readable. In Pi, invoke it as `/skill:resume-session <agent> <session-id>`; in Codex, use `$resume-session <agent> <session-id>`.
 
+### Browser-native WebMCP
+
+The [webmcp skill](../dotfiles/base/.agents/skills/webmcp/SKILL.md)
+covers sites that expose structured in-page tools through the experimental
+browser API. In a bctl-managed session, use `bctl webmcp list/call` without
+adding an MCP server or JS package. bctl remains opt-in through
+`sh sync tools bctl`; its browser images are not yet WebMCP-qualified.
+Fall back to the existing [agent-browser skill](../dotfiles/base/.agents/skills/agent-browser/SKILL.md)
+and CDP/DOM actions when a page lacks the API. See
+[bctl's implementation notes](https://github.com/joshuarli/bctl/blob/main/docs/webmcp.md).
 The tracked skills live in `dotfiles/base/.agents/skills/`. Directory links and allowlists keep harness state outside the repository. Removed native profiles are not installed. For a custom `DSH_HOME`, install the DeepSeek adapter at `${DSH_HOME}/AGENTS.md`; `DSH_AGENTS_HOME` controls shared skill discovery.
 
 [`SKILLS.md`](../SKILLS.md) explains skill selection and the `/do` and `/yea` workflows. To invoke `/do` directly, use `$do <task>` in Codex or fx, `/do <task>` in Claude Code, Muse Code, or OpenCode. Codex also provides `/skills`. Antigravity uses `/<skill-name>`. DeepSeek Harness loads matching skills through its skill tool. In interactive Muse Code, invoke an explicit skill with a leading `/<skill-name>` (for example `/refactor-python`, not `/skill <name>`); `/skills` lists skills and `/skills reload` refreshes after changes. A mid-sentence mention does not inject the body. Muse Code API, `muse serve` raw text, and headless (`muse exec`) sessions have no slash injection: when the user explicitly names an explicit-only skill and the skill tool rejects it as disabled, read the skill body directly (`~/.agents/skills/<name>/SKILL.md`, project skills under `.agents/skills/`) and work under it within existing scope and authority.
