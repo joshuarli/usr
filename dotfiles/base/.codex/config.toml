@@ -155,7 +155,7 @@ trust_level = "trusted"
 [projects."/Users/josh/d/epsh"]
 trust_level = "trusted"
 
-[projects."/home/josh/d/laputa-systems/laputa"]
+[projects."/home/josh/repos/laputa-systems/laputa"]
 trust_level = "trusted"
 
 [projects."/Users/josh/d/home"]
@@ -251,7 +251,7 @@ trust_level = "trusted"
 [projects."/Users/josh/d/niceforge"]
 trust_level = "trusted"
 
-[projects."/home/josh/d/laputa-systems/xsh"]
+[projects."/home/josh/repos/laputa-systems/xsh"]
 trust_level = "trusted"
 
 [projects."/Users/josh/repos/laputa-systems/e"]
