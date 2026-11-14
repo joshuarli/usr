@@ -84,7 +84,7 @@ Size concurrency for accepted progress, not resource headroom. Serial is the def
 
 When a child reports, a merge lands, or a check fails, reassess ready work and the limiting stage. A briefing, environment, or verification failure gets its cause fixed and at most one retry at the same tier with a materially changed approach. Escalate to a stronger tier only for evidenced reasoning limits; where tiers share a model, use fresh context, never a provider switch. Never repeat an unchanged failure. Owner intent, public contracts, required proof, and permissions stay fixed unless the owner changes them.
 
-Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. A child's final report is not shown to the user: relay what matters. Bridge workers do not deliver native harness notifications; use `worker-watch` where available and inspect `worker_status` when complete. Never restart a worker merely because the parent lost its notification.
+Give every parallel writer its own worktree, created by you with `git worktree add .work/wt/<name> -b <branch>` and named in the brief as the only place it may write. A child's final report is not shown to the user: relay what matters. Bridge workers do not deliver native harness notifications; use `pi-subagent-bridge watch` where available and inspect `worker_status` when complete. Never restart a worker merely because the parent lost its notification.
 
 Carry forward findings and failed approaches. Every child gets:
 

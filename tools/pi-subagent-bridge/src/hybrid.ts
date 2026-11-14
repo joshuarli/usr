@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
@@ -10,45 +9,32 @@ import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } f
 
 import { isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
-import { activatePi, activateProcess, antigravityPin, backendOf, decodeSession, encodeSession, processRun, transition, type Session } from "./session.ts"
-import { rootPlan, type CliPin, type Executor, type RootPlan } from "./policy.ts"
+import { changes, git, outside, readStateDir, stateDir } from "./git.ts"
+import {
+  fallbackNotice, fallbackSource, inspectSession, observeExecution, runnerStatus, settledState,
+  type Inspection, type InspectionDeps, type Known,
+} from "./inspect.ts"
+import {
+  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, antigravityPin, backendOf, commandPin,
+  decodeSession, encodeSession, isSessionId, primaryFor, processRun, transition, type Session,
+} from "./session.ts"
+import { rootPlan, type Executor, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
 export type { Tier } from "./tier-policy.ts"
 export type RoutedTier = Tier
 export type { Scope } from "./scope.ts"
-export const TURN_LIMIT_CONTINUATIONS = 2
-export const STEER_LIMIT = 2
 const TERMINATION_WAIT_MS = 2000
-const QUOTA =/\b(429|rate[ -]?limit(ed)?|quota|usage[ -]?limit|allowance exhausted|insufficient credits|credits? exhausted|resource_exhausted|too many requests)\b/i
 
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10000 }).trim()
-}
 const isTier = isBridgeTier
 function scopeFor(value: unknown, tier: RoutedTier, cwd: string, checkHead = true): Scope {
   return parseScope(value, tier, checkHead ? git(cwd, "rev-parse", "HEAD") : undefined)
 }
-function changes(cwd: string, base: string): string[] {
-  const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], { encoding: "utf8" })
-  const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], { encoding: "utf8" })
-  return [...new Set((diff + newFiles).split("\0").filter(Boolean))].sort()
-}
-function outside(paths: string[], owned: string[]): string[] {
-  return paths.filter((p) => !owned.some((w) => w.endsWith("/") ? p.startsWith(w) : p === w))
-}
 /** The command that blocks until the session's executor finishes; run it as a background task. */
 function watchCommand(s: Session): string {
-  return "worker-watch " + JSON.stringify(dirname(dirname(stateDir(s.cwd)))) + " " + s.id
-}
-function stateDir(cwd: string): string {
-  const root = dirname(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
-  execFileSync("git", ["-C", root, "check-ignore", "-q", ".work/worker-bridge/state"], { stdio: "ignore", timeout: 10000 })
-  const dir = join(root, ".work", "worker-bridge")
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  return dir
+  return "pi-subagent-bridge watch " + JSON.stringify(dirname(dirname(stateDir(s.cwd)))) + " " + s.id
 }
 function pathFor(cwd: string, id: string): string {
-  if (!/^usrw_[a-f0-9-]{36}$/.test(id)) throw new Error("Invalid worker ID")
+  if (!isSessionId(id)) throw new Error("Invalid worker ID")
   return join(stateDir(cwd), id + ".json")
 }
 function save(s: Session): void {
@@ -85,14 +71,6 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     rmdirSync(lock)
   }
 }
-function primaryFor(s: Session): ModelRef {
-  if (!s.primary_model) throw new Error("Missing admitted Pi pin; manual reconciliation required")
-  return s.primary_model
-}
-function commandPin(s: Session): CliPin {
-  if (!s.command_model || !s.command_effort) throw new Error("Missing admitted Command Code pin; manual reconciliation required")
-  return { model: s.command_model, effort: s.command_effort }
-}
 function fallbackModelFor(s: Session): string { return commandPin(s).model }
 function fallbackEffortFor(s: Session): Effort { return commandPin(s).effort }
 function cmdAvailable(): boolean {
@@ -121,46 +99,16 @@ function prompt(s: Session): string {
     "End with exactly one final line: `ACCEPTANCE: met` only when every required acceptance command ran and passed, otherwise `ACCEPTANCE: not met`.",
   ].join("\n")
 }
-/** The worker's own verdict from the final `ACCEPTANCE:` line of its proof record. */
-export function acceptanceClaim(text: string | null): "met" | "not_met" | "missing" {
-  const last = text?.trimEnd().split("\n").at(-1)?.replace(/[`*]/g, "").trim().toLowerCase()
-  return last === "acceptance: met" ? "met" : last === "acceptance: not met" ? "not_met" : "missing"
-}
 function untouched(s: Session): boolean {
   return git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision &&
     changes(s.cwd, s.scope.base_revision).length === 0
 }
-function quota(value: unknown): boolean {
-  return QUOTA.test(typeof value === "string" ? value : JSON.stringify(value ?? ""))
-}
-function providerUnavailable(value: unknown): boolean {
-  const message = typeof value === "string" ? value : JSON.stringify(value ?? "")
-  return /\b(model (?:is |was )?(?:unavailable|not available|not found|unsupported)|unknown model|unsupported model|no such model|model does not exist|provider unavailable|provider not found|not logged in|not authenticated|authentication required|missing credentials)\b/i.test(message)
-}
-function fallbackNotice(s: Session): string {
-  return [
-    s.fallback_reason,
-    "Automatic fallback is expected and needs no parent action.",
-    "The worktree was verified untouched before switching, so no work was lost or replayed.",
-    "The task continues on " + (backendOf(s) === "pi"
-      ? (primaryFor(s).providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK")
-      : "Command Code") +
-      " with the same scope and approved tier pins; verify it normally with worker_status.",
-    "Do not retry and do not start a duplicate worker.",
-  ].join(" ")
-}
-function blockedPartialNotice(): string {
-  return [
-    "The primary runner hit a provider usage limit, but the worktree already has edits, so no automatic switch happened.",
-    "Inspect the worktree and decide manually; do not start a duplicate worker.",
-  ].join(" ")
-}
-
 export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
   antigravity = { start: startAntigravity, status: antigravityResult, cancel: cancelAntigravity, available: antigravityAvailable, session: antigravitySession },
   resolvePolicy: (tier: Tier) => RootPlan = rootPlan) {
+  const inspection: InspectionDeps = { api, command, codex, antigravity }
   function runnerFor(executor: Exclude<Executor, "pi">) {
     switch (executor) {
       case "antigravity": return antigravity
@@ -169,7 +117,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
     }
   }
   function observe(s: Session, executor: Exclude<Executor, "pi">, run: CommandRun) {
-    return executor === "antigravity" ? antigravity.status(run, antigravityPin(s)) : runnerFor(executor).status(run)
+    return runnerStatus(inspection, s, executor, run)
   }
   function launch(s: Session, executor: Exclude<Executor, "pi">, text: string, resume?: string): CommandRun {
     const dir = stateDir(s.cwd)
@@ -250,6 +198,75 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (String(error).includes("created but prompt admission failed"))
         throw new Error(String(error) + "; worktree lease retained for session " + s.id)
       throw error
+    }
+  }
+  async function advance(cwd: unknown, id: unknown): Promise<{ session: Session; known?: Known }> {
+    return withSessionLock(cwd, id, async (s) => {
+      const observation = await observeExecution(s, stateDir(s.cwd), inspection)
+      const source = fallbackSource(s, observation)
+      const clean = source === null || untouched(s)
+      let state = settledState(s, observation, clean).state
+      let known: Known | undefined = { observation }
+      if (source === "pi" && clean) {
+        fallbackToCommand(s, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", observation.error)
+        state = "running"
+        known = undefined
+      } else if (source === "codex" && clean) {
+        try {
+          transition(s, "codex")
+          save(s)
+          if (command.available()) fallbackToCommand(s, "Codex provider/model unavailable; continued on Command Code before edits.", observation.error)
+          else await fallbackToPi(s, "Codex and Command Code unavailable; continued on an approved Pi provider.", observation.error)
+          state = "running"
+          known = undefined
+        } catch (fallbackError) {
+          s.fallback_blocked = "Fallback blocked: " + String(fallbackError)
+          save(s)
+          const backend = backendOf(s)
+          state = backend === "pi-transition" || backend === "command-transition" || backend === "codex-transition" ? "blocked_admission" : "blocked_fallback"
+          known = { observation, blocked: { state, notice: s.fallback_blocked } }
+        }
+      } else if (source === "command-code" && clean) {
+        try {
+          await fallbackToPi(s,
+            "Primary Command Code provider/model unavailable; continued on an approved Pi provider before edits.", observation.error)
+          state = "running"
+          known = undefined
+        } catch (fallbackError) {
+          s.fallback_blocked = "Pi fallback blocked: " + String(fallbackError)
+          save(s)
+          state = backendOf(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
+          known = { observation, blocked: { state, notice: s.fallback_blocked } }
+        }
+      }
+      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted"].includes(state)) {
+        const directory = stateDir(s.cwd)
+        if (activeWorktreeOwner(directory, s.cwd) === s.id)
+          releaseWorktree(directory, s.cwd, s.id)
+      }
+      return { session: s, ...(known ? { known } : {}) }
+    })
+  }
+  function statusResponse(i: Inspection) {
+    const s = i.session
+    if ("fault" in i.route) throw new Error(i.route.fault)
+    if (i.worktree.kind === "unreadable") throw new Error(i.worktree.reason)
+    const { head, changed_paths, out_of_scope_paths } = i.worktree
+    const head_unchanged = head === s.scope.base_revision
+    const last_assistant_text = i.observation.final_text?.slice(-5000) ?? null
+    const state = i.state === "succeeded" && i.acceptance_claim !== "met" ? "incomplete" : i.state
+    return {
+      session_id: s.id, backend: backendOf(s), tier: s.tier, model: i.route.model, effort: i.route.effort,
+      state, last_assistant_text, error: i.observation.error, usage: i.observation.usage,
+      changed_paths, out_of_scope_paths, head_unchanged,
+      acceptance_claim: i.acceptance_claim,
+      acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
+      continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
+      steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
+      fallback_reason: s.fallback_reason ?? null,
+      fallback_notice: i.notice,
+      fallback_detail: s.fallback_detail ?? null,
+      note: "Proof must be checked independently. Review the diff once before integration.",
     }
   }
   function admission(s: Session) {
@@ -371,134 +388,8 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
-      return withSessionLock(cwd, id, async (s) => {
-      let state: string, last_assistant_text: string | null, error: unknown = null, usage: unknown = null
-      let notice: string | null = null
-      if (s.execution.kind === "transition" && s.execution.executor === "pi") {
-        state = "blocked_admission"
-        last_assistant_text = null
-        error = "Pi admission interrupted or uncertain; inspect this session before recovery"
-      } else if (s.execution.kind === "pi") {
-        const response = await makeWorkerBridge(api, primaryFor(s)).status(s.cwd, s.execution.session_id)
-        state = typeof response.state === "string" ? response.state : "unknown"
-        last_assistant_text = response.last_assistant_text
-        error = response.error
-        usage = { cost_reported_usd: response.cost_reported_usd, tokens: response.tokens }
-        if (s.execution_order === undefined &&
-            state !== "running" && state !== "queued" && state !== "succeeded" && quota(error)) {
-          if (!untouched(s)) {
-            state = "blocked_partial_work"
-            notice = blockedPartialNotice()
-          } else {
-            fallbackToCommand(s, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", error)
-            state = "running"
-            last_assistant_text = null
-            error = null
-          }
-        }
-      } else if (s.execution.kind === "transition") {
-        state = "blocked_transition"
-        last_assistant_text = null
-        error = s.execution.executor + " transition interrupted; inspect persisted state and worktree before recovery"
-      } else {
-        const response = observe(s, s.execution.executor, s.execution.run)
-        state = response.state
-        last_assistant_text = response.result?.finalText?.slice(-5000) ?? null
-        error = response.state === "interrupted"
-          ? "Worker process is gone or its recorded PID identity changed; the run is terminal and cannot be replayed"
-          : response.state === "failed"
-            ? response.result?.error ?? response.stderr : null
-        usage = response.result?.usage ?? null
-        if (s.cancel_requested && (state === "failed" || state === "interrupted")) { state = "cancelled"; error = null }
-        if (s.fallback_blocked) {
-          state = "blocked_fallback"
-          notice = s.fallback_blocked
-        } else if (backendOf(s) === "codex" && !s.cancel_requested && state === "failed" && (quota(error) || providerUnavailable(error))) {
-          if (!untouched(s)) {
-            state = "blocked_partial_work"
-            notice = blockedPartialNotice()
-          } else {
-            try {
-              transition(s, "codex")
-              save(s)
-              if (command.available()) fallbackToCommand(s, "Codex provider/model unavailable; continued on Command Code before edits.", error)
-              else await fallbackToPi(s, "Codex and Command Code unavailable; continued on an approved Pi provider.", error)
-              state = "running"
-              last_assistant_text = null
-              error = null
-              usage = null
-            } catch (fallbackError) {
-              s.fallback_blocked = "Fallback blocked: " + String(fallbackError)
-              save(s)
-              state = backendOf(s) === "pi-transition" || backendOf(s) === "command-transition" || backendOf(s) === "codex-transition" ? "blocked_admission" : "blocked_fallback"
-              notice = s.fallback_blocked
-            }
-          }
-        } else if (backendOf(s) === "command-code" && !s.cancel_requested && s.execution_order !== undefined && state === "failed" &&
-                   (quota(error) || providerUnavailable(error))) {
-          if (!untouched(s)) {
-            state = "blocked_partial_work"
-            notice = blockedPartialNotice()
-          } else {
-            try {
-              await fallbackToPi(s,
-                "Primary Command Code provider/model unavailable; continued on an approved Pi provider before edits.", error)
-              state = "running"
-              last_assistant_text = null
-              error = null
-              usage = null
-            } catch (fallbackError) {
-              s.fallback_blocked = "Pi fallback blocked: " + String(fallbackError)
-              save(s)
-              state = backendOf(s) === "pi-transition" ? "blocked_admission" : "blocked_fallback"
-              notice = s.fallback_blocked
-            }
-          }
-        }
-      }
-      const changed_paths = changes(s.cwd, s.scope.base_revision)
-      const out_of_scope_paths = outside(changed_paths, s.scope.writable_paths)
-      const head_unchanged = git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision
-      if (s.fallback_reason && !notice) {
-        if (state.startsWith("blocked")) {
-          notice = "Provider transition blocked; inspect the owned session before retrying."
-        } else if ((backendOf(s) === "pi" || backendOf(s) === "pi-admitting" || backendOf(s) === "pi-transition") &&
-                   ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
-          const provider = primaryFor(s).providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
-          notice = "The task was admitted to " + provider + " via Command Code's absence or failure, but that Pi run ended in " + state +
-            " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
-            " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +
-            " per the orchestrate quota-fallback rule, delegate to the harness's native subagents instead of restarting the bridge."
-        } else {
-          notice = fallbackNotice(s)
-        }
-      }
-      // A verified terminal response releases worktree admission, not session history.
-      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted"].includes(state)) {
-        const directory = stateDir(s.cwd)
-        if (activeWorktreeOwner(directory, s.cwd) === s.id)
-          releaseWorktree(directory, s.cwd, s.id)
-      }
-      const acceptance_claim = acceptanceClaim(last_assistant_text)
-      if (state === "succeeded" && acceptance_claim !== "met") state = "incomplete"
-      return {
-        session_id: s.id, backend: backendOf(s), tier: s.tier,
-        model: backendOf(s) === "antigravity" || backendOf(s) === "antigravity-transition" ? antigravityPin(s).model :
-          backendOf(s) === "pi" || backendOf(s) === "pi-admitting" || backendOf(s) === "pi-transition" ? primaryFor(s) :
-          backendOf(s) === "codex" || backendOf(s) === "codex-transition" ? s.codex_model : fallbackModelFor(s),
-        effort: backendOf(s) === "antigravity" || backendOf(s) === "antigravity-transition" ? antigravityPin(s).effort :
-          backendOf(s) === "pi" || backendOf(s) === "pi-admitting" || backendOf(s) === "pi-transition" ? primaryFor(s).variant :
-          backendOf(s) === "codex" || backendOf(s) === "codex-transition" ? s.codex_effort : fallbackEffortFor(s), state, last_assistant_text, error, usage,
-        changed_paths, out_of_scope_paths, head_unchanged,
-        acceptance_claim, acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0 || acceptance_claim !== "met",
-        continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
-        steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
-        fallback_reason: s.fallback_reason ?? null,
-        fallback_notice: notice,
-        fallback_detail: s.fallback_detail ?? null,
-        note: "Proof must be checked independently. Review the diff once before integration.",
-      }
-      })
+      const advanced = await advance(cwd, id)
+      return statusResponse(await inspectSession(advanced.session, readStateDir(advanced.session.cwd), inspection, advanced.known))
     },
     async resume(cwd: unknown, id: unknown, feedback: unknown) {
       return withSessionLock(cwd, id, async (s) => {

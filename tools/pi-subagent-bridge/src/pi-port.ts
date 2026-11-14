@@ -1,12 +1,13 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import {
   appendFileSync, closeSync, mkdirSync, openSync, readFileSync, readdirSync,
   renameSync, rmSync, writeFileSync,
 } from "node:fs"
-import { dirname, isAbsolute, join, relative } from "node:path"
+import { isAbsolute, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
+import { readStateDir, stateDir } from "./git.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
 import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
@@ -35,29 +36,19 @@ for (const pin of Object.values(GO_TIER_MODELS)) {
   }
 }
 
-function stateDir(cwd: string): string {
-  const common = execFileSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { encoding: "utf8", timeout: 10000 }).trim()
-  const root = dirname(common)
-  execFileSync("git", ["-C", root, "check-ignore", "-q", ".work/worker-bridge/state"],
-    { stdio: "ignore", timeout: 10000 })
-  const dir = join(root, ".work", "worker-bridge")
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  return dir
-}
-function statePath(cwd: string, id: string): string {
+function statePath(directory: string, id: string): string {
   if (!SESSION.test(id)) throw new Error("Invalid Pi session ID")
-  return join(stateDir(cwd), id + ".pi.json")
+  return join(directory, id + ".pi.json")
 }
 function load(cwd: string | undefined, id: string): Stored {
   if (!cwd) throw new Error("Pi worker operations require the worktree path")
-  const s: Stored = JSON.parse(readFileSync(statePath(cwd, id), "utf8"))
+  const s: Stored = JSON.parse(readFileSync(statePath(readStateDir(cwd), id), "utf8"))
   if (s.id !== id || s.cwd !== cwd || !SESSION.test(s.id))
     throw new Error("Pi worker session/worktree mismatch")
   return s
 }
 function save(s: Stored): void {
-  const path = statePath(s.cwd, s.id), temporary = path + "." + randomUUID() + ".tmp"
+  const path = statePath(stateDir(s.cwd), s.id), temporary = path + "." + randomUUID() + ".tmp"
   try {
     writeFileSync(temporary, JSON.stringify(s), { mode: 0o600, flag: "wx" })
     renameSync(temporary, path)
@@ -73,6 +64,7 @@ function alive(pid: number): boolean {
 function observe(s: Stored): { state: string; result: Result | null } {
   if (s.admitting) return { state: "blocked_transition", result: null }
   if (!s.run) return { state: "blocked_admission", result: null }
+  if (alive(s.run.pid)) return { state: "running", result: null }
   try {
     const result: Result = JSON.parse(readFileSync(s.run.output, "utf8"))
     if (!["succeeded", "failed", "cancelled"].includes(result.state))
@@ -80,11 +72,9 @@ function observe(s: Stored): { state: string; result: Result | null } {
     if (result.state === "succeeded" && (!result.runId?.trim() || !result.sessionFile?.trim()))
       throw new Error("Pi success has no owned native identity")
     return { state: result.state, result }
-  } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
-      return { state: "unknown_or_interrupted", result: null }
+  } catch {
+    return { state: "unknown_or_interrupted", result: null }
   }
-  return { state: alive(s.run.pid) ? "running" : "unknown_or_interrupted", result: null }
 }
 function run(s: Stored, prompt: string, priorSessionFile?: string, priorRunId?: string): Run {
   const dir = stateDir(s.cwd), id = randomUUID()
@@ -189,7 +179,7 @@ export function piPort(): OpenCodePort {
     },
     async active(input) {
       if (!input?.cwd) return { data: {} }
-      const dir = stateDir(input.cwd), sessions: Record<string, boolean> = {}
+      const dir = readStateDir(input.cwd), sessions: Record<string, boolean> = {}
       for (const filename of readdirSync(dir)) {
         if (!/^ses_[a-f0-9]{32}\.pi\.json$/.test(filename)) continue
         const id = filename.slice(0, -8)

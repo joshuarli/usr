@@ -56,9 +56,9 @@ The Pi fallback is a real subagent runtime, not a prompt-only coordination promi
 - `stop_on`: ambiguity, new dependencies, scope or contract changes, unavailable proof.
 - `network` (optional, writers only): give a Codex worker network access and a writable Cargo home (`CARGO_HOME` or `~/.cargo`). Without it, Codex's `workspace-write` sandbox cannot fetch dependencies. Other backends run without a sandbox, so the flag changes nothing for them.
 
-The admission result includes `watch`, a `worker-watch` command that blocks until the executor ends. The bridge has no completion callback, so run `watch` as a background task; a harness that only polls never learns that a worker finished.
+The admission result includes `watch`, a `pi-subagent-bridge watch` command that blocks until the executor ends. The bridge has no completion callback, so run `watch` as a background task; a harness that only polls never learns that a worker finished.
 
-`worker_status(cwd,session_id)` observes the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. The prompt requires the proof record to end with `ACCEPTANCE: met` or `ACCEPTANCE: not met`. A run that exits cleanly without a final `ACCEPTANCE: met` reports state `incomplete`, `acceptance_claim` `not_met` or `missing`, and `acceptance_blocked: true`; `incomplete` is resumable like any finished attempt. It also reports `continuations` used against `continuation_limit`, so a `turn_limit` session can be continued for free with `worker_resume` until that cap, and `steers` used against `steer_limit`. A Codex or Command Code run whose recorded process is gone, or whose PID now has a different start time (a reused PID), is reported as the terminal `interrupted` state and its worktree lease is released; an alive PID with the recorded start time stays `running` and keeps the lease. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
+`worker_status(cwd,session_id)` first advances the session under its lock (pre-edit fallbacks, a blocked fallback, and releasing the lease of a terminal run), then reports what read-only inspection observes of the real backend, tier/effort, result, changed and out-of-scope paths, HEAD stability and fallback reason. The prompt requires the proof record to end with `ACCEPTANCE: met` or `ACCEPTANCE: not met`. A run that exits cleanly without a final `ACCEPTANCE: met` reports state `incomplete`, `acceptance_claim` `not_met` or `missing`, and `acceptance_blocked: true`; `incomplete` is resumable like any finished attempt. It also reports `continuations` used against `continuation_limit`, so a `turn_limit` session can be continued for free with `worker_resume` until that cap, and `steers` used against `steer_limit`. A Codex or Command Code run whose recorded process is gone, or whose PID now has a different start time (a reused PID), is reported as the terminal `interrupted` state and its worktree lease is released; an alive PID with the recorded start time stays `running` and keeps the lease. The parent verifies the output and independently checks the diff; an assistant claim cannot count as test proof.
 
 `worker_resume(cwd,session_id,feedback)` preserves the approved scope and either resumes the owned native pi-subagents child in its original SDK host session, the Codex thread, or the Command Code session. It refuses uncertain active runs, scope expansion, and depleted attempts. A `turn_limit` result is continued with `TURN_LIMIT_CONTINUATIONS` free continuations that do not consume attempts; the used count and cap are in `worker_status`.
 
@@ -68,7 +68,9 @@ The admission result includes `watch`, a `worker-watch` command that blocks unti
 
 ## Coordinating many workers
 
-Use `worker-campaign` to discover persisted sessions and wait for notifications, or `worker-watch` to follow one session. See [campaign coordination](../../docs/pi.md#coordinating-a-campaign) for commands and state-file locations. These shell watchers do not perform the bridge's process-start identity checks or release leases. Their `interrupted` observation for a dead Pi host is not equivalent to an accepted terminal result; check `worker_status` before reusing the worktree.
+Use `pi-subagent-bridge campaign` to discover persisted sessions, wait for notifications and print a JSON campaign snapshot, `pi-subagent-bridge watch` to follow one session, and `pi-subagent-bridge inspect` to print one session's snapshot. See [campaign coordination](../../docs/pi.md#coordinating-a-campaign) for commands and state-file locations.
+
+All of them, and `worker_status`, share one read-only interpretation (`src/inspect.ts`): provider receipts, Pi child records and the recorded process identity (start time, so a reused PID is `interrupted`). A live process is `running` even when a receipt already exists. Inspection never saves a session, creates a directory, changes a lease, signals a process or launches a provider; only `worker_status` advances a session. Watch and campaign output does not release a lease, and a dead Pi host without a result is `unknown_or_interrupted`, which is not an accepted terminal result: check `worker_status` before reusing the worktree.
 
 ## CLI
 
@@ -83,9 +85,14 @@ pi-subagent-bridge status CWD SESSION_ID
 pi-subagent-bridge resume CWD SESSION_ID FEEDBACK_FILE
 pi-subagent-bridge steer CWD SESSION_ID NOTE_FILE
 pi-subagent-bridge cancel CWD SESSION_ID
+pi-subagent-bridge inspect PATH SESSION_ID
+pi-subagent-bridge watch [--state] ROOT SESSION_ID [IDLE_MINUTES]
+pi-subagent-bridge campaign wait [--timeout DURATION] [ROOT...]
+pi-subagent-bridge campaign ack ID...
+pi-subagent-bridge campaign list [--json] [ROOT...]
 ```
 
-The CLI prints one JSON result to stdout on success and a diagnostic on stderr on error. Pass a scope file rather than interpolating JSON into a shell command. Do not put credentials or private source into task briefs.
+`inspect`, `watch` and `campaign` only read bridge state (`campaign ack` writes its own acknowledgement file). `inspect` prints one JSON snapshot; `watch` and `campaign wait|ack|list` print text with documented exit codes (`watch`: 0 finished, 2 stalled, 3 exited without a terminal result, 4 uninspectable). The other commands print one JSON result to stdout on success and a diagnostic on stderr on error. Pass a scope file rather than interpolating JSON into a shell command. Do not put credentials or private source into task briefs.
 
 `pi-subagent-bridge policy` exports approved routes, native Pi restrictions and
 harness exceptions without loading the SDK, probing a provider, or reading home
@@ -130,11 +137,9 @@ python3 -I dotfiles/orchestrate-test.py
 python3 -I tools/sync/claude-worker-test.py
 python3 -I tools/sync/pi-worker-test.py
 python3 -I tools/sync/opencode-worker-test.py
-sh dotfiles/worker-watch-test.sh
-sh dotfiles/worker-campaign-test.sh
 ```
 
-`npm test` is an explicit developer check requiring a supported Node; the production archive does not supply that test toolchain, so `./dev-install.sh` installs the exact-pinned dev dependencies (and the pinned runtime closure, for type declarations) into the ignored `.dev/` directory, leaving the runtime `node_modules` symlink untouched. Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
+`npm test` covers inspection, `watch` and `campaign` (fixture logs and fake `sleep` executors; no real provider). It is an explicit developer check requiring a supported Node; the production archive does not supply that test toolchain, so `./dev-install.sh` installs the exact-pinned dev dependencies (and the pinned runtime closure, for type declarations) into the ignored `.dev/` directory, leaving the runtime `node_modules` symlink untouched. Mock tests cover scope, fallback, locking, resumes, and protocol shape but do not prove live account access or SDK catalog compatibility. Before unattended use, complete a disposable one-file worktree test of each tier, pre-edit model/quota fallback, post-edit quota refusal, same-session resume and restart recovery. Never claim these checks passed without executing them.
 
 ## Muse Code subscription
 

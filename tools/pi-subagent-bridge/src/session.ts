@@ -4,6 +4,14 @@ import { isBannedModel, type CliPin, type Executor } from "./policy.ts"
 import { isRecord, parseScope, requiredText, type Scope } from "./scope.ts"
 import { isTier, type Tier } from "./tier-policy.ts"
 
+export const TURN_LIMIT_CONTINUATIONS = 2
+export const STEER_LIMIT = 2
+
+const SESSION_ID = /^usrw_[a-f0-9-]{36}$/
+export function isSessionId(value: string): boolean {
+  return SESSION_ID.test(value)
+}
+
 type CliExecutor = Exclude<Executor, "pi">
 /** Active executions carry their handle; interrupted admissions cannot look active. */
 export type Execution =
@@ -52,6 +60,29 @@ export function activatePi(s: Session, session_id: string): void {
 export function antigravityPin(s: Session): CliPin {
   if (!s.antigravity_pin) throw new Error("Missing admitted Antigravity pin; manual reconciliation required")
   return s.antigravity_pin
+}
+
+export function primaryFor(s: Session): ModelRef {
+  if (!s.primary_model) throw new Error("Missing admitted Pi pin; manual reconciliation required")
+  return s.primary_model
+}
+export function commandPin(s: Session): CliPin {
+  if (!s.command_model || !s.command_effort) throw new Error("Missing admitted Command Code pin; manual reconciliation required")
+  return { model: s.command_model, effort: s.command_effort }
+}
+export function admittedModel(s: Session): string | ModelRef | undefined {
+  const backend = backendOf(s)
+  if (backend === "antigravity" || backend === "antigravity-transition") return antigravityPin(s).model
+  if (backend === "pi" || backend === "pi-admitting" || backend === "pi-transition") return primaryFor(s)
+  if (backend === "codex" || backend === "codex-transition") return s.codex_model
+  return commandPin(s).model
+}
+export function admittedEffort(s: Session): string | undefined {
+  const backend = backendOf(s)
+  if (backend === "antigravity" || backend === "antigravity-transition") return antigravityPin(s).effort
+  if (backend === "pi" || backend === "pi-admitting" || backend === "pi-transition") return primaryFor(s).variant
+  if (backend === "codex" || backend === "codex-transition") return s.codex_effort
+  return commandPin(s).effort
 }
 
 /** Keep the flat watcher wire format; only this boundary translates lifecycle states. */
