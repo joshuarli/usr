@@ -1,6 +1,6 @@
 ---
 name: webmcp
-description: 'Use browser-native WebMCP tools exposed by websites in bctl sessions. Discover in-page tools and JSON schemas, execute explicitly authorized actions, and fall back to DOM/CDP when unsupported.'
+description: 'Use browser-native WebMCP tools exposed by websites in bctl sessions. Discover schemas and invoke authorized actions. Skip when WebMCP is unavailable or ordinary DOM/CDP interaction is better.'
 ---
 
 # WebMCP: in-page tools, not a remote MCP server
@@ -78,3 +78,5 @@ attachment). Avoid installing a Node browser stack just for this feature.
 - [WebMCP Community Group draft](https://webmachinelearning.github.io/webmcp/)
 - [Chrome agentic tools guidance](https://developer.chrome.com/docs/modern-web-guidance/guides/webmcp/agentic-javascript-tools)
 - [UI SDK agent bridge](https://ui-sdk.dev/docs/agents)
+
+**Report:** Give the selected session and origin, discovered tool names, any call and observed result, user authorization obtained for writes, and the fallback used if unavailable.
