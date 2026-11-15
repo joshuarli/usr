@@ -164,7 +164,8 @@ class SkillCampaignTests(unittest.TestCase):
         patterns = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))["claudeMdExcludes"]
         tracked = run("git", "-C", str(ROOT), "ls-files", "dotfiles/**/AGENTS*.md", "dotfiles/**/CLAUDE.md").stdout.split()
         self.assertTrue(tracked)
-        excluded = lambda path: any(fnmatch.fnmatchcase(str(path), pattern) for pattern in patterns)
+        def excluded(path):
+            return any(fnmatch.fnmatchcase(str(path), pattern) for pattern in patterns)
         for name in tracked:
             path = ROOT / name
             self.assertTrue(excluded(path), "adapter %s reloads a contract when Claude reads beside it" % name)
