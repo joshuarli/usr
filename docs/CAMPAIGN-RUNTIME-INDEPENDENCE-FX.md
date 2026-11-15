@@ -3,18 +3,18 @@
 ## Status
 
 - **Goal:** make usr's worker orchestration independent of Pi, then establish whether a pinned FX runtime can replace a useful execution lane without weakening its contracts.
-- **State:** Milestone A accepted for local macOS ARM64 gates. Runtime independence achieved; stopped before FX-0. FX has not started and is outside this launch.
-- **Execution baseline:** `67ecf3b7b8235c712462c592bff78983690f2b8a`, macOS ARM64. The owner's Codex config was dirty and is excluded. Default Node was 26.7.0; supported Node 26.13.1 is available in the managed installation.
-- **Evidence:** after developer setup, baseline `npm test` passed 227 tests with one opt-in live Muse skip. The initial command failed because `.dev/bin/tsrs` was absent. The no-Pi pilot reproduced `TRAPPED Pi access: ./pi-port.ts` against the original server, then passed with lazy composition. Policy generation initially passed. No timing or resource comparison is claimed.
-- **Implemented:** typed Pi adapter factory and lazy optional composition; adapter-owned Go diagnostics; preserved SDK-free historical Pi readers; core-only dev dependencies and typecheck; explicit core-only Claude/Pi registration; Pi-free CLI/MCP/owner fixture. Public names, owner v1, persisted formats and production policy remain unchanged.
-- **Verified so far:** full bridge suite on managed Node 26.13.1: 228 passed, one live Muse skip; isolated core-only installation: 217 passed, zero skips; pinned Pi offline suite 14 passed; Pi runtime-contract suite 16 passed; disposable offline sync/registration test one passed; Claude/Pi installer suites five each; OpenCode installer suite six; policy generator tests ten; orchestration tests eight. Isolated observation fixtures passed 65 cases after fixing historical Pi observation without the SDK.
-- **Next:** stop. FX-0 requires a later launch. See [verification](verification/runtime-independence.md) for accepted checkpoints, exact checks, review and external qualification gaps. The hostile fixture qualifies Codex public control; Command Code and Antigravity parity comes from offline executor contracts, not live-provider qualification.
+- **State:** FX spike implemented and locally qualified on macOS ARM64. Verdict: **limited-go for deterministic qualification only**. No production promotion, live FX jobs, Pi removal or remote update.
+- **Accepted implementation:** runtime independence through `2025e04`; FX CLI/bridge qualification `91642ad`; cancellation identity guard `6dd9583`; unavailable-control guard `c6f94ad`; qualification evidence through `d986a7f`.
+- **Evidence:** pinned real FX 0.0.17 and matching source; real tools and exact-session continuation; hostile read-only/fanout/MCP probes; interruption before response, during a tool and after a write; shared owner correction, steering, replay and interruption; unchanged production policy JSON. See [spike verification](verification/runtime-independence-fx.md).
+- **Compatibility:** production routes and schema-2 writes remain unchanged. Experimental leaf records use schema 3 with explicit version-1/2 readers. No production npm dependency was added.
+- **External gates:** live ChatGPT account/model qualification, native musl hosts, real agentctl/Intercom peers and production resource/task quality remain unqualified. The live entrypoint reports unavailable and starts zero jobs. Initial timing gate deferred; a later gated local harness window passed.
+- **Next:** stop. No SDK rewrite or rollout follows from this spike. A separate production decision requires the parked proof in the verification report.
 
 ## Charter
 
 The order is binding: **runtime independence -> existing-backend parity -> no-Pi installation/execution proof -> FX protocol pilot -> FX integration and qualification**. A generic interface or a renamed directory is not runtime independence. FX is a test of the boundary, not the new foundation of usr.
 
-This document's creation authorizes no implementation. On a separate launch, work in `joshuarli/usr`, make focused verified commits, and follow the launch's explicit push grant. Without one, keep implementation commits local; do not infer permission to publish, deploy, alter the real home directory or modify other repositories. The owner's present request authorizes committing this campaign to usr only.
+This document's creation authorizes no implementation. On a separate launch, work in `joshuarli/usr`, make focused verified commits, and follow the launch's explicit push grant. Without one, keep implementation commits local; do not infer permission to publish, deploy, alter the real home directory or modify other repositories. The planning request authorized committing the campaign only. Later owner launches authorized runtime independence and then this isolated FX spike. Neither launch grants production promotion or a push.
 
 Use the existing [campaign mechanics](../dotfiles/base/.agents/skills/orchestrate/references/campaigns.md) and [worktree lifecycle](../dotfiles/base/.agents/skills/orchestrate/SKILL.md#worktree-lifecycle). One writer owns shared bridge, policy, state and installer changes. Do not delegate through the modified bridge while its admission/control path is unqualified. Use a separate known-good installed generation or do the bootstrap directly. Scratch homes, sessions, fixture repositories and worktrees live under `.work/`, never the real home or `/tmp`.
 
@@ -25,7 +25,7 @@ After each accepted slice, perform the parent steering checkpoint: identify the 
 ### Owner-decided
 
 1. Runtime independence comes first; FX is a subsequent spike, not an immediate Pi replacement.
-2. The work belongs in usr. This request is for the committed campaign, not its execution.
+2. The work belongs in usr. The later owner launches authorize executing runtime independence and the isolated FX spike.
 
 ### Prescribed
 

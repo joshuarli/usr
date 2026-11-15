@@ -44,6 +44,22 @@ From this directory:
 
 Fake executors prove bridge lifecycle behavior, not live provider entitlement. The core-only fixture does not qualify Linux binaries or agentctl integration.
 
+## FX qualification experiment
+
+FX is available only through `experiment/fx/spike.mjs`. Installing it does not change production routes or add a runtime selector to `worker_start`. The current pin supports native macOS ARM64 only. Read the [spike result](../../docs/verification/runtime-independence-fx.md) before using it.
+
+From this directory:
+
+- `npm run spike:fx -- --setup` installs the exact checked-in release into a scratch home under usr's `.work/`, using the existing verified installer.
+- `npm run spike:fx -- --local-protocol` runs the real CLI against a loopback provider, including tools, continuation, hostile read-only calls and interruption.
+- `npm run spike:fx -- --local` also runs the real binary through shared bridge admission, owner control and parent-verified acceptance tests. No account credentials are required.
+- `npm run test:fx` checks experiment types and offline supervisor/state fixtures. It does not download a binary or contact a provider.
+- `npm run test:runtime-contract -- --adapter fx` adds saved-state, owner and no-Pi contracts.
+- `npm run spike:fx -- --live` prints its bounded scope and returns unavailable for the unqualified account route. It never substitutes Gateway billing or copies another client's credentials.
+- `npm run bench:runtime` interleaves five adapter/bridge samples for the same local workload. Failed load gates discard timing samples and return exit 75. Native RSS samples and binary size are separate from live task performance.
+
+Ordinary sessions retain schema-2 writes. Experimental leaf sessions use schema 3; versions 1 and 2 remain readable. FX resume tokens are runtime-tagged and bound to the original worktree, native session, model/provider/effort and private connection/control settings.
+
 ## Devin SWE-2 Flash
 
 `devin/swe-2-flash` at **medium** effort is an explicitly pinned **last**
