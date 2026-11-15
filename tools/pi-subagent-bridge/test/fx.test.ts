@@ -22,8 +22,9 @@ const args=process.argv.slice(2),id='native-fixture',dir=p.join(process.env.FX_H
 fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs.writeFileSync(p.join(process.env.FX_HOME,'sessions/v2/index.jsonl'),'');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'log.jsonl'),JSON.stringify({v:1,kind:'session_created',id,workspace:process.cwd(),role:'root'})+'\\n');
 const mode=${JSON.stringify(behavior)};
 if(mode==='oversized')process.stdout.write('x'.repeat(1100000));
-else if(mode!=='hold')console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
-if(mode!=='success'&&mode!=='mismatch')setInterval(()=>{},1000);
+else if(mode==='malformed')process.stdout.write('{\"exit_code\":');
+else if(mode!=='hold')console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:mode==='empty'?'':'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
+if(['hold','oversized','early-json'].includes(mode))setInterval(()=>{},1000);
 `
   writeFileSync(binary, source, { mode: 0o755 })
   const fx = makeFxAdapter({ binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
@@ -63,10 +64,13 @@ test("FX supervision binds final JSON to actual exit and resumes only the record
 
 for (const behavior of ["hold", "oversized", "early-json"] as const) {
   test(`FX ${behavior} cannot turn an unfinished run into success`, async t => {
-    const f = fixture(t, behavior, 200), run = f.fx.start(f.request)
+    const f = fixture(t, behavior, behavior === "oversized" ? 5000 : behavior === "early-json" ? 1000 : 200), run = f.fx.start(f.request)
     const result = await ended(run)
     assert.equal(result.state, "failed")
-    assert.match(readReceipt(run)!, /deadline|oversized/)
+    const receipt = JSON.parse(readReceipt(run)!)
+    assert.equal(receipt.reason, behavior === "oversized" ? "oversized" : "deadline")
+    assert.ok(Buffer.byteLength(receipt.stdout) <= 1_048_576)
+    if (behavior === "early-json") assert.equal(JSON.parse(receipt.stdout).exit_code, 0)
   })
 }
 
@@ -128,3 +132,10 @@ test("missing optional FX composition refuses control before changing attempts o
   await assert.rejects(() => withoutFx.cancel(f.repo.cwd, admitted.session_id), /FX adapter unavailable/)
   assert.equal(readFileSync(path, "utf8"), before)
 })
+
+for (const behavior of ["malformed", "empty"] as const) {
+  test(`FX exit zero with ${behavior} final evidence remains unknown`, async t => {
+    const f = fixture(t, behavior), run = f.fx.start(f.request)
+    assert.equal((await ended(run)).state, "unknown_or_interrupted")
+  })
+}
