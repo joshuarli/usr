@@ -445,6 +445,23 @@ class Installer:
         except (KeyError, zipfile.BadZipFile, OSError):
             return None
 
+    @staticmethod
+    def archive_destination_safe(target: Path, name: str, link: str = "", *, hardlink: bool = False) -> bool:
+        root = Path(target).resolve()
+        destination = root / name
+        if any(part.is_symlink() for part in (destination, *destination.parents) if part != root and root in part.parents):
+            return False
+        if link:
+            if Path(link).is_absolute():
+                return False
+            resolved = ((root if hardlink else destination.parent) / link).resolve()
+            if resolved != root and root not in resolved.parents:
+                return False
+        return True
+
+    def archive_member(self, path: Path, asset: str, member: str) -> bytes | None:
+        return self.tar_member(path, member) if asset.endswith(".tar.xz") else self.zip_member(path, member)
+
     def extract_zip(self, path: Path, target: Path) -> bool:
         names = self.zip_names(path)
         if names is None or self.archive_paths_bad(names):
@@ -454,17 +471,21 @@ class Installer:
                 for info in archive.infolist():
                     dest_path = Path(target) / info.filename
                     mode = (info.external_attr >> 16) & 0o7777
+                    is_link = (info.external_attr >> 16) & 0o170000 == 0o120000
+                    link = archive.read(info).decode() if is_link else ""
+                    if not self.archive_destination_safe(target, info.filename, link):
+                        return False
                     if info.is_dir():
                         dest_path.mkdir(parents=True, exist_ok=True)
                         continue
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    if (info.external_attr >> 16) & 0o170000 == 0o120000:
-                        dest_path.symlink_to(archive.read(info.filename).decode())
+                    if is_link:
+                        dest_path.symlink_to(link)
                         continue
                     dest_path.write_bytes(archive.read(info.filename))
                     if mode:
                         dest_path.chmod(mode)
-        except (zipfile.BadZipFile, OSError, RuntimeError):
+        except (zipfile.BadZipFile, OSError, RuntimeError, UnicodeError, ValueError):
             return False
         return True
 
@@ -496,12 +517,17 @@ class Installer:
             return False
         try:
             with tarfile.open(path, "r:*") as archive:
-                try:
-                    archive.extractall(target, filter="data")
-                except TypeError:
-                    if strip:
+                for member in archive:
+                    if not self.archive_destination_safe(target, member.name,
+                                                         member.linkname if member.issym() or member.islnk() else "",
+                                                         hardlink=member.islnk()):
                         return False
-                    archive.extractall(target)
+                    if not (member.isfile() or member.isdir() or member.issym() or member.islnk()):
+                        return False
+                    if hasattr(tarfile, "data_filter"):
+                        archive.extract(member, target, filter="data")
+                    else:
+                        archive.extract(member, target)
         except (tarfile.TarError, OSError):
             return False
         if strip:
@@ -606,9 +632,11 @@ class Installer:
         asset = (f"{tool}-{self.arch}-apple-darwin" if self.os_name == "darwin"
                  else f"{tool}-{self.arch}-unknown-linux-musl-static")
         base = f"https://github.com/{repo}/releases/download/{tag}"
-        record = f"{tag}:{self.asset_id(f'{base}/{asset}.zip')}"
-        if ":" not in record or not record.split(":", 1)[1]:
-            self.unchecked(tool, f"{base}/{asset}.zip is unreachable")
+        archive_asset = next((f"{asset}.{ext}" for ext in ("tar.xz", "zip")
+                              if self.asset_id(f"{base}/{asset}.{ext}")), "")
+        record = f"{tag}:{self.asset_id(f'{base}/{archive_asset}')}" if archive_asset else ""
+        if not record or not record.split(":", 1)[1]:
+            self.unchecked(tool, f"{base}/{asset} archive is unreachable")
             return
         if self.is_current(install_name, record):
             self.current(f"{install_name} is current ({tag})")
@@ -617,22 +645,22 @@ class Installer:
         if not self.download(f"{base}/SHA256SUMS", sums_path):
             sums_path.unlink(missing_ok=True)
             self.skip(tool, "SHA256SUMS download failed")
-        expected = self.sums_for(sums_path.read_text(), f"{asset}.zip")
+        expected = self.sums_for(sums_path.read_text(), archive_asset)
         sums_path.unlink(missing_ok=True)
         if len(expected) != 64:
-            self.skip(tool, f"{asset}.zip is not listed in SHA256SUMS")
+            self.skip(tool, f"{archive_asset} is not listed in SHA256SUMS")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
             archive_path = Path(stream.name)
-        if not self.download(f"{base}/{asset}.zip", archive_path):
+        if not self.download(f"{base}/{archive_asset}", archive_path):
             archive_path.unlink(missing_ok=True)
-            self.skip(tool, f"{asset}.zip download failed")
+            self.skip(tool, f"{archive_asset} download failed")
         if self.sha256_file(archive_path) != expected:
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "release checksum mismatch")
-        member = self.zip_member(archive_path, asset)
+        member = self.archive_member(archive_path, archive_asset, asset)
         archive_path.unlink(missing_ok=True)
         if member is None:
-            self.skip(tool, f"{asset}.zip does not contain {asset}")
+            self.skip(tool, f"{archive_asset} does not contain {asset}")
         staged = self.stage_file(self.dest, f".{install_name}.")
         staged.write_bytes(member)
         self.install_binary(install_name, staged, record)
@@ -677,30 +705,33 @@ class Installer:
         url = ""
         record = ""
         for candidate in candidates:
-            candidate_url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/{candidate}.zip"
-            candidate_id = self.asset_id(candidate_url)
-            if candidate_id:
-                asset, url, record = candidate, candidate_url, candidate_id
+            for extension in ("tar.xz", "zip"):
+                candidate_url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/{candidate}.{extension}"
+                candidate_id = self.asset_id(candidate_url)
+                if candidate_id:
+                    asset, url, record = candidate, candidate_url, candidate_id
+                    break
+            if asset:
                 break
         if not asset:
-            self.unchecked(prog, f"{asset_base}.zip is not available in {tag}")
+            self.unchecked(prog, f"{asset_base} archive is not available in {tag}")
             return
         asset_inner = prog if prog == "bylaws" else asset
         if self.is_current(install_name, record):
             self.current(f"{install_name} is current ({tag})")
             return
-        self.fetch_msg(f"Downloading {asset}.zip ...")
+        self.fetch_msg(f"Downloading {url.rsplit(chr(47), 1)[-1]} ...")
         with tempfile.NamedTemporaryFile(delete=False) as stream:
             archive_path = Path(stream.name)
         if not self.download(url, archive_path):
             archive_path.unlink(missing_ok=True)
-            self.skip(prog, f"{asset}.zip is not available in {tag}")
+            self.skip(prog, f"{url.rsplit(chr(47), 1)[-1]} is not available in {tag}")
         staged = self.stage_file(self.dest, f".{install_name}.")
-        member = self.zip_member(archive_path, asset_inner)
+        member = self.archive_member(archive_path, url, asset_inner)
         archive_path.unlink(missing_ok=True)
         if member is None:
             staged.unlink(missing_ok=True)
-            self.skip(prog, f"{asset}.zip does not contain {asset_inner}")
+            self.skip(prog, f"{url.rsplit(chr(47), 1)[-1]} does not contain {asset_inner}")
         staged.write_bytes(member)
         self.install_binary(install_name, staged, record)
         if prog == "rage":
@@ -749,19 +780,34 @@ class Installer:
             self.unchecked("zzz", "no release found")
             return
         asset = f"zzz-linux-musl-static-{self.arch}"
-        url = f"https://github.com/laputa-systems/zzz/releases/download/{tag}/{asset}"
-        record = self.asset_id(url)
-        if not record:
-            self.unchecked("zzz", f"{asset} is unavailable")
+        base = f"https://github.com/laputa-systems/zzz/releases/download/{tag}"
+        archive_asset = next((f"{asset}.{ext}" for ext in ("tar.xz", "zip")
+                              if self.asset_id(f"{base}/{asset}.{ext}")), "")
+        if not archive_asset:
+            self.unchecked("zzz", f"{asset} archive is unavailable")
             return
+        record = self.asset_id(f"{base}/{archive_asset}")
         if self.is_current("zzz", record):
             self.current(f"zzz is current ({tag})")
             return
-        self.fetch_msg(f"Downloading {asset} ...")
+        sums = self.fetch_text(f"{base}/SHA256SUMS")
+        expected = self.sums_for(sums, archive_asset)
+        if len(expected) != 64:
+            self.skip("zzz", f"{archive_asset} is not listed in SHA256SUMS")
+        with tempfile.NamedTemporaryFile(delete=False) as stream:
+            archive_path = Path(stream.name)
+        if not self.download(f"{base}/{archive_asset}", archive_path):
+            archive_path.unlink(missing_ok=True)
+            self.skip("zzz", f"{archive_asset} download failed")
+        if self.sha256_file(archive_path) != expected:
+            archive_path.unlink(missing_ok=True)
+            self.skip("zzz", "release checksum mismatch")
+        member = self.archive_member(archive_path, archive_asset, asset)
+        archive_path.unlink(missing_ok=True)
+        if member is None:
+            self.skip("zzz", f"{archive_asset} does not contain {asset}")
         staged = self.stage_file(self.dest, ".zzz.")
-        if not self.download(url, staged):
-            staged.unlink(missing_ok=True)
-            self.skip("zzz", f"{asset} download failed")
+        staged.write_bytes(member)
         self.install_binary("zzz", staged, record)
 
     def install_fd_or_rg(self, prog: str) -> None:
