@@ -21,6 +21,7 @@ const PI_MODELS = {
   goDeepSeek: { providerID: "opencode-go", id: "deepseek-v4.1-flash" },
   goSpark: { providerID: "opencode-go", id: "muse-spark-1.3-contributor" },
   museSpark: { providerID: "muse-sdk", id: "muse-spark-1.3" },
+  devinSwe2: { providerID: "devin", id: "swe-2" },
 } as const
 export const PI_MODEL_ALLOWLIST = Object.values(PI_MODELS).map(({ providerID, id }) => `${providerID}/${id}`)
 
@@ -41,6 +42,17 @@ export const MUSE_TIER_MODELS = {
 } as const satisfies {
   readonly worker: { readonly providerID: "muse-sdk"; readonly id: string; readonly variant: Effort }
 }
+/** Experimental Devin Local worker. Only the medium SWE-2 variant is admitted. */
+export const DEVIN_TIER_MODELS = {
+  worker: { ...PI_MODELS.devinSwe2, variant: "medium" },
+} as const satisfies {
+  readonly worker: { readonly providerID: "devin"; readonly id: "swe-2"; readonly variant: "medium" }
+}
+export const DEVIN_AGENT_NAMES = { worker: "devin-worker" } as const
+export const DEVIN_DELEGATION = {
+  worker: DELEGATION.worker.map(tier => tier === "worker" ? DEVIN_AGENT_NAMES.worker : tier),
+} as const satisfies { readonly worker: readonly string[] }
+
 export const MUSE_AGENT_NAMES = { worker: "muse-worker" } as const
 export const MUSE_DELEGATION = {
   worker: DELEGATION.worker.map(tier => tier === "worker" ? MUSE_AGENT_NAMES.worker : tier),
@@ -77,6 +89,10 @@ export function assertDelegation<P extends Tier>(parent: P, child: unknown): ass
 /** Exact pins admitted for nested spawns, per tier. */
 export type GoModelRef = { providerID: string; id: string; variant?: string }
 export function tierForModel(model: GoModelRef, readOnly: boolean): Tier {
+  if (model.providerID === DEVIN_TIER_MODELS.worker.providerID &&
+      model.id === DEVIN_TIER_MODELS.worker.id &&
+      model.variant === DEVIN_TIER_MODELS.worker.variant && !readOnly)
+    return "worker"
   if (model.providerID === MUSE_TIER_MODELS.worker.providerID &&
       model.id === MUSE_TIER_MODELS.worker.id &&
       model.variant === MUSE_TIER_MODELS.worker.variant && !readOnly)
