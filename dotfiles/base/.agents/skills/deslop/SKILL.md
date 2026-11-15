@@ -39,6 +39,7 @@ Each step ends on its acceptance plus `make test` and `make lint`.
 - Assert exact outputs (whole responses, whole JSON) and table-test both directions of a comparison.
 - Spawned processes and sockets get deadlines and kill-on-drop; ports come from binding port 0 and reading the bound address, never a pre-picked free port.
 - Simplify code that only produces equivalent mutants instead of excluding them.
+- Merge only after every check reports success, a non-required lane included; `gh pr checks --watch` returns early while checks are still queued, so poll until none is pending.
 
 **The test:** another agent can read `## Report` and the merged PRs and know what each step found, what it cost, and what still needs the owner.
 
