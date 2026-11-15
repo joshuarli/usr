@@ -6,7 +6,7 @@ import { makeWorkerBridge } from "../src/bridge.ts"
 import { processStartTime } from "../src/command.ts"
 import { makeHybridBridge } from "../src/hybrid.ts"
 import { inspectStored, type Snapshot } from "../src/inspect.ts"
-import { piPort } from "../src/pi-port.ts"
+import { optionalPiPort } from "../src/optional-pi.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree } from "../src/worktree-lease.ts"
 import {
   PI_MODEL, PI_ID, Scratch, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, toolQueued,
@@ -29,7 +29,7 @@ async function inspectReadOnly(repo: Repo, id: string): Promise<Snapshot> {
   }) as typeof process.kill
   const snapshots: Snapshot[] = []
   try {
-    for (let attempt = 0; attempt < 3; attempt++) snapshots.push(await inspectStored(repo.directory, id, realDeps(piPort())))
+    for (let attempt = 0; attempt < 3; attempt++) snapshots.push(await inspectStored(repo.directory, id, realDeps(optionalPiPort())))
   } finally {
     process.kill = kill
   }
@@ -112,7 +112,7 @@ test("a dead Pi host reports its receipt once it has exited", async () => {
 
 test("a Pi host that is alive is running whatever its receipt says, and its receipt counts after exit", async () => {
   const repo = scratch.repo(), pid = scratch.alive()
-  const bridge = makeWorkerBridge(piPort(), PI_MODEL)
+  const bridge = makeWorkerBridge(optionalPiPort(), PI_MODEL)
   writePiChild(repo, pid, piSuccess())
   assert.equal((await bridge.status(repo.cwd, PI_ID)).state, "running")
   writePiChild(repo, pid, { state: "failed", text: null, error: "boom", usage: null, sessionFile: null, runId: null })
@@ -167,8 +167,8 @@ test("a record saved in the current format inspects exactly like the v1 record i
     const after = migrate(repo, writeSession(repo, n++, { title: "Same lane", ...fields }))
     const path = join(repo.directory, after + ".json")
     assert.equal(JSON.parse(readFileSync(path, "utf8")).schema_version, 2, name)
-    const old = await inspectStored(repo.directory, before, realDeps(piPort()))
-    const current = await inspectStored(repo.directory, after, realDeps(piPort()))
+    const old = await inspectStored(repo.directory, before, realDeps(optionalPiPort()))
+    const current = await inspectStored(repo.directory, after, realDeps(optionalPiPort()))
     assert.deepEqual(strip(current), strip(old), name)
   }
 })

@@ -13,11 +13,8 @@ export type Bridge = ReturnType<typeof import("./hybrid.ts").makeHybridBridge>
 type Message = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: unknown }
 
 export async function connect(): Promise<Bridge> {
-  for (const path of ["/opt/homebrew/opt/rustup/bin", "/opt/homebrew/bin", "/Users/josh/.local/bin"]) {
-    if (!process.env.PATH?.split(":").includes(path)) process.env.PATH = `${path}:${process.env.PATH ?? ""}`
-  }
-  const [{ piPort }, { makeHybridBridge }] = await Promise.all([import("./pi-port.ts"), import("./hybrid.ts")])
-  return makeHybridBridge(piPort())
+  const [{ optionalPiPort }, { makeHybridBridge }] = await Promise.all([import("./optional-pi.ts"), import("./hybrid.ts")])
+  return makeHybridBridge(optionalPiPort())
 }
 
 export function dispatch(worker: Bridge, command: Command): Promise<unknown> {

@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from typing import NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pi_offline  # noqa: E402
@@ -25,12 +26,13 @@ CONFIG = HOME / ".pi/agent/mcp.json"
 OWNER = Path(os.environ.get("XDG_STATE_HOME", str(HOME / ".local/state"))) / "sync/pi-mcp-owner.json"
 
 
-def die(message):
+def die(message) -> NoReturn:
     raise ValueError(message)
 
 
 def dependency_versions():
-    dependencies = json.loads((PROJECT / "package.json").read_text())["dependencies"]
+    dependencies = json.loads((PROJECT / "package.json").read_text())
+    dependencies = dependencies.get("optionalDependencies", dependencies.get("dependencies", {}))
     versions = {}
     for name in ("@earendil-works/pi-coding-agent", "pi-subagents", "pi-muse-subscription"):
         version = dependencies[name]
@@ -163,7 +165,7 @@ def update_configuration(data, original):
             os.unlink(temporary)
 
 
-def run(action):
+def run(action, *, core=False):
     data, original = configuration()
     servers = data.get("mcpServers", {})
     previous = servers.get(NAME)
@@ -178,7 +180,7 @@ def run(action):
     if action == "plan":
         if legacy is not None:
             print(f"MCP: migrate owned {LEGACY_NAME} to {NAME}")
-        if not dependency_current():
+        if not core and not dependency_current():
             print("OFFLINE: link vendored Pi SDK and extensions")
         if previous != desired or legacy is not None:
             print(f"MCP: register {NAME} with Pi user scope")
@@ -189,7 +191,7 @@ def run(action):
     if action == "check":
         if legacy is not None:
             die(f"legacy {LEGACY_NAME} registration is still active")
-        if not dependency_current():
+        if not core and not dependency_current():
             die("Pi SDK worker dependency is not installed")
         if previous != desired or load_owner() != entry_fingerprint(desired):
             die(f"{NAME} MCP registration is missing, unowned, or outdated")
@@ -208,8 +210,9 @@ def run(action):
         return
 
     if action != "install":
-        die("usage: pi-worker.py {plan|check|install|remove}")
-    install_dependency()
+        die("usage: pi-worker.py {plan|check|install|remove} [--core]")
+    if not core:
+        install_dependency()
     node = managed_binary("node")
     if not node:
         die("Node.js is missing")
@@ -225,9 +228,9 @@ def run(action):
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) != 2:
-            die("usage: pi-worker.py {plan|check|install|remove}")
-        run(sys.argv[1])
+        if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != "--core"):
+            die("usage: pi-worker.py {plan|check|install|remove} [--core]")
+        run(sys.argv[1], core=len(sys.argv) == 3)
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"sync: Pi worker bridge: {exc}", file=sys.stderr)
         sys.exit(1)

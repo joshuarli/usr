@@ -8,6 +8,7 @@ import { antigravityAvailable, antigravityResult, antigravitySession, cancelAnti
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
 import { isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
+import { piInstalled, diagnoseGoModel } from "./optional-pi.ts"
 import { musePreflight, museVersion } from "./muse-subscription.ts"
 import { devinPreflight } from "./devin-provider.ts"
 import { changes, git, outside, readStateDir, stateDir } from "./git.ts"
@@ -325,19 +326,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         try { goAvailable = (await makeWorkerBridge(api, goModel).modelCheck(dir)).available }
         catch (e) { goIssue = String(e) }
       }
-      if (goModel && !goAvailable && !goIssue) {
-        try {
-          const { ensureOpenCodeApiKey } = await import("./opencode-auth.ts")
-          ensureOpenCodeApiKey()
-          const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
-          const runtime = await ModelRuntime.create()
-          const model = goModel
-          if (!runtime.getModel(model.providerID, model.id))
-            goIssue = `Pinned OpenCode Go model ${model.providerID}/${model.id} is not in the Pi SDK catalog`
-          else if (!runtime.hasConfiguredAuth(model.providerID))
-            goIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
-        } catch { /* keep issue null if diagnosis unavailable */ }
-      }
+      if (goModel && !goAvailable && !goIssue) goIssue = await diagnoseGoModel(goModel)
       let devinAvailable = false, devinIssue: string | null = null
       if (devinModel) {
         try { devinAvailable = (await makeWorkerBridge(api, devinModel).modelCheck(dir)).available }
@@ -346,7 +335,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           devinIssue = devinPreflight().issue ?? "Devin SWE-2 Flash is not authenticated in the Pi SDK"
       }
       const devinInfo = { available: devinAvailable, issue: devinIssue }
-      const museInfo = museModel ? { available: museAvailable, issue: museIssue, version: museVersion() } : { available: false, issue: null, version: null }
+      const museInfo = museModel ? { available: museAvailable, issue: museIssue, version: piInstalled() ? museVersion() : null } : { available: false, issue: null, version: null }
       const goInfo = { available: goAvailable, issue: goIssue }
       const piLane = { backend: "pi", model: firstPi,
         available: firstPi.providerID === "muse-sdk" ? museInfo.available : firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,

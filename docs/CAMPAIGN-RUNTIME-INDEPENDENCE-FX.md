@@ -3,10 +3,12 @@
 ## Status
 
 - **Goal:** make usr's worker orchestration independent of Pi, then establish whether a pinned FX runtime can replace a useful execution lane without weakening its contracts.
-- **State:** plan committed; implementation not started. Source preflight complete; executable baseline and FX qualification pending.
-- **Survey revision:** usr `f7d8bef8b8a78f0f29bb9fc28cc53346ce315b89`, 2026-11-15. No implementation revision accepted; no slices accepted or parked yet.
-- **Next:** RI-0, baseline and a failing no-Pi boundary test. First command: `git status --short`; read this document and the current AGENTS.md before proceeding.
-- **Launch prompt:** Execute `docs/CAMPAIGN-RUNTIME-INDEPENDENCE-FX.md` unattended. Deliver and verify runtime independence before implementing the FX adapter. Preserve production routes, persisted jobs, worker APIs and owner RPC. Keep FX opt-in, finish independent work when external proof is unavailable, and close with an evidence-backed go/limited-go/no-go verdict. Do not remove Pi or roll FX into production.
+- **State:** runtime-independence bootstrap implemented; final gates and independent review pending. FX has not started and is outside this launch.
+- **Execution baseline:** `67ecf3b7b8235c712462c592bff78983690f2b8a`, macOS ARM64. The owner's Codex config was dirty and is excluded. Default Node was 26.7.0; supported Node 26.13.1 is available in the managed installation.
+- **Evidence:** after developer setup, baseline `npm test` passed 227 tests with one opt-in live Muse skip. The initial command failed because `.dev/bin/tsrs` was absent. The no-Pi pilot reproduced `TRAPPED Pi access: ./pi-port.ts` against the original server, then passed with lazy composition. Policy generation initially passed. No timing or resource comparison is claimed.
+- **Implemented:** lazy optional Pi composition; adapter-owned Go diagnostics; preserved SDK-free historical Pi readers; core-only dev dependencies and typecheck; explicit core-only Claude/Pi registration; Pi-free CLI/MCP/owner fixture. Public names, owner v1, persisted formats and production policy remain unchanged.
+- **Verified so far:** full bridge suite 228 passed, one live Muse skip; pinned Pi offline suite 14 passed; Pi runtime-contract suite 16 passed; Claude/Pi installer suites five each; OpenCode installer suite six; policy generator tests ten; orchestration tests eight. Isolated observation fixtures passed 65 cases after fixing historical Pi observation without the SDK.
+- **Next:** finish the isolated core suite and final review. Do not start FX. RI-1's full neutral typed adapter boundary and RI-3's complete hostile-environment matrix are not yet accepted.
 
 ## Charter
 

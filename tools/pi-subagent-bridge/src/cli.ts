@@ -7,10 +7,10 @@ const WATCH_USAGE = "usage: pi-subagent-bridge watch [--state] ROOT SESSION_ID [
 const INSPECT_USAGE = "usage: pi-subagent-bridge inspect PATH SESSION_ID"
 
 async function inspectionDeps(): Promise<InspectionDeps> {
-  const [{ piPort }, { commandResult }, { codexResult }, { antigravityResult }] = await Promise.all([
-    import("./pi-port.ts"), import("./command.ts"), import("./codex.ts"), import("./antigravity.ts"),
+  const [{ optionalPiPort }, { commandResult }, { codexResult }, { antigravityResult }] = await Promise.all([
+    import("./optional-pi.ts"), import("./command.ts"), import("./codex.ts"), import("./antigravity.ts"),
   ])
-  return { api: piPort(), command: { status: commandResult }, codex: { status: codexResult },
+  return { api: optionalPiPort(), command: { status: commandResult }, codex: { status: codexResult },
     antigravity: { status: antigravityResult } }
 }
 

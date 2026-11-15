@@ -27,6 +27,23 @@ The Antigravity executor is a leaf and may not launch native subagents. It runs 
 
 The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi loads locally bundled subagents and intercom extensions through its managed launcher; no `pi install`, `pi update`, npm or npx runs on the Pi setup path. The scoped SDK bridge continues to load only subagents and (when needed) Muse, never unrestricted intercom tools.
 
+## Core-only installation and checks
+
+The core runs on Node without npm production dependencies. Pi packages and YAML belong to the optional Pi adapter. Production routes and saved session formats remain unchanged. Missing Pi reports an unavailable optional route. Reading historical Pi process evidence does not require the SDK.
+
+To register the bridge without installing Pi, run `python3 -I tools/sync/claude-worker.py install --core` from the repository root. `check --core` checks that registration. The Pi registration helper also accepts `--core`. These commands preserve existing dependency links and companion files. Supply executable locations through `PATH`; the server does not prepend machine-specific home paths.
+
+For core development, run `./dev-install.sh --core` from this directory. Use a fresh checkout to verify package absence. The default developer installation includes the pinned optional adapter dependencies.
+
+From this directory:
+
+- `npm run test:core` checks core types and runs offline core fixtures without the optional adapter suites.
+- `npm run test:no-pi` copies the source into a private fixture without runtime packages. It checks core registration, CLI admission, completion, continuation, MCP model checking, owner RPC, steering and command replay against a deterministic Codex executable. It traps Pi module loading, credential reads and Pi/npm/npx subprocesses.
+- `npm run test:runtime-contract -- --adapter codex` runs the Codex, owner, session and no-Pi fixtures. Supported adapter selections are `codex`, `command-code`, `antigravity` and `pi`. Without a selection it runs shared lifecycle fixtures for the subprocess adapters.
+- `npm test` retains the full typecheck and fixture suite, including optional Pi adapter tests. The live Muse smoke test requires its existing explicit opt-in.
+
+Fake executors prove bridge lifecycle behavior, not live provider entitlement. The core-only fixture does not qualify Linux binaries or agentctl integration.
+
 ## Devin SWE-2 Flash
 
 `devin/swe-2-flash` at **medium** effort is an explicitly pinned **last**

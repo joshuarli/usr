@@ -6,7 +6,7 @@
   "engines": {
     "node": ">=26.0.0"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "@earendil-works/pi-coding-agent": "1.5.0",
     "pi-subagents": "0.87.0",
     "yaml": "2.8.3",
@@ -15,6 +15,9 @@
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
     "test": ".dev/bin/tsrs -p tsconfig.json --noEmit && TSX_TSCONFIG_PATH=tsconfig.tsx.json node --import ./.dev/lib/node_modules/tsx/dist/loader.mjs --test test/*.test.ts",
+    "test:no-pi": "node --test test/no-pi.test.ts",
+    "test:runtime-contract": "node test/runtime-contract.mjs",
+    "test:core": ".dev/bin/tsrs -p tsconfig.core.json --noEmit && node test/core.mjs",
     "typecheck": ".dev/bin/tsrs -p tsconfig.json --noEmit"
   },
   "devDependencies": {

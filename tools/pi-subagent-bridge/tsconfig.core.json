@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "paths": {} },
+  "include": ["src/*.ts", "test/*.test.ts", "test/worker-fixtures.ts", "../policy/*.ts"],
+  "exclude": ["src/pi-port.ts", "src/sdk-worker.ts", "src/nested-guard.ts", "src/tier-profile.ts", "test/integration.test.ts", "test/tier-policy.test.ts"]
+}

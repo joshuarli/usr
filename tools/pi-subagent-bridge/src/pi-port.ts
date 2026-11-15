@@ -242,3 +242,16 @@ export function piPort(): OpenCodePort {
     },
   }
 }
+
+export async function diagnoseGoModel(model: ModelRef): Promise<string | null> {
+  try {
+    ensureOpenCodeApiKey()
+    const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
+    const runtime = await ModelRuntime.create()
+    if (!runtime.getModel(model.providerID, model.id))
+      return `Pinned OpenCode Go model ${model.providerID}/${model.id} is not in the Pi SDK catalog`
+    if (!runtime.hasConfiguredAuth(model.providerID))
+      return `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
+  } catch { return null }
+  return null
+}

@@ -8,6 +8,16 @@ if [ -e "$here/node_modules" ] && [ ! -L "$here/node_modules" ]; then
   exit 1
 fi
 
-deps=$(cd "$here" && node -e 'const p = require("./package.json"); const all = { ...p.dependencies, ...p.devDependencies }; process.stdout.write(Object.entries(all).map(([name, version]) => `${name}@${version}`).join(" "))')
+case ${1-} in
+  ""|--core) ;;
+  *) echo "usage: dev-install.sh [--core]" >&2; exit 1 ;;
+esac
+
+deps=$(cd "$here" && node - "$@" <<'JS'
+const p = require("./package.json");
+const all = process.argv[2] === "--core" ? p.devDependencies : { ...p.optionalDependencies, ...p.devDependencies };
+process.stdout.write(Object.entries(all).map(([name, version]) => `${name}@${version}`).join(" "));
+JS
+)
 # shellcheck disable=SC2086
 npm install --global --prefix "$here/.dev" --no-audit --no-fund $deps
