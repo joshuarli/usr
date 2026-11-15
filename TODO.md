@@ -19,14 +19,6 @@ Next: 73
 
 
 
-### USR-71 · P2 · Fleet doctor reports success when a host doctor fails
-
-- **Area:** Fleet diagnostics
-- **Where:** tools/sync/fleet.py:140-144,183-217,234-245; tools/sync/main.py:450-464; tools/sync/report.py:53-54
-- **Problem:** Confirmed using real main.main doctor JSON output and real fleet.main/visit/render with controlled graph probes and the legacy doctor edge. Healthy control returns doctor_exit=0/fleet_exit=0. A missing required probe returns doctor_exit=1/fleet_exit=0 with a green '1 to apply'; a legacy-only diagnostic failure returns doctor_exit=1/fleet_exit=0 with a green '1 up to date'. visit discards nonzero subprocess status whenever JSON parses, healthy treats apply as success, and main emits its JSON before running the legacy doctor. Fleet automation can therefore certify an unhealthy host as healthy and suppress the reason.
-- **Recommendation:** Retain the child exit status in each host outcome and make any failed doctor fail the aggregate even when valid JSON was emitted. Treat required apply states as unhealthy for doctor without changing plan semantics, and surface legacy doctor failure details through the structured result or stderr. Add boundary tests for healthy, missing-probe, and legacy-only failure cases using the real doctor and fleet rendering paths.
-- **Fix with:** error-model
-- **Effort:** S
 
 
 
