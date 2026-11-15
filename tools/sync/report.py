@@ -11,6 +11,8 @@ from typing import Iterable, TextIO
 # Plan/doctor states come from probes; apply states from dag.Result.
 PLAN_STATES = ("conflict", "apply", "check", "current")
 APPLY_STATES = ("failed", "blocked", "applied", "current", "tolerated")
+UNHEALTHY = ("conflict", "failed", "blocked")
+DOCTOR_UNHEALTHY = ("conflict", "apply", "failed", "blocked")
 QUIET = frozenset({"current", "check"})
 LABELS = {"current": "current", "check": "checked", "apply": "to apply", "conflict": "conflict",
           "applied": "applied", "failed": "failed", "blocked": "blocked", "tolerated": "tolerated"}
@@ -50,8 +52,12 @@ def summary(tally: dict[str, int], color: bool) -> str:
     return " · ".join(parts) if parts else "nothing to do"
 
 
-def healthy(tally: dict[str, int]) -> bool:
-    return not any(tally.get(state, 0) for state in ("conflict", "failed", "blocked"))
+def unhealthy_for(command: str) -> tuple[str, ...]:
+    return DOCTOR_UNHEALTHY if command == "doctor" else UNHEALTHY
+
+
+def healthy(tally: dict[str, int], unhealthy: tuple[str, ...] = UNHEALTHY) -> bool:
+    return not any(tally.get(state, 0) for state in unhealthy)
 
 
 def task_rows(lines: list[TaskLine], show_all: bool, color: bool, indent: str = "  ") -> list[str]:
@@ -77,7 +83,7 @@ def render(command: str, host: str, lines: list[TaskLine], show_all: bool, strea
     print(paint(f"sync {command}", "1", color) + f"  {host}", file=out)
     for row in task_rows(lines, show_all, color):
         print(row, file=out)
-    mark = paint("✓", "32", color) if healthy(tally) else paint("✗", "31", color)
+    mark = paint("✓", "32", color) if healthy(tally, unhealthy_for(command)) else paint("✗", "31", color)
     print(f"  {mark} {summary(tally, color)}", file=out)
 
 

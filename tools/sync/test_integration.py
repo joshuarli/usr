@@ -210,6 +210,60 @@ class Installer:
         self.assertRegex(plan, r"(?m)^  apply +tool:cmd ")
         self.assertFalse((self.root / "home/installed").exists())
 
+    def test_fleet_doctor_matches_real_probe_exit_codes(self):
+        import io
+        import fleet
+        git_env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+        def git(*args, cwd=None):
+            subprocess.run(["git", "-C", str(cwd or self.root), *args], check=True,
+                           capture_output=True, text=True, env={**os.environ, **git_env})
+
+        def fleet_doctor():
+            runner = lambda host, script, timeout: subprocess.run(
+                ["sh", "-c", script], cwd=self.root, capture_output=True, text=True,
+                check=False, timeout=60, env={**self.env, **git_env})
+            out = io.StringIO()
+            original = sys.stdout
+            sys.stdout = out
+            try:
+                code = fleet.main(["doctor"], run=runner, policy={"hosts": {"work": "100.0.0.1"}}, mine={"100.0.0.1"})
+            finally:
+                sys.stdout = original
+            return code, out.getvalue()
+
+        bare = self.root / "origin.git"
+        self._script("dotfiles/doctor", "#!/bin/sh\nexit 0\n")
+        shared = self.root / "home/.config/sh"
+        shared.mkdir(parents=True, exist_ok=True)
+        (shared / "config.sh").write_text("# fixture stub\n")
+        (self.root / ".gitignore").write_text("origin.git/\n")
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True,
+                       capture_output=True, env={**os.environ, **git_env})
+        git("init", "-q", "-b", "main")
+        git("add", ".")
+        git("commit", "-q", "-m", "fixture")
+        git("remote", "add", "origin", str(bare))
+        git("push", "-q", "-u", "origin", "main")
+
+        code, text = fleet_doctor()
+        self.assertEqual(code, 1)
+        self.assertIn("✗", text)
+        self.run_sync("apply")
+        git("add", ".")
+        git("commit", "-q", "-m", "applied")
+        git("push", "-q", "origin", "main")
+        code, text = fleet_doctor()
+        self.assertEqual(code, 0, text)
+        self.assertIn("✓", text)
+
+        self._script("dotfiles/doctor", "#!/bin/sh\nprintf 'problem: simulated legacy failure\\n'\nexit 1\n")
+        code, text = fleet_doctor()
+        self.assertEqual(code, 1)
+        self.assertIn("sync doctor: problem: simulated legacy failure", text)
+        self.assertNotIn("✓", text)
+
 
 if __name__ == "__main__":
     unittest.main()

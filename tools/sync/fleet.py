@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
-from report import APPLY_STATES, PLAN_STATES, TaskLine, counts, healthy, paint, summary, task_rows, use_color
+from report import APPLY_STATES, PLAN_STATES, TaskLine, counts, healthy, paint, summary, task_rows, unhealthy_for, use_color
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "tailscale/policy.json"
@@ -62,6 +62,7 @@ class Outcome:
     repo: dict[str, str] = field(default_factory=dict)
     sync: dict[str, Any] | None = None
     error: str | None = None
+    sync_exit: int | None = None
 
 
 def read_policy(path: Path = POLICY) -> dict[str, Any]:
@@ -144,9 +145,14 @@ def visit(host: Host, command: str, run: Runner) -> Outcome:
         outcome.error = f"sync {sync_command} timed out"
         return outcome
     outcome.sync = last_json(result.stdout)
+    outcome.sync_exit = result.returncode
     if outcome.sync is None:
         tail = (result.stderr or result.stdout).strip().splitlines()[-1:] or [f"exit {result.returncode}"]
         outcome.error = f"sync {sync_command}: {tail[0][:160]}"
+    elif result.returncode != 0 and sync_command == "doctor":
+        detail = next((line.strip() for line in reversed(result.stderr.splitlines()) if line.strip()), "")
+        if detail:
+            outcome.error = f"sync doctor: {detail[:160]}"
     return outcome
 
 
@@ -191,6 +197,7 @@ def render(command: str, outcomes: list[Outcome], show_all: bool, stream: TextIO
     out = sys.stdout if stream is None else stream
     color = use_color(out)
     states = APPLY_STATES if command == "apply" else PLAN_STATES
+    unhealthy = unhealthy_for(command)
     rows: list[tuple[str, str, str, str]] = []
     details: list[tuple[str, list[str]]] = []
     all_ok = True
@@ -213,7 +220,7 @@ def render(command: str, outcomes: list[Outcome], show_all: bool, stream: TextIO
         else:
             lines = sync_lines(outcome.sync)
             tally = counts(lines, states)
-            ok = healthy(tally)
+            ok = healthy(tally, unhealthy) and outcome.sync_exit == 0
             all_ok &= ok
             mark = paint("✓", "32", color) if ok else paint("✗", "31", color)
             sync_cell = f"{mark} {summary(tally, color)}"

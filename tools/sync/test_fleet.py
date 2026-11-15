@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fleet
-from report import TaskLine, counts, render, summary, PLAN_STATES
+from report import TaskLine, counts, render, summary, healthy, unhealthy_for, PLAN_STATES, DOCTOR_UNHEALTHY, UNHEALTHY
 
 POLICY = {"hosts": {"work": "100.0.0.1", "lisa": "100.0.0.2", "tr": "100.0.0.3"}}
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
@@ -26,6 +26,11 @@ def done(stdout: str = "", code: int = 0, stderr: str = "") -> subprocess.Comple
 def plan_json(*tasks: tuple[str, str, str]) -> str:
     lines = [TaskLine(*one) for one in tasks]
     return json.dumps({"schema": 1, "command": "plan", "host": "x", "tasks": [line.__dict__ for line in lines], "counts": counts(lines, PLAN_STATES)})
+
+
+def doctor_json(*tasks: tuple[str, str, str]) -> str:
+    lines = [TaskLine(*one) for one in tasks]
+    return json.dumps({"schema": 1, "command": "doctor", "host": "x", "tasks": [line.__dict__ for line in lines], "counts": counts(lines, PLAN_STATES)})
 
 
 class Fake:
@@ -179,6 +184,37 @@ class FleetTests(unittest.TestCase):
         self.assertIn("✗ 1 conflict", out)
         self.assertIn("CONFLICT: .zshrc", out)
 
+    def test_doctor_healthy_host_passes(self):
+        fake = Fake({
+            "work": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+            "lisa": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+            "tr": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+        })
+        code, out = self.run_fleet(["doctor"], fake)
+        self.assertEqual(code, 0)
+        self.assertIn("✓", out)
+
+    def test_doctor_missing_probe_fails_despite_valid_json(self):
+        fake = Fake({
+            "work": {"repo": done(REPO_OK), "sync": done(doctor_json(("tool:fd", "apply", "missing fd")), 1)},
+            "lisa": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+            "tr": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+        })
+        code, out = self.run_fleet(["doctor"], fake)
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"(?m)^  work\* +abc1234 +up to date +✗ 1 to apply$")
+
+    def test_doctor_legacy_only_failure_surfaces_the_reason_and_fails(self):
+        fake = Fake({
+            "work": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")), 1,
+                                                        "links:\nproblem: Claude bridge is stale\n")},
+            "lisa": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+            "tr": {"repo": done(REPO_OK), "sync": done(doctor_json(("links", "current", "links match")))},
+        })
+        code, out = self.run_fleet(["doctor"], fake)
+        self.assertEqual(code, 1)
+        self.assertIn("sync doctor: problem: Claude bridge is stale", out)
+
     def test_apply_pulls_first_and_skips_sync_where_the_pull_is_blocked(self):
         updated = "before=abc1234\nbranch=main\ndirty=0\nbehind=1\nahead=0\npull=updated\nafter=def5678\n"
         blocked = "before=abc1234\nbranch=main\ndirty=1\nbehind=1\nahead=0\npull=blocked\nafter=abc1234\n"
@@ -202,6 +238,14 @@ class ReportTests(unittest.TestCase):
     def test_summary_names_only_what_needs_attention(self):
         self.assertEqual(summary({"conflict": 0, "apply": 0, "check": 3, "current": 2}, False), "5 up to date")
         self.assertEqual(summary({"conflict": 2, "apply": 1, "check": 0, "current": 1}, False), "2 conflicts · 1 to apply · 1 up to date")
+
+    def test_doctor_treats_required_apply_states_as_unhealthy(self):
+        tally = {"conflict": 0, "apply": 1, "check": 0, "current": 3}
+        self.assertTrue(healthy(tally))
+        self.assertFalse(healthy(tally, DOCTOR_UNHEALTHY))
+        self.assertFalse(healthy(tally, unhealthy_for("doctor")))
+        self.assertTrue(healthy(tally, unhealthy_for("plan")))
+        self.assertTrue(healthy({"conflict": 0, "apply": 0, "check": 0, "current": 3}, UNHEALTHY))
 
     def test_link_changes_are_listed_under_the_links_task(self):
         out = io.StringIO()

@@ -459,6 +459,10 @@ def main(argv: list[str]) -> int:
         emit(lines)
         if command_name == "doctor":
             legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"), capture=as_json)
+            if legacy.returncode != 0 and as_json:
+                text = (legacy.stderr or legacy.stdout or "").strip()
+                for line in (text.splitlines() if text else [f"exit {legacy.returncode}"])[-20:]:
+                    print(line[:200], file=sys.stderr)
             failures += int(legacy.returncode != 0)
         return 1 if failures else 0
     jobs = int(ctx.env["SYNC_JOBS"]) if "SYNC_JOBS" in ctx.env else default_jobs()
