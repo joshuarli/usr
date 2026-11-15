@@ -30,3 +30,7 @@ jobs:
         run: |
           make check-generated
           node --test tools/policy/generate.test.ts
+      - name: Verify Devin provider preflight and conditional Pi launcher
+        run: |
+          node --experimental-strip-types --test tools/pi-subagent-bridge/test/devin-provider.test.ts
+          python3 -I tools/pi/test_runtime_profiles.py
