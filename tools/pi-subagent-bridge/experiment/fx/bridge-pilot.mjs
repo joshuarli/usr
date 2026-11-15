@@ -66,6 +66,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
     execFileSync('python3', ['check.py', 'numbers'], { cwd }); assert.throws(() => execFileSync('python3', ['check.py', 'strings'], { cwd, stdio: 'pipe' }))
     const savedPath = join(repo, '.work/worker-bridge', worker.admitted.session_id + '.json')
     const before = decodeSession(JSON.parse(readFileSync(savedPath, 'utf8')), cwd, worker.admitted.session_id)
+    verifyNativeCheck(before.execution.run, 'python3 check.py numbers', cwd)
     const beforeToken = fx.status(before.execution.run, before.execution.selection).result.sessionId
     const job = (await ownerJobs(repo, owner.ownerId)).find(item => item.job_id === worker.admitted.session_id)
     const target = { job_id: job.job_id, run_id: job.run_id, owner_generation: job.owner_generation }
@@ -78,6 +79,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
     assert.equal(requests.length, 3); assert.ok(requests[0].messages.some(message => message.role === 'tool'))
     execFileSync('python3', ['check.py', 'strings'], { cwd })
     const after = decodeSession(JSON.parse(readFileSync(savedPath, 'utf8')), cwd, worker.admitted.session_id)
+    verifyNativeCheck(after.execution.run, 'python3 check.py strings', cwd)
     assert.equal(fx.status(after.execution.run, after.execution.selection).result.sessionId, beforeToken)
     assert.equal(after.attempts, 2); assert.equal(git('-C', cwd, 'rev-parse', 'HEAD'), base)
     assert.equal(git('-C', cwd, 'diff', '--name-only'), 'arithmetic.py')
@@ -100,6 +102,7 @@ export async function bridgePilot(binary, scratch, options = {}) {
     const steering = await wait(active.session_id)
     assert.equal(steering.state, 'succeeded'); assert.equal(steering.steers, 1)
     const steeredWire = decodeSession(JSON.parse(readFileSync(join(repo, '.work/worker-bridge', active.session_id + '.json'), 'utf8')), cwd, active.session_id)
+    verifyNativeCheck(steeredWire.execution.run, 'python3 check.py strings', cwd)
     assert.equal(steeredWire.attempts, 1); assert.equal(fx.status(steeredWire.execution.run, steeredWire.execution.selection).result.sessionId, steeringToken)
     execFileSync('python3', ['check.py', 'strings'], { cwd })
     git('-C', cwd, 'checkout', '--', 'arithmetic.py')
@@ -147,11 +150,12 @@ export async function bridgePilot(binary, scratch, options = {}) {
               if (performance.now() - started > 20000) throw new Error('benchmark job exceeded fixture deadline')
               await new Promise(r => setTimeout(r, 25))
             }
-            const elapsedMs = performance.now() - started
             assert.equal(result.state, 'succeeded'); assert.equal(requests.length, 4)
             execFileSync('python3', ['check.py', 'numbers'], { cwd })
             const actualJob = JSON.parse(readFileSync(run.output + '.job.json', 'utf8'))
             assert.equal(actualJob.args.at(-1), originalJob.args.at(-1), 'benchmark prompts differ')
+            verifyNativeCheck(run, 'python3 check.py numbers', cwd)
+            const elapsedMs = performance.now() - started
             samples.push({ kind, elapsed_ms: elapsedMs, sampled_peak_native_rss_kib: sampledPeakRssKiB, usage: kind === 'adapter' ? result.result.usage : result.usage })
           }
         }
@@ -176,4 +180,12 @@ async function boundedBarrier(promise) {
   let timer
   try { await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('FX control barrier timed out')), 15000) })]) }
   finally { clearTimeout(timer) }
+}
+
+function verifyNativeCheck(run, command, cwd) {
+  const receipt = JSON.parse(readFileSync(run.output, 'utf8')), native = JSON.parse(receipt.stdout)
+  assert.equal(receipt.code, 0); assert.equal(native.exit_code, 0)
+  assert.ok(native.tool_calls.every(call => call.status === 'success'))
+  const check = native.tool_calls.find(call => call.name === 'shell')?.command_result
+  assert.equal(check?.command, command); assert.equal(check?.cwd, cwd); assert.equal(check?.exit_code, 0)
 }

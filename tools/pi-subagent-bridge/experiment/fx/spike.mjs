@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
 import { protocolPilot } from './protocol.mjs'
 import { bridgePilot } from './bridge-pilot.mjs'
 
@@ -27,7 +27,9 @@ if (mode === '--setup') {
   const binaryHash = createHash('sha256').update(readFileSync(binary)).digest('hex')
   if (binaryHash !== pin.binary_sha256) throw new Error('FX binary does not match the checked-in release pin')
   console.log(JSON.stringify({ mode, runtime: pin.version, provider: 'loopback fixture only', live_account: false, production_routing: false }))
-  const report = { pin, installed_binary_bytes: statSync(binary).size, platform: process.platform + '-' + process.arch, protocol: mode === '--local-protocol' || mode === '--local' ? await protocolPilot(binary, scratch) : undefined, bridge: mode === '--local' || mode === '--bench' ? await bridgePilot(binary, scratch, { benchmark: mode === '--bench' }) : undefined }
+  const source_revision = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10000 }).trim()
+  const tracked_source_dirty = spawnSync('git', ['-C', root, 'diff', '--quiet', 'HEAD', '--', 'tools/pi-subagent-bridge/src', 'tools/pi-subagent-bridge/experiment', 'tools/pi-subagent-bridge/package.json'], { timeout: 10000 }).status !== 0
+  const report = { source_revision, tracked_source_dirty, pin, installed_binary_bytes: statSync(binary).size, platform: process.platform + '-' + process.arch, protocol: mode === '--local-protocol' || mode === '--local' ? await protocolPilot(binary, scratch) : undefined, bridge: mode === '--local' || mode === '--bench' ? await bridgePilot(binary, scratch, { benchmark: mode === '--bench' }) : undefined }
   const output = join(scratch, mode === '--bench' ? 'fx-benchmark.json' : 'fx-qualification.json')
   writeFileSync(output, JSON.stringify(report, null, 2))
   const deferred = report.bridge?.benchmark?.status === 'deferred'
