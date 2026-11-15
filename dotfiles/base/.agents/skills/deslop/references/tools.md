@@ -1,37 +1,49 @@
 # Deslop tools
 
-Pins live in the repository's own manifests; fleet approvals live in stuff's `fleet/policy/`. Use only what the stuff registries serve, except where a row says to install from upstream into scratch.
+Pins live in the repository's own manifests; fleet approvals live in stuff's `fleet/policy/`. Use only what the stuff registries serve, except where a row says to install from upstream into scratch. A recipe is qualified for a CI lane only after it has run in CI with its negative controls failing for the intended reason; a scratch run qualifies nothing.
+
+**Escape-hatch count** (first-party, non-vendored sources):
+
+- Rust: `rg -c '\bunsafe\b|#!?\[allow\(|\.unwrap\(\)|\.expect\('`
+- Python: `rg -c 'cast\(|# type: ignore|# ty: ignore|\bAny\b|# noqa'`
+- TypeScript: `rg -Pc '\bas (?!const\b)|\bany\b|@ts-(ignore|expect-error)|(oxlint|eslint)-disable'`
+
+A lower count is evidence only when the claim that replaced each hatch is sound (typing-audit).
+
+**Run heavy tools under a CPU cap.** Locally, wrap every mutation, coverage, or whole-suite run in `cpu-guard --cores N --`, with N at most half the host's cores and leaving room for other lanes; add `--spin 300` when no step legitimately holds a core that long. A confirmed hang costs the suite's full parallelism for the whole rerun timeout: on loc, each rerun held about ten cores for 60s, so cap the suite's own threads in mutation runs and count rerun cost in the budget.
 
 ## Rust
 
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
 | Coverage | `cargo-llvm-cov` | `llvm-tools` is already in the fleet toolchain. `cargo llvm-cov --branch --html --output-dir .work/coverage`, then `cargo llvm-cov report --branch --summary-only` (branch coverage works on the pinned nightly). |
-| Mutation | `cargo-mutants` 27.1.0 | `cargo mutants --baseline run --timeout 10 --build-timeout 300 --output .work/mutants` (keep the timeout near ten times the suite's run time). Exit 3 means mutants only timed out and none were missed: a hang is detection, so the lane passes on 3 and prints `mutants.out/timeout.txt`. Exclusions go in `.cargo/mutants.toml` `exclude_re`, one comment per entry giving the reason; never a whole module. |
-| Mutation lane | `taiki-e/install-action` (approved pin in `fleet/policy/actions.toml`) with `tool: cargo-mutants@27.1.0`; checkout with `fetch-depth: 0`; pass `github.base_ref` through `env`. | `make mutants-diff BASE=origin/$BASE_REF`: `git diff --merge-base` into `.work/mutants/pr.diff`; `--in-diff` when `cargo mutants --list --in-diff` is non-empty, otherwise the whole crate (a test-only diff). |
+| Mutation | `cargo-mutants` 27.1.0 | `cargo mutants --baseline run --gitignore true --timeout 10 --build-timeout 300 --output .work/mutants` (keep the timeout near ten times the suite's run time; without `--gitignore true` the copy recurses into an in-tree `TMPDIR`). Exit 3 means only timeouts: not a pass by itself (see the lane row). Exclusions go in `.cargo/mutants.toml` `exclude_re`, one comment per entry, equivalent mutants apart from accepted risks; never a whole module. |
+| Mutation lane | `taiki-e/install-action` (approved pin in `fleet/policy/actions.toml`) with `tool: cargo-mutants@27.1.0`; checkout with `fetch-depth: 0`; pass `github.base_ref` through `env`. | `make mutants-diff BASE=origin/$BASE_REF` runs srv's gate (`scripts/mutants_gate.py`, `.cargo/mutants-gate.toml`; srv#38): it classifies the whole change and selects a union (changed production lines, plus the configured bounded scope for tests, fixtures, configuration and the gate), reads `outcomes.json`, confirms timeouts by rerun, and fails on missing results, empty relevant selection, or budget exhaustion. The bounded scope is measured per repository; never copy a whole-crate scope into a large crate. srv: 235 mutants, 9m43s in CI. loc's critical modules are 916 of 2,433 mutants (about 50 minutes on 4 jobs): too large for one lane job without sharding (`--shard k/n` across a matrix, each shard gated on its own listing). |
 | Dead code | rustc `dead_code`, `unreachable_pub` in binary crates, `cargo-machete`, then `cargo +nightly udeps` to settle a disputed dependency | |
 
-Strict-profile evidence so far: `unsafe_code = "forbid"` adopted where unsafe was hand-written FFI with a safe std equivalent. Rejected for false positives on idiomatic code: `wildcard_enum_match_arm` (matches on `Ordering`), `cast_possible_truncation` (bounded cursors), `unwrap_used` (infallible `write!` to `String`), `indexing_slicing`, `as_conversions`.
+Rust candidates: workspace `[lints]` `unsafe_code = "forbid"`; clippy `wildcard_enum_match_arm`, `match_wildcard_for_single_variants`, `cast_possible_truncation`, `cast_sign_loss`, `unwrap_used` and `expect_used` outside tests, `redundant_clone`, `needless_pass_by_value`. Evidence so far: `unsafe_code = "forbid"` adopted where unsafe was hand-written FFI with a safe std equivalent. Rejected for false positives on idiomatic code: `wildcard_enum_match_arm` (matches on `Ordering`), `cast_possible_truncation` (bounded cursors), `unwrap_used` (infallible `write!` to `String`), `indexing_slicing`, `as_conversions`. On loc every candidate was a false positive or had no witness (mmap and SIMD need `unsafe`).
 
 ## Python
 
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
 | Coverage | coverage.py with pytest-cov (mirrored) | Branch coverage, `source` set to the package so unimported files count; `patch = ["subprocess"]` when tests spawn the CLI. pytest-parallel has no coverage support yet: run coverage serially there. |
-| Mutation | `mutmut` 3.8.1 (mirrored) | Install from the stuff pypi mirror (`--index-url https://pypi.17166969.xyz/simple`). Copy the repository to `.work/tmp/`, append `[tool.mutmut]` with `source_paths` to the copy's `pyproject.toml`, then run `mutmut run`. cp315 native wheels are mirrored for linux x86_64/aarch64/musl and macOS arm64. |
+| Mutation | `mutmut` 3.8.1 (mirrored) | Install from the stuff pypi mirror (`--index-url https://pypi.17166969.xyz/simple`). Copy the repository to `.work/tmp/`, append `[tool.mutmut]` with `source_paths` to the copy's `pyproject.toml`, then run `mutmut run`. cp315 native wheels are mirrored for linux x86_64/aarch64/musl and macOS arm64. mutmut cannot run through pytest-parallel (the plugin rejects mutmut's in-memory stats collector before workers start); for pytest-parallel consumers set `pytest_add_cli_args = ["-p", "no:parallel"]` and run serially (pytest-parallel#14). |
 | Dead code | Ruff `F401`/`F841`, `vulture` 2.16 and `deptry` 0.25.1 (mirrored) | vulture at `--min-confidence 60` for discovery, whitelisting only proven dynamic uses; deptry for unused and missing dependencies. |
 
-Strict-profile evidence so far: ty `missing-type-argument` and `unsound-return-statement` at error (they found bare `dict` reports and `Any` returned as `tuple[str, ...]`), Ruff `ANN401` with tests ignored where helpers build deliberately malformed documents. Rejected: `truthiness-test-of-none-union` (intentional `not value` on `str | None`), `missing-override-decorator`, `TC003`, `FBT`.
+Python candidates: ty with every rule at error; Ruff `ANN`, `ANN401`, `PGH003`, `TC`, `B`, `RET`; start from stuff's `pyproject.toml`. Evidence so far: ty `unused-ignore-comment` at error, which turns a `# ty: ignore[code]` on a must-reject program into a checker witness (buildlib `tests/typing_witnesses.py`); ty `missing-type-argument` and `unsound-return-statement` at error (they found bare `dict` reports and `Any` returned as `tuple[str, ...]`), Ruff `ANN401` with tests ignored where helpers build deliberately malformed documents. Rejected: `truthiness-test-of-none-union` (intentional `not value` on `str | None`), `missing-override-decorator`, `TC003`, `FBT`.
 
 ## TypeScript
 
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
 | Coverage | `@vitest/coverage-v8` 5.1.0 (mirrored) | Set `coverage.include` to first-party sources so unimported files count; keep runtime-specific checks (Workers cannot be profiled). |
-| Mutation | Stryker 10.1.1 with its Vitest runner (mirrored) | `--mutate 'src/file.ts:10-40'` scopes a run to lines. |
-| Dead code | knip 6.45.1 (mirrored) | Resolve its configuration hints first, then run default and `--production` modes. |
+| Mutation | Stryker 10.1.1 with its Vitest runner (mirrored) | Stryker needs `typescript` and the Vitest runner plugin listed explicitly in its config, even when the repository compiles with another tool. `--mutate 'src/file.ts:10-40'` scopes a run to lines (5s on extensions; its critical parser, storage and URL modules take 657s). Node tests with mocked browser APIs qualify only Node-level logic; extension and browser runtimes need a separate bounded run. |
+| Dead code | knip 6.45.1 (mirrored) | Configure the real build entries (Vite inputs, injected scripts) first, then run default and `--production` modes. `--production` ignores test consumers, so its findings are not removal evidence on their own. |
 
-Stryker, knip, `@vitest/coverage-v8`, and mutmut are all on the stuff registries (stuff `STUF-83`, 2026-11-15): install them like any other dependency (npm `registry=https://npm.17166969.xyz/current`, pypi `--index-url https://pypi.17166969.xyz/simple`), never from upstream into a scratch copy. A TypeScript or Python repository may add its CI mutation lane from the mirror; each repo decides its scope and timeout like the Rust lane.
+TypeScript candidates: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noImplicitOverride`, `noPropertyAccessFromIndexSignature`; type-aware Oxlint `no-explicit-any`, `no-unsafe-*`, `no-non-null-assertion`, `no-floating-promises`, `switch-exhaustiveness-check`.
+
+Stryker, knip, `@vitest/coverage-v8`, and mutmut are all on the stuff registries (stuff `STUF-83`, 2026-11-15): install them like any other dependency (npm `registry=https://npm.17166969.xyz/current`, pypi `--index-url https://pypi.17166969.xyz/simple`), never from upstream into a scratch copy. A TypeScript or Python repository may add its CI mutation lane from the mirror once the lane is qualified like srv's: the whole-change selection and result contract, and CI negative controls that fail for the intended reason. Each repo measures its own bounded scope and timeout.
 
 ## Report
 
