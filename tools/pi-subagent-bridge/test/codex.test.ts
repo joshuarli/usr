@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { codexResult, codexSession, startCodex } from "../src/codex.ts"
@@ -98,6 +98,39 @@ test("scout exposes only read-only file tools and bounds file reads", async () =
     assert.equal(responses[3].result.isError, true)
     assert.equal(responses[4].result.isError, true)
   } finally { child.kill(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test("cancel signals a CLI-started codex worker after identity check (USR-79)", async () => {
+  const { cancelCodex } = await import("../src/codex.ts")
+  const { processStartTime } = await import("../src/command.ts")
+  const { spawn } = await import("node:child_process")
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "codex-cli-cancel-"))), bin = join(root, "bin")
+  mkdirSync(bin)
+  const oldPath = process.env.PATH
+  let pid = 0
+  try {
+    writeFileSync(join(bin, "codex"), "#!/bin/sh\nsleep 30 &\nsleep 30\n", { mode: 0o755 })
+    process.env.PATH = bin + ":" + oldPath
+    // A CLI-started worker: spawned outside this bridge's child registry, like `pi-subagent-bridge start`.
+    const child = spawn("codex", ["exec", "--json", "prompt"], { cwd: root, detached: true, stdio: "ignore" })
+    pid = child.pid!
+    await delay(150)
+    const run = { pid, output: join(root, "out"), errors: join(root, "err"),
+      started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    assert.equal(cancelCodex(run, root), true)
+    let alive = true
+    for (let i = 0; i < 150 && alive; i++) {
+      await delay(20)
+      try { process.kill(-pid, 0) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false; else throw error
+      }
+    }
+    assert.equal(alive, false, "CLI-started codex process group survives cancellation")
+  } finally {
+    if (pid) { try { process.kill(-pid, "SIGKILL") } catch {} }
+    process.env.PATH = oldPath
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("cancelling an owned Codex run terminates its process group", async () => {

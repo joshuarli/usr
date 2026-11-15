@@ -186,6 +186,59 @@ test("cancellation terminates the entire Command Code process group", async () =
   }
 })
 
+test("cancel signals a verified worker that this process never spawned (USR-79)", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-cli-cancel-")))
+  const bin = join(root, "bin")
+  mkdirSync(bin)
+  const oldPath = process.env.PATH
+  let pid = 0
+  try {
+    writeFileSync(join(bin, "cmd"), "#!/bin/sh\nsleep 30 &\nsleep 30\n", { mode: 0o755 })
+    process.env.PATH = bin + ":" + oldPath
+    // A CLI-started worker: spawned outside this bridge's child registry, like `pi-subagent-bridge start`.
+    const child = spawn("cmd", ["-p", "do work", "--model", "deepseek/deepseek-v4.1-flash"], { cwd: root, detached: true, stdio: "ignore" })
+    pid = child.pid!
+    await delay(150)
+    const run = { pid, output: join(root, "out"), errors: join(root, "err"),
+      started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    assert.equal(cancelCommand(run, root), true)
+    let alive = true
+    for (let i = 0; i < 150 && alive; i++) {
+      await delay(20)
+      try { process.kill(-pid, 0) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false; else throw error
+      }
+    }
+    assert.equal(alive, false, "CLI-started process group survives cancellation")
+  } finally {
+    if (pid) { try { process.kill(-pid, "SIGKILL") } catch {} }
+    process.env.PATH = oldPath
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("cancel refuses an unverified PID without touching its group (USR-79)", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-cli-refuse-")))
+  const bin = join(root, "bin")
+  mkdirSync(bin)
+  const oldPath = process.env.PATH
+  let pid = 0
+  try {
+    writeFileSync(join(bin, "cmd"), "#!/bin/sh\nsleep 30 &\nsleep 30\n", { mode: 0o755 })
+    process.env.PATH = bin + ":" + oldPath
+    const child = spawn("cmd", ["-p", "do work"], { cwd: root, detached: true, stdio: "ignore" })
+    pid = child.pid!
+    await delay(150)
+    const run = { pid, output: join(root, "out"), errors: join(root, "err"), started_at: "now", proc_start: "0" }
+    assert.equal(cancelCommand(run, root), false)
+    process.kill(-pid, 0)
+  } finally {
+    if (pid) { try { process.kill(-pid, "SIGKILL") } catch {} }
+    process.env.PATH = oldPath
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("all observers reject a different identity even when its detached group is alive", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-reused-group-")))
   const child = spawn("sh", ["-c", "sleep 30 & wait"], { detached: true, stdio: "ignore" })

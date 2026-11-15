@@ -2,7 +2,7 @@ import { readBoundedLog } from "./bounded-log.ts"
 import { randomUUID } from "node:crypto"
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync } from "node:fs"
-import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
+import { workerAlive, processStartTime, verifiedSignal, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest, WriteAccess } from "./launch.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
 import { workerEnvironment } from "./worker-env.ts"
@@ -92,9 +92,6 @@ export function antigravityResult(run: CommandRun, pin: CliPin): { state: string
   return { state: succeeded ? "succeeded" : "failed", result, stderr: null }
 }
 
-export function cancelAntigravity(run: CommandRun): boolean {
-  const child = children.get(run.pid)
-  if (!child) return false
-  try { process.kill(-run.pid, "SIGTERM"); return true }
-  catch { return false }
+export function cancelAntigravity(run: CommandRun, cwd?: string): boolean {
+  return verifiedSignal(run, cwd, children, "agy")
 }

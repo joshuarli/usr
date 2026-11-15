@@ -25,15 +25,6 @@ Next: 81
 - **Fix with:** root-cause
 - **Effort:** M
 
-### USR-79 · P2 · pi-subagent-bridge cancel never signals a CLI-started codex worker
-
-- **Area:** pi-subagent-bridge
-- **Where:** tools/pi-subagent-bridge (cancel)
-- **Problem:** On 2026-11-15, `pi-subagent-bridge cancel <worktree> <session>` on a codex worker started with the CLI `start` returned interrupted:false twice, with the note "Never signal a Command Code PID left by an earlier MCP process", while inspect showed execution_state running and pid 49676, a live `codex exec` whose cwd was that worktree. The parent had to SIGINT/SIGTERM it by hand.
-- **Recommendation:** Make cancel signal a worker whose recorded PID identity (start time, command, cwd) still matches, whatever started it, and add a test that cancels a CLI-started worker.
-- **Fix with:** root-cause
-- **Effort:** S
-
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills

@@ -2,7 +2,7 @@ import { readBoundedLog } from "./bounded-log.ts"
 import { spawnSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { workerAlive, processStartTime, type CommandResult, type CommandRun } from "./command.ts"
+import { workerAlive, processStartTime, verifiedSignal, type CommandResult, type CommandRun } from "./command.ts"
 import type { LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
 import { isBannedModel } from "./policy.ts"
@@ -73,9 +73,6 @@ export function codexResult(run: CommandRun): { state: string; result: CommandRe
   const result: CommandResult = { subtype: success ? "success" : "error", sessionId, finalText, error: terminal.error, usage: terminal.usage }
   return { state: success ? "succeeded" : "failed", result, stderr: null }
 }
-export function cancelCodex(run: CommandRun): boolean {
-  const child = children.get(run.pid)
-  if (!child) return false
-  try { process.kill(-run.pid, "SIGTERM"); return true }
-  catch { return false }
+export function cancelCodex(run: CommandRun, cwd?: string): boolean {
+  return verifiedSignal(run, cwd, children, "codex")
 }

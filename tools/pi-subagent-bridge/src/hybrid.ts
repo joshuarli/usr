@@ -505,14 +505,14 @@ export function makeHybridBridge(api: PiAdapter, command = {
           await admitEffect?.()
           s.cancel_requested = true
           save(s)
-          interrupted = runnerFor(executor).cancel(run)
+          interrupted = runnerFor(executor).cancel(run, s.cwd)
           if (!interrupted) { s.cancel_requested = false; save(s) }
         } else if (ownerMode) {
           throw new OwnerPrecheckError("not-running", "Worker run is not running")
         }
       }
       return { session_id: s.id, interrupted,
-        note: "Never signal a Command Code PID left by an earlier MCP process; it may have been reused." }
+        note: "A run is signaled only while its recorded PID identity still matches; an unverified or reused PID is never signaled." }
     })
   }
   async function runSteer(cwd: unknown, id: unknown, note: unknown, admitEffect?: OwnerEffectAdmit) {
@@ -551,7 +551,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         throw new Error("Command Code session identity is not recorded; cannot restart after steering")
       await admitEffect?.()
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-      if (!runner.cancel(run))
+      if (!runner.cancel(run, s.cwd))
         throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
       let state = observe(execution).state
       const deadline = Date.now() + TERMINATION_WAIT_MS

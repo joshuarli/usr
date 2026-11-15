@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process"
-import { appendFileSync, closeSync, openSync, readFileSync, readSync, statSync } from "node:fs"
+import { appendFileSync, closeSync, openSync, readFileSync, readlinkSync, readSync, statSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
 import type { LaunchRequest } from "./launch.ts"
@@ -109,6 +109,49 @@ export function commandResult(run: CommandRun): { state: string; result: Command
   return { state: "interrupted", result: null, stderr }
 }
 
+export function processCommandLine(pid: number): string | null {
+  try {
+    return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+      encoding: "utf8", timeout: 5000, maxBuffer: 1 << 16,
+    }).trim() || null
+  } catch { return null }
+}
+
+export function processCwd(pid: number): string | null {
+  if (process.platform === "linux") {
+    try { return readlinkSync("/proc/" + pid + "/cwd") } catch { return null }
+  }
+  try {
+    const out = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
+      encoding: "utf8", timeout: 5000,
+    })
+    return out.split("\n").find(line => line.startsWith("n"))?.slice(1) ?? null
+  } catch { return null }
+}
+
+/** Identity of the recorded process against live state, whatever bridge spawned it. */
+export function verifiedProcess(run: CommandRun, cwd: string, executable: string): "same" | "different" | "gone" | "unknown" {
+  if (!processAlive(run.pid)) return "gone"
+  if (run.proc_start === undefined || run.proc_start === null) return "unknown"
+  const current = processStartTime(run.pid)
+  if (current === null) return "unknown"
+  if (current !== run.proc_start) return "different"
+  const worktree = processCwd(run.pid)
+  if (worktree !== null && worktree !== cwd) return "different"
+  const command = processCommandLine(run.pid)
+  if (command !== null && !command.toLowerCase().includes(executable)) return "different"
+  return "same"
+}
+
+/** Signal the recorded process group only when this bridge spawned it or its identity still checks out. */
+export function verifiedSignal(run: CommandRun, cwd: string | undefined, children: Map<number, ChildProcess>, executable: string): boolean {
+  if (children.get(run.pid)) {
+    try { process.kill(-run.pid, "SIGTERM"); return true } catch { return false }
+  }
+  if (cwd === undefined || verifiedProcess(run, cwd, executable) !== "same") return false
+  try { process.kill(-run.pid, "SIGTERM"); return true } catch { return false }
+}
+
 export function processStartTime(pid: number): string | null {
   if (process.platform === "linux") {
     try {
@@ -151,9 +194,6 @@ function processAlive(pid: number): boolean {
   }
 }
 
-export function cancelCommand(run: CommandRun): boolean {
-  const child = children.get(run.pid)
-  if (!child) return false
-  try { process.kill(-run.pid, "SIGTERM"); return true }
-  catch { return false }
+export function cancelCommand(run: CommandRun, cwd?: string): boolean {
+  return verifiedSignal(run, cwd, children, "cmd")
 }
