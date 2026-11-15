@@ -2,11 +2,12 @@
 # Tests for perf-gate-ready: the gate decides on load per core, and status mode reports load with memory, swap and disk.
 # The Linux paths read a stand-in /proc.
 
-script="${PWD}/base/.local/bin/perf-gate-ready"
+root=$(CDPATH='' cd -P "$(dirname "$0")/.." && pwd -P)
+script="$root/dotfiles/base/.local/bin/perf-gate-ready"
 nfailed=0
 
-mkdir -p "${PWD}/../.work/tmp"
-scratch=$(mktemp -d "${PWD}/../.work/tmp/perf-gate-ready.XXXXXX") || exit 1
+mkdir -p "$root/.work/tmp"
+scratch=$(mktemp -d "$root/.work/tmp/perf-gate-ready.XXXXXX") || exit 1
 trap 'rm -rf "$scratch"' 0
 
 # Help must exit before reading host state or invoking external commands.

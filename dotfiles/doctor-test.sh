@@ -14,7 +14,7 @@ mkdir -p "$fixture/dotfiles/base/.config" "$fixture/dotfiles/base/.codex" \
 cp "$repo/sync" "$fixture/sync"
 cp "$repo/tools/sync/main.py" "$repo/tools/sync/dag.py" "$repo/tools/sync/uninstall.py" \
    "$repo/tools/sync/ownership.py" "$repo/tools/sync/links.py" \
-   "$repo/tools/sync/link_plan.py" "$repo/tools/sync/link_apply.py" "$repo/tools/sync/link_recovery.py" \
+   "$repo/tools/sync/link_plan.py" "$repo/tools/sync/link_apply.py" "$repo/tools/sync/link_recovery.py" "$repo/tools/sync/report.py" \
    "$repo/tools/sync/pi_extensions.py" "$fixture/tools/sync/"
 cp "$repo/dotfiles/doctor" "$fixture/dotfiles/doctor"
 printf '#!/bin/sh\nexit 0\n' > "$fixture/dotfiles/migrate-pinact.sh"
@@ -44,14 +44,14 @@ rm "$HOME/.config/example.conf"
 if sh "$fixture/sync" doctor > "$fixture/missing"; then
     echo 'doctor failed to detect missing link' >&2; exit 1
 fi
-grep -q '^LINK:' "$fixture/missing"
+grep -q '^ *LINK:' "$fixture/missing"
 [ ! -e "$HOME/.config/example.conf" ]
 
 printf 'foreign\n' > "$HOME/.config/example.conf"
 if sh "$fixture/sync" doctor > "$fixture/conflict"; then
     echo 'doctor failed to detect conflict' >&2; exit 1
 fi
-grep -q '^CONFLICT:' "$fixture/conflict"
+grep -q '^ *CONFLICT:' "$fixture/conflict"
 [ "$(cat "$HOME/.config/example.conf")" = foreign ]
 
 rm "$HOME/.config/example.conf"

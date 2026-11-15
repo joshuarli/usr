@@ -3,14 +3,14 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$root"
 case ${1:-} in
-  help|--help|-h) printf '%s\n' 'usage: sh sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|check [--plan|--changed] [--json] [--base REV]|check-parallel|layers]'; exit 0 ;;
+  help|--help|-h) printf '%s\n' 'usage: sh sync [plan|doctor|links|tools NAME...|bridge] [--all] [--json]' '       sh sync hosts [pull|plan|apply|doctor] [HOST...] [--all]' '       sh sync [list|uninstall|check [--plan|--changed] [--json] [--base REV]|check-parallel|layers]'; exit 0 ;;
 esac
 
 home=${HOME:?HOME is required}
 state=${DL_OWNED_FILE:-${XDG_STATE_HOME:-$home/.local/state}/sync/dl-owned}
 legacy=${XDG_STATE_HOME:-$home/.local/state}/make/dl-owned
 case ${1:-} in
-  plan|doctor|check|check-parallel|layers) ;;
+  plan|doctor|check|check-parallel|layers|hosts) ;;
   *)
     if [ -z "${DL_OWNED_FILE:-}" ] && [ ! -e "$state" ] && [ -f "$legacy" ]; then
       mkdir -p "$(dirname -- "$state")"
@@ -35,7 +35,7 @@ python=$(choose_python)
 case $(uname -s) in
   Darwin)
     case ${1:-} in
-      plan|doctor|check|check-parallel|layers|uninstall|links|list) ;;
+      plan|doctor|check|check-parallel|layers|uninstall|links|list|hosts) ;;
       *)
         if [ ! -x "$home/.local/bin/python3" ]; then
           mkdir -p "$(dirname -- "$state")" "$root/.work/tmp"
@@ -48,7 +48,7 @@ case $(uname -s) in
     ;;
   Linux)
     case ${1:-} in
-      plan|doctor|check|check-parallel|layers|uninstall|links|list) ;;
+      plan|doctor|check|check-parallel|layers|uninstall|links|list|hosts) ;;
       *)
         if [ ! -x "$home/.local/bin/python3" ] && [ -z "$python" ] \
           && awk -F= '$1 == "ID" { gsub(/^"/, "", $2); gsub(/"$/, "", $2); print $2; exit }' /etc/os-release 2>/dev/null | grep -qx alpine; then

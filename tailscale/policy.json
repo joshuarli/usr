@@ -1,4 +1,10 @@
 {
+	"hosts": {
+		"work":         "100.107.2.101",
+		"lisa":         "100.68.104.43",
+		"threadripper": "100.98.145.91",
+		"m1-max":       "100.67.125.73"
+	},
 	"tagOwners": {
 		"tag:tim": ["autogroup:admin"]
 	},
