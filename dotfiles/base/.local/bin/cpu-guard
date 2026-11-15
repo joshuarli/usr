@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Run a command and stop its whole process tree when it burns more CPU than allowed.
+
+usage: cpu-guard [--cores N] [--window S] [--spin S] [--grace S] [--interval S] -- COMMAND [ARG...]
+
+The tree is the command and every descendant ever seen, including children that
+start their own session or are orphaned by their parent. Every interval the
+guard samples each process's cumulative CPU time (/proc on Linux, ps on macOS):
+
+  --cores N   stop the tree when its CPU use averaged over --window seconds
+              exceeds N cores (default: half of this host's cores)
+  --spin S    stop the tree when any one process stays at or above one full
+              core for S seconds (default: off)
+
+Stopping sends SIGTERM to every live process in the tree, then SIGKILL after
+--grace seconds. Descendants still running when the command exits are stopped
+the same way. SIGINT, SIGTERM and SIGHUP to the guard stop the tree.
+
+Exit status: the command's status; 124 when the guard stopped it for CPU use
+(the reason and the hottest processes go to stderr); 125 for a usage or
+sampling error; 128+N when the guard itself was stopped by signal N.
+"""
+from __future__ import annotations
+
+import argparse
+from collections import deque
+from dataclasses import dataclass
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+STOPPED = 124
+FAILED = 125
+FOOTER = """
+
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
+
+
+@dataclass(frozen=True)
+class Proc:
+    pid: int
+    ppid: int
+    cpu: float
+    start: str
+    command: str
+
+
+def parse_ps_time(text: str) -> float:
+    days, _, clock = text.rpartition("-")
+    total = 0.0
+    for part in clock.split(":"):
+        total = total * 60 + float(part)
+    return total + (int(days) * 86400 if days else 0)
+
+
+def parse_ps(output: str) -> dict[int, Proc]:
+    procs: dict[int, Proc] = {}
+    for line in output.splitlines():
+        fields = line.split(None, 8)
+        if len(fields) < 8:
+            continue
+        pid, ppid, cputime = int(fields[0]), int(fields[1]), parse_ps_time(fields[2])
+        procs[pid] = Proc(pid, ppid, cputime, " ".join(fields[3:8]), fields[8] if len(fields) > 8 else "")
+    return procs
+
+
+def sample_ps() -> dict[int, Proc]:
+    result = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,time=,lstart=,command="],
+                            capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"})
+    if result.returncode != 0:
+        raise OSError(f"ps failed: {result.stderr.strip()}")
+    return parse_ps(result.stdout)
+
+
+def parse_proc_stat(pid: int, stat: str, ticks: int) -> Proc:
+    comm_end = stat.rindex(")")
+    rest = stat[comm_end + 2:].split()
+    return Proc(pid, int(rest[1]), (int(rest[11]) + int(rest[12])) / ticks, rest[19],
+                stat[stat.index("(") + 1:comm_end])
+
+
+def sample_proc() -> dict[int, Proc]:
+    ticks = os.sysconf("SC_CLK_TCK")
+    procs: dict[int, Proc] = {}
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            procs[int(entry.name)] = parse_proc_stat(int(entry.name), (entry / "stat").read_text(), ticks)
+        except (OSError, ValueError, IndexError):
+            continue
+    return procs
+
+
+def sample() -> dict[int, Proc]:
+    return sample_proc() if sys.platform.startswith("linux") else sample_ps()
+
+
+class Tree:
+    """Processes descended from the root, remembered by (pid, start) so reuse is not adopted."""
+
+    def __init__(self, root: int) -> None:
+        self.root = root
+        self.members: dict[int, str] = {}
+
+    def update(self, procs: dict[int, Proc]) -> dict[int, Proc]:
+        children: dict[int, list[int]] = {}
+        for proc in procs.values():
+            children.setdefault(proc.ppid, []).append(proc.pid)
+        queue = [self.root] + [pid for pid, start in self.members.items()
+                               if pid in procs and procs[pid].start == start]
+        while queue:
+            pid = queue.pop()
+            if pid not in procs or (pid in self.members and self.members[pid] != procs[pid].start):
+                continue
+            self.members.setdefault(pid, procs[pid].start)
+            queue.extend(child for child in children.get(pid, []) if child not in self.members)
+        return {pid: procs[pid] for pid, start in self.members.items()
+                if pid in procs and procs[pid].start == start}
+
+
+class Detector:
+    """Turns successive samples of one tree into a stop reason, or None."""
+
+    def __init__(self, cores: float, window: float, spin: float | None) -> None:
+        self.cores, self.window, self.spin = cores, window, spin
+        self.history: deque[tuple[float, float]] = deque()
+        self.spinning: dict[tuple[int, str], float] = {}
+        self.previous: dict[tuple[int, str], float] = {}
+        self.consumed = 0.0
+        self.last: float | None = None
+
+    def observe(self, now: float, live: dict[int, Proc]) -> str | None:
+        current = {(proc.pid, proc.start): proc.cpu for proc in live.values()}
+        elapsed = None if self.last is None else now - self.last
+        rates: dict[tuple[int, str], float] = {}
+        for key, cpu in current.items():
+            delta = cpu - self.previous.get(key, cpu if elapsed is None else 0.0)
+            self.consumed += max(delta, 0.0)
+            if elapsed:
+                rates[key] = max(delta, 0.0) / elapsed
+        self.previous, self.last = current, now
+        self.history.append((now, self.consumed))
+        while len(self.history) > 1 and now - self.history[1][0] >= self.window:
+            self.history.popleft()
+        start_time, start_cpu = self.history[0]
+        if now - start_time >= self.window:
+            used = (self.consumed - start_cpu) / (now - start_time)
+            if used > self.cores:
+                return f"tree averaged {used:.1f} cores over {now - start_time:.0f}s (limit {self.cores:g})"
+        if self.spin is not None and elapsed:
+            for key in list(self.spinning):
+                if key not in rates or rates[key] < 0.95:
+                    del self.spinning[key]
+            for key, rate in rates.items():
+                if rate >= 0.95:
+                    began = self.spinning.setdefault(key, now - elapsed)
+                    if now - began >= self.spin:
+                        return f"pid {key[0]} held a full core for {now - began:.0f}s (limit {self.spin:g}s)"
+        return None
+
+
+def hottest(live: dict[int, Proc]) -> str:
+    rows = sorted(live.values(), key=lambda proc: proc.cpu, reverse=True)[:5]
+    return "\n".join(f"  pid {proc.pid} cpu {proc.cpu:.1f}s: {proc.command[:160]}" for proc in rows)
+
+
+def stop(tree: Tree, child: subprocess.Popen[bytes], grace: float) -> None:
+    def live() -> dict[int, Proc]:
+        child.poll()
+        return tree.update(sample())
+
+    deadline = time.monotonic() + grace
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in live():
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        while sig == signal.SIGTERM and time.monotonic() < deadline and live():
+            time.sleep(0.1)
+        if not live():
+            return
+
+
+def parser() -> argparse.ArgumentParser:
+    lines = __doc__.splitlines()
+    result = argparse.ArgumentParser(prog="cpu-guard", description=lines[0], usage=lines[2][7:],
+                                     epilog="\n".join(lines[4:]) + FOOTER,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    result.add_argument("--cores", type=float, default=max(1, (os.cpu_count() or 2) // 2))
+    result.add_argument("--window", type=float, default=20.0)
+    result.add_argument("--spin", type=float)
+    result.add_argument("--grace", type=float, default=5.0)
+    result.add_argument("--interval", type=float, default=1.0)
+    result.add_argument("command", nargs=argparse.REMAINDER)
+    return result
+
+
+def main(argv: list[str]) -> int:
+    args = parser().parse_args(argv)
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command or args.cores <= 0 or args.window <= 0 or args.interval <= 0 or args.grace < 0 or (
+            args.spin is not None and args.spin <= 0):
+        parser().print_usage(sys.stderr)
+        return FAILED
+    try:
+        child = subprocess.Popen(command, start_new_session=True)
+    except OSError as error:
+        print(f"cpu-guard: {error}", file=sys.stderr)
+        return 127 if isinstance(error, FileNotFoundError) else 126
+    tree = Tree(child.pid)
+    detector = Detector(args.cores, args.window, args.spin)
+    received: list[int] = []
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda number, _frame: received.append(number))
+    try:
+        while True:
+            live = tree.update(sample())
+            reason = detector.observe(time.monotonic(), live)
+            if reason is not None:
+                print(f"cpu-guard: stopping {command[0]}: {reason}\n{hottest(live)}", file=sys.stderr)
+                stop(tree, child, args.grace)
+                child.wait()
+                return STOPPED
+            if received:
+                stop(tree, child, args.grace)
+                child.wait()
+                return 128 + received[0]
+            status = child.poll()
+            if status is not None:
+                leftover = tree.update(sample())
+                leftover.pop(child.pid, None)
+                if leftover:
+                    print(f"cpu-guard: stopping {len(leftover)} leftover descendants of {command[0]}",
+                          file=sys.stderr)
+                    stop(tree, child, args.grace)
+                return status if status >= 0 else 128 - status
+            time.sleep(args.interval)
+    except (OSError, ValueError) as error:
+        print(f"cpu-guard: sampling failed: {error}", file=sys.stderr)
+        stop(tree, child, args.grace)
+        return FAILED
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
