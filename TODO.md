@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 76
+Next: 79
 
 
 
@@ -14,26 +14,6 @@ Next: 76
 
 
 
-
-
-### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
-
-- **Area:** Skills
-- **Where:** dotfiles/base/.agents/skills/refactor-web-ui/SKILL.md; docs/CAMPAIGN-AGENTCTL-WEB-UI.md: Transfer after agentctl
-- **Problem:** The skill was exercised and sharpened on one product only. Its rules have not been tested against a dashboard (stats), a developer tool with canvas rendering (stuff), or a reading/research product (discover), so overfit rules cannot yet be told apart from transferable ones.
-- **Recommendation:** On separate requests, apply the skill to stats (with refactor-dashboard-ui owning metrics and trends), stuff (keep canvas rendering and its performance invariants), and discover (evidence and provenance hierarchy, mobile reading). Follow the campaign's Transfer section, and after the second product delete or move rules that turned out to be agentctl-specific.
-- **Fix with:** none
-- **Effort:** L
-
-
-### USR-74 · P3 · Designed UIs lack the required make preview and shared golden dataset
-
-- **Area:** Skills
-- **Where:** refactor-web-ui skill: Preview and goldens; repos discover, niceforge, laputa-ui-dashboard, stats
-- **Problem:** refactor-web-ui now requires every designed UI to ship `make preview` on one canonical mock dataset that its integration goldens also use. On 2026-11-15 discover, niceforge and laputa-ui-dashboard have no `make preview`; stats has one, but whether its preview data is the same dataset its tests use is unverified. agentctl conforms; stuff gains it in its redesign.
-- **Recommendation:** Per repo, on its own request: extract the fixture its browser tests seed into one dataset module, serve it with `make preview`, and add a semantic golden over the same dataset. For stats, check that preview and tests share one dataset before changing anything.
-- **Fix with:** none
-- **Effort:** M
 
 
 ### USR-76 · P2 · pi-subagent-bridge treats directory scopes without a trailing slash as single files
@@ -45,6 +25,7 @@ Next: 76
 - **Fix with:** A scope test where `kernel` admits `kernel/core/x.rs`, or where admission rejects the ambiguous entry with a message naming it
 - **Effort:** S
 
+
 ### USR-77 · P2 · A finished incomplete or blocked session keeps its worktree locked after cancel
 
 - **Area:** pi-subagent-bridge
@@ -53,6 +34,35 @@ Next: 76
 - **Recommendation:** Treat a session whose process has exited and whose state is incomplete or finished as inactive for `start`, or make `cancel` mark such a session released once the worktree is verified clean.
 - **Fix with:** A test that starts, lets the worker finish incomplete with a clean worktree, and then admits a new session in the same worktree
 - **Effort:** S
+
+
+### USR-78 · P2 · long-lived bridge MCP model checks fail after policy updates
+
+- **Area:** Delegation
+- **Where:** tools/pi-subagent-bridge/src/cli.ts (MCP mode), src/policy.ts, src/tier-policy.ts
+- **Problem:** On macOS 27.2, repeated worker_model_check requests for a clean mechanic worktree fail with SyntaxError: tier-policy.ts does not provide an export named DEVIN_TIER_MODELS. The same source-linked installation at ff3059803c7e2615e29e5ee1a3b292764496ddc2 succeeds through a fresh pi-subagent-bridge model-check CWD mechanic process and reports available providers. Ownership is verified as joshuarli/usr by repomod which.py with source-link evidence. Current policy.ts imports and tier-policy.ts exports agree, so stale long-lived MCP module state is suspected but unproven. MCP admission was unavailable during the bctl Helium release cleanup; the fresh CLI is a supported workaround.
+- **Recommendation:** Reproduce a policy update with a running MCP server and compare the same read-only model check through MCP and a fresh CLI. Establish whether server module caching or deployed module mismatch causes the import failure, then make policy rollout consistent or return an actionable reload instruction. Regression acceptance: both interfaces return the same admitted pins after an update without starting a worker or throwing a missing-export SyntaxError.
+- **Fix with:** root-cause
+- **Effort:** M
+
+### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
+
+- **Area:** Skills
+- **Where:** dotfiles/base/.agents/skills/refactor-web-ui/SKILL.md; docs/CAMPAIGN-AGENTCTL-WEB-UI.md: Transfer after agentctl
+- **Problem:** The skill was exercised and sharpened on one product only. Its rules have not been tested against a dashboard (stats), a developer tool with canvas rendering (stuff), or a reading/research product (discover), so overfit rules cannot yet be told apart from transferable ones.
+- **Recommendation:** On separate requests, apply the skill to stats (with refactor-dashboard-ui owning metrics and trends), stuff (keep canvas rendering and its performance invariants), and discover (evidence and provenance hierarchy, mobile reading). Follow the campaign's Transfer section, and after the second product delete or move rules that turned out to be agentctl-specific.
+- **Fix with:** none
+- **Effort:** L
+
+### USR-74 · P3 · Designed UIs lack the required make preview and shared golden dataset
+
+- **Area:** Skills
+- **Where:** refactor-web-ui skill: Preview and goldens; repos discover, niceforge, laputa-ui-dashboard, stats
+- **Problem:** refactor-web-ui now requires every designed UI to ship `make preview` on one canonical mock dataset that its integration goldens also use. On 2026-11-15 discover, niceforge and laputa-ui-dashboard have no `make preview`; stats has one, but whether its preview data is the same dataset its tests use is unverified. agentctl conforms; stuff gains it in its redesign.
+- **Recommendation:** Per repo, on its own request: extract the fixture its browser tests seed into one dataset module, serve it with `make preview`, and add a semantic golden over the same dataset. For stats, check that preview and tests share one dataset before changing anything.
+- **Fix with:** none
+- **Effort:** M
+
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 
