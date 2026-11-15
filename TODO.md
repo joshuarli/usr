@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 80
+Next: 81
 
 
 
@@ -61,5 +61,15 @@ Next: 80
 - **Problem:** On 2026-11-15 several XSH cargo test builds failed with linking with clang failed: signal 11 (SIGSEGV), with 48 GiB free and under heavy unrelated host load; a retry usually succeeds, but one crash left an 18 KiB build_script_build that cargo treated as fresh, so every later build failed until the target directory was deleted.
 - **Recommendation:** Capture a crashing link (RUSTC_LOG or -Clink-arg=-v plus a core dump) to tell a mold crash from a clang driver crash, then report upstream or pin a mold release; meanwhile document deleting the target directory after a crashed link.
 - **Fix with:** A reproduced crash with a core or backtrace and the mold/clang versions
+- **Effort:** M
+
+
+### USR-80 · P3 · Bridge snapshots omit the admitting parent's explicit identity
+
+- **Area:** Delegation
+- **Where:** tools/pi-subagent-bridge/src/session.ts, inspect.ts, owner.ts; agentctl ACTL-28
+- **Problem:** At installed usr 6a203c459fe32dd82b75c4d7efd6d45f8da11fef, read-only campaign snapshots and owner_protocol 1 carry job and owner identities but no admitting parent session identity. Agentctl cannot link delegated jobs to their coordinator without guessing from worktrees or process trees.
+- **Recommendation:** Accept an optional explicit admitting-parent identity at admission, persist it in the versioned session record, and expose it unchanged in read-only snapshots and owner status. Keep absent legacy values unknown. Prove round-trip identity, legacy absence and no guessed lineage with fixture tests. Preserve routing, leases, retries and acceptance in usr.
+- **Fix with:** durable-state
 - **Effort:** M
 
