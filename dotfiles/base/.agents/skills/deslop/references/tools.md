@@ -7,7 +7,7 @@ Pins live in the repository's own manifests; fleet approvals live in stuff's `fl
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
 | Coverage | `cargo-llvm-cov` | `llvm-tools` is already in the fleet toolchain. `cargo llvm-cov --branch --html --output-dir .work/coverage`, then `cargo llvm-cov report --branch --summary-only` (branch coverage works on the pinned nightly). |
-| Mutation | `cargo-mutants` 27.1.0 | `cargo mutants --baseline run --timeout 60 --build-timeout 300 --output .work/mutants`. Exclusions go in `.cargo/mutants.toml` `exclude_re`, one comment per entry giving the reason; never a whole module. |
+| Mutation | `cargo-mutants` 27.1.0 | `cargo mutants --baseline run --timeout 10 --build-timeout 300 --output .work/mutants` (keep the timeout near ten times the suite's run time). Exit 3 means mutants only timed out and none were missed: a hang is detection, so the lane passes on 3 and prints `mutants.out/timeout.txt`. Exclusions go in `.cargo/mutants.toml` `exclude_re`, one comment per entry giving the reason; never a whole module. |
 | Mutation lane | `taiki-e/install-action` (approved pin in `fleet/policy/actions.toml`) with `tool: cargo-mutants@27.1.0`; checkout with `fetch-depth: 0`; pass `github.base_ref` through `env`. | `make mutants-diff BASE=origin/$BASE_REF`: `git diff --merge-base` into `.work/mutants/pr.diff`; `--in-diff` when `cargo mutants --list --in-diff` is non-empty, otherwise the whole crate (a test-only diff). |
 | Dead code | rustc `dead_code`, `unreachable_pub` in binary crates, `cargo-machete`, then `cargo +nightly udeps` to settle a disputed dependency | |
 
@@ -28,10 +28,10 @@ Strict-profile evidence so far: ty `missing-type-argument` and `unsound-return-s
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
 | Coverage | `@vitest/coverage-v8` | Set `coverage.include` to first-party sources so unimported files count; keep runtime-specific checks (Workers cannot be profiled). |
-| Mutation | Stryker with its Vitest runner | `--mutate 'src/file.ts:10-40'` scopes a run to lines. |
-| Dead code | knip | Resolve its configuration hints first, then run default and `--production` modes. |
+| Mutation | Stryker 10.1.1 with its Vitest runner, from a scratch install | `--mutate 'src/file.ts:10-40'` scopes a run to lines. |
+| Dead code | knip 6.45.1, from a scratch install | Resolve its configuration hints first, then run default and `--production` modes. |
 
-Check that the stuff npm registry serves each package before adding it; report a missing one instead of resolving from upstream.
+Stryker, knip, and mutmut are not mirrored yet (stuff `STUF-83`): install them from upstream into a scratch copy of the repository under `.work/tmp/`, never into the committed manifests, and add no CI mutation lane for that language until they are mirrored.
 
 ## Report
 
