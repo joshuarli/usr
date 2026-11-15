@@ -242,7 +242,7 @@ class SkillCampaignTests(unittest.TestCase):
             shutil.rmtree(work)
 
     def test_skill_checker_follows_source_links_in_installed_layout(self):
-        work = Path(tempfile.mkdtemp(prefix="skills-layout-", dir="/Users/josh/usr/.work/tmp"))
+        work = Path(tempfile.mkdtemp(prefix="skills-layout-", dir=WORK_TMP))
         try:
             skills = work / ".agents" / "skills"
             skills.mkdir(parents=True)
