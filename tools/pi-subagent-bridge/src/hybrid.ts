@@ -479,6 +479,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
         if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
+        runnerFor(execution.executor)
+        if (execution.executor === "fx" && !fx?.available(execution.selection)) throw new Error("Pinned FX runtime unavailable; cannot resume")
         await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
@@ -520,10 +522,11 @@ export function makeHybridBridge(api: PiAdapter, command = {
         const run = processRun(s)
         const executor = executorOf(s)
         if (run && executor !== "pi") {
+          const runner = runnerFor(executor)
           await admitEffect?.()
           s.cancel_requested = true
           save(s)
-          interrupted = runnerFor(executor).cancel(run, s.cwd)
+          interrupted = runner.cancel(run, s.cwd)
           if (!interrupted) { s.cancel_requested = false; save(s) }
         } else if (ownerMode) {
           throw new OwnerPrecheckError("not-running", "Worker run is not running")

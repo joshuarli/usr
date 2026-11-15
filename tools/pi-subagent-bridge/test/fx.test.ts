@@ -110,3 +110,21 @@ async function ready(path: string): Promise<void> {
     if (existsSync(path)) { clearTimeout(timer); watcher.close(); resolve() }
   })
 }
+
+test("missing optional FX composition refuses control before changing attempts or history", async t => {
+  const f = fixture(t), policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, undefined, () => policy, f.fx)
+  const scope = { base_revision: f.repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }
+  const admitted = await bridge.start(f.repo.cwd, "fixture", "worker", scope, "task")
+  const path = join(f.repo.directory, admitted.session_id + ".json")
+  const session = decodeSession(JSON.parse(readFileSync(path, "utf8")), f.repo.cwd, admitted.session_id)
+  if (session.execution.kind !== "process") throw new Error("missing process")
+  assert.equal((await ended(session.execution.run)).state, "succeeded")
+  await bridge.status(f.repo.cwd, admitted.session_id)
+  const before = readFileSync(path, "utf8")
+  const withoutFx = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, undefined, () => policy)
+  await assert.rejects(() => withoutFx.resume(f.repo.cwd, admitted.session_id, "same scope"), /FX adapter unavailable/)
+  assert.equal(readFileSync(path, "utf8"), before)
+  await assert.rejects(() => withoutFx.cancel(f.repo.cwd, admitted.session_id), /FX adapter unavailable/)
+  assert.equal(readFileSync(path, "utf8"), before)
+})
