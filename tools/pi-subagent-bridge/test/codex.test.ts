@@ -104,23 +104,25 @@ test("cancel signals a CLI-started codex worker after identity check (USR-79)", 
   const { cancelCodex } = await import("../src/codex.ts")
   const { processStartTime } = await import("../src/command.ts")
   const { spawn } = await import("node:child_process")
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "codex-cli-cancel-"))), bin = join(root, "bin")
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "codex-cli-cancel-"))), bin = join(root, "bin"), ready = join(root, "ready")
   mkdirSync(bin)
   const oldPath = process.env.PATH
   let pid = 0
   try {
-    writeFileSync(join(bin, "codex"), "#!/bin/sh\nsleep 30 &\nsleep 30\n", { mode: 0o755 })
+    writeFileSync(join(bin, "codex"), '#!/bin/sh\nsleep 30 &\nprintf "%s" "$!" > ' + JSON.stringify(ready) + '\nwait\n', { mode: 0o755 })
     process.env.PATH = bin + ":" + oldPath
     // A CLI-started worker: spawned outside this bridge's child registry, like `pi-subagent-bridge start`.
     const child = spawn("codex", ["exec", "--json", "prompt"], { cwd: root, detached: true, stdio: "ignore" })
     pid = child.pid!
-    await delay(150)
+    const { existsSync } = await import("node:fs")
+    for (let i = 0; i < 200 && !existsSync(ready); i++) await delay()
+    assert.ok(existsSync(ready))
     const run = { pid, output: join(root, "out"), errors: join(root, "err"),
       started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
     assert.equal(cancelCodex(run, root), true)
     let alive = true
-    for (let i = 0; i < 150 && alive; i++) {
-      await delay(20)
+    for (let i = 0; i < 300 && alive; i++) {
+      await delay()
       try { process.kill(-pid, 0) } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false; else throw error
       }
