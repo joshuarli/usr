@@ -1,6 +1,6 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process"
 import { randomUUID, createHash } from "node:crypto"
-import { mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync, openSync, readSync, closeSync, statSync } from "node:fs"
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync, openSync, readSync, closeSync, statSync, copyFileSync, chmodSync, existsSync } from "node:fs"
 import { join, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
 import { processStartTime, processIdentity, workerAlive, type CommandRun, type CommandResult } from "./command.ts"
@@ -12,7 +12,20 @@ export const FX_CAPABILITIES = { steering: "interrupt-resume", resume: "bound na
 
 export type FxSelection = CliPin & { readonly provider: string; readonly runtimeVersion: "0.0.17" }
 export type FxLaunch = Omit<LaunchRequest, "selection"> & { readonly selection: FxSelection }
-export type FxOptions = { binary: string; binarySha256: string; home: string; provider: string; connection: object; allowedCommands: string[]; wallMs?: number }
+export type FxOptions = {
+  binary: string; binarySha256: string; home: string; provider: string
+  /** Custom connection settings; omit for FX built-in providers (gateway, codex, grok). */
+  connection?: object | null
+  allowedCommands: string[]; wallMs?: number
+  /** Extra PATH entries for the qualified toolchain; defaults to the minimal fixture PATH. */
+  pathEnv?: string
+  /** Environment variables delivered through 0600 files so job records never serialize secrets. */
+  secretEnvFiles?: Record<string, string>
+  /** Credential files copied into each fresh FX profile home (e.g. chatgpt-auth.json). */
+  authFiles?: string[]
+  /** Additional non-secret environment for the qualified toolchain (e.g. CARGO_HOME). Never secrets. */
+  extraEnv?: Record<string, string>
+}
 type Job = { nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
 const children = new Map<number, { child: ChildProcess; run: CommandRun }>()
 const read = (path: string): unknown => {
@@ -66,7 +79,21 @@ export function fxResult(run: CommandRun, expected: FxSelection) {
 export function makeFxAdapter(options: FxOptions) {
   const home = realpathSync(options.home), wallMs = options.wallMs ?? 900000
   if (!isAbsolute(options.binary) || !Number.isSafeInteger(wallMs) || wallMs < 1 || wallMs > 900000) throw new Error("Invalid FX qualification configuration")
-  const env: NodeJS.ProcessEnv = { HOME: home, PATH: "/usr/bin:/bin", SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: "20" }
+  const pathEnv = options.pathEnv ?? "/usr/bin:/bin"
+  if (!pathEnv.split(":").every(part => isAbsolute(part))) throw new Error("FX PATH entries must be absolute")
+  const secretEnvFiles = options.secretEnvFiles ?? {}
+  for (const [name, path] of Object.entries(secretEnvFiles)) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || !isAbsolute(path)) throw new Error("Invalid FX secret env file mapping")
+  }
+  const authFiles = options.authFiles ?? []
+  for (const path of authFiles) if (!isAbsolute(path)) throw new Error("FX auth files must be absolute")
+  for (const name of Object.keys(options.extraEnv ?? {})) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || name.startsWith("FX_") || ["HOME", "PATH", "SHELL", "TMPDIR"].includes(name)) throw new Error("Invalid FX extra env name: " + name)
+  }
+  const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: "20", ...options.extraEnv }
+  for (const name of Object.keys(secretEnvFiles)) {
+    if (name in env || name === "FX_HOME" || name === "TMPDIR") throw new Error("FX secret env name collides with the qualified environment: " + name)
+  }
   function available(selection: FxSelection): boolean {
     if (isBannedModel(selection.model) || selection.provider !== options.provider || selection.runtimeVersion !== "0.0.17") return false
     try { return createHash("sha256").update(readFileSync(options.binary)).digest("hex") === options.binarySha256 && execFileSync(options.binary, ["--version"], { env, encoding: "utf8", timeout: 5000 }).trim() === selection.runtimeVersion } catch { return false }
@@ -84,14 +111,23 @@ export function makeFxAdapter(options: FxOptions) {
       fxHome = saved.fxHome; resume = saved.id
     } else mkdirSync(fxHome, { mode: 0o700 })
     const readOnly = request.access.kind === "read-only"
-    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: 20, provider: options.provider, models: { [options.provider]: request.selection.model }, providers: { [options.provider]: options.connection }, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
+    const connection = options.connection == null ? {} : { providers: { [options.provider]: options.connection } }
+    const settings = JSON.stringify({ auto_upgrade: false, cache_warming: false, session_titles: false, max_agent_steps: 20, provider: options.provider, models: { [options.provider]: request.selection.model }, ...connection, permission: { "*": "deny", read: "allow", glob: "allow", grep: "allow", edit: readOnly ? "deny" : "allow", bash: readOnly ? "deny" : Object.fromEntries(options.allowedCommands.map(command => [command, "allow"])), subagent: "deny", toolbox: "deny" }, workspaces: { [cwd]: { enableAllProjectMcpServers: false } } })
     if (resume) {
       if (readFileSync(join(fxHome, "settings.json"), "utf8") !== settings) throw new Error("FX saved connection/control configuration changed; refusing to resume")
-    } else writeFileSync(join(fxHome, "settings.json"), settings, { mode: 0o600 })
+    } else {
+      writeFileSync(join(fxHome, "settings.json"), settings, { mode: 0o600 })
+      for (const path of authFiles) {
+        const target = join(fxHome, path.split("/").pop()!)
+        if (existsSync(target)) continue
+        copyFileSync(path, target)
+        chmodSync(target, 0o600)
+      }
+    }
     const job: Job = { nonce, cwd, fxHome, selection: request.selection, output, errors, ...(resume ? { resume } : {}) }
     const args = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=20", ...(resume ? ["--resume", resume] : []), "--", request.prompt]
     const jobPath = output + ".job.json"
-    writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, wallMs }), { mode: 0o600 })
+    writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs }), { mode: 0o600 })
     const child = spawn(process.execPath, [fileURLToPath(new URL("./process-supervisor.ts", import.meta.url)), jobPath], { detached: true, stdio: "ignore", env: { ...env, PATH: process.env.PATH }, cwd })
     child.once("error", error => writeFileSync(errors, error.message))
     if (!child.pid) throw new Error("FX supervisor admission uncertain")

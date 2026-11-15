@@ -1,7 +1,7 @@
 import test, { type TestContext } from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { readFileSync, writeFileSync, mkdirSync, existsSync, watch } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync, existsSync, watch, statSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { Scratch, git, unusedApi } from "./worker-fixtures.ts"
 import { makeFxAdapter, fxResult, type FxSelection } from "../src/fx.ts"
@@ -139,3 +139,83 @@ for (const behavior of ["malformed", "empty"] as const) {
     assert.equal((await ended(run)).state, "unknown_or_interrupted")
   })
 }
+
+function envProbeFixture(t: TestContext, configure?: (scratch: Scratch) => Partial<Parameters<typeof makeFxAdapter>[0]>) {
+  const scratch = new Scratch()
+  t.after(() => scratch.close())
+  const repo = scratch.repo(), binary = join(scratch.path, "fake-fx")
+  const source = `#!${process.execPath}
+const fs=require('node:fs'),p=require('node:path');
+if(process.argv.includes('--version')){console.log('0.0.17');process.exit(0)}
+const id='native-fixture',dir=p.join(process.env.FX_HOME,'sessions/v2',id);
+fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs.writeFileSync(p.join(process.env.FX_HOME,'sessions/v2/index.jsonl'),'');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'log.jsonl'),JSON.stringify({v:1,kind:'session_created',id,workspace:process.cwd(),role:'root'})+'\\n');
+fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:process.env.PATH,secret:process.env.FX_TEST_SECRET??null}));
+console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:id,final_output:'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
+`
+  writeFileSync(binary, source, { mode: 0o755 })
+  const fx = makeFxAdapter({ binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs: 5000, ...configure?.(scratch) })
+  const request = { directory: repo.cwd, logDirectory: repo.directory, prompt: "fixture task", selection, access: { kind: "write" as const } }
+  mkdirSync(repo.directory, { recursive: true })
+  return { scratch, repo, fx, request }
+}
+
+test("FX secret env files reach only the child environment and never the job record", async t => {
+  let secret = ""
+  const f = envProbeFixture(t, scratch => {
+    secret = join(scratch.path, "token.txt")
+    writeFileSync(secret, "s3cr3t-value\n", { mode: 0o600 })
+    return { secretEnvFiles: { FX_TEST_SECRET: secret } }
+  })
+  const run = f.fx.start(f.request)
+  const jobPath = run.output + ".job.json"
+  const recorded = readFileSync(jobPath, "utf8")
+  assert.ok(!recorded.includes("s3cr3t-value"), "job record must not serialize the secret")
+  assert.ok(recorded.includes(secret))
+  assert.equal((await ended(run)).state, "succeeded")
+  const job = JSON.parse(recorded)
+  const probe = JSON.parse(readFileSync(join(job.fxHome, "probe.json"), "utf8"))
+  assert.equal(probe.secret, "s3cr3t-value")
+})
+
+test("FX secret env file failure produces a failed run, not a hung admission", async t => {
+  const f = envProbeFixture(t, scratch => ({ secretEnvFiles: { FX_TEST_SECRET: join(scratch.path, "absent.txt") } }))
+  const run = f.fx.start(f.request)
+  const result = await ended(run)
+  assert.equal(result.state, "failed")
+  assert.match(String(result.stderr ?? "") + JSON.stringify(result.result ?? {}), /absent|ENOENT|spawn/i)
+})
+
+test("FX pathEnv provisions the child toolchain PATH", async t => {
+  const f = envProbeFixture(t, () => ({ pathEnv: "/opt/toolchain/bin:/usr/bin:/bin" }))
+  const run = f.fx.start(f.request)
+  assert.equal((await ended(run)).state, "succeeded")
+  const job = JSON.parse(readFileSync(run.output + ".job.json", "utf8"))
+  const probe = JSON.parse(readFileSync(join(job.fxHome, "probe.json"), "utf8"))
+  assert.equal(probe.path, "/opt/toolchain/bin:/usr/bin:/bin")
+  assert.equal(probe.secret, null)
+})
+
+test("FX auth files seed a fresh profile home and survive resume", async t => {
+  let credential = ""
+  const f = envProbeFixture(t, scratch => {
+    credential = join(scratch.path, "cred.json")
+    writeFileSync(credential, JSON.stringify({ token: "auth-fixture" }), { mode: 0o600 })
+    return { authFiles: [credential], connection: null }
+  })
+  const run = f.fx.start(f.request)
+  const first = await ended(run)
+  assert.equal(first.state, "succeeded")
+  const job = JSON.parse(readFileSync(run.output + ".job.json", "utf8"))
+  const seeded = join(job.fxHome, "cred.json")
+  assert.equal(readFileSync(seeded, "utf8"), JSON.stringify({ token: "auth-fixture" }))
+  assert.equal(statSync(seeded).mode & 0o777, 0o600)
+  const settings = JSON.parse(readFileSync(join(job.fxHome, "settings.json"), "utf8"))
+  assert.equal(settings.providers, undefined)
+  assert.equal(settings.provider, "fixture")
+  writeFileSync(seeded, JSON.stringify({ token: "refreshed" }))
+  const next = f.fx.start({ ...f.request, resume: first.result!.sessionId! })
+  assert.equal((await ended(next)).state, "succeeded")
+  const nextJob = JSON.parse(readFileSync(next.output + ".job.json", "utf8"))
+  assert.equal(nextJob.fxHome, job.fxHome)
+  assert.equal(readFileSync(join(nextJob.fxHome, "cred.json"), "utf8"), JSON.stringify({ token: "refreshed" }))
+})
