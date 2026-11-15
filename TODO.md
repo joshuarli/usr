@@ -47,12 +47,4 @@ Next: 73
 - **Effort:** S
 
 
-### USR-72 · P3 · Alpine key preflight rejects matching keys with different comments
-
-- **Area:** Alpine provisioning
-- **Where:** host/alpine/install.sh:61-76; host/alpine/AGENTS.md:12; host/alpine/README.md:129-139
-- **Problem:** Confirmed by invoking the unchanged check_github_key function with a disposable Ed25519 pair: the generated pair passes, but replacing only the public-key comment makes preflight exit 1 and tell the user to move both files aside. Key type and encoded key material remain identical. The byte-for-byte comparison with ssh-keygen -y incorrectly treats a comment difference as a mismatched or encrypted key, blocking provisioning with a valid existing pair.
-- **Recommendation:** Compare the parsed public-key type and encoded key material independently of the optional comment, while retaining unencrypted-key, Ed25519, ownership, regular-file and symlink checks. Add focused fixtures for matching material with different or absent comments and a genuinely mismatched pair; preserve all original key files.
-- **Fix with:** root-cause
-- **Effort:** S
 
