@@ -352,6 +352,10 @@ class Installer:
                 return value.strip()
         return ""
 
+    def available_archive(self, base: str, stem: str, legacy: str) -> str:
+        """The release's `stem.tar.xz`, else its pre-tar.xz `stem.<legacy>`, else ""."""
+        return next((name for name in (f"{stem}.tar.xz", f"{stem}.{legacy}") if self.asset_id(f"{base}/{name}")), "")
+
     def release_tags(self, feed_url: str, *, prefix: str = "", exclude_prefix: str = "") -> list[str]:
         text = self.fetch_text(feed_url)
         found: list[tuple[str, str]] = []
@@ -632,8 +636,7 @@ class Installer:
         asset = (f"{tool}-{self.arch}-apple-darwin" if self.os_name == "darwin"
                  else f"{tool}-{self.arch}-unknown-linux-musl-static")
         base = f"https://github.com/{repo}/releases/download/{tag}"
-        archive_asset = next((f"{asset}.{ext}" for ext in ("tar.xz", "zip")
-                              if self.asset_id(f"{base}/{asset}.{ext}")), "")
+        archive_asset = self.available_archive(base, asset, "zip")
         record = f"{tag}:{self.asset_id(f'{base}/{archive_asset}')}" if archive_asset else ""
         if not record or not record.split(":", 1)[1]:
             self.unchecked(tool, f"{base}/{asset} archive is unreachable")
@@ -781,8 +784,7 @@ class Installer:
             return
         asset = f"zzz-linux-musl-static-{self.arch}"
         base = f"https://github.com/laputa-systems/zzz/releases/download/{tag}"
-        archive_asset = next((f"{asset}.{ext}" for ext in ("tar.xz", "zip")
-                              if self.asset_id(f"{base}/{asset}.{ext}")), "")
+        archive_asset = self.available_archive(base, asset, "zip")
         if not archive_asset:
             self.unchecked("zzz", f"{asset} archive is unavailable")
             return
@@ -2275,8 +2277,6 @@ class Installer:
         self.prune_bctl_releases()
 
     def install_gluon(self) -> None:
-        if not self.which("zipinfo"):
-            self.skip("gluon", "zipinfo is required to validate the archive")
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux-musl",
                    ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
@@ -2287,8 +2287,11 @@ class Installer:
         if not tag:
             self.unchecked("gluon", "no release found")
             return
-        asset = f"gluon-{triple}.zip"
         base = f"https://github.com/laputa-systems/gluon/releases/download/{tag}"
+        asset = self.available_archive(base, f"gluon-{triple}", "zip")
+        if not asset:
+            self.unchecked("gluon", f"gluon-{triple} archive is unavailable in {tag}")
+            return
         def validate(staged: Path) -> bool:
             for command in GLUON_COMMANDS:
                 path = staged / command
@@ -2699,11 +2702,11 @@ class Installer:
             self.skip("player", f"the release does not run: {lines[0] if lines else result.returncode}")
 
     def install_player(self) -> None:
-        assets = {("darwin", "aarch64"): "Player-aarch64-apple-darwin.zip",
-                  ("linux", "x86_64"): "player-x86_64-linux-musl.tar.gz"}
+        assets = {("darwin", "aarch64"): ("Player-aarch64-apple-darwin", "zip"),
+                  ("linux", "x86_64"): ("player-x86_64-linux-musl", "tar.gz")}
         if (self.os_name, self.arch) not in assets:
             self.skip("player", f"no Player release for {self.os_name}/{self.arch}")
-        asset_name = assets[(self.os_name, self.arch)]
+        stem, legacy = assets[(self.os_name, self.arch)]
         tag = self.latest_tag(f"https://github.com/{PLAYER_REPO}/releases.atom")
         if not tag:
             self.unchecked("player", "no release found")
@@ -2711,10 +2714,11 @@ class Installer:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", tag):
             self.skip("player", f"{tag!r} is not a usable release tag")
         base = f"https://github.com/{PLAYER_REPO}/releases/download/{tag}"
+        asset_name = self.available_archive(base, stem, legacy)
         url = f"{base}/{asset_name}"
-        record_id = self.asset_id(url)
+        record_id = self.asset_id(url) if asset_name else ""
         if not record_id:
-            self.unchecked("player", f"{asset_name} is unavailable")
+            self.unchecked("player", f"{stem} archive is unavailable in {tag}")
             return
         record = f"{tag}:{record_id}"
         launcher = self.dest / "player"
@@ -2777,21 +2781,22 @@ class Installer:
         pinned_before = self.ffmpeg_pinned_tags(self.ffmpeg_home / "pins/player")
         try:
             if self.os_name == "darwin":
-                self.install_player_app(archive_path, tag, record)
+                self.install_player_app(archive_path, asset_name, tag, record)
             else:
                 self.install_player_tarball(archive_path, asset_name, tag, record, expected)
         except SkipInstall:
             self.write_ffmpeg_pin("player", pinned_before)
             raise
 
-    def install_player_app(self, archive_path: Path, tag: str, record: str) -> None:
+    def install_player_app(self, archive_path: Path, asset_name: str, tag: str, record: str) -> None:
         launcher = self.dest / "player"
         launcher_target = os.readlink(launcher) if launcher.is_symlink() else ""
         self.own_missing_dirs(self.player_apps)
         self.player_apps.mkdir(parents=True, exist_ok=True)
         staged = self.stage_dir(self.player_apps, ".player.")
         try:
-            if not self.extract_zip(archive_path, staged):
+            extract = self.extract_tar if asset_name.endswith(".tar.xz") else self.extract_zip
+            if not extract(archive_path, staged):
                 self.skip("player", "release archive is invalid")
             app = staged / "Player.app"
             executable = app / "Contents/MacOS/player"
