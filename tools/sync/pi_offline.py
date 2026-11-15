@@ -99,6 +99,7 @@ def wrapper(root: Path, profile: str = "full") -> str:
     sdk = root / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
     subagent = root / f"node_modules/pi-subagents/index.{suffix}"
     intercom = root / f"node_modules/@dataforxyz/agent-intercom-pi/index.{suffix}"
+    devin = root / "node_modules/pi-devin-local/extensions/index.js"
     return ("#!/bin/sh\n"
             "# Bundled in usr; never install or update npm dependencies at runtime.\n"
             "set -eu\n"
@@ -108,6 +109,11 @@ def wrapper(root: Path, profile: str = "full") -> str:
             'case "${1:-}" in\n'
             '  install|update) echo "usr-managed Pi: use /pi-update to change packages" >&2; exit 64;;\n'
             'esac\n'
+            # Runtime selection may still point at an older pinned archive; the
+            # Devin extension is only included after its verified release ships.
+            f"if [ -f {shlex.quote(str(devin))} ]; then\n"
+            f"  set -- --extension {shlex.quote(str(devin))} \"$@\"\n"
+            "fi\n"
             f"exec node {shlex.quote(str(sdk))} "
             f"--extension {shlex.quote(str(subagent))} "
             f"--extension {shlex.quote(str(intercom))} \"$@\"\n")
