@@ -73,6 +73,7 @@ INSTALL_SCRIPT_MIRROR_SHA256 = {
 }
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
 NODE_BUILD_REPO = "laputa-systems/node-build"
+PYTHON_BUILD_REPO = "laputa-systems/python-build"
 PLAYER_REPO = "joshuarli/play"
 GHOSTTY_CUSTOM_ASSET = "Ghostty-Custom-aarch64-apple-darwin.dmg"
 GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
@@ -120,21 +121,6 @@ def version_at_least(have: str, need: str) -> bool:
     have_parts += [0] * (width - len(have_parts))
     need_parts += [0] * (width - len(need_parts))
     return have_parts >= need_parts
-
-
-def python_build_pin(pin_path: Path | None = None) -> tuple[str, str, dict[str, tuple[str, str]]]:
-    path = pin_path or Path(__file__).with_name("python-build.pin")
-    tag = repo = ""
-    triples: dict[str, tuple[str, str]] = {}
-    for line in path.read_text().splitlines():
-        fields = line.split()
-        if not fields or line.startswith("#"):
-            continue
-        if not tag:
-            tag, repo = fields[0], fields[1] if len(fields) > 1 else ""
-        elif len(fields) == 3:
-            triples[fields[0]] = (fields[1], fields[2])
-    return tag, repo, triples
 
 
 _ENTRY = re.compile(r"<entry>(.*?)</entry>", re.S)
@@ -1047,14 +1033,23 @@ class Installer:
         self.ok(f"Installed {self.dest}/{tool}")
 
     def install_python3(self) -> None:
+        triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
+                   ("linux", "x86_64"): "x86_64-unknown-linux-musl",
+                   ("linux", "aarch64"): "aarch64-unknown-linux-musl"}
+        if (self.os_name, self.arch) not in triples:
+            self.skip("python3", f"no python-build release for {self.os_name}/{self.arch}")
+            return
+        triple = triples[(self.os_name, self.arch)]
+        found = self.build_release("python3", PYTHON_BUILD_REPO, "cpython", triple)
+        if found is None:
+            self.unchecked("python3", "no release found")
+            return
+        tag, asset, base = found
+        expected = self.sums_for(self.fetch_text(f"{base}/SHA256SUMS"), asset)
         self._install_python_build(
-            "python3", self.python_build_root,
-            {("darwin", "aarch64"): "aarch64-apple-darwin",
-             ("linux", "x86_64"): "x86_64-unknown-linux-musl",
-             ("linux", "aarch64"): "aarch64-unknown-linux-musl"},
-            "python/bin/python3.15",
+            "python3", self.python_build_root, triples, "python/bin/python3.15",
             [("python3", "python/bin/python3.15"), ("python3.15", "python/bin/python3.15")],
-            release=python_build_pin())
+            release=(tag, PYTHON_BUILD_REPO, {triple: (asset, expected)}))
 
     def install_nodebuild(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",

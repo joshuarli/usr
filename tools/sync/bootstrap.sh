@@ -210,21 +210,35 @@ install_python3() {
         Linux:aarch64) triple=aarch64-unknown-linux-musl ;;
         *) skip python3 "no python-build release for ${OS}/${ARCH}"; return ;;
     esac
-    pin_file="$(dirname -- "$0")/python-build.pin"
-    if [ ! -f "$pin_file" ]; then
-        unchecked python3 "pinned python-build release is missing: $pin_file"
+    atom=$(curl -fsSL "https://github.com/laputa-systems/python-build/releases.atom" 2>/dev/null) || {
+        unchecked python3 "could not fetch the release feed"
+        return
+    }
+    tag=
+    asset_name=
+    expected_sha256=
+    for candidate in $(printf '%s\n' "$atom" | grep -oE 'releases/tag/release-[0-9a-f]{40}' | cut -d/ -f3 | uniq); do
+        candidate_base="https://github.com/laputa-systems/python-build/releases/download/$candidate"
+        candidate_sums=$(curl -fsSL "$candidate_base/SHA256SUMS" 2>/dev/null) || continue
+        candidate_asset=$(printf '%s\n' "$candidate_sums" | awk '{print $2}' | grep -E "^cpython-[0-9][^ ]*-${triple}\\.tar\\.xz$")
+        asset_count=$(printf '%s\n' "$candidate_asset" | grep -c . || true)
+        if [ "$asset_count" != "1" ]; then
+            continue
+        fi
+        candidate_sha=$(printf '%s\n' "$candidate_sums" | awk -v asset="$candidate_asset" '$2 == asset { print $1 }')
+        if [ "${#candidate_sha}" -ne 64 ]; then
+            continue
+        fi
+        tag=$candidate
+        asset_name=$candidate_asset
+        expected_sha256=$candidate_sha
+        break
+    done
+    if [ -z "$tag" ]; then
+        unchecked python3 "no python-build release with a ${triple} archive was found"
         return
     fi
-    pin_header=$(awk '!/^#/ && NF { print; exit }' "$pin_file")
-    tag=$(printf '%s\n' "$pin_header" | awk '{print $1}')
-    repo=$(printf '%s\n' "$pin_header" | awk '{print $2}')
-    pinned=$(awk -v triple="$triple" '!/^#/ && NF && $1 == triple { print $2 " " $3; exit }' "$pin_file")
-    asset_name=$(printf '%s\n' "$pinned" | awk '{print $1}')
-    expected_sha256=$(printf '%s\n' "$pinned" | awk '{print $2}')
-    if [ -z "$tag" ] || [ -z "$repo" ] || [ -z "$asset_name" ] || [ "${#expected_sha256}" -ne 64 ]; then
-        unchecked python3 "pinned python-build release has no ${triple} artifact"
-        return
-    fi
+    repo=laputa-systems/python-build
     asset_url="https://github.com/${repo}/releases/download/${tag}/$(printf '%s' "$asset_name" | sed 's/+/%2B/g')"
     if is_current python3 "$expected_sha256"; then
         _dl_current "python3 is current (${tag})"
@@ -255,7 +269,7 @@ install_python3() {
         skip python3 "checksum mismatch"
         return
     fi
-    if ! tar -tzf "$tmpzip" | awk '
+    if ! tar -tJf "$tmpzip" | awk '
         BEGIN { bad = 0 }
         /^\// { bad = 1 }
         {
@@ -274,7 +288,7 @@ install_python3() {
     own_missing_dirs "$PYTHON_BUILD_ROOT"
     mkdir -p "$PYTHON_BUILD_ROOT"
     tmpbundle=$(mktemp -d "${PYTHON_BUILD_ROOT}/.python3.XXXXXX")
-    if ! tar -xzf "$tmpzip" -C "$tmpbundle"; then
+    if ! tar -xJf "$tmpzip" -C "$tmpbundle"; then
         rm -f "$tmpzip"
         tmpzip=
         skip python3 "archive could not be extracted"

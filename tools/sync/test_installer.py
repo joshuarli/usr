@@ -514,40 +514,66 @@ sys.exit(1)
         with self.assertRaises(SkipInstall):
             inst.install_uv()
 
-    def _pinned_python(self, routes):
-        import hashlib
-        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"})
-        digest = hashlib.sha256(payload).hexdigest()
-        asset = "cpython-3.15.1+20261107-x86_64-unknown-linux-musl-install_only_stripped.tar.gz"
-        url = f"https://github.com/laputa-systems/python-build/releases/download/20261107/{asset.replace('+', '%2B')}"
-        routes[url] = (payload, {"ETag": "e"})
-        pin = ("20261107", "laputa-systems/python-build",
-               {"x86_64-unknown-linux-musl": (asset, digest)})
-        return routes, url, asset, digest, pin
+    def _python_routes(self, sha, payload, *, version="3.15.1", **kwargs):
+        return self._build_routes("laputa-systems/python-build", "cpython", sha, payload,
+                                  version=version, **kwargs)
 
-    def test_python3_install_and_checksum_mismatch(self):
-        routes, url, asset, digest, pin = self._pinned_python({})
+    def test_python3_install_current_and_checksum_mismatch(self):
+        import hashlib
+        sha = "b" * 40
+        tag = f"release-{sha}"
+        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"}, "w:xz")
+        routes = self._python_routes(sha, payload)
+        digest = hashlib.sha256(payload).hexdigest()
         inst = self.make(routes)
-        with patch.object(installer, "python_build_pin", return_value=pin):
-            inst.install_python3()
+        inst.install_python3()
         self.assertTrue(self.dest_path("python3").is_symlink())
         self.assertTrue(self.dest_path("python3.15").is_symlink())
+        self.assertEqual(os.readlink(self.dest_path("python3")),
+                         str(self.home / f".local/share/python-build/{tag}/python/bin/python3.15"))
         self.assertEqual(self.state("python3"), digest)
-        inst = self.make({})
-        with patch.object(installer, "python_build_pin", return_value=pin):
-            inst.install_python3()
-        self.assertFalse(inst.changed)
-        bad_pin = ("20261107", "laputa-systems/python-build",
-                   {"x86_64-unknown-linux-musl": (asset, "0" * 64)})
         inst = self.make(routes)
+        inst.install_python3()
+        self.assertFalse(inst.changed)
+        inst = self.make(self._python_routes(sha, payload, listed="0" * 64))
         self.dest_path("python3").unlink(missing_ok=True)
         self.dest_path("python3.15").unlink(missing_ok=True)
         (self.home / ".local/state/dl/python3").unlink(missing_ok=True)
         import shutil as _shutil
         _shutil.rmtree(self.home / ".local/share/python-build", ignore_errors=True)
-        with patch.object(installer, "python_build_pin", return_value=bad_pin):
-            with self.assertRaises(SkipInstall):
-                inst.install_python3()
+        with self.assertRaises(SkipInstall):
+            inst.install_python3()
+        self.assertFalse(self.dest_path("python3").exists())
+
+    def test_python3_skips_a_release_without_a_build_archive(self):
+        new, old = "b" * 40, "a" * 40
+        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"}, "w:xz")
+        good = self._python_routes(old, payload)
+        legacy = self._python_routes(new, payload, etag="e2")
+        new_base = f"https://github.com/laputa-systems/python-build/releases/download/release-{new}"
+        legacy[f"{new_base}/SHA256SUMS"] = b"0" * 64 + b"  legacy-input.tar.gz\n"
+        routes = dict(good)
+        routes.update(legacy)
+        routes["https://github.com/laputa-systems/python-build/releases.atom"] = atom([
+            ("2026-11-14T00:00:00Z", f"release-{new}"),
+            ("2026-11-13T00:00:00Z", f"release-{old}"),
+        ])
+        inst = self.make(routes)
+        inst.install_python3()
+        link = os.readlink(self.dest_path("python3"))
+        self.assertIn(f"release-{old}", link)
+
+    def test_python3_refuses_a_release_whose_manifest_does_not_match(self):
+        sha = "b" * 40
+        triple = "x86_64-unknown-linux-musl"
+        payload = make_tar({"python/bin/python3.15": b"#!/bin/sh\nexit 0\n"}, "w:xz")
+        routes = self._python_routes(sha, payload, etag="e2",
+                                     manifest={"schema_version": 1, "product": "cpython",
+                                               "version": "3.15.1", "target": triple,
+                                               "source_revision": "0" * 40})
+        inst = self.make(routes)
+        with self.assertRaises(SkipInstall):
+            inst.install_python3()
         self.assertFalse(self.dest_path("python3").exists())
 
     def test_nodebuild_install_current_and_checksum_mismatch(self):
