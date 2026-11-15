@@ -94,6 +94,8 @@ function prompt(s: Session): string {
     "Codex and Command Code workers remain leaves: do not spawn subagents.",
     "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths.",
     "Stop if blocked or if the requirements demand more scope. Do not broaden the task.",
+    "A slow or still-running required command is not a blocker: run it detached, poll its log until it exits, and never end your turn while a required command is still running.",
+    "Rerun a command once after an environmental failure such as a toolchain crash or interruption before reporting it as a blocker.",
     "Return a PROOF RECORD instead of a summary: changed paths; exact commands, exit codes and decisive output;",
     "file:line evidence for research; and explicit unverified cases and blockers. Never invent a passing check.",
     "End with exactly one final line: `ACCEPTANCE: met` only when every required acceptance command ran and passed, otherwise `ACCEPTANCE: not met`.",

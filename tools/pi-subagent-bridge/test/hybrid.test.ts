@@ -1111,7 +1111,7 @@ test("Codex correction resumes the same thread and pinned model", async () => {
     await bridge.resume(f.cwd, started.session_id, "Correct the same file")
     assert.equal(starts.length, 2)
     assert.equal(starts[1].resume, "codex-thread")
-    assert.deepEqual(starts[1].selection, { model: "gpt-6.1-terra", effort: "medium" })
+    assert.deepEqual(starts[1].selection, { model: "gpt-6.1-terra", effort: "high" })
   } finally { f.close() }
 })
 

@@ -10,7 +10,7 @@ New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`)
 | --- | --- | --- |
 | scout | Codex `gpt-6-luna` (`medium`) | Command Code `meta/muse-ember` (`medium`); Pi `opencode-go/muse-spark-1.3-contributor` (`medium`) |
 | mechanic | Codex `gpt-6-luna` (`high`) | Command Code `meta/muse-ember` (`xhigh`); Pi `opencode-go/muse-spark-1.3-contributor` (`high`) |
-| worker | Codex `gpt-6.1-terra` (`medium`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`) |
+| worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`) |
 | expert | Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) | **None. Fail closed.** |
 <!-- policy:end routing-summary -->
 

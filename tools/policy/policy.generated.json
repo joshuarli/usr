@@ -47,7 +47,7 @@
       {
         "executor": "codex",
         "model": "gpt-6.1-terra",
-        "effort": "medium"
+        "effort": "high"
       },
       {
         "executor": "command-code",

@@ -38,7 +38,7 @@ const codexModels = { small: "gpt-6-luna", coding: "gpt-6.1-terra" } as const
 export const CODEX_TIER_MODELS = {
   scout: { model: codexModels.small, effort: "medium" },
   mechanic: { model: codexModels.small, effort: "high" },
-  worker: { model: codexModels.coding, effort: "medium" },
+  worker: { model: codexModels.coding, effort: "high" },
   expert: { model: codexModels.coding, effort: "xhigh" },
 } as const satisfies Record<Tier, CliPin>
 

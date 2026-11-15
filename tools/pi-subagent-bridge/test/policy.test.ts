@@ -30,7 +30,7 @@ test("native contexts cannot become root expert fallbacks", () => {
 test("the plans are the pins the bridge admits, and the exported routes derive from them", () => {
   assert.deepEqual(ROOT_PLANS.expert, { kind: "exclusive", target: { model: "gemini-4-hydrogen-xhigh", effort: "xhigh" } })
   assert.equal(ROOT_PLANS.worker.kind, "fallback")
-  assert.deepEqual(ROOT_PLANS.worker.codex, { model: "gpt-6.1-terra", effort: "medium" })
+  assert.deepEqual(ROOT_PLANS.worker.codex, { model: "gpt-6.1-terra", effort: "high" })
   assert.deepEqual(ROOT_PLANS.worker.command, { model: "deepseek/deepseek-v4.1-flash", effort: "high" })
   for (const tier of TIERS) assert.deepEqual(POLICY.rootRoutes[tier], routesOf(ROOT_PLANS[tier]))
 })
