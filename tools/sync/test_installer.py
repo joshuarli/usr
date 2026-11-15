@@ -1146,6 +1146,29 @@ sys.exit(1)
         again.install_gluon()
         self.assertFalse(again.changed)
 
+    def test_gluon_bundle_prefers_tar_xz(self):
+        import hashlib
+        members = {"meson": b"m", "ninja": b"n", "gluon-build": b"b"}
+        tarball = make_tar(members, mode="w:xz")
+        legacy = make_zip({name: b"old" for name in members}, executable=set(members))
+        routes, base = self._bundle_routes("laputa-systems/gluon", "release-abc123",
+                                           "gluon-x86_64-unknown-linux-musl.tar.xz", tarball)
+        routes[f"{base}/gluon-x86_64-unknown-linux-musl.zip"] = (legacy, {"ETag": "z"})
+        routes[f"{base}/SHA256SUMS"] += f"{hashlib.sha256(legacy).hexdigest()}  gluon-x86_64-unknown-linux-musl.zip\n".encode()
+        inst = self.make(routes)
+        inst.install_gluon()
+        self.assertEqual(self.state("gluon"), "e")
+        self.assertEqual((self.home / ".local/share/gluon/current/meson").read_bytes(), b"m")
+        self.assertNotIn(f"{base}/gluon-x86_64-unknown-linux-musl.zip", inst.fetched)
+
+    def test_available_archive_prefers_tar_xz_then_legacy(self):
+        base = "https://x/releases/download/t"
+        both = self.make({f"{base}/a.tar.xz": (b"", {"ETag": "1"}), f"{base}/a.tar.gz": (b"", {"ETag": "2"})})
+        self.assertEqual(both.available_archive(base, "a", "tar.gz"), "a.tar.xz")
+        legacy = self.make({f"{base}/a.tar.gz": (b"", {"ETag": "2"})})
+        self.assertEqual(legacy.available_archive(base, "a", "tar.gz"), "a.tar.gz")
+        self.assertEqual(self.make({}).available_archive(base, "a", "zip"), "")
+
     def _bctl_release(self, tag, script):
         import hashlib
         triple = "x86_64-unknown-linux-musl"
