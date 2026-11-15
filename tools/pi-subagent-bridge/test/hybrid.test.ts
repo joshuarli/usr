@@ -1014,7 +1014,7 @@ for (const tier of ["scout", "mechanic", "worker"] as const) {
         assert.equal(piCreates(m.calls).length, 1)
         const stored = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", started.session_id + ".json"), "utf8"))
         assert.deepEqual(stored.execution.selection, GO_TIER_MODELS[tier])
-        assert.deepEqual(stored.plan.pi.at(-1), GO_TIER_MODELS[tier])
+        assert.deepEqual(stored.plan.pi, ROOT_PLANS[tier].pi)
         assert.deepEqual((await makeHybridBridge(m.api, m.command, noCodex).status(f.cwd, started.session_id)).model, GO_TIER_MODELS[tier])
       } finally { f.close() }
     })
@@ -1199,5 +1199,17 @@ test("an order-less legacy Pi record still falls back to Command Code on a provi
     assert.equal(status.state, "running")
     assert.match(status.fallback_reason ?? "", /Primary Pi runner unavailable/)
     assert.equal(commandCalls(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("USR-77: a finished session's lease is released when a new worker starts without a status refresh", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command, noCodex)
+    await bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.start(f.cwd, "busy", "worker", f.scope, "Edit README"), /active worker/)
+    m.done()
+    const next = await bridge.start(f.cwd, "second", "worker", f.scope, "Edit README")
+    assert.equal(next.status, "admitted")
   } finally { f.close() }
 })

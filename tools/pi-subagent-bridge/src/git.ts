@@ -16,8 +16,9 @@ export function changes(cwd: string, base: string): string[] {
   const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], options)
   return [...new Set((diff + newFiles).split("\0").filter(Boolean))].sort()
 }
+/** A writable path owns itself and, as a directory, everything beneath it, with or without a trailing slash. */
 export function outside(paths: string[], owned: string[]): string[] {
-  return paths.filter((p) => !owned.some((w) => w.endsWith("/") ? p.startsWith(w) : p === w))
+  return paths.filter((p) => !owned.some((w) => p === w || p.startsWith(w.endsWith("/") ? w : `${w}/`)))
 }
 
 export function readStateDir(cwd: string): string {

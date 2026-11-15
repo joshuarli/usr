@@ -20,6 +20,7 @@ PACKAGES = {
     "@earendil-works/pi-coding-agent": "1.5.0",
     "pi-subagents": "0.87.0",
     "pi-muse-subscription": "0.1.0",
+    "pi-devin-local": "0.4.2",
     "@dataforxyz/agent-intercom-pi": "0.10.0",
     "@dataforxyz/agent-intercom-core": "0.1.0",
 }
@@ -86,7 +87,8 @@ def version_matches(root: Path, profile: str = "full") -> bool:
             for name, entry in (("pi-subagents", "index.js"),
                                 ("@dataforxyz/agent-intercom-pi", "index.js"),
                                 ("@dataforxyz/agent-intercom-pi", "broker/broker.js"),
-                                ("pi-muse-subscription", "src/index.js")):
+                                ("pi-muse-subscription", "src/index.js"),
+                                ("pi-devin-local", "extensions/index.js")):
                 if not (root / "node_modules" / name / entry).is_file():
                     return False
         return (root / "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js").is_file()

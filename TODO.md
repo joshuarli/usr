@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 79
+Next: 80
 
 
 
@@ -16,32 +16,21 @@ Next: 79
 
 
 
-### USR-76 · P2 · pi-subagent-bridge treats directory scopes without a trailing slash as single files
+### USR-78 · P2 · long-lived bridge MCP model checks fail after policy updates
 
-- **Area:** pi-subagent-bridge
-- **Where:** `tools/pi-subagent-bridge/src/git.ts` (`outside`), `src/scope.ts` (writable_paths validation)
-- **Problem:** On 2026-11-15, four Asterinas kernel workers got `writable_paths` such as `kernel` and `test/initramfs/src/regression`. `outside()` treats an entry as a directory only when it ends in `/`, so every file the workers changed under those directories was reported out of scope. `resume` then refused with `Cannot resume changed HEAD or out-of-scope work`. Admission accepted the scope without warning.
-- **Recommendation:** At admission, reject or normalize an entry that names an existing directory without the trailing slash, or match an entry as a path prefix at a `/` boundary.
-- **Fix with:** A scope test where `kernel` admits `kernel/core/x.rs`, or where admission rejects the ambiguous entry with a message naming it
-- **Effort:** S
+- **Area:** Delegation
+- **Where:** tools/pi-subagent-bridge/src/cli.ts (MCP mode), src/policy.ts, src/tier-policy.ts
+- **Problem:** On macOS 27.2, repeated worker_model_check requests for a clean mechanic worktree fail with SyntaxError: tier-policy.ts does not provide an export named DEVIN_TIER_MODELS. The same source-linked installation at ff3059803c7e2615e29e5ee1a3b292764496ddc2 succeeds through a fresh pi-subagent-bridge model-check CWD mechanic process and reports available providers. Ownership is verified as joshuarli/usr by repomod which.py with source-link evidence. Current policy.ts imports and tier-policy.ts exports agree, so stale long-lived MCP module state is suspected but unproven. MCP admission was unavailable during the bctl Helium release cleanup; the fresh CLI is a supported workaround.
+- **Recommendation:** Reproduce a policy update with a running MCP server and compare the same read-only model check through MCP and a fresh CLI. Establish whether server module caching or deployed module mismatch causes the import failure, then make policy rollout consistent or return an actionable reload instruction. Regression acceptance: both interfaces return the same admitted pins after an update without starting a worker or throwing a missing-export SyntaxError.
+- **Fix with:** root-cause
+- **Effort:** M
 
-
-### USR-77 · P2 · A finished incomplete or blocked session keeps its worktree locked after cancel
-
-- **Area:** pi-subagent-bridge
-- **Where:** `tools/pi-subagent-bridge/src/` (active-worker check in `start`, `cancel`)
-- **Problem:** On 2026-11-15, three sessions ended with `ACCEPTANCE: not met` on legitimate stop conditions, and one stopped on a provider usage limit. Each left its worktree clean. `start` with a corrected scope in the same worktree failed with `Worktree already has active worker <id>; inspect it before starting another`, and `cancel` did not release the worktree (`interrupted: false`). The only workaround was a new worktree per retry.
-- **Recommendation:** Treat a session whose process has exited and whose state is incomplete or finished as inactive for `start`, or make `cancel` mark such a session released once the worktree is verified clean.
-- **Fix with:** A test that starts, lets the worker finish incomplete with a clean worktree, and then admits a new session in the same worktree
-- **Effort:** S
-
-
-### USR-78 · P2 · pi-subagent-bridge cancel never signals a CLI-started codex worker
+### USR-79 · P2 · pi-subagent-bridge cancel never signals a CLI-started codex worker
 
 - **Area:** pi-subagent-bridge
 - **Where:** tools/pi-subagent-bridge (cancel)
-- **Problem:** On 2026-11-15, `pi-subagent-bridge cancel <worktree> <session>` on a codex worker started with the CLI `start` returned interrupted:false twice, with the note "Never signal a Command Code PID left by an earlier MCP process", while inspect showed execution_state running and pid 49676, a live `codex exec` whose cwd was that worktree. The parent had to SIGINT/SIGTERM it by hand. Separately, the MCP server failed every call with `tier-policy.ts does not provide an export named DEVIN_TIER_MODELS` after ~/usr was fast-forwarded under the running server (mixed module versions); the CLI worked.
-- **Recommendation:** Make cancel signal a worker whose recorded PID identity (start time, command, cwd) still matches, whatever started it; and have the MCP server detect a source change under it and fail with a restart instruction instead of a module error.
+- **Problem:** On 2026-11-15, `pi-subagent-bridge cancel <worktree> <session>` on a codex worker started with the CLI `start` returned interrupted:false twice, with the note "Never signal a Command Code PID left by an earlier MCP process", while inspect showed execution_state running and pid 49676, a live `codex exec` whose cwd was that worktree. The parent had to SIGINT/SIGTERM it by hand.
+- **Recommendation:** Make cancel signal a worker whose recorded PID identity (start time, command, cwd) still matches, whatever started it, and add a test that cancels a CLI-started worker.
 - **Fix with:** root-cause
 - **Effort:** S
 
@@ -53,6 +42,7 @@ Next: 79
 - **Recommendation:** On separate requests, apply the skill to stats (with refactor-dashboard-ui owning metrics and trends), stuff (keep canvas rendering and its performance invariants), and discover (evidence and provenance hierarchy, mobile reading). Follow the campaign's Transfer section, and after the second product delete or move rules that turned out to be agentctl-specific.
 - **Fix with:** none
 - **Effort:** L
+
 
 ### USR-74 · P3 · Designed UIs lack the required make preview and shared golden dataset
 

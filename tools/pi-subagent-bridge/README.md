@@ -10,7 +10,7 @@ New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`)
 | --- | --- | --- |
 | scout | Codex `gpt-6-luna` (`medium`) | Command Code `meta/muse-ember` (`medium`); Pi `opencode-go/muse-spark-1.3-contributor` (`medium`) |
 | mechanic | Codex `gpt-6-luna` (`high`) | Command Code `meta/muse-ember` (`xhigh`); Pi `opencode-go/muse-spark-1.3-contributor` (`high`) |
-| worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2` (`medium`) |
+| worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`) |
 | expert | Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) | **None. Fail closed.** |
 <!-- policy:end routing-summary -->
 
@@ -27,32 +27,35 @@ The Antigravity executor is a leaf and may not launch native subagents. It runs 
 
 The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No OpenCode service or `pi -p` is needed. A scoped SDK host loads only pi-subagents and calls its `spawn`/`resume` RPC. The package owns detached child execution, session continuation, and completion artifacts. Interactive Pi loads locally bundled subagents and intercom extensions through its managed launcher; no `pi install`, `pi update`, npm or npx runs on the Pi setup path. The scoped SDK bridge continues to load only subagents and (when needed) Muse, never unrestricted intercom tools.
 
-## Devin SWE-2 Medium (experimental)
+## Devin SWE-2 Flash
 
-`devin/swe-2` at **medium** effort is an explicitly pinned **last**
+`devin/swe-2-flash` at **medium** effort is an explicitly pinned **last**
 Pi fallback for the `worker` tier and a dedicated interactive
 `devin-worker` profile; the default Codex/Command/Muse/OpenCode routes
-and the exclusive Antigravity expert lane are unchanged. The provider
-is supplied by a hash-verified `pi-build` release, never a local
-`pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
-Only the `medium` variant is admitted by the typed tier policy.
-Unavailability cannot authorize another effort level.
+and the exclusive Antigravity expert lane are unchanged — no other tier
+routes to Devin. The provider is supplied by a hash-verified `pi-build` release, never a
+local `pi install`. See [pi-build PR #5](https://github.com/joshuarli/pi-build/pull/5).
+Only the admitted `medium` variant is allowed by the typed tier policy.
+Unavailability cannot authorize another effort level or tier.
 
-On the target machine, install the official Devin CLI and sign in:
-`devin auth login`; `devin auth status`; `devin models list --format json`.
-In interactive Pi, run `/login devin` then `/devin-refresh` to populate
-the Pi OAuth credential store and `~/.cache/pi-devin/models.json`.
-Verify that `swe-2-medium` appears in the CLI catalog. For an explicit
-experiment, launch native `devin-worker` through the Pi subagent tool.
-Scoped bridge workers start `PI_OFFLINE=1`, so no live catalog bootstrap
-is attempted; missing credentials/cache fail before admission. No tokens
-or account data are copied into the repo.
+On the target machine, `sh sync` installs the Devin CLI (`sh sync tools
+devin`) and the pinned `pi-build` runtime that bundles `pi-devin-local`.
+Sign in once with `devin auth login`, then seed Pi's credential store and
+model catalog without the interactive `/login` flow: run the bundled
+`pi-devin-local` extension through the Pi SDK with `PI_OFFLINE` unset
+(a single `-p` prompt is enough — extension startup refreshes
+`~/.cache/pi-devin/models.json`), and store the CLI `windsurf_api_key`
+as the provider's `oauth` entry in `~/.pi/agent/auth.json`. Verify that
+`swe-2-flash-medium` appears in the catalog and that the account is
+entitled to `swe-2-flash` — catalog presence alone does not prove
+entitlement. For an explicit experiment, launch native `devin-worker`
+through the Pi subagent tool. Scoped bridge workers start
+`PI_OFFLINE=1`, so no live catalog bootstrap is attempted; missing
+credentials/cache fail before admission.
+No tokens or account data are copied into the repo.
 
-After the `pi-build` headless-usr release is published, update the
-checked-in `tools/pi/runtime.pin.json` with its verified provenance.
-Until then, `worker_model_check` reports the Devin fallback unavailable.
 Offline fixture checks do not prove paid/free entitlement, streaming or
-tool loops; the owner must run an actual SWE-2 Medium tool-and-resume test.
+tool loops; the owner must run an actual SWE-2 Flash tool-and-resume test.
 
 ## Bounded native Pi nesting
 

@@ -21,7 +21,7 @@ const PI_MODELS = {
   goDeepSeek: { providerID: "opencode-go", id: "deepseek-v4.1-flash" },
   goSpark: { providerID: "opencode-go", id: "muse-spark-1.3-contributor" },
   museSpark: { providerID: "muse-sdk", id: "muse-spark-1.3" },
-  devinSwe2: { providerID: "devin", id: "swe-2" },
+  devinFlash: { providerID: "devin", id: "swe-2-flash" },
 } as const
 export const PI_MODEL_ALLOWLIST = Object.values(PI_MODELS).map(({ providerID, id }) => `${providerID}/${id}`)
 
@@ -42,16 +42,19 @@ export const MUSE_TIER_MODELS = {
 } as const satisfies {
   readonly worker: { readonly providerID: "muse-sdk"; readonly id: string; readonly variant: Effort }
 }
-/** Experimental Devin Local worker. Only the medium SWE-2 variant is admitted. */
+/** Devin Local worker. Only the medium SWE-2 Flash variant is admitted. */
 export const DEVIN_TIER_MODELS = {
-  worker: { ...PI_MODELS.devinSwe2, variant: "medium" },
+  worker: { ...PI_MODELS.devinFlash, variant: "medium" },
 } as const satisfies {
-  readonly worker: { readonly providerID: "devin"; readonly id: "swe-2"; readonly variant: "medium" }
+  readonly worker: { readonly providerID: "devin"; readonly id: "swe-2-flash"; readonly variant: "medium" }
 }
 export const DEVIN_AGENT_NAMES = { worker: "devin-worker" } as const
 export const DEVIN_DELEGATION = {
   worker: DELEGATION.worker.map(tier => tier === "worker" ? DEVIN_AGENT_NAMES.worker : tier),
 } as const satisfies { readonly worker: readonly string[] }
+export function isDevinTier(tier: Tier): tier is "worker" {
+  return tier === "worker"
+}
 
 export const MUSE_AGENT_NAMES = { worker: "muse-worker" } as const
 export const MUSE_DELEGATION = {

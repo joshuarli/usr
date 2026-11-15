@@ -69,7 +69,7 @@
       {
         "executor": "pi",
         "providerID": "devin",
-        "model": "swe-2",
+        "model": "swe-2-flash",
         "effort": "medium"
       }
     ],
@@ -114,7 +114,7 @@
     "devinModels": {
       "worker": {
         "providerID": "devin",
-        "id": "swe-2",
+        "id": "swe-2-flash",
         "variant": "medium"
       }
     },
@@ -206,7 +206,7 @@
       "opencode-go/deepseek-v4.1-flash",
       "opencode-go/muse-spark-1.3-contributor",
       "muse-sdk/muse-spark-1.3",
-      "devin/swe-2"
+      "devin/swe-2-flash"
     ]
   },
   "opencode": {

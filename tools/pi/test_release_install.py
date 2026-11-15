@@ -91,7 +91,8 @@ class ReleaseTests(unittest.TestCase):
         entries = {"node_modules/pi-subagents/index.js": b"export default () => {}",
                    "node_modules/@dataforxyz/agent-intercom-pi/index.js": b"export default () => {}",
                    "node_modules/@dataforxyz/agent-intercom-pi/broker/broker.js": b"",
-                   "node_modules/pi-muse-subscription/src/index.js": b"export default () => {}"}
+                   "node_modules/pi-muse-subscription/src/index.js": b"export default () => {}",
+                   "node_modules/pi-devin-local/extensions/index.js": b"export default () => {}"}
         pin = self.publish(entries, profile="headless-usr")
         generation = self.install(pin)
         launcher = (generation / "bin/pi").read_text()

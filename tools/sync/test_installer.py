@@ -849,6 +849,10 @@ sys.exit(1)
         self.assertEqual(os.readlink(launcher), str(versions / "current/bin/devin"))
         self.assertTrue((versions / version / "bin/devin").is_file())
 
+        intel = self.make(routes, os_name="darwin", arch="x86_64")
+        with self.assertRaisesRegex(SkipInstall, "arm64"):
+            intel.install_devin()
+
     def _bundle_routes(self, repo, tag, asset, payload, sums_asset=None, digest=None):
         import hashlib
         digest = digest or hashlib.sha256(payload).hexdigest()

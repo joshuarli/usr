@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
 import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc, artifactResult, executeJob, type Admission } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { MUSE_AGENT_NAMES, DEVIN_AGENT_NAMES, isMuseTier } from "./tier-policy.ts"
+import { MUSE_AGENT_NAMES, DEVIN_AGENT_NAMES, isDevinTier, isMuseTier } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
 import { DEVIN_PROVIDER, devinExtensionPath, devinPreflight } from "./devin-provider.ts"
 import { stripIntercomEnvironment } from "./worker-env.ts"
@@ -181,7 +181,7 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
       ? { id: job.priorRunId, message: job.prompt }
       : {
           agent: muse && isMuseTier(tier) ? MUSE_AGENT_NAMES[tier] :
-            devin && isMuseTier(tier) ? DEVIN_AGENT_NAMES[tier] : tier,
+            devin && isDevinTier(tier) ? DEVIN_AGENT_NAMES[tier] : tier,
           task: job.prompt, async: true, cwd: job.cwd, worktree: false,
           model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,
           options: { agentScope: "user" },

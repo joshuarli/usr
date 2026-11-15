@@ -40,6 +40,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | git hooks and worktree helpers | `sh dotfiles/reset-agents-test.sh`, `(cd dotfiles && sh pre-push-test.sh)`, `(cd dotfiles && sh worktree-remove-test.sh)`, and `python3 -I dotfiles/worktree-retire-test.py` |
 | zsh shim | `(cd dotfiles && sh zsh-shim-test.sh)` |
 | a hook or `mdtool` | `python3 -I tools/mdtool/src/mdtool.py selftest`, `sh tools/mdtool/tests/mdtool-test.sh`, and `sh FILE` for each changed match |
+| `cpu-guard` | `python3 -I dotfiles/cpu-guard-test.py` on macOS and on Linux (for example `docker run --rm -v "$PWD:/src" -w /src python:3.14-slim python3 -I dotfiles/cpu-guard-test.py`) |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh` and `dash dotfiles/perf-gate-ready-test.sh` |
 | `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I host/macos/sync-test.py` |

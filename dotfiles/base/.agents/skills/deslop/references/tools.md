@@ -18,7 +18,7 @@ Strict-profile evidence so far: `unsafe_code = "forbid"` adopted where unsafe wa
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
 | Coverage | coverage.py with pytest-cov (mirrored) | Branch coverage, `source` set to the package so unimported files count; `patch = ["subprocess"]` when tests spawn the CLI. pytest-parallel has no coverage support yet: run coverage serially there. |
-| Mutation | `mutmut` 3.8.1 from upstream PyPI into a scratch environment (not mirrored: libcst and setproctitle lack wheels for every platform stuff serves) | Copy the repository to `.work/tmp/`, append `[tool.mutmut]` with `paths_to_mutate` to the copy's `pyproject.toml`, then `uv run --locked --with mutmut==3.8.1 --index https://pypi.org/simple mutmut run`. No CI lane until the tool is mirrored. |
+| Mutation | `mutmut` 3.8.1 (mirrored) | Install from the stuff pypi mirror (`--index-url https://pypi.17166969.xyz/simple`). Copy the repository to `.work/tmp/`, append `[tool.mutmut]` with `source_paths` to the copy's `pyproject.toml`, then run `mutmut run`. cp315 native wheels are mirrored for linux x86_64/aarch64/musl and macOS arm64. |
 | Dead code | Ruff `F401`/`F841`, `vulture` 2.16 and `deptry` 0.25.1 (mirrored) | vulture at `--min-confidence 60` for discovery, whitelisting only proven dynamic uses; deptry for unused and missing dependencies. |
 
 Strict-profile evidence so far: ty `missing-type-argument` and `unsound-return-statement` at error (they found bare `dict` reports and `Any` returned as `tuple[str, ...]`), Ruff `ANN401` with tests ignored where helpers build deliberately malformed documents. Rejected: `truthiness-test-of-none-union` (intentional `not value` on `str | None`), `missing-override-decorator`, `TC003`, `FBT`.
@@ -27,11 +27,11 @@ Strict-profile evidence so far: ty `missing-type-argument` and `unsound-return-s
 
 | Purpose | Tool | Recipe |
 | --- | --- | --- |
-| Coverage | `@vitest/coverage-v8` | Set `coverage.include` to first-party sources so unimported files count; keep runtime-specific checks (Workers cannot be profiled). |
-| Mutation | Stryker 10.1.1 with its Vitest runner, from a scratch install | `--mutate 'src/file.ts:10-40'` scopes a run to lines. |
-| Dead code | knip 6.45.1, from a scratch install | Resolve its configuration hints first, then run default and `--production` modes. |
+| Coverage | `@vitest/coverage-v8` 5.1.0 (mirrored) | Set `coverage.include` to first-party sources so unimported files count; keep runtime-specific checks (Workers cannot be profiled). |
+| Mutation | Stryker 10.1.1 with its Vitest runner (mirrored) | `--mutate 'src/file.ts:10-40'` scopes a run to lines. |
+| Dead code | knip 6.45.1 (mirrored) | Resolve its configuration hints first, then run default and `--production` modes. |
 
-Stryker, knip, and mutmut are not mirrored yet (stuff `STUF-83`): install them from upstream into a scratch copy of the repository under `.work/tmp/`, never into the committed manifests, and add no CI mutation lane for that language until they are mirrored.
+Stryker, knip, `@vitest/coverage-v8`, and mutmut are all on the stuff registries (stuff `STUF-83`, 2026-11-15): install them like any other dependency (npm `registry=https://npm.17166969.xyz/current`, pypi `--index-url https://pypi.17166969.xyz/simple`), never from upstream into a scratch copy. A TypeScript or Python repository may add its CI mutation lane from the mirror; each repo decides its scope and timeout like the Rust lane.
 
 ## Report
 

@@ -31,9 +31,10 @@ if (false) {
 function profile(tier: Tier, family: "go" | "muse" | "devin" = "go"): string {
   const muse = family === "muse"
   const devin = family === "devin"
-  const pin = devin ? DEVIN_TIER_MODELS.worker : muse ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier]
-  const name = devin ? DEVIN_AGENT_NAMES.worker : muse ? MUSE_AGENT_NAMES.worker : tier
-  const children = devin ? DEVIN_DELEGATION.worker : muse ? MUSE_DELEGATION.worker : DELEGATION[tier]
+  const devinTier = tier as keyof typeof DEVIN_TIER_MODELS
+  const pin = devin ? DEVIN_TIER_MODELS[devinTier] : muse ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier]
+  const name = devin ? DEVIN_AGENT_NAMES[devinTier] : muse ? MUSE_AGENT_NAMES.worker : tier
+  const children = devin ? DEVIN_DELEGATION[devinTier] : muse ? MUSE_DELEGATION.worker : DELEGATION[tier]
   return [
     "---", "name: " + name, "description: Fixed profile",
     "model: " + pin.providerID + "/" + pin.id,
@@ -53,16 +54,18 @@ function profileSettings(): object {
       [MUSE_AGENT_NAMES.worker, {
         model: MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id,
         thinking: MUSE_TIER_MODELS.worker.variant }],
-      [DEVIN_AGENT_NAMES.worker, {
-        model: DEVIN_TIER_MODELS.worker.providerID + "/" + DEVIN_TIER_MODELS.worker.id,
-        thinking: DEVIN_TIER_MODELS.worker.variant }],
+      ...Object.entries(DEVIN_TIER_MODELS).map(([tier, pin]) => [
+        DEVIN_AGENT_NAMES[tier as keyof typeof DEVIN_AGENT_NAMES],
+        { model: pin.providerID + "/" + pin.id, thinking: pin.variant }]),
     ]),
     modelScope: { enforce: true, strict: true,
       allow: [...PI_MODEL_ALLOWLIST],
       agents: Object.fromEntries([
         ...TIERS.map((tier) => [tier, { allow: [GO_TIER_MODELS[tier].providerID + "/" + GO_TIER_MODELS[tier].id] }]),
         [MUSE_AGENT_NAMES.worker, { allow: [MUSE_TIER_MODELS.worker.providerID + "/" + MUSE_TIER_MODELS.worker.id] }],
-        [DEVIN_AGENT_NAMES.worker, { allow: [DEVIN_TIER_MODELS.worker.providerID + "/" + DEVIN_TIER_MODELS.worker.id] }],
+        ...Object.entries(DEVIN_TIER_MODELS).map(([tier, pin]) => [
+          DEVIN_AGENT_NAMES[tier as keyof typeof DEVIN_AGENT_NAMES],
+          { allow: [pin.providerID + "/" + pin.id] }]),
       ]),
     },
   } }
@@ -131,8 +134,11 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
   }
   assertTierProfile("worker", profile("worker", "muse"), "muse")
   assertTierProfile("worker", profile("worker", "devin"), "devin")
+  assert.throws(() => assertTierProfile("expert", profile("expert"), "devin"), /Unapproved/)
   assert.ok(existsSync(tierGuardPath("worker", { providerID: "muse-sdk" })))
   assert.ok(existsSync(tierGuardPath("worker", { providerID: "devin" })))
+  assert.throws(() => tierGuardPath("scout", { providerID: "devin" }), /Devin cannot/)
+  assert.throws(() => tierGuardPath("expert", { providerID: "devin" }), /Devin cannot/)
 })
 
 test("profile checks enforce one exact pinned scope and one max depth", () => {
@@ -202,7 +208,7 @@ test("Muse worker pins and nested tiers fail closed", () => {
 })
 
 
-test("Devin is pinned to SWE-2 medium, with no read-only or higher-effort escape", () => {
+test("Devin is pinned to SWE-2 Flash medium on worker only; escapes fail closed", () => {
   assert.equal(tierForModel(DEVIN_TIER_MODELS.worker, false), "worker")
   for (const variant of ["off", "low", "high", "xhigh", "max"]) {
     assert.throws(() => tierForModel({ ...DEVIN_TIER_MODELS.worker, variant }, false), /Unapproved/)
@@ -216,5 +222,8 @@ test("Devin is pinned to SWE-2 medium, with no read-only or higher-effort escape
   }, "devin"))
   assert.ok(nestedCallRefusal("worker", "subagent", {
     agent: "expert", task: "Escalate", options: { agentScope: "user" },
+  }, "devin"))
+  assert.ok(nestedCallRefusal("expert", "subagent", {
+    agent: "devin-worker", task: "Escalate", options: { agentScope: "user" },
   }, "devin"))
 })
