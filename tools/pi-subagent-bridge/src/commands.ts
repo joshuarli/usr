@@ -110,6 +110,11 @@ export function cliArguments(name: CommandName, rest: readonly string[], read: (
   return Object.fromEntries(fields.map((field, index) => {
     const value = rest[index]
     const file = FIELDS[field].file
-    return [field, file === undefined ? value : file === "json" ? parseJson(read(value)) : read(value)]
+    try {
+      return [field, file === undefined ? value : file === "json" ? parseJson(read(value)) : read(value)]
+    } catch {
+      const shown = value.includes("\n") || value.length > 80 ? JSON.stringify(value.slice(0, 80)) + "…" : value
+      throw new Error(COMMANDS[name].cli + ": " + FIELDS[field].label + " must be a path to a readable file; got " + shown)
+    }
   }))
 }

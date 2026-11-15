@@ -70,7 +70,12 @@ test("CLI arguments become the same named arguments, reading file-valued ones", 
   assert.equal(usage("model_check"), "usage: pi-subagent-bridge model-check CWD TIER")
   for (const rest of [[], ["/w"], ["/w", "scout", "extra"], ["", "scout"]])
     assert.throws(() => cliArguments("model_check", rest, read), /^Error: usage: pi-subagent-bridge model-check CWD TIER$/)
-  assert.throws(() => cliArguments("start", ["/w", "t", "worker", "missing.json", "brief.txt"], read), /no such file/)
+  assert.throws(() => cliArguments("start", ["/w", "t", "worker", "missing.json", "brief.txt"], read),
+    /^Error: start: SCOPE_JSON_FILE must be a path to a readable file; got missing\.json$/)
+  const feedback = "please do the whole thing.\nsecond line of feedback\n" .repeat(30)
+  assert.throws(() => cliArguments("resume", ["/w", session_id, feedback], read),
+    (error: Error) => /resume: FEEDBACK_FILE must be a path to a readable file/.test(error.message)
+      && !error.message.includes(feedback) && error.message.includes('"please do the whole thing'))
 })
 
 test("string field bounds agree between schema and decoder", () => {
