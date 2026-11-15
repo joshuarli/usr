@@ -1,0 +1,43 @@
+# Deslop tools
+
+Pins live in the repository's own manifests; fleet approvals live in stuff's `fleet/policy/`. Use only what the stuff registries serve, except where a row says to install from upstream into scratch.
+
+## Rust
+
+| Purpose | Tool | Recipe |
+| --- | --- | --- |
+| Coverage | `cargo-llvm-cov` | `llvm-tools` is already in the fleet toolchain. `cargo llvm-cov --branch --html --output-dir .work/coverage`, then `cargo llvm-cov report --branch --summary-only` (branch coverage works on the pinned nightly). |
+| Mutation | `cargo-mutants` 27.1.0 | `cargo mutants --baseline run --timeout 60 --build-timeout 300 --output .work/mutants`. Exclusions go in `.cargo/mutants.toml` `exclude_re`, one comment per entry giving the reason; never a whole module. |
+| Mutation lane | `taiki-e/install-action` (approved pin in `fleet/policy/actions.toml`) with `tool: cargo-mutants@27.1.0`; checkout with `fetch-depth: 0`; pass `github.base_ref` through `env`. | `make mutants-diff BASE=origin/$BASE_REF`: `git diff --merge-base` into `.work/mutants/pr.diff`; `--in-diff` when `cargo mutants --list --in-diff` is non-empty, otherwise the whole crate (a test-only diff). |
+| Dead code | rustc `dead_code`, `unreachable_pub` in binary crates, `cargo-machete`, then `cargo +nightly udeps` to settle a disputed dependency | |
+
+Strict-profile evidence so far: `unsafe_code = "forbid"` adopted where unsafe was hand-written FFI with a safe std equivalent. Rejected for false positives on idiomatic code: `wildcard_enum_match_arm` (matches on `Ordering`), `cast_possible_truncation` (bounded cursors), `unwrap_used` (infallible `write!` to `String`), `indexing_slicing`, `as_conversions`.
+
+## Python
+
+| Purpose | Tool | Recipe |
+| --- | --- | --- |
+| Coverage | coverage.py with pytest-cov (mirrored) | Branch coverage, `source` set to the package so unimported files count; `patch = ["subprocess"]` when tests spawn the CLI. pytest-parallel has no coverage support yet: run coverage serially there. |
+| Mutation | `mutmut` 3.8.1 from upstream PyPI into a scratch environment (not mirrored: libcst and setproctitle lack wheels for every platform stuff serves) | Copy the repository to `.work/tmp/`, append `[tool.mutmut]` with `paths_to_mutate` to the copy's `pyproject.toml`, then `uv run --locked --with mutmut==3.8.1 --index https://pypi.org/simple mutmut run`. No CI lane until the tool is mirrored. |
+| Dead code | Ruff `F401`/`F841`, `vulture` 2.16 and `deptry` 0.25.1 (mirrored) | vulture at `--min-confidence 60` for discovery, whitelisting only proven dynamic uses; deptry for unused and missing dependencies. |
+
+Strict-profile evidence so far: ty `missing-type-argument` and `unsound-return-statement` at error (they found bare `dict` reports and `Any` returned as `tuple[str, ...]`), Ruff `ANN401` with tests ignored where helpers build deliberately malformed documents. Rejected: `truthiness-test-of-none-union` (intentional `not value` on `str | None`), `missing-override-decorator`, `TC003`, `FBT`.
+
+## TypeScript
+
+| Purpose | Tool | Recipe |
+| --- | --- | --- |
+| Coverage | `@vitest/coverage-v8` | Set `coverage.include` to first-party sources so unimported files count; keep runtime-specific checks (Workers cannot be profiled). |
+| Mutation | Stryker with its Vitest runner | `--mutate 'src/file.ts:10-40'` scopes a run to lines. |
+| Dead code | knip | Resolve its configuration hints first, then run default and `--production` modes. |
+
+Check that the stuff npm registry serves each package before adding it; report a missing one instead of resolving from upstream.
+
+## Report
+
+The `## Report` section in the header of `TODO-DESLOP.md`:
+
+- **Scorecard:** before and after for source lines, test lines, warm `make test`, line and branch coverage, mutants caught/missed/timeout/unviable, escape hatches, dead code removed (lines, dependencies), findings filed and fixed by priority, perf verdict, escaped regressions.
+- **Per step:** what it found and what it cost (wall time, CI minutes).
+- **Method feedback:** a rule that would have caught something that slipped through, a tool that misfired, a step that found nothing.
+- **Shared-file gaps:** what stuff or usr would need to change.
