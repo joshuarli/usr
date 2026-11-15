@@ -1,6 +1,6 @@
 ---
 name: test-audit
-description: "Apply when asked to review tests for weak, redundant, or implementation-coupled coverage, execution drag, or test-only seams, or to renovate or restructure a suite toward fewer, wider integration tests, or to decide whether line coverage is worth tracking. Skip writing tests for one change, and fixing a failing test."
+description: "Apply when asked to review tests for weak, redundant, or implementation-coupled coverage, execution drag, or test-only seams, or to renovate or restructure a suite toward fewer, wider integration tests, or to read coverage or run mutation tests. Skip writing tests for one change, and fixing a failing test."
 ---
 
 # Test Audit
@@ -48,17 +48,17 @@ Fix by calling the subject with one concrete input and asserting the literal out
 
 Each test builds its own world: fresh temp directory under `.work/tmp`, own database or schema, `HOME`, config, and environment, torn down on pass and fail, with no server, child process, socket, or connection outliving it. Ephemeral ports and unique names; never a fixed port, shared file, or global singleton, and assert on the test's own path, port, or handle rather than shared listings. Pass in any order and in parallel. No real clock, randomness, or network: inject a clock and seeded RNG; wait on a condition with a deadline, never a bare sleep. Touching the user's real home, shared services, or the network is a defect. If a wide test cannot be deterministic, narrow it until it can. No retries. Isolate mutable state while caching immutable assets.
 
-## Coverage
+## Coverage and mutation
 
-Line coverage is not a gate and not a target. It rewards executing code, not checking it, and drives the trivial tests this removes. Recommend dropping thresholds and their CI step; remove them only when asked. Keep a coverage report only on demand to find a boundary no scenario reaches. Fault-injection spot checks answer "would a test notice?" better.
+Measure coverage. It shows what no test runs, not whether a test would notice a break: never a gate, target or ratchet, and a test added for it must pass the oracle. Collect branch coverage over all first-party files, unimported ones too. Each unrun region that decides behavior gets a boundary test, a `dead-code-archaeology` lead, or a reason it is unreachable. Read [mutation testing](references/mutation.md) before mutation runs.
 
 ## Reshape
 
-**Proof.** Check new tests catch something: break the code two or three plausible ways (wrong output, dropped error, off-by-one) and confirm a test fails. This replaces coverage as the signal the suite works.
+**Proof.** Break the code two or three plausible ways (wrong output, dropped error, off-by-one) and confirm a test fails. This and mutation results, not coverage, show the suite works.
 
 **Compare.** Report suite time, test count, and flake rate before and after.
 
-**Scope and handback.** Work one project or subsystem at a time on the narrowest commands that run affected tests; run the full suite once at the end only when asked, saying why. Comprehensive runs stay manual-only under `test-pyramid`. Removing a coverage gate or deleting many tests changes the project's contract: say so.
+**Scope and handback.** Work one project or subsystem at a time on the narrowest commands that run affected tests; run the full suite once at the end only when asked, saying why. Comprehensive runs stay manual-only under `test-pyramid`. Removing a coverage gate or many tests changes the project's contract: say so.
 
 ## Decisions
 
@@ -70,4 +70,4 @@ Make one coherent owner-boundary change. Remove test-only exports, globals, and 
 
 **The test:** another agent can judge each test from evidence, reshape a suite toward wider checks without losing a contract, and confirm the reshaped suite notices a real defect.
 
-**Report:** scope, boundaries, findings with evidence, tests cut/merged/added with counts, fault-injection results, suite time and flake rate before and after, changes made, checks run, suspicious tests kept and why, open defects, and anything you must decide (coverage gate removal, tests kept for doubt).
+**Report:** scope, boundaries, findings with evidence, tests cut/merged/added with counts, fault-injection and mutation results, suite time and flake rate before and after, changes made, checks run, suspicious tests kept and why, open defects, and anything you must decide (coverage gate removal, tests kept for doubt).
