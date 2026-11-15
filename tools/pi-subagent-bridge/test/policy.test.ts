@@ -9,9 +9,9 @@ import { GO_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, isTier } from ".
 test("root admission keeps ordered lower-tier fallback and a terminal expert executor", () => {
   assert.deepEqual(routesOf(ROOT_PLANS.scout).map(route => route.executor), ["codex", "command-code", "pi"])
   assert.deepEqual(routesOf(ROOT_PLANS.mechanic).map(route => route.executor), ["codex", "command-code", "pi"])
-  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["codex", "command-code", "pi", "pi"])
+  assert.deepEqual(routesOf(ROOT_PLANS.worker).map(route => route.executor), ["codex", "command-code", "pi", "pi", "pi"])
   assert.deepEqual(routesOf(ROOT_PLANS.expert), [{ executor: "antigravity", model: "gemini-4-hydrogen-xhigh", effort: "xhigh" }])
-  assert.deepEqual(ROOT_PLANS.worker.pi.map(pin => pin.providerID), ["muse-sdk", "opencode-go"])
+  assert.deepEqual(ROOT_PLANS.worker.pi.map(pin => pin.providerID), ["muse-sdk", "opencode-go", "devin"])
   assert.equal(isTier("god"), false)
   for (const tier of ["scout", "mechanic", "worker"] as const) {
     assert.deepEqual(ROOT_PLANS[tier].codex, CODEX_TIER_MODELS[tier])
@@ -48,7 +48,7 @@ test("prohibited model families include every effort variant but not unrelated n
 
 test("projection contains each native model once without widening read-only tools", () => {
   assert.deepEqual(PI_MODEL_ALLOWLIST, [
-    "opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor", "muse-sdk/muse-spark-1.3",
+    "opencode-go/deepseek-v4.1-flash", "opencode-go/muse-spark-1.3-contributor", "muse-sdk/muse-spark-1.3", "devin/swe-2",
   ])
   assert.equal(new Set(PI_MODEL_ALLOWLIST).size, PI_MODEL_ALLOWLIST.length)
   for (const tool of ["bash", "edit", "write"]) assert.equal((TIER_TOOLS.scout as readonly string[]).includes(tool), false)
