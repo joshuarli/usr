@@ -3,7 +3,7 @@ import { randomUUID, createHash } from "node:crypto"
 import { mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync, openSync, readSync, closeSync, statSync } from "node:fs"
 import { join, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
-import { processStartTime, workerAlive, type CommandRun, type CommandResult } from "./command.ts"
+import { processStartTime, processIdentity, workerAlive, type CommandRun, type CommandResult } from "./command.ts"
 import type { LaunchRequest } from "./launch.ts"
 import { isRecord } from "./scope.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
@@ -14,7 +14,7 @@ export type FxSelection = CliPin & { readonly provider: string; readonly runtime
 export type FxLaunch = Omit<LaunchRequest, "selection"> & { readonly selection: FxSelection }
 export type FxOptions = { binary: string; binarySha256: string; home: string; provider: string; connection: object; allowedCommands: string[]; wallMs?: number }
 type Job = { nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
-const children = new Map<number, ChildProcess>()
+const children = new Map<number, { child: ChildProcess; run: CommandRun }>()
 const read = (path: string): unknown => {
   if (statSync(path).size > 16_777_216) throw new Error("Oversized FX record")
   return JSON.parse(readFileSync(path, "utf8"))
@@ -49,7 +49,7 @@ export function fxSession(run: CommandRun, expected: FxSelection): string | null
   return id ? token(job, id) : null
 }
 export function fxResult(run: CommandRun, expected: FxSelection) {
-  if (workerAlive(run, children.has(run.pid))) return { state: "running", result: null, stderr: null }
+  if (workerAlive(run, false)) return { state: "running", result: null, stderr: null }
   try {
     const job = jobFor(run), receipt = read(run.output)
     if (!sameSelection(job.selection, expected)) throw new Error("FX admitted pin mismatch")
@@ -96,10 +96,18 @@ export function makeFxAdapter(options: FxOptions) {
     child.once("error", error => writeFileSync(errors, error.message))
     if (!child.pid) throw new Error("FX supervisor admission uncertain")
     const pid = child.pid
-    children.set(pid, child); child.once("close", () => children.delete(pid)); child.unref()
-    return { pid, output, errors, started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    const run: CommandRun = { pid, output, errors, started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    const ownership = { child, run: { ...run } }
+    children.set(pid, ownership)
+    child.once("close", () => { if (children.get(pid) === ownership) children.delete(pid) })
+    child.unref()
+    return run
   }
-  return { capabilities: FX_CAPABILITIES, available, start, status: fxResult, session: fxSession, cancel(run: CommandRun) { if (!children.has(run.pid)) return false; try { process.kill(-run.pid, "SIGTERM"); return true } catch { return false } } }
+  return { capabilities: FX_CAPABILITIES, available, start, status: fxResult, session: fxSession, cancel(run: CommandRun) {
+    const owned = children.get(run.pid)?.run
+    if (!owned || owned.output !== run.output || owned.started_at !== run.started_at || owned.proc_start !== run.proc_start || processIdentity(run) !== "same") return false
+    try { process.kill(-run.pid, "SIGTERM"); return true } catch { return false }
+  } }
 }
 export type FxAdapter = ReturnType<typeof makeFxAdapter>
 

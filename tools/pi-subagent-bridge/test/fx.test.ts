@@ -1,8 +1,8 @@
 import test, { type TestContext } from "node:test"
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
-import { join } from "node:path"
+import { readFileSync, writeFileSync, mkdirSync, existsSync, watch } from "node:fs"
+import { join, dirname } from "node:path"
 import { Scratch, git, unusedApi } from "./worker-fixtures.ts"
 import { makeFxAdapter, fxResult, type FxSelection } from "../src/fx.ts"
 import { makeHybridBridge } from "../src/hybrid.ts"
@@ -91,3 +91,22 @@ test("a mismatched FX native session remains unknown and retains the shared work
   assert.throws(() => decodeSession(invalid, f.repo.cwd, admitted.session_id), /Unsupported persisted FX version/)
   assert.equal(git(f.repo.cwd, "status", "--porcelain"), "")
 })
+
+test("FX cancellation rejects stale process identity and mismatched run ownership before signaling", async t => {
+  const f = fixture(t, "hold"), run = f.fx.start(f.request)
+  await ready(run.output + ".native.json")
+  assert.equal(f.fx.cancel({ ...run, proc_start: "stale-process" }), false)
+  assert.equal(f.fx.cancel({ ...run, output: run.output + ".foreign" }), false)
+  assert.equal(f.fx.cancel(run), true)
+  assert.equal((await ended(run)).state, "interrupted")
+})
+
+async function ready(path: string): Promise<void> {
+  if (existsSync(path)) return
+  await new Promise<void>((resolve, reject) => {
+    const watcher = watch(dirname(path), () => { if (existsSync(path)) { clearTimeout(timer); watcher.close(); resolve() } })
+    const timer = setTimeout(() => { watcher.close(); reject(new Error("supervisor did not publish process identity")) }, 5000)
+    watcher.once("error", error => { clearTimeout(timer); watcher.close(); reject(error) })
+    if (existsSync(path)) { clearTimeout(timer); watcher.close(); resolve() }
+  })
+}
