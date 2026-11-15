@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { parseScope, SCOPE_SCHEMA } from "../src/scope.ts"
+import { outside } from "../src/git.ts"
 
 function scope() {
   return { base_revision: "a".repeat(40), writable_paths: ["src/"],
@@ -42,4 +43,11 @@ test("scope decoder applies its public field bounds", () => {
   assert.throws(() => parseScope({ ...scope(), network: true }, "worker"), /Unknown scope field: network/)
   const max = SCOPE_SCHEMA.properties.writable_paths.maxItems
   assert.throws(() => parseScope({ ...scope(), writable_paths: Array.from({ length: max + 1 }, (_, i) => `src/${i}`) }, "worker"), /writable_paths must name at most/)
+})
+
+test("a writable directory owns its descendants with or without a trailing slash", () => {
+  const changed = ["kernel/core/x.rs", "kernel", "kernelx/y.rs", "test/a.c", "docs/README.md"]
+  assert.deepEqual(outside(changed, ["kernel", "test/"]), ["kernelx/y.rs", "docs/README.md"])
+  assert.deepEqual(outside(["src/a.ts"], ["src/a.ts"]), [])
+  assert.deepEqual(outside(["src/a.tsx"], ["src/a.ts"]), ["src/a.tsx"])
 })

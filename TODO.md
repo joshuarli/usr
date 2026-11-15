@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 76
+Next: 79
 
 
 
@@ -15,6 +15,15 @@ Next: 76
 
 
 
+
+### USR-78 · P2 · long-lived bridge MCP model checks fail after policy updates
+
+- **Area:** Delegation
+- **Where:** tools/pi-subagent-bridge/src/cli.ts (MCP mode), src/policy.ts, src/tier-policy.ts
+- **Problem:** On macOS 27.2, repeated worker_model_check requests for a clean mechanic worktree fail with SyntaxError: tier-policy.ts does not provide an export named DEVIN_TIER_MODELS. The same source-linked installation at ff3059803c7e2615e29e5ee1a3b292764496ddc2 succeeds through a fresh pi-subagent-bridge model-check CWD mechanic process and reports available providers. Ownership is verified as joshuarli/usr by repomod which.py with source-link evidence. Current policy.ts imports and tier-policy.ts exports agree, so stale long-lived MCP module state is suspected but unproven. MCP admission was unavailable during the bctl Helium release cleanup; the fresh CLI is a supported workaround.
+- **Recommendation:** Reproduce a policy update with a running MCP server and compare the same read-only model check through MCP and a fresh CLI. Establish whether server module caching or deployed module mismatch causes the import failure, then make policy rollout consistent or return an actionable reload instruction. Regression acceptance: both interfaces return the same admitted pins after an update without starting a worker or throwing a missing-export SyntaxError.
+- **Fix with:** root-cause
+- **Effort:** M
 
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
 
@@ -25,7 +34,6 @@ Next: 76
 - **Fix with:** none
 - **Effort:** L
 
-
 ### USR-74 · P3 · Designed UIs lack the required make preview and shared golden dataset
 
 - **Area:** Skills
@@ -35,24 +43,6 @@ Next: 76
 - **Fix with:** none
 - **Effort:** M
 
-
-### USR-76 · P2 · pi-subagent-bridge treats directory scopes without a trailing slash as single files
-
-- **Area:** pi-subagent-bridge
-- **Where:** `tools/pi-subagent-bridge/src/git.ts` (`outside`), `src/scope.ts` (writable_paths validation)
-- **Problem:** On 2026-11-15, four Asterinas kernel workers got `writable_paths` such as `kernel` and `test/initramfs/src/regression`. `outside()` treats an entry as a directory only when it ends in `/`, so every file the workers changed under those directories was reported out of scope. `resume` then refused with `Cannot resume changed HEAD or out-of-scope work`. Admission accepted the scope without warning.
-- **Recommendation:** At admission, reject or normalize an entry that names an existing directory without the trailing slash, or match an entry as a path prefix at a `/` boundary.
-- **Fix with:** A scope test where `kernel` admits `kernel/core/x.rs`, or where admission rejects the ambiguous entry with a message naming it
-- **Effort:** S
-
-### USR-77 · P2 · A finished incomplete or blocked session keeps its worktree locked after cancel
-
-- **Area:** pi-subagent-bridge
-- **Where:** `tools/pi-subagent-bridge/src/` (active-worker check in `start`, `cancel`)
-- **Problem:** On 2026-11-15, three sessions ended with `ACCEPTANCE: not met` on legitimate stop conditions, and one stopped on a provider usage limit. Each left its worktree clean. `start` with a corrected scope in the same worktree failed with `Worktree already has active worker <id>; inspect it before starting another`, and `cancel` did not release the worktree (`interrupted: false`). The only workaround was a new worktree per retry.
-- **Recommendation:** Treat a session whose process has exited and whose state is incomplete or finished as inactive for `start`, or make `cancel` mark such a session released once the worktree is verified clean.
-- **Fix with:** A test that starts, lets the worker finish incomplete with a clean worktree, and then admits a new session in the same worktree
-- **Effort:** S
 
 ### USR-75 · P3 · clang plus mold host links intermittently segfault and leave truncated artifacts
 

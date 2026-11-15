@@ -46,12 +46,12 @@ export function devinPreflight(
     const family = value.catalog.families.find((family: unknown) => {
       if (!family || typeof family !== "object" || Array.isArray(family)) return false
       const found = family as { slug?: string; variants?: Array<{ model_uid?: string }> }
-      return found.slug === "swe-2" && Array.isArray(found.variants) &&
-        found.variants.some(variant => variant.model_uid === "swe-2-medium")
+      return found.slug === "swe-2-flash" && Array.isArray(found.variants) &&
+        found.variants.some(variant => variant.model_uid === "swe-2-flash-medium")
     })
-    if (!family) throw new Error("swe-2-medium absent")
+    if (!family) throw new Error("swe-2-flash-medium absent")
     return { available: true, issue: null }
   } catch {
-    return { available: false, issue: "SWE-2 medium model catalog absent; run /devin-refresh in an authenticated Pi session" }
+    return { available: false, issue: "SWE-2 Flash model catalog absent; run /devin-refresh in an authenticated Pi session" }
   }
 }

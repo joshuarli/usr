@@ -15,7 +15,7 @@ PROFILE = ROOT / "dotfiles/base/.pi/agent"
 MODEL = "opencode-go/muse-spark-1.3-contributor"
 GO = "opencode-go/deepseek-v4.1-flash"
 MUSE = "muse-sdk/muse-spark-1.3"
-DEVIN = "devin/swe-2"
+DEVIN = "devin/swe-2-flash"
 WRITER_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "subagent_supervisor"]
 
 

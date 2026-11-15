@@ -1848,10 +1848,12 @@ class Installer:
         return pointed == version_dir and (version_dir / "bin/devin").is_file()
 
     def install_devin(self) -> None:
-        targets = {("darwin", "x86_64"): "x86_64-apple-darwin", ("darwin", "aarch64"): "aarch64-apple-darwin",
+        targets = {("darwin", "aarch64"): "aarch64-apple-darwin",
                    ("linux", "x86_64"): "x86_64-unknown-linux", ("linux", "aarch64"): "aarch64-unknown-linux"}
         if (self.os_name, self.arch) not in targets:
-            self.skip("devin", f"no upstream binary for {self.os_name}/{self.arch}")
+            reason = "macOS is supported on Apple Silicon (arm64) only" if self.os_name == "darwin" \
+                else f"no upstream binary for {self.os_name}/{self.arch}"
+            self.skip("devin", reason)
         target = targets[(self.os_name, self.arch)]
         try:
             manifest = json.loads(self.fetch_text(f"{DEVIN_BASE}/current/manifest.json"))

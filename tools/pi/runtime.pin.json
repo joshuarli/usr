@@ -1,14 +1,14 @@
 {
   "schema": 1,
-  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-f6fc723c32ded8c43ec42df1d870396b8b159eb3/",
-  "builder_revision": "f6fc723c32ded8c43ec42df1d870396b8b159eb3",
+  "release_url": "https://github.com/joshuarli/pi-build/releases/download/release-headless-usr-d2f544fdd3ecc54c3809b02cd4f2fd998a2576d7/",
+  "builder_revision": "d2f544fdd3ecc54c3809b02cd4f2fd998a2576d7",
   "profile": "headless-usr",
   "version": "1.5.0",
-  "provenance_sha256": "d4a56c07bc5a7412140f37f5adda709432e39c81c9f7c5e4d2f20e284b0669bf",
+  "provenance_sha256": "d6c8a4f68946e7dc2a16faea28caff762b353ffa7d967e46943d917c993f1572",
   "targets": {
-    "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "5f5b029ba08233a4e63251d82acafe516144932938224ebd21c2ee9a1642fb67", "bytes": 12797836},
-    "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "69954867822a5ef3997f54649a5a991b6b50175c590d28f774a4fb2aa3bca82c", "bytes": 12783620},
-    "linux-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-unknown-linux-musl.tar.xz", "sha256": "55ae05f2a0eeaba13c890dccaa8aba30946ed97a8545a05575b39fa44ed22565", "bytes": 12782708}
+    "darwin-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-apple-darwin.tar.xz", "sha256": "9c23e8eac56f78246a2dac81e16be322236c2cfa86b3cb6e586dad839f3d3608", "bytes": 12812764},
+    "linux-x64": {"archive": "pi-headless-usr-1.5.0-x86_64-unknown-linux-musl.tar.xz", "sha256": "ce4755d0471fad692e44f36d89b9dc5960d6609f637ad7b0ca865ba0b2bbf4ff", "bytes": 12798804},
+    "linux-arm64": {"archive": "pi-headless-usr-1.5.0-aarch64-unknown-linux-musl.tar.xz", "sha256": "c05f20bea22a649fda55cf8ba5d71c6be8104dbb3d5147569c5cae037cd8dea3", "bytes": 12797876}
   },
   "companions": {
     "agent-intercom-claude": {"archive": "agent-intercom-claude-0.10.0.tgz", "version": "0.10.0", "sha256": "232ba02561765525e84ee9eb1d18d944af07155755ebfca9bf634b0977f04830", "bytes": 154885, "source_sha": "134baec78523d2a648a35506694455bb1c56104f"},

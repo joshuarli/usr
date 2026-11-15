@@ -1,6 +1,6 @@
 import { registerSubagentCapabilityCeiling, type SubagentCapabilityCeilingHandle } from "pi-subagents/capability-ceiling"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
-import { DELEGATION, isMuseTier, MUSE_DELEGATION, DEVIN_DELEGATION, type Tier } from "./tier-policy.ts"
+import { DELEGATION, isDevinTier, isMuseTier, MUSE_DELEGATION, DEVIN_DELEGATION, type Tier } from "./tier-policy.ts"
 
 type Block = { block: true; reason: string }
 const DENIED_FIELDS = new Set([
@@ -42,7 +42,7 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
     return "Nested delegation requires a nonempty bounded task"
   const allowed: readonly string[] = family === "muse"
     ? (isMuseTier(parent) ? MUSE_DELEGATION[parent] : [])
-    : family === "devin" ? (isMuseTier(parent) ? DEVIN_DELEGATION[parent] : [])
+    : family === "devin" ? (isDevinTier(parent) ? DEVIN_DELEGATION[parent] : [])
     : DELEGATION[parent]
   if (typeof request.agent !== "string" || !allowed.includes(request.agent))
     return `Tier ${parent} cannot delegate to ${String(request.agent)}`
@@ -55,10 +55,11 @@ export function nestedCallRefusal(parent: Tier, toolName: string, input: unknown
  * capability ceilings intersect monotonically and survive nested + async runs.
  */
 export function registerTierGuard(parent: Tier, family: GuardFamily = "go"): (pi: ExtensionAPI) => void {
-  if (family !== "go" && !isMuseTier(parent)) throw new Error("Special provider cannot execute this tier")
+  const special = family === "muse" ? isMuseTier(parent) : family === "devin" ? isDevinTier(parent) : false
+  if (family !== "go" && !special) throw new Error("Special provider cannot execute this tier")
   const children: readonly string[] = family === "muse"
     ? MUSE_DELEGATION.worker
-    : family === "devin" ? DEVIN_DELEGATION.worker : DELEGATION[parent]
+    : family === "devin" ? (isDevinTier(parent) ? DEVIN_DELEGATION[parent] : []) : DELEGATION[parent]
   return (pi: ExtensionAPI) => {
     let ceiling: SubagentCapabilityCeilingHandle | undefined
     pi.on("session_start", (_event, ctx) => {
