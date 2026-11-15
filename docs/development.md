@@ -23,6 +23,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Tailnet Intercom coordinator launcher | `python3 -I tools/intercom-tailnet/test_intercom_tailnet.py` and `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` |
 | `tools/pi-subagent-bridge` | `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` and `(export TMPDIR="$PWD/.work/tmp"; cd tools/pi-subagent-bridge && npm test)`; run `./dev-install.sh` once first |
 | Pi profile and extensions | `python3 -I dotfiles/pi-test.py` and `python3 -I tools/sync/test_pi_extensions.py` |
+| `cpu-guard` | `python3 -I dotfiles/cpu-guard-test.py` |
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `sync uninstall` | `python3 -I tools/sync/test_uninstall.py` |
 | owned shell tool help | `sh dotfiles/owned-help-test.sh` |
@@ -40,7 +41,6 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | git hooks and worktree helpers | `sh dotfiles/reset-agents-test.sh`, `(cd dotfiles && sh pre-push-test.sh)`, `(cd dotfiles && sh worktree-remove-test.sh)`, and `python3 -I dotfiles/worktree-retire-test.py` |
 | zsh shim | `(cd dotfiles && sh zsh-shim-test.sh)` |
 | a hook or `mdtool` | `python3 -I tools/mdtool/src/mdtool.py selftest`, `sh tools/mdtool/tests/mdtool-test.sh`, and `sh FILE` for each changed match |
-| `cpu-guard` | `python3 -I dotfiles/cpu-guard-test.py` on macOS and on Linux (for example `docker run --rm -v "$PWD:/src" -w /src python:3.14-slim python3 -I dotfiles/cpu-guard-test.py`) |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh` and `dash dotfiles/perf-gate-ready-test.sh` |
 | `host/setup-linux` | `sh host/setup-linux-test.sh` and `shellcheck -s sh host/setup-linux host/setup-linux-test.sh` |
 | macOS sync side effects | `python3 -I host/macos/sync-test.py` |
