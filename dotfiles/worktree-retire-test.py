@@ -41,6 +41,19 @@ class WorktreeRetireTests(unittest.TestCase):
         return subprocess.run([str(TOOL), str(path), "--into", "main", *extra],
                               capture_output=True, text=True, env={**os.environ, **GIT_ENV})
 
+    def retire_from(self, path, into, cwd, *extra):
+        return subprocess.run([str(TOOL), str(path), "--into", into, *extra],
+                              capture_output=True, text=True, cwd=cwd, env={**os.environ, **GIT_ENV})
+
+    def integration_lane(self, name):
+        path = self.lane(name)
+        self.commit(path, "feature", "x\n")
+        self.git(self.repo, "branch", f"{name}-integration", "main")
+        integration = self.repo / ".work/wt" / f"{name}-integration"
+        self.git(self.repo, "worktree", "add", "-q", str(integration), f"{name}-integration")
+        self.git(integration, "merge", "-q", "--ff-only", name)
+        return path, integration
+
     def branches(self):
         return self.git(self.repo, "branch", "--format=%(refname:short)").split()
 
@@ -58,6 +71,31 @@ class WorktreeRetireTests(unittest.TestCase):
         self.assertEqual(self.git(path, "rev-parse", "HEAD"), self.git(campaign, "rev-parse", "HEAD"))
         self.assertTrue((path / "campaign-only").is_file())
         self.assertFalse((path / "main-only").exists())
+
+    def test_integration_head_retires_lane_and_deletes_its_branch(self):
+        path, integration = self.integration_lane("lane")
+        result = self.retire_from(path, "HEAD", integration)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(path.exists())
+        self.assertNotIn("lane", self.branches())
+        self.assertIn("deleted branch lane", result.stdout)
+
+    def test_integration_head_dry_run_reports_would_remove(self):
+        path, integration = self.integration_lane("dried")
+        result = self.retire_from(path, "HEAD", integration, "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("would remove", result.stdout)
+        self.assertTrue(path.exists())
+
+    def test_explicit_integration_sha_retires_and_deletes_branch_from_older_main(self):
+        path, integration = self.integration_lane("explicit")
+        sha = self.git(integration, "rev-parse", "HEAD")
+        self.assertNotEqual(sha, self.git(self.repo, "rev-parse", "main"))
+        result = self.retire_from(path, sha, self.repo)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(path.exists())
+        self.assertNotIn("explicit", self.branches())
+        self.assertIn("deleted branch explicit", result.stdout)
 
     def test_merged_lane_is_removed_with_its_branch(self):
         path = self.lane("merged")
