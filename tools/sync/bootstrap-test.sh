@@ -4,6 +4,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 tmp=${TMPDIR:-$root/.work/tmp}
 mkdir -p "$tmp"
 work=$(mktemp -d "$tmp/bootstrap-test.XXXXXX")
+unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME XDG_STATE_HOME
 trap 'rm -rf "$work"' 0
 fail() { printf 'bootstrap-test: %s\n' "$*" >&2; exit 1; }
 
