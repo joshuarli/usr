@@ -337,7 +337,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         try { devinAvailable = (await makeWorkerBridge(api, devinModel).modelCheck(dir)).available }
         catch (e) { devinIssue = String(e) }
         if (!devinAvailable && !devinIssue)
-          devinIssue = devinPreflight().issue ?? "Devin SWE-2 Medium is not authenticated in the Pi SDK"
+          devinIssue = devinPreflight().issue ?? "Devin SWE-2 Flash is not authenticated in the Pi SDK"
       }
       const devinInfo = { available: devinAvailable, issue: devinIssue }
       const museInfo = museModel ? { available: museAvailable, issue: museIssue, version: museVersion() } : { available: false, issue: null, version: null }

@@ -1014,7 +1014,7 @@ for (const tier of ["scout", "mechanic", "worker"] as const) {
         assert.equal(piCreates(m.calls).length, 1)
         const stored = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", started.session_id + ".json"), "utf8"))
         assert.deepEqual(stored.execution.selection, GO_TIER_MODELS[tier])
-        assert.deepEqual(stored.plan.pi.at(-1), GO_TIER_MODELS[tier])
+        assert.deepEqual(stored.plan.pi, ROOT_PLANS[tier].pi)
         assert.deepEqual((await makeHybridBridge(m.api, m.command, noCodex).status(f.cwd, started.session_id)).model, GO_TIER_MODELS[tier])
       } finally { f.close() }
     })
