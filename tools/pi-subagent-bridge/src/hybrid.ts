@@ -1,3 +1,4 @@
+import { fxResult, type FxAdapter } from "./fx.ts"
 import type { PiAdapter } from "./pi-adapter.ts"
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
@@ -19,8 +20,8 @@ import {
 } from "./inspect.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, backendOf, decodeSession, encodeSession,
-  executorOf, isSessionId, piFallbackPlan, processRun, transition, type PiFallbackPlan, type ProcessExecution,
-  type ProcessTarget, type Session, type SessionOwner,
+  executorOf, isSessionId, piFallbackPlan, processRun, processTarget, transition, type PiFallbackPlan, type ProcessExecution,
+  type ProcessTarget, type ExecutionPlan, type Session, type SessionOwner,
 } from "./session.ts"
 import type { Access } from "./launch.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
@@ -145,15 +146,21 @@ export function makeHybridBridge(api: PiAdapter, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
   antigravity = { start: startAntigravity, status: antigravityResult, cancel: cancelAntigravity, available: antigravityAvailable, session: antigravitySession },
-  resolvePolicy: (tier: Tier) => RootPlan = tier => ROOT_PLANS[tier]) {
-  const inspection: InspectionDeps = { api, command, codex, antigravity }
+  resolvePolicy: (tier: Tier) => ExecutionPlan = tier => ROOT_PLANS[tier], fx?: FxAdapter) {
+  const inspection: InspectionDeps = { api, command, codex, antigravity, fx: { status: fxResult } }
   let ownerResolver: OwnerResolver | undefined
   function runnerFor(executor: CliExecutor) {
     switch (executor) {
+      case "fx": { if (!fx) throw new Error("FX adapter unavailable"); return fx }
       case "antigravity": return antigravity
       case "codex": return codex
       case "command-code": return command
     }
+  }
+  function targetAvailable(target: ProcessTarget): boolean {
+    if (target.executor === "fx") return fx?.available(target.selection) === true
+    if (target.executor === "antigravity") return antigravity.available(target.selection)
+    return target.executor === "codex" ? codex.available() : command.available()
   }
   function observe(execution: ProcessExecution) {
     return runnerStatus(inspection, execution)
@@ -164,6 +171,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   function launch(s: Session, target: ProcessTarget, text: string, resume?: string): CommandRun {
     const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume }
     switch (target.executor) {
+      case "fx": { if (!fx) throw new Error("FX adapter unavailable"); return fx.start({ ...request, selection: target.selection, access: accessFor(s) }) }
       case "antigravity": return antigravity.start({ ...request, access: { kind: "write" } })
       case "codex": return codex.start({ ...request, access: accessFor(s) })
       case "command-code": return command.start({ ...request, access: accessFor(s) })
@@ -315,6 +323,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const dir = checkedWorktree(cwd)
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
       const plan = resolvePolicy(tierInput)
+      if (plan.kind === "leaf") return { primary: { backend: plan.target.executor, ...plan.target.selection, available: targetAvailable(plan.target) }, fallback: null }
       if (plan.kind === "exclusive") {
         return { primary: { backend: "antigravity", ...plan.target, available: antigravity.available(plan.target) },
           fallback: null, command_code: null, pi_fallback: null, muse: undefined, opencode_go: null }
@@ -367,11 +376,11 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if (git(dir, "status", "--porcelain", "--untracked-files=all")) throw new Error("Worker worktree must start clean")
       const task = required(brief, "brief", 32000)
       const plan = resolvePolicy(tierInput)
-      if (plan.kind === "exclusive") {
+      if (plan.kind === "exclusive" || plan.kind === "leaf") {
         if (activeWorktreeOwner(stateDir(dir), dir)) throw new Error("Worktree already has an active worker")
-        if (!antigravity.available(plan.target))
-          throw new Error("Pinned Antigravity model " + plan.target.model + " unavailable; run agy models and check account access. No fallback.")
-        const target: ProcessTarget = { executor: "antigravity", selection: plan.target }
+        const target: ProcessTarget = plan.kind === "exclusive" ? { executor: "antigravity", selection: plan.target } : plan.target
+        const available = targetAvailable(target)
+        if (!available) throw new Error(plan.kind === "exclusive" ? "Pinned Antigravity model " + plan.target.model + " unavailable; run agy models and check account access. No fallback." : "Pinned leaf runtime/model unavailable. No fallback.")
         const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
           task, plan, execution: { kind: "transition", to: target }, attempts: 0 }
@@ -474,7 +483,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
         else s.attempts++
-        const target: ProcessTarget = { executor: execution.executor, selection: execution.selection }
+        const target: ProcessTarget = processTarget(execution)
         transition(s, target)
         s.cancel_requested = false
         save(s)
@@ -555,9 +564,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if (previous.state !== "running")
         throw new Error("Command Code run is not running (state " + previous.state +
           "); use worker_resume for a finished session")
-      const sessionId = backend === "antigravity" ? antigravity.session(run) : backend === "codex" ? codex.session(run) : commandSession(run)
+      const sessionId = execution.executor === "fx" ? fx?.session(run, execution.selection) : backend === "command-code" ? commandSession(run) : backend === "codex" ? codex.session(run) : antigravity.session(run)
       if (!sessionId)
-        throw new Error("Command Code session identity is not recorded; cannot restart after steering")
+        throw new Error(execution.executor === "fx" ? "FX native session identity is not bound; steering is unavailable until it is recorded" : "Command Code session identity is not recorded; cannot restart after steering")
       await admitEffect?.()
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
       if (!runner.cancel(run, s.cwd))
@@ -571,7 +580,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if (state === "running")
         throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
       s.steers = (s.steers ?? 0) + 1
-      const target: ProcessTarget = { executor: backend, selection: execution.selection }
+      const target: ProcessTarget = processTarget(execution)
       transition(s, target)
       save(s)
       activateProcess(s, target, launch(s, target,

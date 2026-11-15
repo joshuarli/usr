@@ -1,3 +1,4 @@
+import { fxResult } from "./fx.ts"
 import type { PiAdapter } from "./pi-adapter.ts"
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { join } from "node:path"
@@ -7,7 +8,7 @@ import { changes, git, outside } from "./git.ts"
 import type { CliPin, FallbackPlan, PiSelection } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
-  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, backendOf, decodeSession, targetOf,
+  STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, backendOf, decodeSession, targetOf, processTarget,
   type FallbackUnresolvedPiPlan, type LadderPlan, type PiFirstPlan, type ProcessExecution, type ProcessTarget, type Session,
 } from "./session.ts"
 import type { Effort, Tier } from "./tier-policy.ts"
@@ -37,6 +38,7 @@ function classifyState(state: string): Attention {
 
 export type RunnerStatus = { state: string; result: CommandResult | null; stderr: string | null }
 export type InspectionDeps = {
+  fx?: { status: typeof fxResult }
   api: PiAdapter
   command: { status(run: CommandRun): RunnerStatus }
   codex: { status(run: CommandRun): RunnerStatus }
@@ -138,6 +140,7 @@ export function blockedPartialNotice(): string {
 }
 
 export function runnerStatus(deps: InspectionDeps, execution: ProcessExecution): RunnerStatus {
+  if (execution.executor === "fx") return (deps.fx?.status ?? fxResult)(execution.run, execution.selection)
   if (execution.executor === "antigravity") return deps.antigravity.status(execution.run, execution.selection)
   return (execution.executor === "codex" ? deps.codex : deps.command).status(execution.run)
 }
@@ -231,7 +234,7 @@ export function fallbackSource(s: Session, observation: Observation): FallbackSo
   }
   if (execution.kind !== "process" || s.fallback_blocked) return null
   if (observation.state !== "failed" || !(quota(observation.error) || providerUnavailable(observation.error))) return null
-  const from = { executor: execution.executor, selection: execution.selection }
+  const from: ProcessTarget = processTarget(execution)
   if (execution.executor === "codex")
     return plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ? { kind: "codex", from, plan } : null
   if (execution.executor === "command-code" && (plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ||

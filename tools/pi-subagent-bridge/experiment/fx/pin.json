@@ -1,0 +1,8 @@
+{
+  "version": "0.0.17",
+  "tag": "v0.0.17",
+  "source_revision": "d1d4a883382daf8f2e7447dc361978312cf403d2",
+  "asset": "fx-macos-aarch64.tar.gz",
+  "binary_sha256": "e840e7884b5c6a5c40d584770fd1b9dcee78fd5683994d85e32cf7f151959b4e",
+  "sha256": "5cacb5b3624a79db8fd4e31dcbc59d6a933d7e5ed4c397776d95df6b618296a9"
+}

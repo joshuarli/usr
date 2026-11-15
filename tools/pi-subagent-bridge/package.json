@@ -15,6 +15,9 @@
   "scripts": {
     "start": "node --experimental-strip-types src/server.ts",
     "test": ".dev/bin/tsrs -p tsconfig.json --noEmit && TSX_TSCONFIG_PATH=tsconfig.tsx.json node --import ./.dev/lib/node_modules/tsx/dist/loader.mjs --test test/*.test.ts",
+    "test:fx": ".dev/bin/tsrs -p tsconfig.experiment.json --noEmit && node --test test/fx.test.ts",
+    "spike:fx": "node experiment/fx/spike.mjs",
+    "bench:runtime": "node experiment/fx/spike.mjs --bench",
     "test:no-pi": "node --test test/no-pi.test.ts",
     "test:runtime-contract": "node test/runtime-contract.mjs",
     "test:core": ".dev/bin/tsrs -p tsconfig.core.json --noEmit && node test/core.mjs",

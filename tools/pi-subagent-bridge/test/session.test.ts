@@ -84,7 +84,7 @@ test("v1 lower-tier records convert to a typed fallback plan on every executor",
 
 test("records admitted with the retired network scope flag still decode, and re-encode without it", () => {
   for (const schema_version of [1, 2, undefined]) {
-    const legacy = schema_version === 2 ? JSON.parse(JSON.stringify(encodeSession(decode(lower())))) : lower({ schema_version })
+    const legacy = schema_version === 2 ? JSON.parse(JSON.stringify({ ...encodeSession(decode(lower())), schema_version: 2 })) : lower({ schema_version })
     const parsed = decode({ ...legacy, scope: { ...scope, network: true } })
     assert.deepEqual(parsed.scope, scope)
     assert.equal("network" in (encodeSession(parsed).scope as object), false)
@@ -165,7 +165,7 @@ test("incomplete or prohibited legacy records are refused for manual reconciliat
 
 test("unknown versions, removed tiers and malformed state fail at the boundary", () => {
   for (const malformed of [
-    { schema_version: 3 }, { schema_version: "1" }, { schema_version: "2" }, { tier: "god" }, { backend: "carbon" },
+    { schema_version: 4 }, { schema_version: "1" }, { schema_version: "2" }, { tier: "god" }, { backend: "carbon" },
     { id: "usrw_other" }, { cwd: "/tmp/another-worktree" }, { attempts: -1 }, { steers: 1.5 },
     { command_run: { ...run, pid: 0 } }, { command_run: { ...run, output: null } },
     { antigravity_pin: { model: "gemini-4-hydrogen-xhigh", effort: "unlimited" } },

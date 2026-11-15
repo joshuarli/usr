@@ -1,3 +1,4 @@
+import type { FxSelection } from "./fx.ts"
 import type { CommandRun, Effort } from "./command.ts"
 import {
   isBannedModel, type CliExecutor, type CliPin, type Executor, type FallbackPlan, type PiDestinations, type PiSelection,
@@ -8,20 +9,24 @@ import { isTier, type Tier } from "./tier-policy.ts"
 
 export const TURN_LIMIT_CONTINUATIONS = 2
 export const STEER_LIMIT = 2
-export const SESSION_VERSION = 2
+export const SESSION_VERSION = 3
 
 const SESSION_ID = /^usrw_[a-f0-9-]{36}$/
 export function isSessionId(value: string): boolean {
   return SESSION_ID.test(value)
 }
 
-export type ProcessTarget = { readonly executor: CliExecutor; readonly selection: CliPin }
+export type ProcessTarget =
+  | { readonly executor: Exclude<CliExecutor, "fx">; readonly selection: CliPin }
+  | { readonly executor: "fx"; readonly selection: FxSelection }
+export type LeafPlan = { readonly kind: "leaf"; readonly target: ProcessTarget }
+export type ExecutionPlan = RootPlan | LeafPlan
 /** `admitting` is the historical Pi admission state; only legacy records carry it. */
 export type PiTarget = { readonly executor: "pi"; readonly selection: PiSelection; readonly admitting?: true }
 export type Target = ProcessTarget | PiTarget
 
 export type Execution =
-  | { kind: "process"; executor: CliExecutor; selection: CliPin; run: CommandRun }
+  | (ProcessTarget & { kind: "process"; run: CommandRun })
   | { kind: "pi"; selection: PiSelection; session_id: string }
   | { kind: "transition"; to: Target; previous_run?: CommandRun; pi_id?: string }
 export type ProcessExecution = Extract<Execution, { kind: "process" }>
@@ -32,7 +37,7 @@ export type CommandFirstUnresolvedPiPlan = { readonly kind: "command-first-unres
 export type PiFirstPlan = { readonly kind: "pi-first"; readonly command: CliPin }
 /** Root plans plus the legacy arrangements records still carry; only resolved Pi plans can fall back to Pi. */
 export type AdmittedPlan =
-  | RootPlan | FallbackUnresolvedPiPlan | CommandFirstPlan | CommandFirstUnresolvedPiPlan | PiFirstPlan
+  | ExecutionPlan | FallbackUnresolvedPiPlan | CommandFirstPlan | CommandFirstUnresolvedPiPlan | PiFirstPlan
 export type PiFallbackPlan = FallbackPlan | CommandFirstPlan
 export type LadderPlan = FallbackPlan | FallbackUnresolvedPiPlan | CommandFirstPlan | CommandFirstUnresolvedPiPlan
 
@@ -73,10 +78,13 @@ export function backendOf(s: Session): string {
   if (to.executor === "pi") return to.admitting ? "pi-admitting" : "pi-transition"
   return to.executor === "command-code" ? "command-transition" : to.executor + "-transition"
 }
+export function processTarget(execution: ProcessExecution): ProcessTarget {
+  return execution.executor === "fx" ? { executor: "fx", selection: execution.selection } : { executor: execution.executor, selection: execution.selection }
+}
 function destinationOf(execution: Execution): Target {
   if (execution.kind === "transition") return execution.to
   if (execution.kind === "pi") return { executor: "pi", selection: execution.selection }
-  return { executor: execution.executor, selection: execution.selection }
+  return processTarget(execution)
 }
 export function targetOf(s: Session): Target {
   return destinationOf(s.execution)
@@ -95,7 +103,7 @@ export function transition(s: Session, to: Target, keepPrevious = false): void {
   s.execution = { kind: "transition", to, ...(previous_run ? { previous_run } : {}), ...(pi_id ? { pi_id } : {}) }
 }
 export function activateProcess(s: Session, target: ProcessTarget, run: CommandRun): void {
-  s.execution = { kind: "process", executor: target.executor, selection: target.selection, run }
+  s.execution = { ...target, kind: "process", run }
 }
 export function activatePi(s: Session, selection: PiSelection, session_id: string): void {
   s.execution = { kind: "pi", selection, session_id }
@@ -111,7 +119,7 @@ export function admittedEffort(s: Session): Effort {
 
 /** Flat watcher fields stay as derived projections; decoding ignores them. */
 export function encodeSession(s: Session) {
-  return { schema_version: SESSION_VERSION, ...s, backend: backendOf(s), command_run: processRun(s), pi_id: piId(s) }
+  return { schema_version: s.plan.kind === "leaf" ? SESSION_VERSION : 2, ...s, backend: backendOf(s), command_run: processRun(s), pi_id: piId(s) }
 }
 
 function optionalText(value: unknown, name: string): string | undefined {
@@ -158,7 +166,7 @@ function piList(selections: readonly PiSelection[]): [PiSelection, ...PiSelectio
   if (!first) throw new Error("Invalid persisted Pi plan")
   return [first, ...rest]
 }
-function cliExecutor(value: unknown): CliExecutor {
+function cliExecutor(value: unknown): Exclude<CliExecutor, "fx"> {
   if (value !== "codex" && value !== "command-code" && value !== "antigravity")
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   return value
@@ -172,6 +180,9 @@ function samePi(a: PiSelection, b: PiSelection): boolean {
 }
 function coherent(plan: AdmittedPlan, to: Target): boolean {
   switch (plan.kind) {
+    case "leaf":
+      if (to.executor === "pi" || to.executor !== plan.target.executor || !samePin(to.selection, plan.target.selection)) return false
+      return to.executor !== "fx" || (plan.target.executor === "fx" && to.selection.provider === plan.target.selection.provider && to.selection.runtimeVersion === plan.target.selection.runtimeVersion)
     case "exclusive": return to.executor === "antigravity" && samePin(to.selection, plan.target)
     case "fallback":
       return to.executor === "codex" ? samePin(to.selection, plan.codex) :
@@ -191,6 +202,11 @@ function coherent(plan: AdmittedPlan, to: Target): boolean {
 function decodePlan(value: unknown): AdmittedPlan {
   if (!isRecord(value)) throw new Error("Invalid persisted worker plan")
   switch (value.kind) {
+    case "leaf": {
+      const target = decodeTarget(value.target)
+      if (target.executor === "pi") throw new Error("A leaf plan requires a subprocess runtime")
+      return { kind: "leaf", target }
+    }
     case "exclusive": return { kind: "exclusive", target: pin(value.target) }
     case "fallback":
       return { kind: "fallback", codex: pin(value.codex), command: pin(value.command), pi: piList(piSelections(value.pi)) }
@@ -203,6 +219,10 @@ function decodePlan(value: unknown): AdmittedPlan {
 }
 function decodeTarget(value: unknown): Target {
   if (!isRecord(value)) throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
+  if (value.executor === "fx") {
+    if (!isRecord(value.selection) || value.selection.runtimeVersion !== "0.0.17") throw new Error("Unsupported persisted FX version")
+    return { executor: "fx", selection: { ...pin(value.selection), provider: requiredText(value.selection.provider, "FX provider", 128), runtimeVersion: "0.0.17" } }
+  }
   if (value.executor === "pi")
     return { executor: "pi", selection: piSelection(value.selection), ...(value.admitting === true ? { admitting: true } : {}) }
   return { executor: cliExecutor(value.executor), selection: pin(value.selection) }
@@ -210,8 +230,11 @@ function decodeTarget(value: unknown): Target {
 function decodeExecution(value: unknown): Execution {
   if (!isRecord(value)) throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   switch (value.kind) {
-    case "process":
-      return { kind: "process", executor: cliExecutor(value.executor), selection: pin(value.selection), run: commandRun(value.run) }
+    case "process": {
+      const target = decodeTarget(value)
+      if (target.executor === "pi") throw new Error("Pi is not a subprocess execution")
+      return { ...target, kind: "process", run: commandRun(value.run) }
+    }
     case "pi":
       return { kind: "pi", selection: piSelection(value.selection), session_id: requiredText(value.session_id, "Pi session", 32000) }
     case "transition": {
@@ -254,6 +277,7 @@ function legacyPlan(
   value: Record<string, unknown>, to: Target,
   lanes: { codex: CliPin | undefined; command: CliPin | undefined; primary: PiSelection | undefined; pending: PiSelection[] | undefined },
 ): AdmittedPlan {
+  if (to.executor === "fx") throw new Error("FX cannot occur in a legacy record")
   if (to.executor === "antigravity") return { kind: "exclusive", target: to.selection }
   const { codex, primary, pending } = lanes
   const command = admitted(lanes.command, "Command Code pin")
@@ -296,6 +320,7 @@ function decodeLegacy(value: Record<string, unknown>, tier: Tier): { plan: Admit
   const pending = value.pi_candidates === undefined ? undefined : piSelections(value.pi_candidates)
   let to: Target
   switch (lifecycle.executor) {
+    case "fx": throw new Error("FX cannot occur in a legacy record")
     case "antigravity": to = { executor: "antigravity", selection: admitted(antigravity, "Antigravity pin") }; break
     case "codex": to = { executor: "codex", selection: admitted(codex, "Codex pin") }; break
     case "command-code": to = { executor: "command-code", selection: admitted(command, "Command Code pin") }; break
@@ -311,7 +336,7 @@ function decodeLegacy(value: Record<string, unknown>, tier: Tier): { plan: Admit
     return { plan, execution: { kind: "pi", selection: to.selection, session_id: pi_id } }
   }
   if (!previous_run) throw new Error("Missing persisted worker process")
-  return { plan, execution: { kind: "process", executor: to.executor, selection: to.selection, run: previous_run } }
+  return { plan, execution: { ...to, kind: "process", run: previous_run } }
 }
 
 function decodeCurrent(value: Record<string, unknown>): { plan: AdmittedPlan; execution: Execution } {
@@ -328,10 +353,12 @@ function withoutRetiredScopeFields(scope: unknown): unknown {
 export function decodeSession(value: unknown, cwd: string, id: string): Session {
   if (!isRecord(value)) throw new Error("Invalid persisted worker session")
   const version = value.schema_version
-  if (version !== undefined && version !== 1 && version !== SESSION_VERSION)
+  if (version !== undefined && version !== 1 && version !== 2 && version !== SESSION_VERSION)
     throw new Error("Unsupported worker session version; manual reconciliation required")
   if (value.cwd !== cwd || value.id !== id || !isTier(value.tier)) throw new Error("Session/worktree mismatch")
-  const { plan, execution } = version === SESSION_VERSION ? decodeCurrent(value) : decodeLegacy(value, value.tier)
+  const { plan, execution } = (version === SESSION_VERSION || version === 2) ? decodeCurrent(value) : decodeLegacy(value, value.tier)
+  if (version === 2 && (plan.kind === "leaf" || destinationOf(execution).executor === "fx"))
+    throw new Error("FX/leaf routes require session schema 3; manual reconciliation required")
   if ((plan.kind === "exclusive" && value.tier !== "expert") || !coherent(plan, destinationOf(execution)))
     throw new Error("Execution leaves the admitted plan; manual reconciliation required")
   const s: Session = {

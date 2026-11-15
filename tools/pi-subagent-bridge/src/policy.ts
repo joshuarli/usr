@@ -6,13 +6,13 @@ import {
 } from "./tier-policy.ts"
 
 export type { Effort } from "./tier-policy.ts"
-export type Executor = "antigravity" | "codex" | "command-code" | "pi"
+export type Executor = "antigravity" | "codex" | "command-code" | "pi" | "fx"
 export type CliExecutor = Exclude<Executor, "pi">
 export type CliPin = { readonly model: string; readonly effort: Effort }
 export type PiSelection = { readonly providerID: string; readonly id: string; readonly variant: Effort }
 export type PiDestinations = readonly [PiSelection, ...PiSelection[]]
 export type Route =
-  | (CliPin & { readonly executor: CliExecutor })
+  | (CliPin & { readonly executor: Exclude<CliExecutor, "fx"> })
   | (CliPin & { readonly executor: "pi"; readonly providerID: string })
 
 export type RootPlan =
