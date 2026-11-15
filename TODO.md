@@ -37,14 +37,6 @@ Next: 73
 - **Effort:** S
 
 
-### USR-68 · P3 · Retire worktrees without failing branch cleanup against an older main
-
-- **Area:** Delegation
-- **Where:** dotfiles/base/.local/bin/worktree-retire:65-80; dotfiles/worktree-retire-test.py:64-81; original macOS source-link install e5018dceb8c7
-- **Problem:** With a clean child whose HEAD is an ancestor of an explicit integration SHA but ahead of canonical main, worktree-retire CHILD --into INTEGRATION_SHA removes CHILD and then exits 1 because git branch -d runs from older main. Originally reproduced retiring Stats platform-review at 9fdd75d8338 while canonical master remained a480b731f09. Reverified against current code in a disposable two-worktree Git fixture: --into HEAD --dry-run from the integration worktree returns 1 and retains the child; the exact integration SHA returns 1 after removing the child, retaining its branch. HEAD resolves against canonical main rather than the invoking worktree, and the partial-success exit contradicts the documented kept-on-error status.
-- **Recommendation:** Resolve caller-relative integration revisions before changing context. Keep branch deletion safe against the verified integration target, or retain the branch without treating successful worktree retirement as failure. Add a two-worktree regression with an integration branch ahead of canonical main.
-- **Fix with:** root-cause
-- **Effort:** S
 
 
 
