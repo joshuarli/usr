@@ -7,7 +7,7 @@ runs over SSH by its MagicDNS name, in parallel, each with its own `~/usr`.
   pull   fetch and fast-forward `main` (never merges, rebases or stashes)
   plan   fetch, then `sync plan` (read-only apart from the fetch)
   doctor fetch, then `sync doctor`
-  apply  pull, then `sync` on each host whose pull succeeded
+  apply  pull, then `sync` on each host whose checkout verified as updated
 """
 
 from __future__ import annotations
