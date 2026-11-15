@@ -9,8 +9,9 @@ import { fileURLToPath } from "node:url"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 import { readStateDir, stateDir } from "./git.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { GO_TIER_MODELS, MUSE_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
+import { GO_TIER_MODELS, MUSE_TIER_MODELS, DEVIN_TIER_MODELS, MAX_SUBAGENT_DEPTH } from "./tier-policy.ts"
 import { musePreflight } from "./muse-subscription.ts"
+import { devinPreflight } from "./devin-provider.ts"
 import { workerEnvironment } from "./worker-env.ts"
 
 type Result = {
@@ -121,13 +122,15 @@ function verifiedSessionPath(s: Stored, value: string | null): string {
 export function piPort(): OpenCodePort {
   return {
     async models() {
-      ensureOpenCodeApiKey()
+      // An authenticated Devin account must not require unrelated OpenCode credentials.
+      let goAuthenticated = false
+      try { ensureOpenCodeApiKey(); goAuthenticated = true } catch { /* independent providers */ }
       const { ModelRuntime } = await import("@earendil-works/pi-coding-agent")
       const runtime = await ModelRuntime.create()
       const available: Array<{
         id: string; providerID: string; enabled: boolean; status: string; variants: { id: string }[]
       }> = [...VARIANTS]
-        .filter(([id, config]) => runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
+        .filter(([id, config]) => goAuthenticated && runtime.getModel(config.providerID, id) && runtime.hasConfiguredAuth(config.providerID))
         .map(([id, config]) => ({
           id, providerID: config.providerID, enabled: true, status: "active",
           variants: [...config.variants].map((variant) => ({ id: variant })),
@@ -136,6 +139,12 @@ export function piPort(): OpenCodePort {
         available.push({
           id: MUSE_TIER_MODELS.worker.id, providerID: "muse-sdk", enabled: true, status: "active",
           variants: [{ id: MUSE_TIER_MODELS.worker.variant }],
+        })
+      }
+      if (devinPreflight().available) {
+        available.push({
+          id: DEVIN_TIER_MODELS.worker.id, providerID: "devin", enabled: true, status: "active",
+          variants: [{ id: DEVIN_TIER_MODELS.worker.variant }],
         })
       }
       return { data: available }
