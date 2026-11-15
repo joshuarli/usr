@@ -5,9 +5,9 @@ description: "Redesign or substantially polish an existing web app through real-
 
 # Refactor Web UI
 
-Treat web design as a product-quality engineering loop, not a one-pass CSS request. The deliverable is a coherent, readable daily-use interface whose interactions work across states and viewports. A passing build, an attractive hero screenshot, or a collection of generically styled components is not enough.
+Treat web design as a product-quality engineering loop, not a one-pass CSS request. The deliverable is a coherent, readable daily-use interface whose interactions work across states and viewports; a passing build or an attractive hero screenshot is not enough.
 
-The method is provider-independent: no v0, paid design API, image generation, or particular model vendor. A coding agent, a real browser, the existing component system, and an independent screenshot-capable critic suffice.
+The method is provider-independent: no v0, paid design API, or image generation. A coding agent, a real browser, the existing component system, and an independent screenshot-capable critic suffice.
 
 ## Scope and ownership
 
@@ -27,22 +27,23 @@ Before styling, write a short brief:
 3. Existing constraints: typography, spacing, color semantics, density, responsive behavior, themes.
 4. At least two substantively different compositions, rendered as small real prototypes for a major redesign, and the reason to prefer one. Prose mood boards prove nothing visual.
 
-Borrow interaction principles from strong products without copying branding or shipping generic SaaS chrome. Favor calm hierarchy, purposeful whitespace, consistent alignment, restrained color, and readable long-form content. Remove elements that serve no real user decision.
+Borrow interaction principles from strong products without copying branding. Favor calm hierarchy, consistent alignment, restrained color, and readable long-form content. Remove elements that serve no real user decision.
 
 ## Complete journeys, not a static frame
 
-Cover the product's empty state, busy everyday state, long or dense content, a consequential action, an error or disconnected state, and recovery; add loading, permission, search, keyboard, and touch variants where they apply.
+Cover the product's empty state, busy everyday state, long or dense content, a consequential action, an error or disconnected state, and recovery; add loading, permission, search, keyboard, and touch variants where they apply. When the fixture cannot produce distinct item identities, realistic long content, and failed or interrupted outcomes, extend the fixture before judging the design.
 
 - Keep context next to the action it explains; do not hide essential provenance or failure behind hover.
 - Label controls by native capability, including pending, unavailable, uncertain, and failed outcomes. Never fabricate success or add placeholder controls.
+- Seed a failed and an interrupted case for every status indicator and check each screenshot shows it. Trace a wrong state to the client mapping or the backend before restyling; file a backend cause with its owner.
 - Preserve scroll position, focus, and drafts across updates and navigation; do not auto-scroll a reader studying history. Narrow layouts keep their actions.
 - Audit clipping, wrapping, line length, code blocks, and long identifiers. Never ellipsize primary information without a full-value path.
-- Reserve color for state and emphasis. Avoid filler cards, decorative badges, over-boxing, gradients, competing type scales, and unconstrained animation.
+- Reserve color for state and emphasis. Avoid filler cards, decorative badges, over-boxing, gradients, and competing type scales.
 - Keyboard operation, semantic names, visible focus, touch targets, contrast, and reduced motion are in scope.
 
 ## Visual loop
 
-1. **Baseline.** Run the app with its documented fixture commands; capture before screenshots and record functional failures separately. Read the agent-browser skill and `agent-browser skills get core` before driving it. A code skim is not a browser inspection.
+1. **Baseline.** Run the app with its documented fixture commands; capture before screenshots and record functional failures separately. Read the agent-browser skill and `agent-browser skills get core` before driving it. Before restructuring, move browser-gate probes off class names, inline styles, and hard-coded colors onto test ids, ARIA state, and computed values, so the gates verify the redesign rather than block it.
 2. **Build.** Implement a coherent pass with real content and state transitions in small slices, with a browser check after each. Delete superseded CSS and markup instead of stacking overrides.
 3. **Independent critique.** Give rendered screenshots, the thesis, and the scenario to a screenshot-capable reviewer in a context that has not seen the builder's rationale. Require observed location, severity, and a concrete fix. Without such a critic, inspect the images yourself and say the review was not independent.
 4. **Repair by cause.** Fix hierarchy, layout ownership, flow, and information structure before microstyling; rerun the affected journey.
@@ -63,7 +64,7 @@ Check the built product, not component previews:
 - Stability under variable text and streaming or polling updates.
 - Build, typecheck, browser tests, and performance and asset-size deltas.
 
-Label screenshots by scenario and keep a short defect ledger. An unviewed screenshot diff is not approval. When an environment is absent, list the exact missing proof.
+Label screenshots by scenario and keep a short defect ledger. An unviewed screenshot diff is not approval. List any proof an absent environment prevents.
 
 ## Improve this skill from use
 
