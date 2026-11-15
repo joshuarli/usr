@@ -2,9 +2,9 @@
 
 ## Verdict
 
-**Limited-go for deterministic local qualification on native macOS ARM64.** The real CLI works through the shared bridge, including scope checks, leases, continuation and owner control. Live account behavior, intended-model quality and native Linux remain unqualified. Production promotion is prohibited.
+**Limited-go for deterministic local qualification on native macOS ARM64.** The real CLI works through the shared bridge, including scope checks, leases, continuation and owner control. The opt-in live pilot is implemented and was executed against a real provider account; it is parked on reproduced account blockers (no FX Codex login; exhausted OpenCode Go monthly quota that blocks the incumbent identically). Live model usefulness, intended-model quality and native Linux remain unqualified. Production promotion is prohibited.
 
-Accepted source checkpoints are `91642ad`, `6dd9583`, `c6f94ad`, `09815d1` and `d986a7f`, against runtime-independence baseline `2025e04`. The owner's existing Codex configuration change is excluded. No remote update, home sync, production route change, Pi removal or Intercom change was performed.
+Accepted source checkpoints are `91642ad`, `6dd9583`, `c6f94ad`, `09815d1`, `d986a7f`, `1422d6f` and `608e489`, against runtime-independence baseline `2025e04`. The owner's existing Codex configuration change is excluded. No remote update, home sync, production route change, Pi removal or Intercom change was performed.
 
 ## Release and installation
 
@@ -47,18 +47,34 @@ Commands run from `tools/pi-subagent-bridge`, using managed Node 26.13.1:
 | --- | --- |
 | `npm run spike:fx -- --setup` | Exact pinned installation in `.work/tmp/fx-spike/installed-home`; repeat setup preserves the verified pin. |
 | `npm run spike:fx -- --local` | Real CLI protocol and shared bridge scout, repair, same-session correction, steering, replay and interruption passed. |
-| `npm run test:fx` | Nine offline process/state contract cases passed. Fake binaries are used here; they are separate from real-binary qualification. |
-| `npm run test:runtime-contract -- --adapter fx` | 32 FX, saved-state, no-Pi and owner cases passed; zero skips. |
+| `npm run test:fx` | Nine offline process/state contract cases passed, plus secret-env-file, toolchain-PATH and auth-file-seeding cases. Fake binaries are used here; they are separate from real-binary qualification. |
+| `npm run test:runtime-contract -- --adapter fx` | 36 FX, saved-state, no-Pi and owner cases passed; zero skips. |
 | `npm run test:no-pi` | Passed with zero skips and zero trapped Pi accesses. |
-| `npm test` | 237 passed; only the existing opt-in live Muse test skipped. |
-| `npm run spike:fx -- --live` | Exit 75; zero jobs. Existing FX settings are not an account credential. The FX ChatGPT credential file was absent; no credentials were read/copied and no keychain was consulted. |
+| `npm test` | 245 passed; only the existing opt-in live Muse test skipped. |
+| `npm run spike:fx -- --live codex` | Exit 75; zero jobs. No FX-owned ChatGPT credential exists; the runner prints the exact `FX_HOME=<profile> fx login codex` handoff and starts nothing. |
+| `npm run spike:fx -- --live opencode-go` | Six bounded jobs admitted and run (report `.work/tmp/fx-live.json`). All three FX jobs reached the real OpenCode Go endpoint, retried `429 GoUsageLimitError` until their 15-minute deadlines and produced clean `deadline` receipts with zero worktree changes; all three incumbent Pi CLI jobs failed in ~1 s with the identical provider quota error. No model inference completed on either backend. |
 | `npm run bench:runtime` | Initial attempt deferred with gate exit 75. A later before/after gate window passed and produced interleaved local harness measurements. |
 
 Root checks also passed: policy generation, ten policy-generator tests, eight orchestration tests, changed Python Ruff/ty checks, TypeScript checks, Markdown links and `git diff --check`.
 
 An independent read-only review of `91642ad` found no demonstrated introduced P1/P2 defects. The parent checked the diff and clean review worktree. The subsequent cancellation-identity and unavailable-control guards have focused regression cases and real owner-control verification.
 
-Private replayable evidence is in `.work/tmp/fx-qualification.json`, `.work/tmp/fx-benchmark.json` and the fixture roots those files name. The review checkout is retained at `.work/wt/fx-review` as source evidence.
+Private replayable evidence is in `.work/tmp/fx-qualification.json`, `.work/tmp/fx-benchmark.json`, `.work/tmp/fx-live.json` and the fixture roots those files name. The review checkout is retained at `.work/wt/fx-review` as source evidence.
+
+## Live pilot
+
+`spike.mjs --live [profile]` replaces the former unconditional refusal with an opt-in runner (`experiment/fx/live-pilot.mjs`). It provisions a disposable Git repository containing Python, TypeScript and Rust work, selects one exact profile, and drives three bounded tasks (read-only scout, focused bug fix, multi-file rename with same-session correction) through the shared bridge owner controls, plus the matching incumbent backend where installed. Bounds: six new jobs, two corrections, 15-minute wall per job, 20 model steps.
+
+Two profiles exist. `codex` uses the built-in FX provider with the production Codex tier pins and requires `chatgpt-auth.json` inside a private `FX_HOME`; absence prints an exact `fx login codex` handoff and exits 75 without starting jobs. `opencode-go` configures a custom OpenAI Completions connection against `https://opencode.ai/inference/go/openai/v1` with the approved `deepseek-v4.1-flash`/high pin, bearer auth from `LIVE_PROVIDER_TOKEN` and the required `x-opencode-session` routing header from `LIVE_PROVIDER_SESSION`.
+
+Credential isolation is structural: the supervisor job record serializes only environment variable names and secret-file paths; values live in mode-0600 scratch files injected into the child environment at spawn. Verified on the live run: no token value appears anywhere under the run root, and FX settings reference only the environment variable name. `opencode auth export` supplies the bearer value without printing it; a random session ID is generated per run.
+
+Observed live results (report `.work/tmp/fx-live.json`, run root `.work/tmp/fx-live/run-a1hpy6`):
+
+- Wire path proven to the provider: FX authenticated, satisfied the session-header requirement and received real `429 GoUsageLimitError` responses; earlier direct probes confirmed `MissingSessionID` without the header and quota rejection with it.
+- FX retried the rate limit until each job's 900 s deadline, then produced `reason: "deadline"` receipts, `state: "failed"`, zero worktree changes and correct parent-check outcomes. Sampled whole-tree peak RSS was ~100 MiB per job.
+- The incumbent Pi CLI on the same account/model failed each task in ~1 s with the identical `GoUsageLimitError` ("monthly, resets in 14d 3h"), so the blocker is account quota, not an FX deficiency. No paired quality comparison is possible until quota or a Codex login exists.
+- Behavioral difference recorded: FX's recovery loop treats provider 429 as retryable for the full wall budget, while the Pi CLI surfaces the quota error immediately. Both remain inside their bounded contracts.
 
 ## Resource results and limits
 
@@ -79,7 +95,8 @@ Timing values and sample ranges are recorded in the benchmark artifact with `sou
 
 ## Parked proof and next boundary
 
-- **Live account/model qualification:** `npm run spike:fx -- --live` reports the bounded scope and refuses an unqualified account route. Establish an FX-owned ChatGPT account and verify the exact approved model/provider/effort before implementing or enabling live execution. Do not import unrelated client credentials or substitute metered Gateway access.
+- **Live account/model qualification:** implemented and executed; parked on reproduced blockers. Codex route: run `FX_HOME=/Users/josh/usr/.work/tmp/fx-live/fx-profile /Users/josh/usr/.work/tmp/fx-spike/installed-home/.local/bin/fx login codex` (browser login into the private profile), then `npm run spike:fx -- --live codex`. OpenCode Go route: provider reports the monthly quota resets in ~14 days; rerun `npm run spike:fx -- --live opencode-go` afterward. Do not import unrelated client credentials, prompt for secrets or substitute metered Gateway access. Until one route completes inference, live model usefulness and the Pi-route qualification below remain unproven.
+- **Pi-dependent route qualification:** no existing Pi route has been qualified through FX. The OpenCode Go worker route is the intended first candidate once its account quota resets; Codex-tier routes additionally require the ChatGPT login above. This is the remaining step toward the Pi-removal question and is explicitly not satisfied by the ChatGPT path alone.
 - **Native Linux:** qualify each musl architecture separately, including its exact artifact and libc linkage. This macOS pin provides no Linux, emulation or WASM proof.
 - **External consumers:** real agentctl and Intercom peer integrations were not exercised. Owner v1 fixtures and coordinator credential exclusion passed locally.
 - **Production decision:** no production lane is approved by this result. A rollout requires live intended-tier acceptance, resource qualification and a separate owner decision.
