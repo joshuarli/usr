@@ -458,12 +458,23 @@ def main(argv: list[str]) -> int:
     except OSError as exc:
         results = [Result(task.name, "failed", f"{type(exc).__name__}: {exc}")
                    for task in selected.order()]
+    results_by_name = {result.name: result for result in results}
+    soft = set(tolerated)
+    for task in selected.order():
+        result = results_by_name.get(task.name)
+        if result is None or result.state != "blocked" or task.name in soft:
+            continue
+        bad = [dep for dep in task.needs
+               if results_by_name.get(dep) is not None
+               and results_by_name[dep].state in ("failed", "blocked")]
+        if bad and all(dep in soft for dep in bad):
+            soft.add(task.name)
     for result in results:
-        if tolerated and result.name in tolerated and result.state in ("failed", "blocked"):
+        if result.name in soft and result.state in ("failed", "blocked"):
             print(f"TOLERATED {result.name}: {result.detail}")
         else:
             print(f"{result.state.upper():8} {result.name}: {result.detail}")
-    hard = [r for r in results if r.state in ("failed", "blocked") and r.name not in tolerated]
+    hard = [result for result in results if result.state in ("failed", "blocked") and result.name not in soft]
     return 1 if hard else 0
 
 
