@@ -2,11 +2,12 @@
 # Tests for ghostty-fda-check: granted, missing, unknown, and absent-app
 # verdicts, the settings pane opening, and its --no-open opt-outs.
 
-script="${PWD}/base/.local/bin/ghostty-fda-check"
+root=$(CDPATH='' cd -P "$(dirname "$0")/.." && pwd -P)
+script="$root/dotfiles/base/.local/bin/ghostty-fda-check"
 nfailed=0
 
-mkdir -p "${PWD}/../.work/tmp"
-scratch=$(mktemp -d "${PWD}/../.work/tmp/ghostty-fda.XXXXXX") || exit 1
+mkdir -p "$root/.work/tmp"
+scratch=$(mktemp -d "$root/.work/tmp/ghostty-fda.XXXXXX") || exit 1
 trap 'rm -rf "$scratch"' 0
 trap 'exit 1' HUP INT TERM
 
