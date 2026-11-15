@@ -17,15 +17,37 @@ test("public Codex lifecycle works with a physically Pi-free bridge", async () =
     cpSync(new URL("../package.json", import.meta.url), join(root, "tools/pi-subagent-bridge/package.json"))
     writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: { foreign: { command: "preserve" } } }))
     const installerEnv = { PATH: bin + ":/usr/bin:/bin", HOME: home, TMPDIR: root }
+    const guardedInstaller = `import runpy, sys, urllib.request
+def trapped(*args, **kwargs):
+    raise RuntimeError("TRAPPED installer network access")
+urllib.request.urlopen = trapped
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")
+`
     for (const action of ["install", "install", "check"]) {
-      execFileSync("python3", ["-I", join(root, "tools/sync/claude-worker.py"), action, "--core"], { env: installerEnv })
+      execFileSync("python3", ["-I", "-c", guardedInstaller, join(root, "tools/sync/claude-worker.py"), action, "--core"], { env: installerEnv })
     }
     assert.equal(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.foreign.command, "preserve")
+    const piHome = join(root, "pi-home"), piConfig = join(piHome, ".pi/agent/mcp.json"), companion = join(piHome, ".pi/agent/intercom/config.json")
+    mkdirSync(join(piHome, ".pi/agent/intercom"), { recursive: true })
+    writeFileSync(piConfig, JSON.stringify({ mcpServers: { foreign: { command: "preserve" } } }))
+    writeFileSync(companion, "preserve companion")
+    for (const action of ["install", "install", "check"]) {
+      execFileSync("python3", ["-I", "-c", guardedInstaller, join(root, "tools/sync/pi-worker.py"), action, "--core"], { env: { ...installerEnv, HOME: piHome } })
+    }
+    assert.equal(JSON.parse(readFileSync(piConfig, "utf8")).mcpServers.foreign.command, "preserve")
+    assert.equal(readFileSync(companion, "utf8"), "preserve companion")
+
     const hook = join(root, "trap.mjs")
     writeFileSync(hook, `
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import fs from 'node:fs';
 import cp from 'node:child_process';
+import http from 'node:http';
+import https from 'node:https';
+const noNetwork = () => { throw new Error('TRAPPED network access'); };
+globalThis.fetch = noNetwork;
+http.request = http.get = https.request = https.get = noNetwork;
 registerHooks({ resolve(specifier, context, next) {
   if (/pi-port|pi-coding-agent|pi-subagents|pi-muse|yaml/.test(specifier)) throw new Error('TRAPPED Pi access: '+specifier);
   return next(specifier, context);
@@ -62,9 +84,10 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
     const scope = join(root, "scope.json"), brief = join(root, "brief")
     writeFileSync(scope, JSON.stringify({ base_revision: git("rev-parse", "HEAD"), writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }))
     writeFileSync(brief, "Perform fixture task")
-    const cli = (...args: string[]) => JSON.parse(execFileSync(process.execPath, ["--import", hook, join(source, "cli.ts"), ...args], {
+    const cliText = (...args: string[]) => execFileSync(process.execPath, ["--import", hook, join(source, "cli.ts"), ...args], {
       encoding: "utf8", timeout: 15000, env: { PATH: bin + ":/usr/bin:/bin", HOME: home, TMPDIR: root },
-    }))
+    })
+    const cli = (...args: string[]) => JSON.parse(cliText(...args))
     assert.ok(cli("policy").tiers)
     const started = cli("start", cwd, "fixture", "worker", scope, brief)
     assert.equal(started.backend, "codex")
@@ -78,6 +101,8 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
     }
     assert.equal((await wait()).state, "succeeded")
     assert.equal(cli("inspect", root, started.session_id).execution_state, "succeeded")
+    assert.equal(cliText("watch", "--state", root, started.session_id).trim(), "succeeded")
+    assert.ok(cli("campaign", "list", "--json", root).some((job: { id: string }) => job.id === started.session_id))
     cli("resume", cwd, started.session_id, brief)
     assert.equal((await wait()).state, "succeeded")
     assert.match(readFileSync(join(root, "args"), "utf8"), /resume\nfixture-thread/)
@@ -126,6 +151,19 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
       const fallbackPath = cli("start", cwd, "home executable", "worker", scope, brief)
       assert.equal(fallbackPath.backend, "codex")
       assert.equal((await wait(fallbackPath.session_id)).state, "succeeded")
+      writeFileSync(join(root, "hold"), "hold")
+      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "worker_start", arguments: { cwd, title: "cancel fixture", tier: "worker", scope: JSON.parse(readFileSync(scope, "utf8")), brief: "Perform fixture task" } } }) + "\n")
+      for (let i = 0; i < 100 && output.trim().split("\n").length < 3; i++) await new Promise(resolve => setTimeout(resolve, 50))
+      const cancelResponse = JSON.parse(output.trim().split("\n")[2])
+      assert.equal(cancelResponse.result.isError, undefined)
+      const cancelled = JSON.parse(cancelResponse.result.content[0].text)
+      await new Promise(resolve => setTimeout(resolve, 100))
+      assert.equal(cli("cancel", cwd, cancelled.session_id).interrupted, false)
+      const cancelJob = cli("owner", "jobs", ...ownerArgs).find((entry: { job_id: string }) => entry.job_id === cancelled.session_id)
+      const cancelTarget = ["--job", cancelJob.job_id, "--run", cancelJob.run_id, "--generation", String(cancelJob.owner_generation)]
+      assert.equal(cli("owner", "interrupt", ...ownerArgs, ...cancelTarget, "--command", "fixture-interrupt").receipt, "accepted")
+      assert.notEqual((await wait(cancelled.session_id)).state, "running")
+      rmSync(join(root, "hold"))
 
     } finally {
       child.stdin.end()
