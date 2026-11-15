@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { spawn, spawnSync } from "node:child_process"
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -39,12 +39,56 @@ test("stdio MCP handshake, tool discovery and malformed tool rejection need no O
   assert.equal(replies.find((r) => r.id === 3)?.error?.code, -32602)
 })
 
+test("an MCP server whose source changed under it replies with a restart instruction (USR-78)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "usr-mcp-stale-"))
+  const source = join(root, "src")
+  mkdirSync(source)
+  for (const file of readdirSync(fileURLToPath(new URL("../src", import.meta.url)))) {
+    if (file.endsWith(".ts")) copyFileSync(fileURLToPath(new URL("../src/" + file, import.meta.url)), join(source, file))
+  }
+  const child = spawn(process.execPath, ["--experimental-strip-types", join(source, "server.ts")], {
+    cwd: root, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: "", USR_OPENCODE_WORKER_TEST: "" },
+  })
+  let output = ""
+  child.stdout.setEncoding("utf8")
+  child.stdout.on("data", (chunk: string) => { output += chunk })
+  const writeRequest = (request: object) => child.stdin.write(JSON.stringify(request) + "\n")
+  const waitFor = async (id: number) => {
+    for (let i = 0; i < 500; i++) {
+      const reply = output.trim().split("\n").map(line => { try { return JSON.parse(line) } catch { return null } })
+        .find(parsed => parsed?.id === id)
+      if (reply) return reply
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    throw new Error("no reply for request " + id + "; got:\n" + output)
+  }
+  try {
+    writeRequest({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } })
+    writeRequest({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "worker_model_check", arguments: { cwd: "/no-worktree", tier: "worker" } } })
+    const first = await waitFor(2)
+    assert.equal(first.result?.isError, true)
+    assert.doesNotMatch(first.result?.content?.[0]?.text ?? "", /restart/)
+    // A fast-forward lands under the running server: the source changed after start.
+    const tierPolicy = join(source, "tier-policy.ts")
+    writeFileSync(tierPolicy, readFileSync(tierPolicy, "utf8") + "\n// source changed under the server\n")
+    writeRequest({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "worker_model_check", arguments: { cwd: "/no-worktree", tier: "worker" } } })
+    const second = await waitFor(3)
+    assert.equal(second.result?.isError, true)
+    assert.match(second.result?.content?.[0]?.text ?? "", /restart/)
+    assert.doesNotMatch(second.result?.content?.[0]?.text ?? "", /SyntaxError/)
+  } finally {
+    child.stdin.end()
+    await new Promise<void>(resolve => { child.on("close", () => resolve()); child.kill() })
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test("MCP discovery shares policy schemas and rejects malformed scopes before loading providers", () => {
   const root = mkdtempSync(join(tmpdir(), "usr-mcp-policy-"))
   try {
     const source = join(root, "src")
     mkdirSync(source)
-    for (const file of ["server.ts", "commands.ts", "policy.ts", "tier-policy.ts", "scope.ts"]) {
+    for (const file of ["server.ts", "commands.ts", "policy.ts", "tier-policy.ts", "scope.ts", "source-manifest.ts"]) {
       copyFileSync(fileURLToPath(new URL("../src/" + file, import.meta.url)), join(source, file))
     }
     const scope = { base_revision: "a".repeat(40), writable_paths: ["src/"],

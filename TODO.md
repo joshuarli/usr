@@ -16,15 +16,6 @@ Next: 81
 
 
 
-### USR-78 · P2 · long-lived bridge MCP model checks fail after policy updates
-
-- **Area:** Delegation
-- **Where:** tools/pi-subagent-bridge/src/cli.ts (MCP mode), src/policy.ts, src/tier-policy.ts
-- **Problem:** On macOS 27.2, repeated worker_model_check requests for a clean mechanic worktree fail with SyntaxError: tier-policy.ts does not provide an export named DEVIN_TIER_MODELS. The same source-linked installation at ff3059803c7e2615e29e5ee1a3b292764496ddc2 succeeds through a fresh pi-subagent-bridge model-check CWD mechanic process and reports available providers. Ownership is verified as joshuarli/usr by repomod which.py with source-link evidence. Current policy.ts imports and tier-policy.ts exports agree, so stale long-lived MCP module state is suspected but unproven. MCP admission was unavailable during the bctl Helium release cleanup; the fresh CLI is a supported workaround.
-- **Recommendation:** Reproduce a policy update with a running MCP server and compare the same read-only model check through MCP and a fresh CLI. Establish whether server module caching or deployed module mismatch causes the import failure, then make policy rollout consistent or return an actionable reload instruction. Regression acceptance: both interfaces return the same admitted pins after an update without starting a worker or throwing a missing-export SyntaxError.
-- **Fix with:** root-cause
-- **Effort:** M
-
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
 
 - **Area:** Skills

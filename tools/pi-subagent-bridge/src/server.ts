@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { createInterface } from "node:readline"
 import { COMMANDS, COMMAND_NAMES, decodeCommand, toolSchema, type Command } from "./commands.ts"
 import { isRecord } from "./scope.ts"
+import { snapshotSource, sourceChanged, type SourceSnapshot } from "./source-manifest.ts"
 
 const VERSION = "0.3.0"
 const PROTOCOL = "2025-06-18"
@@ -41,6 +42,8 @@ export type ServeOptions = {
 }
 
 export function serve(load: () => Promise<Bridge> = connect, options?: ServeOptions): void {
+  const verifySource = load === connect
+  const sourceAtStart: SourceSnapshot | undefined = verifySource ? snapshotSource() : undefined
   const manageOwner = load === connect || (options?.ownerRepos !== undefined && options.ownerRepos.length > 0)
   let ownerManagerPromise: Promise<{ ensureRepo(dir: string): Promise<unknown>; close(): Promise<void> }> | undefined
   let cached: Promise<Bridge> | undefined
@@ -88,6 +91,15 @@ export function serve(load: () => Promise<Bridge> = connect, options?: ServeOpti
     if (method === "ping") { write({ jsonrpc: "2.0", id, result: {} }); return }
     if (method === "tools/list") { write({ jsonrpc: "2.0", id, result: { tools } }); return }
     if (method !== "tools/call") { rpcError(id, -32601, `Method not found: ${method}`); return }
+    if (sourceAtStart) {
+      const changed = sourceChanged(sourceAtStart)
+      if (changed) {
+        write({ jsonrpc: "2.0", id, result: { content: [{ type: "text",
+          text: "pi-subagent-bridge source changed under this running MCP server (" + changed +
+            "); restart the harness's MCP registration or use the pi-subagent-bridge CLI, then retry." }], isError: true } })
+        return
+      }
+    }
     try {
       const params = isRecord(message.params) ? message.params : {}
       const name = COMMAND_NAMES.find(name => COMMANDS[name].tool === params.name)
