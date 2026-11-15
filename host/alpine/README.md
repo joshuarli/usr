@@ -128,10 +128,9 @@ to use Docker without `doas` or `sudo`.
 
 Provisioning creates an unencrypted Ed25519 GitHub key at `~/.ssh/github` when
 that path is unused. It prints the public key for you to add to GitHub and never
-prints or uploads the private key. Preflight currently compares the entire public
-key line, so a different comment causes a valid pair to be rejected as mismatched.
-Preserve the existing pair when investigating that error; a comment difference
-does not require generating a replacement key.
+prints or uploads the private key. The preflight check compares the key type and
+encoded key material and ignores the comment, so an existing valid pair passes
+regardless of either comment.
 The `setup.sh` bootstrap logs in with `gh` when needed and uploads the public
 key as an authentication key. Set `GH_TOKEN` to a token with the
 `admin:public_key` scope to skip the device login. GitHub CLI stores its token

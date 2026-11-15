@@ -69,7 +69,7 @@ check_github_key() {
 		[ "$(stat -c %u "$github_key")" = "$uid" ] && [ "$(stat -c %u "$github_pub")" = "$uid" ] ||
 			die "$github_key and $github_pub must be owned by $user"
 		command -v ssh-keygen >/dev/null || die 'ssh-keygen is required to check the existing GitHub key; install openssh-keygen'
-		if ! ssh-keygen -y -P '' -f "$github_key" 2>/dev/null | cmp -s - "$github_pub"; then
+		if ! sh pubkey-same.sh "$github_key" "$github_pub"; then
 			die "$github_key must be an unencrypted key matching $github_pub; move both aside to generate a new key"
 		fi
 		ssh-keygen -lf "$github_pub" 2>/dev/null | grep -q '(ED25519)$' ||

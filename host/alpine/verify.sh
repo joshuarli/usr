@@ -31,7 +31,7 @@ github_key_matches_user() {
 	[ "$(stat -c %u:%g:%a "$home/.ssh" 2>/dev/null)" = "$uid:$gid:700" ] || return 1
 	[ "$(stat -c %u:%g:%a "$github_key" 2>/dev/null)" = "$uid:$gid:600" ] || return 1
 	[ "$(stat -c %u:%g:%a "$github_pub" 2>/dev/null)" = "$uid:$gid:644" ] || return 1
-	ssh-keygen -y -P '' -f "$github_key" 2>/dev/null | cmp -s - "$github_pub" || return 1
+	sh pubkey-same.sh "$github_key" "$github_pub" || return 1
 	ssh-keygen -lf "$github_pub" 2>/dev/null | grep -q '(ED25519)$'
 }
 doas_policy_matches_user() {
