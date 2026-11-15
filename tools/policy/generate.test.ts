@@ -138,6 +138,7 @@ test("retired roles cannot silently survive in native profiles or harness config
     for (const [tier, children] of Object.entries(policy.nativePi.delegation))
       Reflect.set(policy.nativePi.delegation, tier, children.filter(child => child !== "mechanic"))
     Reflect.set(policy.nativePi.museDelegation, "worker", policy.nativePi.museDelegation.worker.filter(child => child !== "mechanic"))
+    Reflect.set(policy.nativePi.devinDelegation, "worker", policy.nativePi.devinDelegation.worker.filter(child => child !== "mechanic"))
     Reflect.set(policy.nativeFallback, "tiers", policy.nativeFallback.tiers.filter(tier => tier !== "mechanic"))
     const before = f.paths.map(path => readFileSync(join(f.root, path), "utf8"))
     assert.throws(() => renderOutputs(f.root, policy), /Retired native profile mechanic: explicitly remove/)
