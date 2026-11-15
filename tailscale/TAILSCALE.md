@@ -150,3 +150,7 @@ Date: 2026-10-25. This Mac uses Tailscale 1.104.1. `threadripper` uses 1.102.5. 
 - [ ] Restore MagicDNS lookups on `box`. Its Unbound resolver returns `NXDOMAIN` for tailnet hostnames, and direct queries to its local Quad100 resolver return `SERVFAIL`. The `tailscale` client is 1.102.5 while the running daemon is 1.90.9, so `tailscale dns status` returns 404. Restart the daemon only from a local console or a separate management path.
 
 The CLI does not manage the tailnet ACL policy, device approval, or auth-key inventory in the commands available on this Mac. Device approval is not a pending toggle while Tailnet Lock is enabled.
+
+## Host aliases
+
+`policy.json` names the usr machines in `hosts` (MagicDNS name to tailnet IP). No rule references these aliases, so they grant nothing; `sh sync hosts` reads the map as its fleet. Update the IP when a machine is re-added to the tailnet, then `make check` and `make apply`.
