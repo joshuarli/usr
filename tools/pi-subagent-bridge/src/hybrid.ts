@@ -219,6 +219,12 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       }
     }
   }
+  /** Refreshes the worktree's lease holder so a session that already ended releases its lease before a new admission. */
+  async function settleHolder(leaseDir: string, dir: string): Promise<void> {
+    const holder = activeWorktreeOwner(leaseDir, dir)
+    if (holder === null) return
+    try { await advance(dir, holder) } catch { /* claimWorktree reports the holder */ }
+  }
   async function advance(cwd: unknown, id: unknown): Promise<{ session: Session; known?: Known }> {
     return withSessionLock(cwd, id, async (s) => {
       const observation = await observeExecution(s, stateDir(s.cwd), inspection)
@@ -371,6 +377,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
           task, plan, execution: { kind: "transition", to: target }, attempts: 0 }
         const leaseDir = stateDir(dir)
+        await settleHolder(leaseDir, dir)
         claimWorktree(leaseDir, dir, s.id)
         try {
           const owner = await ownerResolver?.(leaseDir)
@@ -390,6 +397,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
         task, plan, execution: { kind: "transition", to: codexTarget }, attempts: 0 }
       const leaseDir = stateDir(dir)
+      await settleHolder(leaseDir, dir)
       claimWorktree(leaseDir, dir, s.id)
       try {
         const owner = await ownerResolver?.(leaseDir)

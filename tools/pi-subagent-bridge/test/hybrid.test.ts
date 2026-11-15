@@ -1201,3 +1201,15 @@ test("an order-less legacy Pi record still falls back to Command Code on a provi
     assert.equal(commandCalls(m.calls).length, 1)
   } finally { f.close() }
 })
+
+test("USR-77: a finished session's lease is released when a new worker starts without a status refresh", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command, noCodex)
+    await bridge.start(f.cwd, "first", "worker", f.scope, "Edit README")
+    await assert.rejects(bridge.start(f.cwd, "busy", "worker", f.scope, "Edit README"), /active worker/)
+    m.done()
+    const next = await bridge.start(f.cwd, "second", "worker", f.scope, "Edit README")
+    assert.equal(next.status, "admitted")
+  } finally { f.close() }
+})

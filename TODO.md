@@ -16,26 +16,6 @@ Next: 79
 
 
 
-### USR-76 · P2 · pi-subagent-bridge treats directory scopes without a trailing slash as single files
-
-- **Area:** pi-subagent-bridge
-- **Where:** `tools/pi-subagent-bridge/src/git.ts` (`outside`), `src/scope.ts` (writable_paths validation)
-- **Problem:** On 2026-11-15, four Asterinas kernel workers got `writable_paths` such as `kernel` and `test/initramfs/src/regression`. `outside()` treats an entry as a directory only when it ends in `/`, so every file the workers changed under those directories was reported out of scope. `resume` then refused with `Cannot resume changed HEAD or out-of-scope work`. Admission accepted the scope without warning.
-- **Recommendation:** At admission, reject or normalize an entry that names an existing directory without the trailing slash, or match an entry as a path prefix at a `/` boundary.
-- **Fix with:** A scope test where `kernel` admits `kernel/core/x.rs`, or where admission rejects the ambiguous entry with a message naming it
-- **Effort:** S
-
-
-### USR-77 · P2 · A finished incomplete or blocked session keeps its worktree locked after cancel
-
-- **Area:** pi-subagent-bridge
-- **Where:** `tools/pi-subagent-bridge/src/` (active-worker check in `start`, `cancel`)
-- **Problem:** On 2026-11-15, three sessions ended with `ACCEPTANCE: not met` on legitimate stop conditions, and one stopped on a provider usage limit. Each left its worktree clean. `start` with a corrected scope in the same worktree failed with `Worktree already has active worker <id>; inspect it before starting another`, and `cancel` did not release the worktree (`interrupted: false`). The only workaround was a new worktree per retry.
-- **Recommendation:** Treat a session whose process has exited and whose state is incomplete or finished as inactive for `start`, or make `cancel` mark such a session released once the worktree is verified clean.
-- **Fix with:** A test that starts, lets the worker finish incomplete with a clean worktree, and then admits a new session in the same worktree
-- **Effort:** S
-
-
 ### USR-78 · P2 · long-lived bridge MCP model checks fail after policy updates
 
 - **Area:** Delegation
