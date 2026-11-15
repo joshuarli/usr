@@ -10,6 +10,8 @@ Pins live in the repository's own manifests; fleet approvals live in stuff's `fl
 
 A lower count is evidence only when the claim that replaced each hatch is sound (typing-audit).
 
+**Run heavy tools under a CPU cap.** Locally, wrap every mutation, coverage, or whole-suite run in `cpu-guard --cores N --`, with N at most half the host's cores and leaving room for other lanes; add `--spin 300` when no step legitimately holds a core that long. A confirmed hang costs the suite's full parallelism for the whole rerun timeout: on loc, each rerun held about ten cores for 60s, so cap the suite's own threads in mutation runs and count rerun cost in the budget.
+
 ## Rust
 
 | Purpose | Tool | Recipe |
