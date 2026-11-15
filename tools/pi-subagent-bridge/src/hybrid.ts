@@ -108,6 +108,15 @@ function untouched(s: Session): boolean {
   return git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision &&
     changes(s.cwd, s.scope.base_revision).length === 0
 }
+/** Name the drift that blocks a resume or steer: moved HEAD, or the out-of-scope paths. */
+function describeDrift(cwd: string, baseRevision: string, writablePaths: string[]): string {
+  const head = git(cwd, "rev-parse", "HEAD")
+  const details: string[] = []
+  if (head !== baseRevision) details.push("HEAD is " + head.slice(0, 12) + ", expected base " + baseRevision.slice(0, 12))
+  const paths = outside(changes(cwd, baseRevision), writablePaths)
+  if (paths.length) details.push("out-of-scope: " + paths.slice(0, 5).join(", ") + (paths.length > 5 ? " (+" + (paths.length - 5) + " more)" : ""))
+  return details.join("; ") || "work drifted from the admitted scope"
+}
 export type OwnerResolver = (stateDirectory: string) => Promise<SessionOwner | undefined> | SessionOwner | undefined
 export type OwnerEffectAdmit = () => Promise<void> | void
 export type OwnerPrecheckReason = "not-running"
@@ -440,7 +449,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         throw new Error("Turn-limit continuation limit reached")
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
-        throw new Error("Cannot resume changed HEAD or out-of-scope work")
+        throw new Error("Cannot resume changed HEAD or out-of-scope work: " + describeDrift(s.cwd, s.scope.base_revision, s.scope.writable_paths))
       if (s.execution.kind === "transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
@@ -523,7 +532,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if ((s.steers ?? 0) >= STEER_LIMIT) throw new Error("Steer limit reached for this session")
       if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
-        throw new Error("Cannot steer changed HEAD or out-of-scope work")
+        throw new Error("Cannot steer changed HEAD or out-of-scope work: " + describeDrift(s.cwd, s.scope.base_revision, s.scope.writable_paths))
       if (s.execution.kind === "pi") {
         const sessionId = s.execution.session_id
         const worker = api(s.execution.selection)

@@ -519,7 +519,8 @@ test("fallback Pi writer still blocks out-of-scope edits", async () => {
     const status = await bridge.status(f.cwd, task.session_id)
     assert.equal(status.acceptance_blocked, true)
     assert.deepEqual(status.out_of_scope_paths, ["unrelated"])
-    await assert.rejects(bridge.resume(f.cwd, task.session_id, "fix tests"), /out-of-scope/)
+    await assert.rejects(bridge.resume(f.cwd, task.session_id, "fix tests"),
+      /out-of-scope: unrelated/)
   } finally { f.close() }
 })
 
@@ -629,7 +630,8 @@ test("worker_steer refuses changed HEAD and out-of-scope work exactly like resum
     await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"), /out-of-scope/)
     rmSync(join(f.cwd, "unrelated"))
     git(f.cwd, "commit", "--allow-empty", "-qm", "moved")
-    await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"), /changed HEAD/)
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"),
+      /changed HEAD or out-of-scope work: HEAD is [0-9a-f]{12}, expected base [0-9a-f]{12}/)
     assert.equal(commandCalls(m.calls).length, 1)
   } finally { f.close() }
 })
