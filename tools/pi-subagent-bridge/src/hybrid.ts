@@ -17,7 +17,7 @@ import {
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, backendOf, decodeSession, encodeSession,
   executorOf, isSessionId, piFallbackPlan, processRun, transition, type PiFallbackPlan, type ProcessExecution,
-  type ProcessTarget, type Session,
+  type ProcessTarget, type Session, type SessionOwner,
 } from "./session.ts"
 import type { Access } from "./launch.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
@@ -103,12 +103,37 @@ function untouched(s: Session): boolean {
   return git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision &&
     changes(s.cwd, s.scope.base_revision).length === 0
 }
+export type OwnerResolver = (stateDirectory: string) => Promise<SessionOwner | undefined> | SessionOwner | undefined
+export type OwnerEffectAdmit = () => Promise<void> | void
+export type OwnerPrecheckReason = "not-running"
+export class OwnerPrecheckError extends Error {
+  readonly reason: OwnerPrecheckReason
+  constructor(reason: OwnerPrecheckReason, message: string) {
+    super(message)
+    this.reason = reason
+  }
+}
+export type HybridOwnerOps = {
+  readonly inspection: InspectionDeps
+  setOwnerResolver(resolver: OwnerResolver | undefined): void
+  resumeForOwner(cwd: unknown, id: unknown, feedback: unknown, admitEffect: OwnerEffectAdmit): Promise<unknown>
+  steerForOwner(cwd: unknown, id: unknown, note: unknown, admitEffect: OwnerEffectAdmit): Promise<unknown>
+  cancelForOwner(cwd: unknown, id: unknown, admitEffect: OwnerEffectAdmit): Promise<{ interrupted: boolean }>
+}
+
+const ownerOpsRegistry = new WeakMap<object, HybridOwnerOps>()
+
+export function hybridOwnerOps(bridge: object): HybridOwnerOps | undefined {
+  return ownerOpsRegistry.get(bridge)
+}
+
 export function makeHybridBridge(api: OpenCodePort, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
   antigravity = { start: startAntigravity, status: antigravityResult, cancel: cancelAntigravity, available: antigravityAvailable, session: antigravitySession },
   resolvePolicy: (tier: Tier) => RootPlan = tier => ROOT_PLANS[tier]) {
   const inspection: InspectionDeps = { api, command, codex, antigravity }
+  let ownerResolver: OwnerResolver | undefined
   function runnerFor(executor: CliExecutor) {
     switch (executor) {
       case "antigravity": return antigravity
@@ -265,7 +290,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       fallback_notice: s.fallback_reason ? fallbackNotice(s) : null,
     }
   }
-  return {
+  const bridge = {
     async modelCheck(cwd: unknown, tierInput: unknown) {
       const dir = checkedWorktree(cwd)
       if (!isTier(tierInput)) throw new Error("Unknown Pi tier")
@@ -334,7 +359,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
           task, plan, execution: { kind: "transition", to: target }, attempts: 0 }
         const leaseDir = stateDir(dir)
         claimWorktree(leaseDir, dir, s.id)
-        try { save(s) } catch (error) {
+        try {
+          const owner = await ownerResolver?.(leaseDir)
+          if (owner) s.owner = owner
+          save(s)
+        } catch (error) {
           releaseWorktree(leaseDir, dir, s.id)
           throw error
         }
@@ -349,7 +378,11 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         task, plan, execution: { kind: "transition", to: codexTarget }, attempts: 0 }
       const leaseDir = stateDir(dir)
       claimWorktree(leaseDir, dir, s.id)
-      try { save(s) } catch (error) {
+      try {
+        const owner = await ownerResolver?.(leaseDir)
+        if (owner) s.owner = owner
+        save(s)
+      } catch (error) {
         releaseWorktree(leaseDir, dir, s.id)
         throw error
       }
@@ -378,7 +411,17 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       return statusResponse(await inspectSession(advanced.session, readStateDir(advanced.session.cwd), inspection, advanced.known))
     },
     async resume(cwd: unknown, id: unknown, feedback: unknown) {
-      return withSessionLock(cwd, id, async (s) => {
+      return runResume(cwd, id, feedback)
+    },
+    async cancel(cwd: unknown, id: unknown) {
+      return runCancel(cwd, id, false)
+    },
+    async steer(cwd: unknown, id: unknown, note: unknown) {
+      return runSteer(cwd, id, note)
+    },
+  }
+  async function runResume(cwd: unknown, id: unknown, feedback: unknown, admitEffect?: OwnerEffectAdmit) {
+    return withSessionLock(cwd, id, async (s) => {
       const correction = required(feedback, "feedback", 32000)
       const continuation = s.execution.kind === "process" && s.execution.executor === "command-code" &&
         command.status(s.execution.run).state === "turn_limit"
@@ -393,6 +436,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (s.execution.kind === "pi") {
         const { selection, session_id: sessionId } = s.execution
         const dispatch = await makeWorkerBridge(api, selection).preflightResume(s.cwd, sessionId, "Same-scope correction only: " + correction)
+        await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
         transition(s, { executor: "pi", selection }, true)
@@ -406,6 +450,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         if (previous.state === "running" || previous.state === "unknown_or_interrupted" || previous.state === "interrupted")
           throw new Error("Command Code run not known complete")
         if (!previous.result?.sessionId) throw new Error("No resumable Command Code session")
+        await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
         else s.attempts++
@@ -419,12 +464,13 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         save(s)
       }
       return { session_id: s.id, backend: backendOf(s), status: "admitted", watch: watchCommand(s) }
-      })
-    },
-    async cancel(cwd: unknown, id: unknown) {
-      return withSessionLock(cwd, id, async (s) => {
+    })
+  }
+  async function runCancel(cwd: unknown, id: unknown, ownerMode: boolean, admitEffect?: OwnerEffectAdmit) {
+    return withSessionLock(cwd, id, async (s) => {
       const observation = await observeExecution(s, stateDir(s.cwd), inspection)
-      if (settledState(s, observation, untouched(s)).state === "blocked_partial_work") {
+      const state = settledState(s, observation, untouched(s)).state
+      if (!ownerMode && state === "blocked_partial_work") {
         s.cancel_requested = true
         save(s)
         const leaseDir = stateDir(s.cwd)
@@ -434,25 +480,32 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         return { session_id: s.id, interrupted: false, released,
           note: "Worker already ended at a provider usage limit with partial edits; the worktree lease is released and the edits are left untouched. Preserve the work before dispatching again." }
       }
+      if (ownerMode && state !== "running" && state !== "queued") {
+        throw new OwnerPrecheckError("not-running", "Worker run is not running (state " + state + ")")
+      }
       let interrupted = false
       if (s.execution.kind === "pi") {
+        await admitEffect?.()
         interrupted = (await makeWorkerBridge(api, s.execution.selection).cancel(s.cwd, s.execution.session_id)).interrupted
       } else {
         const run = processRun(s)
         const executor = executorOf(s)
         if (run && executor !== "pi") {
+          await admitEffect?.()
           s.cancel_requested = true
           save(s)
           interrupted = runnerFor(executor).cancel(run)
           if (!interrupted) { s.cancel_requested = false; save(s) }
+        } else if (ownerMode) {
+          throw new OwnerPrecheckError("not-running", "Worker run is not running")
         }
       }
       return { session_id: s.id, interrupted,
         note: "Never signal a Command Code PID left by an earlier MCP process; it may have been reused." }
-      })
-    },
-    async steer(cwd: unknown, id: unknown, note: unknown) {
-      return withSessionLock(cwd, id, async (s) => {
+    })
+  }
+  async function runSteer(cwd: unknown, id: unknown, note: unknown, admitEffect?: OwnerEffectAdmit) {
+    return withSessionLock(cwd, id, async (s) => {
       const steering = required(note, "note", 32000)
       if (s.execution.kind === "transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before steering")
@@ -467,6 +520,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         const observedState = typeof observed.state === "string" ? observed.state : "unknown"
         if (observedState !== "running" && observedState !== "queued")
           throw new Error("Pi worker is not running (state " + observedState + "); use worker_resume for a finished session")
+        await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         const receipt = await worker.steer(s.cwd, sessionId, steering)
         s.steers = (s.steers ?? 0) + 1
@@ -484,6 +538,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const sessionId = backend === "antigravity" ? antigravity.session(run) : backend === "codex" ? codex.session(run) : commandSession(run)
       if (!sessionId)
         throw new Error("Command Code session identity is not recorded; cannot restart after steering")
+      await admitEffect?.()
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
       if (!runner.cancel(run))
         throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
@@ -504,7 +559,23 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       save(s)
       return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: true,
         steers: s.steers, steer_limit: STEER_LIMIT }
-      })
-    },
+    })
   }
+  ownerOpsRegistry.set(bridge, {
+    inspection,
+    setOwnerResolver(resolver) {
+      ownerResolver = resolver
+    },
+    resumeForOwner(cwd, id, feedback, admitEffect) {
+      return runResume(cwd, id, feedback, admitEffect)
+    },
+    steerForOwner(cwd, id, note, admitEffect) {
+      return runSteer(cwd, id, note, admitEffect)
+    },
+    async cancelForOwner(cwd, id, admitEffect) {
+      const result = await runCancel(cwd, id, true, admitEffect)
+      return { interrupted: result.interrupted }
+    },
+  })
+  return bridge
 }

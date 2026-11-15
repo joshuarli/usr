@@ -49,7 +49,7 @@ async function runCampaign(rest: string[]): Promise<void> {
 async function main(args: string[]): Promise<void> {
   const [op, ...rest] = args
   if (args.length === 1 && (op === "--help" || op === "-h")) {
-    process.stdout.write("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|inspect|watch|campaign}\n\n" + "Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md" + "\n")
+    process.stdout.write("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|inspect|watch|campaign|owner}\n\n" + "Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md" + "\n")
     return
   }
   if (op === "policy") {
@@ -58,17 +58,25 @@ async function main(args: string[]): Promise<void> {
     return
   }
   if (!op || op === "mcp") {
-    if (rest.length) throw new Error("usage: pi-subagent-bridge mcp")
-    const { serve } = await import("./server.ts")
-    serve()
+    const ownerRepos: string[] = []
+    for (let i = 0; i < rest.length; i++) {
+      if (op === "mcp" && rest[i] === "--repo" && rest[i + 1]) {
+        ownerRepos.push(rest[++i])
+      } else {
+        throw new Error("usage: pi-subagent-bridge mcp [--repo <dir>]")
+      }
+    }
+    const { serve, connect } = await import("./server.ts")
+    serve(connect, ownerRepos.length ? { ownerRepos } : undefined)
     return
   }
   if (op === "inspect") return inspect(rest)
   if (op === "watch") return watch(rest)
   if (op === "campaign") return runCampaign(rest)
+  if (op === "owner") return (await import("./owner-client.ts")).runOwnerCli(rest)
   const { COMMAND_NAMES, COMMANDS, cliArguments, decodeCommand } = await import("./commands.ts")
   const name = COMMAND_NAMES.find(candidate => COMMANDS[candidate].cli === op)
-  if (!name) throw new Error("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|inspect|watch|campaign}")
+  if (!name) throw new Error("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|inspect|watch|campaign|owner}")
   const command = decodeCommand(name, cliArguments(name, rest, path => readFileSync(path, "utf8")))
   const { connect, dispatch } = await import("./server.ts")
   const result = await dispatch(await connect(), command)

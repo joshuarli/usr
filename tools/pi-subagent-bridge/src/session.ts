@@ -42,9 +42,21 @@ export function piFallbackPlan(plan: LadderPlan): PiFallbackPlan {
   throw new Error(UNRESOLVED_PI)
 }
 
+export type SessionOwner = {
+  readonly owner_id: string
+  readonly owner_generation: number
+}
+
+const OWNER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+export function isOwnerId(value: unknown): value is string {
+  return typeof value === "string" && OWNER_ID_RE.test(value)
+}
+
 export type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
   plan: AdmittedPlan; execution: Execution; attempts: number
+  owner?: SessionOwner
   fallback_reason?: string; fallback_detail?: string; fallback_blocked?: string
   continuations?: number; steers?: number; cancel_requested?: boolean
 }
@@ -338,6 +350,17 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
   if (value.cancel_requested !== undefined) {
     if (typeof value.cancel_requested !== "boolean") throw new Error("Invalid persisted cancellation state")
     s.cancel_requested = value.cancel_requested
+  }
+  if (value.owner !== undefined) {
+    if (typeof value.owner !== "object" || value.owner === null || Array.isArray(value.owner)) {
+      throw new Error("Invalid persisted session owner")
+    }
+    const raw = value.owner as Record<string, unknown>
+    if (!isOwnerId(raw.owner_id) || typeof raw.owner_generation !== "number" ||
+      !Number.isInteger(raw.owner_generation) || raw.owner_generation < 1) {
+      throw new Error("Invalid persisted session owner")
+    }
+    s.owner = { owner_id: raw.owner_id, owner_generation: raw.owner_generation }
   }
   return s
 }

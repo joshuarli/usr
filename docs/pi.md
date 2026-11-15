@@ -123,6 +123,10 @@ pi-subagent-bridge cancel /absolute/repo/.work/wt/task usrw_SESSION_ID
 
 It also exposes `pi-subagent-bridge mcp` for JSON-RPC. See the [bridge reference](../tools/pi-subagent-bridge/README.md) for schema and live acceptance checks.
 
+### Owner endpoint (`owner_protocol: 1`)
+
+A running `pi-subagent-bridge mcp` server publishes a local Unix domain socket under `<repo>/.work/worker-bridge/owner/<owner_id>.sock` (`<owner_id>.json` metadata, monotonic per-repo `owner_generation`, and append-only `<owner_id>/commands.jsonl` command journal) so external coordinators can read job state (`hello`, `jobs`, `status`, `command`) and issue idempotent control operations (`steer`, `interrupt`, `resume`) targeted by `{ job_id, run_id, owner_generation }`, or via `pi-subagent-bridge owner <subcommand> --repo <dir> --owner <owner_id> ...`. Restarted MCP servers get a new `owner_id` and generation without adopting prior jobs, and CLI commands never become owners; see [the bridge README](../tools/pi-subagent-bridge/README.md#owner-endpoint-v1) for the full schema, `run_id` derivation, and receipt rules.
+
 ## Verification
 
 Run `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_release_install.py` and `TMPDIR="$PWD/.work/tmp" python3 -I tools/pi/test_offline.py`, then the affected [bridge checks](../tools/pi-subagent-bridge/README.md#tests). The runtime suite installs the pinned archive from `.work/cache/pi-releases`, downloading it once from the pinned release when that cache is empty. It skips runtime checks without a supported Node; skips are not SDK or extension proof. Offline fixtures cannot prove live provider compatibility, authentication refresh, quota, or successful account-backed tool execution. Record those separately using the disposable-worktree live gate.

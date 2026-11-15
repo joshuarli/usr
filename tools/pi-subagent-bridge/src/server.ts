@@ -31,12 +31,41 @@ export function dispatch(worker: Bridge, command: Command): Promise<unknown> {
   }
 }
 
-export function serve(load: () => Promise<Bridge> = connect): void {
+export type ServeOptions = {
+  ownerRepos?: string[]
+  ownerId?: string
+}
+
+export function serve(load: () => Promise<Bridge> = connect, options?: ServeOptions): void {
+  const manageOwner = load === connect || (options?.ownerRepos !== undefined && options.ownerRepos.length > 0)
+  let ownerManagerPromise: Promise<{ ensureRepo(dir: string): Promise<unknown>; close(): Promise<void> }> | undefined
   let cached: Promise<Bridge> | undefined
-  const bridge = () => cached ??= load().catch((error: unknown) => {
+  let closing = false
+  const pending = new Set<Promise<void>>()
+  const bridge = () => cached ??= (async () => {
+    const loaded = await load()
+    if (manageOwner && !closing) {
+      ownerManagerPromise ??= import("./owner.ts").then(({ OwnerManager }) =>
+        new OwnerManager(loaded, options?.ownerId ? { ownerId: options.ownerId } : undefined),
+      )
+      await ownerManagerPromise
+    }
+    return loaded
+  })().catch((error: unknown) => {
     cached = undefined
     throw error
   })
+  const eagerOwner = options?.ownerRepos?.length
+    ? (async () => {
+      await bridge()
+      const manager = ownerManagerPromise ? await ownerManagerPromise : undefined
+      if (manager) {
+        for (const repo of options.ownerRepos!) {
+          await manager.ensureRepo(repo)
+        }
+      }
+    })().catch((error: unknown) => console.error("pi-subagent-bridge:", error))
+    : undefined
   const write = (message: unknown) => process.stdout.write(JSON.stringify(message) + "\n")
   const rpcError = (id: string | number | null, code: number, message: string) =>
     write({ jsonrpc: "2.0", id, error: { code, message } })
@@ -62,8 +91,16 @@ export function serve(load: () => Promise<Bridge> = connect): void {
         rpcError(id, -32602, "Unknown tool")
         return
       }
+      if (eagerOwner) await eagerOwner
       const command = decodeCommand(name, params.arguments)
-      const result = await dispatch(await bridge(), command)
+      const activeBridge = await bridge()
+      if (ownerManagerPromise) {
+        const manager = await ownerManagerPromise
+        if (typeof command.cwd === "string" && command.cwd.trim()) {
+          await manager.ensureRepo(command.cwd).catch(() => undefined)
+        }
+      }
+      const result = await dispatch(activeBridge, command)
       write({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result) }] } })
     } catch (error) {
       // Tool failures are returned to the orchestrator as recoverable tool results, not stdout logs.
@@ -72,12 +109,39 @@ export function serve(load: () => Promise<Bridge> = connect): void {
   }
 
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })
+  let shutdownStarted = false
+  let signalStop = false
+  const shutdown = async () => {
+    if (shutdownStarted) return
+    shutdownStarted = true
+    closing = true
+    process.off("SIGINT", onSignal)
+    process.off("SIGTERM", onSignal)
+    if (eagerOwner) await eagerOwner
+    await Promise.allSettled([...pending])
+    if (ownerManagerPromise) {
+      const manager = await ownerManagerPromise.catch(() => undefined)
+      await manager?.close()
+    }
+    if (signalStop) process.exit(0)
+  }
+  const onSignal = () => {
+    signalStop = true
+    lines.close()
+    void shutdown()
+  }
+  process.on("SIGINT", onSignal)
+  process.on("SIGTERM", onSignal)
+  lines.on("close", () => { void shutdown() })
   lines.on("line", (line) => {
     if (Buffer.byteLength(line) > MAX_LINE) { console.error("pi-subagent-bridge: oversized MCP request"); return }
     try {
       const data: unknown = JSON.parse(line)
       if (!isRecord(data) || data.jsonrpc !== "2.0") return
-      void handle(data as Message).catch((error) => console.error("pi-subagent-bridge:", error))
+      const task = handle(data as Message)
+        .catch((error) => console.error("pi-subagent-bridge:", error))
+        .finally(() => pending.delete(task))
+      pending.add(task)
     } catch { console.error("pi-subagent-bridge: invalid MCP JSON") }
   })
 }
