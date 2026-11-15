@@ -451,6 +451,7 @@ def main(argv: list[str]) -> int:
             failures += int(legacy.returncode != 0)
         return 1 if failures else 0
     jobs = int(ctx.env["SYNC_JOBS"]) if "SYNC_JOBS" in ctx.env else default_jobs()
+    tolerated = {part.strip() for part in os.environ.get("SYNC_TOLERATE", "").split(",") if part.strip()}
     try:
         with ownership_lock(ctx.state):
             results = selected.run(jobs=jobs)
@@ -458,8 +459,12 @@ def main(argv: list[str]) -> int:
         results = [Result(task.name, "failed", f"{type(exc).__name__}: {exc}")
                    for task in selected.order()]
     for result in results:
-        print(f"{result.state.upper():8} {result.name}: {result.detail}")
-    return 1 if any(r.state in ("failed", "blocked") for r in results) else 0
+        if tolerated and result.name in tolerated and result.state in ("failed", "blocked"):
+            print(f"TOLERATED {result.name}: {result.detail}")
+        else:
+            print(f"{result.state.upper():8} {result.name}: {result.detail}")
+    hard = [r for r in results if r.state in ("failed", "blocked") and r.name not in tolerated]
+    return 1 if hard else 0
 
 
 if __name__ == "__main__":

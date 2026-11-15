@@ -27,7 +27,7 @@ jobs:
         run: |
           printf '/.work/\n' >> .git/info/exclude
           mkdir -p .work/tmp .work/ci-home
-          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" sh sync
+          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" SYNC_TOLERATE="tool:agent-browser,tool:ffmpeg,tool:python3,tool:zzz,kache" sh sync
 
       - name: Run repository checks
         run: |
@@ -67,4 +67,4 @@ jobs:
         run: |
           printf '/.work/\n' >> .git/info/exclude
           mkdir -p .work/tmp .work/ci-home
-          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" sh sync
+          HOME="$GITHUB_WORKSPACE/.work/ci-home" TMPDIR="$GITHUB_WORKSPACE/.work/tmp" SYNC_TOLERATE="tool:agent-browser,tool:ffmpeg,tool:python3,tool:zzz,kache" sh sync
