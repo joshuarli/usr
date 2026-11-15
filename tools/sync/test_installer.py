@@ -176,6 +176,68 @@ sys.exit(1)
     def state(self, name):
         return (self.home / ".local/state/dl" / name).read_text().strip()
 
+    def test_tar_xz_single_binary_consumers(self):
+        import hashlib
+        for tool in ("gh", "img", "lz", "zzz"):
+            with self.subTest(tool=tool), tempfile.TemporaryDirectory(dir=self.root) as home:
+                self.home = Path(home)
+                target = "x86_64-unknown-linux-musl" if tool == "gh" else "x86_64-unknown-linux-musl-static"
+                member = f"{tool}-{target}" if tool != "zzz" else "zzz-linux-musl-static-x86_64"
+                repo = {"gh": "joshuarli/gh", "img": "joshuarli/img", "lz": "joshuarli/lz", "zzz": "laputa-systems/zzz"}[tool]
+                tag = "release-" + "a" * 40
+                base = f"https://github.com/{repo}/releases/download/{tag}"
+                payload = make_tar({member: b"binary"}, mode="w:xz")
+                asset = member + ".tar.xz"
+                routes = {f"https://github.com/{repo}/releases.atom": atom([("2026-01-01", tag)]),
+                          f"{base}/{asset}": (payload, {"ETag": "etag"}),
+                          f"{base}/SHA256SUMS": f"{hashlib.sha256(payload).hexdigest()}  {asset}\n".encode()}
+                self.make(routes).install(tool)
+                dest = self.dest_path("less" if tool == "lz" else tool)
+                self.assertEqual(dest.read_bytes(), b"binary")
+                self.assertTrue(os.access(dest, os.X_OK))
+
+    def test_archive_extraction_symlink_confinement(self):
+        inst = self.make()
+        for fmt in ("zip", "tar"):
+            for case in ("escape", "absolute_link", "through_link", "parent", "absolute", "valid"):
+                with self.subTest(fmt=fmt, case=case), tempfile.TemporaryDirectory(dir=self.root) as tmp:
+                    root = Path(tmp)
+                    archive_path = root / "archive"
+                    entries = {"escape": [("link", "symlink", "../outside")],
+                               "absolute_link": [("link", "symlink", "/outside")],
+                               "through_link": [("inside", "dir", ""), ("link", "symlink", "inside"), ("link/file", "file", "data")],
+                               "parent": [("../outside", "file", "data")],
+                               "absolute": [("/outside", "file", "data")],
+                               "valid": [("inside", "file", "data"), ("link", "symlink", "inside")]}[case]
+                    if fmt == "zip":
+                        with zipfile.ZipFile(archive_path, "w") as archive:
+                            for name, kind, data in entries:
+                                info = zipfile.ZipInfo(name)
+                                info.create_system = 3
+                                info.external_attr = (0o120777 if kind == "symlink" else 0o40755 if kind == "dir" else 0o100755) << 16
+                                if kind == "dir":
+                                    info.filename += "/"
+                                archive.writestr(info, data)
+                    else:
+                        with tarfile.open(archive_path, "w:xz") as archive:
+                            for name, kind, data in entries:
+                                info = tarfile.TarInfo(name)
+                                if kind == "dir":
+                                    info.type = tarfile.DIRTYPE
+                                    archive.addfile(info)
+                                elif kind == "symlink":
+                                    info.type, info.linkname = tarfile.SYMTYPE, data
+                                    archive.addfile(info)
+                                else:
+                                    info.size, info.mode = len(data), 0o755
+                                    archive.addfile(info, io.BytesIO(data.encode()))
+                    target = root / "extract"
+                    target.mkdir()
+                    result = inst.extract_zip(archive_path, target) if fmt == "zip" else inst.extract_tar(archive_path, target)
+                    self.assertEqual(result, case == "valid")
+                    if case == "valid":
+                        self.assertEqual((target / "link").read_text(), "data")
+
     def test_release_install_current_and_unknown(self):
         asset = "gh-x86_64-unknown-linux-musl"
         url = f"https://github.com/joshuarli/gh/releases/download/v1/{asset}.zip"

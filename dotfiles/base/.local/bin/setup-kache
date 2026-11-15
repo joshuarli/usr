@@ -356,25 +356,31 @@ fi
 
 if [ -n "$asset" ]; then
     command -v curl >/dev/null 2>&1 || die "curl not found"
-    command -v unzip >/dev/null 2>&1 || die "unzip not found"
     tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/setup-kache.XXXXXX")
     trap 'rm -rf "$tmpdir"' EXIT INT TERM
 
     curl -fsSL -o "$tmpdir/SHA256SUMS" "$base_url/SHA256SUMS"
-    curl -fsSL -o "$tmpdir/$asset" "$base_url/$asset"
-    curl -fsSL -o "$tmpdir/$engine_asset" "$base_url/$engine_asset"
-
-    for zip in "$asset" "$engine_asset"; do
-        want=$(grep -F "  $zip" "$tmpdir/SHA256SUMS" | awk '{print $1}')
-        [ "${#want}" -eq 64 ] || die "$zip is not available in $tag"
-        got=$(checksum_of "$tmpdir/$zip")
-        [ "$got" = "$want" ] || die "checksum mismatch for $zip"
+    for name in "kache-${triple}" "kache-engine-${triple}"; do
+        archive=
+        for ext in tar.xz zip; do
+            candidate="$name.$ext"
+            want=$(awk -v name="$candidate" '$2 == name {print $1}' "$tmpdir/SHA256SUMS")
+            if [ "${#want}" -eq 64 ]; then
+                archive=$candidate
+                break
+            fi
+        done
+        [ -n "$archive" ] || die "$name is not available in $tag"
+        curl -fsSL -o "$tmpdir/$archive" "$base_url/$archive"
+        got=$(checksum_of "$tmpdir/$archive")
+        [ "$got" = "$want" ] || die "checksum mismatch for $archive"
+        mkdir -p "$tmpdir/unpack"
+        case "$archive" in
+            *.tar.xz) tar -xOf "$tmpdir/$archive" "$name" > "$tmpdir/unpack/$name" ;;
+            *.zip) unzip -p "$tmpdir/$archive" "$name" > "$tmpdir/unpack/$name" ;;
+        esac
+        [ -s "$tmpdir/unpack/$name" ] || die "$archive did not contain $name"
     done
-
-    rm -rf "$tmpdir/unpack"
-    mkdir -p "$tmpdir/unpack"
-    unzip -q "$tmpdir/$asset" -d "$tmpdir/unpack"
-    unzip -q "$tmpdir/$engine_asset" -d "$tmpdir/unpack"
     [ -f "$tmpdir/unpack/kache-${triple}" ] && [ ! -L "$tmpdir/unpack/kache-${triple}" ] \
         || die "$asset did not contain the kache binary"
     [ -f "$tmpdir/unpack/kache-engine-${triple}" ] && [ ! -L "$tmpdir/unpack/kache-engine-${triple}" ] \
