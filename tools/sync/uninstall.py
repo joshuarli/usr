@@ -44,6 +44,7 @@ def _uninstall_locked(ctx: Context) -> None:
         if proof != {"kind": kind, "fingerprint": identity}:
             raise RuntimeError(f"unverified or modified managed path: {path}; preserving all files")
 
+    required(command(ctx, os.sys.executable, "-I", str(COMPANIONS), "preflight"), "companion preflight")
     required(command(ctx, os.sys.executable, "-I", str(BRIDGE), "remove"), "Claude MCP removal")
     required(command(ctx, os.sys.executable, "-I", str(PI_BRIDGE), "remove"), "Pi MCP removal")
     required(command(ctx, os.sys.executable, "-I", str(OPENCODE_BRIDGE), "remove"), "OpenCode MCP removal")

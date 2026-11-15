@@ -96,6 +96,52 @@ def payload_for(pin: dict, name: str, files: dict[str, dict[str, str | int]]) ->
     }
 
 
+def _safe_relative(relative: object) -> bool:
+    if not isinstance(relative, str) or not relative or relative == ".":
+        return False
+    if relative.startswith("/") or relative.startswith("./"):
+        return False
+    return ".." not in PurePosixPath(relative).parts
+
+
+def _receipt_ok(current: object, name: str) -> bool:
+    if not isinstance(current, dict):
+        return False
+    if current.get("companion") != name:
+        return False
+    pin = current.get("pin")
+    if not (isinstance(pin, dict)
+            and all(isinstance(pin.get(key), str) and pin[key] != "" for key in ("builder_revision", "version", "source_sha"))):
+        return False
+    if not all(isinstance(current.get(key), str) and current[key] != "" for key in ("archive", "sha256")):
+        return False
+    files = current.get("files")
+    if not isinstance(files, dict):
+        return False
+    for relative, entry in files.items():
+        if not _safe_relative(relative) or relative == RECEIPT:
+            return False
+        if not isinstance(entry, dict):
+            return False
+        if set(entry) == {"link"}:
+            if not isinstance(entry["link"], str):
+                return False
+        elif set(entry) == {"sha256", "mode"}:
+            if not (isinstance(entry["sha256"], str) and type(entry["mode"]) is int):
+                return False
+        else:
+            return False
+    return True
+
+
+def read_receipt(destination: Path, name: str) -> dict | None:
+    try:
+        current = json.loads((destination / RECEIPT).read_text())
+    except (OSError, ValueError):
+        return None
+    return current if _receipt_ok(current, name) else None
+
+
 def inventory(root: Path) -> dict[str, dict[str, str | int]]:
     result: dict[str, dict[str, str | int]] = {}
     for path in sorted(root.rglob("*")):
@@ -112,15 +158,16 @@ def inventory(root: Path) -> dict[str, dict[str, str | int]]:
 def install_status(destination: Path, pin: dict, name: str) -> str:
     if destination.is_symlink() or not destination.is_dir():
         return "foreign" if destination.exists() or destination.is_symlink() else "absent"
-    try:
-        current = json.loads((destination / RECEIPT).read_text())
-    except (OSError, ValueError):
+    receipt = read_receipt(destination, name)
+    if receipt is None:
         return "foreign"
-    wanted = payload_for(pin, name, current.get("files", {}))
-    if (current.get("pin") != wanted["pin"] or current.get("archive") != wanted["archive"]
-            or current.get("sha256") != wanted["sha256"]):
+    if receipt["files"] != inventory(destination):
+        return "modified"
+    wanted = payload_for(pin, name, receipt["files"])
+    if (receipt.get("pin") != wanted["pin"] or receipt.get("archive") != wanted["archive"]
+            or receipt.get("sha256") != wanted["sha256"]):
         return "stale"
-    return "current" if current.get("files") == inventory(destination) else "modified"
+    return "current"
 
 
 def safe_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
@@ -250,6 +297,7 @@ def install_companion(pin: dict, cache: Path, destination: Path, name: str) -> b
         die(f"companion {name} installation is modified; preserve it and inspect before retrying")
     if status == "foreign":
         die(f"refusing foreign companion install root: {destination}")
+    before = read_receipt(destination, name)
     archive = acquire(pin, cache)[name]
     with tempfile.TemporaryDirectory(prefix=f".{name}-", dir=destination.parent) as temporary:
         stage = Path(temporary) / name
@@ -260,6 +308,8 @@ def install_companion(pin: dict, cache: Path, destination: Path, name: str) -> b
             die(f"companion archive is not a valid tar.gz: {name}: {exc}")
         if manifest.get("name") != f"@dataforxyz/{name}" or manifest.get("version") != entry["version"]:
             die(f"companion archive identity mismatch: {name}")
+        if install_status(destination, pin, name) != status or read_receipt(destination, name) != before:
+            die(f"companion {name} changed while preparing the replacement; preserving {destination}")
         bins = manifest.get("bin") or {}
         if isinstance(bins, str):
             bins = {manifest["name"].split("/")[-1]: bins}
@@ -335,6 +385,31 @@ def remove_shims(destination: Path, env: dict[str, str]) -> None:
                     launcher.unlink()
             except OSError:
                 pass
+
+
+def preflight_remove(env: dict) -> None:
+    root = prefix(env)
+    for name in COMPANIONS:
+        destination = root / name
+        if destination.is_symlink():
+            die(f"refusing to remove symlinked companion root: {destination}")
+        if not destination.exists():
+            continue
+        if not destination.is_dir():
+            die(f"refusing to remove non-directory companion root: {destination}")
+        receipt = read_receipt(destination, name)
+        if receipt is None:
+            die(f"refusing to remove {name}: {destination / RECEIPT} is not a valid receipt; preserving it")
+        if receipt["files"] != inventory(destination):
+            die(f"companion {name} installation is modified; preserve it and inspect before retrying")
+
+
+def _remove_root(destination: Path, env: dict, name: str) -> None:
+    receipt = read_receipt(destination, name)
+    if receipt is None or receipt["files"] != inventory(destination):
+        die(f"companion {name} changed during removal; preserving {destination}")
+    remove_shims(destination, env)
+    shutil.rmtree(destination)
 
 
 def _read_json(file: Path):
@@ -516,6 +591,7 @@ def command_plan(env: dict) -> int:
 
 def command_remove(env: dict) -> int:
     root = prefix(env)
+    preflight_remove(env)
     result = sync_claude(root / "agent-intercom-claude", "remove", env)
     if result == "kept-foreign":
         print("companions: keeping foreign Claude intercom MCP entry")
@@ -527,8 +603,12 @@ def command_remove(env: dict) -> int:
             die(f"refusing to remove symlinked companion root: {destination}")
         if not destination.exists():
             continue
-        remove_shims(destination, env)
-        shutil.rmtree(destination)
+        _remove_root(destination, env, name)
+    return 0
+
+
+def command_preflight(env: dict) -> int:
+    preflight_remove(env)
     return 0
 
 
@@ -541,7 +621,7 @@ def command_verify_absent(env: dict) -> int:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: companions.py {plan|check|install|remove|verify-absent}", file=sys.stderr)
+        print("usage: companions.py {plan|check|install|remove|preflight|verify-absent}", file=sys.stderr)
         return 2
     action = sys.argv[1]
     env = dict(os.environ)
@@ -550,12 +630,13 @@ def main() -> int:
         "check": command_check,
         "install": command_install,
         "remove": command_remove,
+        "preflight": command_preflight,
         "verify-absent": command_verify_absent,
     }
     try:
         handler = commands[action]
     except KeyError:
-        print("usage: companions.py {plan|check|install|remove|verify-absent}", file=sys.stderr)
+        print("usage: companions.py {plan|check|install|remove|preflight|verify-absent}", file=sys.stderr)
         return 2
     try:
         return handler(env)

@@ -220,10 +220,19 @@ class CompanionFixture(unittest.TestCase):
             "check": companions.command_check,
             "install": companions.command_install,
             "remove": companions.command_remove,
+            "preflight": companions.command_preflight,
             "verify-absent": companions.command_verify_absent,
         }
         with patch.object(companions.pi_release, "load_pin", lambda *a, **kw: pin or self.pin):
             return functions[action](env)
+
+    def bumped_pin(self):
+        pin = json.loads(json.dumps(self.pin))
+        pin["builder_revision"] = "b" * 40
+        return pin
+
+    def root(self, name):
+        return Path(self.env["XDG_DATA_HOME"]) / "agent-intercom" / name
 
     def test_fresh_install_registers_and_checks(self):
         self.assertEqual(self.call("install"), 0)
@@ -357,6 +366,101 @@ class CompanionFixture(unittest.TestCase):
         target.write_bytes(b"// tampered\n")
         with self.assertRaises(ValueError):
             self.call("check")
+
+    def test_pin_bump_replaces_intact_install(self):
+        self.assertEqual(self.call("install"), 0)
+        bumped = self.bumped_pin()
+        self.assertEqual(self.call("install", pin=bumped), 0)
+        root = self.root("agent-intercom-claude")
+        self.assertEqual(companions.install_status(root, bumped, "agent-intercom-claude"), "current")
+        receipt = json.loads((root / companions.RECEIPT).read_text())
+        self.assertEqual(receipt["pin"]["builder_revision"], "b" * 40)
+
+    def test_pin_bump_preserves_modified_install(self):
+        self.assertEqual(self.call("install"), 0)
+        root = self.root("agent-intercom-claude")
+        (root / "personal.txt").write_text("keep me\n")
+        with self.assertRaises(ValueError):
+            self.call("install", pin=self.bumped_pin())
+        self.assertEqual((root / "personal.txt").read_text(), "keep me\n")
+
+    def test_install_status_is_modified_for_old_and_new_pin(self):
+        self.assertEqual(self.call("install"), 0)
+        root = self.root("agent-intercom-claude")
+        (root / "personal.txt").write_text("keep me\n")
+        self.assertEqual(companions.install_status(root, self.pin, "agent-intercom-claude"), "modified")
+        self.assertEqual(companions.install_status(root, self.bumped_pin(), "agent-intercom-claude"), "modified")
+
+    def test_remove_refuses_unrecorded_foreign_root(self):
+        root = self.root("agent-intercom-codex")
+        root.mkdir(parents=True)
+        (root / "foreign.txt").write_text("not ours\n")
+        with self.assertRaises(ValueError):
+            self.call("remove")
+        self.assertEqual((root / "foreign.txt").read_text(), "not ours\n")
+
+    def test_remove_refuses_modified_root_and_keeps_registration(self):
+        home = Path(self.env["HOME"])
+        self.assertEqual(self.call("install"), 0)
+        before = (home / ".claude.json").read_bytes()
+        target = self.root("agent-intercom-claude") / "dist/claude-server.mjs"
+        target.write_bytes(b"// tampered\n")
+        with self.assertRaises(ValueError):
+            self.call("remove")
+        self.assertEqual((home / ".claude.json").read_bytes(), before)
+        self.assertEqual(target.read_bytes(), b"// tampered\n")
+
+    def test_remove_refuses_non_directory_companion_root(self):
+        root = self.root("agent-intercom-opencode")
+        root.parent.mkdir(parents=True)
+        root.write_text("not a directory\n")
+        with self.assertRaises(ValueError):
+            self.call("remove")
+        self.assertEqual(root.read_text(), "not a directory\n")
+
+    def test_remove_refuses_receipt_with_mismatched_companion_identity(self):
+        root = self.root("agent-intercom-claude")
+        root.mkdir(parents=True)
+        receipt = {
+            "pin": {
+                "builder_revision": self.pin["builder_revision"],
+                "version": self.pin["version"],
+                "source_sha": self.pin["companions"]["agent-intercom-claude"]["source_sha"],
+            },
+            "companion": "agent-intercom-codex",
+            "archive": self.pin["companions"]["agent-intercom-claude"]["archive"],
+            "sha256": self.pin["companions"]["agent-intercom-claude"]["sha256"],
+            "files": {},
+        }
+        (root / companions.RECEIPT).write_text(json.dumps(receipt))
+        self.assertEqual(companions.install_status(root, self.pin, "agent-intercom-claude"), "foreign")
+        with self.assertRaises(ValueError):
+            self.call("remove")
+        self.assertTrue(root.is_dir())
+
+    def test_remove_refuses_receipt_with_unsafe_file_entry(self):
+        root = self.root("agent-intercom-codex")
+        root.mkdir(parents=True)
+        receipt = {
+            "pin": {
+                "builder_revision": self.pin["builder_revision"],
+                "version": self.pin["version"],
+                "source_sha": self.pin["companions"]["agent-intercom-codex"]["source_sha"],
+            },
+            "companion": "agent-intercom-codex",
+            "archive": self.pin["companions"]["agent-intercom-codex"]["archive"],
+            "sha256": self.pin["companions"]["agent-intercom-codex"]["sha256"],
+            "files": {"../../escape.txt": {"sha256": "0" * 64, "mode": 0o644}},
+        }
+        (root / companions.RECEIPT).write_text(json.dumps(receipt))
+        self.assertEqual(companions.install_status(root, self.pin, "agent-intercom-codex"), "foreign")
+        with self.assertRaises(ValueError):
+            self.call("remove")
+        self.assertTrue(root.is_dir())
+
+    def test_preflight_succeeds_for_intact_install(self):
+        self.assertEqual(self.call("install"), 0)
+        self.assertEqual(self.call("preflight"), 0)
 
 
 if __name__ == "__main__":

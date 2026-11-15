@@ -90,6 +90,19 @@ class UninstallTests(unittest.TestCase):
             uninstall(self.ctx)
         self.assertEqual(link.resolve(), second)
 
+    def test_foreign_companion_root_aborts_before_any_removal(self):
+        self.patcher.stop()
+        try:
+            root = self.home / ".local/share/agent-intercom/agent-intercom-codex"
+            root.mkdir(parents=True)
+            (root / "foreign.txt").write_text("keep\n")
+            with self.assertRaisesRegex(RuntimeError, "companion preflight"):
+                uninstall(self.ctx)
+            self.assertEqual((root / "foreign.txt").read_text(), "keep\n")
+            self.assertFalse((self.home / ".claude.json").exists())
+        finally:
+            self.patcher.start()
+
     def test_old_path_only_records_never_become_verified(self):
         file = self.home / "binary"
         file.write_text("old")
