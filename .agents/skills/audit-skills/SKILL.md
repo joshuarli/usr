@@ -1,6 +1,6 @@
 ---
 name: audit-skills
-description: "Use for /audit-skills: QA the global contract, skills, and agent definitions for contradictions, duplicated rules, bloat, unclear wording, and procedures that belong in tooling; report ranked findings, then apply the approved ones in reviewed commits."
+description: "Use for /audit-skills: QA the global contract, skills, and agent definitions for contradictions, duplicated rules, bloat, unclear wording, and procedures that belong in tooling; report ranked findings, then apply the approved ones in reviewed commits. With a timeframe argument such as `past 2h`, instead audit recent session history across coding agents for delegation and qualification tooling friction."
 disable-model-invocation: true
 metadata:
   opencode/slash: "true"
@@ -46,6 +46,10 @@ Instructions drift as they grow: two skills give opposite orders, a rule is rest
 - **A new tool lands before the skill that points at it**, in its own commit with tests registered in `tools/sync/checks.py`. When a check fails, rerun it on the stashed tree to tell a pre-existing failure from a new one.
 - **Expect modest savings.** Once contradictions and duplicates are gone, most remaining text is a specific rule. Stop there instead of compressing rules away.
 
-**The test:** no two files give conflicting orders, each shared rule has one owner the others point to, the contract loads once per harness, every removed token is accounted for, and the checks and text-pinning tests pass on the final tree.
+## Session-history audit (with a timeframe)
 
-**Report:** findings ranked with `file:line`, owner decisions listed separately, and after applying, the commits, tools added and the prose they replaced, bytes before and after for the contract, descriptions, and total, removed tokens, and checks run.
+`/audit-skills past 2h` audits how delegation and qualification tooling behaved in recent sessions — `pi-subagent-bridge`, `agentctl`, harness MCP registrations — instead of the instruction files. Judge from what sessions did, not from how the tools read. Read-only; this mode reports, it never fixes, and skill keep or delete verdicts stay with `skill-eval`. Read [session-history](references/session-history.md) for the data sources, method and report shape.
+
+**The test:** no two files give conflicting orders, each shared rule has one owner the others point to, the contract loads once per harness, every removed token is accounted for, and the checks and text-pinning tests pass on the final tree. The session-history mode ends only when every reported friction is verified against its log or job file.
+
+**Report:** findings ranked with `file:line`, owner decisions listed separately, and after applying, the commits, tools added and the prose they replaced, bytes before and after for the contract, descriptions, and total, removed tokens, and checks run. The session-history mode reports per [session-history](references/session-history.md).
