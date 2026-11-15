@@ -67,6 +67,27 @@ class TodoTests(unittest.TestCase):
         self.cli('check')
         self.assertEqual(self.path.read_text().count('**Problem:** Broken'), 2)
 
+    def test_file_selects_a_separate_backlog_with_its_own_ids(self):
+        other = self.root / 'TODO-DESLOP.md'
+        other.write_text('Prefix: DSLP\nNext: 1\n\n')
+        nested = self.root / 'sub'
+        nested.mkdir()
+        self.cli('add', '--json', '-', data=ITEM)
+        added = subprocess.run([sys.executable, str(CLI), '--file', 'TODO-DESLOP.md', 'add', '--json', '-'], cwd=nested, input=json.dumps({**ITEM, 'priority': 'P1'}), text=True, capture_output=True)
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.assertEqual(json.loads(added.stdout)['id'], 'DSLP-1')
+        self.assertEqual([r['id'] for r in json.loads(self.cli('--file', 'TODO-DESLOP.md', 'list', '--json').stdout)['tickets']], ['DSLP-1'])
+        self.assertEqual([r['id'] for r in json.loads(self.cli('list', '--json').stdout)['tickets']], ['ABC-1'])
+        self.assertIn('Next: 2', other.read_text())
+        self.assertNotIn('DSLP', self.path.read_text())
+        self.cli('--file', 'TODO-DESLOP.md', 'check')
+        self.cli('--file', 'TODO-DESLOP.md', 'close', 'DSLP-1')
+        self.assertNotIn('### DSLP-1', other.read_text())
+        before = other.read_text()
+        for name in ('sub/TODO-DESLOP.md', '../TODO-DESLOP.md', 'MISSING.md'):
+            self.cli('--file', name, 'add', '--json', '-', data=ITEM, ok=False)
+        self.assertEqual(other.read_text(), before)
+
     def test_concurrent_allocations(self):
         processes = [subprocess.Popen([sys.executable, str(CLI), 'add', '--json', '-'], cwd=self.root, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(8)]
         for process in processes:

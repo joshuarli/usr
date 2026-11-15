@@ -1,6 +1,6 @@
 # todo
 
-`todo` manages the nearest `TODO.md` in the current directory or an ancestor. It needs Python 3 and the synced dotfiles checkout. Create a backlog with `Prefix: ABC` and `Next: 1` on separate lines before filing its first ticket. The prefix is three or four uppercase letters. IDs never reuse a number.
+`todo` manages the nearest `TODO.md` in the current directory or an ancestor. `--file NAME`, given before the subcommand, selects another backlog file name, such as `todo --file TODO-DESLOP.md list --json`; it is a file name, not a path, and each backlog keeps its own prefix and `Next`. It needs Python 3 and the synced dotfiles checkout. Create a backlog with `Prefix: ABC` and `Next: 1` on separate lines before filing its first ticket. The prefix is three or four uppercase letters. IDs never reuse a number.
 
 ```sh
 todo list --json

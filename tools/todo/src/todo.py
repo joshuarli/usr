@@ -17,12 +17,14 @@ NAMES = {'Area': 'area', 'Where': 'where', 'Problem': 'problem', 'Recommendation
 REQUIRED = set(NAMES.values()) - {'design'}
 
 
-def locate():
+def locate(name):
+    if not name or Path(name).name != name or name in ('.', '..'):
+        raise ValueError(f'{name}: --file takes a file name, not a path')
     for directory in (Path.cwd(), *Path.cwd().parents):
-        path = directory / 'TODO.md'
+        path = directory / name
         if path.is_file():
             return path
-    raise ValueError('TODO.md not found in this directory or its parents')
+    raise ValueError(f'{name} not found in this directory or its parents')
 
 
 def parse(text):
@@ -196,6 +198,7 @@ def run(args, path):
 
 def main():
     parser = argparse.ArgumentParser(description='Manage a Markdown TODO backlog', epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--file', default='TODO.md', help='backlog file name to find in this directory or its parents (default: TODO.md)')
     sub = parser.add_subparsers(dest='command', required=True)
     listing = sub.add_parser('list')
     listing.add_argument('--priority')
@@ -218,7 +221,7 @@ def main():
     try:
         if args.command in ('add', 'edit'):
             args.data = json.load(sys.stdin)
-        path = locate()
+        path = locate(args.file)
         if args.command in ('add', 'edit', 'close') or (args.command == 'fmt' and not args.check):
             with lock(path):
                 run(args, path)
