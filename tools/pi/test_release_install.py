@@ -101,7 +101,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(pi_release.current(self.prefix, pin, "darwin-arm64"), generation)
         self.assertEqual(self.install(pin), generation)
         project = self.root / "bridge"
-        with patch.object(pi_release, "load_pin", side_effect=AssertionError("default pin must not select the bridge")):
+        # This fixture installs a darwin-arm64 archive on every CI host; make
+        # the platform selector follow the fixture rather than the Linux runner.
+        with patch.object(pi_offline, "platform_key", return_value="darwin-arm64"), \
+             patch.object(pi_release, "load_pin", side_effect=AssertionError("default pin must not select the bridge")):
             self.assertTrue(pi_release.link_bridge(project, self.prefix, self.root / "legacy"))
             self.assertTrue(pi_release.bridge_current(project, self.prefix))
             self.assertFalse(pi_release.bridge_current(project, self.prefix, self.pin))
