@@ -1,7 +1,8 @@
 /** Operational model policy. Pure data: safe to import in runtime, tests and generators. */
 import {
   DELEGATION, GO_TIER_MODELS, MAX_SUBAGENT_DEPTH, MUSE_AGENT_NAMES, MUSE_DELEGATION,
-  MUSE_TIER_MODELS, PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, type Effort, type Tier,
+  MUSE_TIER_MODELS, DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
+  PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, type Effort, type Tier,
 } from "./tier-policy.ts"
 
 export type { Effort } from "./tier-policy.ts"
@@ -61,7 +62,7 @@ export const ROOT_PLANS = {
   },
   worker: {
     kind: "fallback", codex: CODEX_TIER_MODELS.worker, command: COMMAND_TIER_MODELS.worker,
-    pi: [MUSE_TIER_MODELS.worker, GO_TIER_MODELS.worker],
+    pi: [MUSE_TIER_MODELS.worker, GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker],
   },
   expert: { kind: "exclusive", target: ANTIGRAVITY_PIN },
 } as const satisfies Record<Tier, RootPlan>
@@ -106,9 +107,12 @@ export const POLICY = {
   nativePi: {
     goModels: GO_TIER_MODELS,
     museModels: MUSE_TIER_MODELS,
+    devinModels: DEVIN_TIER_MODELS,
     agentNames: MUSE_AGENT_NAMES,
+    devinAgentNames: DEVIN_AGENT_NAMES,
     delegation: DELEGATION,
     museDelegation: MUSE_DELEGATION,
+    devinDelegation: DEVIN_DELEGATION,
     tools: TIER_TOOLS,
     maxSubagentDepth: MAX_SUBAGENT_DEPTH,
     modelAllowlist: PI_MODEL_ALLOWLIST,

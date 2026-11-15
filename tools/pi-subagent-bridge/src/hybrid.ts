@@ -9,6 +9,7 @@ import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } f
 
 import { isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
 import { musePreflight, museVersion } from "./muse-subscription.ts"
+import { devinPreflight } from "./devin-provider.ts"
 import { changes, git, outside, readStateDir, stateDir } from "./git.ts"
 import {
   fallbackNotice, fallbackSource, inspectSession, observeExecution, runnerStatus, settledState,
@@ -304,6 +305,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const [firstPi] = plan.pi
       const museModel = plan.pi.find(pin => pin.providerID === "muse-sdk")
       const goModel = plan.pi.find(pin => pin.providerID === "opencode-go")
+      const devinModel = plan.pi.find(pin => pin.providerID === "devin")
       let museAvailable = false, museIssue: string | null = null
       if (museModel) {
         try {
@@ -330,11 +332,19 @@ export function makeHybridBridge(api: OpenCodePort, command = {
             goIssue = `No configured auth for ${model.providerID} in Pi SDK; sign in with opencode2 or set OPENCODE_API_KEY`
         } catch { /* keep issue null if diagnosis unavailable */ }
       }
+      let devinAvailable = false, devinIssue: string | null = null
+      if (devinModel) {
+        try { devinAvailable = (await makeWorkerBridge(api, devinModel).modelCheck(dir)).available }
+        catch (e) { devinIssue = String(e) }
+        if (!devinAvailable && !devinIssue)
+          devinIssue = devinPreflight().issue ?? "Devin SWE-2 Medium is not authenticated in the Pi SDK"
+      }
+      const devinInfo = { available: devinAvailable, issue: devinIssue }
       const museInfo = museModel ? { available: museAvailable, issue: museIssue, version: museVersion() } : { available: false, issue: null, version: null }
       const goInfo = { available: goAvailable, issue: goIssue }
       const piLane = { backend: "pi", model: firstPi,
-        available: firstPi.providerID === "muse-sdk" ? museInfo.available : goInfo.available,
-        issue: firstPi.providerID === "muse-sdk" ? museInfo.issue : goInfo.issue }
+        available: firstPi.providerID === "muse-sdk" ? museInfo.available : firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
+        issue: firstPi.providerID === "muse-sdk" ? museInfo.issue : firstPi.providerID === "devin" ? devinInfo.issue : goInfo.issue }
       const commandLane = { backend: "command-code", ...plan.command, available: command.available() }
       return {
         primary: { backend: "codex", ...plan.codex, available: codex.available() },
@@ -343,6 +353,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         pi_fallback: piLane,
         muse: museModel ? { backend: "pi", model: museModel, available: museInfo.available, issue: museInfo.issue, version: museInfo.version } : undefined,
         opencode_go: goModel ? { backend: "pi", model: goModel, available: goInfo.available, issue: goInfo.issue } : null,
+        devin: devinModel ? { backend: "pi", model: devinModel, available: devinInfo.available, issue: devinInfo.issue } : null,
       }
     },
     async start(cwd: unknown, title: unknown, tierInput: unknown, scopeInput: unknown, brief: unknown) {

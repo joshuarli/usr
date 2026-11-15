@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { parseDocument } from "yaml"
 import {
   DELEGATION, GO_TIER_MODELS, isMuseTier, MUSE_AGENT_NAMES, MUSE_DELEGATION, MUSE_TIER_MODELS,
+  DEVIN_AGENT_NAMES, DEVIN_DELEGATION, DEVIN_TIER_MODELS,
   MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, type Tier,
 } from "./tier-policy.ts"
 
@@ -16,10 +17,17 @@ const TIER_GUARDS = {
 const MUSE_GUARDS = {
   worker: new URL("./guards/muse-worker.ts", import.meta.url),
 } as const
+const DEVIN_GUARDS = {
+  worker: new URL("./guards/devin-worker.ts", import.meta.url),
+} as const
 export function tierGuardPath(tier: Tier, model?: { providerID: string }): URL {
   if (model?.providerID === "muse-sdk") {
     if (!isMuseTier(tier)) throw new Error("Muse cannot execute this tier")
     return MUSE_GUARDS[tier]
+  }
+  if (model?.providerID === "devin") {
+    if (!isMuseTier(tier)) throw new Error("Devin cannot execute this tier")
+    return DEVIN_GUARDS[tier]
   }
   return TIER_GUARDS[tier]
 }
@@ -41,17 +49,18 @@ function exactList(value: unknown, expected: readonly string[], description: str
  * Validate the parsed YAML against the code-owned tier graph before admitting
  * a new root worker. A locally edited/synced profile cannot widen authority.
  */
-export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "muse" = "go"): void {
+export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "muse" | "devin" = "go"): void {
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown)
   if (!match) throw new Error(`Missing Pi agent frontmatter: ${tier}`)
   const parsed = parseDocument(match[1]!, { uniqueKeys: true })
   if (parsed.errors.length) throw new Error(`Invalid Pi agent YAML ${tier}: ${parsed.errors[0]?.message}`)
   const config = record(parsed.toJS())
-  if (family === "muse" && !isMuseTier(tier)) throw new Error("Unapproved Muse tier")
+  if (family !== "go" && !isMuseTier(tier)) throw new Error("Unapproved special provider tier")
   const muse = family === "muse" && isMuseTier(tier)
-  const pinned = muse ? MUSE_TIER_MODELS[tier] : GO_TIER_MODELS[tier]
-  const name = muse ? MUSE_AGENT_NAMES[tier] : tier
-  const children = muse ? MUSE_DELEGATION[tier] : DELEGATION[tier]
+  const devin = family === "devin" && isMuseTier(tier)
+  const pinned = devin ? DEVIN_TIER_MODELS.worker : muse ? MUSE_TIER_MODELS.worker : GO_TIER_MODELS[tier]
+  const name = devin ? DEVIN_AGENT_NAMES.worker : muse ? MUSE_AGENT_NAMES.worker : tier
+  const children = devin ? DEVIN_DELEGATION.worker : muse ? MUSE_DELEGATION.worker : DELEGATION[tier]
   if (config.name !== name ||
       config.model !== pinned.providerID + "/" + pinned.id ||
       config.thinking !== pinned.variant ||
@@ -100,7 +109,16 @@ export function assertTierProfiles(agentDir: string): void {
     throw new Error(`Unapproved Pi model override for ${museName}`)
   exactList(record(agents[museName]).allow, [musePin.providerID + "/" + musePin.id],
     `${museName}.modelScope.allow`)
-  const allowedNames: readonly string[] = [...TIERS, ...Object.values(MUSE_AGENT_NAMES)]
+  const devinPin = DEVIN_TIER_MODELS.worker
+  const devinName = DEVIN_AGENT_NAMES.worker
+  assertTierProfile("worker", readFileSync(join(agentDir, "agents", devinName + ".md"), "utf8"), "devin")
+  const devinOverride = record(overrides[devinName])
+  if (devinOverride.model !== devinPin.providerID + "/" + devinPin.id ||
+      devinOverride.thinking !== devinPin.variant)
+    throw new Error("Unapproved Devin model override for " + devinName)
+  exactList(record(agents[devinName]).allow, [devinPin.providerID + "/" + devinPin.id],
+    devinName + ".modelScope.allow")
+  const allowedNames: readonly string[] = [...TIERS, ...Object.values(MUSE_AGENT_NAMES), ...Object.values(DEVIN_AGENT_NAMES)]
   if (Object.keys(overrides).some(name => !allowedNames.includes(name)) ||
       Object.keys(agents).some(name => !allowedNames.includes(name)))
     throw new Error("Unapproved additional Pi subagent tier override")

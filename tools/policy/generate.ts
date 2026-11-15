@@ -151,6 +151,13 @@ function profiles(policy: Policy) {
       if (!name || !allowed) throw new Error(`Missing Muse profile mapping: ${tier}`)
       return { name, tier, pin, allowed }
     }),
+    ...Object.entries(policy.nativePi.devinModels).map(([key, pin]) => {
+      const tier = policyTier(key)
+      const name = policy.nativePi.devinAgentNames[tier as "worker"]
+      const allowed = policy.nativePi.devinDelegation[tier as "worker"]
+      if (!name || !allowed) throw new Error(`Missing Devin profile mapping: ${tier}`)
+      return { name, tier, pin, allowed }
+    }),
   ]
 }
 
@@ -226,7 +233,8 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     if (previous.schema_version !== 1) throw new Error("Unsupported previous policy snapshot schema")
     const native = object(previous.nativePi, "previous nativePi")
     const oldNames = [...Object.keys(object(native.goModels, "previous goModels")),
-      ...Object.values(object(native.agentNames, "previous agentNames"))]
+      ...Object.values(object(native.agentNames, "previous agentNames")),
+      ...Object.values(object(native.devinAgentNames ?? {}, "previous devinAgentNames"))]
     const oldOpenCode = Object.keys(object(object(previous.opencode, "previous opencode").efforts, "previous OpenCode efforts"))
     if (oldNames.some(name => typeof name !== "string" || !/^[a-z][a-z0-9-]*$/.test(name)) ||
         oldOpenCode.some(name => !/^[a-z][a-z0-9-]*$/.test(name))) throw new Error("Invalid previous policy profile membership")

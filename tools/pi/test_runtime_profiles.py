@@ -51,6 +51,9 @@ class RuntimeProfileTests(unittest.TestCase):
             self.assertIn(f"agent-intercom-pi/index.{suffix}'", wrapper)
             self.assertIn('"$@"', wrapper)
             self.assertIn("PI_OFFLINE=1", wrapper)
+            self.assertIn("pi-devin-local/extensions/index.js", wrapper)
+            self.assertIn("if [ -f ", wrapper)
+            self.assertIn("set -- --extension ", wrapper)
         with self.assertRaises(KeyError):
             pi_offline.wrapper(root, "unknown")
 
