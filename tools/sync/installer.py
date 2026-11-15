@@ -56,6 +56,7 @@ CODEX_MIRROR_SHA256 = {
     "x86_64-apple-darwin": "3f9b4ace250629325223f185c1fa9baa7d780199730f2c14d0b9e8e82eaa4965",
     "x86_64-unknown-linux-musl": "45385fb0f8f9704441495d9a3f0464ba53028b8b2696c2baa979bf19119bdbf9",
 }
+DEVIN_BASE = "https://static.devin.ai/cli"
 OPENCODE_VERSION = "2.3.0"
 OPENCODE_MIRROR_SHA256 = {
     "darwin-arm64": "a1154db80032754f759aa30d15925170cc28f8a594f3e1cf8bdc78e18534435a",
@@ -159,6 +160,7 @@ class Installer:
         self.claude_versions = self.data_home / "claude/versions"
         self.dsh_root = self.data_home / "dsh"
         self.codex_home = Path(self.env.get("CODEX_HOME") or self.home / ".codex")
+        self.devin_root = self.data_home / "devin/cli"
         self.codex_legacy_root = self.data_home / "codex"
         self.git_home = Path(self.env.get("GIT_HOME") or self.data_home / "git")
         self.ssh_home = Path(self.env.get("SSH_HOME") or self.data_home / "ssh")
@@ -1834,6 +1836,87 @@ class Installer:
         self.changed = True
         self.ok(f"Installed {self.dest}/codex")
 
+    def devin_current(self, launcher: Path, versions: Path, version_dir: Path) -> bool:
+        if not launcher.is_symlink() or os.readlink(launcher) != str(versions / "current/bin/devin"):
+            return False
+        current = versions / "current"
+        if not current.is_symlink():
+            return False
+        pointed = Path(os.readlink(current))
+        if not pointed.is_absolute():
+            pointed = versions / pointed
+        return pointed == version_dir and (version_dir / "bin/devin").is_file()
+
+    def install_devin(self) -> None:
+        targets = {("darwin", "x86_64"): "x86_64-apple-darwin", ("darwin", "aarch64"): "aarch64-apple-darwin",
+                   ("linux", "x86_64"): "x86_64-unknown-linux", ("linux", "aarch64"): "aarch64-unknown-linux"}
+        if (self.os_name, self.arch) not in targets:
+            self.skip("devin", f"no upstream binary for {self.os_name}/{self.arch}")
+        target = targets[(self.os_name, self.arch)]
+        try:
+            manifest = json.loads(self.fetch_text(f"{DEVIN_BASE}/current/manifest.json"))
+        except (URLError, OSError, ValueError):
+            self.skip("devin", "release manifest download failed")
+        version = manifest.get("version") if isinstance(manifest, dict) else None
+        entry = manifest.get("platforms", {}).get(target) if isinstance(manifest, dict) else None
+        url = entry.get("url", "") if isinstance(entry, dict) else ""
+        expected = entry.get("sha256", "") if isinstance(entry, dict) else ""
+        if not isinstance(version, str) or not version or not url or len(expected) != 64:
+            self.skip("devin", f"release manifest has no {target} entry")
+        versions = self.devin_root / "_versions"
+        current = versions / "current"
+        version_dir = versions / version
+        record = f"devin-{version}-{target}"
+        launcher = self.dest / "devin"
+        if launcher.exists() and not launcher.is_symlink():
+            self.skip("devin", f"{launcher} is not a dl-managed symlink")
+        if self.is_current("devin", record) and self.devin_current(launcher, versions, version_dir):
+            self.current(f"devin is current ({version})")
+            return
+        if launcher.is_symlink() and os.readlink(launcher) != str(current / "bin/devin"):
+            resolved = Path(os.path.realpath(launcher))
+            if versions not in resolved.parents:
+                self.skip("devin", f"{launcher} is not a dl-managed symlink")
+        if versions.is_symlink() or (versions.exists() and not versions.is_dir()):
+            self.skip("devin", f"{versions} is not a directory")
+        if current.is_symlink():
+            pointed = Path(os.readlink(current))
+            if not pointed.is_absolute():
+                pointed = versions / pointed
+            if pointed.parent != versions:
+                self.skip("devin", f"{current} points outside the versions directory")
+        if version_dir.exists() or version_dir.is_symlink():
+            if version_dir.is_symlink() or not (version_dir / "bin/devin").is_file():
+                self.skip("devin", f"{version_dir} already exists")
+        else:
+            self.fetch_msg(f"Downloading devin {version} ...")
+            with tempfile.NamedTemporaryFile(delete=False) as stream:
+                archive_path = Path(stream.name)
+            if not self.download(url, archive_path):
+                archive_path.unlink(missing_ok=True)
+                self.skip("devin", "release download failed")
+            if self.sha256_file(archive_path) != expected:
+                archive_path.unlink(missing_ok=True)
+                self.skip("devin", "release checksum mismatch")
+            self.own_missing_dirs(versions)
+            versions.mkdir(parents=True, exist_ok=True)
+            staged = self.stage_dir(versions, f".{version}.")
+            if not self.extract_tar(archive_path, staged) or not (staged / "bin/devin").is_file():
+                archive_path.unlink(missing_ok=True)
+                shutil.rmtree(staged, ignore_errors=True)
+                self.skip("devin", "release archive could not be extracted")
+            archive_path.unlink(missing_ok=True)
+            os.replace(staged, version_dir)
+        self.own_dir(version_dir)
+        (version_dir / "distribution").write_text("curl-bash\n")
+        self.own_file(version_dir / "distribution")
+        if not self.switch_symlink(version_dir, current):
+            self.skip("devin", f"could not switch {current}")
+        self.link_symlink(launcher, str(current / "bin/devin"))
+        self.write_state("devin", record)
+        self.changed = True
+        self.ok(f"Installed {self.dest}/devin")
+
     def _own_release_target(self, home: Path, commands: list[str], target: str, *, in_bin: bool) -> bool:
         prefix = f"{home}/releases/"
         if not target.startswith(prefix):
@@ -2938,6 +3021,7 @@ class Installer:
             "agent-browser": self.install_agent_browser, "pi": self.install_pi,
             "antigravity": self.install_antigravity, "agy": self.install_antigravity,
             "muse": self.install_muse, "claude": self.install_claude, "codex": self.install_codex,
+            "devin": self.install_devin,
             "opencode2": self.install_opencode2,
             "ghostty": self.install_ghostty_custom, "ghostty-custom": self.install_ghostty_custom,
             "play": self.install_player, "player": self.install_player,
@@ -2968,7 +3052,7 @@ class Installer:
     def record_managed_installs(self) -> None:
         for prog in ("fd", "rg", "jaq", "fastermod", "tm", "ish", "img", "stuff", "e", "fz",
                      "srv", "mactop", "view", "vault", "gh", "bylaws", "mold", "cf", "player", "soulseek-rs",
-                     "zzz", "uv", "uvx", "rage", "shellcheck", "less"):
+                     "zzz", "uv", "uvx", "rage", "shellcheck", "less", "devin"):
             self.record_managed_binary(prog)
         if self.installed("rage") and (self.dest / "rage-keygen").is_symlink():
             self.own_file(self.dest / "rage-keygen")
@@ -3123,7 +3207,7 @@ def default_tools(os_name: str, arch: str, profile: str, server_tools: Path | No
     tools = ["fd", "rg"]
     if not (os_name == "linux" and arch == "aarch64"):
         tools.append("jaq")
-    tools += "codex claude opencode2 pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage".split()
+    tools += "codex claude devin opencode2 pi fastermod tm ish stuff e fz srv git python3 uv cf agent-browser rage".split()
     if (os_name, arch) in (("darwin", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")):
         tools += ["ffmpeg", "nodejs", "pnpm", "cmd", "syncthing", "shuck", "img", "gluon", "lz"]
     if (os_name, arch) in (("linux", "x86_64"), ("linux", "aarch64")):

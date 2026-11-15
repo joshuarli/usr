@@ -816,6 +816,39 @@ sys.exit(1)
             with self.assertRaises(SkipInstall):
                 inst.install_codex()
 
+    def test_devin_install_current_and_checksum(self):
+        import hashlib
+        target = "x86_64-unknown-linux"
+        version = "1.2.3"
+        payload = make_tar({"bin/devin": b"devin", "share/man/man1/devin.1": b"man"})
+        digest = hashlib.sha256(payload).hexdigest()
+        url = f"{installer.DEVIN_BASE}/{version}/devin-{version}-{target}.tar.gz"
+        manifest_url = f"{installer.DEVIN_BASE}/current/manifest.json"
+
+        def manifest(ver, asset_url, sha):
+            return json.dumps({"version": ver, "platforms": {target: {"url": asset_url, "sha256": sha}}}).encode()
+
+        routes = {manifest_url: manifest(version, url, digest), url: payload}
+        inst = self.make(routes)
+        inst.install_devin()
+        launcher = self.dest_path("devin")
+        self.assertTrue(launcher.is_symlink())
+        versions = self.home / ".local/share/devin/cli/_versions"
+        self.assertEqual(os.readlink(launcher), str(versions / "current/bin/devin"))
+        self.assertTrue((versions / version / "bin/devin").is_file())
+        self.assertEqual(self.state("devin"), f"devin-{version}-{target}")
+        again = self.make(routes)
+        again.install_devin()
+        self.assertFalse(again.changed)
+
+        bad_url = f"{installer.DEVIN_BASE}/9.9.9/devin-9.9.9-{target}.tar.gz"
+        bad_routes = {manifest_url: manifest("9.9.9", bad_url, digest), bad_url: b"tampered"}
+        bad = self.make(bad_routes)
+        with self.assertRaises(SkipInstall):
+            bad.install_devin()
+        self.assertEqual(os.readlink(launcher), str(versions / "current/bin/devin"))
+        self.assertTrue((versions / version / "bin/devin").is_file())
+
     def _bundle_routes(self, repo, tag, asset, payload, sums_asset=None, digest=None):
         import hashlib
         digest = digest or hashlib.sha256(payload).hexdigest()
