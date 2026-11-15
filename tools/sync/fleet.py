@@ -126,10 +126,16 @@ def visit(host: Host, command: str, run: Runner) -> Outcome:
     if repo.returncode == 255 and not repo.stdout:
         outcome.error = "unreachable"
         return outcome
+    if command == "apply" and repo.returncode != 0:
+        outcome.error = f"repository update failed (exit {repo.returncode})"
+        return outcome
     outcome.repo = parse_pairs(repo.stdout)
+    if command == "apply" and not outcome.repo:
+        outcome.error = "repository update check produced no output"
+        return outcome
     if command == "pull" or outcome.repo.get("repo") == "missing":
         return outcome
-    if command == "apply" and outcome.repo.get("pull") == "blocked":
+    if command == "apply" and not repo_text(outcome.repo)[1]:
         return outcome
     sync_command = "apply" if command == "apply" else command
     try:

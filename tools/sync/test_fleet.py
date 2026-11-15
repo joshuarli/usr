@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,6 +16,7 @@ import fleet
 from report import TaskLine, counts, render, summary, PLAN_STATES
 
 POLICY = {"hosts": {"work": "100.0.0.1", "lisa": "100.0.0.2", "tr": "100.0.0.3"}}
+GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
 
 
 def done(stdout: str = "", code: int = 0, stderr: str = "") -> subprocess.CompletedProcess[str]:
@@ -37,6 +40,96 @@ class Fake:
 
 
 REPO_OK = "before=abc1234\nbranch=main\ndirty=0\nbehind=0\nahead=0\n"
+
+
+class LocalGitApplyTests(unittest.TestCase):
+    """fleet apply against a real Git checkout whose origin may break."""
+
+    def setUp(self):
+        root_path = Path(__file__).resolve().parents[2]
+        scratch = root_path / ".work/tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=scratch, prefix="fleet-apply-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.origin = self.root / "origin.git"
+        self.seed = self.root / "seed"
+        self.host_checkout = self.root / "host"
+        self.git(None, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.git(None, "init", "-q", "-b", "main", str(self.seed))
+        (self.seed / "file").write_text("base\n")
+        self.git(self.seed, "add", "file")
+        self.git(self.seed, "commit", "-q", "-m", "base")
+        self.git(self.seed, "remote", "add", "origin", str(self.origin))
+        self.git(self.seed, "push", "-q", "-u", "origin", "main")
+        self.git(None, "clone", "-q", str(self.origin), str(self.host_checkout))
+        self.host = fleet.Host("work", "100.0.0.1", True)
+        self.calls: list[str] = []
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", *(["-C", str(cwd)] if cwd else []), *args], check=True,
+                              capture_output=True, text=True,
+                              env={**os.environ, **GIT_ENV}).stdout.strip()
+
+    def runner(self, host, script, timeout):
+        self.calls.append(script)
+        return subprocess.run(["sh", "-c", script], cwd=self.host_checkout, capture_output=True, text=True,
+                              check=False, timeout=60, env={**os.environ, **GIT_ENV})
+
+    def advance_origin(self, text):
+        (self.seed / "file").write_text(text)
+        self.git(self.seed, "commit", "-qam", "advance")
+        self.git(self.seed, "push", "-q", "origin", "main")
+        return self.git(self.seed, "rev-parse", "HEAD")
+
+    def test_failed_fetch_never_invokes_apply(self):
+        self.git(self.host_checkout, "remote", "set-url", "origin", str(self.root / "missing.git"))
+        outcome = fleet.visit(self.host, "apply", self.runner)
+        self.assertEqual(outcome.repo.get("fetch"), "failed")
+        self.assertEqual([script for script in self.calls if script.startswith("sh sync")], [])
+
+    def test_failed_fetch_fails_fleet_apply_and_reports_fetch(self):
+        self.git(self.host_checkout, "remote", "set-url", "origin", str(self.root / "missing.git"))
+        out = io.StringIO()
+        original = sys.stdout
+        sys.stdout = out
+        try:
+            code = fleet.main(["apply"], run=self.runner, policy={"hosts": {"work": "100.0.0.1"}}, mine={"100.0.0.1"})
+        finally:
+            sys.stdout = original
+        self.assertEqual(code, 1)
+        self.assertIn("fetch failed", out.getvalue())
+        self.assertEqual([script for script in self.calls if script.startswith("sh sync")], [])
+
+    def test_successful_fetch_fast_forwards_then_invokes_apply(self):
+        target = self.advance_origin("advanced\n")
+        outcome = fleet.visit(self.host, "apply", self.runner)
+        self.assertEqual(outcome.repo.get("pull"), "updated")
+        self.assertEqual(outcome.repo.get("after"), target[:7])
+        self.assertTrue(any(script == "sh sync apply --json" for script in self.calls))
+
+    def test_blocked_pull_skips_apply(self):
+        self.advance_origin("advanced\n")
+        (self.host_checkout / "file").write_text("local change\n")
+        outcome = fleet.visit(self.host, "apply", self.runner)
+        self.assertEqual(outcome.repo.get("pull"), "blocked")
+        self.assertEqual([script for script in self.calls if script.startswith("sh sync")], [])
+
+    def test_diverged_checkout_skips_apply(self):
+        self.advance_origin("advanced\n")
+        (self.host_checkout / "local").write_text("local\n")
+        self.git(self.host_checkout, "add", "local")
+        self.git(self.host_checkout, "commit", "-q", "-m", "local")
+        outcome = fleet.visit(self.host, "apply", self.runner)
+        self.assertEqual(outcome.repo.get("behind"), "1")
+        self.assertEqual(outcome.repo.get("ahead"), "1")
+        self.assertEqual([script for script in self.calls if script.startswith("sh sync")], [])
+
+    def test_non_main_branch_skips_apply(self):
+        self.git(self.host_checkout, "checkout", "-q", "-b", "feature")
+        outcome = fleet.visit(self.host, "apply", self.runner)
+        self.assertEqual(outcome.repo.get("branch"), "feature")
+        self.assertEqual([script for script in self.calls if script.startswith("sh sync")], [])
 
 
 class FleetTests(unittest.TestCase):
