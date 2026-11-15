@@ -17,14 +17,6 @@ Next: 73
 - **Effort:** M
 
 
-### USR-70 · P2 · Fleet apply runs the old checkout after fetching fails
-
-- **Area:** Fleet sync
-- **Where:** tools/sync/fleet.py:34-46,119-136; tools/sync/test_fleet.py:88-104
-- **Problem:** Confirmed through real fleet.visit and PULL_SCRIPT in a disposable local Git checkout: after a successful-fetch control, point origin at a nonexistent local bare repository and run apply. REPO_SCRIPT prints fetch=failed and exits 0, but visit skips only pull=blocked and still invokes sh sync apply --json; the fixture sync writes its applied marker. The summary later reports the fetch failure, but the stale checkout has already mutated the host, violating the pull-before-apply dependency.
-- **Recommendation:** Make apply require a successfully completed repository update phase. Treat fetch failure and unexpected repository-command exits as a per-host failure and skip sync before mutation. Preserve the existing read-only plan/doctor policy. Add a local-Git boundary test proving failed fetch never invokes apply, alongside successful fetch/fast-forward and blocked-pull controls.
-- **Fix with:** root-cause
-- **Effort:** S
 
 
 ### USR-71 · P2 · Fleet doctor reports success when a host doctor fails
