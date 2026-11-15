@@ -16,7 +16,9 @@ A change counts only if it does at least one of these:
 - **Rejects a program:** something the checker accepts today, such as a forbidden construction, an unvalidated value reaching a decision, or a missing variant, becomes a type error. Write that program down as the witness.
 - **Deletes trust:** a cast, an unchecked assertion, a suppression, `any`, a "should never happen" check, or a repeated guard becomes unnecessary. Delete it in the same change.
 
-Readability, symmetry, or resemblance to a state machine is not evidence. A rename or restructure that rejects nothing new and deletes nothing is churn.
+Deleting trust counts only when the replacing claim is sound. A narrowing predicate must be true on both branches: `TypeIs[T]` also narrows the false branch to "not `T`", so a check that rejects some `T` values needs `TypeGuard[T]`; a TypeScript `x is T` narrows both branches too. An unsound claim with fewer escape hatches is a regression.
+
+Readability, symmetry, or resembling a state machine is not evidence. A rename or restructure that rejects nothing new and deletes nothing is churn.
 
 ## Classify each finding
 
@@ -30,7 +32,7 @@ Readability, symmetry, or resemblance to a state machine is not evidence. A rena
 
 ## Pick the most critical, then stop
 
-Rank leads by how much unchecked trust reaches decisions. Untrusted or persisted data reaching control flow comes first. Escape hatches on values that select behavior (authority, routing, lifecycle, money, paths) come next, then option soups and loose closed sets guarded by hand, then imprecise internal types. Fix one contract per change: the producer, its consumers, and their tests. A reviewer should see in a minute why the new type is truer than the old one. If a contract cannot be split, say why. Leave the rest as a ranked list.
+Rank leads by how much unchecked trust reaches decisions. Untrusted or persisted data reaching control flow comes first. Escape hatches on values that select behavior (authority, routing, lifecycle, money, paths) come next, then option soups and loose closed sets guarded by hand, then imprecise internal types. Fix one contract per change: the producer, its consumers, and their tests. A reviewer should see in a minute why the new type is truer. If a contract cannot be split, say why. Leave the rest as a ranked list.
 
 ## Escape hatches
 
@@ -57,7 +59,7 @@ Then read [the language notes](references/languages.md) for the checker in use.
 Run the project's type checker on the affected contract and consumers. The checker run is the proof of a typing change. Tests are proportional to regression risk:
 
 - **Witnesses:** keep each one as a negative type test that asserts the intended diagnostic. Use an expected-error marker the checker reports once the error disappears, or the project's checker harness. Keep it minimal so no other error can satisfy it.
-- **Runtime tests only when needed:** add one when behavior changes (it must fail before the fix), when you add a parser or type predicate (test the false branch and one malformed input), or when safety depends on a runtime fact the types don't show. Search existing coverage first, in every spelling of the input.
+- **Runtime tests only when needed:** add one when behavior changes (it must fail before the fix), when you add a parser or type predicate (test the false branch and one malformed input; give the predicate a checker witness for each branch), or when safety depends on a runtime fact the types don't show. Search coverage first.
 - **Mutation check:** break the guarded line and confirm the test fails, then revert. Delete a test that still passes.
 - **`assert_type`:** only where a precise type could decay to `Any` unnoticed.
 - **Don't add:** tests of dependency behavior, smoke tests, or a type assertion for every annotation.
