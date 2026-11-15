@@ -9,15 +9,16 @@ from dataclasses import asdict, dataclass
 from typing import Iterable, TextIO
 
 # Plan/doctor states come from probes; apply states from dag.Result.
-PLAN_STATES = ("conflict", "apply", "check", "current")
-APPLY_STATES = ("failed", "blocked", "applied", "current", "tolerated")
+PLAN_STATES = ("conflict", "apply", "check", "current", "login")
+APPLY_STATES = ("failed", "blocked", "applied", "current", "tolerated", "login")
 UNHEALTHY = ("conflict", "failed", "blocked")
 DOCTOR_UNHEALTHY = ("conflict", "apply", "failed", "blocked")
 QUIET = frozenset({"current", "check"})
 LABELS = {"current": "current", "check": "checked", "apply": "to apply", "conflict": "conflict",
-          "applied": "applied", "failed": "failed", "blocked": "blocked", "tolerated": "tolerated"}
+          "applied": "applied", "failed": "failed", "blocked": "blocked", "tolerated": "tolerated",
+          "login": "signed out"}
 COLORS = {"conflict": "31", "failed": "31", "blocked": "33", "tolerated": "2", "apply": "33",
-          "applied": "32", "current": "2", "check": "2"}
+          "applied": "32", "current": "2", "check": "2", "login": "33"}
 DETAIL_PREFIXES = ("LINK:", "CONFLICT:", "PRUNE:")
 
 

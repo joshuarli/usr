@@ -433,6 +433,13 @@ def main(argv: list[str]) -> int:
     argv, as_json, show_all = output_flags(argv)
     host = os.uname().nodename.split(".")[0]
     emit = (lambda lines: render_json(command_name, host, lines)) if as_json else (lambda lines: render(command_name, host, lines, show_all))
+    auth_lines: list[TaskLine] = []
+    if command_name in {"apply", "plan", "doctor"}:
+        try:
+            from auth import login_lines
+            auth_lines = login_lines(ctx.home, ctx.env)
+        except Exception as exc:
+            auth_lines = [TaskLine("auth:error", "login", f"could not check — {type(exc).__name__}: {exc}")]
     defaults = tool_list(ctx) if command_name in ("apply", "plan", "doctor") or (command_name == "tools" and not argv) else []
     chosen = argv if command_name == "tools" and argv else defaults
     full = graph(ctx, chosen, setup=command_name in {"apply", "plan", "doctor"})
@@ -456,6 +463,7 @@ def main(argv: list[str]) -> int:
                 failures += 1
             if command_name == "plan" and probe.conflict:
                 failures += 1
+        lines.extend(auth_lines)
         emit(lines)
         if command_name == "doctor":
             legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"), capture=as_json)
@@ -485,7 +493,7 @@ def main(argv: list[str]) -> int:
         if bad and all(dep in soft for dep in bad):
             soft.add(task.name)
     emit([TaskLine(result.name, "tolerated" if result.name in soft and result.state in ("failed", "blocked") else result.state, result.detail)
-          for result in results])
+          for result in results] + auth_lines)
     hard = [result for result in results if result.state in ("failed", "blocked") and result.name not in soft]
     return 1 if hard else 0
 

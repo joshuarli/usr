@@ -24,7 +24,7 @@ class SyncIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         for relative in ("tools/sync", "dotfiles/base", "dotfiles/linux", "bin", "home"):
             (self.root / relative).mkdir(parents=True, exist_ok=True)
-        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py", "pi_extensions.py", "report.py"):
+        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py", "pi_extensions.py", "report.py", "auth.py"):
             shutil.copy2(SOURCE / name, self.root / "tools/sync" / name)
         shutil.copy2(SYNC, self.root / "sync")
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
@@ -221,9 +221,9 @@ class Installer:
                            capture_output=True, text=True, env={**os.environ, **git_env})
 
         def fleet_doctor():
-            runner = lambda host, script, timeout: subprocess.run(
-                ["sh", "-c", script], cwd=self.root, capture_output=True, text=True,
-                check=False, timeout=60, env={**self.env, **git_env})
+            def runner(host, script, timeout):
+                return subprocess.run(["sh", "-c", script], cwd=self.root, capture_output=True, text=True,
+                                      check=False, timeout=60, env={**self.env, **git_env})
             out = io.StringIO()
             original = sys.stdout
             sys.stdout = out

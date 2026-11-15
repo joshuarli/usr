@@ -127,6 +127,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("bridge", (BRIDGE,), ("npm", "test"), ("tools/pi-subagent-bridge/",), cwd="tools/pi-subagent-bridge", tmpdir=True, needs=("npm",)),
     Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),
+    Check("sync-auth", (DAG,), py("tools/sync/test_auth.py"), ("tools/sync/auth.py", "tools/sync/report.py", "tools/sync/test_auth.py")),
     Check("sync-dag", (DAG,), py("tools/sync/test_dag.py"), ("tools/sync/dag.py", "tools/sync/test_dag.py")),
     Check("sync-hosts", (DAG,), py("tools/sync/test_fleet.py"), ("tools/sync/fleet.py", "tools/sync/report.py", "tools/sync/test_fleet.py", "tailscale/policy.json")),
     Check("sync-sh-syntax", (DAG,), ("sh", "-n", "sync"), ("sync",)),

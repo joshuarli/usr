@@ -171,6 +171,18 @@ class FleetTests(unittest.TestCase):
         self.assertNotIn("\nlisa\n", out)
         self.assertTrue(all("merge" not in script for _, _, script in fake.calls if "sync" not in script.split()[:2]), "plan must not merge")
 
+    def test_login_rows_flag_without_failing_the_host(self):
+        fake = Fake({
+            "work": {"repo": done(REPO_OK), "sync": done(plan_json(("links", "current", "links match"), ("auth:devin", "login", "not signed in — devin auth login")))},
+            "lisa": {"repo": done(REPO_OK), "sync": done(plan_json(("links", "current", "links match")))},
+            "tr": {"repo": done(REPO_OK), "sync": done(plan_json(("links", "current", "links match")))},
+        })
+        code, out = self.run_fleet(["plan"], fake)
+        self.assertEqual(code, 0)
+        self.assertIn("✓", out)
+        self.assertIn("1 signed out", out)
+        self.assertIn("auth:devin", out)
+
     def test_unreachable_and_failed_hosts_fail_the_run(self):
         fake = Fake({
             "work": {"repo": done(REPO_OK), "sync": done(plan_json(("links", "conflict", "CONFLICT: .zshrc")))},
