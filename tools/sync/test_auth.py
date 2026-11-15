@@ -101,6 +101,18 @@ class AuthProbeTests(unittest.TestCase):
         auth_json.write_text(json.dumps({"apiKey": "fake-key", "authenticatedAt": "2026-11-15"}))
         self.assertEqual(self.state("cmd", auth.login_lines(self.home, self.env)).state, "current")
 
+    def test_pi_honours_agent_dir_and_requires_a_provider(self):
+        self.fake_bin("pi", "#!/bin/sh\nexit 0\n")
+        agent = self.home / "pi-agent"
+        agent.mkdir()
+        (agent / "auth.json").write_text("{}")
+        env = dict(self.env, PI_CODING_AGENT_DIR=str(agent))
+        row = self.state("pi", auth.login_lines(self.home, env))
+        self.assertEqual(row.state, "login")
+        self.assertIn("sh sync", row.detail)
+        (agent / "auth.json").write_text(json.dumps({"opencode-go": {"type": "api_key", "key": "fake"}}))
+        self.assertEqual(self.state("pi", auth.login_lines(self.home, env)).state, "current")
+
     def test_muse_accepts_meta_api_key_or_config_providers(self):
         self.fake_bin("muse", "#!/bin/sh\nexit 0\n")
         env = dict(self.env, META_API_KEY="fake-key")

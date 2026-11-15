@@ -107,6 +107,16 @@ def _cmd(home: Path, env: dict[str, str]) -> Probe:
     return Probe(False, "not signed in — cmd login")
 
 
+def _pi(home: Path, env: dict[str, str]) -> Probe:
+    agent = Path(env.get("PI_CODING_AGENT_DIR") or home / ".pi" / "agent")
+    if not agent.is_absolute():
+        agent = home / ".pi" / "agent"
+    data = _read_json(agent / "auth.json")
+    if isinstance(data, dict) and data:
+        return Probe(True, "signed in")
+    return Probe(False, "not configured — run `sh sync` to seed Pi from the opencode login")
+
+
 def _muse(home: Path, env: dict[str, str]) -> Probe:
     if env.get("META_API_KEY", "").strip():
         return Probe(True, "signed in")
@@ -187,6 +197,7 @@ HARNESSES: tuple[Harness, ...] = tuple(sorted((
     Harness("devin", "devin", _devin),
     Harness("dsh", "dsh", _dsh),
     Harness("fx", "fx", _fx),
+    Harness("pi", "pi", _pi),
     Harness("muse", "muse", _muse),
     Harness("opencode2", "opencode2", _opencode2),
 ), key=lambda harness: harness.name))
