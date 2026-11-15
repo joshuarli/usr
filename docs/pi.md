@@ -60,7 +60,7 @@ Pi parent session defaults remain in its tracked settings. The generated subagen
 
 Run `sh sync plan`, `sh sync`, and `sh sync doctor` from the `usr` checkout. The default tool set includes Pi, Node.js and Command Code. The bridge's pinned Pi SDK and pi-subagents dependencies are symlinked from the SHA-256-verified local Pi runtime into `tools/pi-subagent-bridge`, and its MCP entry is registered for Claude and Pi; Codex uses its tracked MCP entry. The intercom companions install alongside and register Claude (`~/.claude.json`) and Codex (tracked `codex-intercom` entry); OpenCode loads its adapter through the tracked plugins-dir wrapper instead of a config entry (sync removes owned OpenCode `plugins` registrations left by earlier builds). OpenCode never registers the bridge (see `orchestrate`); sync removes an owned OpenCode registration. Sync migrates recognized legacy `usr-opencode-worker` registrations on the Claude and Pi paths without disturbing unrelated MCP connections.
 
-Pi authenticates only to OpenCode Go using the existing OpenCode login. In the **untracked and private** `~/.pi/agent/auth.json`:
+Pi authenticates only to OpenCode Go using the existing OpenCode login. `sh sync` seeds this automatically: the `pi-auth` task ensures `~/.pi/agent/auth.json` carries the `opencode-go` entry below. Tokens are never copied or stored — the key is a runtime command — and existing entries (a user-customised `opencode-go` or other providers such as Devin) are preserved. `sh sync uninstall` leaves the credential file untouched. In the **untracked and private** `~/.pi/agent/auth.json`:
 
 ```json
 {

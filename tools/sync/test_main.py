@@ -149,7 +149,16 @@ class MainTests(unittest.TestCase):
             defaults = main.default_goals(server)
         self.assertNotIn("claude-mcp", defaults)
         self.assertNotIn("pi-mcp", defaults)
+        self.assertNotIn("pi-auth", defaults)
         self.assertNotIn("opencode-mcp", defaults)
+
+    def test_pi_auth_needs_only_links_and_pi(self):
+        dag = main.graph(self.ctx, [], setup=True).select(["pi-auth"])
+        self.assertEqual({task.name for task in dag.order()}, {"links", "tool:nodejs", "tool:pi", "pi-auth"})
+
+    def test_desktop_default_goals_include_pi_auth(self):
+        with patch.object(main, "tool_list", return_value=["python3"]):
+            self.assertIn("pi-auth", main.default_goals(self.ctx))
 
     def test_server_profile_omits_mcp_bridges_from_default_sync(self):
         server = main.Context(self.ctx.root, self.ctx.home, "linux", "server", self.ctx.env)
@@ -157,6 +166,7 @@ class MainTests(unittest.TestCase):
             defaults = main.default_goals(server)
         self.assertNotIn("claude-mcp", defaults)
         self.assertNotIn("pi-mcp", defaults)
+        self.assertNotIn("pi-auth", defaults)
         self.assertNotIn("opencode-mcp", defaults)
         self.assertIn("tool:python3", defaults)
 

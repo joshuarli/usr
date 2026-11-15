@@ -55,6 +55,7 @@ DOCTOR = Area("`sync doctor` and default tool inventory")
 GUARD = Area("Pi Git tool-call guard")
 PI_RELEASE = Area("Pi release pin, installer, launcher, or SDK closure")
 CPUGUARD = Area("`cpu-guard`")
+PI_AUTH = Area("`sync` Pi auth wiring")
 PI_BRIDGE_INSTALL = Area("Pi bridge installation or MCP registration")
 COMPANIONS = Area("Intercom companion installation or MCP/plugin registration")
 INTERCOM_TAILNET = Area("Tailnet Intercom coordinator launcher")
@@ -92,7 +93,7 @@ CONTRACTS = ("dotfiles/base/.agents/instructions/", "dotfiles/base/.codex/AGENTS
 GENERATED_POLICY = ("dotfiles/base/.agents/instructions/lean.md", "dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/skills/orchestrate/SKILL.md",
                     "dotfiles/base/.pi/agent/", "dotfiles/base/.config/opencode/opencode.json", "tools/pi-subagent-bridge/README.md", "docs/pi.md", "docs/agent-setup.md")
 LINK_CODE = ("tools/sync/links.py", "tools/sync/link_plan.py", "tools/sync/link_apply.py", "tools/sync/link_recovery.py", "tools/sync/ownership.py")
-SYNC_CORE = ("sync", "tools/sync/main.py", "tools/sync/dag.py", "tools/sync/bootstrap.sh")
+SYNC_CORE = ("sync", "tools/sync/main.py", "tools/sync/dag.py", "tools/sync/bootstrap.sh", "tools/sync/pi_auth.py")
 WORKER_REG = ("tools/sync/claude-worker.py", "tools/sync/pi-worker.py", "tools/sync/opencode-worker.py", "tools/pi/sync_bridge.py")
 
 REGISTRY: tuple[Check, ...] = (
@@ -129,6 +130,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),
     Check("sync-auth", (DAG,), py("tools/sync/test_auth.py"), ("tools/sync/auth.py", "tools/sync/report.py", "tools/sync/test_auth.py")),
+    Check("sync-pi-auth", (PI_AUTH,), py("tools/sync/test_pi_auth.py"), ("tools/sync/pi_auth.py", "tools/sync/test_pi_auth.py", "tools/sync/main.py", "tools/sync/test_main.py")),
     Check("cpu-guard", (CPUGUARD,), py("dotfiles/cpu-guard-test.py"), ("dotfiles/base/.local/bin/cpu-guard", "dotfiles/cpu-guard-test.py")),
     Check("sync-dag", (DAG,), py("tools/sync/test_dag.py"), ("tools/sync/dag.py", "tools/sync/test_dag.py")),
     Check("sync-hosts", (DAG,), py("tools/sync/test_fleet.py"), ("tools/sync/fleet.py", "tools/sync/report.py", "tools/sync/test_fleet.py", "tailscale/policy.json")),

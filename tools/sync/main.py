@@ -17,6 +17,7 @@ from links import LinkError, discover
 from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
 from installer import Installer, SkipInstall, default_tools
+import pi_auth
 from pi_extensions import missing as missing_pi_extensions
 from report import TaskLine, render, render_json
 from ownership import capture_new, claims_lock, merge_claims, records, ownership_lock, fingerprint, read_manifest
@@ -178,6 +179,14 @@ def opencode_bridge_status(ctx: Context) -> Probe:
 
 def opencode_bridge_apply(ctx: Context) -> None:
     required(command(ctx, sys.executable, "-I", str(OPENCODE_BRIDGE), "remove"), "OpenCode MCP removal")
+
+
+def pi_auth_status(ctx: Context) -> Probe:
+    return pi_auth.status(ctx.home, ctx.env)
+
+
+def pi_auth_apply(ctx: Context) -> None:
+    pi_auth.apply(ctx.home, ctx.env)
 
 
 def companions_status(ctx: Context) -> Probe:
@@ -356,6 +365,9 @@ def graph(ctx: Context, names: list[str], *, setup: bool) -> Graph:
     nodes.append(Task("pi-mcp", ("pi-extensions", "tool:nodejs", "tool:pi"),
                       lambda: pi_bridge_status(ctx), lambda: pi_bridge_apply(ctx),
                       lambda: pi_bridge_status(ctx), frozenset({"pi-config", "pi-sdk-install"})))
+    nodes.append(Task("pi-auth", ("links", "tool:pi"),
+                      lambda: pi_auth_status(ctx), lambda: pi_auth_apply(ctx),
+                      lambda: pi_auth_status(ctx), frozenset({"pi-config"})))
     nodes.append(Task("opencode-mcp", ("links",),
                       lambda: opencode_bridge_status(ctx), lambda: opencode_bridge_apply(ctx),
                       lambda: opencode_bridge_status(ctx), frozenset({"opencode-config"})))
@@ -376,7 +388,7 @@ def default_goals(ctx: Context) -> list[str]:
     if ctx.platform == "darwin":
         goals.append("host:mac-packages")
     if ctx.profile != "server":
-        goals.extend(["claude-mcp", "pi-mcp", "opencode-mcp", "companions-mcp"])
+        goals.extend(["claude-mcp", "pi-mcp", "pi-auth", "opencode-mcp", "companions-mcp"])
     if ctx.platform == "darwin" or os.access(ctx.home / ".cargo/bin/rustup", os.X_OK):
         goals.append("kache")
     return goals
@@ -446,7 +458,7 @@ def main(argv: list[str]) -> int:
     if command_name == "links":
         selected = full.select(["links"])
     elif command_name == "bridge":
-        selected = full.select(["claude-mcp", "pi-mcp", "opencode-mcp", "companions-mcp"])
+        selected = full.select(["claude-mcp", "pi-mcp", "pi-auth", "opencode-mcp", "companions-mcp"])
     elif command_name == "tools":
         selected = full.select(["tool:" + name for name in chosen])
     elif command_name in {"apply", "plan", "doctor"}:

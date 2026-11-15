@@ -23,6 +23,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | Tailnet Intercom coordinator launcher | `python3 -I tools/intercom-tailnet/test_intercom_tailnet.py` and `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` |
 | `tools/pi-subagent-bridge` | `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` and `(export TMPDIR="$PWD/.work/tmp"; cd tools/pi-subagent-bridge && npm test)`; run `./dev-install.sh` once first |
 | Pi profile and extensions | `python3 -I dotfiles/pi-test.py` and `python3 -I tools/sync/test_pi_extensions.py` |
+| `sync` Pi auth wiring | `python3 -I tools/sync/test_pi_auth.py` |
 | `cpu-guard` | `python3 -I dotfiles/cpu-guard-test.py` |
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `sync uninstall` | `python3 -I tools/sync/test_uninstall.py` |
