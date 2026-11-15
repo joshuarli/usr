@@ -158,11 +158,12 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
       assert.equal(cancelResponse.result.isError, undefined)
       const cancelled = JSON.parse(cancelResponse.result.content[0].text)
       await new Promise(resolve => setTimeout(resolve, 100))
-      assert.equal(cli("cancel", cwd, cancelled.session_id).interrupted, false)
+      assert.equal(cli("cancel", cwd, cancelled.session_id).interrupted, true)
+      assert.notEqual((await wait(cancelled.session_id)).state, "running")
       const cancelJob = cli("owner", "jobs", ...ownerArgs).find((entry: { job_id: string }) => entry.job_id === cancelled.session_id)
       const cancelTarget = ["--job", cancelJob.job_id, "--run", cancelJob.run_id, "--generation", String(cancelJob.owner_generation)]
-      assert.equal(cli("owner", "interrupt", ...ownerArgs, ...cancelTarget, "--command", "fixture-interrupt").receipt, "accepted")
-      assert.notEqual((await wait(cancelled.session_id)).state, "running")
+      assert.deepEqual(cli("owner", "interrupt", ...ownerArgs, ...cancelTarget, "--command", "fixture-interrupt"),
+        { receipt: "rejected", reason: "not-running" })
       rmSync(join(root, "hold"))
 
     } finally {
