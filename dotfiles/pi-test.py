@@ -118,6 +118,11 @@ class PiTests(unittest.TestCase):
         self.sync_tools(False)
         self.assertFalse((self.home / ".local/share/pi-runtime").exists())
 
+    def test_last_changelog_seed_matches_runtime_pin(self):
+        settings = json.loads((PROFILE / "settings.json").read_text())
+        pin = json.loads((ROOT / "tools/pi/runtime.pin.json").read_text())
+        self.assertEqual(settings["lastChangelogVersion"], pin["version"])
+
     def test_profile_and_orchestration_agree(self):
         settings = json.loads((PROFILE / "settings.json").read_text())
         self.assertEqual(settings["defaultProvider"] + "/" + settings["defaultModel"], "opencode-go/deepseek-v4.1-flash")

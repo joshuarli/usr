@@ -179,7 +179,7 @@ def run(action):
         if legacy is not None:
             print(f"MCP: migrate owned {LEGACY_NAME} to {NAME}")
         if not dependency_current():
-            print(f"OFFLINE: link vendored Pi SDK and extensions")
+            print("OFFLINE: link vendored Pi SDK and extensions")
         if previous != desired or legacy is not None:
             print(f"MCP: register {NAME} with Pi user scope")
         elif load_owner() != entry_fingerprint(desired):

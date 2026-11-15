@@ -128,6 +128,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),
     Check("pi-extensions", (PI_PROFILE,), py("tools/sync/test_pi_extensions.py"), ("tools/sync/pi_extensions.py", "tools/sync/test_pi_extensions.py", "dotfiles/base/.pi/")),
     Check("sync-dag", (DAG,), py("tools/sync/test_dag.py"), ("tools/sync/dag.py", "tools/sync/test_dag.py")),
+    Check("sync-hosts", (DAG,), py("tools/sync/test_fleet.py"), ("tools/sync/fleet.py", "tools/sync/report.py", "tools/sync/test_fleet.py", "tailscale/policy.json")),
     Check("sync-sh-syntax", (DAG,), ("sh", "-n", "sync"), ("sync",)),
     Check("sync-launcher", (DAG,), py("tools/sync/test_launcher.py"), (*SYNC_CORE, "tools/sync/installer.py", "tools/sync/pi_release.py", "tools/sync/test_launcher.py")),
     Check("installer", (INSTALLER,), py("tools/sync/test_installer.py"), ("tools/sync/installer.py", "tools/sync/test_installer.py", "tools/sync/tools.json")),

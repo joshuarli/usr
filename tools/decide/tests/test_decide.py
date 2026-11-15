@@ -1004,7 +1004,8 @@ class DecideTests(unittest.TestCase):
             self.assertEqual(result["reason"], reason)
 
     def test_route_insufficient_evidence_high_risk_and_opt_out_never_infer(self):
-        never = lambda *args: self.fail("network used")
+        def never(*args):
+            return self.fail("network used")
         for changes, reason in [
             ({"scope": []}, "insufficient_context"),
             ({"evidence": []}, "insufficient_context"),
@@ -1030,7 +1031,8 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(single["reason"], "single_eligible_tier")
 
     def test_route_mode_controls_scout_eligibility_and_baseline(self):
-        never = lambda *args: self.fail("network used")
+        def never(*args):
+            return self.fail("network used")
         for bad in [
             DECIDE.route_task(sample_route_brief(), eligible_tiers=("scout", "worker"), env=self.env, transport=never),
             DECIDE.route_task(sample_route_brief(), baseline_tier="scout", env=self.env, transport=never),
@@ -1046,7 +1048,8 @@ class DecideTests(unittest.TestCase):
         self.assertEqual(read_only["selected_tier"], "scout")
 
     def test_route_rejects_arbitrary_text_unknown_fields_and_oversize(self):
-        never = lambda *args: self.fail("network used")
+        def never(*args):
+            return self.fail("network used")
         bad_inputs = [
             "",
             "Fix the flaky Niceforge tests",

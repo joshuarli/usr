@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from pathlib import Path
+import json
 import shutil
 import subprocess
 import tempfile
@@ -23,7 +24,7 @@ class SyncIntegrationTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         for relative in ("tools/sync", "dotfiles/base", "dotfiles/linux", "bin", "home"):
             (self.root / relative).mkdir(parents=True, exist_ok=True)
-        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py", "pi_extensions.py"):
+        for name in ("dag.py", "main.py", "uninstall.py", "ownership.py", "links.py", "link_plan.py", "link_apply.py", "link_recovery.py", "pi_extensions.py", "report.py"):
             shutil.copy2(SOURCE / name, self.root / "tools/sync" / name)
         shutil.copy2(SYNC, self.root / "sync")
         self._script("bin/uname", '#!/bin/sh\nprintf "Linux\\n"\n')
@@ -122,7 +123,8 @@ class Installer:
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.read_text(), "hello")
         self.run_sync("links")
-        self.assertIn("CURRENT", self.run_sync("plan").stdout)
+        report = json.loads(self.run_sync("plan", "--json").stdout.strip().splitlines()[-1])
+        self.assertEqual({task["name"]: task["state"] for task in report["tasks"]}["links"], "current")
 
     def test_links_foreign_file_blocks_entire_apply(self):
         self.root.joinpath("dotfiles/base/first").write_text("first")
@@ -204,8 +206,8 @@ class Installer:
     def test_plan_does_not_change_home(self):
         self.assertIn("nodejs", self.run_sync("list").stdout)
         plan = self.run_sync("plan").stdout
-        self.assertIn("APPLY    tool:nodejs", plan)
-        self.assertIn("APPLY    tool:cmd", plan)
+        self.assertRegex(plan, r"(?m)^  apply +tool:nodejs ")
+        self.assertRegex(plan, r"(?m)^  apply +tool:cmd ")
         self.assertFalse((self.root / "home/installed").exists())
 
 

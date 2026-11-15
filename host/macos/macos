@@ -9,6 +9,7 @@ import importlib.machinery
 import importlib.util
 import os
 import plistlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -44,9 +45,6 @@ def defaults(scope: str, *arguments: str, input_data: bytes | None = None) -> by
         detail = process.stderr.decode(errors="replace").strip()
         raise RuntimeError(f"defaults {' '.join(arguments)} failed: {detail}")
     return process.stdout
-
-
-import re
 
 
 REDACTED = "<redacted>"

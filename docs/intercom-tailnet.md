@@ -149,26 +149,52 @@ credential checks, old-runtime failures and worker environment isolation. They d
 not prove a connection between two physical hosts or a complete real-harness
 conversation.
 
-After publishing and adopting the reviewed runtime, verify the deployment on two
-hosts with disposable coordinator enrollments:
+### Two-host qualification
 
-1. Start the hub on its actual Tailscale address. Confirm the listener is confined
-   to that address and a transport probe succeeds from the second host.
-2. Enroll two coordinators into the same fleet, start their top-level harnesses,
-   and confirm they discover each other with the expected host/name identities.
-3. Send a distinctive harmless message in each direction and confirm receipt in
-   both harnesses. Exercise Pi/Claude, Pi/Codex and Pi/OpenCode separately when
-   those harness pairs are used. Transport acceptance alone is not this proof.
-4. Restart one coordinator with its saved session credential and confirm reconnect
-   behavior. Stop the hub and confirm sends report a bounded connection failure
-   rather than silently starting a separate local broker.
-5. Revoke a disposable coordinator, then confirm further discovery/sends and a
-   reconnect with its old credential fail. Confirm a coordinator in another fleet
-   cannot discover or address the first fleet's sessions.
-6. Start a normal scoped Pi bridge worker while its parent is connected. Confirm
-   it has no Intercom tools, receives no coordinator environment, and never appears
-   as an enrolled peer. Keep the no-automatic-wake defaults during these checks.
+After both hosts run the reviewed runtime, qualify the deployment from the
+coordinator host. SSH must reach the hub host without a prompt, and both hosts
+need `tmux` and a `usr` checkout at `~/usr`:
 
-Record the runtime builder revision, host/harness pair, receipt evidence and any
-remaining failures. A local fixture pass or successful `doctor --connect` must not
-be reported as completed two-host acceptance.
+```sh
+python3 -I tools/intercom-tailnet/qualify.py --hub-ssh josh@lisa \
+  --hub-address 100.68.104.43 --hub-label lisa --local-label mac
+```
+
+It starts a disposable hub with its own state directory, port (`--port`,
+default 47839) and fleets. It does not touch a running hub. It drives
+interactive Pi coordinators in `tmux` on both hosts through the Intercom overlay
+shortcut and checks:
+
+- the listener binds only the tailnet address;
+- discovery and delivery in both directions;
+- identity retention across a restart;
+- isolation between fleets;
+- rejection of a forged enrollment;
+- inspect output without secrets;
+- revocation, including reconnect with the old credential;
+- launcher refusal of scoped workers;
+- a bounded error after the hub stops, without starting a local broker.
+
+Each coordinator runs with the tracked Pi settings and Intercom policy but no
+`auth.json`. Any model turn, including an automatic wakeup on an incoming
+message, would leave a local provider error. The run fails if one appears and
+never spends provider budget. Everything it starts is stopped, and its scratch
+is removed unless you pass `--keep`.
+
+The qualifier does not cover these:
+
+- Claude, Codex or OpenCode coordinator pairs, which need model turns;
+- a scoped Pi bridge worker launched from an enrolled coordinator.
+
+Exercise those separately before relying on them.
+
+Results on 2026-11-14, runtime `pi-build` `f6fc723` (usr `a34fdcc`), with hub
+`lisa` (Alpine x86_64) and coordinator `mac` (macOS arm64):
+
+- The qualifier passed all checks on three consecutive runs; the last followed
+  tightening the roster check to an exact peer set.
+- A manual Pi (`lisa`) and Claude Code (`mac`) pair delivered in both
+  directions. Claude saw only its fleet peer. Pi received
+  `From: mac/a1 [remote:mac]`, and Claude's `intercom_pending` showed the Pi
+  sender with `remotePolicy: remote-fleet` and `trustedLocal: false`.
+- Codex and OpenCode pairs and a real scoped bridge worker remain unverified.

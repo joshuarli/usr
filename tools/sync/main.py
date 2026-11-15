@@ -18,6 +18,7 @@ from link_plan import plan_links
 from link_apply import LinkApplyError, apply as apply_link_plan
 from installer import Installer, SkipInstall, default_tools
 from pi_extensions import missing as missing_pi_extensions
+from report import TaskLine, render, render_json
 from ownership import capture_new, claims_lock, merge_claims, records, ownership_lock, fingerprint, read_manifest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -381,8 +382,17 @@ def default_goals(ctx: Context) -> list[str]:
     return goals
 
 
+def output_flags(argv: list[str]) -> tuple[list[str], bool, bool]:
+    as_json = "--json" in argv
+    show_all = "--all" in argv
+    return [arg for arg in argv if arg not in ("--json", "--all")], as_json, show_all
+
+
 def main(argv: list[str]) -> int:
     command_name = argv.pop(0) if argv else "apply"
+    if command_name == "hosts":
+        from fleet import main as fleet_main
+        return fleet_main(argv)
     if command_name == "launchers":
         for tool in argv:
             print(tool, *TOOL_EXECUTABLES.get(tool, (tool,)))
@@ -419,7 +429,10 @@ def main(argv: list[str]) -> int:
                     observed.add(relative)
         return 0
     if command_name not in {"apply", "plan", "doctor", "links", "tools", "bridge"}:
-        raise GraphError("usage: sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|check|check-parallel|layers]")
+        raise GraphError("usage: sync [plan|doctor|links|tools NAME...|list|bridge|uninstall|hosts|check|check-parallel|layers] [--all] [--json]")
+    argv, as_json, show_all = output_flags(argv)
+    host = os.uname().nodename.split(".")[0]
+    emit = (lambda lines: render_json(command_name, host, lines)) if as_json else (lambda lines: render(command_name, host, lines, show_all))
     defaults = tool_list(ctx) if command_name in ("apply", "plan", "doctor") or (command_name == "tools" and not argv) else []
     chosen = argv if command_name == "tools" and argv else defaults
     full = graph(ctx, chosen, setup=command_name in {"apply", "plan", "doctor"})
@@ -435,31 +448,42 @@ def main(argv: list[str]) -> int:
         raise AssertionError(command_name)
     if command_name in {"plan", "doctor"}:
         failures = 0
+        lines: list[TaskLine] = []
         for task, probe in selected.inspect():
-            state = "CONFLICT" if probe.conflict else "APPLY" if not probe.current else "CHECK" if task.reconcile else "CURRENT"
-            print(f"{state:8} {task.name}: {probe.detail}")
-            if command_name == "plan" and task.name == "links":
-                for line in probe.detail.split("; "):
-                    if line.startswith(("LINK:", "CONFLICT:", "PRUNE:")):
-                        print(line)
+            state = "conflict" if probe.conflict else "apply" if not probe.current else "check" if task.reconcile else "current"
+            lines.append(TaskLine(task.name, state, probe.detail))
             if command_name == "doctor" and (not probe.current or probe.conflict):
                 failures += 1
             if command_name == "plan" and probe.conflict:
                 failures += 1
+        emit(lines)
         if command_name == "doctor":
-            legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"))
+            legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"), capture=as_json)
             failures += int(legacy.returncode != 0)
         return 1 if failures else 0
     jobs = int(ctx.env["SYNC_JOBS"]) if "SYNC_JOBS" in ctx.env else default_jobs()
+    tolerated = {part.strip() for part in os.environ.get("SYNC_TOLERATE", "").split(",") if part.strip()}
     try:
         with ownership_lock(ctx.state):
             results = selected.run(jobs=jobs)
     except OSError as exc:
         results = [Result(task.name, "failed", f"{type(exc).__name__}: {exc}")
                    for task in selected.order()]
-    for result in results:
-        print(f"{result.state.upper():8} {result.name}: {result.detail}")
-    return 1 if any(r.state in ("failed", "blocked") for r in results) else 0
+    results_by_name = {result.name: result for result in results}
+    soft = set(tolerated)
+    for task in selected.order():
+        result = results_by_name.get(task.name)
+        if result is None or result.state != "blocked" or task.name in soft:
+            continue
+        bad = [dep for dep in task.needs
+               if results_by_name.get(dep) is not None
+               and results_by_name[dep].state in ("failed", "blocked")]
+        if bad and all(dep in soft for dep in bad):
+            soft.add(task.name)
+    emit([TaskLine(result.name, "tolerated" if result.name in soft and result.state in ("failed", "blocked") else result.state, result.detail)
+          for result in results])
+    hard = [result for result in results if result.state in ("failed", "blocked") and result.name not in soft]
+    return 1 if hard else 0
 
 
 if __name__ == "__main__":
