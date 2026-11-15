@@ -1,3 +1,4 @@
+import { piAdapter } from "../src/pi-adapter.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 const noCodex = { available: () => false, start: startCodex, status: codexResult, cancel: cancelCodex, session: codexSession }
 import test from "node:test"
@@ -67,7 +68,7 @@ function fake(cwd: string) {
 test("integration: HEAD-pinned scoped admission and status report unchanged head", async () => {
   const f = fixture()
   try {
-    const m = fake(f.cwd), bridge = makeHybridBridge(m.api, m.command, noCodex)
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
     const started = await bridge.start(f.cwd, "smoke", "worker", f.scope, "Do scoped work")
     assert.match(started.session_id, /^usrw_/)
     assert.equal(started.backend, "command-code")
@@ -92,7 +93,7 @@ test("integration: active worktree lease blocks a second start, including higher
     m.command.status = () => done
       ? { state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd", finalText: "proof\nACCEPTANCE: met" }, stderr: null }
       : { state: "running" as const, result: null, stderr: null }
-    const bridge = makeHybridBridge(m.api, m.command, noCodex)
+    const bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
     const started = await bridge.start(f.cwd, "owner", "mechanic", f.scope, "Hold lease")
     assert.equal(started.backend, "command-code")
     await assert.rejects(

@@ -1,3 +1,4 @@
+import { piAdapter } from "../src/pi-adapter.ts"
 import test from "node:test"
 import assert from "node:assert/strict"
 import { spawn, execFileSync, type ChildProcess } from "node:child_process"
@@ -327,7 +328,7 @@ test("a: fresh client lists only this owner's jobs with generation and private s
   const scratch = makeScratch(t)
   const repo = makeRepo(scratch)
   const cmd = makeFakeCommand()
-  const bridge = makeHybridBridge(makeFakePiPort().port, cmd.runner, noCodex)
+  const bridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
   const manager = new OwnerManager(bridge)
   t.after(async () => manager.close())
 
@@ -373,7 +374,7 @@ test("b: steer twice with one command_id delivers exactly one steer and returns 
   const pi = makeFakePiPort("running")
   const noCmd = makeFakeCommand()
   noCmd.runner.available = () => false
-  const piBridge = makeHybridBridge(pi.port, noCmd.runner, noCodex, undefined, piOnlyPolicy)
+  const piBridge = makeHybridBridge(piAdapter(pi.port), noCmd.runner, noCodex, undefined, piOnlyPolicy)
   const piManager = new OwnerManager(piBridge)
   t.after(async () => piManager.close())
 
@@ -419,7 +420,7 @@ test("b: steer twice with one command_id delivers exactly one steer and returns 
       cmd.behavior.state = "running"
     },
   })
-  const cmdBridge = makeHybridBridge(makeFakePiPort().port, cmd.runner, noCodex)
+  const cmdBridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
   const cmdManager = new OwnerManager(cmdBridge)
   t.after(async () => cmdManager.close())
 
@@ -445,7 +446,7 @@ test("c: owner loss mid-command reports uncertain via command and new owner does
   const scratch = makeScratch(t)
   const repo = makeRepo(scratch)
   const cmd1 = makeFakeCommand()
-  const bridge1 = makeHybridBridge(makeFakePiPort().port, cmd1.runner, noCodex)
+  const bridge1 = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd1.runner, noCodex)
   const endpoint1 = await RepoOwnerEndpoint.start(repo, bridge1, {
     testHooks: {
       afterAdmitted: async () => {
@@ -479,7 +480,7 @@ test("c: owner loss mid-command reports uncertain via command and new owner does
 
   // New owner instance starts at generation 2
   const cmd2 = makeFakeCommand()
-  const bridge2 = makeHybridBridge(makeFakePiPort().port, cmd2.runner, noCodex)
+  const bridge2 = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd2.runner, noCodex)
   const manager2 = new OwnerManager(bridge2)
   t.after(async () => manager2.close())
   await manager2.ensureRepo(repo)
@@ -505,7 +506,7 @@ test("d: after owner restart old target is stale-target and old commands reconci
   const pi1 = makeFakePiPort("running")
   const noCmd = makeFakeCommand()
   noCmd.runner.available = () => false
-  const bridge1 = makeHybridBridge(pi1.port, noCmd.runner, noCodex, undefined, piOnlyPolicy)
+  const bridge1 = makeHybridBridge(piAdapter(pi1.port), noCmd.runner, noCodex, undefined, piOnlyPolicy)
   let abortNext = false
   let mgr1Ref: RepoOwnerEndpoint | undefined
   const manager1 = new OwnerManager(bridge1, {
@@ -541,7 +542,7 @@ test("d: after owner restart old target is stale-target and old commands reconci
 
   // Restarted owner (generation 2)
   const pi2 = makeFakePiPort("running")
-  const bridge2 = makeHybridBridge(pi2.port, noCmd.runner, noCodex, undefined, piOnlyPolicy)
+  const bridge2 = makeHybridBridge(piAdapter(pi2.port), noCmd.runner, noCodex, undefined, piOnlyPolicy)
   const manager2 = new OwnerManager(bridge2)
   t.after(async () => manager2.close())
   await manager2.ensureRepo(repo)
@@ -581,7 +582,7 @@ test("e: status, jobs, and hello leave leases, counts, and session records byte-
   const scratch = makeScratch(t)
   const repo = makeRepo(scratch)
   const cmd = makeFakeCommand()
-  const bridge = makeHybridBridge(makeFakePiPort().port, cmd.runner, noCodex)
+  const bridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
   const manager = new OwnerManager(bridge)
   t.after(async () => manager.close())
 
@@ -617,7 +618,7 @@ test("f: unknown method, unknown param field, bad protocol use, and unowned job 
   const scratch = makeScratch(t)
   const repo = makeRepo(scratch)
   const cmd = makeFakeCommand()
-  const bridge = makeHybridBridge(makeFakePiPort().port, cmd.runner, noCodex)
+  const bridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
   const manager = new OwnerManager(bridge)
   t.after(async () => manager.close())
   await manager.ensureRepo(repo)
@@ -689,7 +690,7 @@ test("g: steer on finished run -> not-running; resume while running -> rejected;
   const scratch = makeScratch(t)
   const repo = makeRepo(scratch)
   const cmd = makeFakeCommand()
-  const bridge = makeHybridBridge(makeFakePiPort().port, cmd.runner, noCodex)
+  const bridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
   const manager = new OwnerManager(bridge)
   t.after(async () => manager.close())
 
@@ -754,7 +755,7 @@ test("h: interrupt on blocked_partial_work returns rejected: not-running and pre
   const scratch = makeScratch(t)
   const repo = makeRepo(scratch)
   const cmd = makeFakeCommand()
-  const bridge = makeHybridBridge(makeFakePiPort().port, cmd.runner, noCodex)
+  const bridge = makeHybridBridge(piAdapter(makeFakePiPort().port), cmd.runner, noCodex)
   const manager = new OwnerManager(bridge)
   t.after(async () => manager.close())
 

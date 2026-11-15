@@ -1,4 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { createInterface } from "node:readline"
 import { COMMANDS, COMMAND_NAMES, decodeCommand, toolSchema, type Command } from "./commands.ts"
 import { isRecord } from "./scope.ts"
@@ -13,8 +15,13 @@ export type Bridge = ReturnType<typeof import("./hybrid.ts").makeHybridBridge>
 type Message = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: unknown }
 
 export async function connect(): Promise<Bridge> {
-  const [{ optionalPiPort }, { makeHybridBridge }] = await Promise.all([import("./optional-pi.ts"), import("./hybrid.ts")])
-  return makeHybridBridge(optionalPiPort())
+  const paths = (process.env.PATH ?? "").split(":").filter(Boolean)
+  for (const path of [join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/opt/homebrew/opt/rustup/bin"]) {
+    if (!paths.includes(path)) paths.push(path)
+  }
+  process.env.PATH = paths.join(":")
+  const [{ optionalPiAdapter }, { makeHybridBridge }] = await Promise.all([import("./optional-pi.ts"), import("./hybrid.ts")])
+  return makeHybridBridge(optionalPiAdapter())
 }
 
 export function dispatch(worker: Bridge, command: Command): Promise<unknown> {

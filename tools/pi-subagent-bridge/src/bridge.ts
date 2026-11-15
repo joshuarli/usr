@@ -213,7 +213,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
       const running = activeSession(active, id)
       const pending = queuedInputs(inbox)
       return {
-        session_id: id, cwd: directory, model, state: running ? "running" : pending ? "queued" : (info.outcome ?? "idle_or_queued"),
+        session_id: id, cwd: directory, model, state: running ? "running" : pending ? "queued" : info.outcome === undefined ? "idle_or_queued" : typeof info.outcome === "string" ? info.outcome : "unknown",
         pending_inputs: pending,
         cost_reported_usd: info.cost ?? null, tokens: info.tokens ?? null, error: info.error ?? latestAssistantError(messages),
         last_assistant_text: latestAssistant(messages), git_status: statusLines(directory),

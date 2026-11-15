@@ -1,3 +1,4 @@
+import { piAdapter } from "./pi-adapter.ts"
 import { existsSync } from "node:fs"
 import type { ModelRef, OpenCodePort } from "./bridge.ts"
 
@@ -31,4 +32,8 @@ export async function diagnoseGoModel(model: ModelRef): Promise<string | null> {
   const modulePath: string = "./pi-port.ts"
   const adapter: { diagnoseGoModel(model: ModelRef): Promise<string | null> } = await import(modulePath)
   return adapter.diagnoseGoModel(model)
+}
+
+export function optionalPiAdapter() {
+  return piAdapter(optionalPiPort())
 }

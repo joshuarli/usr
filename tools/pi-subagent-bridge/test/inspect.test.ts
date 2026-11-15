@@ -1,3 +1,4 @@
+import { piAdapter } from "../src/pi-adapter.ts"
 import test, { after } from "node:test"
 import assert from "node:assert/strict"
 import { existsSync, readFileSync } from "node:fs"
@@ -6,7 +7,7 @@ import { makeWorkerBridge } from "../src/bridge.ts"
 import { processStartTime } from "../src/command.ts"
 import { makeHybridBridge } from "../src/hybrid.ts"
 import { inspectStored, type Snapshot } from "../src/inspect.ts"
-import { optionalPiPort } from "../src/optional-pi.ts"
+import { optionalPiAdapter } from "../src/optional-pi.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree } from "../src/worktree-lease.ts"
 import {
   PI_MODEL, PI_ID, Scratch, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, toolQueued,
@@ -29,7 +30,7 @@ async function inspectReadOnly(repo: Repo, id: string): Promise<Snapshot> {
   }) as typeof process.kill
   const snapshots: Snapshot[] = []
   try {
-    for (let attempt = 0; attempt < 3; attempt++) snapshots.push(await inspectStored(repo.directory, id, realDeps(optionalPiPort())))
+    for (let attempt = 0; attempt < 3; attempt++) snapshots.push(await inspectStored(repo.directory, id, realDeps(optionalPiAdapter())))
   } finally {
     process.kill = kill
   }
@@ -112,7 +113,7 @@ test("a dead Pi host reports its receipt once it has exited", async () => {
 
 test("a Pi host that is alive is running whatever its receipt says, and its receipt counts after exit", async () => {
   const repo = scratch.repo(), pid = scratch.alive()
-  const bridge = makeWorkerBridge(optionalPiPort(), PI_MODEL)
+  const bridge = optionalPiAdapter()(PI_MODEL)
   writePiChild(repo, pid, piSuccess())
   assert.equal((await bridge.status(repo.cwd, PI_ID)).state, "running")
   writePiChild(repo, pid, { state: "failed", text: null, error: "boom", usage: null, sessionFile: null, runId: null })
@@ -143,7 +144,7 @@ test("worker_status advances and releases a terminal lease, which inspection alo
   const snapshot = await inspectStored(repo.directory, id, realDeps())
   assert.equal(snapshot.execution_state, "interrupted")
   assert.equal(activeWorktreeOwner(repo.directory, repo.cwd), id)
-  const response = await makeHybridBridge(unusedApi()).status(repo.cwd, id)
+  const response = await makeHybridBridge(piAdapter(unusedApi())).status(repo.cwd, id)
   assert.equal(response.state, "interrupted")
   assert.equal(activeWorktreeOwner(repo.directory, repo.cwd), null)
 })
@@ -167,8 +168,8 @@ test("a record saved in the current format inspects exactly like the v1 record i
     const after = migrate(repo, writeSession(repo, n++, { title: "Same lane", ...fields }))
     const path = join(repo.directory, after + ".json")
     assert.equal(JSON.parse(readFileSync(path, "utf8")).schema_version, 2, name)
-    const old = await inspectStored(repo.directory, before, realDeps(optionalPiPort()))
-    const current = await inspectStored(repo.directory, after, realDeps(optionalPiPort()))
+    const old = await inspectStored(repo.directory, before, realDeps(optionalPiAdapter()))
+    const current = await inspectStored(repo.directory, after, realDeps(optionalPiAdapter()))
     assert.deepEqual(strip(current), strip(old), name)
   }
 })

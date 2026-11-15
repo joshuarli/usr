@@ -31,7 +31,7 @@ The explicit CLI shim is installed at `~/.local/bin/pi-subagent-bridge`. No Open
 
 The core runs on Node without npm production dependencies. Pi packages and YAML belong to the optional Pi adapter. Production routes and saved session formats remain unchanged. Missing Pi reports an unavailable optional route. Reading historical Pi process evidence does not require the SDK.
 
-To register the bridge without installing Pi, run `python3 -I tools/sync/claude-worker.py install --core` from the repository root. `check --core` checks that registration. The Pi registration helper also accepts `--core`. These commands preserve existing dependency links and companion files. Supply executable locations through `PATH`; the server does not prepend machine-specific home paths.
+To register the bridge without installing Pi, run `python3 -I tools/sync/claude-worker.py install --core` from the repository root. `check --core` checks that registration. The Pi registration helper also accepts `--core`. These commands preserve existing dependency links and companion files. Supply executable locations through `PATH`; caller locations take priority over conventional tool directories appended by the server.
 
 For core development, run `./dev-install.sh --core` from this directory. Use a fresh checkout to verify package absence. The default developer installation includes the pinned optional adapter dependencies.
 

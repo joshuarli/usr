@@ -1,3 +1,4 @@
+import { piAdapter } from "../src/pi-adapter.ts"
 import test, { after } from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -260,7 +261,7 @@ test("a real in-flight codex-first record with only symbolic Pi destinations is 
     start: (request: LaunchRequest) => { starts.push(request.resume ?? ""); return { pid: 1, output: "fake", errors: "fake", started_at: "now" } } }
   const command = { available: () => false, start: () => { throw new Error("unexpected") }, status: () => failed, cancel: () => false }
   const calls: string[] = []
-  const bridge = makeHybridBridge(recordingApi(calls), command, codex)
+  const bridge = makeHybridBridge(piAdapter(recordingApi(calls)), command, codex)
   assert.equal((await bridge.status(repo.cwd, ended)).state, "succeeded")
   assert.equal((await bridge.resume(repo.cwd, ended, "Same-scope correction")).backend, "codex")
   assert.deepEqual(starts, ["thread"])
@@ -274,14 +275,14 @@ test("only a Pi fallback from that record is refused, with the reconciliation er
   const codex = { available: () => false, start: () => { throw new Error("unexpected") }, status: () => failed, cancel: () => false, session: codexSession }
   const unavailable = { available: () => false, start: () => { throw new Error("unexpected") }, status: () => failed, cancel: () => false }
   const fromCodex = realShape(repo, 3, "codex", await scratch.gone(), [])
-  const first = await makeHybridBridge(recordingApi(calls), unavailable, codex).status(repo.cwd, fromCodex)
+  const first = await makeHybridBridge(piAdapter(recordingApi(calls)), unavailable, codex).status(repo.cwd, fromCodex)
   assert.equal(first.state, "blocked_admission")
   assert.match(String(first.fallback_notice ?? ""), /Fallback blocked/)
   assert.match(JSON.parse(readFileSync(join(repo.directory, fromCodex + ".json"), "utf8")).fallback_blocked, REFUSAL)
 
   const other = scratch.repo()
   const fromCommand = realShape(other, 4, "command-code", await scratch.gone(), [])
-  const second = await makeHybridBridge(recordingApi(calls), { ...unavailable, available: () => true }, codex).status(other.cwd, fromCommand)
+  const second = await makeHybridBridge(piAdapter(recordingApi(calls)), { ...unavailable, available: () => true }, codex).status(other.cwd, fromCommand)
   assert.equal(second.state, "blocked_fallback")
   assert.match(JSON.parse(readFileSync(join(other.directory, fromCommand + ".json"), "utf8")).fallback_blocked, REFUSAL)
   assert.deepEqual(calls, [])

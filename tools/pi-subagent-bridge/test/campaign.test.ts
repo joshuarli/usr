@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { readFileSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { campaign } from "../src/campaign.ts"
-import { optionalPiPort } from "../src/optional-pi.ts"
+import { optionalPiAdapter } from "../src/optional-pi.ts"
 import {
   Scratch, collect, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor,
   toolQueued, writeLog, writePiChild, writeSession, type Repo,
@@ -31,7 +31,7 @@ before(async () => {
 })
 after(() => scratch.close())
 
-type Options = { cwd?: string; env?: NodeJS.ProcessEnv; pollMs?: number; clock?: { now: () => number; sleep: (ms: number) => Promise<void> }; api?: ReturnType<typeof optionalPiPort> }
+type Options = { cwd?: string; env?: NodeJS.ProcessEnv; pollMs?: number; clock?: { now: () => number; sleep: (ms: number) => Promise<void> }; api?: ReturnType<typeof optionalPiAdapter> }
 async function run(args: string[], options: Options = {}) {
   const out = collect(), err = collect()
   const status = await campaign(args, {
@@ -143,7 +143,7 @@ test("a Pi SDK terminal result is reported", async () => {
   const pi = scratch.repo("repo-pi")
   writePiChild(pi, gone, piSuccess("SDK proof\nACCEPTANCE: met"))
   const id = migrate(pi, piSession(pi, 10, { title: "Pi lane" }))
-  const { status, out } = await run(["wait", pi.root], { api: optionalPiPort() })
+  const { status, out } = await run(["wait", pi.root], { api: optionalPiAdapter() })
   assert.equal(status, 0, out)
   assert.equal(out, `${id} succeeded ${pi.cwd} Pi lane\n`)
 })

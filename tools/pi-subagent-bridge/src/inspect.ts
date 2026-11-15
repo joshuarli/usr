@@ -1,6 +1,7 @@
+import type { PiAdapter } from "./pi-adapter.ts"
 import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { makeWorkerBridge, type ModelRef, type OpenCodePort } from "./bridge.ts"
+import { type ModelRef } from "./bridge.ts"
 import type { CommandResult, CommandRun } from "./command.ts"
 import { changes, git, outside } from "./git.ts"
 import type { CliPin, FallbackPlan, PiSelection } from "./policy.ts"
@@ -36,7 +37,7 @@ function classifyState(state: string): Attention {
 
 export type RunnerStatus = { state: string; result: CommandResult | null; stderr: string | null }
 export type InspectionDeps = {
-  api: OpenCodePort
+  api: PiAdapter
   command: { status(run: CommandRun): RunnerStatus }
   codex: { status(run: CommandRun): RunnerStatus }
   antigravity: { status(run: CommandRun, pin: CliPin): RunnerStatus }
@@ -198,7 +199,7 @@ export async function observeExecution(s: Session, directory: string, deps: Insp
     return withheld("blocked_transition",
       execution.to.executor + " transition interrupted; inspect persisted state and worktree before recovery", sessionFile)
   if (execution.kind === "pi") {
-    const response = await makeWorkerBridge(deps.api, execution.selection).status(s.cwd, execution.session_id)
+    const response = await deps.api(execution.selection).status(s.cwd, execution.session_id)
     const run = piRun(directory, execution.session_id)
     return {
       state: typeof response.state === "string" ? response.state : "unknown",

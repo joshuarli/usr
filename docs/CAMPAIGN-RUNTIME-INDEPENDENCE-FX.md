@@ -3,12 +3,12 @@
 ## Status
 
 - **Goal:** make usr's worker orchestration independent of Pi, then establish whether a pinned FX runtime can replace a useful execution lane without weakening its contracts.
-- **State:** runtime-independence bootstrap implemented; final gates and independent review pending. FX has not started and is outside this launch.
+- **State:** core installation and execution are Pi-free on macOS ARM64; final adapter-boundary review pending. FX has not started and is outside this launch.
 - **Execution baseline:** `67ecf3b7b8235c712462c592bff78983690f2b8a`, macOS ARM64. The owner's Codex config was dirty and is excluded. Default Node was 26.7.0; supported Node 26.13.1 is available in the managed installation.
 - **Evidence:** after developer setup, baseline `npm test` passed 227 tests with one opt-in live Muse skip. The initial command failed because `.dev/bin/tsrs` was absent. The no-Pi pilot reproduced `TRAPPED Pi access: ./pi-port.ts` against the original server, then passed with lazy composition. Policy generation initially passed. No timing or resource comparison is claimed.
-- **Implemented:** lazy optional Pi composition; adapter-owned Go diagnostics; preserved SDK-free historical Pi readers; core-only dev dependencies and typecheck; explicit core-only Claude/Pi registration; Pi-free CLI/MCP/owner fixture. Public names, owner v1, persisted formats and production policy remain unchanged.
-- **Verified so far:** full bridge suite 228 passed, one live Muse skip; pinned Pi offline suite 14 passed; Pi runtime-contract suite 16 passed; Claude/Pi installer suites five each; OpenCode installer suite six; policy generator tests ten; orchestration tests eight. Isolated observation fixtures passed 65 cases after fixing historical Pi observation without the SDK.
-- **Next:** finish the isolated core suite and final review. Do not start FX. RI-1's full neutral typed adapter boundary and RI-3's complete hostile-environment matrix are not yet accepted.
+- **Implemented:** typed Pi adapter factory and lazy optional composition; adapter-owned Go diagnostics; preserved SDK-free historical Pi readers; core-only dev dependencies and typecheck; explicit core-only Claude/Pi registration; Pi-free CLI/MCP/owner fixture. Public names, owner v1, persisted formats and production policy remain unchanged.
+- **Verified so far:** full bridge suite on managed Node 26.13.1: 228 passed, one live Muse skip; isolated core-only installation: 217 passed, zero skips; pinned Pi offline suite 14 passed; Pi runtime-contract suite 16 passed; disposable offline sync/registration test one passed; Claude/Pi installer suites five each; OpenCode installer suite six; policy generator tests ten; orchestration tests eight. Isolated observation fixtures passed 65 cases after fixing historical Pi observation without the SDK.
+- **Next:** finish the focused review of the typed boundary, record local acceptance and stop. Do not start FX. Native Linux, live account and agentctl proofs remain external qualification gaps. The hostile fixture qualifies Codex public control; Command Code and Antigravity parity comes from their existing offline executor contracts, not live-provider qualification.
 
 ## Charter
 

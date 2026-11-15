@@ -1,3 +1,4 @@
+import { piAdapter, type PiAdapter } from "../src/pi-adapter.ts"
 import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { once } from "node:events"
 import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
@@ -141,7 +142,7 @@ export function unusedApi(): OpenCodePort {
   return new Proxy({}, { get() { throw new Error("the Pi API is not used here") } }) as OpenCodePort
 }
 
-export function realDeps(api: OpenCodePort = unusedApi()): InspectionDeps {
+export function realDeps(api: PiAdapter = piAdapter(unusedApi())): InspectionDeps {
   return { api, command: { status: commandResult }, codex: { status: codexResult }, antigravity: { status: antigravityResult } }
 }
 

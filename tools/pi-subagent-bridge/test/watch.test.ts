@@ -1,6 +1,6 @@
 import test, { after, before } from "node:test"
 import assert from "node:assert/strict"
-import { optionalPiPort } from "../src/optional-pi.ts"
+import { optionalPiAdapter } from "../src/optional-pi.ts"
 import { watchSession } from "../src/watch.ts"
 import {
   Scratch, collect, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, sessionId,
@@ -101,7 +101,7 @@ test("a live executor keeps the watch polling until its receipt appears", async 
 test("Pi SDK terminal result is observed", async () => {
   writePiChild(repo, gone, piSuccess("SDK proof\nACCEPTANCE: met"))
   const id = piSession(repo, 10)
-  const { status, text } = await watch(id, 10, false, realDeps(optionalPiPort()))
+  const { status, text } = await watch(id, 10, false, realDeps(optionalPiAdapter()))
   assert.equal(status, 0, text)
   assert.ok(text.startsWith("finished: succeeded\nSDK proof"), text)
 })
@@ -109,7 +109,7 @@ test("Pi SDK terminal result is observed", async () => {
 test("Pi SDK receipt does not precede host termination", async () => {
   writePiChild(repo, alive, piSuccess())
   const id = piSession(repo, 11)
-  const { text } = await watch(id, 10, true, realDeps(optionalPiPort()))
+  const { text } = await watch(id, 10, true, realDeps(optionalPiAdapter()))
   assert.equal(text, "running\n")
 })
 

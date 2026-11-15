@@ -1,7 +1,8 @@
+import type { PiAdapter } from "./pi-adapter.ts"
 import { randomUUID } from "node:crypto"
 import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
-import { PreAdmissionError, checkedWorktree, makeWorkerBridge, type OpenCodePort } from "./bridge.ts"
+import { PreAdmissionError, checkedWorktree } from "./bridge.ts"
 import { cancelCommand, commandResult, commandSession, startCommand, type CommandRun } from "./command.ts"
 import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
 import { antigravityAvailable, antigravityResult, antigravitySession, cancelAntigravity, startAntigravity } from "./antigravity.ts"
@@ -131,7 +132,7 @@ export function hybridOwnerOps(bridge: object): HybridOwnerOps | undefined {
   return ownerOpsRegistry.get(bridge)
 }
 
-export function makeHybridBridge(api: OpenCodePort, command = {
+export function makeHybridBridge(api: PiAdapter, command = {
   start: startCommand, status: commandResult, cancel: cancelCommand, available: cmdAvailable,
 }, codex = { start: startCodex, status: codexResult, cancel: cancelCodex, available: codexAvailable, session: codexSession },
   antigravity = { start: startAntigravity, status: antigravityResult, cancel: cancelAntigravity, available: antigravityAvailable, session: antigravitySession },
@@ -178,7 +179,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       const candidate = plan.pi[index]
       if (candidate.providerID === "muse-sdk") process.env.PI_MUSE_SDK_CONTRIBUTOR = "on"
       try {
-        if ((await makeWorkerBridge(api, candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
+        if ((await api(candidate).modelCheck(cwd)).available) return { selection: candidate, next: index + 1 }
       } catch { }
     }
     return null
@@ -196,7 +197,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (!available) throw new Error("Pinned Pi fallback models are unavailable")
       const { selection } = available
       next = available.next
-      const worker = makeWorkerBridge(api, selection)
+      const worker = api(selection)
       transition(s, { executor: "pi", selection }, true)
       s.fallback_reason = reason
       if (detail !== undefined)
@@ -316,20 +317,20 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let museAvailable = false, museIssue: string | null = null
       if (museModel) {
         try {
-          museAvailable = (await makeWorkerBridge(api, museModel).modelCheck(dir)).available
+          museAvailable = (await api(museModel).modelCheck(dir)).available
         } catch (e) { museIssue = String(e) }
         if (!museAvailable && !museIssue)
           museIssue = musePreflight().issue ?? "Muse subscription model unavailable; check Muse Code login"
       }
       let goAvailable = false, goIssue: string | null = null
       if (goModel) {
-        try { goAvailable = (await makeWorkerBridge(api, goModel).modelCheck(dir)).available }
+        try { goAvailable = (await api(goModel).modelCheck(dir)).available }
         catch (e) { goIssue = String(e) }
       }
       if (goModel && !goAvailable && !goIssue) goIssue = await diagnoseGoModel(goModel)
       let devinAvailable = false, devinIssue: string | null = null
       if (devinModel) {
-        try { devinAvailable = (await makeWorkerBridge(api, devinModel).modelCheck(dir)).available }
+        try { devinAvailable = (await api(devinModel).modelCheck(dir)).available }
         catch (e) { devinIssue = String(e) }
         if (!devinAvailable && !devinIssue)
           devinIssue = devinPreflight().issue ?? "Devin SWE-2 Flash is not authenticated in the Pi SDK"
@@ -445,7 +446,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
       if (s.execution.kind === "pi") {
         const { selection, session_id: sessionId } = s.execution
-        const dispatch = await makeWorkerBridge(api, selection).preflightResume(s.cwd, sessionId, "Same-scope correction only: " + correction)
+        const dispatch = await api(selection).preflightResume(s.cwd, sessionId, "Same-scope correction only: " + correction)
         await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.attempts++
@@ -496,7 +497,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
       let interrupted = false
       if (s.execution.kind === "pi") {
         await admitEffect?.()
-        interrupted = (await makeWorkerBridge(api, s.execution.selection).cancel(s.cwd, s.execution.session_id)).interrupted
+        interrupted = (await api(s.execution.selection).cancel(s.cwd, s.execution.session_id)).interrupted
       } else {
         const run = processRun(s)
         const executor = executorOf(s)
@@ -525,7 +526,7 @@ export function makeHybridBridge(api: OpenCodePort, command = {
         throw new Error("Cannot steer changed HEAD or out-of-scope work")
       if (s.execution.kind === "pi") {
         const sessionId = s.execution.session_id
-        const worker = makeWorkerBridge(api, s.execution.selection)
+        const worker = api(s.execution.selection)
         const observed = await worker.status(s.cwd, sessionId)
         const observedState = typeof observed.state === "string" ? observed.state : "unknown"
         if (observedState !== "running" && observedState !== "queued")

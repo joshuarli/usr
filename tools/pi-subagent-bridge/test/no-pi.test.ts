@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, readFileSync, symlinkSync, readdirSync } from "node:fs"
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, readFileSync, symlinkSync, readdirSync, renameSync } from "node:fs"
 import { execFileSync, spawn } from "node:child_process"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -120,6 +120,12 @@ printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"
       assert.equal(cli(...steerArgs).receipt, "accepted")
       assert.equal(readFileSync(join(root, "args"), "utf8"), argsAfterSteer)
       assert.equal((await wait(job.session_id)).state, "succeeded")
+
+      mkdirSync(join(home, ".local/bin"), { recursive: true })
+      renameSync(join(bin, "codex"), join(home, ".local/bin/codex"))
+      const fallbackPath = cli("start", cwd, "home executable", "worker", scope, brief)
+      assert.equal(fallbackPath.backend, "codex")
+      assert.equal((await wait(fallbackPath.session_id)).state, "succeeded")
 
     } finally {
       child.stdin.end()
