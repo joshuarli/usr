@@ -116,7 +116,8 @@ def credential_file(value: str) -> tuple[Path, str]:
         raise IntercomError(f"cannot read a private Intercom credential at {path}") from exc
     if not isinstance(value, dict):
         raise IntercomError("credential must contain an enrollment or session record")
-    valid_text = lambda item: isinstance(item, str) and bool(item) and "\0" not in item
+    def valid_text(item):
+        return isinstance(item, str) and bool(item) and "\0" not in item
     if valid_text(value.get("enrollmentToken")):
         return path, "enrollment"
     if (value.get("version") == 1 and valid_text(value.get("sessionCredential"))

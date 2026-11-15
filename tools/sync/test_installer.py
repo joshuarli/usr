@@ -1056,7 +1056,7 @@ sys.exit(1)
         self.make(self._bctl_release("release-aaa", b"#!/bin/sh\nexit 0\n")).install_bctl()
         current = self.home / ".local/share/bctl/current"
         before = os.readlink(current)
-        with self.assertRaises(Exception):
+        with self.assertRaises(SkipInstall):
             self.make(self._bctl_release("release-bbb", b"#!/bin/sh\n[ \"$1\" = image ] && exit 1\nexit 0\n")).install_bctl()
         self.assertEqual(os.readlink(current), before)
         self.assertEqual([p.name for p in (self.home / ".local/share/bctl/releases").iterdir() if not p.name.startswith(".")], ["release-aaa-x86_64-unknown-linux-musl"])

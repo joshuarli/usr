@@ -10,11 +10,11 @@ from typing import Iterable, TextIO
 
 # Plan/doctor states come from probes; apply states from dag.Result.
 PLAN_STATES = ("conflict", "apply", "check", "current")
-APPLY_STATES = ("failed", "blocked", "applied", "current")
+APPLY_STATES = ("failed", "blocked", "applied", "current", "tolerated")
 QUIET = frozenset({"current", "check"})
 LABELS = {"current": "current", "check": "checked", "apply": "to apply", "conflict": "conflict",
-          "applied": "applied", "failed": "failed", "blocked": "blocked"}
-COLORS = {"conflict": "31", "failed": "31", "blocked": "33", "apply": "33",
+          "applied": "applied", "failed": "failed", "blocked": "blocked", "tolerated": "tolerated"}
+COLORS = {"conflict": "31", "failed": "31", "blocked": "33", "tolerated": "2", "apply": "33",
           "applied": "32", "current": "2", "check": "2"}
 DETAIL_PREFIXES = ("LINK:", "CONFLICT:", "PRUNE:")
 

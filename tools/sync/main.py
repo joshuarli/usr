@@ -462,14 +462,28 @@ def main(argv: list[str]) -> int:
             failures += int(legacy.returncode != 0)
         return 1 if failures else 0
     jobs = int(ctx.env["SYNC_JOBS"]) if "SYNC_JOBS" in ctx.env else default_jobs()
+    tolerated = {part.strip() for part in os.environ.get("SYNC_TOLERATE", "").split(",") if part.strip()}
     try:
         with ownership_lock(ctx.state):
             results = selected.run(jobs=jobs)
     except OSError as exc:
         results = [Result(task.name, "failed", f"{type(exc).__name__}: {exc}")
                    for task in selected.order()]
-    emit([TaskLine(result.name, result.state, result.detail) for result in results])
-    return 1 if any(r.state in ("failed", "blocked") for r in results) else 0
+    results_by_name = {result.name: result for result in results}
+    soft = set(tolerated)
+    for task in selected.order():
+        result = results_by_name.get(task.name)
+        if result is None or result.state != "blocked" or task.name in soft:
+            continue
+        bad = [dep for dep in task.needs
+               if results_by_name.get(dep) is not None
+               and results_by_name[dep].state in ("failed", "blocked")]
+        if bad and all(dep in soft for dep in bad):
+            soft.add(task.name)
+    emit([TaskLine(result.name, "tolerated" if result.name in soft and result.state in ("failed", "blocked") else result.state, result.detail)
+          for result in results])
+    hard = [result for result in results if result.state in ("failed", "blocked") and result.name not in soft]
+    return 1 if hard else 0
 
 
 if __name__ == "__main__":
