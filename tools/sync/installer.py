@@ -26,7 +26,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from typing import NoReturn
+from typing import Callable, NoReturn, cast
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 import zipfile
@@ -36,6 +36,7 @@ import ffmpeg_runtime  # noqa: E402
 import pi_offline  # noqa: E402
 import pi_release  # noqa: E402
 
+HTTP_TIMEOUT = 30
 NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 NODEJS_VERSION = "26.13.1"
@@ -77,13 +78,13 @@ PYTHON_BUILD_REPO = "laputa-systems/python-build"
 PLAYER_REPO = "joshuarli/play"
 GHOSTTY_CUSTOM_ASSET = "Ghostty-Custom-aarch64-apple-darwin.dmg"
 GHOSTTY_CUSTOM_BUNDLE_ID = "com.joshuarli.ghostty-custom"
-SSH_COMMANDS = "ssh ssh-keygen ssh-agent ssh-add sftp scp".split()
-OXISH_COMMANDS = "oxish-server oxish-session".split()
-GLUON_COMMANDS = "meson ninja gluon-build".split()
+SSH_COMMANDS = ["ssh", "ssh-keygen", "ssh-agent", "ssh-add", "sftp", "scp"]
+OXISH_COMMANDS = ["oxish-server", "oxish-session"]
+GLUON_COMMANDS = ["meson", "ninja", "gluon-build"]
 BCTL_COMMANDS = ["bctl"]
-FFMPEG_COMMANDS = "ffmpeg ffprobe".split()
+FFMPEG_COMMANDS = ["ffmpeg", "ffprobe"]
 OPENCODE2_SHIM = '#!/bin/sh\nexec "${HOME}/.opencode/bin/opencode" "$@"'
-GIT_COMMANDS = "git git-shell git-upload-archive git-upload-pack git-receive-pack git-submodule git-submodule--helper git-sh-setup git-sh-i18n git-sh-i18n--envsubst".split()
+GIT_COMMANDS = ["git", "git-shell", "git-upload-archive", "git-upload-pack", "git-receive-pack", "git-submodule", "git-submodule--helper", "git-sh-setup", "git-sh-i18n", "git-sh-i18n--envsubst"]
 
 
 class InstallError(Exception):
@@ -291,13 +292,13 @@ class Installer:
         if ranged:
             headers["Range"] = "bytes=0-0"
         request = Request(url, headers=headers)
-        with urlopen(request) as response:
-            return response.read(), {key: value for key, value in response.headers.items()}
+        with urlopen(request, timeout=HTTP_TIMEOUT) as response:
+            return cast(bytes, response.read()), {key: value for key, value in response.headers.items()}
 
     def effective_url(self, url: str) -> str:
         try:
-            with urlopen(Request(url, headers={"User-Agent": "usr-sync"})) as response:
-                return response.geturl()
+            with urlopen(Request(url, headers={"User-Agent": "usr-sync"}), timeout=HTTP_TIMEOUT) as response:
+                return str(response.geturl())
         except (URLError, OSError, ValueError):
             return ""
 
@@ -377,18 +378,26 @@ class Installer:
         tags = self.release_tags(feed_url, prefix=prefix, exclude_prefix=exclude_prefix)
         return tags[0] if tags else ""
 
-    def release_asset(self, tool: str, base: str, tag: str, product: str, triple: str,
-                      version: str = "") -> tuple[str, str, str] | None:
+    def _release_listing(self, base: str, product: str, triple: str, version: str = "") -> tuple[str, str, str, str] | None:
         version_re = re.escape(version) if version else r"[0-9][^\s/]*"
         pattern = re.compile(rf"{re.escape(product)}-({version_re})-{re.escape(triple)}\.(?:tar\.xz|zip)")
         sums = self.fetch_text(f"{base}/SHA256SUMS")
-        assets = [fields[1] for line in sums.splitlines()
-                  if len(fields := line.split()) == 2 and pattern.fullmatch(fields[1])]
-        if len(assets) != 1:
+        matched: list[tuple[re.Match[str], str]] = []
+        for line in sums.splitlines():
+            fields = line.split()
+            if len(fields) != 2:
+                continue
+            match = pattern.fullmatch(fields[1])
+            if match is not None:
+                matched.append((match, fields[1]))
+        if len(matched) != 1:
             return None
-        asset = assets[0]
-        found = pattern.fullmatch(asset).group(1)
-        manifest_name = f"{product}-{found}-{triple}.manifest.json"
+        match, asset = matched[0]
+        return asset, cast(str, match.group(1)), self.sums_for(sums, asset), sums
+
+    def check_release_manifest(self, tool: str, base: str, tag: str, product: str, triple: str,
+                               version: str, asset: str, sums: str) -> None:
+        manifest_name = f"{product}-{version}-{triple}.manifest.json"
         expected = self.sums_for(sums, manifest_name)
         body = b""
         try:
@@ -400,17 +409,26 @@ class Installer:
                 or not isinstance(manifest, dict)):
             self.skip(tool, f"{tag} {manifest_name} is missing or does not match SHA256SUMS")
         if (manifest.get("schema_version") != 1 or manifest.get("product") != product
-                or manifest.get("version") != found or manifest.get("target") != triple
+                or manifest.get("version") != version or manifest.get("target") != triple
                 or manifest.get("source_revision") != tag[len("release-"):]):
             self.skip(tool, f"{tag} {manifest_name} does not describe {asset}")
-        return asset, found, self.sums_for(sums, asset)
 
-    def build_release(self, tool: str, repo: str, product: str, triple: str) -> tuple[str, str, str] | None:
+    def release_asset(self, tool: str, base: str, tag: str, product: str, triple: str,
+                      version: str = "") -> tuple[str, str, str] | None:
+        listing = self._release_listing(base, product, triple, version)
+        if listing is None:
+            return None
+        asset, found, expected, sums = listing
+        self.check_release_manifest(tool, base, tag, product, triple, found, asset, sums)
+        return asset, found, expected
+
+    def build_release(self, repo: str, product: str, triple: str) -> tuple[str, str, str, str, str] | None:
         for tag in self.release_tags(f"https://github.com/{repo}/releases.atom", prefix="release-")[:BUILD_RELEASE_CANDIDATES]:
             base = f"https://github.com/{repo}/releases/download/{tag}"
-            found = self.release_asset(tool, base, tag, product, triple)
-            if found is not None:
-                return tag, found[0], base
+            listing = self._release_listing(base, product, triple)
+            if listing is not None:
+                asset, found, expected, sums = listing
+                return tag, asset, found, base, sums
         return None
 
     @staticmethod
@@ -1015,7 +1033,8 @@ class Installer:
     def _install_python_build(self, tool: str, root: Path, triples: dict[tuple[str, str], str],
                               inner: str, links: list[tuple[str, str]],
                               *, release: tuple[str, str, dict[str, tuple[str, str]]],
-                              run_staged: bool = False) -> None:
+                              run_staged: bool = False,
+                              manifest: Callable[[], None] | None = None) -> None:
         if (self.os_name, self.arch) not in triples:
             self.skip(tool, f"no {tool} release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
@@ -1030,6 +1049,8 @@ class Installer:
         if self.is_current(tool, record):
             self.current(f"{tool} is current ({tag})")
             return
+        if manifest is not None:
+            manifest()
         release_dir = root / tag
         if release_dir.exists() or release_dir.is_symlink():
             existing = release_dir / inner
@@ -1088,16 +1109,17 @@ class Installer:
             self.skip("python3", f"no python-build release for {self.os_name}/{self.arch}")
             return
         triple = triples[(self.os_name, self.arch)]
-        found = self.build_release("python3", PYTHON_BUILD_REPO, "cpython", triple)
+        found = self.build_release(PYTHON_BUILD_REPO, "cpython", triple)
         if found is None:
             self.unchecked("python3", "no release found")
             return
-        tag, asset, base = found
-        expected = self.sums_for(self.fetch_text(f"{base}/SHA256SUMS"), asset)
+        tag, asset, version, base, sums = found
+        expected = self.sums_for(sums, asset)
         self._install_python_build(
             "python3", self.python_build_root, triples, "python/bin/python3.15",
             [("python3", "python/bin/python3.15"), ("python3.15", "python/bin/python3.15")],
-            release=(tag, PYTHON_BUILD_REPO, {triple: (asset, expected)}))
+            release=(tag, PYTHON_BUILD_REPO, {triple: (asset, expected)}),
+            manifest=lambda: self.check_release_manifest("python3", base, tag, "cpython", triple, version, asset, sums))
 
     def install_nodebuild(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -1105,16 +1127,17 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("node-build", f"no node-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        found = self.build_release("node-build", NODE_BUILD_REPO, "node", triple)
+        found = self.build_release(NODE_BUILD_REPO, "node", triple)
         if found is None:
             self.unchecked("node-build", "no release found")
             return
-        tag, asset, base = found
-        expected = self.sums_for(self.fetch_text(f"{base}/SHA256SUMS"), asset)
+        tag, asset, version, base, sums = found
+        expected = self.sums_for(sums, asset)
         self._install_python_build(
             "node-build", self.node_build_root, triples, "node/bin/node",
             [("node-build", "node/bin/node")],
-            release=(tag, NODE_BUILD_REPO, {triple: (asset, expected)}), run_staged=True)
+            release=(tag, NODE_BUILD_REPO, {triple: (asset, expected)}), run_staged=True,
+            manifest=lambda: self.check_release_manifest("node-build", base, tag, "node", triple, version, asset, sums))
 
     def _npm_tool(self, tool: str, root: Path, package: str, bin_name: str, *,
                   extra: tuple[str, ...] = (), fetch_msg: str = "", no_release: str = "") -> None:
@@ -2042,7 +2065,8 @@ class Installer:
 
     def _archive_bundle(self, tool: str, home: Path, commands: list[str], state_name: str, *,
                         in_bin: bool, asset: str, url: str, sums_url: str, release_dir: Path,
-                        validate, ok_message: str, install_message: str, on_current=None) -> None:
+                        validate, ok_message: str, install_message: str, on_current=None,
+                        manifest: Callable[[], None] | None = None) -> None:
         for command in commands:
             existing = self.dest / command
             if existing.exists() or existing.is_symlink():
@@ -2076,6 +2100,8 @@ class Installer:
                     on_current()
                 self.current(ok_message)
                 return
+        if manifest is not None:
+            manifest()
         self.own_missing_dirs(releases)
         releases.mkdir(parents=True, exist_ok=True)
         self.fetch_msg(f"Downloading {asset} ...")
@@ -2148,11 +2174,11 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("git", f"no git-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        release = self.build_release("git", "laputa-systems/git-build", "git", triple)
+        release = self.build_release("laputa-systems/git-build", "git", triple)
         if release is None:
             self.unchecked("git", "no release found")
             return
-        tag, asset, base = release
+        tag, asset, version, base, sums = release
         def validate(staged: Path) -> bool:
             if not (staged / "git").is_file() or not os.access(staged / "git", os.X_OK):
                 return False
@@ -2175,7 +2201,9 @@ class Installer:
                              release_dir=self.git_home / "releases" / f"{tag}-{triple}",
                              validate=validate, ok_message=f"git is current ({tag})",
                              install_message=f"Installed {self.dest}/git",
-                             on_current=self.ensure_git_templates)
+                             on_current=self.ensure_git_templates,
+                             manifest=lambda: self.check_release_manifest(
+                                 "git", base, tag, "git", triple, version, asset, sums))
 
     def install_ssh(self) -> None:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -2184,11 +2212,11 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("ssh", f"no ssh-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        release = self.build_release("ssh", "laputa-systems/ssh-build", "ssh", triple)
+        release = self.build_release("laputa-systems/ssh-build", "ssh", triple)
         if release is None:
             self.unchecked("ssh", "no release found")
             return
-        tag, asset, base = release
+        tag, asset, version, base, sums = release
         def validate(staged: Path) -> bool:
             return all((staged / command).is_file() and os.access(staged / command, os.X_OK)
                        for command in SSH_COMMANDS)
@@ -2196,7 +2224,9 @@ class Installer:
                              asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
                              release_dir=self.ssh_home / "releases" / f"{tag}-{triple}",
                              validate=validate, ok_message=f"ssh is current ({tag})",
-                             install_message=f"Installed {self.dest}/ssh")
+                             install_message=f"Installed {self.dest}/ssh",
+                             manifest=lambda: self.check_release_manifest(
+                                 "ssh", base, tag, "ssh", triple, version, asset, sums))
 
     def prune_gluon_releases(self) -> None:
         home = self.gluon_home
@@ -2313,11 +2343,11 @@ class Installer:
         if (self.os_name, self.arch) not in triples:
             self.skip("oxish", f"no ssh-build release for {self.os_name}/{self.arch}")
         triple = triples[(self.os_name, self.arch)]
-        release = self.build_release("oxish", "laputa-systems/ssh-build", "oxish", triple)
+        release = self.build_release("laputa-systems/ssh-build", "oxish", triple)
         if release is None:
             self.unchecked("oxish", "no release found")
             return
-        tag, asset, base = release
+        tag, asset, version, base, sums = release
         def validate(staged: Path) -> bool:
             return all((staged / "bin" / command).is_file() and os.access(staged / "bin" / command, os.X_OK)
                        for command in OXISH_COMMANDS)
@@ -2325,7 +2355,9 @@ class Installer:
                              asset=asset, url=f"{base}/{asset}", sums_url=f"{base}/SHA256SUMS",
                              release_dir=self.oxish_home / "releases" / f"{tag}-{triple}",
                              validate=validate, ok_message=f"oxish is current ({tag})",
-                             install_message=f"Installed {self.dest}/oxish-server")
+                             install_message=f"Installed {self.dest}/oxish-server",
+                             manifest=lambda: self.check_release_manifest(
+                                 "oxish", base, tag, "oxish", triple, version, asset, sums))
 
     def ffmpeg_triple(self, tool: str) -> str:
         triples = {("darwin", "aarch64"): "aarch64-apple-darwin",
@@ -2490,7 +2522,7 @@ class Installer:
 
     def install_ffmpeg(self) -> None:
         triple = self.ffmpeg_triple("ffmpeg")
-        release = self.build_release("ffmpeg", FFMPEG_REPO, "ffmpeg-runtime", triple)
+        release = self.build_release(FFMPEG_REPO, "ffmpeg-runtime", triple)
         if release is None:
             self.unchecked("ffmpeg", "no release found")
             return
@@ -2686,7 +2718,7 @@ class Installer:
             if isinstance(declared, str) else None
         if match is None:
             self.skip("player", "the release does not declare its FFmpeg runtime as <ffmpeg>+release-<commit>")
-        return match.group(1), match.group(2)
+        return cast(str, match.group(1)), cast(str, match.group(2))
 
     def pinned_player_runtime(self) -> Path | None:
         tags = self.ffmpeg_pinned_tags(self.ffmpeg_home / "pins" / "player")

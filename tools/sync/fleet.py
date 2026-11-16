@@ -16,7 +16,8 @@ import json
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, TextIO
@@ -193,6 +194,22 @@ def sync_lines(sync: dict[str, Any]) -> list[TaskLine]:
     return [TaskLine(str(t.get("name")), str(t.get("state")), str(t.get("detail", ""))) for t in sync.get("tasks", []) if isinstance(t, dict)]
 
 
+def host_ok(outcome: Outcome, command: str) -> bool:
+    if outcome.error is not None and not outcome.repo:
+        return False
+    if not repo_text(outcome.repo)[1]:
+        return False
+    if command == "pull":
+        return True
+    if outcome.error is not None:
+        return False
+    if outcome.sync is None:
+        return True
+    states = APPLY_STATES if command == "apply" else PLAN_STATES
+    tally = counts(sync_lines(outcome.sync), states)
+    return healthy(tally, unhealthy_for(command)) and outcome.sync_exit == 0
+
+
 def render(command: str, outcomes: list[Outcome], show_all: bool, stream: TextIO | None = None) -> bool:
     out = sys.stdout if stream is None else stream
     color = use_color(out)
@@ -209,19 +226,17 @@ def render(command: str, outcomes: list[Outcome], show_all: bool, stream: TextIO
             continue
         revision = outcome.repo.get("after") or outcome.repo.get("before") or "-"
         repo, repo_ok = repo_text(outcome.repo)
-        all_ok &= repo_ok
+        all_ok &= host_ok(outcome, command)
         if command == "pull":
             sync_cell = ""
         elif outcome.error is not None:
             sync_cell = paint(outcome.error, "31", color)
-            all_ok = False
         elif outcome.sync is None:
             sync_cell = paint("skipped", "33", color)
         else:
             lines = sync_lines(outcome.sync)
             tally = counts(lines, states)
             ok = healthy(tally, unhealthy) and outcome.sync_exit == 0
-            all_ok &= ok
             mark = paint("✓", "32", color) if ok else paint("✗", "31", color)
             sync_cell = f"{mark} {summary(tally, color)}"
             shown = task_rows(lines, show_all, color, indent="  ")
@@ -253,6 +268,19 @@ def main(argv: list[str], run: Runner = ssh_runner, policy: dict[str, Any] | Non
     if any(arg.startswith("-") for arg in args):
         raise ValueError("usage: sync hosts [pull|plan|doctor|apply] [HOST...] [--all]")
     hosts = fleet(policy if policy is not None else read_policy(), local_ips() if mine is None else mine, args)
+    started = time.monotonic()
+    print(f"sync hosts {command}: {' '.join(host.name for host in hosts)}", file=sys.stderr)
+    outcomes: dict[str, Outcome] = {}
     with ThreadPoolExecutor(max_workers=len(hosts)) as pool:
-        outcomes = list(pool.map(lambda host: visit(host, command, run), hosts))
-    return 0 if render(command, outcomes, show_all) else 1
+        futures = {pool.submit(visit, host, command, run): host for host in hosts}
+        for future in as_completed(futures):
+            host = futures[future]
+            try:
+                outcome = future.result()
+            except Exception as exc:
+                outcome = Outcome(host, error=f"{type(exc).__name__}: {exc}")
+            outcomes[host.name] = outcome
+            mark = "·" if host_ok(outcome, command) else "✗"
+            print(f"{mark} {host.name} done in {int(time.monotonic() - started)}s", file=sys.stderr)
+    ordered = [outcomes[host.name] for host in hosts]
+    return 0 if render(command, ordered, show_all) else 1

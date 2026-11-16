@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -412,6 +413,32 @@ def main(argv: list[str]) -> int:
     ctx = context()
     if ctx.link_target.resolve() != ctx.home.resolve() and command_name in {"apply", "tools", "bridge", "uninstall"}:
         raise GraphError(f"{command_name} cannot mutate host tools with TARGET different from HOME; use sync links")
+
+    auth_future: Future[list[TaskLine]] | None = None
+    auth_pool: ThreadPoolExecutor | None = None
+
+    def resolve_auth() -> list[TaskLine]:
+        nonlocal auth_future, auth_pool
+        if auth_future is None:
+            return []
+        try:
+            lines = auth_future.result()
+        except Exception as exc:
+            lines = [TaskLine("auth:error", "login", f"could not check — {type(exc).__name__}: {exc}")]
+        auth_future = None
+        if auth_pool is not None:
+            auth_pool.shutdown(wait=False)
+            auth_pool = None
+        return lines
+
+    if command_name in {"apply", "plan", "doctor"}:
+        def probes() -> list[TaskLine]:
+            from auth import login_lines
+            return login_lines(ctx.home, ctx.env)
+
+        pool = ThreadPoolExecutor(max_workers=1)
+        auth_pool = pool
+        auth_future = pool.submit(probes)
     if command_name == "list":
         if argv:
             raise GraphError("sync list does not take arguments")
@@ -445,13 +472,6 @@ def main(argv: list[str]) -> int:
     argv, as_json, show_all = output_flags(argv)
     host = os.uname().nodename.split(".")[0]
     emit = (lambda lines: render_json(command_name, host, lines)) if as_json else (lambda lines: render(command_name, host, lines, show_all))
-    auth_lines: list[TaskLine] = []
-    if command_name in {"apply", "plan", "doctor"}:
-        try:
-            from auth import login_lines
-            auth_lines = login_lines(ctx.home, ctx.env)
-        except Exception as exc:
-            auth_lines = [TaskLine("auth:error", "login", f"could not check — {type(exc).__name__}: {exc}")]
     defaults = tool_list(ctx) if command_name in ("apply", "plan", "doctor") or (command_name == "tools" and not argv) else []
     chosen = argv if command_name == "tools" and argv else defaults
     full = graph(ctx, chosen, setup=command_name in {"apply", "plan", "doctor"})
@@ -475,7 +495,7 @@ def main(argv: list[str]) -> int:
                 failures += 1
             if command_name == "plan" and probe.conflict:
                 failures += 1
-        lines.extend(auth_lines)
+        lines.extend(resolve_auth())
         emit(lines)
         if command_name == "doctor":
             legacy = command(ctx, "sh", str(ctx.root / "dotfiles/doctor"), capture=as_json)
@@ -505,7 +525,7 @@ def main(argv: list[str]) -> int:
         if bad and all(dep in soft for dep in bad):
             soft.add(task.name)
     emit([TaskLine(result.name, "tolerated" if result.name in soft and result.state in ("failed", "blocked") else result.state, result.detail)
-          for result in results] + auth_lines)
+          for result in results] + resolve_auth())
     hard = [result for result in results if result.state in ("failed", "blocked") and result.name not in soft]
     return 1 if hard else 0
 
