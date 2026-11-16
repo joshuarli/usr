@@ -659,7 +659,7 @@ sys.exit(1)
         self.assertIn("checksum mismatch", str(ctx.exception))
 
     def test_nodejs_checksum_mismatch_is_a_skip(self):
-        inst = self.make({"https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.zip": b"not-the-pinned-build"},
+        inst = self.make({"https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.tar.xz": b"not-the-pinned-build"},
                          os_name="darwin", arch="aarch64")
         with self.assertRaises(SkipInstall) as ctx:
             inst.install_nodejs()
@@ -679,7 +679,7 @@ sys.exit(1)
         self.dest_path("node").parent.mkdir(parents=True)
         for tool in ("node", "npm", "npx"):
             self.dest_path(tool).symlink_to(str(current / "bin" / tool))
-        url = "https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.zip"
+        url = "https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.tar.xz"
         inst = self.make({}, os_name="darwin", arch="aarch64")
         with self.assertRaises(SkipInstall):
             inst.install_nodejs()
@@ -697,8 +697,8 @@ sys.exit(1)
                 target.write_text(body)
                 target.chmod(0o755)
             return True
-        with patch.object(retry, "sha256_file", return_value="0d45363e43fc1e290035d9a85962c62c32e42b70d28ae48b7b7196b335a188aa"), \
-             patch.object(retry, "extract_zip", side_effect=extract):
+        with patch.object(retry, "sha256_file", return_value=installer.NODE_MIRROR_SHA256["darwin-arm64"]), \
+             patch.object(retry, "extract_tar", side_effect=extract):
             retry.install_nodejs()
         selected = Path(os.readlink(current))
         self.assertEqual(selected.name, "26.13.1-npm12.2.2-darwin-arm64")
@@ -773,7 +773,7 @@ sys.exit(1)
         (foreign / "marker").write_text("keep\n")
         current = self.home / ".local/share/nodejs/current"
         current.symlink_to(foreign.name, target_is_directory=True)
-        routes = {"https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.zip": b"not-the-pinned-build"}
+        routes = {"https://mirror.17166969.xyz/current/node-v26.13.1-darwin-arm64.tar.xz": b"not-the-pinned-build"}
         inst = self.make(routes, os_name="darwin", arch="aarch64")
         for command in ("node", "npm", "npx"):
             self.dest_path(command).symlink_to(str(current / "bin" / command))
@@ -883,10 +883,10 @@ sys.exit(1)
     def test_codex_install_and_checksum(self):
         import hashlib
         target = "x86_64-unknown-linux-musl"
-        asset = f"codex-{installer.CODEX_VERSION}-{target}.zip"
+        asset = f"codex-{installer.CODEX_VERSION}-{target}.tar.xz"
         url = f"{installer.MIRROR_BASE}/{asset}"
-        payload = make_zip({"codex-package.json": b"{}", "bin/codex": b"c", "bin/codex-code-mode-host": b"m", "codex-path/rg": b"r"},
-                           executable=("bin/codex", "bin/codex-code-mode-host", "codex-path/rg"))
+        payload = make_tar({"codex-package.json": b"{}", "bin/codex": b"c", "bin/codex-code-mode-host": b"m", "codex-path/rg": b"r"},
+                           mode="w:xz")
         digest = hashlib.sha256(payload).hexdigest()
         routes = {url: payload}
         with patch.dict(installer.CODEX_MIRROR_SHA256, {target: digest}):
@@ -1209,12 +1209,12 @@ sys.exit(1)
         self.assertEqual(os.readlink(current), before)
         self.assertEqual([p.name for p in (self.home / ".local/share/bctl/releases").iterdir() if not p.name.startswith(".")], ["release-aaa-x86_64-unknown-linux-musl"])
 
-    def test_opencode2_zip_shim_and_current(self):
+    def test_opencode2_archive_shim_and_current(self):
         import hashlib
         target = "linux-x64"
-        asset = f"opencode-{installer.OPENCODE_VERSION}-{target}.zip"
+        asset = f"opencode-{installer.OPENCODE_VERSION}-{target}.tar.xz"
         url = f"{installer.MIRROR_BASE}/{asset}"
-        payload = make_zip({"opencode": b"binary"}, executable=("opencode",))
+        payload = make_tar({"opencode": b"binary"}, mode="w:xz")
         digest = hashlib.sha256(payload).hexdigest()
         with patch.dict(installer.OPENCODE_MIRROR_SHA256, {target: digest}):
             inst = self.make({url: payload})
@@ -1229,9 +1229,9 @@ sys.exit(1)
     def test_opencode2_alias_keeps_foreign_file(self):
         import hashlib
         target = "linux-x64"
-        asset = f"opencode-{installer.OPENCODE_VERSION}-{target}.zip"
+        asset = f"opencode-{installer.OPENCODE_VERSION}-{target}.tar.xz"
         url = f"{installer.MIRROR_BASE}/{asset}"
-        payload = make_zip({"opencode": b"binary"}, executable=("opencode",))
+        payload = make_tar({"opencode": b"binary"}, mode="w:xz")
         digest = hashlib.sha256(payload).hexdigest()
         inst = self.make({url: payload})
         foreign = self.dest_path("opencode")
@@ -1258,17 +1258,17 @@ sys.exit(1)
             script = f"#!/bin/sh\nprintf '#!/bin/sh\\nexit 0\\n' > \"$HOME/.local/bin/{binary}\"\nchmod +x \"$HOME/.local/bin/{binary}\"\n"
             if tool == "antigravity":
                 script += f"printf '#!/bin/sh\\nexit 0\\n' > \"$2/{binary}\"\nchmod +x \"$2/{binary}\"\n"
-            payload = make_zip({"install.sh": script.encode()})
+            payload = make_tar({"install.sh": script.encode()}, mode="w:xz")
             digest = hashlib.sha256(payload).hexdigest()
-            routes = {f"{installer.MIRROR_BASE}/{artifact}.zip": payload}
+            routes = {f"{installer.MIRROR_BASE}/{artifact}.tar.xz": payload}
             with patch.dict(installer.INSTALL_SCRIPT_MIRROR_SHA256, {artifact: digest}):
                 inst = self.make(routes)
                 getattr(inst, f"install_{tool}")()
             self.assertTrue(self.dest_path(binary).is_file(), tool)
 
     def test_official_installer_checksum_mismatch_is_a_skip(self):
-        payload = make_zip({"install.sh": b"#!/bin/sh\nexit 1\n"})
-        inst = self.make({f"{installer.MIRROR_BASE}/claude-install.zip": payload})
+        payload = make_tar({"install.sh": b"#!/bin/sh\nexit 1\n"}, mode="w:xz")
+        inst = self.make({f"{installer.MIRROR_BASE}/claude-install.tar.xz": payload})
         with self.assertRaises(SkipInstall) as ctx:
             inst.install_claude()
         self.assertIn("checksum mismatch", str(ctx.exception))
