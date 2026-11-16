@@ -2,9 +2,10 @@
 
 Root admission plans and native exceptions are authored in
 [`policy.ts`](../pi-subagent-bridge/src/policy.ts): `ROOT_PLANS` holds one typed
-`RootPlan` per tier (an exclusive terminal executor, or Codex, Command Code and
-an ordered Pi list), and `routesOf` derives the ordered route list that the JSON
-export, the tables and the MCP summary share. Nested Pi pins, tool sets and
+`RootPlan` per admitted bridge tier (`scout`, `mechanic`, `worker`: Codex,
+Command Code and an ordered Pi list), and `routesOf` derives the ordered route
+list that the JSON export, the tables and the MCP summary share. `expert` is a
+harness-native lane with no bridge route. Nested Pi pins, tool sets and
 descendant ceilings are authored in
 [`tier-policy.ts`](../pi-subagent-bridge/src/tier-policy.ts). The first module
 composes both domains into one pure `POLICY` value. Runtime code imports these
@@ -32,8 +33,8 @@ The installed `pi-subagent-bridge policy` command exposes the same pure export.
 
 Edit the policy, run `make generate`, and review the generated diff. Session
 defaults, profile descriptions, unrelated harness settings and authored
-instructions remain outside generator ownership. Pi expert profiles preserve
-the nested/legacy contract; root expert admission is a separate terminal route.
+instructions remain outside generator ownership. Pi expert profiles are the
+first-class native Pi expert lane; the bridge admits no expert tier.
 
 Named `policy:begin` / `policy:end` blocks are the only Markdown template
 mechanism. Rendering rejects missing, duplicate, nested, malformed and unknown
@@ -66,7 +67,7 @@ python3 -I dotfiles/orchestrate-test.py
 ```
 
 The generator tests prove reproduction, ownership and propagation. One
-hand-written list names every remaining policy dimension (expert, Codex and
+hand-written list names every remaining policy dimension (Codex and
 Command Code pins per lower tier, the Pi fallback list, OpenCode, native
 fallback, direct Antigravity models, banned families and each native Pi field);
 each entry must change a rendered projection other than the JSON export or be

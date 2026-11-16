@@ -148,17 +148,6 @@ test("a Pi SDK terminal result is reported", async () => {
   assert.equal(out, `${id} succeeded ${pi.cwd} Pi lane\n`)
 })
 
-test("an Antigravity terminal result is reported", async () => {
-  const agy = scratch.repo("agy")
-  const output = runFor(agy, "agy", gone)
-  writeLog(output.output, [{ event: "init", init: { model: "fixture-model" } }, { event: "result", result: { status: "SUCCESS", response: "Expert proof" } }])
-  const id = writeSession(agy, 12, { title: "Expert lane", tier: "expert", backend: "antigravity", command_model: undefined,
-    command_effort: undefined, antigravity_pin: { model: "fixture-model", effort: "xhigh" }, command_run: output })
-  const { status, out } = await run(["wait", "--timeout", "1s", agy.root])
-  assert.equal(status, 0)
-  assert.equal(out, `${id} succeeded ${agy.cwd} Expert lane\n`)
-})
-
 test("wait keeps blocking while the session runs", async () => {
   const live = scratch.repo("repo-live")
   const worker = scratch.alive()

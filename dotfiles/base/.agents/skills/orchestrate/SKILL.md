@@ -7,7 +7,7 @@ description: "Route coding subagents through the Pi SDK bridge (OpenCode and Dev
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) exclusively, with no fallback. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant. Already-admitted sessions retain their recorded models and routes.
+**All scout/mechanic/worker coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. The bridge admits `scout`, `mechanic`, `worker` only; `expert` assignments use harness-native subagents instead. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
 <!-- policy:end routing-intro -->
 
 <!-- policy:begin opencode -->
@@ -31,7 +31,7 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Quota fallback for scout/mechanic/worker only:** When no approved bridge backend can run because it is unavailable or exhausted, use tier-matched native subagents with the same brief, worktree, scope, and independent verification. In Claude Code use scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. Preserve partial work before relaunch. Expert unavailability or quota exhaustion is a blocker; never substitute another model. No hook gates native subagents. Return to the bridge when capacity recovers.
+**Claude Code native subagents:** `expert` assignments always use native subagents pinned to `opus` with `medium` thinking. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. Preserve partial work before relaunch. No hook gates native subagents. Return to the bridge when capacity recovers.
 <!-- policy:end native-fallback -->
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.
@@ -40,11 +40,11 @@ The parent keeps task framing, orchestration, integration, and independent verif
 
 Call `worker_model_check` for the tier you are about to assign: it returns the exact pins, efforts, fallback order and availability. The full table is in `tools/pi-subagent-bridge/README.md`.
 
-**Pi OpenCode Go boundary:** scout and mechanic Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The Pi expert profile belongs to the native/nested domain and supports already-admitted legacy sessions; it does not authorize new root expert dispatches.
+**Pi OpenCode Go boundary:** scout and mechanic Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The native Pi `expert` profile is the Pi-native expert lane; it authorizes new expert dispatches from Pi sessions through the native subagent tool.
 
-Expert is a terminal Antigravity lane; no native child fanout beyond the typed ceilings. Reserve it for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert.
+Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Pi's native `expert` profile, Claude Code's `opus` at medium thinking); nothing routes to the bridge. Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert.
 
-**Default to worker** for substantial well-specified tasks; size alone does not justify `expert`. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
+**Default to worker** for substantial well-specified tasks; size alone does not justify a native `expert` subagent. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
 ## The bridge, except OpenCode and Devin
 
@@ -58,7 +58,7 @@ The parent independently reviews `git diff --check`, the diff against `base_revi
 
 ## Provider fallback and ambiguous runs
 
-**The bridge owns provider fallback.** `worker_status` switches only along the tier's admitted routes, only before edits and with unambiguous termination, never for expert, and admitted sessions keep their recorded models. Never start a replacement worker yourself: a task failure, rejected acceptance check, or changed path is not a provider failure. A session whose `attention` is `needs_attention` (any `blocked_*` state) or `unknown` needs you to inspect the session and worktree before deciding anything; do not launch a second paid worker over it. Cancellation acknowledgement is not proof of termination; wait until `watch` or `inspect` shows the run gone. The scope check is Git-based; ignored files and host writes are not contained.
+**The bridge owns provider fallback.** `worker_status` switches only along the tier's admitted routes, only before edits and with unambiguous termination, and admitted sessions keep their recorded models. Never start a replacement worker yourself: a task failure, rejected acceptance check, or changed path is not a provider failure. A session whose `attention` is `needs_attention` (any `blocked_*` state) or `unknown` needs you to inspect the session and worktree before deciding anything; do not launch a second paid worker over it. Cancellation acknowledgement is not proof of termination; wait until `watch` or `inspect` shows the run gone. The scope check is Git-based; ignored files and host writes are not contained.
 
 **Nesting:** grant one level of Pi fanout in the brief only when the slice needs it; the bridge's guard enforces the rest. Codex and Command Code workers are leaves.
 

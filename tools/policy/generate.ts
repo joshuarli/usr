@@ -2,11 +2,11 @@ import { readFileSync, writeFileSync, renameSync, unlinkSync, lstatSync, realpat
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { POLICY, isBannedModel, type Route } from "../pi-subagent-bridge/src/policy.ts"
-import { isTier, PI_RUN_DEADLINE_MS, type Tier } from "../pi-subagent-bridge/src/tier-policy.ts"
+import { isTier, PI_RUN_DEADLINE_MS, type Tier, type BridgeTier } from "../pi-subagent-bridge/src/tier-policy.ts"
 
 export type Policy = Omit<typeof POLICY, "rootRoutes" | "tiers"> & {
-  readonly tiers: readonly Tier[]
-  readonly rootRoutes: Readonly<Record<Tier, readonly Route[]>>
+  readonly tiers: readonly BridgeTier[]
+  readonly rootRoutes: Readonly<Record<BridgeTier, readonly Route[]>>
 }
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 type JsonObject = { [key: string]: Json }
@@ -18,7 +18,7 @@ const SOURCE = "tools/pi-subagent-bridge/src/policy.ts"
 const NOTICE = `<!-- Generated from ${SOURCE}; run make generate. -->`
 const JSON_PATH = "tools/policy/policy.generated.json"
 const PROFILE = "dotfiles/base/.pi/agent"
-const LABELS = { codex: "Codex", "command-code": "Command Code", antigravity: "Antigravity CLI", pi: "Pi" } as const
+const LABELS = { codex: "Codex", "command-code": "Command Code", pi: "Pi" } as const
 
 function code(value: string): string {
   if (!/^[a-zA-Z0-9_./#-]+$/.test(value)) throw new Error(`Invalid policy identifier: ${value}`)
@@ -33,13 +33,6 @@ function routeLabel(route: Route): string {
   return `${LABELS[route.executor]} ${code(model(route))} (${code(route.effort)})`
 }
 
-function expert(policy: Policy): Route {
-  const routes = policy.rootRoutes.expert
-  if (routes.length !== 1 || routes[0].executor !== "antigravity")
-    throw new Error("The expert projection requires one terminal Antigravity route")
-  return routes[0]
-}
-
 export function routingTable(policy: Policy): string {
   const rows = policy.tiers.map(tier => {
     const [primary, ...fallback] = policy.rootRoutes[tier]
@@ -50,10 +43,9 @@ export function routingTable(policy: Policy): string {
 }
 
 function summary(policy: Policy): string {
-  return `New ${code("expert")} assignments use ${routeLabel(expert(policy))} exclusively, with no fallback. ` +
-    `The available tiers are ${policy.tiers.map(code).join(", ")}; there is no ${code("god")} tier. ` +
-    `The model families ${policy.bannedModels.map(code).join(" and ")} are prohibited, including every effort variant. ` +
-    "Already-admitted sessions retain their recorded models and routes."
+  return `The bridge admits ${policy.tiers.map(code).join(", ")} only; ${code("expert")} assignments use harness-native subagents instead. ` +
+    `The available tiers are ${[...policy.tiers.map(code), code("expert")].join(", ")}; there is no ${code("god")} tier. ` +
+    `The model families ${policy.bannedModels.map(code).join(" and ")} are prohibited, including every effort variant.`
 }
 
 function openCode(policy: Policy): string {
@@ -75,28 +67,29 @@ function devin(): string {
 function nativeFallback(policy: Policy): string {
   const tiers = policy.nativeFallback.tiers.join("/")
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
-  return `**Quota fallback for ${tiers} only:** When no approved bridge backend can run because it is unavailable or exhausted, ` +
-    `use tier-matched native subagents with the same brief, worktree, scope, and independent verification. In Claude Code use ${mappings}. ` +
-    "Preserve partial work before relaunch. Expert unavailability or quota exhaustion is a blocker; never substitute another model. No hook gates native subagents. Return to the bridge when capacity recovers."
+  const expertModel = code(policy.nativeFallback.claudeModels.expert)
+  const expertThinking = code(policy.nativeFallback.claudeThinking.expert)
+  return `**Claude Code native subagents:** ${code("expert")} assignments always use native subagents pinned to ${expertModel} with ${expertThinking} thinking. ` +
+    `When no approved bridge backend can run because it is unavailable or exhausted, ${tiers} use tier-matched native subagents with the same brief, worktree, scope, and independent verification: ${mappings}. ` +
+    "Preserve partial work before relaunch. No hook gates native subagents. Return to the bridge when capacity recovers."
 }
 
 function delegation(policy: Policy, lean: boolean): string {
-  const pin = expert(policy)
-  const head = lean ? "- Before delegation, read `orchestrate` and use `pi-subagent-bridge` for every tier." :
-    "- All coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`."
+  const head = lean ? "- Before delegation, read `orchestrate` and use `pi-subagent-bridge` for scout/mechanic/worker." :
+    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`. Expert assignments use harness-native subagents; the bridge has no expert tier."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
-    `Expert pins ${code(pin.model)} at ${code(pin.effort)} without fallback. No ${code("god")} tier exists. ` +
+    `No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
     `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion, ` +
-    "with the same scope, worktree and independent parent review. Expert failures block rather than downgrade." +
-    (lean ? " With verified, safely shareable evidence and meaningful tier uncertainty, consult `decide`; unavailable advice does not block." :
-      " The parent scopes, verifies, reviews and integrates.")
+    "with the same scope, worktree and independent parent review. " +
+    (lean ? "With verified, safely shareable evidence and meaningful tier uncertainty, consult `decide`; unavailable advice does not block." :
+      "The parent scopes, verifies, reviews and integrates.")
 }
 
 function directModels(policy: Policy): string {
   return `Antigravity main sessions replacing Gemini 3.8 Flash must explicitly select an available approved model: ${policy.antigravityDirect.models.map(code).join(" or ")}. ` +
-    "Verify it with `agy models`; never silently substitute a model or purchase API credits. Delegated expert assignments use the exact root pin above."
+    "Verify it with `agy models`; never silently substitute a model or purchase API credits."
 }
 
 export function replaceBlocks(text: string, blocks: Blocks, yaml = false): string {
@@ -196,7 +189,8 @@ function validatePolicy(policy: Policy): void {
     if (profile.allowed.some(name => !profileNames.has(name))) throw new Error(`Unknown descendant in ${profile.name}`)
   for (const value of policy.antigravityDirect.models) validateModel(value)
   validateModel(policy.opencode.model)
-  expert(policy)
+  for (const value of Object.values(policy.nativeFallback.claudeModels)) code(value)
+  for (const value of Object.values(policy.nativeFallback.claudeThinking)) code(value)
 }
 
 function destination(root: string, path: string): string {
@@ -270,7 +264,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   const table = routingTable(policy)
   const direct = directModels(policy)
   document("dotfiles/base/.agents/skills/orchestrate/SKILL.md", {
-    "routing-intro": "**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. " + summary(policy),
+    "routing-intro": "**All scout/mechanic/worker coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. " + summary(policy),
     "opencode": openCode(policy),
     "devin": devin(),
     "native-fallback": nativeFallback(policy),

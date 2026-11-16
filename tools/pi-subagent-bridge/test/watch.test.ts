@@ -44,8 +44,6 @@ test("a session saved in the current format ends the wait the same way", async (
   await expectExit(0, id, "finished: succeeded\nreport written")
   await expectState(migrate(repo, commandLane(repo, 46, alive, [queued])), "running")
   await expectState(migrate(repo, codexLane(47, gone)), "succeeded")
-  await expectState(migrate(repo, agyLane(48, gone, [init("fixture-model"), agyResult("SUCCESS")])), "succeeded")
-  await expectState(migrate(repo, agyLane(49, gone, [init("wrong-model"), agyResult("SUCCESS")])), "failed")
 })
 
 test("an executor gone without a result is reported", async () => {
@@ -134,89 +132,4 @@ test("Codex completed turn is observed after termination", async () => {
 
 test("Codex proof is displayed", async () => {
   await expectExit(0, codexLane(22, gone), "Codex proof")
-})
-
-const EXPERT = { tier: "expert", backend: "antigravity", command_model: undefined, command_effort: undefined }
-const PIN = { model: "fixture-model", effort: "xhigh" }
-const HYDROGEN = "gemini-4-hydrogen-xhigh"
-function agyLane(n: number, pid: number, lines: Array<Record<string, unknown>>, fields: Record<string, unknown> = {}) {
-  const run = runFor(repo, "agy-" + n, pid)
-  writeLog(run.output, lines)
-  return writeSession(repo, n, { ...EXPERT, antigravity_pin: PIN, command_run: run, ...fields })
-}
-const init = (model: string) => ({ event: "init", conversation_id: "conversation", init: { model } })
-const agyResult = (status: string, extra: Record<string, unknown> = {}) => ({ event: "result", result: { status, ...extra } })
-
-test("Antigravity receipt does not precede process termination", async () => {
-  await expectState(agyLane(30, alive, [init("fixture-model"), agyResult("SUCCESS", { response: "Antigravity proof" })]), "running")
-})
-
-test("Antigravity success uses the admitted model pin", async () => {
-  await expectState(agyLane(31, gone, [init("fixture-model"), agyResult("SUCCESS", { response: "Antigravity proof" })]), "succeeded")
-})
-
-test("Antigravity proof is displayed", async () => {
-  await expectExit(0, agyLane(32, gone, [init("fixture-model"), agyResult("SUCCESS", { response: "Antigravity proof" })]), "Antigravity proof")
-})
-
-test("Antigravity cannot succeed with a mismatched model", async () => {
-  await expectState(agyLane(33, gone, [init("wrong-model"), agyResult("SUCCESS")]), "failed")
-})
-
-test("Antigravity cannot succeed without an init model", async () => {
-  await expectState(agyLane(34, gone, [agyResult("SUCCESS")]), "failed")
-})
-
-test("Antigravity provider failure remains failed", async () => {
-  await expectState(agyLane(35, gone, [init("fixture-model"), agyResult("ERROR", { error: "quota exhausted" })]), "failed")
-})
-
-test("Antigravity error is displayed", async () => {
-  await expectExit(0, agyLane(36, gone, [init("fixture-model"), agyResult("ERROR", { error: "quota exhausted" })]), "quota exhausted")
-})
-
-test("Antigravity without a terminal receipt is interrupted", async () => {
-  await expectState(agyLane(37, gone, [init("fixture-model")]), "interrupted")
-})
-
-test("Antigravity without an admitted pin is unknown", async () => {
-  const run = runFor(repo, "agy-38", gone)
-  writeLog(run.output, [init("fixture-model"), agyResult("SUCCESS")])
-  await expectState(writeSession(repo, 38, { ...EXPERT, command_run: run }), "unknown")
-})
-
-test("Antigravity interrupted admission stays unknown", async () => {
-  const run = runFor(repo, "agy-39", gone)
-  const unpinned = writeSession(repo, 39, { ...EXPERT, backend: "antigravity-transition", command_run: run })
-  await expectState(unpinned, "unknown")
-  const pinned = writeSession(repo, 40, { ...EXPERT, backend: "antigravity-transition", antigravity_pin: PIN, command_run: run })
-  await expectState(pinned, "blocked_transition")
-  await expectExit(4, pinned, "antigravity transition interrupted")
-})
-
-const legacy = { ...EXPERT, backend: "hydrogen", schema_version: undefined }
-function legacyLane(n: number, lines: Array<Record<string, unknown>>, fields: Record<string, unknown> = {}) {
-  const run = runFor(repo, "legacy-" + n, gone)
-  writeLog(run.output, lines)
-  return writeSession(repo, n, { ...legacy, command_run: run, ...fields })
-}
-
-test("legacy Hydrogen records retain their historical pin", async () => {
-  await expectState(legacyLane(41, [init(HYDROGEN), agyResult("SUCCESS", { response: "Legacy proof" })]), "succeeded")
-})
-
-test("legacy Hydrogen cannot adopt a newly attached pin", async () => {
-  const id = legacyLane(42, [init(HYDROGEN), agyResult("SUCCESS")], { antigravity_pin: { model: "different-model", effort: "xhigh" } })
-  await expectState(id, "unknown")
-})
-
-test("a future session schema is not interpreted as successful", async () => {
-  const run = runFor(repo, "future", gone)
-  writeLog(run.output, [init(HYDROGEN), agyResult("SUCCESS")])
-  const id = writeSession(repo, 43, { ...EXPERT, schema_version: 3, antigravity_pin: { model: HYDROGEN, effort: "xhigh" }, command_run: run })
-  await expectState(id, "unknown")
-})
-
-test("legacy Hydrogen does not adopt a different model", async () => {
-  await expectState(legacyLane(44, [init("wrong-model"), agyResult("SUCCESS")]), "failed")
 })

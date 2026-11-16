@@ -11,5 +11,5 @@ export function qualificationBridge(fx: FxAdapter) {
     if (tier !== "scout" && tier !== "worker") throw new Error("FX qualification supports only its fixture scout and worker")
     return { kind: "leaf", target: { executor: "fx", selection: FIXTURE_SELECTION } }
   }
-  return makeHybridBridge(optionalPiAdapter(), undefined, undefined, undefined, resolvePolicy, fx)
+  return makeHybridBridge(optionalPiAdapter(), undefined, undefined, resolvePolicy, fx)
 }

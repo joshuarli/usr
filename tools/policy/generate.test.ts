@@ -21,28 +21,20 @@ function fixture() {
   return { root, paths: initial.map(output => output.path), close: () => rmSync(root, { recursive: true, force: true }) }
 }
 
-test("one expert pin change propagates to every representation and leaves other policy fields untouched", () => {
+test("a root route pin change propagates to the README table and JSON export, leaving native policy untouched", () => {
   const f = fixture()
   try {
     const policy: Policy = {
       ...POLICY,
-      rootRoutes: { ...POLICY.rootRoutes, expert: [{ executor: "antigravity", model: "fixture-expert-model", effort: "high" }] },
+      rootRoutes: { ...POLICY.rootRoutes, worker: [{ ...POLICY.rootRoutes.worker[0], model: "fixture-worker-model" }, ...POLICY.rootRoutes.worker.slice(1)] },
     }
     const outputs = renderOutputs(f.root, policy)
     const changed = outputs.filter(output => output.content !== output.previous)
-    assert.deepEqual(changed.map(output => output.path), [
-      "docs/agent-setup.md", "docs/pi.md", "dotfiles/base/.agents/instructions/lean.md",
-      "dotfiles/base/.agents/skills/orchestrate/SKILL.md", "dotfiles/base/.codex/AGENTS.md",
-      "tools/pi-subagent-bridge/README.md", JSON_PATH,
-    ])
-    for (const output of changed) {
-      assert.match(output.content, /fixture-expert-model/, output.path)
-      assert.ok(!output.content.includes(POLICY.rootRoutes.expert[0].model), output.path)
-    }
+    assert.deepEqual(changed.map(output => output.path), ["tools/pi-subagent-bridge/README.md", JSON_PATH])
     const table = changed.find(output => output.path === "tools/pi-subagent-bridge/README.md")!
-    assert.ok(table.content.includes("| expert | Antigravity CLI `fixture-expert-model` (`high`) | **None. Fail closed.** |"))
+    assert.ok(table.content.includes("| worker | Codex `fixture-worker-model` (`high`) |"))
     const exported = JSON.parse(changed.find(output => output.path === JSON_PATH)!.content)
-    assert.deepEqual(exported.rootRoutes.expert, [{ executor: "antigravity", model: "fixture-expert-model", effort: "high" }])
+    assert.equal(exported.rootRoutes.worker[0].model, "fixture-worker-model")
     assert.deepEqual(exported.nativePi, POLICY.nativePi)
     assert.deepEqual(writeOutputs(f.root, outputs), changed.map(output => output.path))
     const mtimes = f.paths.map(path => statSync(join(f.root, path)).mtimeMs)
@@ -56,7 +48,7 @@ test("check mode detects stale generated content without repairing or rewriting 
   try {
     assert.equal(main(["--check"], f.root), 0)
     const path = join(f.root, "docs/pi.md")
-    writeFileSync(path, readFileSync(path, "utf8").replace("gemini-4-hydrogen-xhigh", "stale-policy-model"))
+    writeFileSync(path, readFileSync(path, "utf8").replace("gemini-4-argon", "stale-policy-model"))
     const before = f.paths.map(path => readFileSync(join(f.root, path), "utf8"))
     const mtimes = f.paths.map(path => statSync(join(f.root, path)).mtimeMs)
     assert.equal(main(["--check"], f.root), 1)
@@ -182,7 +174,7 @@ test("provider-qualified prohibited models fail before any projection is written
     for (const model of ["gemini-4-argon-high", "google/gemini-4-argon-high", "antigravity/gemini-4-carbon-xhigh"]) {
       const policy: Policy = {
         ...POLICY,
-        rootRoutes: { ...POLICY.rootRoutes, expert: [{ executor: "antigravity", model, effort: "high" }] },
+        rootRoutes: { ...POLICY.rootRoutes, worker: [{ ...POLICY.rootRoutes.worker[0], model }, ...POLICY.rootRoutes.worker.slice(1)] },
       }
       assert.throws(() => writeOutputs(f.root, renderOutputs(f.root, policy)), /Prohibited model in active policy/)
       assert.deepEqual(f.paths.map(path => readFileSync(join(f.root, path), "utf8")), before)
@@ -199,7 +191,7 @@ type MutablePolicy = {
     maxSubagentDepth: number; modelAllowlist: string[]
   }
   opencode: { model: string; efforts: Record<string, string> }
-  nativeFallback: { tiers: string[]; claudeModels: Record<string, string> }
+  nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeThinking: Record<string, string> }
   antigravityDirect: { models: string[] }
   bannedModels: string[]
 }
@@ -207,9 +199,6 @@ type Dimension = { name: string; mutate: (policy: MutablePolicy) => void; reject
 
 const FIXTURE_MODEL = "fixture-model"
 const dimensions: Dimension[] = [
-  { name: "expert model", mutate: p => { p.rootRoutes.expert[0].model = FIXTURE_MODEL } },
-  { name: "expert effort", mutate: p => { p.rootRoutes.expert[0].effort = "high" } },
-
   { name: "codex scout model", mutate: p => { p.rootRoutes.scout[0].model = FIXTURE_MODEL } },
   { name: "codex scout effort", mutate: p => { p.rootRoutes.scout[0].effort = "xhigh" } },
   { name: "codex mechanic model", mutate: p => { p.rootRoutes.mechanic[0].model = FIXTURE_MODEL } },
@@ -244,13 +233,15 @@ const dimensions: Dimension[] = [
   { name: "native fallback scout Claude model", mutate: p => { p.nativeFallback.claudeModels.scout = "opus" } },
   { name: "native fallback mechanic Claude model", mutate: p => { p.nativeFallback.claudeModels.mechanic = "haiku" } },
   { name: "native fallback worker Claude model", mutate: p => { p.nativeFallback.claudeModels.worker = "opus" } },
+  { name: "native fallback expert Claude model", mutate: p => { p.nativeFallback.claudeModels.expert = "fixture-model" } },
+  { name: "native fallback expert Claude thinking", mutate: p => { p.nativeFallback.claudeThinking.expert = "high" } },
 
   { name: "antigravity direct first model", mutate: p => { p.antigravityDirect.models[0] = "fixture-direct-a" } },
   { name: "antigravity direct second model", mutate: p => { p.antigravityDirect.models[1] = "fixture-direct-b" } },
   { name: "antigravity direct list length", mutate: p => { p.antigravityDirect.models.push("fixture-direct-c") } },
 
   { name: "banned family list", mutate: p => { p.bannedModels = ["gemini-4-argon"] } },
-  { name: "banned family covering the expert pin", mutate: p => { p.bannedModels.push("gemini-4-hydrogen") }, rejects: /Prohibited model in active policy/ },
+  { name: "banned family covering the direct Antigravity model", mutate: p => { p.bannedModels.push("gemini-4-hydrogen") }, rejects: /Prohibited model in active policy/ },
   { name: "banned family covering a Pi route", mutate: p => { p.bannedModels.push("muse-spark-1.3-contributor") }, rejects: /Prohibited model in active policy/ },
 
   { name: "native scout model", mutate: p => { p.nativePi.goModels.scout.id = FIXTURE_MODEL } },

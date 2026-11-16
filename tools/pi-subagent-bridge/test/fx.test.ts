@@ -83,7 +83,7 @@ for (const behavior of ["hold", "oversized", "early-json"] as const) {
 
 test("a mismatched FX native session remains unknown and retains the shared worktree lease", async t => {
   const f = fixture(t, "mismatch"), policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, undefined, () => policy, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, f.fx)
   const scope = { base_revision: f.repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }
   const admitted = await bridge.start(f.repo.cwd, "fixture", "worker", scope, "task")
   const path = join(f.repo.directory, admitted.session_id + ".json")
@@ -124,7 +124,7 @@ async function ready(path: string): Promise<void> {
 
 test("missing optional FX composition refuses control before changing attempts or history", async t => {
   const f = fixture(t), policy: ExecutionPlan = { kind: "leaf", target: { executor: "fx", selection } }
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, undefined, () => policy, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy, f.fx)
   const scope = { base_revision: f.repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }
   const admitted = await bridge.start(f.repo.cwd, "fixture", "worker", scope, "task")
   const path = join(f.repo.directory, admitted.session_id + ".json")
@@ -133,7 +133,7 @@ test("missing optional FX composition refuses control before changing attempts o
   assert.equal((await ended(session.execution.run)).state, "succeeded")
   await bridge.status(f.repo.cwd, admitted.session_id)
   const before = readFileSync(path, "utf8")
-  const withoutFx = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, undefined, () => policy)
+  const withoutFx = makeHybridBridge(piAdapter(unusedApi()), undefined, undefined, () => policy)
   await assert.rejects(() => withoutFx.resume(f.repo.cwd, admitted.session_id, "same scope"), /FX adapter unavailable/)
   assert.equal(readFileSync(path, "utf8"), before)
   await assert.rejects(() => withoutFx.cancel(f.repo.cwd, admitted.session_id), /FX adapter unavailable/)
@@ -368,7 +368,7 @@ function ladderScope(f: ReturnType<typeof fixture>) {
 test("FX quota exhaustion advances exactly once to Command Code on a clean worktree", async t => {
   const f = fixture(t, "exhaust", 20000)
   const cmd = commandLane(), codex = codexLane(false)
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, () => FX_LADDER, f.fx)
   const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
   const status = await settle(bridge, f.repo.cwd, admitted.session_id)
   assert.equal(status.backend, "command-code")
@@ -385,7 +385,7 @@ test("FX quota exhaustion advances exactly once to Command Code on a clean workt
 test("FX exhaustion prefers Codex over Command Code when both lanes are approved", async t => {
   const f = fixture(t, "exhaust", 20000)
   const cmd = commandLane(), codex = codexLane(true)
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, () => FX_LADDER, f.fx)
   const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
   const status = await settle(bridge, f.repo.cwd, admitted.session_id)
   assert.equal(status.backend, "codex")
@@ -397,7 +397,7 @@ test("FX exhaustion prefers Codex over Command Code when both lanes are approved
 test("FX exhaustion after edits blocks fallback instead of replaying partial work", async t => {
   const f = fixture(t, "exhaust", 20000)
   const cmd = commandLane(), codex = codexLane(true)
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, () => FX_LADDER, f.fx)
   const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
   writeFileSync(join(f.repo.cwd, "README"), "partial\n")
   const status = await settle(bridge, f.repo.cwd, admitted.session_id)
@@ -408,7 +408,7 @@ test("FX exhaustion after edits blocks fallback instead of replaying partial wor
 test("FX exhaustion with every fallback lane unavailable ends blocked, never replayed", async t => {
   const f = fixture(t, "exhaust", 20000)
   const cmd = commandLane(false), codex = codexLane(false)
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, () => FX_LADDER, f.fx)
   const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
   const status = await settle(bridge, f.repo.cwd, admitted.session_id)
   assert.match(status.state, /^blocked_/)
@@ -420,7 +420,7 @@ test("an unavailable FX primary admits the next approved lane with a recorded re
   const cmd = commandLane(), codex = codexLane(false)
   const foreign: FxSelection = { ...selection, provider: "other-provider" }
   const plan = { ...FX_LADDER, fx: foreign }
-  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => plan, f.fx)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, () => plan, f.fx)
   const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
   assert.match(admitted.fallback_reason ?? "", /FX runtime\/provider unavailable/)
   const status = await settle(bridge, f.repo.cwd, admitted.session_id)

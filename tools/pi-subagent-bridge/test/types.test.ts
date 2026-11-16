@@ -54,8 +54,8 @@ export function witnesses(): void {
   // @ts-expect-error a launch request needs its selection
   const noRequestSelection = { directory: "/w", logDirectory: "/l", prompt: "p", access: { kind: "read-only" } } satisfies LaunchRequest
 
-  // @ts-expect-error Antigravity launches are never read-only
-  const readOnlyAntigravity = { ...validRequest, access: { kind: "read-only" } } satisfies LaunchRequest<WriteAccess>
+  // @ts-expect-error a write-access launch cannot carry read-only access
+  const readOnlyWriteAccess = { ...validRequest, access: { kind: "read-only" } } satisfies LaunchRequest<WriteAccess>
 
   const validStart = { name: "start", cwd: "/w", title: "t", tier: "scout", scope: SCOPE, brief: "b" } satisfies Command
   // @ts-expect-error a start command needs its scope
@@ -63,7 +63,7 @@ export function witnesses(): void {
 
   void [validProcess, noSelection, piProcess, validPi, noVariant, cliPinOnPi, validTransition, noDestination,
     wrongDestination, validPlan, emptyPi, resolvedPiFallback, unresolvedPiFallback, piInCodexSlot, extraExecutor, routeList, validRequest, noRequestSelection,
-    readOnlyAntigravity, validStart, noScope]
+    readOnlyWriteAccess, validStart, noScope]
 }
 
 test("type witnesses are checked by the compiler, not at runtime", () => {

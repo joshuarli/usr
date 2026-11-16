@@ -97,7 +97,7 @@ test("integration: active worktree lease blocks a second start, including higher
     const started = await bridge.start(f.cwd, "owner", "mechanic", f.scope, "Hold lease")
     assert.equal(started.backend, "command-code")
     await assert.rejects(
-      bridge.start(f.cwd, "escalate", "expert", f.scope, "Try higher lane"),
+      bridge.start(f.cwd, "escalate", "worker", f.scope, "Try higher lane"),
       /active worker|inspect/i,
     )
     done = true

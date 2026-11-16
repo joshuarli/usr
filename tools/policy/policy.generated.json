@@ -3,8 +3,7 @@
   "tiers": [
     "scout",
     "mechanic",
-    "worker",
-    "expert"
+    "worker"
   ],
   "rootRoutes": {
     "scout": [
@@ -71,13 +70,6 @@
         "providerID": "devin",
         "model": "swe-2-flash",
         "effort": "medium"
-      }
-    ],
-    "expert": [
-      {
-        "executor": "antigravity",
-        "model": "gemini-4-hydrogen-xhigh",
-        "effort": "xhigh"
       }
     ]
   },
@@ -227,7 +219,11 @@
     "claudeModels": {
       "scout": "haiku",
       "mechanic": "sonnet",
-      "worker": "sonnet"
+      "worker": "sonnet",
+      "expert": "opus"
+    },
+    "claudeThinking": {
+      "expert": "medium"
     }
   },
   "antigravityDirect": {

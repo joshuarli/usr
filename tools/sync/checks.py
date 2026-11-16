@@ -124,7 +124,7 @@ REGISTRY: tuple[Check, ...] = (
            "tools/sync/companions.py", "tools/sync/pi_release.py", "tools/sync/pi_offline.py")),
     Check("worker-env", (INTERCOM_TAILNET, BRIDGE), ("node", "--experimental-strip-types", "--test", "tools/pi-subagent-bridge/test/worker-env.test.ts"),
           ("tools/pi-subagent-bridge/src/worker-env.ts", "tools/pi-subagent-bridge/src/pi-port.ts", "tools/pi-subagent-bridge/src/sdk-worker.ts",
-           "tools/pi-subagent-bridge/src/codex.ts", "tools/pi-subagent-bridge/src/command.ts", "tools/pi-subagent-bridge/src/antigravity.ts",
+           "tools/pi-subagent-bridge/src/codex.ts", "tools/pi-subagent-bridge/src/command.ts",
            "tools/pi-subagent-bridge/test/worker-env.test.ts"), needs=("node",)),
     Check("bridge", (BRIDGE,), ("npm", "test"), ("tools/pi-subagent-bridge/",), cwd="tools/pi-subagent-bridge", tmpdir=True, needs=("npm",)),
     Check("pi-profile", (PI_PROFILE,), py("dotfiles/pi-test.py"), ("dotfiles/base/.pi/", "dotfiles/pi-test.py", "tools/policy/policy.generated.json", "dotfiles/base/.agents/skills/orchestrate/")),

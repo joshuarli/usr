@@ -5,7 +5,6 @@ import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, real
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { OpenCodePort } from "../src/bridge.ts"
-import { antigravityResult } from "../src/antigravity.ts"
 import { codexResult } from "../src/codex.ts"
 import { commandResult } from "../src/command.ts"
 import type { InspectionDeps } from "../src/inspect.ts"
@@ -143,7 +142,7 @@ export function unusedApi(): OpenCodePort {
 }
 
 export function realDeps(api: PiAdapter = piAdapter(unusedApi())): InspectionDeps {
-  return { api, command: { status: commandResult }, codex: { status: codexResult }, antigravity: { status: antigravityResult } }
+  return { api, command: { status: commandResult }, codex: { status: codexResult } }
 }
 
 export function collect() {

@@ -5,7 +5,7 @@ import {
   type RootPlan,
 } from "./policy.ts"
 import { isRecord, parseScope, requiredText, type Scope } from "./scope.ts"
-import { isTier, type Tier } from "./tier-policy.ts"
+import { isBridgeTier, type BridgeTier } from "./tier-policy.ts"
 
 export const TURN_LIMIT_CONTINUATIONS = 2
 export const STEER_LIMIT = 2
@@ -67,7 +67,7 @@ export function isOwnerId(value: unknown): value is string {
 }
 
 export type Session = {
-  id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
+  id: string; cwd: string; title: string; tier: BridgeTier; scope: Scope; task: string
   plan: AdmittedPlan; execution: Execution; attempts: number
   owner?: SessionOwner
   lane_branch?: string | null
@@ -176,7 +176,7 @@ function piList(selections: readonly PiSelection[]): [PiSelection, ...PiSelectio
   return [first, ...rest]
 }
 function cliExecutor(value: unknown): Exclude<CliExecutor, "fx"> {
-  if (value !== "codex" && value !== "command-code" && value !== "antigravity")
+  if (value !== "codex" && value !== "command-code")
     throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   return value
 }
@@ -200,7 +200,6 @@ function coherent(plan: AdmittedPlan, to: Target): boolean {
       return to.executor === "codex" ? samePin(to.selection, plan.codex) :
         to.executor === "command-code" ? samePin(to.selection, plan.command) :
         to.executor === "pi" && plan.pi.some(candidate => samePi(candidate, to.selection))
-    case "exclusive": return to.executor === "antigravity" && samePin(to.selection, plan.target)
     case "fallback":
       return to.executor === "codex" ? samePin(to.selection, plan.codex) :
         to.executor === "command-code" ? samePin(to.selection, plan.command) :
@@ -229,7 +228,6 @@ function decodePlan(value: unknown): AdmittedPlan {
       if (fx.executor !== "fx") throw new Error("Invalid persisted FX plan")
       return { kind: "fx-fallback", fx: fx.selection, codex: pin(value.codex), command: pin(value.command), pi: piList(piSelections(value.pi)) }
     }
-    case "exclusive": return { kind: "exclusive", target: pin(value.target) }
     case "fallback":
       return { kind: "fallback", codex: pin(value.codex), command: pin(value.command), pi: piList(piSelections(value.pi)) }
     case "fallback-unresolved-pi": return { kind: "fallback-unresolved-pi", codex: pin(value.codex), command: pin(value.command) }
@@ -268,10 +266,6 @@ function decodeExecution(value: unknown): Execution {
   }
 }
 
-// These are historical wire meanings, not defaults for new sessions. Never update
-// them when the current policy changes: unversioned Hydrogen records omitted pins.
-const LEGACY_HYDROGEN_PIN = { model: "gemini-4-hydrogen-xhigh", effort: "xhigh" } as const
-
 const LEGACY_BACKENDS = new Map<string, { executor: Executor; transition: boolean; admitting: boolean }>([
   ["pi", { executor: "pi", transition: false, admitting: false }],
   ["pi-admitting", { executor: "pi", transition: true, admitting: true }],
@@ -280,8 +274,6 @@ const LEGACY_BACKENDS = new Map<string, { executor: Executor; transition: boolea
   ["codex-transition", { executor: "codex", transition: true, admitting: false }],
   ["command-code", { executor: "command-code", transition: false, admitting: false }],
   ["command-transition", { executor: "command-code", transition: true, admitting: false }],
-  ["antigravity", { executor: "antigravity", transition: false, admitting: false }],
-  ["antigravity-transition", { executor: "antigravity", transition: true, admitting: false }],
 ])
 
 function legacyPin(value: Record<string, unknown>, modelKey: string, effortKey: string): CliPin | undefined {
@@ -300,7 +292,6 @@ function legacyPlan(
   lanes: { codex: CliPin | undefined; command: CliPin | undefined; primary: PiSelection | undefined; pending: PiSelection[] | undefined },
 ): AdmittedPlan {
   if (to.executor === "fx") throw new Error("FX cannot occur in a legacy record")
-  if (to.executor === "antigravity") return { kind: "exclusive", target: to.selection }
   const { codex, primary, pending } = lanes
   const command = admitted(lanes.command, "Command Code pin")
   const symbolic = Array.isArray(value.remaining_pi) && value.remaining_pi.length > 0
@@ -313,23 +304,12 @@ function legacyPlan(
   return destinations ? { kind: "command-first", command, pi: destinations } : { kind: "command-first-unresolved-pi", command }
 }
 
-function decodeLegacy(value: Record<string, unknown>, tier: Tier): { plan: AdmittedPlan; execution: Execution } {
-  let backend = typeof value.backend === "string" ? value.backend : undefined
-  let antigravity = value.antigravity_pin === undefined ? undefined : pin(value.antigravity_pin)
-  if (value.schema_version === undefined && (backend === "hydrogen" || backend === "hydrogen-transition")) {
-    if (antigravity && !samePin(antigravity, LEGACY_HYDROGEN_PIN))
-      throw new Error("Ambiguous legacy Antigravity pin; manual reconciliation required")
-    antigravity = { ...LEGACY_HYDROGEN_PIN }
-    backend = backend === "hydrogen" ? "antigravity" : "antigravity-transition"
-  }
+function decodeLegacy(value: Record<string, unknown>): { plan: AdmittedPlan; execution: Execution } {
+  const backend = typeof value.backend === "string" ? value.backend : undefined
   const lifecycle = backend === undefined ? undefined : LEGACY_BACKENDS.get(backend)
   if (!lifecycle) throw new Error("Invalid persisted worker lifecycle; manual reconciliation required")
   const previous_run = value.command_run === undefined ? undefined : commandRun(value.command_run)
   const pi_id = optionalText(value.pi_id, "Pi session")
-  if (lifecycle.executor === "antigravity" && (!antigravity || tier !== "expert"))
-    throw new Error("Invalid admitted Antigravity route; manual reconciliation required")
-  if (value.schema_version === 1 && tier === "expert" && lifecycle.executor !== "antigravity")
-    throw new Error("Invalid versioned expert route; manual reconciliation required")
   if (value.remaining_pi !== undefined &&
       !(Array.isArray(value.remaining_pi) && value.remaining_pi.every(item => item === "muse" || item === "go")))
     throw new Error("Invalid legacy Pi destinations")
@@ -343,7 +323,6 @@ function decodeLegacy(value: Record<string, unknown>, tier: Tier): { plan: Admit
   let to: Target
   switch (lifecycle.executor) {
     case "fx": throw new Error("FX cannot occur in a legacy record")
-    case "antigravity": to = { executor: "antigravity", selection: admitted(antigravity, "Antigravity pin") }; break
     case "codex": to = { executor: "codex", selection: admitted(codex, "Codex pin") }; break
     case "command-code": to = { executor: "command-code", selection: admitted(command, "Command Code pin") }; break
     case "pi":
@@ -377,11 +356,11 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
   const version = value.schema_version
   if (version !== undefined && version !== 1 && version !== 2 && version !== SESSION_VERSION)
     throw new Error("Unsupported worker session version; manual reconciliation required")
-  if (value.cwd !== cwd || value.id !== id || !isTier(value.tier)) throw new Error("Session/worktree mismatch")
-  const { plan, execution } = (version === SESSION_VERSION || version === 2) ? decodeCurrent(value) : decodeLegacy(value, value.tier)
+  if (value.cwd !== cwd || value.id !== id || !isBridgeTier(value.tier)) throw new Error("Unsupported persisted worker tier; manual reconciliation required")
+  const { plan, execution } = (version === SESSION_VERSION || version === 2) ? decodeCurrent(value) : decodeLegacy(value)
   if (version === 2 && (plan.kind === "leaf" || plan.kind === "fx-fallback" || destinationOf(execution).executor === "fx"))
     throw new Error("FX/leaf routes require session schema 3; manual reconciliation required")
-  if ((plan.kind === "exclusive" && value.tier !== "expert") || !coherent(plan, destinationOf(execution)))
+  if (!coherent(plan, destinationOf(execution)))
     throw new Error("Execution leaves the admitted plan; manual reconciliation required")
   const s: Session = {
     id, cwd, tier: value.tier, title: requiredText(value.title, "title", 100), task: requiredText(value.task, "task", 32000),

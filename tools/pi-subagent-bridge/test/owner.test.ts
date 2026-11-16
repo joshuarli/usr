@@ -374,7 +374,7 @@ test("b: steer twice with one command_id delivers exactly one steer and returns 
   const pi = makeFakePiPort("running")
   const noCmd = makeFakeCommand()
   noCmd.runner.available = () => false
-  const piBridge = makeHybridBridge(piAdapter(pi.port), noCmd.runner, noCodex, undefined, piOnlyPolicy)
+  const piBridge = makeHybridBridge(piAdapter(pi.port), noCmd.runner, noCodex, piOnlyPolicy)
   const piManager = new OwnerManager(piBridge)
   t.after(async () => piManager.close())
 
@@ -506,7 +506,7 @@ test("d: after owner restart old target is stale-target and old commands reconci
   const pi1 = makeFakePiPort("running")
   const noCmd = makeFakeCommand()
   noCmd.runner.available = () => false
-  const bridge1 = makeHybridBridge(piAdapter(pi1.port), noCmd.runner, noCodex, undefined, piOnlyPolicy)
+  const bridge1 = makeHybridBridge(piAdapter(pi1.port), noCmd.runner, noCodex, piOnlyPolicy)
   let abortNext = false
   let mgr1Ref: RepoOwnerEndpoint | undefined
   const manager1 = new OwnerManager(bridge1, {
@@ -542,7 +542,7 @@ test("d: after owner restart old target is stale-target and old commands reconci
 
   // Restarted owner (generation 2)
   const pi2 = makeFakePiPort("running")
-  const bridge2 = makeHybridBridge(piAdapter(pi2.port), noCmd.runner, noCodex, undefined, piOnlyPolicy)
+  const bridge2 = makeHybridBridge(piAdapter(pi2.port), noCmd.runner, noCodex, piOnlyPolicy)
   const manager2 = new OwnerManager(bridge2)
   t.after(async () => manager2.close())
   await manager2.ensureRepo(repo)

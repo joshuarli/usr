@@ -4,6 +4,9 @@
  */
 export const TIERS = ["scout", "mechanic", "worker", "expert"] as const
 export type Tier = (typeof TIERS)[number]
+/** The bridge admits only these tiers; expert is a harness-native lane with no bridge route. */
+export const BRIDGE_TIERS = ["scout", "mechanic", "worker"] as const
+export type BridgeTier = (typeof BRIDGE_TIERS)[number]
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
 
 export const MAX_SUBAGENT_DEPTH = 2 as const
@@ -80,6 +83,9 @@ export const TIER_TOOLS = {
 
 export function isTier(value: unknown): value is Tier {
   return typeof value === "string" && TIERS.some((tier) => tier === value)
+}
+export function isBridgeTier(value: unknown): value is BridgeTier {
+  return typeof value === "string" && BRIDGE_TIERS.some((tier) => tier === value)
 }
 
 export function canDelegate<P extends Tier>(parent: P, child: Tier): child is ChildOf<P> {

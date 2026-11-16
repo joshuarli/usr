@@ -6,8 +6,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { COMMAND_EMBER_MODEL, COMMAND_MODEL, cancelCommand, commandResult, commandSession, processStartTime, startCommand } from "../src/command.ts"
 import { codexResult } from "../src/codex.ts"
-import { antigravityResult } from "../src/antigravity.ts"
-import { ANTIGRAVITY_PIN } from "../src/policy.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -246,8 +244,8 @@ test("all observers reject a different identity even when its detached group is 
     await delay(100)
     const run = { pid: child.pid!, output: join(root, "out"), errors: join(root, "err"), started_at: "now", proc_start: "0" }
     assert.ok(processStartTime(run.pid))
-    assert.deepEqual([commandResult(run).state, codexResult(run).state, antigravityResult(run, ANTIGRAVITY_PIN).state],
-      ["interrupted", "interrupted", "interrupted"])
+    assert.deepEqual([commandResult(run).state, codexResult(run).state],
+      ["interrupted", "interrupted"])
   } finally {
     try { process.kill(-child.pid!, "SIGKILL") } catch {}
     await new Promise<void>(resolve => child.exitCode !== null || child.signalCode !== null ? resolve() : child.once("exit", () => resolve()))

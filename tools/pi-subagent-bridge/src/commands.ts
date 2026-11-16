@@ -1,10 +1,10 @@
 import { ROOT_PLANS, routesOf } from "./policy.ts"
-import { TIERS, isTier, type Tier } from "./tier-policy.ts"
+import { BRIDGE_TIERS, isBridgeTier, type BridgeTier } from "./tier-policy.ts"
 import { SCOPE_SCHEMA, isRecord, parseScope, requiredText, type Scope } from "./scope.ts"
 
 export type Command =
-  | { readonly name: "model_check"; readonly cwd: string; readonly tier: Tier }
-  | { readonly name: "start"; readonly cwd: string; readonly title: string; readonly tier: Tier; readonly scope: Scope; readonly brief: string }
+  | { readonly name: "model_check"; readonly cwd: string; readonly tier: BridgeTier }
+  | { readonly name: "start"; readonly cwd: string; readonly title: string; readonly tier: BridgeTier; readonly scope: Scope; readonly brief: string }
   | { readonly name: "status"; readonly cwd: string; readonly session_id: string }
   | { readonly name: "resume"; readonly cwd: string; readonly session_id: string; readonly feedback: string }
   | { readonly name: "steer"; readonly cwd: string; readonly session_id: string; readonly note: string }
@@ -21,8 +21,8 @@ function textField(label: string, name: string, maxLength: number, description?:
 const FIELDS = {
   cwd: textField("CWD", "cwd", 32000, "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it."),
   title: textField("TITLE", "title", 100, "Short scoped task name"),
-  tier: { label: "TIER", schema: { type: "string", minLength: 1, maxLength: Math.max(...TIERS.map(value => value.length)), enum: TIERS }, file: undefined,
-    decode: (value: unknown): Tier => { if (!isTier(value)) throw new Error("Unknown Pi tier"); return value } },
+  tier: { label: "TIER", schema: { type: "string", minLength: 1, maxLength: Math.max(...BRIDGE_TIERS.map(value => value.length)), enum: BRIDGE_TIERS }, file: undefined,
+    decode: (value: unknown): BridgeTier => { if (!isBridgeTier(value)) throw new Error("Unknown bridge tier"); return value } },
   scope: { label: "SCOPE_JSON_FILE", file: "json" as const, schema: SCOPE_SCHEMA },
   brief: textField("BRIEF_FILE", "brief", 32000, "One bounded outcome and only the context needed", "text"),
   session_id: textField("SESSION_ID", "session_id", 64, "usrw_ session ID returned by worker_start; never guess another session."),
@@ -30,7 +30,7 @@ const FIELDS = {
   note: textField("NOTE_FILE", "note", 32000, undefined, "text"),
 } satisfies Record<Field, { readonly schema: object; readonly label: string; readonly file?: "text" | "json"; readonly decode?: (value: unknown) => unknown }>
 
-const routingSummary = TIERS.map(name => {
+const routingSummary = BRIDGE_TIERS.map(name => {
   const routes = routesOf(ROOT_PLANS[name])
   return `${name}: ${routes.map(route => route.executor).join(" then ")}${routes.length === 1 ? ", no fallback" : ""}`
 }).join("; ")

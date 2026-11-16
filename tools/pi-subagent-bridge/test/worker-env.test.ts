@@ -7,7 +7,6 @@ import test from "node:test"
 import { stripIntercomEnvironment, workerEnvironment } from "../src/worker-env.ts"
 import { startCodex } from "../src/codex.ts"
 import { startCommand } from "../src/command.ts"
-import { startAntigravity } from "../src/antigravity.ts"
 
 test("a scoped worker process receives provider settings but no coordinator authority", () => {
   const parent = {
@@ -53,14 +52,13 @@ test("every CLI worker launcher actually strips coordinator authority before exe
   const previous = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]))
   try {
     Object.assign(process.env, values)
-    for (const name of ["codex", "cmd", "agy"]) {
+    for (const name of ["codex", "cmd"]) {
       writeFileSync(join(bin, name), `#!${process.execPath}\n` +
         'require("node:fs").writeFileSync(process.env.USR_ENV_REPORT, JSON.stringify(Object.fromEntries(Object.entries(process.env).filter(([key]) => key.includes("INTERCOM") || key === "USR_SCOPED_WORKER"))))\n', { mode: 0o700 })
     }
     const cases = [
       { launch: startCodex, model: "gpt-6.1-terra" },
       { launch: startCommand, model: "deepseek/deepseek-v4.1-flash" },
-      { launch: startAntigravity, model: "gemini-4-hydrogen-xhigh" },
     ]
     for (const [index, { launch, model }] of cases.entries()) {
       const report = join(root, `report-${index}.json`)

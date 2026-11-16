@@ -13,16 +13,15 @@ class OrchestrateTests(unittest.TestCase):
         cls.text = (ROOT / "dotfiles/base/.agents/skills/orchestrate/SKILL.md").read_text()
 
     def test_every_harness_uses_shared_bridge(self):
-        self.assertIn("all coding subagents", self.text.lower())
+        self.assertIn("all scout/mechanic/worker coding subagents", self.text.lower())
         self.assertIn("pi-subagent-bridge", self.text)
         for method in ("worker_model_check", "worker_start", "worker_status", "worker_resume"):
             self.assertIn(method, self.text)
 
     def test_generated_policy_has_distinct_root_and_native_domains(self):
-        self.assertEqual(POLICY["tiers"], ["scout", "mechanic", "worker", "expert"])
-        self.assertEqual(len(POLICY["rootRoutes"]["expert"]), 1)
-        self.assertEqual(POLICY["rootRoutes"]["expert"][0]["executor"], "antigravity")
-        self.assertIn(POLICY["rootRoutes"]["expert"][0]["model"], self.text)
+        self.assertEqual(POLICY["tiers"], ["scout", "mechanic", "worker"])
+        self.assertNotIn("expert", POLICY["rootRoutes"])
+        self.assertNotIn("antigravity", [route["executor"] for routes in POLICY["rootRoutes"].values() for route in routes])
         self.assertIn("expert", POLICY["nativePi"]["goModels"])
         self.assertNotIn("god", POLICY["rootRoutes"])
         for family in POLICY["bannedModels"]:
@@ -45,13 +44,13 @@ class OrchestrateTests(unittest.TestCase):
         codex = (ROOT / "dotfiles/base/.codex/config.toml").read_text()
         self.assertIn("pi-subagent-bridge", codex)
         self.assertNotIn("usr-opencode-worker", codex)
-        opencode = (ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text()
-        self.assertNotIn("pi-subagent-bridge", opencode)
-        self.assertNotIn("usr-opencode-worker", opencode)
-        json.loads(opencode)
+        opencode = json.loads((ROOT / "dotfiles/base/.config/opencode/opencode.json").read_text())
+        self.assertNotIn("pi-subagent-bridge", json.dumps(opencode.get("mcp", {})))
+        self.assertNotIn("usr-opencode-worker", json.dumps(opencode))
 
-    def test_native_subagents_are_the_quota_fallback(self):
-        self.assertIn("Quota fallback for scout/mechanic/worker only:", self.text)
+    def test_native_subagents_cover_claude_code(self):
+        self.assertIn("Claude Code native subagents:", self.text)
+        self.assertIn("`expert` assignments always use native subagents pinned to `opus` with `medium` thinking.", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
         self.assertNotIn("Host-access exception", self.text)
         self.assertNotIn("sandbox cannot grant", self.text)
@@ -75,8 +74,8 @@ class OrchestrateTests(unittest.TestCase):
         policy = POLICY["opencode"]
         self.assertIn(f"The configured tier agents use `{policy['model']}` regardless of the top-level model", self.text)
         self.assertEqual(
-            {tier: agents[tier]["model"] for tier in POLICY["tiers"]},
-            {tier: policy["model"] + "#" + policy["efforts"][tier] for tier in POLICY["tiers"]},
+            {tier: agents[tier]["model"] for tier in policy["efforts"]},
+            {tier: policy["model"] + "#" + policy["efforts"][tier] for tier in policy["efforts"]},
         )
         self.assertNotIn("god", agents)
         scout_rules = agents["scout"]["permissions"]

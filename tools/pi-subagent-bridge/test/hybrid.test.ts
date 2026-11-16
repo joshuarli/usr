@@ -10,7 +10,7 @@ import { stateDir } from "../src/git.ts"
 import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
-import { ANTIGRAVITY_PIN, ROOT_PLANS, type CliPin, type FallbackPlan, type RootPlan } from "../src/policy.ts"
+import { ROOT_PLANS, type CliPin, type FallbackPlan, type RootPlan } from "../src/policy.ts"
 import { PI_RUN_DEADLINE_MS } from "../src/tier-policy.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { activeWorktreeOwner, claimWorktree } from "../src/worktree-lease.ts"
@@ -152,117 +152,11 @@ test("model check reports Codex primary and Command Code pins", async () => {
       assert.equal(status.command_code.effort, effort)
       assert.equal(status.command_code.available, true)
     }
-    assert.equal((await bridge.modelCheck(f.cwd, "expert")).primary.model, ANTIGRAVITY_PIN.model)
+    await assert.rejects(bridge.modelCheck(f.cwd, "expert"), /Unknown bridge tier/)
+    await assert.rejects(bridge.start(f.cwd, "escalate", "expert", f.scope, "Work"), /Unknown bridge tier/)
   } finally { f.close() }
 })
 
-
-function antigravityFake(pin: CliPin = ANTIGRAVITY_PIN) {
-  const starts: Array<{ model: string; effort: string; resume?: string; readOnly: boolean }> = []
-  let available = true
-  let failed = false
-  const run: CommandRun = { pid: 9012, output: "fake", errors: "fake", started_at: "now" }
-  return {
-    starts,
-    setAvailable: (value: boolean) => { available = value },
-    fail: () => { failed = true },
-    runner: {
-      available: () => available,
-      start: (request: LaunchRequest): CommandRun => {
-        const { model, effort } = request.selection
-        if (model !== pin.model || effort !== pin.effort || request.access.kind === "read-only") throw new Error("Unapproved Antigravity dispatch")
-        starts.push({ model, effort, readOnly: false, resume: request.resume })
-        return run
-      },
-      status: (_run?: CommandRun, admitted?: CliPin) => {
-        if (admitted) assert.deepEqual(admitted, pin)
-        return failed ?
-        { state: "failed", result: { subtype: "error" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", error: "429 quota exhausted" }, stderr: null } :
-        { state: "succeeded", result: { subtype: "success" as const, sessionId: "7ce10216-708a-4ba7-9128-53789b2ce8ad", finalText: "PROOF\nACCEPTANCE: met" }, stderr: null }
-      },
-      cancel: () => true,
-      session: () => "7ce10216-708a-4ba7-9128-53789b2ce8ad",
-    },
-  }
-}
-
-test("expert uses only pinned Antigravity XHigh, persists it, and never falls back on quota", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), antigravity = antigravityFake()
-    const bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex, antigravity.runner)
-    const check = await bridge.modelCheck(f.cwd, "expert")
-    assert.deepEqual(check.primary, { backend: "antigravity", model: ANTIGRAVITY_PIN.model, effort: ANTIGRAVITY_PIN.effort, available: true })
-    assert.equal(check.fallback, null)
-    const task = await bridge.start(f.cwd, "expert", "expert", f.scope, "Inspect source and prove behavior")
-    assert.equal(task.backend, "antigravity")
-    assert.deepEqual(antigravity.starts, [{ model: ANTIGRAVITY_PIN.model, effort: "xhigh", readOnly: false, resume: undefined }])
-    const persisted = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
-    assert.equal(persisted.backend, "antigravity")
-    assert.equal(persisted.tier, "expert")
-    assert.deepEqual(persisted.plan, { kind: "exclusive", target: ANTIGRAVITY_PIN })
-    assert.equal(persisted.execution.kind, "process")
-    antigravity.fail()
-    const status = await bridge.status(f.cwd, task.session_id)
-    assert.equal(status.state, "failed")
-    assert.equal(status.model, ANTIGRAVITY_PIN.model)
-    assert.equal(status.fallback_reason, null)
-    assert.equal(antigravity.starts.length, 1)
-    assert.equal(commandCalls(m.calls).length, 0)
-    assert.equal(piCreates(m.calls).length, 0)
-  } finally { f.close() }
-})
-
-test("unavailable Antigravity blocks expert before starting any other model or claiming a lease", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), antigravity = antigravityFake()
-    antigravity.setAvailable(false)
-    const bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex, antigravity.runner)
-    await assert.rejects(bridge.start(f.cwd, "expert", "expert", f.scope, "Work"), /Antigravity model .* unavailable.*No fallback/)
-    assert.equal(antigravity.starts.length, 0)
-    assert.equal(commandCalls(m.calls).length, 0)
-    assert.equal(piCreates(m.calls).length, 0)
-    const task = await bridge.start(f.cwd, "safe", "worker", f.scope, "Work")
-    assert.equal(task.backend, "command-code")
-  } finally { f.close() }
-})
-
-test("Antigravity corrections preserve the exact model and conversation", async () => {
-  const f = fixture()
-  try {
-    const m = fake(f.cwd), antigravity = antigravityFake()
-    const bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex, antigravity.runner)
-    const task = await bridge.start(f.cwd, "review", "expert", f.scope, "Work")
-    assert.equal((await bridge.status(f.cwd, task.session_id)).state, "succeeded")
-    await bridge.resume(f.cwd, task.session_id, "Verify a second edge case")
-    assert.deepEqual(antigravity.starts[1], { model: ANTIGRAVITY_PIN.model, effort: "xhigh", readOnly: false,
-      resume: "7ce10216-708a-4ba7-9128-53789b2ce8ad" })
-  } finally { f.close() }
-})
-
-test("a restarted expert keeps its admitted model when current policy changes", async () => {
-  const f = fixture()
-  try {
-    const oldPin: CliPin = { model: "fixture-expert-v1", effort: "high" }
-    const newPin: CliPin = { model: "fixture-expert-v2", effort: "xhigh" }
-    const m = fake(f.cwd), executor = antigravityFake(oldPin)
-    const before = makeHybridBridge(piAdapter(m.api), m.command, noCodex, executor.runner,
-      () => ({ kind: "exclusive", target: oldPin }))
-    const task = await before.start(f.cwd, "snapshot", "expert", f.scope, "Verify the pin")
-    const stored = JSON.parse(readFileSync(join(f.root, ".work", "worker-bridge", task.session_id + ".json"), "utf8"))
-    assert.deepEqual(stored.plan, { kind: "exclusive", target: oldPin })
-    assert.deepEqual(stored.execution.selection, oldPin)
-    assert.equal(stored.schema_version, 2)
-    const after = makeHybridBridge(piAdapter(m.api), m.command, noCodex, executor.runner,
-      () => ({ kind: "exclusive", target: newPin }))
-    assert.equal((await after.modelCheck(f.cwd, "expert")).primary.model, "fixture-expert-v2")
-    assert.equal((await after.status(f.cwd, task.session_id)).model, "fixture-expert-v1")
-    await after.resume(f.cwd, task.session_id, "Recheck the same work")
-    assert.deepEqual(executor.starts.map(({ model, effort }) => ({ model, effort })), [oldPin, oldPin])
-    assert.equal(commandCalls(m.calls).length, 0)
-  } finally { f.close() }
-})
 
 for (const executor of ["codex", "command-code"] as const) {
   test(`a restarted ${executor} retains its admitted pair after a policy change`, async () => {
@@ -274,11 +168,11 @@ for (const executor of ["codex", "command-code"] as const) {
       const withPin = (pin: CliPin): RootPlan => ({ ...plan, [executor === "codex" ? "codex" : "command"]: pin })
       const m = fake(f.cwd)
       const codex = executor === "codex" ? { ...m.command, session: () => "cmd-session" } : noCodex
-      const before = makeHybridBridge(piAdapter(m.api), m.command, codex, undefined, () => withPin(oldPin))
+      const before = makeHybridBridge(piAdapter(m.api), m.command, codex, () => withPin(oldPin))
       const task = await before.start(f.cwd, "snapshot", "worker", f.scope, "Verify the pin")
       assert.equal(task.backend, executor)
       m.done()
-      const after = makeHybridBridge(piAdapter(m.api), m.command, codex, undefined, () => withPin(newPin))
+      const after = makeHybridBridge(piAdapter(m.api), m.command, codex, () => withPin(newPin))
       assert.equal((await after.status(f.cwd, task.session_id)).model, "fixture-before")
       await after.resume(f.cwd, task.session_id, "Recheck the same work")
       const launches = commandCalls(m.calls)
@@ -299,7 +193,7 @@ test("pending Pi fallback uses its admitted plan after restart, not the new poli
     const task = await before.start(f.cwd, "snapshot", "scout", { ...f.scope, writable_paths: [] }, "Inspect README")
     m.failCommand("quota exhausted")
     const changedPlan: FallbackPlan = ROOT_PLANS.scout
-    const after = makeHybridBridge(piAdapter(m.api), m.command, noCodex, undefined,
+    const after = makeHybridBridge(piAdapter(m.api), m.command, noCodex, 
       () => ({ ...changedPlan, pi: [{ providerID: "opencode-go", id: "unavailable-new-model", variant: "high" }] }))
     const status = await after.status(f.cwd, task.session_id)
     assert.equal(status.backend, "pi")
@@ -570,7 +464,7 @@ test("invalid scopes, unapproved tiers and dirty worktrees fail before any execu
     await assert.rejects(bridge.start(f.cwd, "x", "worker",
       { ...f.scope, writable_paths: ["../secret"] }, "x"), /Invalid writable path/)
     await assert.rejects(bridge.start(f.cwd, "x", "scout", f.scope, "x"), /scouts are read-only/)
-    await assert.rejects(bridge.start(f.cwd, "x", "titan", f.scope, "x"), /Unknown Pi tier/)
+    await assert.rejects(bridge.start(f.cwd, "x", "titan", f.scope, "x"), /Unknown bridge tier/)
     writeFileSync(join(f.cwd, "untracked"), "bad")
     await assert.rejects(bridge.start(f.cwd, "x", "worker", f.scope, "x"), /clean/)
     assert.equal(commandCalls(m.calls).length, 0)
@@ -1259,13 +1153,13 @@ test("USR-77: a finished session's lease is released when a new worker starts wi
 
 
 test("admitted writers can commit in scope and resume or steer", async () => {
-  for (const tier of ["worker", "mechanic", "expert"] as const) {
+  for (const tier of ["worker", "mechanic"] as const) {
     for (const action of ["resume", "steer"] as const) {
       const f = fixture()
       try {
         const m = fake(f.cwd), { command } = steerable(f, m)
         const runner = action === "resume" ? m.command : command
-        const bridge = makeHybridBridge(piAdapter(m.api), runner, noCodex, undefined,
+        const bridge = makeHybridBridge(piAdapter(m.api), runner, noCodex, 
           () => ({ kind: "leaf", target: { executor: "command-code", selection: { model: "fixture", effort: "high" } } }))
         const task = await bridge.start(f.cwd, "lane", tier, f.scope, "Edit README")
         writeFileSync(join(f.cwd, "README"), "committed\n")
@@ -1296,7 +1190,7 @@ test("lane drift and committed out-of-scope work block status, resume and steer"
       try {
         const m = fake(f.cwd), { command } = steerable(f, m)
         const runner = action === "resume" ? m.command : command
-        const bridge = makeHybridBridge(piAdapter(m.api), runner, noCodex, undefined,
+        const bridge = makeHybridBridge(piAdapter(m.api), runner, noCodex, 
           () => ({ kind: "leaf", target: { executor: "command-code", selection: { model: "fixture", effort: "high" } } }))
         const tier = scenario === "scout" ? "scout" : "worker"
         const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope

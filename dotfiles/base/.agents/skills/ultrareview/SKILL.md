@@ -22,7 +22,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 ## Steps
 
 1. **Orient.** Read AGENTS.md, README, manifests, CI config, the open tickets via `todo list --json` and matching details via `todo show ID --json`, and recent `git log --stat` for churn. Find entry points, boundaries, how it is tested, built, released, and run, then take the baseline.
-2. **Review** through the lenses below. On a big repo use `orchestrate`: one read-only lane per group of rows, told which lens skill files to read and returning only candidate findings in the `todo` ticket shape. Lanes are `worker`, or `scout` for pure inventory (the build, CI, and dependency row), however large the code. Use `expert` only for a lane on crash consistency, races, or `unsafe` soundness, and state why in the brief. Merge findings that share a root cause and rank them.
+2. **Review** through the lenses below. On a big repo use `orchestrate`: one read-only lane per group of rows, told which lens skill files to read and returning only candidate findings in the `todo` ticket shape. Lanes are `worker`, or `scout` for pure inventory (the build, CI, and dependency row), however large the code. Use a native `expert` subagent only for a lane on crash consistency, races, or `unsafe` soundness, and state why in the brief. Merge findings that share a root cause and rank them.
 3. **Prove the top.** Before a P1 or P2 stands, prove the fact it depends on with the `blast-radius` ladder. Check any measured claim with `benchmark-checklist`. A finding you cannot prove is marked `unproven` or downgraded.
 4. **Refresh the docs** (below), after the review, so dead code you found is not documented.
 5. **File the findings** (below).

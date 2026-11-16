@@ -17,7 +17,6 @@ const cwd = "/tmp/usr-session-fixture"
 const id = "usrw_01234567-89ab-cdef-0123-456789abcdef"
 const run = { pid: 12345, output: "/tmp/worker.ndjson", errors: "/tmp/worker.stderr", started_at: "2026-11-14T03:13:57Z", proc_start: "fixture-start" }
 const scope = { base_revision: "a".repeat(40), writable_paths: ["README"], acceptance_proof: "Check the output", attempt_limit: 2, stop_on: "Scope expansion" }
-const HYDROGEN = { model: "gemini-4-hydrogen-xhigh", effort: "xhigh" } as const
 const CODEX = { model: "gpt-6.1-terra", effort: "medium" } as const
 const COMMAND = { model: "deepseek/deepseek-v4.1-flash", effort: "high" } as const
 const MUSE = { providerID: "muse-sdk", id: "muse-spark-1.3", variant: "xhigh" } as const
@@ -26,13 +25,15 @@ const GO = { providerID: "opencode-go", id: "deepseek-v4.1-flash", variant: "hig
 function record(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schema_version: 1, id, cwd, title: "Review a bounded slice", task: "Read the source and return evidence",
-    tier: "expert", scope, attempts: 0, backend: "antigravity", command_run: run, antigravity_pin: HYDROGEN,
+    tier: "worker", scope, attempts: 0, backend: "codex", command_run: run,
+    codex_model: CODEX.model, codex_effort: CODEX.effort,
+    command_model: COMMAND.model, command_effort: COMMAND.effort, execution_order: "codex-first",
     ...overrides,
   }
 }
 function lower(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return record({
-    tier: "worker", backend: "command-code", antigravity_pin: undefined, execution_order: "codex-first",
+    tier: "worker", backend: "command-code", execution_order: "codex-first",
     codex_model: CODEX.model, codex_effort: CODEX.effort, command_model: COMMAND.model, command_effort: COMMAND.effort,
     pi_candidates: [MUSE, GO], ...overrides,
   })
@@ -40,30 +41,6 @@ function lower(overrides: Record<string, unknown> = {}): Record<string, unknown>
 
 function decode(value: Record<string, unknown>) { return decodeSession(value, cwd, id) }
 function roundTrip(value: Record<string, unknown>) { return decodeSession(JSON.parse(JSON.stringify(encodeSession(decode(value)))), cwd, id) }
-
-test("an expert round trip keeps its admitted plan and selection independent of current defaults", () => {
-  const selected = { model: "fixture-admitted-model", effort: "high" }
-  const parsed = roundTrip(record({ antigravity_pin: selected }))
-  assert.deepEqual(parsed.plan, { kind: "exclusive", target: selected })
-  assert.deepEqual(parsed.execution, { kind: "process", executor: "antigravity", selection: selected, run })
-  assert.equal(backendOf(parsed), "antigravity")
-  assert.deepEqual(processRun(parsed), run)
-  const wire = encodeSession(parsed)
-  assert.equal(wire.schema_version, 2)
-  assert.equal(wire.backend, "antigravity")
-  assert.deepEqual(wire.command_run, run)
-  assert.deepEqual(wire.execution, parsed.execution)
-})
-
-test("unversioned Hydrogen records use the historical pin and become typed exclusive plans", () => {
-  for (const backend of ["hydrogen", "hydrogen-transition"]) {
-    const parsed = roundTrip(record({ schema_version: undefined, backend, antigravity_pin: undefined }))
-    assert.deepEqual(parsed.plan, { kind: "exclusive", target: HYDROGEN })
-    assert.deepEqual(targetOf(parsed).selection, HYDROGEN)
-    assert.equal(backendOf(parsed), backend === "hydrogen" ? "antigravity" : "antigravity-transition")
-  }
-  assert.throws(() => decode(record({ schema_version: undefined, backend: "hydrogen", antigravity_pin: { model: "different-model", effort: "xhigh" } })), /legacy|Ambiguous/)
-})
 
 test("v1 lower-tier records convert to a typed fallback plan on every executor", () => {
   const cases = [
@@ -137,9 +114,7 @@ test("legacy records whose Pi fallback cannot be resolved still decode, keeping 
   const onPi = roundTrip(lower({ schema_version: undefined, execution_order: "command-first", codex_model: undefined, codex_effort: undefined,
     backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: GO, pi_candidates: undefined, remaining_pi: [] }))
   assert.deepEqual(onPi.plan, { kind: "command-first", command: COMMAND, pi: [GO] })
-  const legacyExpert = roundTrip(lower({ schema_version: undefined, tier: "expert", backend: "codex" }))
-  assert.equal(legacyExpert.tier, "expert")
-  assert.equal(legacyExpert.plan.kind, "fallback")
+  assert.throws(() => roundTrip(lower({ schema_version: undefined, tier: "expert", backend: "codex" })), /Unsupported persisted worker tier/)
 })
 
 test("incomplete or prohibited legacy records are refused for manual reconciliation", () => {
@@ -152,11 +127,10 @@ test("incomplete or prohibited legacy records are refused for manual reconciliat
     [lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: { providerID: "opencode-go", id: "deepseek-v4.1-flash" } }), /Missing admitted Pi effort; manual reconciliation required/],
     [lower({ pi_candidates: [{ providerID: "opencode-go", id: "deepseek-v4.1-flash" }] }), /Missing admitted Pi effort; manual reconciliation required/],
     [lower({ schema_version: undefined, execution_order: undefined, backend: "pi", pi_id: "ses_legacy", command_run: undefined, primary_model: undefined }), /Missing admitted Pi pin; manual reconciliation required/],
-    [lower({ tier: "expert" }), /Invalid versioned expert route; manual reconciliation required/],
+    [lower({ tier: "expert" }), /Unsupported persisted worker tier/],
+    [record({ backend: "antigravity" }), /Invalid persisted worker lifecycle; manual reconciliation required/],
+    [record({ backend: "hydrogen" }), /Invalid persisted worker lifecycle; manual reconciliation required/],
     [lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: GO, command_model: undefined, command_effort: undefined }), /Missing admitted Command Code pin; manual reconciliation required/],
-    [record({ antigravity_pin: undefined }), /Invalid admitted Antigravity route; manual reconciliation required/],
-    [record({ tier: "worker" }), /Invalid admitted Antigravity route; manual reconciliation required/],
-    [record({ antigravity_pin: { model: "gemini-4-carbon-high", effort: "high" } }), /Prohibited persisted model; manual reconciliation required/],
     [lower({ pi_candidates: [{ ...GO, id: "gemini-4-argon-high" }] }), /Prohibited persisted model; manual reconciliation required/],
     [lower({ command_model: "google/gemini-4-carbon-high" }), /Prohibited persisted model; manual reconciliation required/],
   ]
@@ -168,7 +142,6 @@ test("unknown versions, removed tiers and malformed state fail at the boundary",
     { schema_version: 4 }, { schema_version: "1" }, { schema_version: "2" }, { tier: "god" }, { backend: "carbon" },
     { id: "usrw_other" }, { cwd: "/tmp/another-worktree" }, { attempts: -1 }, { steers: 1.5 },
     { command_run: { ...run, pid: 0 } }, { command_run: { ...run, output: null } },
-    { antigravity_pin: { model: "gemini-4-hydrogen-xhigh", effort: "unlimited" } },
     { remaining_pi: ["other"] }, { execution_order: "other" }, { cancel_requested: "yes" },
   ]) assert.throws(() => decode(record(malformed)))
   assert.throws(() => decode(lower({ pi_candidates: [null] })))
@@ -188,27 +161,26 @@ test("v2 records are checked against their admitted plan", () => {
     { plan: { ...plan, pi: [{ providerID: "opencode-go", id: "deepseek-v4.1-flash" }] } },
     { plan: { kind: "other" } }, { plan: undefined }, { execution: undefined }, { execution: { kind: "other" } },
     { plan: { ...plan, command: { model: "elsewhere", effort: "high" } } },
-    { plan: { kind: "exclusive", target: HYDROGEN } },
+    { plan: { kind: "exclusive", target: CODEX } },
     { execution: { kind: "pi", selection: { ...GO, id: "elsewhere" }, session_id: "ses_fixture" } },
-    { execution: { kind: "process", executor: "antigravity", selection: HYDROGEN, run } },
+    { execution: { kind: "process", executor: "codex", selection: { model: "other-model", effort: "high" }, run } },
     { execution: { kind: "process", executor: "pi", selection: COMMAND, run } },
     { execution: { kind: "process", executor: "command-code", selection: COMMAND } },
     { execution: { kind: "transition", to: { executor: "pi", selection: COMMAND } } },
   ]) assert.throws(() => decode(current(malformed)), /plan|lifecycle|Invalid|Missing/)
-  assert.throws(() => decode(current({ tier: "worker", plan: { kind: "exclusive", target: HYDROGEN } })), /admitted plan/)
 })
 
 test("lifecycle transitions cannot expose a previous receipt as an active run", () => {
   const parsed = decode(record())
-  const target = { executor: "antigravity", selection: HYDROGEN } as const
+  const target = { executor: "codex", selection: CODEX } as const
   transition(parsed, target)
   assert.deepEqual(parsed.execution, { kind: "transition", to: target })
   assert.equal(processRun(parsed), undefined)
-  assert.equal(backendOf(parsed), "antigravity-transition")
+  assert.equal(backendOf(parsed), "codex-transition")
   assert.equal(encodeSession(parsed).command_run, undefined)
   activateProcess(parsed, target, run)
   transition(parsed, target, true)
-  assert.equal(backendOf(parsed), "antigravity-transition")
+  assert.equal(backendOf(parsed), "codex-transition")
   assert.deepEqual(processRun(parsed), run)
   activatePi(parsed, GO, "ses_next")
   assert.deepEqual(parsed.execution, { kind: "pi", selection: GO, session_id: "ses_next" })

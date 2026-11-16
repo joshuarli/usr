@@ -2,7 +2,7 @@ import test from "node:test"
 import assert from "node:assert/strict"
 import { COMMANDS, COMMAND_NAMES, cliArguments, decodeCommand, toolSchema, usage } from "../src/commands.ts"
 import { SCOPE_SCHEMA } from "../src/scope.ts"
-import { TIERS } from "../src/tier-policy.ts"
+import { BRIDGE_TIERS } from "../src/tier-policy.ts"
 
 const scope = { base_revision: "a".repeat(40), writable_paths: ["src/"], acceptance_proof: "Run a check", attempt_limit: 1, stop_on: "Scope change" }
 const session_id = "usrw_01234567-89ab-cdef-0123-456789abcdef"
@@ -29,7 +29,7 @@ test("malformed arguments are refused before any value reaches the bridge", () =
     ["start", null, /must be an object/], ["start", [], /must be an object/],
     ["start", { cwd: "/w", title: "t", tier: "scout", brief: "b" }, /Missing tool argument: scope/],
     ["start", { ...valid, extra: 1 }, /Unknown tool argument: extra/],
-    ["start", { ...valid, cwd: " " }, /Invalid cwd/], ["start", { ...valid, tier: "god" }, /Unknown Pi tier/],
+    ["start", { ...valid, cwd: " " }, /Invalid cwd/], ["start", { ...valid, tier: "god" }, /Unknown bridge tier/],
     ["start", { ...valid, title: "" }, /Invalid title/], ["start", { ...valid, brief: "x".repeat(32001) }, /Invalid brief/],
     ["start", { ...valid, scope: { ...valid.scope, extra: true } }, /Unknown scope field: extra/],
     ["start", { ...valid, tier: "worker" }, /scouts are read-only|writers need/],
@@ -50,8 +50,8 @@ test("MCP input schemas are derived from the shared field list", () => {
   assert.deepEqual(start.required, ["cwd", "title", "tier", "scope", "brief"])
   assert.equal(start.additionalProperties, false)
   assert.deepEqual(start.properties.scope, SCOPE_SCHEMA)
-  assert.deepEqual(start.properties.tier, { type: "string", minLength: 1, maxLength: 8, enum: TIERS })
-  assert.match(COMMANDS.start.description, /scout: codex then command-code then pi; mechanic: .*; worker: codex then command-code then pi then pi then pi; expert: antigravity, no fallback\)/)
+  assert.deepEqual(start.properties.tier, { type: "string", minLength: 1, maxLength: 8, enum: BRIDGE_TIERS })
+  assert.match(COMMANDS.start.description, /scout: codex then command-code then pi; mechanic: .*; worker: codex then command-code then pi then pi then pi\)/)
   assert.deepEqual(toolSchema("steer").required, ["cwd", "session_id", "note"])
   for (const name of COMMAND_NAMES) {
     const sample = { cwd: "/w", title: "t", tier: "scout", scope: { ...scope, writable_paths: [] }, brief: "b", session_id, feedback: "f", note: "n" }

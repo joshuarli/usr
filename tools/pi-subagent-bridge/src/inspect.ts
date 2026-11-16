@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { type ModelRef } from "./bridge.ts"
 import type { CommandResult, CommandRun } from "./command.ts"
 import { changes, git, laneHead, outside } from "./git.ts"
-import type { CliPin, FallbackPlan, PiSelection } from "./policy.ts"
+import type { FallbackPlan, PiSelection } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, backendOf, decodeSession, targetOf, processTarget,
@@ -42,7 +42,6 @@ export type InspectionDeps = {
   api: PiAdapter
   command: { status(run: CommandRun): RunnerStatus }
   codex: { status(run: CommandRun): RunnerStatus }
-  antigravity: { status(run: CommandRun, pin: CliPin): RunnerStatus }
 }
 
 export type Observation = {
@@ -127,7 +126,7 @@ function continuedOn(s: Session): string {
   const target = targetOf(s)
   if (target.executor === "pi")
     return target.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK"
-  return { codex: "Codex", "command-code": "Command Code", fx: "FX", antigravity: "Antigravity" }[target.executor]
+  return { codex: "Codex", "command-code": "Command Code", fx: "FX" }[target.executor]
 }
 
 export function fallbackNotice(s: Session): string {
@@ -149,7 +148,6 @@ export function blockedPartialNotice(): string {
 
 export function runnerStatus(deps: InspectionDeps, execution: ProcessExecution): RunnerStatus {
   if (execution.executor === "fx") return (deps.fx?.status ?? fxResult)(execution.run, execution.selection)
-  if (execution.executor === "antigravity") return deps.antigravity.status(execution.run, execution.selection)
   return (execution.executor === "codex" ? deps.codex : deps.command).status(execution.run)
 }
 

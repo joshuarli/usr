@@ -31,7 +31,7 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) exclusively, with no fallback. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant. Already-admitted sessions retain their recorded models and routes.
+The bridge admits `scout`, `mechanic`, `worker` only; `expert` assignments use harness-native subagents instead. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
 <!-- policy:end routing-summary -->
 
 After updating `usr`, review `sh sync plan`, then use `sh sync` and `sh sync doctor` to apply and inspect home configuration.

@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { TIERS } from "../src/tier-policy.ts"
+import { BRIDGE_TIERS } from "../src/tier-policy.ts"
 import { SCOPE_SCHEMA } from "../src/scope.ts"
 
 const server = fileURLToPath(new URL("../src/server.ts", import.meta.url))
@@ -110,9 +110,9 @@ test("MCP discovery shares policy schemas and rejects malformed scopes before lo
     assert.equal(child.status, 0, child.stderr)
     const replies = child.stdout.trim().split("\n").map(line => JSON.parse(line))
     const start = replies.find(reply => reply.id === 1)?.result?.tools.find((tool: { name: string }) => tool.name === "worker_start")
-    assert.deepEqual(start.inputSchema.properties.tier.enum, TIERS)
+    assert.deepEqual(start.inputSchema.properties.tier.enum, BRIDGE_TIERS)
     assert.deepEqual(start.inputSchema.properties.scope, SCOPE_SCHEMA)
-    for (const [id, message] of [[2, /Unknown scope field: extra/], [3, /Unknown Pi tier/], [4, /Unknown tool argument: extra/]] as const) {
+    for (const [id, message] of [[2, /Unknown scope field: extra/], [3, /Unknown bridge tier/], [4, /Unknown tool argument: extra/]] as const) {
       const result = replies.find(reply => reply.id === id)?.result
       assert.equal(result?.isError, true)
       assert.match(result.content[0].text, message)

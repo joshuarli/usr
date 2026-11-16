@@ -2,11 +2,11 @@
 import {
   DELEGATION, GO_TIER_MODELS, MAX_SUBAGENT_DEPTH, MUSE_AGENT_NAMES, MUSE_DELEGATION,
   MUSE_TIER_MODELS, DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
-  PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, type Effort, type Tier,
+  PI_MODEL_ALLOWLIST, TIER_TOOLS, BRIDGE_TIERS, type Effort, type Tier, type BridgeTier,
 } from "./tier-policy.ts"
 
 export type { Effort } from "./tier-policy.ts"
-export type Executor = "antigravity" | "codex" | "command-code" | "pi" | "fx"
+export type Executor = "codex" | "command-code" | "pi" | "fx"
 export type CliExecutor = Exclude<Executor, "pi">
 export type CliPin = { readonly model: string; readonly effort: Effort }
 export type PiSelection = { readonly providerID: string; readonly id: string; readonly variant: Effort }
@@ -15,24 +15,20 @@ export type Route =
   | (CliPin & { readonly executor: Exclude<CliExecutor, "fx"> })
   | (CliPin & { readonly executor: "pi"; readonly providerID: string })
 
-export type RootPlan =
-  | { readonly kind: "exclusive"; readonly target: CliPin }
-  | {
-    readonly kind: "fallback"
-    readonly codex: CliPin
-    readonly command: CliPin
-    readonly pi: PiDestinations
-  }
-export type ExclusivePlan = Extract<RootPlan, { kind: "exclusive" }>
-export type FallbackPlan = Extract<RootPlan, { kind: "fallback" }>
+export type RootPlan = {
+  readonly kind: "fallback"
+  readonly codex: CliPin
+  readonly command: CliPin
+  readonly pi: PiDestinations
+}
+export type FallbackPlan = RootPlan
 
 const antigravityFamily = "gemini-4-hydrogen"
-function antigravityPin<E extends "low" | "medium" | "high" | "xhigh">(effort: E) {
-  return { model: `${antigravityFamily}-${effort}`, effort } as const
+function antigravityModel<E extends "low" | "medium" | "high" | "xhigh">(effort: E) {
+  return `${antigravityFamily}-${effort}` as const
 }
-export const ANTIGRAVITY_PIN = antigravityPin("xhigh")
 export const ANTIGRAVITY_DIRECT = {
-  models: [antigravityPin("high").model, antigravityPin("medium").model],
+  models: [antigravityModel("high"), antigravityModel("medium")],
 } as const
 
 const codexModels = { small: "gpt-6-luna", coding: "gpt-6.1-terra" } as const
@@ -40,8 +36,7 @@ export const CODEX_TIER_MODELS = {
   scout: { model: codexModels.small, effort: "medium" },
   mechanic: { model: codexModels.small, effort: "high" },
   worker: { model: codexModels.coding, effort: "high" },
-  expert: { model: codexModels.coding, effort: "xhigh" },
-} as const satisfies Record<Tier, CliPin>
+} as const satisfies Record<BridgeTier, CliPin>
 
 export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
 export const COMMAND_EMBER_MODEL = "meta/muse-ember"
@@ -49,10 +44,9 @@ export const COMMAND_TIER_MODELS = {
   scout: { model: COMMAND_EMBER_MODEL, effort: "medium" },
   mechanic: { model: COMMAND_EMBER_MODEL, effort: "xhigh" },
   worker: { model: COMMAND_MODEL, effort: "high" },
-  expert: { model: COMMAND_MODEL, effort: "max" },
-} as const satisfies Record<Tier, CliPin>
+} as const satisfies Record<BridgeTier, CliPin>
 
-/** Ordered admission plan per tier. Native Pi/legacy expert profiles are deliberately separate. */
+/** Ordered admission plan per admitted bridge tier. Expert is a harness-native lane and has no plan here. */
 export const ROOT_PLANS = {
   scout: {
     kind: "fallback", codex: CODEX_TIER_MODELS.scout, command: COMMAND_TIER_MODELS.scout, pi: [GO_TIER_MODELS.scout],
@@ -64,14 +58,12 @@ export const ROOT_PLANS = {
     kind: "fallback", codex: CODEX_TIER_MODELS.worker, command: COMMAND_TIER_MODELS.worker,
     pi: [MUSE_TIER_MODELS.worker, GO_TIER_MODELS.worker, DEVIN_TIER_MODELS.worker],
   },
-  expert: { kind: "exclusive", target: ANTIGRAVITY_PIN },
-} as const satisfies Record<Tier, RootPlan>
+} as const satisfies Record<BridgeTier, RootPlan>
 
 function piRoute(pin: PiSelection) {
   return { executor: "pi", providerID: pin.providerID, model: pin.id, effort: pin.variant } as const
 }
 export function routesOf(plan: RootPlan): readonly [Route, ...Route[]] {
-  if (plan.kind === "exclusive") return [{ executor: "antigravity", ...plan.target }]
   return [
     { executor: "codex", ...plan.codex },
     { executor: "command-code", ...plan.command },
@@ -85,7 +77,8 @@ export const OPENCODE_NATIVE = {
 } as const satisfies { model: string; efforts: Record<Tier, Effort> }
 export const NATIVE_FALLBACK = {
   tiers: ["scout", "mechanic", "worker"],
-  claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet" },
+  claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet", expert: "opus" },
+  claudeThinking: { expert: "medium" },
 } as const
 /** Family prefixes are prohibited, including all effort-suffixed variants. */
 export const BANNED_MODELS = ["gemini-4-argon", "gemini-4-carbon"] as const
@@ -97,12 +90,11 @@ export function isBannedModel(model: string, families: readonly string[] = BANNE
 /** Build-time JSON projection for Python/harness consumers; never read generated data here. */
 export const POLICY = {
   schema_version: 1,
-  tiers: TIERS,
+  tiers: BRIDGE_TIERS,
   rootRoutes: {
     scout: routesOf(ROOT_PLANS.scout),
     mechanic: routesOf(ROOT_PLANS.mechanic),
     worker: routesOf(ROOT_PLANS.worker),
-    expert: routesOf(ROOT_PLANS.expert),
   },
   nativePi: {
     goModels: GO_TIER_MODELS,

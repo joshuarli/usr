@@ -275,7 +275,7 @@ function liveBridge(fx, selections) {
     if (tail.kind !== 'fallback') throw new Error('live pilot requires a fallback root plan for ' + tier)
     return { kind: 'fx-fallback', fx: selections[tier], codex: tail.codex, command: tail.command, pi: tail.pi }
   }
-  return makeHybridBridge(optionalPiAdapter(), undefined, undefined, undefined, resolvePolicy, fx)
+  return makeHybridBridge(optionalPiAdapter(), undefined, undefined, resolvePolicy, fx)
 }
 
 function codexBridge(selections) {
@@ -284,7 +284,7 @@ function codexBridge(selections) {
     const pin = selections[tier]
     return { kind: 'leaf', target: { executor: 'codex', selection: { model: pin.model, effort: pin.effort } } }
   }
-  return makeHybridBridge(optionalPiAdapter(), undefined, undefined, undefined, resolvePolicy)
+  return makeHybridBridge(optionalPiAdapter(), undefined, undefined, resolvePolicy)
 }
 
 async function waitJob(bridge, cwd, id, deadlineMs = 960000) {
