@@ -40,36 +40,36 @@ NODE_MINIMUM = "26.12.0"
 PYTHON_SMOKE = 'import sqlite3, ssl, subprocess; subprocess.run(["/bin/sh", "-c", ":"], check=True)'
 NODEJS_VERSION = "26.13.1"
 MIRROR_BASE = "https://mirror.17166969.xyz/current"
-# Zip SHA-256 pins from the static artifact mirror's SHA256SUMS (bump them
+# tar.xz SHA-256 pins from the static artifact mirror's SHA256SUMS (bump them
 # together with mirror/manifest.toml in the stuff repo).
 NODE_MIRROR_SHA256 = {
-    "darwin-arm64": "0d45363e43fc1e290035d9a85962c62c32e42b70d28ae48b7b7196b335a188aa",
-    "linux-arm64": "852023eaba5a6c2af01b34099c72b91f1c25125c7b3802f44a110f4bba4c25e7",
-    "linux-arm64-musl": "51d0e59cf9461efb38ef78c6654232a530cf27c5960b431869d99957e1ee72c0",
-    "linux-x64": "3536ba2115df0fba8e90374f109da650f0583fed7ab34f22af26f89172be16d7",
-    "linux-x64-musl": "b11cc6b444326723d62a32e666b95550c06f43d98fda09488cee490923e159bc",
+    "darwin-arm64": "8fa6b7ad7716ccaa1207bae31bce5288b0397701447892124ab6050e8766275e",
+    "linux-arm64": "248aac99e55d1aebe01a503e200e13f20c157c2eb1ce90a57412993ff851ea6c",
+    "linux-arm64-musl": "670be6eca85943fb8960e036126976e0ffff655ccfed705b388ac221710c3d13",
+    "linux-x64": "2665351811c0e9bf4a4e345a015dc8bdd661cc45ab2dff9aba3050bbecc97477",
+    "linux-x64-musl": "79f2a1a88de7059fac094fb1b0985bdea968362159d2fece85b7e1f1cd8af90a",
 }
 CODEX_VERSION = "0.169.0"
 CODEX_MIRROR_SHA256 = {
-    "aarch64-apple-darwin": "8e482ac7e893cfa0b548742a2f3e6ae81de2ac2891053453b0304b4a8e2f592a",
-    "aarch64-unknown-linux-musl": "40ee0eb85768dd4574cd8b657a69bd872dbfb5776aadac912c1f84c99a69448d",
-    "x86_64-apple-darwin": "3f9b4ace250629325223f185c1fa9baa7d780199730f2c14d0b9e8e82eaa4965",
-    "x86_64-unknown-linux-musl": "45385fb0f8f9704441495d9a3f0464ba53028b8b2696c2baa979bf19119bdbf9",
+    "aarch64-apple-darwin": "c77ff50d0b360b5779d8ef707e2abf8b6fed0dd30c0fe8c4193f2c22a752536d",
+    "aarch64-unknown-linux-musl": "a25d183d51fae2cc8367becb73d07568f339b75351783169a36c44a27ab1cefd",
+    "x86_64-apple-darwin": "f09658e8908285c53e1cd455031a2059674d216f54d929cf10f066be2c676357",
+    "x86_64-unknown-linux-musl": "929038efb8b04332822cb362f7f72fd854b666fb20c3baa1ccbd2e88de20d5f3",
 }
 DEVIN_BASE = "https://static.devin.ai/cli"
 OPENCODE_VERSION = "2.3.0"
 OPENCODE_MIRROR_SHA256 = {
-    "darwin-arm64": "a1154db80032754f759aa30d15925170cc28f8a594f3e1cf8bdc78e18534435a",
-    "darwin-x64": "a83eff46face267e51346857f8044677d2a224fcbfd44bd3364c609ca5840d30",
-    "linux-arm64": "cd0a4c946c7a5781099981f961c4daed967a2db294bb826979ff82c3caa64360",
-    "linux-arm64-musl": "0d5123dd83d8cebbcb9b3beeb71b873a074751e4b8c7f1e79a872cfd472f2c4b",
-    "linux-x64": "90f9f923d0cf11105ca74112b4b0b1ba5474a138288e3a23a887bc1de73504c7",
-    "linux-x64-musl": "c8edfb4b6afc49a089d3cb106ba58db319df0c727c2d68e3da3ecd52354fc53c",
+    "darwin-arm64": "e2bb644b159a76a20c1a0357fc9ca7d5b905ec97a8b6ed98330ec6582e5e4f3f",
+    "darwin-x64": "7a3e2e3fed911d99b90f3a1a1f6c9d11646ba12e88f3d7cc00e462098d0862b7",
+    "linux-arm64": "82341539c40ddca53eea4d1499b9b20a40473ae440e4b9779c719b483d6a07fd",
+    "linux-arm64-musl": "865b9747382234847442f4901164da53a0cdcfa906efb0a71251d96f42183d93",
+    "linux-x64": "463accc8040c21df5b3faec859606a91213a8a9a2bdec2c5f7994dfab9b3d7cb",
+    "linux-x64-musl": "1776a37381d1357163ccf7b002b2fa7fc8800713ca7e665acfe2ff4bad2c4d7f",
 }
 INSTALL_SCRIPT_MIRROR_SHA256 = {
-    "antigravity-install": "bb5d2b9a55f5372b60b82fdf4a3895b023c5bbb956a05ffcf8136d490fa3dd6f",
-    "claude-install": "ff3309b380abe6289c754a2c921ba73846f35b35bde1b768c24663ba2df6d0bb",
-    "muse-install": "6a582900510f3d3e1df03fefa0a397681f7b5ce247a3be62d7dffab0fa52bac0",
+    "antigravity-install": "736e0e2f638f21467952c61ae2e327eb5cfd89d86474506cc10153657aed2f8b",
+    "claude-install": "82bf06bb220afb73889ebbaf7e6a06ac90fd245a5ece66d962d37205513b827d",
+    "muse-install": "882381728554f6b2b875a3d0279d32de17845a2f77bb11b4c95a4bee6d1f24c2",
 }
 FFMPEG_REPO = "laputa-systems/ffmpeg-build"
 NODE_BUILD_REPO = "laputa-systems/node-build"
@@ -327,16 +327,16 @@ class Installer:
     def mirror_script(self, tool: str, artifact_id: str) -> Path:
         with tempfile.NamedTemporaryFile(delete=False) as stream:
             archive_path = Path(stream.name)
-        if not self.download(f"{MIRROR_BASE}/{artifact_id}.zip", archive_path):
+        if not self.download(f"{MIRROR_BASE}/{artifact_id}.tar.xz", archive_path):
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "the mirror installer is unavailable")
         if self.sha256_file(archive_path) != INSTALL_SCRIPT_MIRROR_SHA256[artifact_id]:
             archive_path.unlink(missing_ok=True)
             self.skip(tool, "the mirror installer checksum mismatch")
-        member = self.zip_member(archive_path, "install.sh")
+        member = self.tar_member(archive_path, "install.sh")
         archive_path.unlink(missing_ok=True)
         if member is None:
-            self.skip(tool, "the mirror installer zip is missing install.sh")
+            self.skip(tool, "the mirror installer archive is missing install.sh")
         fd, path = tempfile.mkstemp(prefix=f"{tool}.install.")
         with os.fdopen(fd, "wb") as stream:
             stream.write(member)
@@ -1587,7 +1587,7 @@ class Installer:
                 target = "linux-arm64-musl"
         else:
             self.skip("nodejs", f"no Node.js {NODEJS_VERSION} build for {self.os_name}/{self.arch}")
-        asset = f"node-v{NODEJS_VERSION}-{target}.zip"
+        asset = f"node-v{NODEJS_VERSION}-{target}.tar.xz"
         url = f"{MIRROR_BASE}/{asset}"
         sha256 = NODE_MIRROR_SHA256[target]
         if self.nodejs_root.is_symlink():
@@ -1669,7 +1669,7 @@ class Installer:
                 if self.sha256_file(archive_path) != sha256:
                     archive_path.unlink(missing_ok=True)
                     self.skip("nodejs", f"{asset} checksum mismatch")
-                if not self.extract_zip(archive_path, staged_bundle):
+                if not self.extract_tar(archive_path, staged_bundle):
                     archive_path.unlink(missing_ok=True)
                     self.skip("nodejs", f"{asset} could not be extracted")
                 archive_path.unlink(missing_ok=True)
@@ -1825,7 +1825,7 @@ class Installer:
             self.skip("codex", f"no upstream binary for {self.os_name}/{self.arch}")
         target = targets[(self.os_name, self.arch)]
         version = CODEX_VERSION
-        asset = f"codex-{version}-{target}.zip"
+        asset = f"codex-{version}-{target}.tar.xz"
         url = f"{MIRROR_BASE}/{asset}"
         digest = CODEX_MIRROR_SHA256[target]
         codex_root = self.codex_home / "packages/standalone"
@@ -1858,12 +1858,12 @@ class Installer:
         if self.sha256_file(archive_path) != digest:
             archive_path.unlink(missing_ok=True)
             self.skip("codex", f"{asset} checksum mismatch")
-        names = self.zip_names(archive_path)
+        names = self.tar_names(archive_path)
         if names is None or self.archive_paths_bad(names):
             archive_path.unlink(missing_ok=True)
             self.skip("codex", f"{asset} contains an invalid path")
         staged = self.stage_dir(releases, ".codex.")
-        if not self.extract_zip(archive_path, staged):
+        if not self.extract_tar(archive_path, staged):
             archive_path.unlink(missing_ok=True)
             self.skip("codex", f"{asset} could not be extracted")
         archive_path.unlink(missing_ok=True)
@@ -2616,7 +2616,7 @@ class Installer:
         if self.os_name == "linux" and (Path("/etc/alpine-release").exists()
                 or (ldd_result is not None and "musl" in (ldd_result.stdout + ldd_result.stderr).lower())):
             target += "-musl"
-        asset = f"opencode-{OPENCODE_VERSION}-{target}.zip"
+        asset = f"opencode-{OPENCODE_VERSION}-{target}.tar.xz"
         url = f"{MIRROR_BASE}/{asset}"
         digest = OPENCODE_MIRROR_SHA256[target]
         record = f"opencode2-{OPENCODE_VERSION}-{target}"
@@ -2644,7 +2644,7 @@ class Installer:
             archive_path.unlink(missing_ok=True)
             self.skip("opencode2", "checksum mismatch")
         staged = self.stage_file(bin_dir, ".opencode2.")
-        member = self.zip_member(archive_path, "opencode")
+        member = self.tar_member(archive_path, "opencode")
         archive_path.unlink(missing_ok=True)
         if not member:
             staged.unlink(missing_ok=True)
