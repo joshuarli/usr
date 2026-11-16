@@ -4,7 +4,8 @@ set -u
 prog=${0##*/}
 
 usage() {
-  cat >&2 <<EOF
+  if [ "${help_requested:-0}" -ne 1 ]; then exec 1>&2; fi
+  cat <<EOF
 usage: $prog [--all] [--dry-run]
 
 Stop pi-subagent-bridge MCP server processes so their client starts a fresh
@@ -18,9 +19,18 @@ state is on disk, so running workers keep running and stay observable.
 In Claude Code, /mcp then Reconnect on pi-subagent-bridge restarts that
 session's server by itself; use this script for other clients, for --all, or
 from a shell that the client started.
+
+Options:
+  --all      Stop every client's server (default: calling client only).
+  --dry-run  List servers without stopping them.
+  -h, --help Show this help.
+
+Examples:
+  $prog --dry-run
+  $prog --all --dry-run
 EOF
   if [ "${help_requested:-0}" -eq 1 ]; then
-    cat >&2 <<'EOF'
+    cat <<'EOF'
 
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
@@ -30,7 +40,7 @@ standing instructions. Release only when needed to deliver the verified fix.
 Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
 EOF
   fi
-  exit 2
+  exit "${help_status:-2}"
 }
 
 all=0
@@ -39,7 +49,7 @@ for arg in "$@"; do
   case $arg in
     --all) all=1 ;;
     --dry-run) dry=1 ;;
-    -h | --help) help_requested=1; usage ;;
+    -h | --help) help_requested=1; help_status=0; usage ;;
     *) usage ;;
   esac
 done

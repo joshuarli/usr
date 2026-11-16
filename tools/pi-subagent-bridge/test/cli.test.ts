@@ -46,12 +46,36 @@ test("policy CLI needs only pure sources and makes no cwd, home or provider call
   }
 })
 
-test("launchers print their primary help footer", () => {
+test("help is a complete reference with examples and the owned footer", () => {
   const root = fileURLToPath(new URL("../../..", import.meta.url))
   const footer = "Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"
-  for (const [command, status] of [["pi-subagent-bridge", 0], ["pi-subagent-bridge-reload", 2]] as const) {
-    const result = spawnSync(join(root, "dotfiles/base/.local/bin", command), ["--help"], { encoding: "utf8" })
-    assert.equal(result.status, status, result.stderr)
-    assert.ok((result.stdout + result.stderr).trimEnd().endsWith(footer))
+  const bridge = join(root, "dotfiles/base/.local/bin/pi-subagent-bridge")
+  const reload = join(root, "dotfiles/base/.local/bin/pi-subagent-bridge-reload")
+  const commands = ["policy", "mcp", "model-check", "start", "status", "resume", "steer", "cancel", "inspect", "watch", "campaign wait", "campaign ack", "campaign list", "owner hello", "owner jobs", "owner status", "owner steer", "owner interrupt", "owner resume", "owner command"]
+  for (const command of [bridge, reload]) {
+    for (const flag of ["-h", "--help"]) {
+      const result = spawnSync(command, [flag], { encoding: "utf8" })
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(result.stderr, "")
+      assert.ok(result.stdout.trimEnd().endsWith(footer))
+      const examples = result.stdout.split("Examples:\n")[1].split("\n\n")[0].split("\n")
+      assert.ok(examples.length > 0)
+      for (const example of examples) {
+        assert.ok(example.startsWith("  " + command.split("/").pop() + " "), example)
+        for (const option of example.match(/--[a-z-]+/g) ?? []) assert.ok(result.stdout.includes(option), option)
+      }
+      if (command === bridge) for (const subcommand of commands) {
+        assert.ok(result.stdout.includes("usage: pi-subagent-bridge " + subcommand), subcommand)
+        assert.ok(examples.some(example => example.startsWith("  pi-subagent-bridge " + subcommand + " ") || example === "  pi-subagent-bridge " + subcommand), subcommand)
+      }
+    }
+  }
+  for (const subcommand of [...commands, "campaign", "owner"]) {
+    for (const flag of ["-h", "--help"]) {
+      const result = spawnSync(bridge, [...subcommand.split(" "), flag], { encoding: "utf8" })
+      assert.equal(result.status, 0, result.stderr)
+      assert.match(result.stdout, /Examples:\n  pi-subagent-bridge /)
+      assert.match(result.stdout, /See pi-subagent-bridge -h/)
+    }
   }
 })
