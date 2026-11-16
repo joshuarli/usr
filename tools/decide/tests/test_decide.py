@@ -1247,6 +1247,15 @@ class OwnedHelpTests(unittest.TestCase):
                     self.assertIn(word.split("=", 1)[0], result.stdout.split("\nExamples:\n", 1)[0])
         self.assertTrue(result.stdout.rstrip().endswith("Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"), result.stdout)
 
+    def test_bare_terminal_invocation_prints_the_reference(self):
+        class Terminal(io.BytesIO):
+            def isatty(self):
+                return True
+        bare, flag = io.StringIO(), io.StringIO()
+        self.assertEqual(DECIDE.main([], env={}, stdin=Terminal(), stdout=bare), 0)
+        DECIDE.build_parser().print_help(flag)
+        self.assertEqual(bare.getvalue(), flag.getvalue())
+
     def test_command_help_points_to_reference(self):
         import subprocess
         root = Path(__file__).resolve().parents[3]

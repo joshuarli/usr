@@ -1347,8 +1347,8 @@ def main(argv=None, env=None, stdin=None, stdout=None):
         except (AttributeError, ValueError):
             interactive = False
         if interactive:
-            parser.print_help()
-            return 2
+            parser.print_help(stdout)
+            return 0
     if args.command == "doctor":
         outcome = doctor(env)
         print_json(outcome, stdout)
