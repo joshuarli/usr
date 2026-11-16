@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "devin": {
+    "org_id": "org-f8e6cf13c6f447c19fde546f8f59a0bc"
+  },
+  "shell": {
+    "setup_complete": true
+  },
+  "theme_mode": "dark",
+  "permission_mode": "dangerous",
+  "read_config_from": {
+    "claude": false,
+    "cloud": false
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "exec|write_to_process",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/josh/.config/devin/hooks/pi-bridge-guard.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
