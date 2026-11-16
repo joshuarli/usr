@@ -10,6 +10,16 @@
       "action": "*",
       "resource": "*",
       "effect": "allow"
+    },
+    {
+      "action": "shell",
+      "resource": "pi-subagent-bridge",
+      "effect": "deny"
+    },
+    {
+      "action": "shell",
+      "resource": "pi-subagent-bridge *",
+      "effect": "deny"
     }
   ],
   "agents": {
