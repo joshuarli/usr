@@ -14,6 +14,7 @@ tools:
   - subagent_supervisor
 allowNestedSubagents: true
 maxSubagentDepth: 2
+timeoutMs: 14400000
 allowedAgents:
   - scout
 # policy:end native-profile

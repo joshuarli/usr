@@ -7,6 +7,8 @@ export type Tier = (typeof TIERS)[number]
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
 
 export const MAX_SUBAGENT_DEPTH = 2 as const
+// pi-subagents silently defaults an unset run to 30 minutes; the deadline is explicit instead.
+export const PI_RUN_DEADLINE_MS: number = 4 * 60 * 60 * 1000
 
 export const DELEGATION = {
   scout: ["scout"],

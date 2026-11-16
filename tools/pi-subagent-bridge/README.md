@@ -174,6 +174,10 @@ Codex runs use the signed-in ChatGPT account and do not use API keys. Codex runs
 
 Exception recovery accepts only the admitted run's matching metadata and paired output. Uncertain create or prompt dispatch retains the transition and lease without provider replay. New lower-tier sessions snapshot their root plan at admission, including every pending Pi destination, and record the exact selection of each active state. New expert sessions retain their admitted Antigravity pin; removed tiers cannot be admitted.
 
+### Pi run deadline
+
+pi-subagents silently defaults an unset run deadline to 30 minutes; the bridge never lets that apply. One typed constant in `src/tier-policy.ts` (`PI_RUN_DEADLINE_MS`, 4 hours) is the single source for the deadline in Pi dispatches (`spawn`/`resume` carry `timeoutMs`) and in the generated native Pi profiles (`timeoutMs` frontmatter, verified at admission by `assertTierProfiles`). `worker_start` and `worker_status` surface the effective deadline as `run_deadline_ms` (`null` for backends with no wall-clock cap). A Pi run that reaches the deadline reports state `timed_out` with its partial output — distinct from a provider failure, and it releases the worktree lease without any automatic fallback or retry.
+
 ### Typed state
 
 The routing policy is one `RootPlan` per tier (`ROOT_PLANS` in `src/policy.ts`): either `{ kind: "exclusive", target }` (expert, Antigravity only) or `{ kind: "fallback", codex, command, pi }` with a non-empty ordered Pi list whose entries all carry an effort. `routesOf(plan)` is the one ordered view used by the policy export, the generated tables and the MCP routing summary. An unsupported arrangement does not type-check, so admission performs no route-order validation. The banned-model rule is a test over every plan and a generation-time check.

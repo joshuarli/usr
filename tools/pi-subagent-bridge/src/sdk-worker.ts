@@ -3,9 +3,9 @@ import { appendFileSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createRequire } from "node:module"
-import { REQUEST, REPLY, COMPLETE, record, string, role, persist, steerNative, unwrap, runDetails, terminal, type Job, type Reply, type Result, type Rpc, artifactResult, executeJob, type Admission } from "./native-delegation.ts"
+import { REQUEST, REPLY, COMPLETE, record, string, role, steerNative, unwrap, runDetails, terminal, deadlineExpiredError, dispatchParams, type Job, type Reply, type Result, type Rpc, artifactResult, executeJob, type Admission } from "./native-delegation.ts"
 import { ensureOpenCodeApiKey } from "./opencode-auth.ts"
-import { MUSE_AGENT_NAMES, DEVIN_AGENT_NAMES, isDevinTier, isMuseTier } from "./tier-policy.ts"
+import { PI_RUN_DEADLINE_MS } from "./tier-policy.ts"
 import { MUSE_PROVIDER, museExtensionPath, musePreflight } from "./muse-subscription.ts"
 import { DEVIN_PROVIDER, devinExtensionPath, devinPreflight } from "./devin-provider.ts"
 import { stripIntercomEnvironment } from "./worker-env.ts"
@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url)
 const subagentsExtensionPath = require.resolve("pi-subagents")
 const requiredExtensionsExtensionPath = fileURLToPath(new URL("./extensions/register-required-child-extensions.ts", import.meta.url))
 const POLL_MS = 1500
-const TIMEOUT_MS = 4 * 60 * 60 * 1000
+const TIMEOUT_MS = PI_RUN_DEADLINE_MS + 5 * 60 * 1000
 
 function ids(event: Record<string, unknown>): string[] {
   const details = record(event.details)
@@ -45,6 +45,10 @@ async function statusResult(rpc: Rpc, runId: string, sessionFile: string): Promi
       const error = string(child?.error) ?? string(details.error) ?? string(data.error)
       if (state === "stopped" || state === "cancelled" || state === "canceled")
         return { state: "cancelled", error: error ?? "Native subagent stopped", text, sessionFile, runId, usage: details.usage ?? null }
+      if (child?.timedOut === true || details.timedOut === true || data.timedOut === true ||
+          deadlineExpiredError(child?.error) || deadlineExpiredError(details.error) || deadlineExpiredError(data.error) ||
+          deadlineExpiredError(error))
+        return { state: "timed_out", error: error ?? "Subagent timed out after the run deadline", text, sessionFile, runId, usage: details.usage ?? null }
       if (state === "failed" || state === "error" || (terminalState && (details.success === false || child?.success === false)))
         return { state: "failed", error: error ?? "Native subagent failed", text, sessionFile, runId, usage: details.usage ?? null }
       if (state === "succeeded" || state === "completed" || details.success === true)
@@ -177,15 +181,7 @@ async function run(job: Job, started: (admission: Admission) => void, dispatchin
     if (ping.version !== 1) throw new Error("Unsupported pi-subagents RPC version")
     const sessionFile = session.sessionFile
     if (!sessionFile) throw new Error("Pi host session is not durable")
-    const params: Record<string, unknown> = job.priorRunId
-      ? { id: job.priorRunId, message: job.prompt }
-      : {
-          agent: muse && isMuseTier(tier) ? MUSE_AGENT_NAMES[tier] :
-            devin && isDevinTier(tier) ? DEVIN_AGENT_NAMES[tier] : tier,
-          task: job.prompt, async: true, cwd: job.cwd, worktree: false,
-          model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,
-          options: { agentScope: "user" },
-        }
+    const params = dispatchParams(job)
     dispatching()
     const reply = await rpc(job.priorRunId ? "resume" : "spawn", params)
     const { runId: id, asyncDir } = runDetails(reply)

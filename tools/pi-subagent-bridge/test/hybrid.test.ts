@@ -11,6 +11,7 @@ import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
 import { ANTIGRAVITY_PIN, ROOT_PLANS, type CliPin, type FallbackPlan, type RootPlan } from "../src/policy.ts"
+import { PI_RUN_DEADLINE_MS } from "../src/tier-policy.ts"
 import type { OpenCodePort } from "../src/bridge.ts"
 import { activeWorktreeOwner, claimWorktree } from "../src/worktree-lease.ts"
 import { commandResult, processStartTime, type CommandRun } from "../src/command.ts"
@@ -304,6 +305,44 @@ test("pending Pi fallback uses its admitted plan after restart, not the new poli
     assert.equal(status.backend, "pi")
     assert.deepEqual(status.model, { providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "medium" })
     assert.equal(piCreates(m.calls).length, 1)
+  } finally { f.close() }
+})
+
+test("Pi dispatches surface the tier run deadline; Codex and Command Code stay unbounded", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    m.noCommand()
+    const started = await bridge.start(f.cwd, "pi-deadline", "worker", f.scope, "Edit README")
+    assert.equal(started.backend, "pi")
+    assert.equal(started.run_deadline_ms, PI_RUN_DEADLINE_MS)
+    const status = await bridge.status(f.cwd, started.session_id)
+    assert.equal(status.run_deadline_ms, PI_RUN_DEADLINE_MS)
+  } finally { f.close() }
+  const g = fixture()
+  try {
+    const m = fake(g.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    const started = await bridge.start(g.cwd, "cmd-unbounded", "worker", g.scope, "Edit README")
+    assert.equal(started.backend, "command-code")
+    assert.equal(started.run_deadline_ms, null)
+    const status = await bridge.status(g.cwd, started.session_id)
+    assert.equal(status.run_deadline_ms, null)
+  } finally { g.close() }
+})
+
+test("a deadline-expired Pi run reports timed_out and releases the worktree lease", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    m.noCommand()
+    const started = await bridge.start(f.cwd, "deadline-hit", "worker", f.scope, "Edit README")
+    assert.equal(started.backend, "pi")
+    m.setPiState("timed_out")
+    const status = await bridge.status(f.cwd, started.session_id)
+    assert.equal(status.state, "timed_out")
+    assert.equal(status.run_deadline_ms, PI_RUN_DEADLINE_MS)
+    const next = await bridge.start(f.cwd, "after-timeout", "worker", f.scope, "Edit README")
+    assert.equal(next.status, "admitted")
   } finally { f.close() }
 })
 

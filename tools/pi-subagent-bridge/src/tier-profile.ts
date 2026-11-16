@@ -4,7 +4,7 @@ import { parseDocument } from "yaml"
 import {
   DELEGATION, GO_TIER_MODELS, isDevinTier, isMuseTier, MUSE_AGENT_NAMES, MUSE_DELEGATION, MUSE_TIER_MODELS,
   DEVIN_AGENT_NAMES, DEVIN_DELEGATION, DEVIN_TIER_MODELS,
-  MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST, TIER_TOOLS, TIERS, type Tier,
+  MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST, PI_RUN_DEADLINE_MS, TIER_TOOLS, TIERS, type Tier,
 } from "./tier-policy.ts"
 
 const TIER_GUARDS = {
@@ -76,7 +76,8 @@ export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "
       config.model !== pinned.providerID + "/" + pinned.id ||
       config.thinking !== pinned.variant ||
       config.maxSubagentDepth !== MAX_SUBAGENT_DEPTH ||
-      config.allowNestedSubagents !== true)
+      config.allowNestedSubagents !== true ||
+      config.timeoutMs !== PI_RUN_DEADLINE_MS)
     throw new Error(`Unapproved Pi tier profile for ${tier}`)
   exactList(config.tools, TIER_TOOLS[tier], `${tier}.tools`)
   exactList(config.allowedAgents, children, `${name}.allowedAgents`)
@@ -84,7 +85,7 @@ export function assertTierProfile(tier: Tier, markdown: string, family: "go" | "
   // the bridge's delegation surface. Fail closed rather than ignore them.
   const allowedFields = new Set([
     "name", "description", "model", "thinking", "tools",
-    "maxSubagentDepth", "allowNestedSubagents", "allowedAgents",
+    "maxSubagentDepth", "allowNestedSubagents", "allowedAgents", "timeoutMs",
   ])
   if (Object.keys(config).some((field) => !allowedFields.has(field)))
     throw new Error(`Unapproved Pi agent profile setting for ${tier}`)

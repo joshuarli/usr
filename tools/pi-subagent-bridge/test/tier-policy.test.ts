@@ -6,7 +6,7 @@ import { join } from "node:path"
 import {
   assertDelegation, canDelegate, DELEGATION, GO_TIER_MODELS, MUSE_TIER_MODELS, MUSE_AGENT_NAMES,
   MUSE_DELEGATION, museSubscriptionSelected, DEVIN_TIER_MODELS, DEVIN_AGENT_NAMES, DEVIN_DELEGATION,
-  MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST,
+  MAX_SUBAGENT_DEPTH, PI_MODEL_ALLOWLIST, PI_RUN_DEADLINE_MS,
   TIER_TOOLS, TIERS, tierForModel, type ChildOf, type Tier,
 } from "../src/tier-policy.ts"
 import { nestedCallRefusal, registerTierGuard } from "../src/nested-guard.ts"
@@ -42,6 +42,7 @@ function profile(tier: Tier, family: "go" | "muse" | "devin" = "go"): string {
     "tools:", ...TIER_TOOLS[tier].map(tool => "  - " + tool),
     "allowNestedSubagents: true",
     "maxSubagentDepth: " + MAX_SUBAGENT_DEPTH,
+    "timeoutMs: " + PI_RUN_DEADLINE_MS,
     "allowedAgents:", ...(children as readonly string[]).map((child) => "  - " + child),
     "---", "Profile body.",
   ].join("\n") + "\n"
@@ -131,6 +132,10 @@ test("real YAML profiles are validated as runtime policy; drift fails before spa
       profile(tier, family).replace("tools:", "tools:\n  - unrestricted_shell"), family), /allowlist/)
     assert.throws(() => assertTierProfile(tier,
       profile(tier, family).replace("model: " + GO_TIER_MODELS[tier].providerID, "model: openrouter"), family), /Unapproved/)
+    assert.throws(() => assertTierProfile(tier,
+      profile(tier, family).replace("timeoutMs: " + PI_RUN_DEADLINE_MS, "timeoutMs: 1800000"), family), /Unapproved/)
+    assert.throws(() => assertTierProfile(tier,
+      profile(tier, family).replace("timeoutMs: " + PI_RUN_DEADLINE_MS + "\n", ""), family), /Unapproved/)
   }
   assertTierProfile("worker", profile("worker", "muse"), "muse")
   assertTierProfile("worker", profile("worker", "devin"), "devin")

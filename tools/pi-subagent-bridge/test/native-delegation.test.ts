@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { role, runId, steerNative, terminal, unwrap, type Job, type Rpc } from "../src/native-delegation.ts"
+import { role, runId, steerNative, terminal, unwrap, dispatchParams, type Job, type Rpc } from "../src/native-delegation.ts"
+import { PI_RUN_DEADLINE_MS } from "../src/tier-policy.ts"
 
 function job(id: string, variant: string, readOnly = false, providerID = "opencode-go"): Job {
   return { cwd: "/work", prompt: "proof", model: { providerID, id, variant },
@@ -54,6 +55,71 @@ test("native terminal receipts require one successful child and actual proof out
   assert.equal(terminal({ success: false, results: [{ success: false, error: "quota exhausted" }] }, "r", "/session").error, "quota exhausted")
   assert.equal(terminal({ state: "stopped", results: [{ stopped: true }] }, "r", "/session").state, "cancelled")
   assert.equal(terminal({ success: false, summary: "quota local assertion", results: [{ success: false }] }, "r", "/session").error, "Native subagent failed")
+})
+
+test("a deadline-expired run is its own state with the partial output preserved", () => {
+  const partial = { timedOut: true, success: false, error: "Subagent timed out after 14400000ms.",
+    results: [{ success: false, timedOut: true, error: "Subagent timed out after 14400000ms.", output: "Partial output before timeout:\nimplemented fix" }] }
+  const result = terminal(partial, "r", "/session")
+  assert.equal(result.state, "timed_out")
+  assert.match(result.error ?? "", /timed out after 14400000ms/)
+  assert.match(result.text ?? "", /implemented fix/)
+  assert.equal(terminal({ success: false, results: [{ success: false, error: "Subagent timed out after 4ms." }] }, "r", "/s").state, "timed_out")
+  assert.equal(terminal({ success: false, results: [{ success: false, error: "quota exhausted" }] }, "r", "/s").state, "failed")
+})
+
+test("a muse-worker dispatch carries the tier run deadline, including resume", () => {
+  const muse = job("muse-spark-1.3", "xhigh", false, "muse-sdk")
+  const fresh = dispatchParams(muse)
+  assert.equal(fresh.timeoutMs, PI_RUN_DEADLINE_MS)
+  assert.equal(fresh.agent, "muse-worker")
+  assert.equal(fresh.async, true)
+  assert.equal(fresh.model, "muse-sdk/muse-spark-1.3:xhigh")
+  const devin = dispatchParams(job("swe-2-flash", "medium", false, "devin"))
+  assert.equal(devin.agent, "devin-worker")
+  assert.equal(devin.timeoutMs, PI_RUN_DEADLINE_MS)
+  const go = dispatchParams(job("deepseek-v4.1-flash", "high"))
+  assert.equal(go.agent, "worker")
+  assert.equal(go.timeoutMs, PI_RUN_DEADLINE_MS)
+  const resumed = dispatchParams({ ...muse, priorRunId: "old-run", priorSessionFile: "/work/old.jsonl" })
+  assert.equal(resumed.timeoutMs, PI_RUN_DEADLINE_MS)
+  assert.equal(resumed.id, "old-run")
+  assert.equal(resumed.message, "proof")
+})
+
+test("an expired run reports timed_out from runner status or the meta error, keeping partial output", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs")
+  const { tmpdir } = await import("node:os")
+  const { join } = await import("node:path")
+  const { executeJob, artifactResult } = await import("../src/native-delegation.ts")
+  const dir = mkdtempSync(join(tmpdir(), "deadline-"))
+  try {
+    const asyncDir = join(dir, "async-run")
+    const artifacts = join(dir, "subagent-artifacts")
+    mkdirSync(asyncDir, { recursive: true })
+    mkdirSync(artifacts, { recursive: true })
+    writeFileSync(join(asyncDir, "status.json"), JSON.stringify({ runId: "run-x", state: "failed", timedOut: true }))
+    writeFileSync(join(artifacts, "run-x_muse-worker_meta.json"), JSON.stringify({ runId: "run-x", exitCode: 1, error: "boom" }))
+    writeFileSync(join(artifacts, "run-x_muse-worker_output.md"), "Partial output before timeout:\nhalf the fix")
+    const found = artifactResult(dir, asyncDir, "run-x", "/session.jsonl")
+    assert.equal(found?.state, "timed_out")
+    assert.equal(found?.text?.includes("half the fix"), true)
+    // Without the runner's timedOut marker, the meta error string still identifies the deadline.
+    rmSync(join(asyncDir, "status.json"))
+    writeFileSync(join(artifacts, "run-x_muse-worker_meta.json"), JSON.stringify({ runId: "run-x", exitCode: 1, error: "Subagent timed out after 14400000ms." }))
+    const inferred = artifactResult(dir, asyncDir, "run-x", "/session.jsonl")
+    assert.equal(inferred?.state, "timed_out")
+    // A provider failure stays failed.
+    writeFileSync(join(artifacts, "run-x_muse-worker_meta.json"), JSON.stringify({ runId: "run-x", exitCode: 1, error: "429 quota exhausted" }))
+    assert.equal(artifactResult(dir, asyncDir, "run-x", "/session.jsonl")?.state, "failed")
+    writeFileSync(join(artifacts, "run-x_muse-worker_meta.json"), JSON.stringify({ runId: "run-x", exitCode: 1, error: "Subagent timed out after 14400000ms." }))
+    const job2 = { ...job("deepseek-v4.1-flash", "high"), sessionDir: dir, resultPath: join(dir, "result2.json") }
+    await executeJob(job2, async (_, started) => {
+      started({ runId: "run-x", asyncDir, sessionFile: "/session.jsonl" })
+      throw new Error("Timed out waiting for native subagent completion")
+    })
+    assert.equal(JSON.parse(readFileSync(job2.resultPath, "utf8")).state, "timed_out")
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test("USR-39: timeout recovery cannot inherit an old worker's proof", async () => {

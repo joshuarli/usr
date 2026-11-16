@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, renameSync, unlinkSync, lstatSync, realpat
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { POLICY, isBannedModel, type Route } from "../pi-subagent-bridge/src/policy.ts"
-import { isTier, type Tier } from "../pi-subagent-bridge/src/tier-policy.ts"
+import { isTier, PI_RUN_DEADLINE_MS, type Tier } from "../pi-subagent-bridge/src/tier-policy.ts"
 
 export type Policy = Omit<typeof POLICY, "rootRoutes" | "tiers"> & {
   readonly tiers: readonly Tier[]
@@ -281,7 +281,7 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
     const frontmatter = [
       `model: ${profile.pin.providerID}/${profile.pin.id}`, `thinking: ${profile.pin.variant}`, "tools:",
       ...policy.nativePi.tools[profile.tier].map(tool => `  - ${tool}`),
-      "allowNestedSubagents: true", `maxSubagentDepth: ${policy.nativePi.maxSubagentDepth}`, "allowedAgents:",
+      "allowNestedSubagents: true", `maxSubagentDepth: ${policy.nativePi.maxSubagentDepth}`, `timeoutMs: ${PI_RUN_DEADLINE_MS}`, "allowedAgents:",
       ...profile.allowed.map(name => `  - ${name}`),
     ].join("\n")
     emit(path, replaceBlocks(previous, { "native-profile": frontmatter }, true), previous)

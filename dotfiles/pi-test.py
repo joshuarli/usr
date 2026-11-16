@@ -151,7 +151,7 @@ class PiTests(unittest.TestCase):
             self.assertIn("name: " + name, agent)
             block = "\n".join([
                 "model: " + model, "thinking: " + effort, "tools:", *["  - " + tool for tool in tools],
-                "allowNestedSubagents: true", "maxSubagentDepth: 2", "allowedAgents:",
+                "allowNestedSubagents: true", "maxSubagentDepth: 2", "timeoutMs: 14400000", "allowedAgents:",
                 *["  - " + child for child in children],
             ])
             self.assertIn(block + "\n# policy:end native-profile", agent)

@@ -20,9 +20,10 @@ import {
 } from "./inspect.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, activatePi, activateProcess, backendOf, decodeSession, encodeSession,
-  executorOf, isSessionId, piFallbackPlan, processRun, processTarget, transition, type PiFallbackPlan, type ProcessExecution,
+  executorOf, isSessionId, piFallbackPlan, processRun, processTarget, targetOf, transition, type PiFallbackPlan, type ProcessExecution,
   type ProcessTarget, type ExecutionPlan, type Session, type SessionOwner,
 } from "./session.ts"
+import { PI_RUN_DEADLINE_MS } from "./tier-policy.ts"
 import type { Access } from "./launch.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
@@ -34,6 +35,10 @@ const TERMINATION_WAIT_MS = 2000
 const isTier = isBridgeTier
 function scopeFor(value: unknown, tier: RoutedTier, cwd: string, checkHead = true): Scope {
   return parseScope(value, tier, checkHead ? git(cwd, "rev-parse", "HEAD") : undefined)
+}
+/** The effective wall-clock budget: explicit for Pi, unbounded elsewhere. */
+function runDeadlineMs(s: Session): number | null {
+  return targetOf(s).executor === "pi" ? PI_RUN_DEADLINE_MS : null
 }
 /** The command that blocks until the session's executor finishes; run it as a background task. */
 function watchCommand(s: Session): string {
@@ -300,7 +305,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
           known = { observation, blocked: { state, notice: s.fallback_blocked } }
         }
       }
-      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted"].includes(state)) {
+      if (["succeeded", "failed", "turn_limit", "cancelled", "canceled", "interrupted", "timed_out"].includes(state)) {
         const directory = stateDir(s.cwd)
         if (activeWorktreeOwner(directory, s.cwd) === s.id)
           releaseWorktree(directory, s.cwd, s.id)
@@ -318,6 +323,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
     return {
       session_id: s.id, backend: backendOf(s), tier: s.tier, model: i.route.model, effort: i.route.effort,
       state, last_assistant_text, error: i.observation.error, usage: i.observation.usage,
+      run_deadline_ms: runDeadlineMs(s),
       changed_paths, out_of_scope_paths, head_unchanged,
       acceptance_claim: i.acceptance_claim,
       acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
@@ -332,6 +338,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   function admission(s: Session) {
     return {
       session_id: s.id, backend: backendOf(s), status: "admitted", watch: watchCommand(s),
+      run_deadline_ms: runDeadlineMs(s),
       fallback_reason: s.fallback_reason ?? null,
       fallback_notice: s.fallback_reason ? fallbackNotice(s) : null,
     }

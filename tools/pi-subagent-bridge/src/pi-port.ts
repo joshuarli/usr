@@ -15,7 +15,7 @@ import { devinPreflight } from "./devin-provider.ts"
 import { workerEnvironment } from "./worker-env.ts"
 
 type Result = {
-  state: "succeeded" | "failed" | "cancelled" | "unknown_or_interrupted"
+  state: "succeeded" | "failed" | "cancelled" | "timed_out" | "unknown_or_interrupted"
   text: string | null; error: string | null; usage: unknown; sessionFile: string | null; runId: string | null
 }
 type Run = { pid: number; output: string; errors: string; control?: string; receipts?: string }
@@ -69,7 +69,7 @@ function observe(s: Stored): { state: string; result: Result | null } {
   if (alive(s.run.pid)) return { state: "running", result: null }
   try {
     const result: Result = JSON.parse(readFileSync(s.run.output, "utf8"))
-    if (!["succeeded", "failed", "cancelled"].includes(result.state))
+    if (!["succeeded", "failed", "cancelled", "timed_out"].includes(result.state))
       throw new Error("Invalid Pi result state")
     if (result.state === "succeeded" && (!result.runId?.trim() || !result.sessionFile?.trim()))
       throw new Error("Pi success has no owned native identity")
@@ -164,7 +164,7 @@ export function piPort(): OpenCodePort {
       let priorRunId: string | undefined
       if (s.run) {
         const previous = observe(s)
-        if (!previous.result || !["succeeded", "failed", "cancelled"].includes(previous.state))
+        if (!previous.result || !["succeeded", "failed", "cancelled", "timed_out"].includes(previous.state))
           throw new Error("Pi session is not known terminal; no overlapping run")
         prior = verifiedSessionPath(s, previous.result.sessionFile)
         if (!previous.result.runId) throw new Error("No native subagent run identity for same-session correction")

@@ -44,11 +44,11 @@ export const COMMANDS: Record<CommandName, {
   },
   start: {
     tool: "worker_start", cli: "start", fields: ["cwd", "title", "tier", "scope", "brief"],
-    description: `Delegate a scoped task using policy routes (${routingSummary}). Never start a duplicate. Admission is not completion: run the returned watch command as a background task to learn when the worker ends.`,
+    description: `Delegate a scoped task using policy routes (${routingSummary}). Never start a duplicate. Admission is not completion: run the returned watch command as a background task to learn when the worker ends. Pi dispatches carry run_deadline_ms (the pinned 4-hour wall clock); it is null for backends with no wall-clock cap.`,
   },
   status: {
     tool: "worker_status", cli: "status", fields: ["cwd", "session_id"],
-    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A run that ends without a final `ACCEPTANCE: met` line reports state incomplete and acceptance_blocked. A Codex or Command Code run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
+    description: "Observe actual backend/model, claimed proof, changed/out-of-scope paths, and HEAD. Reports continuations used against the continuation cap and steers used against the steer cap. A run that ends without a final `ACCEPTANCE: met` line reports state incomplete and acceptance_blocked. A Codex or Command Code run whose recorded process is gone without a terminal receipt or whose PID identity changed is interrupted. A Pi run that reaches its pinned wall-clock deadline reports state timed_out with the partial output, distinct from a provider failure; run_deadline_ms shows the effective deadline (null when unbounded). When fallback_reason is set, fallback_notice identifies the switch. The original provider message is kept in fallback_detail for diagnosis; error is null once the fallback has safely taken over.",
   },
   resume: {
     tool: "worker_resume", cli: "resume", fields: ["cwd", "session_id", "feedback"],

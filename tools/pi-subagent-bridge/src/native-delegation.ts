@@ -1,6 +1,8 @@
 import { basename, join } from "node:path"
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
-import { tierForModel, type Tier } from "./tier-policy.ts"
+import { tierForModel, PI_RUN_DEADLINE_MS, MUSE_AGENT_NAMES, DEVIN_AGENT_NAMES, isDevinTier, isMuseTier, type Tier } from "./tier-policy.ts"
+import { MUSE_PROVIDER } from "./muse-subscription.ts"
+import { DEVIN_PROVIDER } from "./devin-provider.ts"
 
 export type Job = {
   cwd: string
@@ -15,7 +17,7 @@ export type Job = {
   receiptPath?: string
 }
 export type Result = {
-  state: "succeeded" | "failed" | "cancelled" | "unknown_or_interrupted"
+  state: "succeeded" | "failed" | "cancelled" | "timed_out" | "unknown_or_interrupted"
   error: string | null
   text: string | null
   sessionFile: string | null
@@ -62,6 +64,15 @@ export function runDetails(reply: Reply): { runId: string; asyncDir: string | nu
   return { runId, asyncDir: string(details?.asyncDir) }
 }
 export function runId(reply: Reply): string { return runDetails(reply).runId }
+/** True when an error string reports the pi-subagents wall-clock deadline, not a provider or task failure. */
+export function deadlineExpiredError(value: unknown): boolean {
+  return typeof value === "string" && /timed out after \d+\s*ms/i.test(value)
+}
+function eventTimedOut(event: Record<string, unknown>, child: Record<string, unknown> | null): boolean {
+  if (event.timedOut === true || child?.timedOut === true) return true
+  const results = Array.isArray(event.results) ? event.results : []
+  return results.some((entry) => record(entry)?.timedOut === true)
+}
 export function terminal(event: Record<string, unknown>, id: string, sessionFile: string): Result {
   const results = Array.isArray(event.results) ? event.results : []
   const child = results.length === 1 ? record(results[0]) : null
@@ -69,6 +80,8 @@ export function terminal(event: Record<string, unknown>, id: string, sessionFile
   const cancelled = event.state === "stopped" || event.state === "paused" || child?.stopped === true
   if (cancelled)
     return { state: "cancelled", error: string(child?.error) ?? "Native subagent stopped", text, sessionFile, runId: id, usage: null }
+  if (eventTimedOut(event, child) || deadlineExpiredError(child?.error) || deadlineExpiredError(event.error))
+    return { state: "timed_out", error: string(child?.error) ?? string(event.error) ?? "Subagent timed out after the run deadline", text, sessionFile, runId: id, usage: null }
   if (event.success !== true || child?.success !== true)
     return { state: "failed", error: string(child?.error) ?? "Native subagent failed", text, sessionFile, runId: id, usage: null }
   if (!text)
@@ -77,8 +90,16 @@ export function terminal(event: Record<string, unknown>, id: string, sessionFile
 }
 
 
+function statusTimedOut(root: string): boolean {
+  try {
+    const status = record(JSON.parse(readFileSync(join(root, "status.json"), "utf8")))
+    return status?.timedOut === true
+  } catch { return false }
+}
+
 export function artifactResult(sessionDir: string, asyncDir: string | null, runId: string, sessionFile: string): Result | null {
   if (!runId || !/^[a-zA-Z0-9._-]+$/.test(runId)) return null
+  const runnerTimedOut = asyncDir ? statusTimedOut(asyncDir) : false
   const roots = [asyncDir, join(sessionDir, "subagent-artifacts")].filter((v): v is string => !!v)
   for (const root of roots) {
     if (!existsSync(root)) continue
@@ -99,6 +120,10 @@ export function artifactResult(sessionDir: string, asyncDir: string | null, runI
         if (text) return { state: "succeeded", error: null, text, sessionFile, runId, usage }
         return { state: "failed", error: error ?? "Native subagent completed without a proof record", text, sessionFile, runId, usage }
       }
+      const expired = runnerTimedOut || deadlineExpiredError(error)
+      if (expired) {
+        return { state: "timed_out", error: error ?? "Subagent timed out after the run deadline", text, sessionFile, runId, usage }
+      }
       if (error || meta.exitCode !== undefined || meta.success === false) {
         return { state: "failed", error: error ?? text ?? "Native subagent failed", text, sessionFile, runId, usage }
       }
@@ -107,6 +132,21 @@ export function artifactResult(sessionDir: string, asyncDir: string | null, runI
   return null
 }
 
+
+export function dispatchParams(job: Job): Record<string, unknown> {
+  const deadline = { timeoutMs: PI_RUN_DEADLINE_MS }
+  if (job.priorRunId) return { id: job.priorRunId, message: job.prompt, ...deadline }
+  const tier = role(job)
+  let agent: string = tier
+  if (job.model.providerID === MUSE_PROVIDER && isMuseTier(tier)) agent = MUSE_AGENT_NAMES[tier]
+  else if (job.model.providerID === DEVIN_PROVIDER && isDevinTier(tier)) agent = DEVIN_AGENT_NAMES[tier]
+  return {
+    agent, task: job.prompt, async: true, cwd: job.cwd, worktree: false,
+    model: job.model.providerID + "/" + job.model.id + ":" + job.model.variant,
+    options: { agentScope: "user" },
+    ...deadline,
+  }
+}
 
 export type Admission = { runId: string; asyncDir: string | null; sessionFile: string }
 export async function executeJob(job: Job, run: (

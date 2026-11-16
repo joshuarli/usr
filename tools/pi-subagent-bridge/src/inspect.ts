@@ -22,13 +22,13 @@ const EVENT_DESCRIPTION_CHARS = 160
 
 type OrUnknown<T> = T | "unknown"
 
-type DetailedState = "running" | "queued" | "idle_or_queued" | "succeeded" | "failed" | "turn_limit" | "cancelled" | "canceled" | "interrupted" | "unknown_or_interrupted" | "blocked_partial_work" | "blocked_admission" | "blocked_transition" | "blocked_fallback" | "unknown"
+type DetailedState = "running" | "queued" | "idle_or_queued" | "succeeded" | "failed" | "turn_limit" | "cancelled" | "canceled" | "interrupted" | "unknown_or_interrupted" | "timed_out" | "blocked_partial_work" | "blocked_admission" | "blocked_transition" | "blocked_fallback" | "unknown"
 export type Attention = "active" | "finished" | "gone" | "needs_attention" | "unknown"
 function classifyState(state: string): Attention {
   const detailed = state as DetailedState
   switch (detailed) {
     case "running": case "queued": case "idle_or_queued": return "active"
-    case "succeeded": case "failed": case "turn_limit": case "cancelled": case "canceled": return "finished"
+    case "succeeded": case "failed": case "turn_limit": case "cancelled": case "canceled": case "timed_out": return "finished"
     case "interrupted": case "unknown_or_interrupted": return "gone"
     case "blocked_partial_work": case "blocked_admission": case "blocked_transition": case "blocked_fallback": return "needs_attention"
     case "unknown": return "unknown"
@@ -262,6 +262,9 @@ function inheritedNotice(s: Session, state: string): string | null {
   if (!s.fallback_reason) return null
   if (state.startsWith("blocked")) return "Provider transition blocked; inspect the owned session before retrying."
   const target = targetOf(s)
+  if (target.executor === "pi" && state === "timed_out") {
+    return "The Pi run reached its pinned run deadline and was stopped; the worktree may hold partial work and the bridge will not re-dispatch automatically. Inspect changed_paths, then resume with worker_resume (same scope) or preserve the work before dispatching again."
+  }
   if (target.executor === "pi" && ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
     const provider = target.selection.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
     return "The task was admitted to " + provider + " after earlier approved lanes failed or were unavailable, but that Pi run ended in " + state +
