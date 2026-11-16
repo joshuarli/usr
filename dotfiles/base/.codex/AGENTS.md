@@ -66,11 +66,15 @@ After long-running or delegated work, add one line each for **Goal**, **Done**, 
 
 ## Environment
 
-macOS and Linux. For shell search always use `rg` (never `grep`/`egrep`/`grep -r`) and `fd` (never `find`/`ls -R`). Prefer harness-native search tools over shell when available; they are `rg`/`fd`-backed. Use `jaq` for all JSON and YAML work, in place of `jq` and `yq` (`jaq --from yaml` reads YAML, `--to yaml` writes it). Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
+macOS and Linux. For shell search always use `rg` (never `grep`/`egrep`/`grep -r`) and `fd` (never `find`/`ls -R`). Prefer harness-native search tools over shell when available; they are `rg`/`fd`-backed. Use `jaq` for all JSON and YAML work, in place of `jq` and `yq` (`jaq --from yaml` reads YAML, `--to yaml` writes it). Use `fastermod` for renames across a tree, in place of scripted `sed`/`perl` (see Renaming). Rust builds go through the `kache` rustc wrapper, and Linux musl targets link with `mold`.
 
 ## Structured data
 
 Use `jaq --from FORMAT` and `--to FORMAT` for XML, TOML, CSV, and TSV instead of a parser script; file extensions select the input format, and `--slurp` collects records into one array. XML nodes use `.t` for the tag, `.a` for attributes, and `.c` for children. CSV and TSV records are arrays, and a header is an ordinary first row. Each output array becomes one CSV or TSV row, TOML output needs an object at the root, and XML output uses jaq's XML node representation.
+
+## Renaming
+
+Use `fastermod` to rename text or symbols across a tree instead of scripted `sed`/`perl`. `--rename` is binding-aware and fails closed on unresolved references; `--ident` rewrites identifier tokens syntactically; `-S` adapts the replacement's casing to each match. On a non-TTY it previews diffs and writes nothing without `--apply`; `--check` exits 1 when edits are pending, and `--json` emits a machine-readable result. See `~/.agents/instructions/fastermod.md` for worked examples.
 
 ## Working files
 

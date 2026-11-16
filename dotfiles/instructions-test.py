@@ -185,11 +185,12 @@ class InstructionTests(unittest.TestCase):
         bootstrap = BOOTSTRAP.read_text()
         self.assertIn("~/.codex/AGENTS.md", bootstrap)
         self.assertNotIn("@", bootstrap)
-        for name in ("performance", "structured-data", "owned-tools"):
+        for name in ("performance", "structured-data", "owned-tools", "fastermod"):
             path = BASE / f".agents/instructions/{name}.md"
             self.assertIn(f"~/.agents/instructions/{name}.md", LEAN.read_text())
             self.assertNotIn(path.read_text(), LEAN.read_text())
         self.assertIn("~/.agents/instructions/owned-tools.md", NORMAL.read_text())
+        self.assertIn("~/.agents/instructions/fastermod.md", NORMAL.read_text())
 
     def test_other_harnesses_keep_the_original_normal_contract(self):
         for relative in (".commandcode/AGENTS.md", ".config/muse/AGENTS.md", ".config/opencode/AGENTS.md",

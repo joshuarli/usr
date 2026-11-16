@@ -20,7 +20,7 @@
 
 ## Environment and changes
 
-- macOS/Linux: prefer native search, otherwise `rg`/`fd`, not `grep`/`find`. Use `jaq`, not `jq`/`yq` or parser scripts, for structured data. For non-JSON formats read `~/.agents/instructions/structured-data.md`. Rust uses `kache`; Linux musl links with `mold`.
+- macOS/Linux: prefer native search, otherwise `rg`/`fd`, not `grep`/`find`. Use `jaq`, not `jq`/`yq` or parser scripts, for structured data. For non-JSON formats read `~/.agents/instructions/structured-data.md`. Use `fastermod`, not `sed`/`perl`, for renames across a tree: `fastermod --rename OLD NEW .` (binding-aware, fails closed), `--ident` (identifier tokens), `-S` (case-preserving text). Non-TTY runs preview without writing; `--apply` writes. For non-trivial renames read `~/.agents/instructions/fastermod.md`. Rust uses `kache`; Linux musl links with `mold`.
 - Scratch and worktrees belong in repo `.work/tmp` and `.work/wt/<name>`, never system temp. Ignore `.work/` through `.git/info/exclude` before writing; set `TMPDIR` accordingly. Commit durable plans, handoffs, and results outside scratch.
 - Commit and push completed, verified changes without waiting for another request; stage only your work. Use Conventional Commits: `type(scope): subject`, types `feat|fix|perf|refactor|docs|test|build|ci|chore|revert`, lowercase imperative subject at most 72 characters, no final period. The body explains why; contract changes use `!` or `BREAKING CHANGE:`.
 

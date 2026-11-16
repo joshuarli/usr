@@ -9,7 +9,7 @@ Load one user contract, not a normal contract plus model-specific corrections. N
 | Other or missing model IDs | [Normal](../dotfiles/base/.codex/AGENTS.md), unchanged |
 | Other harnesses | Their existing normal-contract adapters, unchanged |
 
-The lean version keeps owner preferences and boundaries rather than general coaching. It no longer requires loading `do` merely because a task is substantive. Requested workflows and useful task-specific skills still apply; `orchestrate` still governs every delegation. Performance and structured-data procedures are read only when relevant. The shared skill catalog and its invocation metadata have not changed, so this reduces the user contract, not all context a harness may load.
+The lean version keeps owner preferences and boundaries rather than general coaching. It no longer requires loading `do` merely because a task is substantive. Requested workflows and useful task-specific skills still apply; `orchestrate` still governs every delegation. Performance, structured-data and renaming procedures are read only when relevant. The shared skill catalog and its invocation metadata have not changed, so this reduces the user contract, not all context a harness may load.
 
 ## Loading
 
