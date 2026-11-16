@@ -22,6 +22,7 @@ From the repository root, with the supported Node runtime:
 make generate
 make check-generated
 make policy
+make subagent-visualization
 ```
 
 `generate` renders checked-in policy tables, bounded instruction blocks, native
@@ -30,6 +31,9 @@ Pi profile fields, Pi subagent settings and OpenCode tier model fields.
 `policy` prints that JSON without reading credentials or probing providers.
 Live availability belongs to `worker_model_check`.
 The installed `pi-subagent-bridge policy` command exposes the same pure export.
+`subagent-visualization` renders [`docs/subagents.md`](../docs/subagents.md), the
+markdown decision graph of the delegation architecture, from the same typed
+export; `check-generated` verifies it stays current.
 
 Edit the policy, run `make generate`, and review the generated diff. Session
 defaults, profile descriptions, unrelated harness settings and authored
