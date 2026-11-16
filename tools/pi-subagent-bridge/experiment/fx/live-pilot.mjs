@@ -12,6 +12,7 @@ import { OwnerManager } from '../../src/owner.ts'
 import { ownerJobs, ownerResume } from '../../src/owner-client.ts'
 import { codexAvailable } from '../../src/codex.ts'
 import { CODEX_TIER_MODELS } from '../../src/policy.ts'
+import { workerEnvironment } from '../../src/worker-env.ts'
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url))
 const pin = JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8'))
@@ -182,9 +183,13 @@ function testsUntouched(wt) {
 const TASKS = [
   {
     key: 'scout', tier: 'scout',
-    prompt: 'The acceptance checks fail in this repository. Investigate and report the exact file and line that causes the wrong result, with a one-sentence explanation. Do not modify any files and do not run shell commands.',
+    prompt: 'The Python acceptance check fails in this repository. Investigate python/ and report the exact file and line that causes the wrong result, with a one-sentence explanation. Do not modify any files and do not run shell commands.',
     scope: { writable_paths: [], acceptance_proof: 'final answer cites python/ledger.py line evidence; worktree unchanged', attempt_limit: 1, stop_on: 'any file modification or shell use' },
-    verify: cleanTree,
+    verify: (wt, answer) => {
+      cleanTree(wt)
+      assert.match(String(answer ?? ''), /python\/ledger\.py/i, 'scout answer must cite python/ledger.py')
+      assert.match(String(answer ?? ''), /line\s*\d+|:\d+/i, 'scout answer must cite a line number')
+    },
   },
   {
     key: 'fix', tier: 'worker',
@@ -194,10 +199,10 @@ const TASKS = [
   },
   {
     key: 'multi', tier: 'worker',
-    prompt: 'Rename the public balance function to settled_balance in all three language ports: python/ledger.py (update python/report.py and python/test_ledger.py callers), ts/ledger.mjs and rust/src/lib.rs consistently, then run the Python, Node and Cargo checks.',
+    prompt: 'Rename the public balance function to settled_balance in all three language ports: python/ledger.py (update python/report.py and python/test_ledger.py callers), ts/ledger.mjs and rust/src/lib.rs consistently. The acceptance checks currently fail; make the Python, Node and Cargo checks all pass.',
     scope: { writable_paths: ['python', 'ts', 'rust'], acceptance_proof: 'python unittest, node ts/check.mjs and cargo test --manifest-path rust/Cargo.toml all exit zero', attempt_limit: 2, stop_on: 'scope expansion or unavailable proof' },
     verify: allChecks,
-    correction: 'The Rust port still exposes balance_after and its test still calls it; complete the rename there and keep cargo test green. Stay in the same scope.',
+    correction: 'The acceptance checks still fail. Finish the settled_balance rename wherever it is incomplete and fix the remaining defects so python unittest, node ts/check.mjs and cargo test all pass. Stay in the same scope.',
   },
 ]
 
@@ -297,7 +302,7 @@ async function runBridgeJob(bridge, repo, wtName, task, base) {
   finally { clearInterval(poll) }
   const elapsed = performance.now() - started
   let checksPassed = false, checkError = null
-  try { task.verify(wt); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
+  try { task.verify(wt, result.last_assistant_text); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
   const status = execFileSync('git', ['-C', wt, 'status', '--porcelain'], { encoding: 'utf8' })
   return { task: task.key, tier: task.tier, backend: admitted.backend, session_id: admitted.session_id, state: result.state, acceptance_claim: result.acceptance_claim ?? null, last_assistant_text: String(result.last_assistant_text ?? '').slice(0, 2000), elapsed_ms: Math.round(elapsed), sampled_peak_tree_rss_kib: peakRss, parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), ...(result.usage ? { usage: result.usage } : {}) }
 }
@@ -306,16 +311,21 @@ async function runPiCliJob(repo, wtName, task, base) {
   const wt = join(repo, '.work', 'wt', wtName)
   execFileSync('git', ['-C', repo, 'worktree', 'add', '-qb', wtName, wt, base], { encoding: 'utf8', timeout: 10000 })
   const started = performance.now()
-  const child = spawn('pi', ['-p', '--model', 'opencode-go/deepseek-v4.1-flash:high', '--no-session', '--session-dir', join(repo, '.work', 'pi-sessions'), '--', task.prompt], { cwd: wt, env: { ...process.env, PI_TELEMETRY: '0' }, stdio: ['ignore', 'pipe', 'pipe'] })
-  let stdout = '', stderr = ''
+  const child = spawn('pi', ['-p', '--model', 'opencode-go/deepseek-v4.1-flash:high', '--no-session', '--session-dir', join(repo, '.work', 'pi-sessions'), '--', task.prompt], { cwd: wt, env: { ...workerEnvironment(), PI_TELEMETRY: '0' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  let stdout = '', stderr = '', timedOut = false
   child.stdout.on('data', b => { stdout += b; if (stdout.length > 1_048_576) child.kill('SIGKILL') })
   child.stderr.on('data', b => { stderr += b; if (stderr.length > 1_048_576) child.kill('SIGKILL') })
+  const deadline = setTimeout(() => {
+    timedOut = true
+    try { process.kill(-child.pid, 'SIGKILL') } catch { try { child.kill('SIGKILL') } catch {} }
+  }, BOUNDS.wall_ms_per_job)
   const code = await new Promise(resolve => child.once('close', resolve))
+  clearTimeout(deadline)
   const elapsed = performance.now() - started
   let checksPassed = false, checkError = null
-  try { task.verify(wt); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
+  try { task.verify(wt, stdout); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
   const status = execFileSync('git', ['-C', wt, 'status', '--porcelain'], { encoding: 'utf8' })
-  return { task: task.key, tier: task.tier, backend: 'pi-cli', state: code === 0 ? 'succeeded' : 'failed', exit_code: code, last_assistant_text: stdout.slice(-2000), elapsed_ms: Math.round(elapsed), parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), stderr_tail: stderr.slice(-500) }
+  return { task: task.key, tier: task.tier, backend: 'pi-cli', state: code === 0 && !timedOut ? 'succeeded' : 'failed', exit_code: code, timed_out: timedOut, last_assistant_text: stdout.slice(-2000), elapsed_ms: Math.round(elapsed), parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), stderr_tail: stderr.slice(-500) }
 }
 
 export async function livePilot(binary, scratch, requested) {
