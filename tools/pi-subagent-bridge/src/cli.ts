@@ -19,7 +19,7 @@ const help: Record<string, Help> = {
   mcp: { usage: "mcp [--repo DIR]...", description: "Serve the MCP bridge.", details: ["--repo DIR  Register an owner for DIR; may be repeated."], example: "mcp --repo /work/project" },
   "scope-check": { usage: "scope-check CWD SCOPE_JSON_FILE [BRANCH]", description: "Check a lane the bridge did not admit, such as a native expert subagent, against a scope: changed and out-of-scope paths since base_revision and whether HEAD stayed on the lane. Exits 1 when the lane is out of scope.", details: ["CWD  Lane worktree root (required).", "SCOPE_JSON_FILE  Scope JSON with base_revision and writable_paths (required).", "BRANCH  Lane branch HEAD must stay on (default: the current branch)."], example: "scope-check /work/project/.work/wt/lane scope.json lane/name" },
   inspect: { usage: "inspect PATH SESSION_ID", description: "Print a session snapshot as JSON.", details: ["PATH  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required)."], example: "inspect /work/project usrw_12345678-1234-1234-1234-123456789abc" },
-  watch: { usage: "watch [--state] ROOT SESSION_ID [IDLE_MINUTES]", description: "Watch a session until it finishes or needs attention.", details: ["--state  Print state only; cannot be combined with IDLE_MINUTES.", "ROOT  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required).", "IDLE_MINUTES  Idle threshold in minutes (default: 10)."], example: "watch /work/project usrw_12345678-1234-1234-1234-123456789abc 10" },
+  watch: { usage: "watch [--state] ROOT SESSION_ID [IDLE_MINUTES]", description: "Watch a session until it finishes or needs attention.", details: ["--state  Print state only; cannot be combined with IDLE_MINUTES.", "ROOT  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required).", "IDLE_MINUTES  Idle threshold in minutes (default: 45)."], example: "watch /work/project usrw_12345678-1234-1234-1234-123456789abc 45" },
   "campaign wait": { usage: "campaign wait [--timeout DURATION] [ROOT...]", description: "Wait for unacknowledged sessions needing attention.", details: ["--timeout DURATION  Timeout in seconds, or with s, m, or h suffix (default: no timeout).", "ROOT  Repository roots, repeated; defaults to WORKER_CAMPAIGN_ROOTS (colon-separated).", "--  End options."], example: "campaign wait --timeout 5m /work/project" },
   "campaign ack": { usage: "campaign ack ID...", description: "Acknowledge sessions in campaign state.", details: ["ID  Session ID (required, repeated).", "XDG_STATE_HOME  State directory; defaults to HOME/.local/state."], example: "campaign ack usrw_12345678-1234-1234-1234-123456789abc" },
   "campaign list": { usage: "campaign list [--json] [ROOT...]", description: "List campaign sessions.", details: ["--json  Print JSON snapshots.", "ROOT  Repository roots, repeated; defaults to WORKER_CAMPAIGN_ROOTS (colon-separated)."], example: "campaign list --json /work/project" },
@@ -96,7 +96,7 @@ async function watch(rest: string[]): Promise<void> {
     return
   }
   const { watchSession } = await import("./watch.ts")
-  process.exitCode = await watchSession(root, id, { idleMinutes: Number(idle ?? 10), stateOnly },
+  process.exitCode = await watchSession(root, id, { idleMinutes: Number(idle ?? 45), stateOnly },
     await inspectionDeps(), (text) => process.stdout.write(text))
 }
 

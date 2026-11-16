@@ -80,6 +80,13 @@ test("help is a complete reference with examples and the owned footer", () => {
   }
 })
 
+test("watch help reports the 45 minute default", () => {
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", cli, "watch", "--help"], { encoding: "utf8" })
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /default: 45/)
+})
+
 test("scope-check reports a native lane's changed paths, out-of-scope paths and lane drift", () => {
   const root = mkdtempSync(join(tmpdir(), "usr-scope-check-"))
   try {
