@@ -5,7 +5,7 @@ hide_agent_reasoning = true
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 service_tier = "default"
-model = "gpt-6.1-terra"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "medium"
 
 notify = ["/Users/josh/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
@@ -272,6 +272,9 @@ trust_level = "trusted"
 [projects."/Users/josh/d/finances"]
 trust_level = "trusted"
 
+[projects."/Users/josh/repos/ctrs"]
+trust_level = "trusted"
+
 [[hooks.SessionStart]]
 
 [[hooks.SessionStart.hooks]]
@@ -303,6 +306,12 @@ trusted_hash = "sha256:0d0564abe1b14925cf07bc041fb4dc0ebec5a0d659f1b51b3aa91523b
 
 [hooks.state."/home/josh/.codex/config.toml:stop:0:0"]
 trusted_hash = "sha256:0d0564abe1b14925cf07bc041fb4dc0ebec5a0d659f1b51b3aa91523be13e37e"
+
+[hooks.state."/Users/josh/.codex/config.toml:session_start:0:0"]
+trusted_hash = "sha256:4aeeadc7be8a7a6004290c2fd1a324665b307ca52cb3aa034c47d75b7aa985a8"
+
+[hooks.state."/Users/josh/.codex/config.toml:subagent_start:0:0"]
+trusted_hash = "sha256:6addc2b76b0d03f8ccae0e34a8ed110d828d280eddb43ac59c326ad281a72602"
 
 [desktop]
 followUpQueueMode = "steer"
