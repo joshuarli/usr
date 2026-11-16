@@ -43,8 +43,8 @@ export function routingTable(policy: Policy): string {
 }
 
 function summary(policy: Policy): string {
-  return `The bridge admits ${policy.tiers.map(code).join(", ")} only; ${code("expert")} assignments use harness-native subagents instead. ` +
-    `The available tiers are ${[...policy.tiers.map(code), code("expert")].join(", ")}; there is no ${code("god")} tier. ` +
+  return `Bridge tiers: ${policy.tiers.map(code).join(", ")}. Native-only tier: ${code("expert")}, which always runs as a harness-native subagent and never through the bridge. ` +
+    `There is no ${code("god")} tier. ` +
     `The model families ${policy.bannedModels.map(code).join(" and ")} are prohibited, including every effort variant.`
 }
 
@@ -68,15 +68,16 @@ function nativeFallback(policy: Policy): string {
   const tiers = policy.nativeFallback.tiers.join("/")
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
   const expertModel = code(policy.nativeFallback.claudeModels.expert)
-  const expertThinking = code(policy.nativeFallback.claudeThinking.expert)
-  return `**Claude Code native subagents:** ${code("expert")} assignments always use native subagents pinned to ${expertModel} with ${expertThinking} thinking. ` +
+  const expertThinking = code(policy.nativeFallback.claudeEffort.expert)
+  return `**Claude Code native subagents:** ${code("expert")} assignments always use native subagents pinned to ${expertModel} with ${expertThinking} effort. ` +
+    "If that pinned model is unavailable, the expert lane is blocked; never substitute another model. " +
     `When no approved bridge backend can run because it is unavailable or exhausted, ${tiers} use tier-matched native subagents with the same brief, worktree, scope, and independent verification: ${mappings}. ` +
     "Preserve partial work before relaunch. No hook gates native subagents. Return to the bridge when capacity recovers."
 }
 
 function delegation(policy: Policy, lean: boolean): string {
   const head = lean ? "- Before delegation, read `orchestrate` and use `pi-subagent-bridge` for scout/mechanic/worker." :
-    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`. Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's `opus` at medium thinking); the bridge has no expert tier."
+    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`. Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
     `No ${code("god")} tier exists. ` +
@@ -190,7 +191,7 @@ function validatePolicy(policy: Policy): void {
   for (const value of policy.antigravityDirect.models) validateModel(value)
   validateModel(policy.opencode.model)
   for (const value of Object.values(policy.nativeFallback.claudeModels)) code(value)
-  for (const value of Object.values(policy.nativeFallback.claudeThinking)) code(value)
+  for (const value of Object.values(policy.nativeFallback.claudeEffort)) code(value)
 }
 
 function destination(root: string, path: string): string {

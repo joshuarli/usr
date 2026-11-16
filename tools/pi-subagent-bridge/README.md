@@ -4,7 +4,7 @@ One shared delegation bridge for every coding harness except OpenCode and Devin.
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-The bridge admits `scout`, `mechanic`, `worker` only; `expert` assignments use harness-native subagents instead. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
+Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |
@@ -13,7 +13,7 @@ The bridge admits `scout`, `mechanic`, `worker` only; `expert` assignments use h
 | worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`) |
 <!-- policy:end routing-summary -->
 
-Expert assignments never enter the bridge. OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` with medium thinking for expert work; Pi launches its native `expert` profile. See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
+Expert assignments never enter the bridge. OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
 ## Setup
 

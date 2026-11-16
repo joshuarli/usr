@@ -191,7 +191,7 @@ type MutablePolicy = {
     maxSubagentDepth: number; modelAllowlist: string[]
   }
   opencode: { model: string; efforts: Record<string, string> }
-  nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeThinking: Record<string, string> }
+  nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeEffort: Record<string, string> }
   antigravityDirect: { models: string[] }
   bannedModels: string[]
 }
@@ -234,7 +234,7 @@ const dimensions: Dimension[] = [
   { name: "native fallback mechanic Claude model", mutate: p => { p.nativeFallback.claudeModels.mechanic = "haiku" } },
   { name: "native fallback worker Claude model", mutate: p => { p.nativeFallback.claudeModels.worker = "opus" } },
   { name: "native fallback expert Claude model", mutate: p => { p.nativeFallback.claudeModels.expert = "fixture-model" } },
-  { name: "native fallback expert Claude thinking", mutate: p => { p.nativeFallback.claudeThinking.expert = "high" } },
+  { name: "native fallback expert Claude effort", mutate: p => { p.nativeFallback.claudeEffort.expert = "high" } },
 
   { name: "antigravity direct first model", mutate: p => { p.antigravityDirect.models[0] = "fixture-direct-a" } },
   { name: "antigravity direct second model", mutate: p => { p.antigravityDirect.models[1] = "fixture-direct-b" } },

@@ -78,7 +78,7 @@ export const OPENCODE_NATIVE = {
 export const NATIVE_FALLBACK = {
   tiers: ["scout", "mechanic", "worker"],
   claudeModels: { scout: "haiku", mechanic: "sonnet", worker: "sonnet", expert: "opus" },
-  claudeThinking: { expert: "medium" },
+  claudeEffort: { expert: "xhigh" },
 } as const
 /** Family prefixes are prohibited, including all effort-suffixed variants. */
 export const BANNED_MODELS = ["gemini-4-argon", "gemini-4-carbon"] as const

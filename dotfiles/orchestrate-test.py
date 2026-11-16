@@ -53,7 +53,9 @@ class OrchestrateTests(unittest.TestCase):
         for harness in ("OpenCode", "Devin", "Codex", "Pi", "Claude Code"):
             self.assertIn(harness, self.text)
         self.assertIn("Claude Code native subagents:", self.text)
-        self.assertIn("`expert` assignments always use native subagents pinned to `opus` with `medium` thinking.", self.text)
+        self.assertIn("`expert` assignments always use native subagents pinned to `opus` with `xhigh` effort.", self.text)
+        self.assertIn("If that pinned model is unavailable, the expert lane is blocked; never substitute another model.", self.text)
+        self.assertIn("pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE BRANCH", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
         self.assertNotIn("Host-access exception", self.text)
         self.assertNotIn("sandbox cannot grant", self.text)

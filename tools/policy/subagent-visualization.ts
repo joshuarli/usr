@@ -13,7 +13,7 @@ const NOTICE = `<!-- Generated from ${SOURCE}; run make subagent-visualization. 
 function markdown(): string {
   const opencode = POLICY.opencode
   const expertPi = POLICY.nativePi.goModels.expert
-  const expertClaude = `\`${POLICY.nativeFallback.claudeModels.expert}\`, \`${POLICY.nativeFallback.claudeThinking.expert}\` thinking`
+  const expertClaude = `\`${POLICY.nativeFallback.claudeModels.expert}\`, \`${POLICY.nativeFallback.claudeEffort.expert}\` effort`
   const quota = POLICY.nativeFallback.tiers.map(tier => `\`${tier}\` \`${POLICY.nativeFallback.claudeModels[tier as "scout"]}\``).join(" · ")
   const opencodeTier = (tier: "scout" | "mechanic" | "worker" | "expert") => `\`${opencode.model}#${opencode.efforts[tier]}\``
   const lines: string[] = [
@@ -33,7 +33,7 @@ function markdown(): string {
     '  harness -->|Devin top-level| dv_exp["Devin native run_subagent<br/>subagent_general or subagent_explore<br/>no per-tier pin"]',
     '  harness -->|Codex| cx_exp["Codex native subagent<br/>session-config model, no per-tier pin"]',
     '  harness -->|Pi| pi_exp["Pi native expert profile<br/>' + `${expertPi.providerID}/${expertPi.id}, ${expertPi.variant}` + '"]',
-    '  harness -->|Claude Code| cc_exp["Claude Code native subagent<br/>' + POLICY.nativeFallback.claudeModels.expert + ", " + POLICY.nativeFallback.claudeThinking.expert + ' thinking"]',
+    '  harness -->|Claude Code| cc_exp["Claude Code native subagent<br/>' + POLICY.nativeFallback.claudeModels.expert + ", " + POLICY.nativeFallback.claudeEffort.expert + ' effort"]',
     '  harness -->|any other harness| other["No defined lane in this contract<br/>report to the owner before delegating"]',
     "",
     '  tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode or Devin session?"}',

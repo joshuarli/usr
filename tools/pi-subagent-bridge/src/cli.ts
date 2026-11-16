@@ -17,6 +17,7 @@ type Help = { usage: string; description: string; details: string[]; example: st
 const help: Record<string, Help> = {
   policy: { usage: "policy", description: "Print the approved routing policy as JSON.", details: [], example: "policy" },
   mcp: { usage: "mcp [--repo DIR]...", description: "Serve the MCP bridge.", details: ["--repo DIR  Register an owner for DIR; may be repeated."], example: "mcp --repo /work/project" },
+  "scope-check": { usage: "scope-check CWD SCOPE_JSON_FILE [BRANCH]", description: "Check a lane the bridge did not admit, such as a native expert subagent, against a scope: changed and out-of-scope paths since base_revision and whether HEAD stayed on the lane. Exits 1 when the lane is out of scope.", details: ["CWD  Lane worktree root (required).", "SCOPE_JSON_FILE  Scope JSON with base_revision and writable_paths (required).", "BRANCH  Lane branch HEAD must stay on (default: the current branch)."], example: "scope-check /work/project/.work/wt/lane scope.json lane/name" },
   inspect: { usage: "inspect PATH SESSION_ID", description: "Print a session snapshot as JSON.", details: ["PATH  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required)."], example: "inspect /work/project usrw_12345678-1234-1234-1234-123456789abc" },
   watch: { usage: "watch [--state] ROOT SESSION_ID [IDLE_MINUTES]", description: "Watch a session until it finishes or needs attention.", details: ["--state  Print state only; cannot be combined with IDLE_MINUTES.", "ROOT  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required).", "IDLE_MINUTES  Idle threshold in minutes (default: 10)."], example: "watch /work/project usrw_12345678-1234-1234-1234-123456789abc 10" },
   "campaign wait": { usage: "campaign wait [--timeout DURATION] [ROOT...]", description: "Wait for unacknowledged sessions needing attention.", details: ["--timeout DURATION  Timeout in seconds, or with s, m, or h suffix (default: no timeout).", "ROOT  Repository roots, repeated; defaults to WORKER_CAMPAIGN_ROOTS (colon-separated).", "--  End options."], example: "campaign wait --timeout 5m /work/project" },
@@ -134,13 +135,22 @@ async function main(args: string[]): Promise<void> {
     serve(connect, ownerRepos.length ? { ownerRepos } : undefined)
     return
   }
+  if (op === "scope-check") {
+    const [cwd, file, branch, ...extra] = rest
+    const { SCOPE_CHECK_USAGE, scopeCheck } = await import("./scope-check.ts")
+    if (!cwd || !file || extra.length) throw new Error(SCOPE_CHECK_USAGE)
+    const result = scopeCheck(cwd, JSON.parse(readFileSync(file, "utf8")), branch)
+    process.stdout.write(JSON.stringify(result) + "\n")
+    if (!result.in_scope) process.exitCode = 1
+    return
+  }
   if (op === "inspect") return inspect(rest)
   if (op === "watch") return watch(rest)
   if (op === "campaign") return runCampaign(rest)
   if (op === "owner") return (await import("./owner-client.ts")).runOwnerCli(rest)
   const { COMMAND_NAMES, COMMANDS, cliArguments, decodeCommand } = await import("./commands.ts")
   const name = COMMAND_NAMES.find(candidate => COMMANDS[candidate].cli === op)
-  if (!name) throw new Error("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|inspect|watch|campaign|owner}")
+  if (!name) throw new Error("usage: pi-subagent-bridge {policy|mcp|model-check|start|status|resume|cancel|steer|scope-check|inspect|watch|campaign|owner}")
   const command = decodeCommand(name, cliArguments(name, rest, path => readFileSync(path, "utf8")))
   const { connect, dispatch } = await import("./server.ts")
   const result = await dispatch(await connect(), command)

@@ -222,8 +222,8 @@
       "worker": "sonnet",
       "expert": "opus"
     },
-    "claudeThinking": {
-      "expert": "medium"
+    "claudeEffort": {
+      "expert": "xhigh"
     }
   },
   "antigravityDirect": {

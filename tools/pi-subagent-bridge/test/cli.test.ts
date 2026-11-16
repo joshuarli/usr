@@ -51,7 +51,7 @@ test("help is a complete reference with examples and the owned footer", () => {
   const footer = "Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"
   const bridge = join(root, "dotfiles/base/.local/bin/pi-subagent-bridge")
   const reload = join(root, "dotfiles/base/.local/bin/pi-subagent-bridge-reload")
-  const commands = ["policy", "mcp", "model-check", "start", "status", "resume", "steer", "cancel", "inspect", "watch", "campaign wait", "campaign ack", "campaign list", "owner hello", "owner jobs", "owner status", "owner steer", "owner interrupt", "owner resume", "owner command"]
+  const commands = ["policy", "mcp", "model-check", "start", "status", "resume", "steer", "cancel", "scope-check", "inspect", "watch", "campaign wait", "campaign ack", "campaign list", "owner hello", "owner jobs", "owner status", "owner steer", "owner interrupt", "owner resume", "owner command"]
   for (const command of [bridge, reload]) {
     for (const flag of ["-h", "--help"]) {
       const result = spawnSync(command, [flag], { encoding: "utf8" })
@@ -77,5 +77,63 @@ test("help is a complete reference with examples and the owned footer", () => {
       assert.match(result.stdout, /Examples:\n  pi-subagent-bridge /)
       assert.match(result.stdout, /See pi-subagent-bridge -h/)
     }
+  }
+})
+
+test("scope-check reports a native lane's changed paths, out-of-scope paths and lane drift", () => {
+  const root = mkdtempSync(join(tmpdir(), "usr-scope-check-"))
+  try {
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" })
+      assert.equal(result.status, 0, result.stderr)
+      return result.stdout.trim()
+    }
+    git("init", "-q", "-b", "lane/native")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "test")
+    mkdirSync(join(root, "src"))
+    writeFileSync(join(root, "src/a.ts"), "a\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    const base = git("rev-parse", "HEAD")
+    const scope = join(root, "..", "usr-scope-check-" + base.slice(0, 8) + ".json")
+    writeFileSync(scope, JSON.stringify({ base_revision: base, writable_paths: ["src"] }))
+    const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+    const run = (...extra: string[]) => {
+      const result = spawnSync(process.execPath, ["--experimental-strip-types", cli, "scope-check", root, scope, ...extra], { encoding: "utf8" })
+      return { status: result.status, stderr: result.stderr, report: result.stdout ? JSON.parse(result.stdout) : null }
+    }
+    try {
+      writeFileSync(join(root, "src/a.ts"), "b\n")
+      git("commit", "-qam", "in scope")
+      writeFileSync(join(root, "src/new.ts"), "n\n")
+      let result = run("lane/native")
+      assert.equal(result.status, 0, result.stderr)
+      assert.deepEqual(result.report.changed_paths, ["src/a.ts", "src/new.ts"])
+      assert.deepEqual(result.report.out_of_scope_paths, [])
+      assert.equal(result.report.commits_since_base, 1)
+      assert.equal(result.report.in_scope, true)
+
+      writeFileSync(join(root, "README.md"), "outside\n")
+      result = run("lane/native")
+      assert.equal(result.status, 1)
+      assert.deepEqual(result.report.out_of_scope_paths, ["README.md"])
+      assert.equal(result.report.in_scope, false)
+      rmSync(join(root, "README.md"))
+
+      git("switch", "-q", "-c", "elsewhere")
+      result = run("lane/native")
+      assert.equal(result.status, 1)
+      assert.equal(result.report.head_on_lane, false)
+      assert.match(result.report.drift, /current branch differs/)
+
+      const bad = spawnSync(process.execPath, ["--experimental-strip-types", cli, "scope-check", root], { encoding: "utf8" })
+      assert.equal(bad.status, 1)
+      assert.match(bad.stderr, /usage: pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE \[BRANCH\]/)
+    } finally {
+      rmSync(scope, { force: true })
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })

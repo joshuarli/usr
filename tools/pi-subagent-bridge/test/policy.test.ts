@@ -21,11 +21,11 @@ test("root admission keeps ordered lower-tier fallback and no expert route", () 
   }
 })
 
-test("native expert paths are first-class and Claude Code pins opus at medium thinking", () => {
+test("native expert paths are first-class and Claude Code pins opus at xhigh effort", () => {
   assert.equal(GO_TIER_MODELS.expert.providerID, "opencode-go")
   assert.deepEqual(NATIVE_FALLBACK.tiers, ["scout", "mechanic", "worker"])
   assert.deepEqual(NATIVE_FALLBACK.claudeModels, { scout: "haiku", mechanic: "sonnet", worker: "sonnet", expert: "opus" })
-  assert.deepEqual(NATIVE_FALLBACK.claudeThinking, { expert: "medium" })
+  assert.deepEqual(NATIVE_FALLBACK.claudeEffort, { expert: "xhigh" })
   assert.ok(OPENCODE_NATIVE.model.endsWith("-free"))
   assert.deepEqual(OPENCODE_NATIVE.efforts, { scout: "low", mechanic: "medium", worker: "high", expert: "max" })
 })
