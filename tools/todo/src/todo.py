@@ -74,20 +74,24 @@ def show_ticket(identifier, filename):
     if re.fullmatch(r'[A-Z]{3,4}-[1-9][0-9]*', identifier) is None:
         raise ValueError(f'{identifier}: invalid ticket ID')
     if filename is not None:
-        record = show_record(locate(filename), identifier)
+        path = locate(filename)
+        record = show_record(path, identifier)
     else:
-        local = next((directory / 'TODO.md' for directory in (Path.cwd(), *Path.cwd().parents)
-                      if (directory / 'TODO.md').is_file()), None)
-        record = show_record(local, identifier) if local is not None else None
+        path = next((directory / 'TODO.md' for directory in (Path.cwd(), *Path.cwd().parents)
+                     if (directory / 'TODO.md').is_file()), None)
+        record = show_record(path, identifier) if path is not None else None
         if record is None:
             matches = [(path, found) for path in workspace_backlogs()
                        if (found := show_record(path, identifier)) is not None]
             if len(matches) > 1:
                 raise ValueError(f'{identifier}: ambiguous ticket ID: ' + ', '.join(str(path) for path, _ in matches))
-            record = matches[0][1] if matches else None
-    if record is None:
+            path, record = matches[0] if matches else (None, None)
+    if record is None or path is None:
         raise ValueError(f'{identifier}: ticket not found')
-    print(json.dumps(record, indent=2))
+    result = subprocess.run(['git', '-C', str(path.parent), 'rev-parse', '--show-toplevel'],
+                            capture_output=True, text=True)
+    root = Path(result.stdout.strip()).resolve() if result.returncode == 0 else path.parent.resolve()
+    print(json.dumps({'repository_root': str(root), **record}, indent=2))
 
 
 def parse(text):

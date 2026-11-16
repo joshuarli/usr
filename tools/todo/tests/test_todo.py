@@ -101,7 +101,7 @@ class TodoTests(unittest.TestCase):
     def remote_backlog(self, relative, prefix='CHB', name='TODO.md'):
         path = self.root / 'repos' / relative / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        (path.parent / '.git').mkdir(exist_ok=True)
+        subprocess.run(['git', 'init', '-q', str(path.parent)], check=True, capture_output=True)
         path.write_text(f'Prefix: {prefix}\nNext: 11\n\n' +
                         f'### {prefix}-10 · P2 · Cross repository\n\n' +
                         ''.join(f'- **{label}:** {ITEM[key]}\n' for label, key in
@@ -112,11 +112,34 @@ class TodoTests(unittest.TestCase):
     def test_show_finds_cross_repo_ticket_with_and_without_a_local_backlog(self):
         remote = self.remote_backlog('org/chromium-build')
         original = remote.read_bytes()
-        self.assertEqual(json.loads(self.cli('show', 'CHB-10').stdout)['title'], 'Cross repository')
+        shown = json.loads(self.cli('show', 'CHB-10').stdout)
+        self.assertEqual(shown['title'], 'Cross repository')
+        self.assertEqual(next(iter(shown)), 'repository_root')
+        self.assertEqual(shown['repository_root'], str(remote.parent.resolve()))
         self.path.unlink()
-        self.assertEqual(json.loads(self.cli('show', 'CHB-10', '--json').stdout)['id'], 'CHB-10')
+        self.assertEqual(json.loads(self.cli('show', 'CHB-10', '--json').stdout), shown)
         self.assertEqual(remote.read_bytes(), original)
         self.assertFalse((remote.parent / '.todo.lock').exists())
+
+    def test_show_reports_the_git_root_for_a_nested_selected_backlog(self):
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True, capture_output=True)
+        self.cli('add', '--json', '-', data=ITEM)
+        nested = self.root / 'docs'
+        nested.mkdir()
+        selected = nested / 'TODO-OTHER.md'
+        selected.write_bytes(self.path.read_bytes())
+        result = subprocess.run([sys.executable, str(CLI), '--file', selected.name, 'show', 'ABC-1', '--json'],
+                                cwd=nested, env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        shown = json.loads(result.stdout)
+        self.assertEqual(shown['repository_root'], str(self.root.resolve()))
+        self.assertEqual(shown['where'], ITEM['where'])
+
+    def test_show_uses_the_backlog_directory_outside_git(self):
+        self.cli('add', '--json', '-', data=ITEM)
+        self.env['GIT_CEILING_DIRECTORIES'] = str(self.root.parent.resolve())
+        shown = json.loads(self.cli('show', 'ABC-1').stdout)
+        self.assertEqual(shown['repository_root'], str(self.root.resolve()))
 
     def test_show_ignores_unrelated_malformed_tickets_but_validates_the_requested_one(self):
         remote = self.remote_backlog('org/chromium-build')
