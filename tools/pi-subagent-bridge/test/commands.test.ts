@@ -78,6 +78,14 @@ test("CLI arguments become the same named arguments, reading file-valued ones", 
       && !error.message.includes(feedback) && error.message.includes('"please do the whole thing'))
 })
 
+test("attempt extensions require a bounded count and a reason", () => {
+  const base = { cwd: "/w", session_id, feedback: "Fix it" }
+  assert.deepEqual(decodeCommand("resume", cliArguments("resume", ["/w", session_id, "feedback.txt", "--extend-attempts", "2", "--reason", "Reviewed"], read)),
+    { name: "resume", ...base, extension: { extend_attempts: 2, extension_reason: "Reviewed" } })
+  for (const extra of [{ extend_attempts: 1 }, { extension_reason: "why" }, { extend_attempts: 3, extension_reason: "why" }, { extend_attempts: 1, extension_reason: " " }])
+    assert.throws(() => decodeCommand("resume", { ...base, ...extra }))
+})
+
 test("string field bounds agree between schema and decoder", () => {
   const sample = { cwd: "/w", title: "t", tier: "worker", scope, brief: "b", session_id, feedback: "f", note: "n" }
   for (const [name, field, max] of [["start", "cwd", 32000], ["model_check", "tier", 8], ["start", "title", 100], ["start", "brief", 32000], ["status", "session_id", 64], ["resume", "feedback", 32000], ["steer", "note", 32000]] as const) {

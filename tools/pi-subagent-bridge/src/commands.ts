@@ -66,9 +66,10 @@ export const COMMANDS: Record<CommandName, {
 
 export function toolSchema(name: CommandName) {
   const fields = COMMANDS[name].fields
-  return { type: "object", properties: { ...Object.fromEntries(fields.map(field => [field, FIELDS[field].schema])), ...(name === "resume" ? {
+  const properties: Record<string, object> = { ...Object.fromEntries(fields.map(field => [field, FIELDS[field].schema])), ...(name === "resume" ? {
     extend_attempts: { type: "integer", minimum: 1, maximum: 2 }, extension_reason: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S" },
-  } : {}) },
+  } : {}) }
+  return { type: "object", properties,
     required: fields, ...(name === "resume" ? { dependentRequired: { extend_attempts: ["extension_reason"], extension_reason: ["extend_attempts"] } } : {}), additionalProperties: false }
 }
 export function usage(name: CommandName): string {
