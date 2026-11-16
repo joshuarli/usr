@@ -18,7 +18,7 @@ type Help = { usage: string; description: string; details: string[]; example: st
 const help: Record<string, Help> = {
   policy: { usage: "policy", description: "Print the approved routing policy as JSON.", details: [], example: "policy" },
   mcp: { usage: "mcp [--repo DIR]...", description: "Serve the MCP bridge.", details: ["--repo DIR  Register an owner for DIR; may be repeated."], example: "mcp --repo /work/project" },
-  "scope-check": { usage: "scope-check CWD SCOPE_JSON_FILE [BRANCH]", description: "Check a lane the bridge did not admit, such as a native expert subagent, against a scope: changed and out-of-scope paths since base_revision and whether HEAD stayed on the lane. Exits 1 when the lane is out of scope.", details: ["CWD  Lane worktree root (required).", "SCOPE_JSON_FILE  Scope JSON with base_revision and writable_paths (required).", "BRANCH  Lane branch HEAD must stay on (default: the current branch)."], example: "scope-check /work/project/.work/wt/lane scope.json lane/name" },
+  "scope-check": { usage: "scope-check CWD SCOPE_JSON_FILE [BRANCH]", description: "Check a lane the bridge did not admit, such as a native expert subagent, against a scope: changed and out-of-scope paths since base_revision and whether HEAD stayed on the lane. Exits 1 when the lane is out of scope.", details: ["CWD  Lane worktree root (required).", "SCOPE_JSON_FILE  Scope JSON with base_revision and writable_paths (required).", "BRANCH  Lane branch HEAD must stay on (default: the current branch).", "--register TITLE  Record a native lane; scope-check --lane ID checks it from its repository."], example: "scope-check /work/project/.work/wt/lane scope.json lane/name" },
   inspect: { usage: "inspect PATH SESSION_ID", description: "Print a session snapshot as JSON.", details: ["PATH  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required)."], example: "inspect /work/project usrw_12345678-1234-1234-1234-123456789abc" },
   watch: { usage: "watch [--state] ROOT SESSION_ID [IDLE_MINUTES]", description: "Watch a session until it finishes or needs attention.", details: ["--state  Print state only; cannot be combined with IDLE_MINUTES.", "ROOT  Repository or worktree path (required).", "SESSION_ID  Worker session ID (required).", "IDLE_MINUTES  Idle threshold in minutes (default: 45)."], example: "watch /work/project usrw_12345678-1234-1234-1234-123456789abc 45" },
   "campaign wait": { usage: "campaign wait [--timeout DURATION] [ROOT...]", description: "Wait for unacknowledged sessions needing attention.", details: ["--timeout DURATION  Timeout in seconds, or with s, m, or h suffix (default: no timeout).", "ROOT  Repository roots, repeated; defaults to WORKER_CAMPAIGN_ROOTS (colon-separated).", "--  End options."], example: "campaign wait --timeout 5m /work/project" },
@@ -156,6 +156,23 @@ async function main(args: string[]): Promise<void> {
     return
   }
   if (op === "scope-check") {
+    if (rest[0] === "--lane" && rest.length === 2) {
+      const { checkNative } = await import("./scope-check.ts")
+      const result = checkNative(process.cwd(), rest[1])
+      process.stdout.write(JSON.stringify(result) + "\n")
+      if (!result.in_scope) process.exitCode = 1
+      return
+    }
+    const registerAt = rest.indexOf("--register")
+    if (registerAt >= 0) {
+      const title = rest[registerAt + 1]
+      if (!title || registerAt + 2 !== rest.length) throw new Error("usage: pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE")
+      const [cwd, file, branch, ...extra] = rest.slice(0, registerAt)
+      if (!cwd || !file || extra.length) throw new Error("usage: pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE")
+      const { registerNative } = await import("./scope-check.ts")
+      process.stdout.write(registerNative(cwd, JSON.parse(readFileSync(resolve(file), "utf8")), title, branch).id + "\n")
+      return
+    }
     const [cwd, file, branch, ...extra] = rest
     const { SCOPE_CHECK_USAGE, scopeCheck } = await import("./scope-check.ts")
     if (!cwd || !file || extra.length) throw new Error(SCOPE_CHECK_USAGE)

@@ -48,7 +48,7 @@ Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devi
 
 - Create its worktree and branch, and name that worktree in the brief as the only place it may write. Write the scope as a bridge scope JSON (`base_revision`, `writable_paths`, `acceptance_proof`, `stop_on`).
 - Put the bridge's worker contract in the brief: commit only on the lane branch, never amend pre-existing commits, merge, rebase, switch branches or push; keep working until the acceptance proof is met or a listed stop condition applies; end with a proof record of exact commands, exit codes and decisive output, and a final `ACCEPTANCE: met` or `ACCEPTANCE: not met` line.
-- When it finishes, run `pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE BRANCH`. It reports changed and out-of-scope paths since `base_revision` and whether HEAD stayed on the lane, and exits 1 when either fails. Then review the diff as for any worker.
+- Register it with `pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE BRANCH --register TITLE` and retain the returned lane ID. When it finishes, from the repository run `pi-subagent-bridge scope-check --lane ID`. It reports changed and out-of-scope paths since `base_revision` and whether HEAD stayed on the lane, and exits 1 when either fails. Then review the diff as for any worker.
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify a native `expert` subagent. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 

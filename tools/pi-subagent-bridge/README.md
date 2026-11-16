@@ -13,7 +13,7 @@ Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which a
 | worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`) |
 <!-- policy:end routing-summary -->
 
-Expert assignments never enter the bridge. OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
+Expert assignments never enter the bridge. OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` at `xhigh` effort for expert work; Pi launches its native `expert` profile. `scope-check CWD SCOPE_JSON_FILE [BRANCH] --register TITLE` records a native lane, and `scope-check --lane ID` from its repository records its latest Git scope check. `campaign list` includes these lanes. `scope-check` applies the bridge's Git scope check to such a native lane (see `pi-subagent-bridge scope-check -h`). See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
 ## Setup
 

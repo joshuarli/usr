@@ -158,3 +158,33 @@ test("scope-check reports a native lane's changed paths, out-of-scope paths and 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test("native lane registration and campaign listing retain the last scope check", () => {
+  const root = mkdtempSync(join(tmpdir(), "usr-native-lane-"))
+  try {
+    const git = (...args: string[]) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" }).stdout.trim()
+    git("init", "-q", "-b", "lane")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "test")
+    writeFileSync(join(root, ".gitignore"), ".work/\n")
+    writeFileSync(join(root, "file"), "a")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    const scope = join(root, "scope.json")
+    writeFileSync(scope, JSON.stringify({ base_revision: git("rev-parse", "HEAD"), writable_paths: ["file", "scope.json"] }))
+    const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+    const run = (...args: string[]) => spawnSync(process.execPath, ["--experimental-strip-types", cli, ...args], { cwd: root, encoding: "utf8" })
+    const registration = run("scope-check", ".", "scope.json", "--register", "Native task")
+    assert.equal(registration.status, 0, registration.stderr)
+    const id = registration.stdout.trim()
+    assert.match(id, /^usrn_/)
+    writeFileSync(join(root, "file"), "b")
+    const checked = run("scope-check", "--lane", id)
+    assert.equal(checked.status, 0, checked.stderr)
+    const list = run("campaign", "list", "--json", ".")
+    assert.equal(list.status, 0, list.stderr)
+    const lane = JSON.parse(list.stdout).find((entry: { id: string }) => entry.id === id)
+    assert.equal(lane.kind, "native")
+    assert.deepEqual(lane.last_scope_check.changed_paths, ["file", "scope.json"])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

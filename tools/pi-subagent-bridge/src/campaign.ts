@@ -5,6 +5,7 @@ import { readStateDir } from "./git.ts"
 import { inspectStored, sessionPath, type InspectionDeps, type Snapshot } from "./inspect.ts"
 import { isSessionId } from "./session.ts"
 import { systemClock, type Clock } from "./watch.ts"
+import { isNativeId, type NativeLane } from "./scope-check.ts"
 
 export const CAMPAIGN_POLL_MS = 10_000
 export const EXIT_TICK = 2
@@ -128,9 +129,21 @@ async function wait(arguments_: string[], context: CampaignContext): Promise<num
 
 async function list(arguments_: string[], context: CampaignContext): Promise<number> {
   const json = arguments_.includes("--json")
-  const entries = await discover(stateDirectories(arguments_.filter((argument) => argument !== "--json"), context), context.deps)
+  const directories = stateDirectories(arguments_.filter((argument) => argument !== "--json"), context)
+  const entries = await discover(directories, context.deps)
+  const native: NativeLane[] = []
+  for (const directory of directories) {
+    let names: string[]
+    try { names = readdirSync(directory) } catch { continue }
+    for (const name of names) {
+      const id = name.endsWith(".json") ? name.slice(0, -5) : ""
+      if (!isNativeId(id)) continue
+      const lane = JSON.parse(readFileSync(join(directory, name), "utf8")) as NativeLane
+      if (lane.kind === "native" && lane.id === id) native.push(lane)
+    }
+  }
   if (json) {
-    context.stdout(JSON.stringify(entries.map(({ snapshot }) => snapshot)) + "\n")
+    context.stdout(JSON.stringify([...entries.map(({ snapshot }) => snapshot), ...native]) + "\n")
     return 0
   }
   const now = (context.clock ?? systemClock).now()
@@ -143,6 +156,7 @@ async function list(arguments_: string[], context: CampaignContext): Promise<num
     ].join("")
     context.stdout(snapshot.id + " " + snapshot.execution_state + " " + humanAge(age) + " " + snapshot.worktree + budgets + "\n")
   }
+  for (const lane of native) context.stdout(lane.id + " native " + lane.cwd + " " + cell(lane.title) + " scope=" + (lane.last_scope_check ? (lane.last_scope_check.in_scope ? "in" : "out") : "unchecked") + "\n")
   return 0
 }
 

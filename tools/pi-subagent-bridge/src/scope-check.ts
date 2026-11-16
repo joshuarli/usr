@@ -1,4 +1,7 @@
-import { changes, currentBranch, laneHead, outside } from "./git.ts"
+import { randomUUID } from "node:crypto"
+import { readFileSync, writeFileSync } from "node:fs"
+import { join, resolve } from "node:path"
+import { changes, currentBranch, laneHead, outside, stateDir, readStateDir } from "./git.ts"
 import { isRecord } from "./scope.ts"
 
 export const SCOPE_CHECK_USAGE = "usage: pi-subagent-bridge scope-check CWD SCOPE_JSON_FILE [BRANCH]"
@@ -12,6 +15,28 @@ export type ScopeCheck = {
   readonly changed_paths: readonly string[]
   readonly out_of_scope_paths: readonly string[]
   readonly in_scope: boolean
+}
+export type NativeLane = { id: string; kind: "native"; cwd: string; branch: string | null; scope: unknown; title: string; registered_at: string; last_scope_check: ScopeCheck | null }
+const NATIVE_ID = /^usrn_[a-f0-9-]{36}$/
+export function isNativeId(id: string): boolean { return NATIVE_ID.test(id) }
+export function registerNative(cwd: string, scope: unknown, title: string, branch?: string): NativeLane {
+  const absolute = resolve(cwd)
+  scopeFields(scope)
+  if (!title.trim() || title.length > 100) throw new Error("Invalid native lane title")
+  const lane: NativeLane = { id: "usrn_" + randomUUID(), kind: "native", cwd: absolute,
+    branch: branch ?? currentBranch(absolute), scope, title, registered_at: new Date().toISOString(), last_scope_check: null }
+  writeFileSync(join(stateDir(absolute), lane.id + ".json"), JSON.stringify(lane), { mode: 0o600, flag: "wx" })
+  return lane
+}
+export function checkNative(root: string, id: string): ScopeCheck {
+  if (!isNativeId(id)) throw new Error("Invalid native lane ID")
+  const path = join(readStateDir(resolve(root)), id + ".json")
+  const lane = JSON.parse(readFileSync(path, "utf8")) as NativeLane
+  if (lane.id !== id || lane.kind !== "native") throw new Error("Invalid native lane record")
+  const result = scopeCheck(lane.cwd, lane.scope, lane.branch ?? undefined)
+  lane.last_scope_check = result
+  writeFileSync(path, JSON.stringify(lane), { mode: 0o600 })
+  return result
 }
 
 function scopeFields(value: unknown): { base: string; writable: string[] } {
