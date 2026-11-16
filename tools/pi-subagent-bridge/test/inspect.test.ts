@@ -53,6 +53,17 @@ test("a live Command Code process with a terminal receipt is running", async () 
   assert.equal(snapshot.pid, pid)
 })
 
+test("inspection can omit live worktree scans and reads them after completion", async () => {
+  const repo = scratch.repo(), pid = scratch.alive()
+  const id = commandLane(repo, 91, pid, [receipt])
+  const live = await inspectStored(repo.directory, id, realDeps(), { omitRunningWorktree: true })
+  assert.equal(live.changed_paths, "unknown")
+  assert.equal(live.head_on_lane, "unknown")
+  await scratch.stop(pid)
+  const done = await inspectStored(repo.directory, id, realDeps(), { omitRunningWorktree: true })
+  assert.deepEqual(done.changed_paths, [])
+})
+
 test("a live Pi host with a terminal receipt is running", async () => {
   const repo = scratch.repo(), pid = scratch.alive()
   writePiChild(repo, pid, piSuccess())

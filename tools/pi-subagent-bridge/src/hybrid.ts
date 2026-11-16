@@ -311,7 +311,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   }
   function statusResponse(i: Inspection) {
     const s = i.session
-    if (i.worktree.kind === "unreadable") throw new Error(i.worktree.reason)
+    if (i.worktree.kind !== "read") throw new Error(i.worktree.kind === "unreadable" ? i.worktree.reason : "Worktree inspection omitted")
     const { head, changed_paths, out_of_scope_paths } = i.worktree
     const head_unchanged = head === s.scope.base_revision
     const { head_on_lane, commits_since_base } = laneHead(s)

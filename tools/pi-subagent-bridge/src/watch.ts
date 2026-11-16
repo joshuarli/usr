@@ -40,8 +40,9 @@ export async function watchSession(
   if (!isSessionId(id)) return refuse("not a worker session ID")
   let directory: string
   try { directory = readStateDir(path) } catch { return refuse("not a Git repository: " + path) }
+  let previousActivity: string | undefined, delay = pollMs
   for (;;) {
-    const snapshot = await inspectStored(directory, id, deps)
+    const snapshot = await inspectStored(directory, id, deps, { omitRunningWorktree: true })
     const state = snapshot.execution_state
     if (options.stateOnly) { stdout(state + "\n"); return 0 }
     if (snapshot.attention === "unknown" || snapshot.attention === "needs_attention")
@@ -63,6 +64,9 @@ export async function watchSession(
         return EXIT_STALLED
       }
     }
-    await clock.sleep(pollMs)
+    const activityKey = snapshot.last_activity + "\n" + snapshot.last_event
+    delay = previousActivity === undefined || previousActivity !== activityKey ? pollMs : Math.min(delay * 2, 60_000)
+    previousActivity = activityKey
+    await clock.sleep(delay)
   }
 }

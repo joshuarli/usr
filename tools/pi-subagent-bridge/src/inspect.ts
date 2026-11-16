@@ -4,7 +4,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from
 import { join } from "node:path"
 import { type ModelRef } from "./bridge.ts"
 import type { CommandResult, CommandRun } from "./command.ts"
-import { changes, git, laneHead, outside } from "./git.ts"
+import { inspectionChanges, inspectionGit, laneHead, outside } from "./git.ts"
 import type { FallbackPlan, PiSelection } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
@@ -64,6 +64,7 @@ export type Known = { observation: Observation; blocked?: { state: string; notic
 type Route = { model: string | PiSelection; effort: Effort }
 type Worktree =
   | { kind: "read"; head: string; changed_paths: string[]; out_of_scope_paths: string[] }
+  | { kind: "omitted" }
   | { kind: "unreadable"; reason: string }
 export type Inspection = {
   observed_at: string
@@ -290,8 +291,8 @@ function inheritedNotice(s: Session, state: string): string | null {
 
 function readWorktree(s: Session): Worktree {
   try {
-    const changed_paths = changes(s.cwd, s.scope.base_revision)
-    return { kind: "read", head: git(s.cwd, "rev-parse", "HEAD"), changed_paths,
+    const changed_paths = inspectionChanges(s.cwd, s.scope.base_revision)
+    return { kind: "read", head: inspectionGit(s.cwd, "rev-parse", "HEAD"), changed_paths,
       out_of_scope_paths: outside(changed_paths, s.scope.writable_paths) }
   } catch (error) {
     return { kind: "unreadable", reason: error instanceof Error ? error.message : String(error) }
@@ -301,8 +302,8 @@ function routeOf(s: Session): Route {
   return { model: admittedModel(s), effort: admittedEffort(s) }
 }
 
-function compose(s: Session, observation: Observation, blocked?: Known["blocked"]): Inspection {
-  const worktree = readWorktree(s)
+function compose(s: Session, observation: Observation, blocked?: Known["blocked"], omitRunningWorktree = false): Inspection {
+  const worktree: Worktree = omitRunningWorktree && classifyState(observation.state) === "active" ? { kind: "omitted" } : readWorktree(s)
   const clean = worktree.kind === "read" ? worktree.head === s.scope.base_revision && worktree.changed_paths.length === 0 : null
   const settled = blocked ?? settledState(s, observation, clean)
   const claim = acceptanceClaim(observation.final_text?.slice(-5000) ?? null)
@@ -346,8 +347,8 @@ export function toSnapshot(i: Inspection): Snapshot {
     last_event: i.observation.last_event,
     changed_paths: read?.changed_paths ?? "unknown", out_of_scope_paths: read?.out_of_scope_paths ?? "unknown",
     head_unchanged: read ? read.head === s.scope.base_revision : "unknown",
-    head_on_lane: read ? laneHead(s).head_on_lane : "unknown",
-    commits_since_base: read ? laneHead(s).commits_since_base : "unknown",
+    head_on_lane: read ? laneHead(s, inspectionGit).head_on_lane : "unknown",
+    commits_since_base: read ? laneHead(s, inspectionGit).commits_since_base : "unknown",
     acceptance_claim: i.acceptance_claim, stopped_on: i.stopped_on, stop_condition_valid: i.stop_condition_valid,
     continuations: s.continuations ?? 0, attempt_extensions: (s.attempt_extensions ?? []).reduce((sum, entry) => sum + entry.added, 0), continuation_limit: TURN_LIMIT_CONTINUATIONS,
     steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
@@ -370,7 +371,7 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
   }
 }
 
-export async function inspectStored(directory: string, id: string, deps: InspectionDeps): Promise<Snapshot> {
+export async function inspectStored(directory: string, id: string, deps: InspectionDeps, options?: { omitRunningWorktree?: boolean }): Promise<Snapshot> {
   const path = sessionPath(directory, id)
   let raw: unknown
   try {
@@ -392,5 +393,5 @@ export async function inspectStored(directory: string, id: string, deps: Inspect
   } catch (error) {
     observation = withheld("unknown", describe(error), path)
   }
-  return toSnapshot(compose(session, observation))
+  return toSnapshot(compose(session, observation, undefined, options?.omitRunningWorktree))
 }

@@ -96,6 +96,19 @@ test("a live executor keeps the watch polling until its receipt appears", async 
   assert.ok(done.text.startsWith("finished: turn_limit\nran out"), done.text)
 })
 
+test("watch backs off unchanged output and resets on activity", async () => {
+  const id = commandLane(repo, 90, alive, [queued]), delays: number[] = []
+  const run = runFor(repo, "lane-90", alive)
+  const clock = { now: () => Date.now(), sleep: async (ms: number) => {
+    delays.push(ms)
+    if (delays.length === 3) writeLog(run.output, [toolQueued("new activity")])
+    if (delays.length === 5) writeSession(repo, 90, { command_run: runFor(repo, "lane-90", gone) })
+  } }
+  const out = collect()
+  await watchSession(repo.root, id, { idleMinutes: 45, stateOnly: false, clock }, realDeps(), out.write)
+  assert.deepEqual(delays, [15000, 30000, 60000, 15000, 30000])
+})
+
 test("Pi SDK terminal result is observed", async () => {
   writePiChild(repo, gone, piSuccess("SDK proof\nACCEPTANCE: met"))
   const id = piSession(repo, 10)
