@@ -407,8 +407,8 @@ def plan_policy_edits(doc: SourceDocument, source: bytes,
     return edits, notes
 
 
-def fix_main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Apply safe pinact fixes.")
+def build_parser():
+    parser = argparse.ArgumentParser(epilog="Example: pinact fix --diff. Full reference: pinact -h", description="Apply safe pinact fixes.")
     parser.add_argument("--diff", action="store_true",
                         help="print a diff without writing")
     parser.add_argument("--pin", action="store_true",
@@ -419,7 +419,12 @@ def fix_main(argv: list[str]) -> int:
                         help="upgrade catalog-backed actions to their approved catalog versions")
     parser.add_argument("--policy", action="append", default=[],
                         help="explicit policy KEY=VALUE (permissions, timeout-minutes)")
-    parser.add_argument("files", nargs="*", type=Path)
+    parser.add_argument("files", nargs="*", type=Path, help="YAML files (default: discover workflows and actions)")
+    return parser
+
+
+def fix_main(argv: list[str]) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     try:
         policy = _parse_policy(list(args.policy))

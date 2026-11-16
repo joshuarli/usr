@@ -484,14 +484,19 @@ def render_text(findings: list[Finding]) -> str:
     return "".join(line + "\n" for line in lines)
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Lint GitHub Actions workflow files.")
-    parser.add_argument("--format", choices=("text", "json"), default="text")
-    parser.add_argument("--profile", choices=("correctness", "default", "strict"), default="default")
+def build_parser():
+    parser = argparse.ArgumentParser(epilog="Example: pinact lint --format json. Full reference: pinact -h", description="Lint GitHub Actions workflow files.")
+    parser.add_argument("--format", choices=("text", "json"), default="text", help="output format (default: text)")
+    parser.add_argument("--profile", choices=("correctness", "default", "strict"), default="default", help="rule profile (default: default)")
     parser.add_argument("--select", default=None,
                         help="comma-separated rule IDs to report")
     parser.add_argument("--catalog", default=None, help="approved-pin catalog path (validation minimal in U2)")
     parser.add_argument("files", nargs="*", type=Path, help="YAML files (default: discover workflows and actions)")
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     select = [s.strip() for s in args.select.split(",") if s.strip()] if args.select else None
     findings, error = lint_files(args.files, profile=args.profile, select=select, catalog=args.catalog)

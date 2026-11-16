@@ -162,39 +162,69 @@ def execute(command: list[str], env: dict[str, str]) -> int:
 
 
 def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(
+    class Root(argparse.ArgumentParser):
+        def format_help(self):
+            lines = [super().format_help().rstrip(), "", "Commands:"]
+            for name, command in commands.choices.items():
+                lines.extend(["", command.format_usage().strip(), command.description or command_help[name]])
+                for action in command._actions:
+                    if action.dest != "help":
+                        lines.append(f"  {', '.join(action.option_strings) or action.dest}: {action.help or action.dest}")
+            lines.extend(["", "Examples:", *(f"  {example}" for example in examples), "", footer, ""])
+            return "\n".join(lines)
+
+    footer = """Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
+    examples = ("intercom-tailnet hub --listen tcp://100.64.0.1:47831", "intercom-tailnet enroll --host laptop --name coordinator --output /tmp/credential", "intercom-tailnet inspect", "intercom-tailnet revoke --session SESSION", "intercom-tailnet run --endpoint tcp://100.64.0.1:47831 --credential /tmp/credential -- pi", "intercom-tailnet doctor")
+    result = Root(
+        prog="intercom-tailnet",
         description="Connect explicitly enrolled top-level agent coordinators to one private Intercom hub.",
         epilog="Owned sources: https://github.com/joshuarli/usr (launcher/config) and https://github.com/joshuarli/pi-build (runtime). Change those repositories; do not patch installed packages.",
     )
-    commands = result.add_subparsers(dest="action", required=True)
+    commands = result.add_subparsers(dest="action", required=True, parser_class=argparse.ArgumentParser)
     hub = commands.add_parser("hub", help="run the canonical broker in the foreground")
     hub.add_argument("--listen", required=True, help="tcp://<literal Tailscale IP>:<port>")
     enroll = commands.add_parser("enroll", help="create one coordinator credential on the hub host")
-    enroll.add_argument("--fleet", default="default")
+    enroll.add_argument("--fleet", default="default", help="fleet name (default: default)")
     enroll.add_argument("--host", required=True, help="coordinator host label")
     enroll.add_argument("--name", required=True, help="coordinator name")
     enroll.add_argument("--output", required=True, help="new absolute private credential file")
-    enroll.add_argument("--ttl-ms", type=int)
-    enroll.add_argument("--session-ttl-ms", type=int)
+    enroll.add_argument("--ttl-ms", type=int, help="credential lifetime in milliseconds (default: runtime setting)")
+    enroll.add_argument("--session-ttl-ms", type=int, help="session lifetime in milliseconds (default: runtime setting)")
     inspect = commands.add_parser("inspect", help="inspect the hub's fleet without exposing credentials")
-    inspect.add_argument("--fleet", default="default")
+    inspect.add_argument("--fleet", default="default", help="fleet name (default: default)")
     revoke = commands.add_parser("revoke", help="revoke one coordinator session on the hub host")
-    revoke.add_argument("--session", required=True)
+    revoke.add_argument("--session", required=True, help="session identifier to revoke")
     for command in (hub, enroll, inspect, revoke):
         command.add_argument("--hub-dir", help="absolute dedicated hub state directory (default: $XDG_STATE_HOME/agent-intercom/hub)")
     run = commands.add_parser("run", help="run an enrolled Pi, Claude, Codex or OpenCode coordinator")
-    run.add_argument("--endpoint", required=True)
-    run.add_argument("--credential", required=True)
+    run.add_argument("--endpoint", required=True, help="hub transport endpoint")
+    run.add_argument("--credential", required=True, help="private credential file")
     run.add_argument("command", nargs=argparse.REMAINDER, help="-- pi|claude|codex|opencode|opencode2 [arguments]")
     doctor = commands.add_parser("doctor", help="check the local setup; optional reachability never enrolls or sends messages")
-    doctor.add_argument("--endpoint")
-    doctor.add_argument("--credential")
+    doctor.add_argument("--endpoint", help="hub transport endpoint to check")
+    doctor.add_argument("--credential", help="private credential file to check")
     doctor.add_argument("--connect", action="store_true", help="also make a bounded transport connection; does not prove authentication")
+    command_help = {action.dest: action.help for action in commands._choices_actions}
+    for name, command in commands.choices.items():
+        command.description = command_help[name]
+        example = next(example for example in examples if example.startswith(f"intercom-tailnet {name} ") or example == f"intercom-tailnet {name}")
+        command.epilog = f"Example: {example}\nFull reference: intercom-tailnet -h"
+        command.formatter_class = argparse.RawDescriptionHelpFormatter
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    argv = sys.argv[1:] if argv is None else argv
+    reference = parser()
+    if not argv:
+        reference.print_help()
+        return 0
+    args = reference.parse_args(argv)
     try:
         if (os.environ.get("PI_SUBAGENT_CHILD") == "1" or os.environ.get("USR_SCOPED_WORKER") == "1"
                 or "USR_REQUIRED_CHILD_EXTENSIONS_JSON" in os.environ):

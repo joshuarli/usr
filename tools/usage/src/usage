@@ -35,7 +35,18 @@ a subscription quota. With no provider, query every supported CLI installed
 here. These reads do not submit a model prompt. Claude Code uses its
 undocumented OAuth usage endpoint and does not refresh credentials. OpenCode
 Go queries its hosted usage endpoint with the stored OAuth credential.
-"""
+
+Full reference: usage -h
+
+Options:
+  -h, --help  show this reference
+
+Providers:
+""" + "".join(f"  usage {name}\n    Read {title} usage.\n" for name, title, _ in PROVIDERS) + """  usage opencode2
+    Alias for opencode.
+
+Examples:
+""" + "".join(f"  usage {name}\n" for name, _, _ in PROVIDERS) + "  usage opencode2\n"
 
 def stop_process(process):
     if process.stdin and not process.stdin.closed:
@@ -1229,21 +1240,26 @@ def print_cmd(result: dict[str, object]) -> None:
     elif percent is None:
         print(f"  {color('no subscription quota returned', '33')}")
 
-def main(arguments):
-    if arguments in (["-h"], ["--help"]):
-        print(HELP, end="")
-        print("\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md")
-        return 0
+def parse_provider(arguments):
     if len(arguments) > 1:
-        print(HELP, end="", file=sys.stderr)
-        return 2
+        return False, None
     selected = arguments[0] if arguments else None
     if selected == "opencode2":
         selected = "opencode"
-    providers = {item[0]: item for item in PROVIDERS}
-    if selected is not None and selected not in providers:
+    if selected is not None and selected not in {item[0] for item in PROVIDERS}:
+        return False, None
+    return True, selected
+
+def main(arguments):
+    if arguments in (["-h"], ["--help"]) or (len(arguments) == 2 and arguments[0] in {item[0] for item in PROVIDERS} | {"opencode2"} and arguments[1] in ("-h", "--help")):
+        print(HELP, end="")
+        print("\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md")
+        return 0
+    valid, selected = parse_provider(arguments)
+    if not valid:
         print(HELP, end="", file=sys.stderr)
         return 2
+    providers = {item[0]: item for item in PROVIDERS}
     candidates = (providers[selected],) if selected is not None else PROVIDERS
     available = []
     for item in candidates:

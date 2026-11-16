@@ -283,7 +283,28 @@ class OwnedHelpTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         result = subprocess.run([str(root / "dotfiles/base/.local/bin/pinact"), "--help"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("\nExamples:\n", result.stdout)
+        self.assertTrue(any(line.startswith("  pinact ") for line in result.stdout.splitlines()))
+        import shlex
+        for line in result.stdout.split("\nExamples:\n", 1)[1].splitlines():
+            if not line.startswith("  pinact "):
+                continue
+            for word in shlex.split(line, comments=True):
+                if word.startswith("--"):
+                    self.assertIn(word.split("=", 1)[0], result.stdout.split("\nExamples:\n", 1)[0])
         self.assertTrue(result.stdout.rstrip().endswith("Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"), result.stdout)
+
+    def test_documented_examples_parse(self):
+        import shlex
+        sys.path.insert(0, PINACT_MODULE._source_root())
+        self.addCleanup(sys.path.remove, PINACT_MODULE._source_root())
+        from pinact import pinning, lint, fixes
+        parsers = {"pin": pinning.build_parser, "lint": lint.build_parser, "fix": fixes.build_parser, "run": pinning.build_parser}
+        result = subprocess.run([str(PINACT), "-h"], capture_output=True, text=True)
+        for line in result.stdout.split("\nExamples:\n", 1)[1].splitlines():
+            if line.startswith("  pinact "):
+                words = shlex.split(line)
+                parsers[words[1]]().parse_args(words[2:])
 
 
 if __name__ == "__main__":

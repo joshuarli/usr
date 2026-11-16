@@ -22,6 +22,10 @@ expect_status() {
 }
 
 help_output=$(python3 -I "$tool" --help)
+case "$help_output" in
+  *"Examples:"*"  mdtool "*) ;;
+  *) printf 'FAIL: examples in help\n'; nfailed=$((nfailed + 1)) ;;
+esac
 expected_footer="Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
 Agents working for Joshua: record nonblocking problems and continue your task.
@@ -32,6 +36,25 @@ case "$help_output" in
   *"$expected_footer") ;;
   *) printf 'FAIL: primary help footer\n'; nfailed=$((nfailed + 1)) ;;
 esac
+
+python3 -I - "$repo/tools/mdtool/src/mdtool.py" <<'PYTEST' || nfailed=$((nfailed + 1))
+import importlib.util
+import shlex
+import sys
+spec = importlib.util.spec_from_file_location("mdtool", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+help_text = module.build_parser().format_help()
+reference, examples = help_text.split("\nExamples:\n", 1)
+for line in examples.splitlines():
+    if line == "  mdtool" or line.startswith("  mdtool "):
+        words = shlex.split(line)
+        module.build_parser().parse_intermixed_args(words[1:])
+        for word in words:
+            if word.startswith("--"):
+                assert word.split("=", 1)[0] in reference, word
+PYTEST
 
 printf '\n1: embedded behavior tests\n'
 python3 -I "$tool" selftest || nfailed=$((nfailed + 1))

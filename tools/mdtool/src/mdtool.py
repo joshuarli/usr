@@ -1929,7 +1929,22 @@ def emit(findings, total_files, quiet=False, json_mode=False, extra="", verbose=
 
 
 def build_parser():
-    parser=argparse.ArgumentParser(
+    class Root(argparse.ArgumentParser):
+        def format_help(self):
+            text = super().format_help()
+            descriptions = {
+                "links": "Check local links.", "anchors": "Inspect anchors in the given paths.",
+                "refs": "Check references.", "consumers": "Find consumers of documents.",
+                "pointers": "Check document pointers.", "dups": "Find duplicate content.",
+                "router": "Check agent instruction routers.", "check": "Run all checks.",
+                "commands": "Print check names; no options.", "selftest": "Run embedded tests; no options.",
+            }
+            commands = "Commands:\n" + "".join(
+                f"  mdtool {name} {'PATH [PATH ...]' if name == 'anchors' else '[OPTIONS] [PATH ...]' if name not in ('commands', 'selftest') else ''}\n    {description}\n"
+                for name, description in descriptions.items()) + "\n"
+            return text.replace("Examples:\n", commands + "Examples:\n")
+
+    parser=Root(
         prog="mdtool",
         description="Read-only audit of a repository's Markdown, MDX, reStructuredText, and the code that depends on those docs. Writes nothing and uses no network; the only subprocess is read-only git.",
         epilog="Examples:\n"
@@ -1940,6 +1955,12 @@ def build_parser():
                "  mdtool anchors docs/router.md\n"
                "  mdtool refs --json\n"
                "  mdtool consumers skills/mine/SKILL.md\n"
+               "  mdtool pointers docs/\n"
+               "  mdtool dups docs/\n"
+               "  mdtool router docs/\n"
+               "  mdtool commands\n"
+               "  mdtool selftest\n"
+               "Full reference: mdtool -h\n"
                "Exit status is 0 for no error findings, 1 for at least one, and 2 for a usage, root, or git failure. "
                f"Warnings and notes never change it. Full docs: {Path(__file__).resolve().parents[1]/'README.md'}."
         "\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md",

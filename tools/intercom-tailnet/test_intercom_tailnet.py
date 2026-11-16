@@ -252,5 +252,37 @@ class TailnetTests(unittest.TestCase):
         self.assertIn("does not match the selected Pi runtime", result.stderr)
 
 
+class HelpTests(unittest.TestCase):
+    def test_reference_and_examples(self):
+        import importlib.util
+        import shlex
+        spec = importlib.util.spec_from_file_location("intercom_tailnet", CLI)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        result = subprocess.run([sys.executable, "-I", str(CLI), "-h"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("\nExamples:\n", result.stdout)
+        examples = [line.strip() for line in result.stdout.splitlines() if line.startswith("  intercom-tailnet ") and "[" not in line]
+        for example in examples:
+            words = shlex.split(example)
+            module.parser().parse_args(words[1:])
+            for word in words:
+                if word.startswith("--") and word != "--":
+                    self.assertIn(word.split("=", 1)[0], result.stdout.split("\nExamples:\n", 1)[0])
+        self.assertEqual(len(examples), 6)
+        self.assertTrue(result.stdout.rstrip().endswith("""Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""))
+        bare = subprocess.run([sys.executable, "-I", str(CLI)], capture_output=True, text=True)
+        self.assertEqual((bare.returncode, bare.stdout), (0, result.stdout))
+        for name in ("hub", "enroll", "inspect", "revoke", "run", "doctor"):
+            page = subprocess.run([sys.executable, "-I", str(CLI), name, "-h"], capture_output=True, text=True)
+            self.assertEqual(page.returncode, 0, page.stderr)
+            self.assertIn("intercom-tailnet -h", page.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

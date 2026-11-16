@@ -1271,13 +1271,24 @@ def build_parser():
     root = Path(__file__).resolve().parents[3]
     readme = Path(__file__).resolve().parents[1] / "README.md"
     setup = root / "docs" / "agent-setup.md"
-    parser = argparse.ArgumentParser(
+    class Root(argparse.ArgumentParser):
+        def format_help(self):
+            text = super().format_help()
+            marker = "Examples:\n"
+            sections = []
+            for name, command in subcommands.choices.items():
+                sections.extend([command.format_usage().strip(), command.description or "", *(
+                    f"  {', '.join(action.option_strings) or action.dest}: {action.help or action.dest}"
+                    for action in command._actions if action.dest != "help"), ""])
+            return text.replace(marker, "Commands:\n" + "\n".join(sections) + marker)
+
+    parser = Root(
         prog="decide",
         description="Ask a bounded advisory decision question using Cloudflare Workers AI. It does not deploy a Worker. Uses an existing cf auth login session by default, or explicit CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.",
         epilog="Examples:\n"
         "  decide doctor\n"
         "  decide route --guide    # schema, example and when to call\n"
-        "  echo '{\"state\":\"...\",\"questions\":{...}}' | decide\n"
+        "  decide --model clef-flash < request.json\n"
         "  decide eval cases.jsonl\n"
         "  decide eval --live --max-calls 5 cases.jsonl\n"
         "\n"
@@ -1287,7 +1298,7 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--model", choices=tuple(MODELS), default="clef-flash", help="model to ask (default %(default)s)")
-    subcommands = parser.add_subparsers(dest="command", metavar="command")
+    subcommands = parser.add_subparsers(dest="command", metavar="command", parser_class=argparse.ArgumentParser)
     subcommands.add_parser("doctor", help="check local configuration without a request")
     route_parser = subcommands.add_parser(
         "route", help="advise on task tier from a structured, evidence-backed JSON brief"
@@ -1307,6 +1318,12 @@ def build_parser():
     eval_parser.add_argument("--live", action="store_true", help="make live model requests (refuses without --live)")
     eval_parser.add_argument("--max-calls", type=int, help="live request budget, 1 to 50")
     eval_parser.add_argument("path", help="JSONL cases file")
+    for action in subcommands._choices_actions:
+        command = subcommands.choices[action.dest]
+        command.description = action.help
+        example = {"doctor": "decide doctor", "route": "decide route --guide", "eval": "decide eval cases.jsonl"}[action.dest]
+        command.epilog = f"Example: {example}\nFull reference: decide -h"
+        command.formatter_class = argparse.RawDescriptionHelpFormatter
     return parser
 
 
