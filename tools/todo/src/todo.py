@@ -27,6 +27,69 @@ def locate(name):
     raise ValueError(f'{name} not found in this directory or its parents')
 
 
+def show_record(path, identifier):
+    text = path.read_text(encoding='utf-8')
+    matches = [match for match in TICKET.finditer(text) if match.group(1) == identifier]
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise ValueError(f'{path}: {identifier}: duplicate ID')
+    header = HEADER.match(text)
+    if header is None:
+        raise ValueError(f'{path}: expected Prefix and Next header')
+    start = matches[0].start()
+    following = re.search(r'^### ', text[matches[0].end():], re.M)
+    end = matches[0].end() + following.start() if following else len(text)
+    try:
+        _, _, _, records = parse(header.group() + '\n' + text[start:end])
+    except ValueError as error:
+        raise ValueError(f'{path}: {error}') from error
+    return {key: value for key, value in records[0].items() if not key.startswith('_')}
+
+
+def workspace_backlogs():
+    root = Path(os.environ.get('REPOMOD_ROOT', str(Path.home() / 'repos'))).expanduser()
+    if not root.is_absolute():
+        raise ValueError('REPOMOD_ROOT must be an absolute directory')
+    repositories = {Path(__file__).resolve().parents[3]}
+    pending = [root] if root.exists() else []
+    visited = set()
+    while pending:
+        directory = pending.pop().resolve()
+        if directory in visited:
+            continue
+        visited.add(directory)
+        if (directory / '.git').exists():
+            repositories.add(directory)
+            continue
+        for child in sorted(directory.iterdir()):
+            if child.name.startswith('.') or not child.is_dir():
+                continue
+            if not child.is_symlink() or (child / '.git').exists():
+                pending.append(child)
+    return sorted({path.resolve() for repo in repositories for path in repo.glob('TODO*.md') if path.is_file()})
+
+
+def show_ticket(identifier, filename):
+    if re.fullmatch(r'[A-Z]{3,4}-[1-9][0-9]*', identifier) is None:
+        raise ValueError(f'{identifier}: invalid ticket ID')
+    if filename is not None:
+        record = show_record(locate(filename), identifier)
+    else:
+        local = next((directory / 'TODO.md' for directory in (Path.cwd(), *Path.cwd().parents)
+                      if (directory / 'TODO.md').is_file()), None)
+        record = show_record(local, identifier) if local is not None else None
+        if record is None:
+            matches = [(path, found) for path in workspace_backlogs()
+                       if (found := show_record(path, identifier)) is not None]
+            if len(matches) > 1:
+                raise ValueError(f'{identifier}: ambiguous ticket ID: ' + ', '.join(str(path) for path, _ in matches))
+            record = matches[0][1] if matches else None
+    if record is None:
+        raise ValueError(f'{identifier}: ticket not found')
+    print(json.dumps(record, indent=2))
+
+
 def parse(text):
     header = HEADER.match(text)
     if not header:
@@ -172,9 +235,6 @@ def run(args, path):
         record = next ( (r for r in records if r['id'] == args.id), None)
         if record is None:
             raise ValueError(f'{args.id}: ticket not found')
-        if args.command == 'show':
-            print(json.dumps({k: v for k, v in record.items() if not k.startswith('_')}, indent=2))
-            return
         if args.command == 'close':
             index = records.index(record)
             if index:
@@ -198,7 +258,7 @@ def run(args, path):
 
 def main():
     parser = argparse.ArgumentParser(description='Manage a Markdown TODO backlog', epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--file', default='TODO.md', help='backlog file name to find in this directory or its parents (default: TODO.md)')
+    parser.add_argument('--file', help='select a backlog file name in this directory or its parents (default: TODO.md; show also searches workspace backlogs)')
     sub = parser.add_subparsers(dest='command', required=True)
     listing = sub.add_parser('list')
     listing.add_argument('--priority')
@@ -219,9 +279,12 @@ def main():
     fmt.add_argument('--check', action='store_true')
     args = parser.parse_args()
     try:
+        if args.command == 'show':
+            show_ticket(args.id, args.file)
+            return 0
         if args.command in ('add', 'edit'):
             args.data = json.load(sys.stdin)
-        path = locate(args.file)
+        path = locate(args.file or 'TODO.md')
         if args.command in ('add', 'edit', 'close') or (args.command == 'fmt' and not args.check):
             with lock(path):
                 run(args, path)

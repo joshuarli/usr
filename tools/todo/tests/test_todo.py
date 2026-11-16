@@ -17,9 +17,10 @@ class TodoTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.path = self.root / 'TODO.md'
         self.path.write_text('Prefix: ABC\nNext: 1\n\nIntroduction stays.\n\n')
+        self.env = os.environ | {'HOME': str(self.root / 'home'), 'REPOMOD_ROOT': str(self.root / 'repos')}
 
     def cli(self, *args, data=None, ok=True):
-        result = subprocess.run([sys.executable, str(CLI), *args], cwd=self.root, input=json.dumps(data) if data is not None else None, text=True, capture_output=True)
+        result = subprocess.run([sys.executable, str(CLI), *args], cwd=self.root, env=self.env, input=json.dumps(data) if data is not None else None, text=True, capture_output=True)
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return result
 
@@ -96,6 +97,66 @@ class TodoTests(unittest.TestCase):
         data = json.loads(self.cli('list', '--json').stdout)
         self.assertEqual(data['next'], 9)
         self.assertEqual(len({r['id'] for r in data['tickets']}), 8)
+
+    def remote_backlog(self, relative, prefix='CHB', name='TODO.md'):
+        path = self.root / 'repos' / relative / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        (path.parent / '.git').mkdir(exist_ok=True)
+        path.write_text(f'Prefix: {prefix}\nNext: 11\n\n' +
+                        f'### {prefix}-10 · P2 · Cross repository\n\n' +
+                        ''.join(f'- **{label}:** {ITEM[key]}\n' for label, key in
+                                [('Area', 'area'), ('Where', 'where'), ('Problem', 'problem'),
+                                 ('Recommendation', 'recommendation'), ('Fix with', 'fix_with'), ('Effort', 'effort')]))
+        return path
+
+    def test_show_finds_cross_repo_ticket_with_and_without_a_local_backlog(self):
+        remote = self.remote_backlog('org/chromium-build')
+        original = remote.read_bytes()
+        self.assertEqual(json.loads(self.cli('show', 'CHB-10').stdout)['title'], 'Cross repository')
+        self.path.unlink()
+        self.assertEqual(json.loads(self.cli('show', 'CHB-10', '--json').stdout)['id'], 'CHB-10')
+        self.assertEqual(remote.read_bytes(), original)
+        self.assertFalse((remote.parent / '.todo.lock').exists())
+
+    def test_show_ignores_unrelated_malformed_tickets_but_validates_the_requested_one(self):
+        remote = self.remote_backlog('org/chromium-build')
+        remote.write_text(remote.read_text().replace('### CHB-10', '### CHB-9 · P2 · Invalid\n\n- **Status:** legacy\n\n### CHB-10'))
+        self.assertEqual(json.loads(self.cli('show', 'CHB-10').stdout)['id'], 'CHB-10')
+        result = self.cli('show', 'CHB-9', ok=False)
+        self.assertIn('CHB-9', result.stderr)
+        self.assertIn('missing fields', result.stderr)
+
+    def test_show_rejects_ambiguous_global_ids_and_skips_worktrees(self):
+        first = self.remote_backlog('one')
+        second = self.remote_backlog('two')
+        result = self.cli('show', 'CHB-10', ok=False)
+        self.assertIn('ambiguous', result.stderr)
+        self.assertIn(str(first), result.stderr)
+        self.assertIn(str(second), result.stderr)
+        second.unlink()
+        self.remote_backlog('.work/wt/old')
+        (self.root / 'repos' / 'alias').symlink_to(first.parent, target_is_directory=True)
+        self.assertEqual(json.loads(self.cli('show', 'CHB-10').stdout)['id'], 'CHB-10')
+
+    def test_show_prefers_the_current_backlog_and_honors_explicit_file(self):
+        duplicate = self.remote_backlog('other', prefix='ABC')
+        duplicate.write_text(duplicate.read_text().replace('ABC-10', 'ABC-1'))
+        self.cli('add', '--json', '-', data=ITEM)
+        self.assertEqual(json.loads(self.cli('show', 'ABC-1').stdout)['title'], ITEM['title'])
+        self.remote_backlog('org/chromium-build')
+        result = self.cli('--file', 'TODO.md', 'show', 'CHB-10', ok=False)
+        self.assertIn('ticket not found', result.stderr)
+        self.remote_backlog('org/alternate', prefix='DSLP', name='TODO-DESLOP.md')
+        self.assertEqual(json.loads(self.cli('show', 'DSLP-10').stdout)['id'], 'DSLP-10')
+
+    def test_show_validates_ids_and_keeps_mutations_local(self):
+        remote = self.remote_backlog('other')
+        before = remote.read_bytes()
+        for identifier in ('../CHB-10', 'CHB-0', 'CHB-10/other'):
+            self.assertIn('invalid ticket ID', self.cli('show', identifier, ok=False).stderr)
+        self.cli('close', 'CHB-10', ok=False)
+        self.cli('edit', 'CHB-10', '--json', '-', data={'title': 'Changed'}, ok=False)
+        self.assertEqual(remote.read_bytes(), before)
 
 
 class OwnedHelpTests(unittest.TestCase):
