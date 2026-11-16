@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 85
+Next: 86
 
 
 
@@ -26,6 +26,15 @@ Next: 85
 - **Recommendation:** Keep the trust model: enrolled, tailnet-only, credential per host. Remove the per-session ceremony. (1) Run the hub on one always-on host under its existing supervisor, from one documented command. (2) Enroll once per host, not per session, storing the credential at a fixed private path. (3) Have the normal claude/codex/pi launchers join the hub automatically whenever that host credential exists, so every ordinary session is reachable without relaunching through `intercom-tailnet run`. (4) Give `intercom_list` a fleet scope that shows remote sessions by host. (5) Make `intercom-tailnet` find the pinned Node the same way the other usr tools do, so `doctor` works over non-login SSH. Acceptance: two ordinary sessions started normally on the Mac and on threadripper can `intercom_list` each other and exchange `intercom_ask`.
 - **Fix with:** none
 - **Effort:** M
+
+### USR-85 · P2 · Closeout rejects a local work exclude when tracked ignore wins
+
+- **Area:** Campaign lifecycle
+- **Where:** dotfiles/base/.local/bin/codex-campaign-closeout.py:ensure_work_directory; dotfiles/codex-campaign-closeout-test.py
+- **Problem:** Installed usr 521187d8f10d051c51d16061d45b338551de7117 is linked directly from the verified joshuarli/usr checkout. On Linux crabc, begin exits 1 claiming .work must be ignored through .git/info/exclude although that file contains /.work/ and .work/. Git check-ignore reports the higher-priority tracked .gitignore rule, so valid campaign worktrees cannot enter the closeout guard.
+- **Recommendation:** Verify the local exclude independently with Git's ignore engine rather than requiring it to be the winning overall rule. Retain rejection when only tracked ignore applies, leave existing data untouched, and cover both existing and initially absent work directories.
+- **Fix with:** none
+- **Effort:** S
 
 
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
