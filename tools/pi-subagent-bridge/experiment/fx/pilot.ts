@@ -16,6 +16,7 @@ export type JobBlock = "quota" | "auth" | "provider-stall"
 export function classifyJobBlock(input: {
   state: string
   lastText: string
+  error?: string | null
   elapsedMs: number
   wallMs: number
   stderrTail: string
@@ -23,7 +24,7 @@ export function classifyJobBlock(input: {
 }): JobBlock | null {
   if (input.state === "succeeded") return null
   if (input.probe === "quota") return "quota"
-  const err = input.stderrTail.toLowerCase()
+  const err = (input.stderrTail + "\n" + (input.error ?? "")).toLowerCase()
   if (/usage limit|goressagelimiterror|quota|insufficient|resets? in|credit/.test(err)) return "quota"
   if (input.probe === "auth" || /missingcredentials|missingsessionid|unauthorized|\b401\b|\b403\b/.test(err)) return "auth"
   if (!input.lastText.trim() && input.elapsedMs >= input.wallMs * 0.85) return "provider-stall"
@@ -49,7 +50,7 @@ export function renameEvidenceOk(files: Record<string, string>): string | null {
 export type PilotVerdict = "passed" | "blocked" | "failed"
 
 export function pilotVerdict(input: {
-  tasks: { key: string; state?: string; checks?: boolean; block?: JobBlock | null }[]
+  tasks: { key: string; state?: string; checks?: boolean; block?: JobBlock | null; backend?: string }[]
   continuation: {
     attempted: boolean
     accepted?: boolean
@@ -62,7 +63,10 @@ export function pilotVerdict(input: {
 }): PilotVerdict {
   const required = ["scout", "fix", "multi"]
   const byKey = new Map(input.tasks.map(t => [t.key, t]))
-  const ok = (t?: { state?: string; checks?: boolean }) => t?.state === "succeeded" && t.checks === true
+  // A task completed by an approved fallback lane proves orchestration continuity,
+  // not FX inference; only an "fx" backend (or an unspecified test double) counts.
+  const fxLane = (t?: { backend?: string }) => t?.backend === undefined || t.backend === "fx"
+  const ok = (t?: { state?: string; checks?: boolean; backend?: string }) => t?.state === "succeeded" && t.checks === true && fxLane(t)
   const allTasksOk = required.every(key => ok(byKey.get(key)))
   const c = input.continuation
   const contOk = c?.attempted === true && c.accepted === true && c.identity === true && c.checks === true

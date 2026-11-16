@@ -20,7 +20,15 @@ export type ProcessTarget =
   | { readonly executor: Exclude<CliExecutor, "fx">; readonly selection: CliPin }
   | { readonly executor: "fx"; readonly selection: FxSelection }
 export type LeafPlan = { readonly kind: "leaf"; readonly target: ProcessTarget }
-export type ExecutionPlan = RootPlan | LeafPlan
+/** FX first, then the admitted codex → command-code → pi ladder; used by the experimental FX path only. */
+export type FxFallbackPlan = {
+  readonly kind: "fx-fallback"
+  readonly fx: FxSelection
+  readonly codex: CliPin
+  readonly command: CliPin
+  readonly pi: PiDestinations
+}
+export type ExecutionPlan = RootPlan | LeafPlan | FxFallbackPlan
 /** `admitting` is the historical Pi admission state; only legacy records carry it. */
 export type PiTarget = { readonly executor: "pi"; readonly selection: PiSelection; readonly admitting?: true }
 export type Target = ProcessTarget | PiTarget
@@ -38,12 +46,12 @@ export type PiFirstPlan = { readonly kind: "pi-first"; readonly command: CliPin 
 /** Root plans plus the legacy arrangements records still carry; only resolved Pi plans can fall back to Pi. */
 export type AdmittedPlan =
   | ExecutionPlan | FallbackUnresolvedPiPlan | CommandFirstPlan | CommandFirstUnresolvedPiPlan | PiFirstPlan
-export type PiFallbackPlan = FallbackPlan | CommandFirstPlan
-export type LadderPlan = FallbackPlan | FallbackUnresolvedPiPlan | CommandFirstPlan | CommandFirstUnresolvedPiPlan
+export type PiFallbackPlan = FallbackPlan | CommandFirstPlan | FxFallbackPlan
+export type LadderPlan = FallbackPlan | FallbackUnresolvedPiPlan | CommandFirstPlan | CommandFirstUnresolvedPiPlan | FxFallbackPlan
 
 const UNRESOLVED_PI = "Legacy Pi fallback has no exact model snapshot; manual reconciliation required"
 export function piFallbackPlan(plan: LadderPlan): PiFallbackPlan {
-  if (plan.kind === "fallback" || plan.kind === "command-first") return plan
+  if (plan.kind === "fallback" || plan.kind === "command-first" || plan.kind === "fx-fallback") return plan
   throw new Error(UNRESOLVED_PI)
 }
 
@@ -119,7 +127,7 @@ export function admittedEffort(s: Session): Effort {
 
 /** Flat watcher fields stay as derived projections; decoding ignores them. */
 export function encodeSession(s: Session) {
-  return { schema_version: s.plan.kind === "leaf" ? SESSION_VERSION : 2, ...s, backend: backendOf(s), command_run: processRun(s), pi_id: piId(s) }
+  return { schema_version: s.plan.kind === "leaf" || s.plan.kind === "fx-fallback" ? SESSION_VERSION : 2, ...s, backend: backendOf(s), command_run: processRun(s), pi_id: piId(s) }
 }
 
 function optionalText(value: unknown, name: string): string | undefined {
@@ -178,11 +186,19 @@ function samePin(a: CliPin, b: CliPin): boolean {
 function samePi(a: PiSelection, b: PiSelection): boolean {
   return a.providerID === b.providerID && a.id === b.id && a.variant === b.variant
 }
+function sameFx(a: FxSelection, b: FxSelection): boolean {
+  return a.model === b.model && a.effort === b.effort && a.provider === b.provider && a.runtimeVersion === b.runtimeVersion
+}
 function coherent(plan: AdmittedPlan, to: Target): boolean {
   switch (plan.kind) {
     case "leaf":
       if (to.executor === "pi" || to.executor !== plan.target.executor || !samePin(to.selection, plan.target.selection)) return false
       return to.executor !== "fx" || (plan.target.executor === "fx" && to.selection.provider === plan.target.selection.provider && to.selection.runtimeVersion === plan.target.selection.runtimeVersion)
+    case "fx-fallback":
+      if (to.executor === "fx") return sameFx(to.selection, plan.fx)
+      return to.executor === "codex" ? samePin(to.selection, plan.codex) :
+        to.executor === "command-code" ? samePin(to.selection, plan.command) :
+        to.executor === "pi" && plan.pi.some(candidate => samePi(candidate, to.selection))
     case "exclusive": return to.executor === "antigravity" && samePin(to.selection, plan.target)
     case "fallback":
       return to.executor === "codex" ? samePin(to.selection, plan.codex) :
@@ -206,6 +222,11 @@ function decodePlan(value: unknown): AdmittedPlan {
       const target = decodeTarget(value.target)
       if (target.executor === "pi") throw new Error("A leaf plan requires a subprocess runtime")
       return { kind: "leaf", target }
+    }
+    case "fx-fallback": {
+      const fx = decodeTarget({ executor: "fx", selection: value.fx })
+      if (fx.executor !== "fx") throw new Error("Invalid persisted FX plan")
+      return { kind: "fx-fallback", fx: fx.selection, codex: pin(value.codex), command: pin(value.command), pi: piList(piSelections(value.pi)) }
     }
     case "exclusive": return { kind: "exclusive", target: pin(value.target) }
     case "fallback":
@@ -357,7 +378,7 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
     throw new Error("Unsupported worker session version; manual reconciliation required")
   if (value.cwd !== cwd || value.id !== id || !isTier(value.tier)) throw new Error("Session/worktree mismatch")
   const { plan, execution } = (version === SESSION_VERSION || version === 2) ? decodeCurrent(value) : decodeLegacy(value, value.tier)
-  if (version === 2 && (plan.kind === "leaf" || destinationOf(execution).executor === "fx"))
+  if (version === 2 && (plan.kind === "leaf" || plan.kind === "fx-fallback" || destinationOf(execution).executor === "fx"))
     throw new Error("FX/leaf routes require session schema 3; manual reconciliation required")
   if ((plan.kind === "exclusive" && value.tier !== "expert") || !coherent(plan, destinationOf(execution)))
     throw new Error("Execution leaves the admitted plan; manual reconciliation required")

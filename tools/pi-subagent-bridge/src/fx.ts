@@ -73,6 +73,7 @@ export function fxResult(run: CommandRun, expected: FxSelection) {
     if (!sameSelection(job.selection, expected)) throw new Error("FX admitted pin mismatch")
     if (!isRecord(receipt) || receipt.schema !== 1 || receipt.nonce !== job.nonce || receipt.supervisor_pid !== run.pid || typeof receipt.stdout !== "string" || typeof receipt.stderr !== "string") throw new Error("Invalid FX termination receipt")
     if (receipt.reason === "cancelled") return { state: "interrupted", result: null, stderr: receipt.stderr }
+    if (receipt.reason === "exhausted") return { state: "failed", result: { subtype: "error" as const, error: "provider quota exhaustion: FX reported a quota failure or a retry delay beyond this job's bound; terminated early", finalText: "" }, stderr: receipt.stderr }
     if (receipt.reason !== "exit" || receipt.signal !== null || receipt.code !== 0) return { state: "failed", result: { subtype: "error" as const, error: `${String(receipt.reason)}: FX exited ${String(receipt.code)} with signal ${String(receipt.signal)}`, finalText: "" }, stderr: receipt.stderr }
     const value: unknown = JSON.parse(receipt.stdout)
     const id = nativeSession(job)
@@ -132,7 +133,7 @@ export function makeFxAdapter(options: FxOptions) {
     const job: Job = { nonce, cwd, fxHome, selection: request.selection, output, errors, ...(resume ? { resume } : {}) }
     const args = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=20", ...(resume ? ["--resume", resume] : []), "--", request.prompt]
     const jobPath = output + ".job.json"
-    writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs }), { mode: 0o600 })
+    writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs, exhaustion: { dir: join(fxHome, "sessions/v2"), retry_after_seconds: Math.max(1, Math.floor(wallMs / 1000)) } }), { mode: 0o600 })
     const child = spawn(process.execPath, [fileURLToPath(new URL("./process-supervisor.ts", import.meta.url)), jobPath], { detached: true, stdio: "ignore", env: { ...env, PATH: process.env.PATH }, cwd })
     child.once("error", error => writeFileSync(errors, error.message))
     if (!child.pid) throw new Error("FX supervisor admission uncertain")

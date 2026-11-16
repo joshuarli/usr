@@ -8,7 +8,7 @@ import { makeFxAdapter, fxResult, type FxSelection } from "../src/fx.ts"
 import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk, scoutFindingOk } from "../experiment/fx/pilot.ts"
 import { makeHybridBridge } from "../src/hybrid.ts"
 import { piAdapter } from "../src/pi-adapter.ts"
-import { decodeSession, encodeSession, type ExecutionPlan } from "../src/session.ts"
+import { decodeSession, encodeSession, type ExecutionPlan, type FxFallbackPlan } from "../src/session.ts"
 import type { CommandRun } from "../src/command.ts"
 
 const selection: FxSelection = { model: "fixture-model", effort: "high", provider: "fixture", runtimeVersion: "0.0.17" }
@@ -24,8 +24,14 @@ fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs
 const mode=${JSON.stringify(behavior)};
 if(mode==='oversized')process.stdout.write('x'.repeat(1100000));
 else if(mode==='malformed')process.stdout.write('{\"exit_code\":');
-else if(mode!=='hold')console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:mode==='empty'?'':'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
-if(['hold','oversized','early-json'].includes(mode))setInterval(()=>{},1000);
+else if(!['hold','exhaust','quotafail','smallretry'].includes(mode))console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:mode==='mismatch'?'foreign-session':id,final_output:mode==='empty'?'':'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
+if(['exhaust','quotafail','smallretry'].includes(mode))setTimeout(()=>{
+  const rec=mode==='exhaust'?{v:1,seq:2,ts:Date.now(),kind:'item',turn:1,type:'model_call',data:{outcome:'failed',failure:'rate_limited',retry_after_s:999999}}
+    :mode==='quotafail'?{v:1,seq:2,ts:Date.now(),kind:'item',turn:1,type:'model_call',data:{outcome:'failed',failure:'quota'}}
+    :{v:1,seq:2,ts:Date.now(),kind:'item',turn:1,type:'model_call',data:{outcome:'failed',failure:'rate_limited',retry_after_s:3}};
+  fs.appendFileSync(p.join(dir,'log.jsonl'),JSON.stringify(rec)+'\\n');
+},300);
+if(['hold','oversized','early-json','exhaust','quotafail','smallretry'].includes(mode))setInterval(()=>{},1000);
 `
   writeFileSync(binary, source, { mode: 0o755 })
   const fx = makeFxAdapter({ binary, binarySha256: createHash("sha256").update(source).digest("hex"), home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [], wallMs })
@@ -249,6 +255,8 @@ test("FX live pilot verdict distinguishes passed, blocked and failed", () => {
   assert.equal(pilotVerdict({ tasks, continuation: { attempted: true, accepted: false, nativeSession: true } }), "failed")
   assert.equal(pilotVerdict({ tasks, continuation: { attempted: false, nativeSession: false, reason: "no-native-session" } }), "blocked")
   assert.equal(pilotVerdict({ tasks: tasks.map(t => ({ ...t, block: "quota" as const })), continuation: { attempted: false, nativeSession: false } }), "blocked")
+  assert.equal(pilotVerdict({ tasks: tasks.map(t => ({ ...t, backend: "codex" })), continuation: contOk }), "blocked")
+  assert.equal(pilotVerdict({ tasks: [{ key: "scout", state: "succeeded", checks: true, backend: "pi" }, ...tasks.slice(1)], continuation: contOk }), "blocked")
 })
 
 test("FX live pilot provider classification separates quota, auth and transient stalls", () => {
@@ -283,4 +291,139 @@ test("FX live pilot task evidence rejects citation-shaped and rename-incomplete 
   assert.match(String(renameEvidenceOk({ ...good, rust: good.rust.replace("settled_balance", "balance_after") })), /old name/)
   assert.match(String(renameEvidenceOk({ ...good, "python-test": "from ledger import balance_after\n" })), /old name/)
   assert.match(String(renameEvidenceOk({ ...good, "ts-check": "import { summarize } from './ledger.mjs'\n" })), /lacks settled_balance/)
+})
+
+test("FX provider exhaustion surfaces promptly as a quota-classified failure", async t => {
+  for (const behavior of ["exhaust", "quotafail"] as const) {
+    const f = fixture(t, behavior, 20000), run = f.fx.start(f.request)
+    const result = await ended(run)
+    assert.equal(result.state, "failed")
+    assert.match(String(result.result!.error), /quota exhaustion/)
+    assert.equal(JSON.parse(readReceipt(run)!).reason, "exhausted")
+  }
+})
+
+test("a provider retry hint inside the job bound does not count as exhaustion", async t => {
+  const f = fixture(t, "smallretry", 6000), run = f.fx.start(f.request)
+  const result = await ended(run)
+  assert.equal(result.state, "failed")
+  assert.equal(JSON.parse(readReceipt(run)!).reason, "deadline")
+})
+
+const FX_LADDER: FxFallbackPlan = {
+  kind: "fx-fallback",
+  fx: selection,
+  codex: { model: "gpt-6.1-terra", effort: "high" },
+  command: { model: "deepseek/deepseek-v4.1-flash", effort: "high" },
+  pi: [{ providerID: "opencode-go", id: "muse-spark-1.3-contributor", variant: "high" }],
+}
+
+function commandLane(available = true) {
+  const launches: unknown[] = []
+  return {
+    launches,
+    runner: {
+      available: () => available,
+      start: (request: { selection: { model: string; effort: string } }) => {
+        launches.push(request.selection)
+        return { pid: 4242, output: "cmd-out", errors: "cmd-err", started_at: "2026-11-15T00:00:00Z" }
+      },
+      status: () => ({ state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "cmd-session", finalText: "PROOF\nACCEPTANCE: met" }, stderr: null }),
+      cancel: () => true,
+    },
+  }
+}
+
+function codexLane(available = false) {
+  const launches: unknown[] = []
+  return {
+    launches,
+    runner: {
+      available: () => available,
+      start: (request: { selection: { model: string; effort: string } }) => {
+        launches.push(request.selection)
+        return { pid: 4343, output: "codex-out", errors: "codex-err", started_at: "2026-11-15T00:00:00Z" }
+      },
+      status: () => ({ state: "succeeded" as const, result: { subtype: "success" as const, sessionId: "codex-session", finalText: "PROOF\nACCEPTANCE: met" }, stderr: null }),
+      cancel: () => true,
+      session: () => "codex-session",
+    },
+  }
+}
+
+async function settle(bridge: ReturnType<typeof makeHybridBridge>, cwd: string, id: string, ms = 30000) {
+  const deadline = Date.now() + ms
+  for (;;) {
+    const status = await bridge.status(cwd, id)
+    if (status.state !== "running" && status.state !== "queued") return status
+    if (Date.now() > deadline) throw new Error("session did not settle")
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+}
+
+function ladderScope(f: ReturnType<typeof fixture>) {
+  return { base_revision: f.repo.base, writable_paths: ["README"], acceptance_proof: "fixture proof", attempt_limit: 2, stop_on: "scope expansion" }
+}
+
+test("FX quota exhaustion advances exactly once to Command Code on a clean worktree", async t => {
+  const f = fixture(t, "exhaust", 20000)
+  const cmd = commandLane(), codex = codexLane(false)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
+  const status = await settle(bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(status.backend, "command-code")
+  assert.equal(status.state, "succeeded")
+  assert.match(status.fallback_reason ?? "", /FX provider\/model exhausted/)
+  assert.equal(cmd.launches.length, 1)
+  const session = decodeSession(JSON.parse(readFileSync(join(f.repo.directory, admitted.session_id + ".json"), "utf8")), f.repo.cwd, admitted.session_id)
+  assert.equal(session.plan.kind, "fx-fallback")
+  assert.equal(encodeSession(session).schema_version, 3)
+  await bridge.status(f.repo.cwd, admitted.session_id)
+  assert.equal(cmd.launches.length, 1)
+})
+
+test("FX exhaustion prefers Codex over Command Code when both lanes are approved", async t => {
+  const f = fixture(t, "exhaust", 20000)
+  const cmd = commandLane(), codex = codexLane(true)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
+  const status = await settle(bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(status.backend, "codex")
+  assert.equal(status.state, "succeeded")
+  assert.equal(codex.launches.length, 1)
+  assert.equal(cmd.launches.length, 0)
+})
+
+test("FX exhaustion after edits blocks fallback instead of replaying partial work", async t => {
+  const f = fixture(t, "exhaust", 20000)
+  const cmd = commandLane(), codex = codexLane(true)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
+  writeFileSync(join(f.repo.cwd, "README"), "partial\n")
+  const status = await settle(bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(status.state, "blocked_partial_work")
+  assert.equal(cmd.launches.length + codex.launches.length, 0)
+})
+
+test("FX exhaustion with every fallback lane unavailable ends blocked, never replayed", async t => {
+  const f = fixture(t, "exhaust", 20000)
+  const cmd = commandLane(false), codex = codexLane(false)
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => FX_LADDER, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
+  const status = await settle(bridge, f.repo.cwd, admitted.session_id)
+  assert.match(status.state, /^blocked_/)
+  assert.equal(cmd.launches.length + codex.launches.length, 0)
+})
+
+test("an unavailable FX primary admits the next approved lane with a recorded reason", async t => {
+  const f = fixture(t, "success")
+  const cmd = commandLane(), codex = codexLane(false)
+  const foreign: FxSelection = { ...selection, provider: "other-provider" }
+  const plan = { ...FX_LADDER, fx: foreign }
+  const bridge = makeHybridBridge(piAdapter(unusedApi()), cmd.runner, codex.runner, undefined, () => plan, f.fx)
+  const admitted = await bridge.start(f.repo.cwd, "fx-fallback", "worker", ladderScope(f), "task")
+  assert.match(admitted.fallback_reason ?? "", /FX runtime\/provider unavailable/)
+  const status = await settle(bridge, f.repo.cwd, admitted.session_id)
+  assert.equal(status.backend, "command-code")
+  assert.equal(cmd.launches.length, 1)
 })

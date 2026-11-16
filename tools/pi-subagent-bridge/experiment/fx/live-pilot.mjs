@@ -11,7 +11,7 @@ import { dispatch } from '../../src/server.ts'
 import { OwnerManager } from '../../src/owner.ts'
 import { ownerJobs, ownerResume } from '../../src/owner-client.ts'
 import { codexAvailable } from '../../src/codex.ts'
-import { CODEX_TIER_MODELS } from '../../src/policy.ts'
+import { CODEX_TIER_MODELS, ROOT_PLANS } from '../../src/policy.ts'
 import { workerEnvironment } from '../../src/worker-env.ts'
 import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk, scoutFindingOk } from './pilot.ts'
 
@@ -271,7 +271,9 @@ function profileAuth(profile, runRoot) {
 function liveBridge(fx, selections) {
   const resolvePolicy = tier => {
     if (tier !== 'scout' && tier !== 'worker') throw new Error('live pilot supports only scout and worker')
-    return { kind: 'leaf', target: { executor: 'fx', selection: selections[tier] } }
+    const tail = ROOT_PLANS[tier]
+    if (tail.kind !== 'fallback') throw new Error('live pilot requires a fallback root plan for ' + tier)
+    return { kind: 'fx-fallback', fx: selections[tier], codex: tail.codex, command: tail.command, pi: tail.pi }
   }
   return makeHybridBridge(optionalPiAdapter(), undefined, undefined, undefined, resolvePolicy, fx)
 }
@@ -354,7 +356,7 @@ async function runBridgeJob(bridge, repo, wtName, task, base) {
   if (timedOut && !termination) checkError = 'job exceeded wall deadline and termination could not be verified; parent checks skipped'
   else try { task.verify(wt, result.last_assistant_text); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
   const status = execFileSync('git', ['-C', wt, 'status', '--porcelain'], { encoding: 'utf8' })
-  return { task: task.key, tier: task.tier, backend: admitted.backend, session_id: admitted.session_id, state: result.state, timed_out: timedOut || undefined, termination: timedOut ? (termination ? 'verified' : 'unverified') : undefined, acceptance_claim: result.acceptance_claim ?? null, last_assistant_text: String(result.last_assistant_text ?? '').slice(0, 2000), elapsed_ms: Math.round(elapsed), sampled_peak_tree_rss_kib: peakRss, parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), ...(result.usage ? { usage: result.usage } : {}) }
+  return { task: task.key, tier: task.tier, backend: result.backend ?? admitted.backend, session_id: admitted.session_id, state: result.state, timed_out: timedOut || undefined, termination: timedOut ? (termination ? 'verified' : 'unverified') : undefined, acceptance_claim: result.acceptance_claim ?? null, error: result.error ?? null, fallback_reason: result.fallback_reason ?? null, last_assistant_text: String(result.last_assistant_text ?? '').slice(0, 2000), elapsed_ms: Math.round(elapsed), sampled_peak_tree_rss_kib: peakRss, parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), ...(result.usage ? { usage: result.usage } : {}) }
 }
 
 async function runPiCliJob(repo, wtName, task, base) {
@@ -450,21 +452,19 @@ export async function livePilot(binary, scratch, requested) {
     const preflight = profileAuth(profile, runRoot)
     if (!preflight.ready) { unavailable.push({ profile: name, reason: 'authentication unavailable', setup: preflight.setup }); continue }
     if (preflight.probe) {
-      const probe = await preflight.probe()
-      preflight.probe_result = probe
-      if (probe === 'quota' || probe === 'auth') {
-        unavailable.push({ profile: name, reason: probe === 'quota' ? 'provider quota exhausted' : 'provider rejected credentials', probe, setup: preflight.setup })
-        continue
-      }
+      // A quota/auth probe result is evidence about the FX lane only. The admitted
+      // fx-fallback plan owns failover, so a dead FX provider must not zero the
+      // batch; the session-log exhaustion watch surfaces it promptly per job.
+      preflight.probe_result = await preflight.probe()
     }
-    selected = { name, profile }; auth = preflight; break
+    selected = { name, profile, probe_result: preflight.probe_result }; auth = preflight; break
   }
   if (!selected) {
     console.log(JSON.stringify({ status: 'blocked', jobs_started: 0, profiles: unavailable }))
     return { status: 'blocked', exitCode: 75, report: { verdict: 'blocked', scope: BOUNDS, unavailable } }
   }
   const { name, profile } = selected
-  const report = { mode: 'live', profile: name, provider: profile.provider, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [] }
+  const report = { mode: 'live', profile: name, provider: profile.provider, probe_result: selected.probe_result ?? null, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [] }
   let owner = null
   try {
     const home = join(runRoot, 'home'), repo = join(home, 'repo')
@@ -492,10 +492,14 @@ export async function livePilot(binary, scratch, requested) {
       if (jobResult.state !== 'succeeded') {
         const probe = auth.probe ? await auth.probe() : null
         jobResult.provider_block = classifyJobBlock({
-          state: jobResult.state, lastText: jobResult.last_assistant_text ?? '', elapsedMs: jobResult.elapsed_ms,
-          wallMs: BOUNDS.wall_ms_per_job, stderrTail: runStderrTail(repo, jobResult.session_id), probe,
+          state: jobResult.state, lastText: jobResult.last_assistant_text ?? '', error: jobResult.error,
+          elapsedMs: jobResult.elapsed_ms, wallMs: BOUNDS.wall_ms_per_job,
+          stderrTail: runStderrTail(repo, jobResult.session_id), probe,
         })
-        if (jobResult.provider_block) providerBlocked = true
+        // Only a block on the FX lane itself should halt the batch: once the
+        // admitted ladder has fallen through to another backend, the FX probe
+        // result no longer predicts whether the remaining tasks can run.
+        if (jobResult.provider_block && (jobResult.backend ?? 'fx') === 'fx') providerBlocked = true
       }
     }
     const multi = jobs.find(j => j.task === 'multi')
@@ -522,12 +526,16 @@ export async function livePilot(binary, scratch, requested) {
     } else {
       report.incumbent = { status: 'unavailable', note: 'incumbent runtime not authenticated on this host' }
     }
-    report.incumbent_ran = jobs.some(j => j.backend !== 'fx')
-    const fxJobs = jobs.filter(j => j.backend === 'fx')
+    report.incumbent_ran = jobs.some(j => j.comparison_class !== undefined)
+    // FX-intended jobs are the ones admitted through the fx-fallback plan; incumbent
+    // comparisons carry an explicit comparison_class and never count as FX evidence.
+    const fxJobs = jobs.filter(j => j.comparison_class === undefined)
+    report.provider_failover = fxJobs.filter(j => j.backend !== 'fx')
+      .map(j => ({ task: j.task, from: 'fx', to: j.backend, state: j.state, fallback_reason: j.fallback_reason ?? null, parent_checks_passed: j.parent_checks_passed }))
     report.verdict = pilotVerdict({
       tasks: TASKS.map(t => {
         const j = fxJobs.find(x => x.task === t.key)
-        return { key: t.key, state: j?.state, checks: j?.parent_checks_passed === true, block: j?.provider_block ?? null }
+        return { key: t.key, state: j?.state, checks: j?.parent_checks_passed === true, block: j?.provider_block ?? null, backend: j?.backend }
       }),
       continuation: continuation ? {
         attempted: continuation.attempted === true, accepted: continuation.accepted,

@@ -9,7 +9,7 @@ import type { CliPin, FallbackPlan, PiSelection } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
   STEER_LIMIT, TURN_LIMIT_CONTINUATIONS, admittedEffort, admittedModel, backendOf, decodeSession, targetOf, processTarget,
-  type FallbackUnresolvedPiPlan, type LadderPlan, type PiFirstPlan, type ProcessExecution, type ProcessTarget, type Session,
+  type FallbackUnresolvedPiPlan, type FxFallbackPlan, type LadderPlan, type PiFirstPlan, type ProcessExecution, type ProcessTarget, type Session,
 } from "./session.ts"
 import type { Effort, Tier } from "./tier-policy.ts"
 
@@ -56,7 +56,8 @@ export type Observation = {
 }
 export type Claim = "met" | "not_met" | "missing"
 export type FallbackSource =
-  | { readonly kind: "codex"; readonly from: ProcessTarget; readonly plan: FallbackPlan | FallbackUnresolvedPiPlan }
+  | { readonly kind: "fx"; readonly from: ProcessTarget; readonly plan: FxFallbackPlan }
+  | { readonly kind: "codex"; readonly from: ProcessTarget; readonly plan: FallbackPlan | FallbackUnresolvedPiPlan | FxFallbackPlan }
   | { readonly kind: "command-code"; readonly from: ProcessTarget; readonly plan: LadderPlan }
   | { readonly kind: "pi"; readonly plan: PiFirstPlan }
 export type Known = { observation: Observation; blocked?: { state: string; notice: string } }
@@ -120,14 +121,19 @@ export function acceptanceClaim(text: string | null): Claim {
   return last === "acceptance: met" ? "met" : last === "acceptance: not met" ? "not_met" : "missing"
 }
 
+function continuedOn(s: Session): string {
+  const target = targetOf(s)
+  if (target.executor === "pi")
+    return target.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK"
+  return { codex: "Codex", "command-code": "Command Code", fx: "FX", antigravity: "Antigravity" }[target.executor]
+}
+
 export function fallbackNotice(s: Session): string {
   return [
     s.fallback_reason,
     "Automatic fallback is expected and needs no parent action.",
     "The worktree was verified untouched before switching, so no work was lost or replayed.",
-    "The task continues on " + (s.execution.kind === "pi"
-      ? (s.execution.selection.providerID === "muse-sdk" ? "Muse subscription via the Pi SDK" : "OpenCode Go via the Pi SDK")
-      : "Command Code") +
+    "The task continues on " + continuedOn(s) +
       " with the same scope and approved tier pins; verify it normally with worker_status.",
     "Do not retry and do not start a duplicate worker.",
   ].join(" ")
@@ -235,10 +241,12 @@ export function fallbackSource(s: Session, observation: Observation): FallbackSo
   if (execution.kind !== "process" || s.fallback_blocked) return null
   if (observation.state !== "failed" || !(quota(observation.error) || providerUnavailable(observation.error))) return null
   const from: ProcessTarget = processTarget(execution)
+  if (execution.executor === "fx")
+    return plan.kind === "fx-fallback" ? { kind: "fx", from, plan } : null
   if (execution.executor === "codex")
-    return plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ? { kind: "codex", from, plan } : null
+    return plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" || plan.kind === "fx-fallback" ? { kind: "codex", from, plan } : null
   if (execution.executor === "command-code" && (plan.kind === "fallback" || plan.kind === "fallback-unresolved-pi" ||
-      plan.kind === "command-first" || plan.kind === "command-first-unresolved-pi"))
+      plan.kind === "command-first" || plan.kind === "command-first-unresolved-pi" || plan.kind === "fx-fallback"))
     return { kind: "command-code", from, plan }
   return null
 }
@@ -256,7 +264,7 @@ function inheritedNotice(s: Session, state: string): string | null {
   const target = targetOf(s)
   if (target.executor === "pi" && ["failed", "interrupted", "cancelled", "canceled"].includes(state)) {
     const provider = target.selection.providerID === "muse-sdk" ? "the pinned Muse SDK fallback" : "the pinned OpenCode Go fallback"
-    return "The task was admitted to " + provider + " via Command Code's absence or failure, but that Pi run ended in " + state +
+    return "The task was admitted to " + provider + " after earlier approved lanes failed or were unavailable, but that Pi run ended in " + state +
       " (see error; it may have left partial edits). The worktree is retained and the lease is released. No automatic retry will occur: a fresh dispatch" +
       " re-admits with the best available lane, and a provider usage-limit error (for example 429) means every pinned lane is exhausted —" +
       " per the orchestrate quota-fallback rule, delegate to the harness's native subagents instead of restarting the bridge."

@@ -177,11 +177,10 @@ export function makeHybridBridge(api: PiAdapter, command = {
       case "command-code": return command.start({ ...request, access: accessFor(s) })
     }
   }
-  function fallbackToCommand(s: Session, pin: CliPin, reason: string, detail?: unknown): Session {
-    if (!command.available()) throw new Error(reason + "; Command Code cmd unavailable")
+  function fallbackToProcess(s: Session, target: ProcessTarget, reason: string, detail?: unknown): Session {
+    if (!targetAvailable(target)) throw new Error(reason + "; " + target.executor + " unavailable")
     if (!untouched(s)) throw new Error("Fallback forbidden after partial edits; inspect the worktree")
     ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-    const target: ProcessTarget = { executor: "command-code", selection: pin }
     transition(s, target)
     s.fallback_reason = reason
     if (detail !== undefined) s.fallback_detail = (typeof detail === "string" ? detail : JSON.stringify(detail)).slice(0, 2000)
@@ -190,6 +189,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
     activateProcess(s, target, launch(s, target, prompt(s)))
     save(s)
     return s
+  }
+  function fallbackToCommand(s: Session, pin: CliPin, reason: string, detail?: unknown): Session {
+    return fallbackToProcess(s, { executor: "command-code", selection: pin }, reason, detail)
   }
   async function availablePi(plan: PiFallbackPlan, from: number, cwd: string): Promise<{ selection: PiSelection; next: number } | null> {
     for (let index = from; index < plan.pi.length; index++) {
@@ -255,6 +257,22 @@ export function makeHybridBridge(api: PiAdapter, command = {
         fallbackToCommand(s, source.plan.command, "Primary Pi runner unavailable during execution (provider usage limit); no edits existed, so the task continued on Command Code.", observation.error)
         state = "running"
         known = undefined
+      } else if (source?.kind === "fx" && clean) {
+        try {
+          transition(s, source.from)
+          save(s)
+          const codexTarget: ProcessTarget = { executor: "codex", selection: source.plan.codex }
+          if (codex.available()) fallbackToProcess(s, codexTarget, "FX provider/model exhausted or unavailable; continued on Codex before edits.", observation.error)
+          else if (command.available()) fallbackToCommand(s, source.plan.command, "FX provider/model exhausted or unavailable and Codex is unavailable; continued on Command Code before edits.", observation.error)
+          else await fallbackToPi(s, source.plan, "FX, Codex and Command Code unavailable; continued on an approved Pi provider.", observation.error)
+          state = "running"
+          known = undefined
+        } catch (fallbackError) {
+          s.fallback_blocked = "Fallback blocked: " + String(fallbackError)
+          save(s)
+          state = s.execution.kind === "transition" ? "blocked_admission" : "blocked_fallback"
+          known = { observation, blocked: { state, notice: s.fallback_blocked } }
+        }
       } else if (source?.kind === "codex" && clean) {
         try {
           transition(s, source.from)
@@ -360,9 +378,12 @@ export function makeHybridBridge(api: PiAdapter, command = {
         available: firstPi.providerID === "muse-sdk" ? museInfo.available : firstPi.providerID === "devin" ? devinInfo.available : goInfo.available,
         issue: firstPi.providerID === "muse-sdk" ? museInfo.issue : firstPi.providerID === "devin" ? devinInfo.issue : goInfo.issue }
       const commandLane = { backend: "command-code", ...plan.command, available: command.available() }
+      const codexLane = { backend: "codex", ...plan.codex, available: codex.available() }
       return {
-        primary: { backend: "codex", ...plan.codex, available: codex.available() },
-        fallback: commandLane,
+        primary: plan.kind === "fx-fallback"
+          ? { backend: "fx", ...plan.fx, available: targetAvailable({ executor: "fx", selection: plan.fx }) }
+          : codexLane,
+        fallback: plan.kind === "fx-fallback" ? codexLane : commandLane,
         command_code: commandLane,
         pi_fallback: piLane,
         muse: museModel ? { backend: "pi", model: museModel, available: museInfo.available, issue: museInfo.issue, version: museInfo.version } : undefined,
@@ -401,9 +422,11 @@ export function makeHybridBridge(api: PiAdapter, command = {
         return admission(s)
       }
       const codexTarget: ProcessTarget = { executor: "codex", selection: plan.codex }
+      const fxTarget: ProcessTarget | undefined = plan.kind === "fx-fallback" ? { executor: "fx", selection: plan.fx } : undefined
+      const first: ProcessTarget = fxTarget ?? codexTarget
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, plan, execution: { kind: "transition", to: codexTarget }, attempts: 0 }
+        task, plan, execution: { kind: "transition", to: first }, attempts: 0 }
       const leaseDir = stateDir(dir)
       await settleHolder(leaseDir, dir)
       claimWorktree(leaseDir, dir, s.id)
@@ -415,24 +438,29 @@ export function makeHybridBridge(api: PiAdapter, command = {
         releaseWorktree(leaseDir, dir, s.id)
         throw error
       }
-      if (codex.available()) {
-        activateProcess(s, codexTarget, launch(s, codexTarget, prompt(s)))
+      if (targetAvailable(first)) {
+        activateProcess(s, first, launch(s, first, prompt(s)))
         s.attempts = 1
         save(s)
         return admission(s)
       }
-      s.fallback_reason = "Codex subscription unavailable; continued on the next approved provider."
-      if (command.available()) {
-        const commandTarget: ProcessTarget = { executor: "command-code", selection: plan.command }
-        transition(s, commandTarget)
+      s.fallback_reason = fxTarget
+        ? "Pinned FX runtime/provider unavailable; continued on the next approved provider."
+        : "Codex subscription unavailable; continued on the next approved provider."
+      const commandTarget: ProcessTarget = { executor: "command-code", selection: plan.command }
+      for (const target of fxTarget ? [codexTarget, commandTarget] : [commandTarget]) {
+        if (!targetAvailable(target)) continue
+        transition(s, target)
         save(s)
         // Commit an admission transition before spawning. If the launch is ambiguous, retain the lease.
-        activateProcess(s, commandTarget, launch(s, commandTarget, prompt(s)))
+        activateProcess(s, target, launch(s, target, prompt(s)))
         s.attempts = 1
         save(s)
         return admission(s)
       }
-      await fallbackToPi(s, plan, "Command Code CLI is unavailable; continued on an approved Pi provider.")
+      await fallbackToPi(s, plan, fxTarget
+        ? "FX, Codex and Command Code are unavailable; continued on an approved Pi provider."
+        : "Command Code CLI is unavailable; continued on an approved Pi provider.")
       return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
