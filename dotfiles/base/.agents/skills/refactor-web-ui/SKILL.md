@@ -1,6 +1,9 @@
 ---
 name: refactor-web-ui
-description: "Redesign or substantially polish an existing web app through real-browser screenshots, independent visual critique, and iterative implementation. Use for chat/workbench UIs, consoles, developer tools, and broad cross-page visual-quality work. Skip isolated CSS cleanup (refactor-css), dashboard data/trend restructuring (refactor-dashboard-ui), and read-only UX audits (jank-audit)."
+description: "Use for /refactor-web-ui: redesign or substantially polish an existing web app through real-browser screenshots, independent visual critique, and iterative implementation."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Refactor Web UI

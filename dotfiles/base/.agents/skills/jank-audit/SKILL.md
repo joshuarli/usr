@@ -1,6 +1,9 @@
 ---
 name: jank-audit
-description: Audit a software product for concrete user-facing rough edges, confusing flows, weak feedback, and inconsistent behavior. Use for broad UX or product-polish audits. Skip ordinary code review, subjective visual critique, and single-flow bug reports.
+description: "Use for /jank-audit: audit a software product for concrete user-facing rough edges, confusing flows, weak feedback, and inconsistent behavior."
+disable-model-invocation: true
+metadata:
+  opencode/autoinvoke: "false"
 ---
 
 # Jank Audit
