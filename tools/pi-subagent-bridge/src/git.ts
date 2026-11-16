@@ -41,7 +41,7 @@ export function outside(paths: string[], owned: string[]): string[] {
 }
 
 export function readStateDir(cwd: string): string {
-  const root = dirname(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+  const root = dirname(inspectionGit(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
   return join(root, ".work", "worker-bridge")
 }
 export function stateDir(cwd: string): string {
