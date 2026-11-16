@@ -197,6 +197,7 @@ export function makeWorkerBridge(api: OpenCodePort, model = selectedModel()) {
           "You may commit your work on the current branch of this worktree (Conventional Commits, explaining why); do not amend or rewrite commits that existed at admission, merge, rebase, switch branches, push, add dependencies, clean worktrees, or edit outside the brief.",
         "The brief's acceptance proof is the goal: keep working until it is met or a listed stop condition truly applies. Resolve ambiguity from the brief, code, or repository conventions; that ambiguity is not a stop condition. A needed commit, missing scratch directory, slow command, or recoverable tool error is not a blocker. Stopping early without a named stop condition from the brief counts as an incomplete run.",
         "Report changed files, checks with results, and unverified work. The parent will review and integrate.",
+        "When acceptance is not met, end with `STOPPED_ON: <the stop condition, quoted verbatim from the scope's stop_on>` followed by `ACCEPTANCE: not met`.",
         "", text,
       ].join("\n")
       try {

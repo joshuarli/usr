@@ -22,13 +22,13 @@ const EVENT_DESCRIPTION_CHARS = 160
 
 type OrUnknown<T> = T | "unknown"
 
-type DetailedState = "running" | "queued" | "idle_or_queued" | "succeeded" | "failed" | "turn_limit" | "cancelled" | "canceled" | "interrupted" | "unknown_or_interrupted" | "timed_out" | "blocked_partial_work" | "blocked_admission" | "blocked_transition" | "blocked_fallback" | "unknown"
+type DetailedState = "running" | "queued" | "idle_or_queued" | "succeeded" | "incomplete" | "failed" | "turn_limit" | "cancelled" | "canceled" | "interrupted" | "unknown_or_interrupted" | "timed_out" | "blocked_partial_work" | "blocked_admission" | "blocked_transition" | "blocked_fallback" | "unknown"
 export type Attention = "active" | "finished" | "gone" | "needs_attention" | "unknown"
 function classifyState(state: string): Attention {
   const detailed = state as DetailedState
   switch (detailed) {
     case "running": case "queued": case "idle_or_queued": return "active"
-    case "succeeded": case "failed": case "turn_limit": case "cancelled": case "canceled": case "timed_out": return "finished"
+    case "succeeded": case "incomplete": case "failed": case "turn_limit": case "cancelled": case "canceled": case "timed_out": return "finished"
     case "interrupted": case "unknown_or_interrupted": return "gone"
     case "blocked_partial_work": case "blocked_admission": case "blocked_transition": case "blocked_fallback": return "needs_attention"
     case "unknown": return "unknown"
@@ -74,6 +74,8 @@ export type Inspection = {
   route: Route
   worktree: Worktree
   acceptance_claim: Claim
+  stopped_on: string | null
+  stop_condition_valid: boolean
 }
 export type Snapshot = {
   observed_at: string
@@ -100,6 +102,8 @@ export type Snapshot = {
   head_on_lane: OrUnknown<boolean>
   commits_since_base: OrUnknown<number>
   acceptance_claim: OrUnknown<Claim>
+  stopped_on: OrUnknown<string | null>
+  stop_condition_valid: OrUnknown<boolean>
   continuations: OrUnknown<number>
   continuation_limit: number
   steers: OrUnknown<number>
@@ -120,6 +124,14 @@ function providerUnavailable(value: unknown): boolean {
 export function acceptanceClaim(text: string | null): Claim {
   const last = text?.trimEnd().split("\n").at(-1)?.replace(/[`*]/g, "").trim().toLowerCase()
   return last === "acceptance: met" ? "met" : last === "acceptance: not met" ? "not_met" : "missing"
+}
+
+function stopCondition(text: string | null, scope: string): { stopped_on: string | null; stop_condition_valid: boolean } {
+  const lines = text?.trimEnd().split("\n") ?? []
+  const match = lines.at(-2)?.replace(/[`*]/g, "").trim().match(/^STOPPED_ON:\s*(.+)$/i)
+  const stopped_on = match?.[1]?.trim() || null
+  const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase()
+  return { stopped_on, stop_condition_valid: stopped_on !== null && normalize(scope).includes(normalize(stopped_on)) }
 }
 
 function continuedOn(s: Session): string {
@@ -292,10 +304,13 @@ function compose(s: Session, observation: Observation, blocked?: Known["blocked"
   const worktree = readWorktree(s)
   const clean = worktree.kind === "read" ? worktree.head === s.scope.base_revision && worktree.changed_paths.length === 0 : null
   const settled = blocked ?? settledState(s, observation, clean)
+  const claim = acceptanceClaim(observation.final_text?.slice(-5000) ?? null)
+  const stop = stopCondition(observation.final_text?.slice(-5000) ?? null, s.scope.stop_on)
+  const invalidStop = settled.state === "succeeded" && claim === "not_met" && !stop.stop_condition_valid
   return {
-    observed_at: new Date().toISOString(), session: s, observation, state: settled.state,
-    notice: settled.notice ?? inheritedNotice(s, settled.state), route: routeOf(s), worktree,
-    acceptance_claim: acceptanceClaim(observation.final_text?.slice(-5000) ?? null),
+    observed_at: new Date().toISOString(), session: s, observation, state: invalidStop ? "incomplete" : settled.state,
+    notice: invalidStop ? "stopped without a listed stop condition" : settled.notice ?? inheritedNotice(s, settled.state), route: routeOf(s), worktree,
+    acceptance_claim: claim, ...stop,
   }
 }
 
@@ -312,6 +327,7 @@ function describe(error: unknown): string {
 }
 function inspectionReason(i: Inspection): string | null {
   if (i.worktree.kind === "unreadable") return i.worktree.reason
+  if (i.notice === "stopped without a listed stop condition") return i.notice
   return i.observation.state === "unknown" ? describe(i.observation.error ?? "execution state is unknown") : null
 }
 
@@ -331,7 +347,7 @@ export function toSnapshot(i: Inspection): Snapshot {
     head_unchanged: read ? read.head === s.scope.base_revision : "unknown",
     head_on_lane: read ? laneHead(s).head_on_lane : "unknown",
     commits_since_base: read ? laneHead(s).commits_since_base : "unknown",
-    acceptance_claim: i.acceptance_claim,
+    acceptance_claim: i.acceptance_claim, stopped_on: i.stopped_on, stop_condition_valid: i.stop_condition_valid,
     continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
     steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
     fallback_reason: s.fallback_reason ?? null, fallback_notice: i.notice, fallback_detail: s.fallback_detail ?? null,
@@ -347,7 +363,7 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
     base_revision: "unknown", head: "unknown", backend: text(record.backend), model: "unknown", effort: "unknown",
     execution_state: "unknown", attention: "unknown", last_assistant_text: "unknown", error: reason, usage: "unknown", pid: "unknown",
     last_activity: "unknown", last_event: "unknown", changed_paths: "unknown", out_of_scope_paths: "unknown",
-    head_unchanged: "unknown", head_on_lane: "unknown", commits_since_base: "unknown", acceptance_claim: "unknown", continuations: "unknown",
+    head_unchanged: "unknown", head_on_lane: "unknown", commits_since_base: "unknown", acceptance_claim: "unknown", stopped_on: "unknown", stop_condition_valid: "unknown", continuations: "unknown",
     continuation_limit: TURN_LIMIT_CONTINUATIONS, steers: "unknown", steer_limit: STEER_LIMIT,
     fallback_reason: "unknown", fallback_notice: "unknown", fallback_detail: "unknown", reason,
   }

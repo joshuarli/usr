@@ -153,6 +153,8 @@ pi-subagent-bridge campaign ack ID...
 pi-subagent-bridge campaign list [--json] [ROOT...]
 ```
 
+For unmet acceptance, the worker ends with `STOPPED_ON: <condition>` followed by `ACCEPTANCE: not met`. Status and inspection report `stopped_on` and `stop_condition_valid`; an unlisted or missing condition makes the run incomplete.
+
 Inspection snapshots include `attention`: `active`, `finished`, `gone`, `needs_attention`, or `unknown`, alongside the detailed `execution_state`. Campaign wait reports every non-active session, including blocked and unknown sessions; timeout ticks count only active sessions. Watch exits 4 for sessions needing attention or with unknown state.
 
 `inspect`, `watch` and `campaign` only read bridge state (`campaign ack` writes its own acknowledgement file). `inspect` prints one JSON snapshot; `watch` and `campaign wait|ack|list` print text with documented exit codes (`watch`: 0 finished, 2 stalled, 3 exited without a terminal result, 4 uninspectable). The other commands print one JSON result to stdout on success and a diagnostic on stderr on error. Pass a scope file rather than interpolating JSON into a shell command. Do not put credentials or private source into task briefs.

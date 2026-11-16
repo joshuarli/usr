@@ -107,6 +107,7 @@ function prompt(s: Session): string {
     "Return a PROOF RECORD instead of a summary: changed paths; exact commands, exit codes and decisive output;",
     "file:line evidence for research; and explicit unverified cases and blockers. Never invent a passing check.",
     "End with exactly one final line: `ACCEPTANCE: met` only when every required acceptance command ran and passed, otherwise `ACCEPTANCE: not met`.",
+    "When acceptance is not met, put `STOPPED_ON: <the stop condition, quoted verbatim from the scope's stop_on>` immediately before that final line.",
   ].join("\n")
 }
 function untouched(s: Session): boolean {
@@ -321,7 +322,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
       state, last_assistant_text, error: i.observation.error, usage: i.observation.usage,
       run_deadline_ms: runDeadlineMs(s),
       changed_paths, out_of_scope_paths, head_unchanged, head_on_lane, commits_since_base,
-      acceptance_claim: i.acceptance_claim,
+      acceptance_claim: i.acceptance_claim, stopped_on: i.stopped_on, stop_condition_valid: i.stop_condition_valid,
+      reason: i.notice === "stopped without a listed stop condition" ? i.notice : null,
       acceptance_blocked: !head_on_lane || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
       continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
       steers: s.steers ?? 0, steer_limit: STEER_LIMIT,

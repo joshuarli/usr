@@ -1108,6 +1108,29 @@ test("a run without a final ACCEPTANCE: met line is incomplete", async () => {
   }
 })
 
+test("an unmet acceptance names a listed stop condition", async () => {
+  for (const [finalText, stopped, valid] of [
+    ["STOPPED_ON: unexpected dependencies\nACCEPTANCE: not met", "unexpected dependencies", true],
+    ["STOPPED_ON: insufficient time\nACCEPTANCE: not met", "insufficient time", false],
+    ["ACCEPTANCE: not met", null, false],
+  ] as const) {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd)
+      const codex = { ...noCodex, available: () => true,
+        start: () => ({ pid: 123, output: "fake", errors: "fake", started_at: "now" }),
+        status: () => ({ state: "succeeded", result: { subtype: "success" as const, sessionId: "t", finalText }, stderr: null }) }
+      const bridge = makeHybridBridge(piAdapter(m.api), m.command, codex)
+      const started = await bridge.start(f.cwd, "edit", "worker", f.scope, "Do scoped work")
+      const status = await bridge.status(f.cwd, started.session_id)
+      assert.equal(status.stopped_on, stopped)
+      assert.equal(status.stop_condition_valid, valid)
+      if (!valid) assert.equal(status.reason, "stopped without a listed stop condition")
+      assert.equal(status.state, "incomplete")
+    } finally { f.close() }
+  }
+})
+
 test("the retired network scope flag is rejected for new work", async () => {
   const f = fixture()
   try {
