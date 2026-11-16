@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawnSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeHybridBridge } from '../../src/hybrid.ts'
@@ -159,7 +159,7 @@ mod tests {
     }
 }
 `)
-  writeFileSync(join(repo, '.gitignore'), 'target/\n__pycache__/\n.work/\n')
+  writeFileSync(join(repo, '.gitignore'), 'target/\n__pycache__/\n.work/\nCargo.lock\n')
   git('add', '.'); git('commit', '-qm', 'live fixture')
   return git('rev-parse', 'HEAD')
 }
@@ -233,7 +233,7 @@ function profileAuth(profile, runRoot) {
     return true
   }
   if (!refresh()) return { ready: false, setup: 'opencode auth login (OpenCode Go subscription), then rerun' }
-  return { ready: true, secretEnvFiles: { [profile.auth.envName]: tokenPath, LIVE_PROVIDER_SESSION: sessionPath }, refresh }
+  return { ready: true, secretEnvFiles: { [profile.auth.envName]: tokenPath, LIVE_PROVIDER_SESSION: sessionPath }, refresh, secretDir }
 }
 
 function liveBridge(fx, selections) {
@@ -295,8 +295,8 @@ async function runBridgeJob(bridge, repo, wtName, task, base) {
     const session = JSON.parse(readFileSync(join(repo, '.work', 'worker-bridge', admitted.session_id + '.json'), 'utf8'))
     if (session.execution?.kind === 'process') rootPid = session.execution.run.pid
   } catch {}
-  let peakRss = 0
-  const poll = setInterval(() => { if (rootPid) { const rss = descendantRss(rootPid); if (rss) peakRss = Math.max(peakRss, rss) } }, 250)
+  let peakRss = null
+  const poll = setInterval(() => { if (rootPid) { const rss = descendantRss(rootPid); if (rss) peakRss = Math.max(peakRss ?? 0, rss) } }, 250)
   let result
   try { result = await waitJob(bridge, wt, admitted.session_id) }
   finally { clearInterval(poll) }
@@ -348,7 +348,8 @@ export async function livePilot(binary, scratch, requested) {
     return { status: 'unavailable', exitCode: 75, report: { scope: BOUNDS, unavailable } }
   }
   const { name, profile } = selected
-  const report = { mode: 'live', profile: name, provider: profile.provider, model: profile.selections.worker.model, effort: profile.selections.worker.effort, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [], corrections: [] }
+  const report = { mode: 'live', profile: name, provider: profile.provider, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [], corrections: [] }
+  let owner = null
   try {
     const home = join(runRoot, 'home'), repo = join(home, 'repo')
     mkdirSync(home, { recursive: true })
@@ -362,16 +363,17 @@ export async function livePilot(binary, scratch, requested) {
       extraEnv: { CARGO_HOME: join(LIVE_BASE, 'cargo-home') },
     })
     const bridge = liveBridge(fx, profile.selections)
-    const owner = new OwnerManager(bridge)
+    owner = new OwnerManager(bridge)
     await owner.ensureRepo(repo)
     const jobs = []
+    report.jobs = jobs
     let corrections = 0
     for (const task of TASKS) {
       auth.refresh?.()
-      jobs.push(await runBridgeJob(bridge, repo, 'fx-' + task.key, task, base))
+      jobs.push({ selection: profile.selections[task.tier], ...(await runBridgeJob(bridge, repo, 'fx-' + task.key, task, base)) })
     }
     const multi = jobs.find(j => j.task === 'multi')
-    if (multi?.state === 'succeeded' && corrections < BOUNDS.max_corrections) {
+    if (multi?.state === 'succeeded' && multi.parent_checks_passed === false && corrections < BOUNDS.max_corrections) {
       const wt = join(repo, '.work', 'wt', 'fx-multi')
       const job = (await ownerJobs(repo, owner.ownerId)).find(item => item.job_id === multi.session_id)
       if (job) {
@@ -390,14 +392,15 @@ export async function livePilot(binary, scratch, requested) {
     }
     if (profile.incumbent === 'bridge-codex' && codexAvailable()) {
       const incumbentBridge = codexBridge(profile.selections)
-      for (const task of TASKS) jobs.push(await runBridgeJob(incumbentBridge, repo, 'inc-' + task.key, task, base))
+      for (const task of TASKS) {
+        const pin = profile.selections[task.tier]
+        jobs.push({ selection: { model: pin.model, effort: pin.effort, provider: 'codex' }, ...(await runBridgeJob(incumbentBridge, repo, 'inc-' + task.key, task, base)) })
+      }
     } else if (profile.incumbent === 'pi-cli' && spawnSync('which', ['pi'], { encoding: 'utf8', timeout: 5000 }).status === 0) {
-      for (const task of TASKS) jobs.push(await runPiCliJob(repo, 'inc-' + task.key, task, base))
+      for (const task of TASKS) jobs.push({ selection: { model: 'deepseek-v4.1-flash', effort: 'high', provider: 'opencode-go' }, ...(await runPiCliJob(repo, 'inc-' + task.key, task, base)) })
     } else {
       report.incumbent = { status: 'unavailable', note: 'incumbent runtime not authenticated on this host' }
     }
-    await owner.close()
-    report.jobs = jobs
     report.incumbent_ran = jobs.some(j => j.backend !== 'fx')
     const output = join(scratch, 'fx-live.json')
     writeFileSync(output, JSON.stringify(report, null, 2))
@@ -408,5 +411,8 @@ export async function livePilot(binary, scratch, requested) {
     writeFileSync(join(scratch, 'fx-live.json'), JSON.stringify(report, null, 2))
     console.log(JSON.stringify({ status: 'failed', profile: name, error: report.error }))
     return { status: 'failed', exitCode: 1, report }
+  } finally {
+    if (owner) await owner.close().catch(() => {})
+    if (auth?.secretDir) rmSync(auth.secretDir, { recursive: true, force: true })
   }
 }

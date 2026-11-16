@@ -47,7 +47,7 @@ Commands run from `tools/pi-subagent-bridge`, using managed Node 26.13.1:
 | --- | --- |
 | `npm run spike:fx -- --setup` | Exact pinned installation in `.work/tmp/fx-spike/installed-home`; repeat setup preserves the verified pin. |
 | `npm run spike:fx -- --local` | Real CLI protocol and shared bridge scout, repair, same-session correction, steering, replay and interruption passed. |
-| `npm run test:fx` | Nine offline process/state contract cases passed, plus secret-env-file, toolchain-PATH and auth-file-seeding cases. Fake binaries are used here; they are separate from real-binary qualification. |
+| `npm run test:fx` | 14 offline process/state contract cases passed, including secret-env-file, toolchain-PATH, auth-file-seeding and reserved-env-name cases. Fake binaries are used here; they are separate from real-binary qualification. |
 | `npm run test:runtime-contract -- --adapter fx` | 36 FX, saved-state, no-Pi and owner cases passed; zero skips. |
 | `npm run test:no-pi` | Passed with zero skips and zero trapped Pi accesses. |
 | `npm test` | 245 passed; only the existing opt-in live Muse test skipped. |
