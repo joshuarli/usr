@@ -182,6 +182,43 @@ class TodoTests(unittest.TestCase):
         self.assertEqual(remote.read_bytes(), before)
 
 
+class HelpTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, str(CLI.parent))
+        self.addCleanup(sys.path.remove, str(CLI.parent))
+        import todo
+        self.todo = todo
+
+    def test_bare_invocation_prints_the_full_reference(self):
+        bare = subprocess.run([sys.executable, str(CLI)], capture_output=True, text=True)
+        flag = subprocess.run([sys.executable, str(CLI), '-h'], capture_output=True, text=True)
+        self.assertEqual((bare.returncode, bare.stderr), (0, ''))
+        self.assertEqual(bare.stdout, flag.stdout)
+        positions = [bare.stdout.index(f'\n  todo {name}') for name, *_ in self.todo.COMMANDS]
+        self.assertEqual(positions, sorted(positions))
+        for _, description, arguments, examples in self.todo.COMMANDS:
+            self.assertIn(description, bare.stdout)
+            for _, options in arguments:
+                self.assertIn(options['help'], bare.stdout)
+            for example in examples:
+                self.assertIn(f'Example: {example}', bare.stdout)
+
+    def test_every_example_parses(self):
+        import shlex
+        for name, _, _, examples in self.todo.COMMANDS:
+            self.assertTrue(examples, name)
+            for example in examples:
+                words = shlex.split(example)
+                words = words[:words.index('<')] if '<' in words else words
+                self.assertEqual(words[0], 'todo')
+                self.assertEqual(self.todo.build_parser().parse_args(words[1:]).command, name, example)
+
+    def test_usage_error_points_to_the_reference(self):
+        result = subprocess.run([sys.executable, str(CLI), 'bogus'], capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (2, ''))
+        self.assertIn('Run `todo -h` for the full reference.', result.stderr)
+
+
 class OwnedHelpTests(unittest.TestCase):
     def test_primary_help_footer(self):
         import subprocess

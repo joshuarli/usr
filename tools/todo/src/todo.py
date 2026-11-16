@@ -260,28 +260,74 @@ def run(args, path):
         print(json.dumps({k: v for k, v in record.items() if not k.startswith('_')}, indent=2))
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Manage a Markdown TODO backlog', epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--file', help='select a backlog file name in this directory or its parents (default: TODO.md; show also searches workspace backlogs)')
-    sub = parser.add_subparsers(dest='command', required=True)
-    listing = sub.add_parser('list')
-    listing.add_argument('--priority')
-    listing.add_argument('--json', action='store_true')
-    show = sub.add_parser('show')
-    show.add_argument('id')
-    show.add_argument('--json', action='store_true')
-    for name in ('add', 'edit'):
-        command = sub.add_parser(name)
-        if name == 'edit':
-            command.add_argument('id')
-        command.add_argument('--json', required=True, choices=['-'])
-    close = sub.add_parser('close')
-    close.add_argument('id')
-    check = sub.add_parser('check')
-    check.add_argument('--json', action='store_true')
-    fmt = sub.add_parser('fmt')
-    fmt.add_argument('--check', action='store_true')
-    args = parser.parse_args()
+FOOTER = """Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"""
+FILE_OPTION = ('--file', {'metavar': 'NAME', 'help': 'backlog file name in this directory or its parents (default: TODO.md; show also searches workspace backlogs)'})
+ID = ('id', {'metavar': 'ID', 'help': 'ticket ID, such as ABC-1'})
+JSON_ALWAYS = ('--json', {'action': 'store_true', 'help': 'accepted for scripts; output is always JSON'})
+JSON_INPUT = ('--json', {'required': True, 'choices': ['-'], 'metavar': '-', 'help': 'read a JSON object from stdin (required)'})
+COMMANDS = (
+    ('list', 'Print compact records in priority and ID order.', (('--priority', {'metavar': 'P1,P2', 'help': 'only these comma-separated priorities'}), JSON_ALWAYS), ('todo list --priority P1,P2 --json',)),
+    ('show', 'Print one ticket with all fields and its repository_root as JSON.', (ID, JSON_ALWAYS), ('todo show ABC-1 --json',)),
+    ('add', 'File a ticket from JSON and print the record.', (JSON_INPUT,), ('todo add --json - < ticket.json',)),
+    ('edit', 'Change ticket fields from JSON and print the record.', (ID, JSON_INPUT), ('todo edit ABC-1 --json - < changes.json',)),
+    ('close', 'Remove a ticket.', (ID,), ('todo close ABC-1',)),
+    ('check', 'Validate records, IDs, Next, and ordering.', (('--json', {'action': 'store_true', 'help': 'print {"ok", "errors"} JSON instead of failing with a message'}),), ('todo check --json',)),
+    ('fmt', 'Order tickets by priority and ID.', (('--check', {'action': 'store_true', 'help': 'exit 1 instead of writing when tickets are out of order'}),), ('todo fmt --check',)),
+)
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.exit(2, f'{self.format_usage()}{self.prog}: error: {message}\nRun `todo -h` for the full reference.\n')
+
+
+def _arguments(arguments):
+    rows = []
+    for name, options in arguments:
+        label = name if name.startswith('-') else options['metavar']
+        if name.startswith('-') and options.get('action') != 'store_true':
+            label = f"{name} {options['metavar']}"
+        rows.append(f'    {label:<18} {options["help"]}')
+    return rows
+
+
+def _usage(parser):
+    return parser.format_usage().removeprefix('usage: ').replace(' [-h]', '').strip()
+
+
+def build_parser():
+    commands = {}
+
+    class Root(Parser):
+        def format_help(self):
+            lines = [f'usage: {_usage(self)}', '', 'Manage a Markdown TODO backlog.', '', 'Common options, given before COMMAND:', *_arguments([FILE_OPTION]), f"    {'-h, --help':<18} print this reference", '', 'Commands:']
+            for name, description, arguments, examples in COMMANDS:
+                lines += ['', f'  {_usage(commands[name])}', f'    {description}', *_arguments(arguments), *(f'    Example: {example}' for example in examples)]
+            return '\n'.join([*lines, '', FOOTER, ''])
+
+    parser = Root(prog='todo', description='Manage a Markdown TODO backlog.')
+    parser.add_argument(FILE_OPTION[0], **FILE_OPTION[1])
+    sub = parser.add_subparsers(dest='command', required=True, metavar='COMMAND', parser_class=Parser)
+    for name, description, arguments, examples in COMMANDS:
+        command = sub.add_parser(name, description=description, epilog='\n'.join([*(f'example: {example}' for example in examples), 'Common option --file NAME goes before the command. Full reference and maintainer: todo -h']), formatter_class=argparse.RawDescriptionHelpFormatter)
+        for argument, options in arguments:
+            command.add_argument(argument, **options)
+        commands[name] = command
+    return parser
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    parser = build_parser()
+    if not argv:
+        parser.print_help()
+        return 0
+    args = parser.parse_args(argv)
     try:
         if args.command == 'show':
             show_ticket(args.id, args.file)
