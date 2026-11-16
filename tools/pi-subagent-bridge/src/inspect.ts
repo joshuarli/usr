@@ -4,7 +4,7 @@ import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from
 import { join } from "node:path"
 import { type ModelRef } from "./bridge.ts"
 import type { CommandResult, CommandRun } from "./command.ts"
-import { changes, git, outside } from "./git.ts"
+import { changes, git, laneHead, outside } from "./git.ts"
 import type { CliPin, FallbackPlan, PiSelection } from "./policy.ts"
 import { isRecord } from "./scope.ts"
 import {
@@ -98,6 +98,8 @@ export type Snapshot = {
   changed_paths: OrUnknown<string[]>
   out_of_scope_paths: OrUnknown<string[]>
   head_unchanged: OrUnknown<boolean>
+  head_on_lane: OrUnknown<boolean>
+  commits_since_base: OrUnknown<number>
   acceptance_claim: OrUnknown<Claim>
   continuations: OrUnknown<number>
   continuation_limit: number
@@ -329,6 +331,8 @@ export function toSnapshot(i: Inspection): Snapshot {
     last_event: i.observation.last_event,
     changed_paths: read?.changed_paths ?? "unknown", out_of_scope_paths: read?.out_of_scope_paths ?? "unknown",
     head_unchanged: read ? read.head === s.scope.base_revision : "unknown",
+    head_on_lane: read ? laneHead(s).head_on_lane : "unknown",
+    commits_since_base: read ? laneHead(s).commits_since_base : "unknown",
     acceptance_claim: i.acceptance_claim,
     continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
     steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
@@ -345,7 +349,7 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
     base_revision: "unknown", head: "unknown", backend: text(record.backend), model: "unknown", effort: "unknown",
     execution_state: "unknown", attention: "unknown", last_assistant_text: "unknown", error: reason, usage: "unknown", pid: "unknown",
     last_activity: "unknown", last_event: "unknown", changed_paths: "unknown", out_of_scope_paths: "unknown",
-    head_unchanged: "unknown", acceptance_claim: "unknown", continuations: "unknown",
+    head_unchanged: "unknown", head_on_lane: "unknown", commits_since_base: "unknown", acceptance_claim: "unknown", continuations: "unknown",
     continuation_limit: TURN_LIMIT_CONTINUATIONS, steers: "unknown", steer_limit: STEER_LIMIT,
     fallback_reason: "unknown", fallback_notice: "unknown", fallback_detail: "unknown", reason,
   }

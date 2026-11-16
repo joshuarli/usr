@@ -32,3 +32,31 @@ export function stateDir(cwd: string): string {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   return dir
 }
+
+/** The admitted branch is absent for detached worktrees and legacy sessions. */
+export function currentBranch(cwd: string): string | null {
+  try { return git(cwd, "symbolic-ref", "--quiet", "--short", "HEAD") }
+  catch (error) {
+    if ((error as { status?: number }).status === 1) return null
+    throw error
+  }
+}
+
+export function laneHead(s: { cwd: string; tier: string; lane_branch?: string | null; scope: { base_revision: string } }) {
+  const base = s.scope.base_revision, head = git(s.cwd, "rev-parse", "HEAD")
+  const commits_since_base = Number(git(s.cwd, "rev-list", "--count", base + ".." + head))
+  if (head === base) return { head, commits_since_base, head_on_lane: true, drift: null }
+  let drift: string | null = null
+  if (s.tier === "scout") drift = "scout HEAD changed from base"
+  else if (!s.lane_branch) drift = "no admitted branch; HEAD must equal base"
+  else if (currentBranch(s.cwd) !== s.lane_branch) drift = "current branch differs from admitted branch " + s.lane_branch
+  else {
+    try { git(s.cwd, "merge-base", "--is-ancestor", base, head) }
+    catch (error) {
+      if ((error as { status?: number }).status !== 1) throw error
+      drift = "base revision is not an ancestor of HEAD"
+    }
+    if (!drift && git(s.cwd, "rev-list", "--merges", base + ".." + head)) drift = "merge commit since base"
+  }
+  return { head, commits_since_base, head_on_lane: drift === null, drift }
+}

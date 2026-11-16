@@ -1,7 +1,7 @@
 import { piAdapter } from "../src/pi-adapter.ts"
 import test, { after } from "node:test"
 import assert from "node:assert/strict"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { makeWorkerBridge } from "../src/bridge.ts"
 import { processStartTime } from "../src/command.ts"
@@ -10,7 +10,7 @@ import { inspectStored, type Snapshot } from "../src/inspect.ts"
 import { optionalPiAdapter } from "../src/optional-pi.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree } from "../src/worktree-lease.ts"
 import {
-  PI_MODEL, PI_ID, Scratch, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, toolQueued,
+  PI_MODEL, PI_ID, Scratch, git, commandLane, commandResultLine, migrate, piSession, piSuccess, realDeps, runFor, toolQueued,
   treeOf, unusedApi, writeLog, writePiChild, writeSession, type Repo,
 } from "./worker-fixtures.ts"
 
@@ -172,4 +172,21 @@ test("a record saved in the current format inspects exactly like the v1 record i
     const current = await inspectStored(repo.directory, after, realDeps(optionalPiAdapter()))
     assert.deepEqual(strip(current), strip(old), name)
   }
+})
+
+
+test("inspection reports lane commits and retains legacy strictness", async () => {
+  const repo = scratch.repo()
+  const lane = git(repo.cwd, "branch", "--show-current")
+  const id = commandLane(repo, 40, await scratch.gone(), [receipt], { lane_branch: lane })
+  const legacy = commandLane(repo, 41, await scratch.gone(), [receipt])
+  writeFileSync(join(repo.cwd, "README"), "changed\n")
+  git(repo.cwd, "add", "README")
+  git(repo.cwd, "commit", "-qm", "change")
+  const current = await inspectStored(repo.directory, id, realDeps())
+  assert.equal(current.head_unchanged, false)
+  assert.equal(current.head_on_lane, true)
+  assert.equal(current.commits_since_base, 1)
+  assert.deepEqual(current.changed_paths, ["README"])
+  assert.equal((await inspectStored(repo.directory, legacy, realDeps())).head_on_lane, false)
 })
