@@ -1,13 +1,13 @@
 ---
 name: orchestrate
-description: "Route coding subagents through the Pi SDK bridge (OpenCode: native subagents only); scope and verify; campaigns only when useful. Skip work cheaper to do directly."
+description: "Route coding subagents through the Pi SDK bridge (OpenCode and Devin: native subagents only); scope and verify; campaigns only when useful. Skip work cheaper to do directly."
 ---
 
 # Orchestrate
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode and native exceptions below. New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) exclusively, with no fallback. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant. Already-admitted sessions retain their recorded models and routes.
+**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. New `expert` assignments use Antigravity CLI `gemini-4-hydrogen-xhigh` (`xhigh`) exclusively, with no fallback. The available tiers are `scout`, `mechanic`, `worker`, `expert`; there is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant. Already-admitted sessions retain their recorded models and routes.
 <!-- policy:end routing-intro -->
 
 <!-- policy:begin opencode -->
@@ -23,6 +23,11 @@ description: "Route coding subagents through the Pi SDK bridge (OpenCode: native
 
 Bridge pins, fallbacks, and nesting rules do not apply on this path.
 <!-- policy:end opencode -->
+
+<!-- policy:begin devin -->
+<!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
+**Devin exception:** A top-level Devin session never uses `pi-subagent-bridge`, at any tier or as a fallback. Delegate only through native `run_subagent` subagents (`subagent_explore` for read-only research, `subagent_general` for changes). Devin subagents run on the models the session provides, so there is no per-tier pinning on this path. Bridge pins, fallbacks, and nesting rules do not apply.
+<!-- policy:end devin -->
 
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
@@ -41,7 +46,7 @@ Expert is a terminal Antigravity lane; no native child fanout beyond the typed c
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify `expert`. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 
-## The bridge, except OpenCode
+## The bridge, except OpenCode and Devin
 
 Use the MCP tools `worker_model_check`, `worker_start`, `worker_status`, `worker_resume`, `worker_cancel`, or the `pi-subagent-bridge` CLI shim where a harness has no MCP (see `tools/pi-subagent-bridge/README.md`).
 

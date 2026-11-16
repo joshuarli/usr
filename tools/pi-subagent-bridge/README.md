@@ -1,6 +1,6 @@
 # pi-subagent-bridge
 
-One shared delegation bridge for every coding harness except OpenCode. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state.
+One shared delegation bridge for every coding harness except OpenCode and Devin. Parents own scoping, worktrees, verification, integration and cleanup. The MCP and CLI expose the same durable session state.
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->

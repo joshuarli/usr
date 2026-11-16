@@ -65,6 +65,13 @@ function openCode(policy: Policy): string {
     "\n\nBridge pins, fallbacks, and nesting rules do not apply on this path."
 }
 
+function devin(): string {
+  return "**Devin exception:** A top-level Devin session never uses `pi-subagent-bridge`, at any tier or as a fallback. " +
+    "Delegate only through native `run_subagent` subagents (`subagent_explore` for read-only research, `subagent_general` for changes). " +
+    "Devin subagents run on the models the session provides, so there is no per-tier pinning on this path. " +
+    "Bridge pins, fallbacks, and nesting rules do not apply."
+}
+
 function nativeFallback(policy: Policy): string {
   const tiers = policy.nativeFallback.tiers.join("/")
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
@@ -78,6 +85,7 @@ function delegation(policy: Policy, lean: boolean): string {
   const head = lean ? "- Before delegation, read `orchestrate` and use `pi-subagent-bridge` for every tier." :
     "- All coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
+    "A top-level Devin session delegates only through Devin native subagents. " +
     `Expert pins ${code(pin.model)} at ${code(pin.effort)} without fallback. No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
     `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion, ` +
@@ -262,8 +270,9 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   const table = routingTable(policy)
   const direct = directModels(policy)
   document("dotfiles/base/.agents/skills/orchestrate/SKILL.md", {
-    "routing-intro": "**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode and native exceptions below. " + summary(policy),
+    "routing-intro": "**All coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. " + summary(policy),
     "opencode": openCode(policy),
+    "devin": devin(),
     "native-fallback": nativeFallback(policy),
   })
   document("dotfiles/base/.codex/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })

@@ -20,13 +20,14 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 | Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/` |
 | Muse Code | `~/.config/muse/AGENTS.md` | `~/.agents/skills/` |
 | OpenCode | `~/.config/opencode/AGENTS.md` | `~/.agents/skills/` |
+| Devin | `~/.config/devin/AGENTS.md` | `~/.agents/skills/` |
 | Antigravity CLI | `~/.gemini/config/AGENTS.md` | `~/.gemini/antigravity-cli/skills/` |
 | DeepSeek Harness | `${DSH_HOME:-~/.dsh}/AGENTS.md` | `${DSH_AGENTS_HOME:-~/.agents}/skills/` |
 | Pi | `~/.pi/agent/AGENTS.md` | `~/.agents/skills/` |
 | Command Code (`cmd`) | `~/.commandcode/AGENTS.md` | `~/.agents/skills/` |
 | Vercel fx (opt-in) | `~/.fx/AGENTS.md` | `~/.agents/skills/` |
 
-**Routing coverage:** both instruction profiles and all harnesses share [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md). OpenCode delegates only through its configured native subagents; other harnesses use the shared bridge except for the documented lower-tier native quota and host-access exceptions. This is instruction policy, not an interception hook. `decide` is advisory only.
+**Routing coverage:** both instruction profiles and all harnesses share [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md). OpenCode and Devin delegate only through their native subagents; other harnesses use the shared bridge except for the documented lower-tier native quota and host-access exceptions. This is instruction policy, not an interception hook. `decide` is advisory only.
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->

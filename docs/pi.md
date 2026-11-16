@@ -1,6 +1,6 @@
 # Pi
 
-Every coding harness except OpenCode delegates through `pi-subagent-bridge`. The bridge invokes the versioned Pi SDK delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native execution, completion events and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability).
+Every coding harness except OpenCode and Devin delegates through `pi-subagent-bridge`. The bridge invokes the versioned Pi SDK delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native execution, completion events and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability).
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
