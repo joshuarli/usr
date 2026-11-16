@@ -649,6 +649,23 @@ test("worker_steer on the Pi backend forwards the note through the native steer 
   } finally { f.close() }
 })
 
+test("a pending Pi delivery remains visible instead of counting as completed", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd)
+    m.noCommand()
+    m.setPiState("running")
+    m.api.steer = async () => ({ data: { accepted: false, delivery_status: "pending" } })
+    const bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    const receipt = await bridge.steer(f.cwd, task.session_id, "focus")
+    assert.equal(receipt.status, "pending")
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.pending_steer?.note, "focus")
+    assert.equal(status.steers, 0)
+  } finally { f.close() }
+})
+
 test("a gone Command Code PID is terminal interrupted, releases its lease, and admits a new worker", async () => {
   const f = fixture()
   try {

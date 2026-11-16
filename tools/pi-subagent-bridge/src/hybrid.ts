@@ -622,6 +622,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
         let receipt: Awaited<ReturnType<typeof worker.steer>>
         try {
           receipt = await worker.steer(s.cwd, sessionId, steering)
+          if (receipt.receipt.accepted === false) return { session_id: s.id, backend: backendOf(s), status: "pending", interrupted: false,
+            steers: s.steers ?? 0, steer_limit: STEER_LIMIT, receipt }
           s.steers = (s.steers ?? 0) + 1
           finishSteer(s, "completed")
         } catch (error) { finishSteer(s, "failed"); throw error }
