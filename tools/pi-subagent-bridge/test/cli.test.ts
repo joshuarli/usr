@@ -7,6 +7,20 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { POLICY } from "../src/policy.ts"
 
+test("missing command prints usage and exits 2", () => {
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", cli], { encoding: "utf8", timeout: 2000 })
+  assert.equal(result.status, 2)
+  assert.match(result.stderr, /usage: pi-subagent-bridge/)
+  assert.equal(result.stdout, "")
+})
+
+test("relative non-worktree errors name the resolved path", () => {
+  const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url))
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", cli, "model-check", "missing-worktree", "worker"], { encoding: "utf8" })
+  assert.match(result.stderr, new RegExp(join(process.cwd(), "missing-worktree")))
+})
+
 test("policy CLI needs only pure sources and makes no cwd, home or provider calls", () => {
   const root = mkdtempSync(join(tmpdir(), "usr-policy-cli-"))
   try {

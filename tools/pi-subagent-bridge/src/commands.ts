@@ -19,7 +19,7 @@ function textField(label: string, name: string, maxLength: number, description?:
     decode: (value: unknown) => requiredText(value, name, maxLength) }
 }
 const FIELDS = {
-  cwd: textField("CWD", "cwd", 32000, "Absolute root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it."),
+  cwd: textField("CWD", "cwd", 32000, "Root of an EXISTING clean, separate git worktree under <repo>/.work/wt/<name>. Parent creates and owns it; relative paths resolve against the process cwd."),
   title: textField("TITLE", "title", 100, "Short scoped task name"),
   tier: { label: "TIER", schema: { type: "string", minLength: 1, maxLength: Math.max(...BRIDGE_TIERS.map(value => value.length)), enum: BRIDGE_TIERS }, file: undefined,
     decode: (value: unknown): BridgeTier => { if (!isBridgeTier(value)) throw new Error("Unknown bridge tier"); return value } },

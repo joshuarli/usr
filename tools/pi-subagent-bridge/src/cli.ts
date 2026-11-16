@@ -1,5 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { existsSync, readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { POLICY } from "./policy.ts"
 import type { InspectionDeps } from "./inspect.ts"
 
@@ -82,7 +83,7 @@ async function inspect(rest: string[]): Promise<void> {
   const [{ readStateDir }, { inspectStored, sessionPath }, { isSessionId }] =
     await Promise.all([import("./git.ts"), import("./inspect.ts"), import("./session.ts")])
   if (!isSessionId(id)) throw new Error("Invalid worker ID")
-  const directory = readStateDir(path)
+  const directory = readStateDir(resolve(path))
   if (!existsSync(sessionPath(directory, id))) throw new Error("no session record at " + sessionPath(directory, id))
   process.stdout.write(JSON.stringify(await inspectStored(directory, id, await inspectionDeps())) + "\n")
 }
@@ -96,7 +97,7 @@ async function watch(rest: string[]): Promise<void> {
     return
   }
   const { watchSession } = await import("./watch.ts")
-  process.exitCode = await watchSession(root, id, { idleMinutes: Number(idle ?? 45), stateOnly },
+  process.exitCode = await watchSession(resolve(root), id, { idleMinutes: Number(idle ?? 45), stateOnly },
     await inspectionDeps(), (text) => process.stdout.write(text))
 }
 
@@ -110,6 +111,11 @@ async function runCampaign(rest: string[]): Promise<void> {
 
 async function main(args: string[]): Promise<void> {
   const [op, ...rest] = args
+  if (!op) {
+    process.stderr.write("usage: pi-subagent-bridge COMMAND [ARGS...]\n")
+    process.exitCode = 2
+    return
+  }
   if (args.length === 1 && (op === "--help" || op === "-h")) return printHelp()
   if (op && rest.length && (rest.at(-1) === "-h" || rest.at(-1) === "--help")) {
     const selected = [op, ...rest.slice(0, -1)].join(" ")
@@ -122,7 +128,7 @@ async function main(args: string[]): Promise<void> {
     process.stdout.write(JSON.stringify(POLICY) + "\n")
     return
   }
-  if (!op || op === "mcp") {
+  if (op === "mcp") {
     const ownerRepos: string[] = []
     for (let i = 0; i < rest.length; i++) {
       if (op === "mcp" && rest[i] === "--repo" && rest[i + 1]) {
@@ -139,7 +145,7 @@ async function main(args: string[]): Promise<void> {
     const [cwd, file, branch, ...extra] = rest
     const { SCOPE_CHECK_USAGE, scopeCheck } = await import("./scope-check.ts")
     if (!cwd || !file || extra.length) throw new Error(SCOPE_CHECK_USAGE)
-    const result = scopeCheck(cwd, JSON.parse(readFileSync(file, "utf8")), branch)
+    const result = scopeCheck(resolve(cwd), JSON.parse(readFileSync(resolve(file), "utf8")), branch)
     process.stdout.write(JSON.stringify(result) + "\n")
     if (!result.in_scope) process.exitCode = 1
     return

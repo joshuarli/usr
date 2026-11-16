@@ -59,7 +59,7 @@ function stateDirectories(arguments_: string[], context: CampaignContext): strin
   for (const root of requested.filter(Boolean)) {
     let absolute: string
     try { absolute = realpathSync(resolve(context.cwd, root)) } catch { throw new CampaignError("no such root: " + root) }
-    try { directories.add(readStateDir(absolute)) } catch { throw new CampaignError("not a Git repository: " + root) }
+    try { directories.add(readStateDir(absolute)) } catch { throw new CampaignError("not a Git repository: " + absolute) }
   }
   if (!directories.size) throw new CampaignError("no ROOT given and WORKER_CAMPAIGN_ROOTS is empty")
   return [...directories]

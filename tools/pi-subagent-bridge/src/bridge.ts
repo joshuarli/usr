@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { realpathSync } from "node:fs"
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path"
+import { dirname, relative, resolve, sep } from "node:path"
 import { GO_TIER_MODELS } from "./tier-policy.ts"
 
 export type ModelRef = { id: string; providerID: string; variant?: string }
@@ -58,10 +58,12 @@ function git(cwd: string, ...args: string[]): string {
 
 /** Never create, reset, clean, merge, or delete a worktree here: the parent owns that lifecycle. */
 export function checkedWorktree(directory: unknown, requireClean = false): string {
-  const input = requiredText(directory, "cwd", 4096)
-  if (!isAbsolute(input)) throw new Error("cwd must be an absolute path to a dedicated Git worktree")
-  const cwd = realpathSync(input)
-  const top = realpathSync(git(cwd, "rev-parse", "--show-toplevel"))
+  const input = resolve(requiredText(directory, "cwd", 4096))
+  let cwd: string, top: string
+  try {
+    cwd = realpathSync(input)
+    top = realpathSync(git(cwd, "rev-parse", "--show-toplevel"))
+  } catch { throw new Error("not a Git worktree: " + input) }
   if (cwd !== top) throw new Error("cwd must be the worktree root, not a subdirectory")
   const commonDir = realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
   const gitDir = realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-dir"))
