@@ -2,8 +2,101 @@
 set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$root"
+show_help() {
+  cat <<'EOF'
+Usage: sh sync [COMMAND] [OPTIONS]
+Reconcile the home configuration and managed tools; omitting COMMAND runs apply.
+
+Commands:
+  sh sync apply [--all] [--json]
+    Reconcile the full home (also the default with no command).
+  sh sync plan [--all] [--json]
+    Preview the full reconciliation and conflicts.
+  sh sync doctor [--all] [--json]
+    Inspect task postconditions and environment diagnostics.
+  sh sync links [--all] [--json]
+    Reconcile layer links only.
+  sh sync tools [NAME...] [--all] [--json]
+    Install or update named tools and prerequisites; no names selects defaults.
+    NAME...  Optional, repeated tool names; see list for the defaults.
+  sh sync bridge [--all] [--json]
+    Reconcile bridge registrations and their prerequisites.
+  sh sync list
+    List default tools for this host and profile.
+  sh sync launchers [NAME...]
+    List executable names for each optional, repeated tool name.
+  sh sync uninstall
+    Remove sync-managed installations and registrations.
+  sh sync check [--plan|--changed] [--json] [--base REV]
+    Run the check suite, or select checks for changed files.
+    --plan     Show selected checks without running them.
+    --changed  Run selected checks for changed files.
+    --json     Output the selected plan or results as JSON (requires a mode).
+    --base REV Include changes since revision REV (requires a mode).
+  sh sync check docs [--check]
+    Generate the development checks table; --check verifies it instead.
+  sh sync check-parallel
+    Run the Python checks in parallel.
+  sh sync layers
+    Check the active layers for duplicate link owners.
+  sh sync hosts [pull|plan|doctor|apply] [HOST...] [--all]
+    Run a fleet operation on hosts in the tailnet policy; default is plan.
+    HOST...  Optional, repeated host names; default is all policy hosts.
+    --all    Show all tasks in host results.
+  sh sync hosts pull [HOST...] [--all]
+    Fetch and fast-forward each selected host's main branch.
+  sh sync hosts plan [HOST...] [--all]
+    Fetch and preview reconciliation on selected hosts.
+  sh sync hosts doctor [HOST...] [--all]
+    Fetch and inspect selected hosts.
+  sh sync hosts apply [HOST...] [--all]
+    Update and reconcile selected hosts.
+
+Options for apply, plan, doctor, links, tools, and bridge:
+  --all   Show every task, including up-to-date tasks.
+  --json  Output one machine-readable JSON object.
+  -h, --help  Show this reference; also available after a command.
+
+Environment:
+  HOME            Required absolute home directory for tools and default target.
+  TARGET          Absolute link destination; defaults to HOME. Apply, tools,
+                  bridge, and uninstall require it to equal HOME.
+  XDG_STATE_HOME  State directory; defaults to HOME/.local/state.
+  DL_OWNED_FILE   Override the ownership record path.
+  DL_PROFILE      Select the host profile; defaults to /etc/home/install-mode.
+  SYNC_JOBS       Maximum concurrent tasks; defaults to the CPU count.
+  NO_COLOR        Disable terminal color.
+
+Examples:
+  sh sync apply --all
+  sh sync plan --json
+  sh sync doctor
+  sh sync links
+  sh sync tools python3
+  sh sync bridge
+  sh sync list
+  sh sync launchers nodejs
+  sh sync uninstall
+  sh sync check
+  sh sync check --plan --base HEAD
+  sh sync check --changed --json
+  sh sync check docs --check
+  sh sync check-parallel
+  sh sync layers
+  sh sync hosts
+  sh sync hosts pull
+  sh sync hosts plan --all
+  sh sync hosts doctor
+  sh sync hosts apply
+EOF
+}
 case ${1:-} in
-  help|--help|-h) printf '%s\n' 'usage: sh sync [plan|doctor|links|tools NAME...|bridge] [--all] [--json]' '       sh sync hosts [pull|plan|apply|doctor] [HOST...] [--all]' '       sh sync [list|uninstall|check [--plan|--changed] [--json] [--base REV]|check-parallel|layers]'; exit 0 ;;
+  help|--help|-h) show_help; exit 0 ;;
+  apply|plan|doctor|links|tools|bridge|list|launchers|uninstall|check|check-parallel|layers|hosts)
+    for arg do
+      case $arg in -h|--help) show_help; exit 0 ;; esac
+    done
+    ;;
 esac
 
 home=${HOME:?HOME is required}

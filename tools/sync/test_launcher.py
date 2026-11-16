@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import re
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,37 @@ class LauncherTests(unittest.TestCase):
         base.mkdir(parents=True, exist_ok=True)
         self.tmp = Path(tempfile.mkdtemp(dir=base))
         self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_help_reference_and_command_pages_are_side_effect_free(self):
+        home = self.tmp / "home"
+        home.mkdir()
+        env = {"HOME": str(home), "TMPDIR": str(self.tmp), "PATH": "/usr/bin:/bin"}
+        commands = ["apply", "plan", "doctor", "links", "tools", "bridge", "list",
+                    "launchers", "uninstall", "check", "check docs", "check-parallel",
+                    "layers", "hosts", "hosts pull", "hosts plan", "hosts doctor", "hosts apply"]
+        reference = None
+        for args in (["-h"], ["--help"], ["help"],
+                     *([*command.split(), flag] for command in commands for flag in ("-h", "--help"))):
+            with self.subTest(args=args):
+                result = subprocess.run(["sh", str(ROOT / "sync"), *args], cwd=ROOT, env=env,
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                if reference is None:
+                    reference = result.stdout
+                self.assertEqual(result.stdout, reference)
+        for command in commands:
+            self.assertIn("sh sync " + command, reference)
+        for option in ("--all", "--json", "--plan", "--changed", "--base REV", "--check"):
+            self.assertIn(option, reference)
+        examples = reference.split("Examples:\n", 1)[1].splitlines()
+        self.assertTrue(examples)
+        self.assertTrue(all(line.startswith("  sh sync ") for line in examples))
+        documented = reference.split("Examples:\n", 1)[0]
+        for example in examples:
+            for option in re.findall(r"(?<!\S)--[\w-]+", example):
+                self.assertIn(option, documented)
+        self.assertEqual(list(home.iterdir()), [])
 
     def test_skips_interpreter_that_cannot_import_executor(self):
         home = self.tmp / "home"
