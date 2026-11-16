@@ -220,12 +220,26 @@ def ensure_work_directory(root):
     expected_ignore_file = Path(
         os.fsdecode(git_output(root, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude").rstrip(b"\n"))
     )
-    if canonical(ignore_file) != canonical(expected_ignore_file):
-        raise CloseoutError(".work must be ignored through .git/info/exclude")
-    if not directory.exists():
+    created = not directory.exists()
+    if created:
         directory.mkdir(mode=0o700)
     if not directory.is_dir():
         raise CloseoutError(f"{directory} must be a directory")
+    try:
+        if canonical(ignore_file) != canonical(expected_ignore_file):
+            local = subprocess.run(
+                ["git", "-C", os.fspath(root), "ls-files", "--others", "--ignored",
+                 "--directory", "-z", "--exclude-from", os.fspath(expected_ignore_file), "--", ".work/"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            if local.returncode != 0 or local.stdout != b".work/\0":
+                raise CloseoutError(".work must be ignored through .git/info/exclude")
+    except (CloseoutError, OSError):
+        if created:
+            directory.rmdir()
+        raise
     return directory
 
 

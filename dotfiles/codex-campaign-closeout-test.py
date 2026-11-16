@@ -29,6 +29,44 @@ def allow(root, path, loaded, release):
 
 
 class CloseoutTests(unittest.TestCase):
+    def ignored_repository(self, root, exclude):
+        subprocess.run(['git', '-C', str(root), 'init'], check=True, capture_output=True)
+        (root / '.gitignore').write_text('.work/\n')
+        (root / '.git/info/exclude').write_text(exclude)
+        subprocess.run(['git', '-C', str(root), 'add', '.gitignore'], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(root), '-c', 'user.name=Test', '-c', 'user.email=test@example.com',
+                        'commit', '-m', 'initial'], check=True, capture_output=True)
+
+    def test_tracked_ignore_can_coexist_with_local_exclude(self):
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as temp:
+                root = Path(temp)
+                self.ignored_repository(root, '/.work/\n')
+                if existing:
+                    (root / '.work').mkdir()
+                closeout.begin(root)
+                self.assertTrue(closeout.state_path(root).is_file())
+                self.assertEqual((root / '.gitignore').read_text(), '.work/\n')
+
+    def test_tracked_ignore_does_not_replace_local_exclude(self):
+        for exclude in ('', '/.work/\n!/.work/\n', '/.work/keep\n',
+                        '/.work/*\n!/.work/codex-campaign-closeout.json\n'):
+            for existing in (False, True):
+                with self.subTest(exclude=exclude, existing=existing), tempfile.TemporaryDirectory(
+                        dir=os.environ.get('TMPDIR')) as temp:
+                    root = Path(temp)
+                    self.ignored_repository(root, exclude)
+                    if existing:
+                        (root / '.work').mkdir()
+                        (root / '.work/keep').write_bytes(b'preserved')
+                    with self.assertRaisesRegex(closeout.CloseoutError, '.git/info/exclude'):
+                        closeout.begin(root)
+                    self.assertFalse(closeout.state_path(root).exists())
+                    if existing:
+                        self.assertEqual((root / '.work/keep').read_bytes(), b'preserved')
+                    else:
+                        self.assertFalse((root / '.work').exists())
+
     def test_concurrent_allowances_survive(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get('TMPDIR')) as temp:
             root = Path(temp)
