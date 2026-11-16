@@ -105,6 +105,7 @@ export type Snapshot = {
   stopped_on: OrUnknown<string | null>
   stop_condition_valid: OrUnknown<boolean>
   continuations: OrUnknown<number>
+  attempt_extensions: OrUnknown<number>
   continuation_limit: number
   steers: OrUnknown<number>
   steer_limit: number
@@ -348,7 +349,7 @@ export function toSnapshot(i: Inspection): Snapshot {
     head_on_lane: read ? laneHead(s).head_on_lane : "unknown",
     commits_since_base: read ? laneHead(s).commits_since_base : "unknown",
     acceptance_claim: i.acceptance_claim, stopped_on: i.stopped_on, stop_condition_valid: i.stop_condition_valid,
-    continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
+    continuations: s.continuations ?? 0, attempt_extensions: (s.attempt_extensions ?? []).reduce((sum, entry) => sum + entry.added, 0), continuation_limit: TURN_LIMIT_CONTINUATIONS,
     steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
     fallback_reason: s.fallback_reason ?? null, fallback_notice: i.notice, fallback_detail: s.fallback_detail ?? null,
     reason: inspectionReason(i),
@@ -364,7 +365,7 @@ function unreadableSnapshot(id: string, raw: unknown, reason: string): Snapshot 
     execution_state: "unknown", attention: "unknown", last_assistant_text: "unknown", error: reason, usage: "unknown", pid: "unknown",
     last_activity: "unknown", last_event: "unknown", changed_paths: "unknown", out_of_scope_paths: "unknown",
     head_unchanged: "unknown", head_on_lane: "unknown", commits_since_base: "unknown", acceptance_claim: "unknown", stopped_on: "unknown", stop_condition_valid: "unknown", continuations: "unknown",
-    continuation_limit: TURN_LIMIT_CONTINUATIONS, steers: "unknown", steer_limit: STEER_LIMIT,
+    continuation_limit: TURN_LIMIT_CONTINUATIONS, attempt_extensions: "unknown", steers: "unknown", steer_limit: STEER_LIMIT,
     fallback_reason: "unknown", fallback_notice: "unknown", fallback_detail: "unknown", reason,
   }
 }

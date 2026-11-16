@@ -487,6 +487,21 @@ test("Command correction resumes the same pinned Ember session, with a bounded a
   } finally { f.close() }
 })
 
+test("parent can extend a session's attempt limit by at most two", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    const task = await bridge.start(f.cwd, "fix", "worker", { ...f.scope, attempt_limit: 1 }, "Edit README")
+    m.done()
+    await assert.rejects(bridge.resume(f.cwd, task.session_id, "fix"), /attempt limit/)
+    await bridge.resume(f.cwd, task.session_id, "fix", { extend_attempts: 2, extension_reason: "Reviewed correction" })
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.attempt_extensions, 2)
+    m.done()
+    await assert.rejects(bridge.resume(f.cwd, task.session_id, "fix", { extend_attempts: 1, extension_reason: "again" }), /extension limit/)
+  } finally { f.close() }
+})
+
 test("Command turn cap continuation does not consume the normal retry budget", async () => {
   const f = fixture()
   try {

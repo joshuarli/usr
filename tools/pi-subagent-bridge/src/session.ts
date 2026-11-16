@@ -73,6 +73,7 @@ export type Session = {
   lane_branch?: string | null
   fallback_reason?: string; fallback_detail?: string; fallback_blocked?: string
   continuations?: number; steers?: number; cancel_requested?: boolean
+  attempt_extensions?: { added: number; reason: string; at: string }[]
 }
 
 export function executorOf(s: Session): Executor {
@@ -377,6 +378,14 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
   }
   for (const key of ["continuations", "steers"] as const) {
     if (value[key] !== undefined) s[key] = counter(value[key], key)
+  }
+  if (value.attempt_extensions !== undefined) {
+    if (!Array.isArray(value.attempt_extensions)) throw new Error("Invalid persisted attempt extensions")
+    s.attempt_extensions = value.attempt_extensions.map((entry: unknown) => {
+      if (!isRecord(entry) || (entry.added !== 1 && entry.added !== 2)) throw new Error("Invalid persisted attempt extension")
+      return { added: entry.added, reason: requiredText(entry.reason, "extension reason", 2000), at: requiredText(entry.at, "extension time") }
+    })
+    if (s.attempt_extensions.reduce((sum, entry) => sum + entry.added, 0) > 2) throw new Error("Invalid persisted attempt extensions")
   }
   if (value.cancel_requested !== undefined) {
     if (typeof value.cancel_requested !== "boolean") throw new Error("Invalid persisted cancellation state")

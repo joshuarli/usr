@@ -143,7 +143,7 @@ pi-subagent-bridge policy
 pi-subagent-bridge model-check CWD TIER
 pi-subagent-bridge start CWD TITLE TIER SCOPE_JSON_FILE BRIEF_FILE
 pi-subagent-bridge status CWD SESSION_ID
-pi-subagent-bridge resume CWD SESSION_ID FEEDBACK_FILE
+pi-subagent-bridge resume CWD SESSION_ID FEEDBACK_FILE [--extend-attempts N --reason TEXT]
 pi-subagent-bridge steer CWD SESSION_ID NOTE_FILE
 pi-subagent-bridge cancel CWD SESSION_ID
 pi-subagent-bridge inspect PATH SESSION_ID
@@ -257,3 +257,5 @@ admissions retain their lease under [Safety and durability](#safety-and-durabili
 This is a community adapter using a developer-preview Muse Code SDK.
 Live account compatibility and network behavior must be tested locally before
 unattended use.
+
+A parent may extend a session by one or two attempts using `worker_resume` fields `extend_attempts` and `extension_reason`, or the corresponding CLI flags. The lifetime extension cap is two; status reports the total.

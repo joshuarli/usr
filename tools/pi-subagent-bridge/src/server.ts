@@ -30,7 +30,7 @@ export function dispatch(worker: Bridge, command: Command): Promise<unknown> {
     case "model_check": return worker.modelCheck(command.cwd, command.tier)
     case "start": return worker.start(command.cwd, command.title, command.tier, command.scope, command.brief)
     case "status": return worker.status(command.cwd, command.session_id)
-    case "resume": return worker.resume(command.cwd, command.session_id, command.feedback)
+    case "resume": return worker.resume(command.cwd, command.session_id, command.feedback, command.extension)
     case "steer": return worker.steer(command.cwd, command.session_id, command.note)
     case "cancel": return worker.cancel(command.cwd, command.session_id)
   }

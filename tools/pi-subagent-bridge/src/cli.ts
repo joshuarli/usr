@@ -57,7 +57,7 @@ async function printHelp(selected?: string): Promise<void> {
   for (const name of COMMAND_NAMES) {
     const command = COMMANDS[name], line = usage(name).replace("usage: pi-subagent-bridge ", "")
     entries[command.cli] = { usage: line, description: command.description,
-      details: line.split(" ").slice(1).map(label => label + "  " + fieldHelp[label]), example: commandExamples[command.cli] }
+      details: command.fields.map(field => ({ cwd: "CWD", title: "TITLE", tier: "TIER", scope: "SCOPE_JSON_FILE", brief: "BRIEF_FILE", session_id: "SESSION_ID", feedback: "FEEDBACK_FILE", note: "NOTE_FILE" })[field]).map(label => label + "  " + fieldHelp[label]).concat(name === "resume" ? ["--extend-attempts N --reason TEXT  Add one or two reviewed attempts, with a reason."] : []), example: commandExamples[command.cli] }
   }
   const keys = selected ? Object.keys(entries).filter(key => key === selected || key.startsWith(selected + " ")) : Object.keys(entries)
   const blocks = keys.map(key => {

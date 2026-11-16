@@ -6,7 +6,7 @@ export type Command =
   | { readonly name: "model_check"; readonly cwd: string; readonly tier: BridgeTier }
   | { readonly name: "start"; readonly cwd: string; readonly title: string; readonly tier: BridgeTier; readonly scope: Scope; readonly brief: string }
   | { readonly name: "status"; readonly cwd: string; readonly session_id: string }
-  | { readonly name: "resume"; readonly cwd: string; readonly session_id: string; readonly feedback: string }
+  | { readonly name: "resume"; readonly cwd: string; readonly session_id: string; readonly feedback: string; readonly extension?: { extend_attempts: number; extension_reason: string } }
   | { readonly name: "steer"; readonly cwd: string; readonly session_id: string; readonly note: string }
   | { readonly name: "cancel"; readonly cwd: string; readonly session_id: string }
 export type CommandName = Command["name"]
@@ -66,12 +66,15 @@ export const COMMANDS: Record<CommandName, {
 
 export function toolSchema(name: CommandName) {
   const fields = COMMANDS[name].fields
-  return { type: "object", properties: Object.fromEntries(fields.map(field => [field, FIELDS[field].schema])),
-    required: fields, additionalProperties: false }
+  return { type: "object", properties: { ...Object.fromEntries(fields.map(field => [field, FIELDS[field].schema])), ...(name === "resume" ? {
+    extend_attempts: { type: "integer", minimum: 1, maximum: 2 }, extension_reason: { type: "string", minLength: 1, maxLength: 2000, pattern: "\\S" },
+  } : {}) },
+    required: fields, ...(name === "resume" ? { dependentRequired: { extend_attempts: ["extension_reason"], extension_reason: ["extend_attempts"] } } : {}), additionalProperties: false }
 }
 export function usage(name: CommandName): string {
   const { cli, fields } = COMMANDS[name]
-  return "usage: pi-subagent-bridge " + [cli, ...fields.map(field => FIELDS[field].label)].join(" ")
+  return "usage: pi-subagent-bridge " + [cli, ...fields.map(field => FIELDS[field].label)].join(" ") +
+    (name === "resume" ? " [--extend-attempts N --reason TEXT]" : "")
 }
 
 function parseJson(text: string): unknown {
@@ -85,7 +88,7 @@ export function decodeCommand(name: CommandName, args: unknown): Command {
     if (!Object.hasOwn(args, field)) throw new Error("Missing tool argument: " + field)
   }
   for (const key of Object.keys(args)) {
-    if (!fields.some(field => field === key)) throw new Error("Unknown tool argument: " + key)
+    if (!fields.some(field => field === key) && !(name === "resume" && (key === "extend_attempts" || key === "extension_reason"))) throw new Error("Unknown tool argument: " + key)
   }
   const dir = FIELDS.cwd.decode(args.cwd)
   switch (name) {
@@ -96,8 +99,12 @@ export function decodeCommand(name: CommandName, args: unknown): Command {
         scope: parseScope(args.scope, requested), brief: FIELDS.brief.decode(args.brief) }
     }
     case "status": return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id) }
-    case "resume":
-      return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id), feedback: FIELDS.feedback.decode(args.feedback) }
+    case "resume": {
+      const hasExtension = args.extend_attempts !== undefined || args.extension_reason !== undefined
+      if (hasExtension && args.extend_attempts !== 1 && args.extend_attempts !== 2) throw new Error("extend_attempts must be 1 or 2")
+      const extension = hasExtension ? { extend_attempts: args.extend_attempts as number, extension_reason: requiredText(args.extension_reason, "extension_reason", 2000) } : undefined
+      return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id), feedback: FIELDS.feedback.decode(args.feedback), ...(extension ? { extension } : {}) }
+    }
     case "steer":
       return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id), note: FIELDS.note.decode(args.note) }
     case "cancel": return { name, cwd: dir, session_id: FIELDS.session_id.decode(args.session_id) }
@@ -106,6 +113,9 @@ export function decodeCommand(name: CommandName, args: unknown): Command {
 
 export function cliArguments(name: CommandName, rest: readonly string[], read: (path: string) => string): Record<string, unknown> {
   const fields = COMMANDS[name].fields
+  if (name === "resume" && rest.length === 7 && rest[3] === "--extend-attempts" && rest[5] === "--reason") {
+    return { ...cliArguments(name, rest.slice(0, 3), read), extend_attempts: Number(rest[4]), extension_reason: rest[6] }
+  }
   if (rest.length !== fields.length || rest.some(value => !value)) throw new Error(usage(name))
   return Object.fromEntries(fields.map((field, index) => {
     const value = rest[index]

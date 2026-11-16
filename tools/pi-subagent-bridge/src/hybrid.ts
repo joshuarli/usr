@@ -326,6 +326,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       reason: i.notice === "stopped without a listed stop condition" ? i.notice : null,
       acceptance_blocked: !head_on_lane || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
       continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
+      attempt_extensions: (s.attempt_extensions ?? []).reduce((sum, entry) => sum + entry.added, 0),
       steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
       fallback_reason: s.fallback_reason ?? null,
       fallback_notice: i.notice,
@@ -468,8 +469,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const advanced = await advance(cwd, id)
       return statusResponse(await inspectSession(advanced.session, readStateDir(advanced.session.cwd), inspection, advanced.known))
     },
-    async resume(cwd: unknown, id: unknown, feedback: unknown) {
-      return runResume(cwd, id, feedback)
+    async resume(cwd: unknown, id: unknown, feedback: unknown, extension?: { extend_attempts: number; extension_reason: string }) {
+      return runResume(cwd, id, feedback, undefined, extension)
     },
     async cancel(cwd: unknown, id: unknown) {
       return runCancel(cwd, id, false)
@@ -478,9 +479,14 @@ export function makeHybridBridge(api: PiAdapter, command = {
       return runSteer(cwd, id, note)
     },
   }
-  async function runResume(cwd: unknown, id: unknown, feedback: unknown, admitEffect?: OwnerEffectAdmit) {
+  async function runResume(cwd: unknown, id: unknown, feedback: unknown, admitEffect?: OwnerEffectAdmit, extension?: { extend_attempts: number; extension_reason: string }) {
     return withSessionLock(cwd, id, async (s) => {
       const correction = required(feedback, "feedback", 32000)
+      const added = extension?.extend_attempts ?? 0
+      if (extension && (added !== 1 && added !== 2)) throw new Error("extend_attempts must be 1 or 2")
+      const reason = extension ? required(extension.extension_reason, "extension_reason", 2000) : undefined
+      const total = (s.attempt_extensions ?? []).reduce((sum, entry) => sum + entry.added, 0)
+      if (total + added > 2) throw new Error("Attempt extension limit reached")
       const continuation = s.execution.kind === "process" && s.execution.executor === "command-code" &&
         command.status(s.execution.run).state === "turn_limit"
       if (continuation && (s.continuations ?? 0) >= TURN_LIMIT_CONTINUATIONS)
@@ -490,12 +496,13 @@ export function makeHybridBridge(api: PiAdapter, command = {
         throw new Error("Cannot resume changed HEAD or out-of-scope work: " + describeDrift(s))
       if (s.execution.kind === "transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before resuming")
-      if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
+      if (!continuation && s.attempts >= s.scope.attempt_limit + total + added) throw new Error("Task attempt limit reached")
       if (s.execution.kind === "pi") {
         const { selection, session_id: sessionId } = s.execution
         const dispatch = await api(selection).preflightResume(s.cwd, sessionId, "Same-scope correction only: " + correction)
         await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+        if (reason) s.attempt_extensions = [...s.attempt_extensions ?? [], { added, reason, at: new Date().toISOString() }]
         s.attempts++
         transition(s, { executor: "pi", selection }, true)
         save(s)
@@ -512,6 +519,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         if (execution.executor === "fx" && !fx?.available(execution.selection)) throw new Error("Pinned FX runtime unavailable; cannot resume")
         await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+        if (reason) s.attempt_extensions = [...s.attempt_extensions ?? [], { added, reason, at: new Date().toISOString() }]
         if (continuation) s.continuations = (s.continuations ?? 0) + 1
         else s.attempts++
         const target: ProcessTarget = processTarget(execution)
