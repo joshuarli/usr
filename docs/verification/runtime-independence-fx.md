@@ -4,7 +4,7 @@
 
 **Limited-go for deterministic local qualification on native macOS ARM64.** The real CLI works through the shared bridge, including scope checks, leases, continuation and owner control. The opt-in live pilot is implemented and was executed against a real provider account; it is parked on reproduced account blockers (no FX Codex login; exhausted OpenCode Go monthly quota that blocks the incumbent identically). Live model usefulness, intended-model quality and native Linux remain unqualified. Production promotion is prohibited.
 
-Accepted source checkpoints are `91642ad`, `6dd9583`, `c6f94ad`, `09815d1`, `d986a7f`, `c19b2f3`, `cdda03b`, `12df815` and `5d541d5`, against runtime-independence baseline `2025e04`. The owner's existing Codex configuration change is excluded. No remote update, home sync, production route change, Pi removal or Intercom change was performed.
+Accepted source checkpoints are `91642ad`, `6dd9583`, `c6f94ad`, `09815d1`, `d986a7f`, `c19b2f3`, `cdda03b`, `12df815` and `4019568`, against runtime-independence baseline `2025e04`. The owner's existing Codex configuration change is excluded. No remote update, home sync, production route change, Pi removal or Intercom change was performed.
 
 ## Release and installation
 
