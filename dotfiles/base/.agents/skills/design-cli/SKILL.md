@@ -18,14 +18,14 @@ One declaration of each command drives parsing, validation, usage, help, errors,
 ## Help
 
 - **The top-level help is the complete reference.** `tool -h` and `tool --help` print, in a fixed order, the usage, common options once, then every command and nested command with its usage, description, own options, positionals, defaults, value names, required and repeated status, and environment inputs. A bare list of command names that points to each command's `-h` page does not satisfy this. Do not concatenate standalone pages that repeat common options or `-h` in every block.
-- **Each command shows a representative example.** Each command has at least one real invocation covering its common use, written exactly as a user types it. A test parses every example against the real parser, so an example cannot drift from the parser.
+- **Each command shows a representative example.** Each command has at least one real invocation covering its common use, written exactly as a user types it. Where parsing can run without side effects, a test parses every example against the real parser so the examples cannot drift. Otherwise a test checks that each example uses only documented options.
 - **A bare invocation prints help.** When a tool requires a command, running it with no arguments prints the same text as `-h` to stdout and exits 0. Tools whose bare invocation already performs work keep that behavior.
 - **`-h` and `--help` work everywhere.** Every command, including nested ones, accepts them before required-argument validation. Help prints to stdout, exits 0, and works offline. It does not write state, start daemons, install anything, or use the network. A command's own page also shows the inherited common options.
 - **Version identifies the build.** `--version` prints the tool name, version, and the source revision embedded at build time, for example `tool 1.4.0 (git abc123456789)`. Do not run git at runtime. Use `-v` for version only if it is not taken; when it is, keep the existing meaning and report the conflict.
 
 ## Owned tools
 
-A tool from the `joshuarli` or `laputa-systems` GitHub namespaces ends its primary help with this footer. Substitute the real repository and keep the wording:
+An agent-facing tool from the `joshuarli` or `laputa-systems` GitHub namespaces ends its primary help with this footer. Substitute the real repository and keep the wording. `fleet/policy/owned-tools.toml` in `laputa-systems/stuff` records each command's footer source and test, or why the command is exempt: shims, harness launchers, hooks whose output is a protocol, and personal host helpers. Update that entry when a command gains the footer or its exemption no longer applies.
 
 ```text
 Maintained by Joshua Li: https://github.com/OWNER/REPO
