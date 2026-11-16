@@ -1,20 +1,12 @@
----
-name: correct
-description: "Find the mistakes agents keep repeating in this repo and make each one impossible. Use for /correct or repeated user corrections."
-disable-model-invocation: true
-metadata:
-  opencode/autoinvoke: "false"
----
+# Recurring failures and enforcement
 
-# Correct
-
-The same mistakes keep getting fixed by hand. Change the repo so the next agent cannot make them.
+Read this for stages 3 and 4, in `~/usr` or the repository named in `/audit-skills <repo>`. The goal is to change the repo so the next agent cannot make the mistake again.
 
 Assume every contributor is an agent that sees only the files it opened, copies the nearest example, and takes the shortest path that compiles. A change that looks right from one file must be right for the whole repo.
 
 ## Find the classes
 
-Read recent commits and reverts, review comments, the `AGENTS.md` chain, comments that explain workarounds (each is a defect class agents will copy), and recent sessions under `~/.claude/projects/` for the user's corrections. Group mistakes into classes. A class counts once it has happened twice.
+Read recent commits and reverts, review comments, the `AGENTS.md` chain, comments that explain workarounds (each is a defect class agents will copy), and recent sessions in the repo for the user's corrections (sources in [sessions](sessions.md)). Group mistakes into classes. A class counts once it has happened twice. Start from the window or a bounded recent sample; go further back only for a class the sample shows.
 
 ## Fix each at the highest level that works
 
@@ -25,10 +17,8 @@ Read recent commits and reverts, review comments, the `AGENTS.md` chain, comment
 
 Take the strongest mechanism available. A weaker guard becomes the next template that agents copy.
 
-## Prove and record
+## Prove
 
-Fix the most frequent classes now, one logical change per commit. Prove each new check fails on a real past mistake by running it against the old code. A check agents will not run is not a check, so keep it fast enough to run on every change. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
+Fix the most frequent classes first, one logical change per commit. Prove each new check fails on a real past mistake by running it against the old code. A check agents will not run is not a check, so keep it fast enough to run on every change. Allow an exception only on the offending line, with a reason, an expiry, and a human's approval.
 
 A rule nothing enforces is a repeat: fix it higher in the same change. Drop a rule once its mistake can no longer happen.
-
-**Report:** each class with its evidence, the level chosen, and why a higher level did not work.

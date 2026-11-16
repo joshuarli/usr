@@ -47,7 +47,7 @@ One repository in, two deliverables out: docs that match the code, and tickets i
 | Dead weight | `dead-code-archaeology` | Dead code, finished flags, legacy paths: prove liveness. |
 | Navigability | `make-code-search-a-reliable-navigation-boundary` | Does text search reach definitions, callers, tests, and docs? |
 | Comments | `comment-cleanup` | Which comments excuse a workaround or claim a constraint nothing enforces? Each is a finding about that code, and the spreading ones are the worst. |
-| Recurring mistakes | `correct` | Which defect classes recur in history and have no guard? |
+| Recurring mistakes | [`audit-skills` failures](../audit-skills/references/failures.md) | Which defect classes recur in history and have no guard? |
 
 No skill covers these, so ask directly:
 

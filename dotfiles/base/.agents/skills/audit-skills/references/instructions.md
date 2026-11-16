@@ -1,0 +1,36 @@
+# Instruction audit
+
+Read this for stage 1 and for applying instruction fixes in `~/usr`. `dotfiles-health` owns the structural invariants and the rule-owner list; this stage judges the prose against them. Run commands from `~/usr`.
+
+## Scope and cost
+
+- **Everything an agent reads.** `dotfiles/base/.codex/AGENTS.md` and every adapter linking to it, the repo `AGENTS.md`, `SKILLS.md`, `docs/agent-setup.md`, `dotfiles/base/.claude/agents/`, and every `SKILL.md` and `references/` file under `dotfiles/base/.agents/skills/` and `.agents/skills/`. For `/audit-skills <repo>`, the scope is that repo's `AGENTS.md` chain and local skills.
+- **Weight findings by load cost.** The global contract loads in every session, auto-skill descriptions in every session, and skill bodies only on use. A byte cut from the contract is worth more than a paragraph cut from an explicit skill.
+- **Each harness loads the contract once.** List the adapter symlinks (`fd -H -t l '^(AGENTS|CLAUDE|GEMINI)\.md$' dotfiles`) against the paths in `docs/agent-setup.md`. A second adapter in one harness's directory doubles the contract in every session, and so does a stale link left in the home directory, which sync must then retire. Inside this repo, Claude Code also loads nested instruction files and `.claude/skills` directories beside files it reads; `.claude/settings.json` excludes the adapters and sync declares `~/.claude/skills` in code. When a finding is about load cost, prove it: run `claude -p --model claude-haiku-5-5 --allowedTools Read` asking it to read a file in the suspect directory and list every `Contents of` header, once with the fix and once without.
+
+## Audit (read-only)
+
+1. **Inventory.** Run `node tools/skills/skills.ts check` and `node tools/skills/skills.ts check --root .agents/skills` for current warnings. Rank every file in scope by bytes, and every skill by description length, since descriptions load in every session of every harness.
+2. **Fan out by cluster** when the inventory shows work across many skills; a pass with a handful of findings is cheaper done directly. Use `orchestrate` with one read-only lane each for the contract with its index and agent definitions, workflow and campaign skills, review, test, and performance skills, code-design skills, and language, writing, and repo skills. Rebalance clusters as skills are added. Each lane reads the global contract first, since anything a skill restates from it is redundant.
+3. **Brief each lane with the priorities in order.**
+   - Contradictions between files, quoted on both sides with `file:line`.
+   - Rules without one owner: the same rule in several skills, or overlapping scopes that should merge or point. Check against the owner list in `dotfiles-health`.
+   - Procedures that belong in tooling: a fixed sequence of commands or checks an agent must reproduce by hand (for example the git steps `worktree-retire` replaced). Propose a stdlib Python or TypeScript tool with tests, and leave the skill only the judgment the tool cannot make.
+   - Restated enforcement: prose repeating what a schema, checker, hook, or test already enforces. Cut it to the judgment the enforcement leaves open.
+   - Bloat: sentences that can be cut or halved with no lost decision, and facts pinned to a library version that will go stale.
+   - Placement: material needed at one step only (one-time setup, lookup tables, verified facts) belongs in `references/`, linked at that step.
+   - Unclear wording: more than one reading, jargon where a plain word works, stacked qualifiers.
+   - Invocation precision: an auto-skill description must name the distinct tasks that require its body, not merely describe its topic. Test whether each description would trigger for a concrete user request and stay silent for an adjacent request; explicitly gated skills must remain manual-only. Stage 2 supplies the real-session evidence.
+   - Descriptions that are vague or would fire too broadly; skills missing `**The test:**` or `**Report:**`.
+
+   Each finding gives `file:line`, the quoted text, a proposed replacement or "delete", and a one-line reason.
+
+## Apply
+
+- **Lanes edit disjoint files and run no git writes.** Reuse the audit lanes, which already hold their findings. A fix that crosses into another lane's files is reported, not made.
+- **Preserve every decision.** Per file, compare backticked tokens with `git show HEAD:<file> | rg -o '\`[^\`]+\`' | sort -u`; every token removed must be named as moved or deliberately dropped.
+- **Tests that pin instruction text run from the plan.** `sh sync check --plan` selects every registered test that reads a changed contract or skill. When you add such a test, register the files it reads in `tools/sync/checks.py`; the planner test pins that coverage.
+- **Review each lane's diff, then commit it alone** with a body naming the contradictions it resolves. New rule owners go into the list in `dotfiles-health` in the same change.
+- **Run the shared checks once all lanes stop**, not while they edit: `sh sync check --changed --base <campaign base>`. Concurrent runs collide on fixtures and fail spuriously.
+- **A new tool lands before the skill that points at it**, in its own commit with tests registered in `tools/sync/checks.py`. When a check fails, rerun it on the stashed tree to tell a pre-existing failure from a new one.
+- **Expect modest savings from prose alone.** Once contradictions and duplicates are gone, most remaining text is a specific rule. Stop there instead of compressing rules away; larger cuts come from guards and consolidation.

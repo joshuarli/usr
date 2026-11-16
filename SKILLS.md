@@ -29,7 +29,6 @@ You rarely need to name a skill. `do` loads on its own for work with real uncert
 | `sleep` | Explicit | Proceed unattended while you are asleep: keep working without stopping, decide within authority, park only owner-blocked work. |
 | `resume-session` | Explicit | Continue a specific Codex, Claude, Muse, OpenCode, Pi, Command, Antigravity, DeepSeek, or fx session's unfinished work in this agent: `/resume-session <agent> <session-id>`. |
 | `session-handoff` | Explicit | Export a redacted, portable brief from the current task or a named coding-agent session: `/session-handoff current` or `/session-handoff <agent> <session-id>`. |
-| `correct` | Explicit | When you correct the same mistake twice: find the repeated mistakes and make each one impossible (architecture, then types, then a lint, then a test, docs last). |
 
 ## Review
 
@@ -103,7 +102,7 @@ Repo upkeep and getting work merged.
 
 | Skill | Mode | Use it to |
 | --- | --- | --- |
-| `skill-eval` | Explicit | Judge from real sessions whether each skill earns its place: keep, retune, demote, fold, or delete. |
+| `audit-skills` | Explicit | Improve the agent system from evidence: audit instructions, judge from sessions whether each skill earns its place, and make repeated mistakes impossible (architecture, then types, then a lint, then a test, docs last). `/audit-skills past 2h` reads recent sessions; `/audit-skills <repo>` targets the mistakes agents repeat in that repo, for example after you correct the same one twice. |
 | `create-verification-skill` | Explicit | Write or refresh a repo-local skill that checks a project's real user-facing behavior. `do` looks for one. |
 | `todo` | Auto | Save work for later as a `TODO.md` ticket (P1 to P4) or an RFC. Ask for "save this as a todo". |
 
