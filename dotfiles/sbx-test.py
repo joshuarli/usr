@@ -421,7 +421,7 @@ def main():
 
 
 class OwnedHelpTests(unittest.TestCase):
-    def test_help_examples_and_bare_invocation(self):
+    def test_help_examples(self):
         import re
         import shlex
         import subprocess
@@ -430,7 +430,7 @@ class OwnedHelpTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         tool = root / "dotfiles/base/.local/bin/sbx"
         results = [subprocess.run([sys.executable, "-I", str(tool), *args], capture_output=True, text=True)
-                   for args in (("-h",), ("--help",), ())]
+                   for args in (("-h",), ("--help",))]
         for result in results:
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout, results[0].stdout)

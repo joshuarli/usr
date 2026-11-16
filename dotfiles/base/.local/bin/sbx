@@ -361,9 +361,6 @@ def describe(plan: Plan, argv: list[str], profile: str | None = None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv:
-        parse(["-h"])
-        return 0
     try:
         plan = parse(argv)
         explain = plan.explain
