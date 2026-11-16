@@ -307,7 +307,8 @@ def build_parser():
         def format_help(self):
             lines = [f'usage: {_usage(self)}', '', 'Manage a Markdown TODO backlog.', '', 'Common options, given before COMMAND:', *_arguments([FILE_OPTION]), f"    {'-h, --help':<18} print this reference", '', 'Commands:']
             for name, description, arguments, examples in COMMANDS:
-                lines += ['', f'  {_usage(commands[name])}', f'    {description}', *_arguments(arguments), *(f'    Example: {example}' for example in examples)]
+                lines += ['', f'  {_usage(commands[name])}', f'    {description}', *_arguments(arguments)]
+            lines += ['', 'Examples:', *(f'  {example}' for *_, examples in COMMANDS for example in examples)]
             return '\n'.join([*lines, '', FOOTER, ''])
 
     parser = Root(prog='todo', description='Manage a Markdown TODO backlog.')

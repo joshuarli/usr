@@ -201,7 +201,7 @@ class HelpTests(unittest.TestCase):
             for _, options in arguments:
                 self.assertIn(options['help'], bare.stdout)
             for example in examples:
-                self.assertIn(f'Example: {example}', bare.stdout)
+                self.assertIn(f'  {example}', bare.stdout.split('\nExamples:\n', 1)[1].splitlines())
 
     def test_every_example_parses(self):
         import shlex
