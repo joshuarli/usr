@@ -42,7 +42,7 @@ Call `worker_model_check` for the tier you are about to assign: it returns the e
 
 **Pi OpenCode Go boundary:** scout and mechanic Pi fallbacks use pinned OpenCode Go models; Zen models are unusable from headless SDK workers (the gateway rejects non-opencode-client User-Agents with `429 FreeUsageLimitError` — see `docs/pi.md#why-zen-is-not-a-pin`). Other OpenCode Go models and custom endpoints are forbidden. The native Pi `expert` profile is the Pi-native expert lane; it authorizes new expert dispatches from Pi sessions through the native subagent tool.
 
-Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Pi's native `expert` profile, Claude Code's `opus` at medium thinking); nothing routes to the bridge. Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert.
+Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's `opus` at medium thinking); nothing routes to the bridge. Codex expert runs like Devin's: on the model its session config provides, with no per-tier pin. Reserve the lane for exceptional architectural decisions and independent adversarial review. There is no higher tier above expert.
 
 **Default to worker** for substantial well-specified tasks; size alone does not justify a native `expert` subagent. A read-only `scout` gets no `bash`, `edit`, or `write`. No tier grants privilege to change requirements or affect unrelated files.
 

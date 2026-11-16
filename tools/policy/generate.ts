@@ -76,7 +76,7 @@ function nativeFallback(policy: Policy): string {
 
 function delegation(policy: Policy, lean: boolean): string {
   const head = lean ? "- Before delegation, read `orchestrate` and use `pi-subagent-bridge` for scout/mechanic/worker." :
-    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`. Expert assignments use harness-native subagents; the bridge has no expert tier."
+    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`. Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's `opus` at medium thinking); the bridge has no expert tier."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
     `No ${code("god")} tier exists. ` +

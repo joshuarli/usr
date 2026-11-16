@@ -13,7 +13,7 @@ The bridge admits `scout`, `mechanic`, `worker` only; `expert` assignments use h
 | worker | Codex `gpt-6.1-terra` (`high`) | Command Code `deepseek/deepseek-v4.1-flash` (`high`); Pi `muse-sdk/muse-spark-1.3` (`xhigh`); Pi `opencode-go/deepseek-v4.1-flash` (`high`); Pi `devin/swe-2-flash` (`medium`) |
 <!-- policy:end routing-summary -->
 
-Expert assignments never enter the bridge. OpenCode and Devin top-level sessions delegate only through native subagents; Claude Code pins `opus` with medium thinking for expert work; Pi launches its native `expert` profile. See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
+Expert assignments never enter the bridge. OpenCode and Devin top-level sessions delegate only through native subagents; Codex uses its configured native subagents (no per-tier pin); Claude Code pins `opus` with medium thinking for expert work; Pi launches its native `expert` profile. See [orchestrate](../../dotfiles/base/.agents/skills/orchestrate/SKILL.md).
 
 ## Setup
 

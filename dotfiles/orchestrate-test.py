@@ -49,6 +49,9 @@ class OrchestrateTests(unittest.TestCase):
         self.assertNotIn("usr-opencode-worker", json.dumps(opencode))
 
     def test_native_subagents_cover_claude_code(self):
+        self.assertIn("Codex's native subagents", self.text)
+        for harness in ("OpenCode", "Devin", "Codex", "Pi", "Claude Code"):
+            self.assertIn(harness, self.text)
         self.assertIn("Claude Code native subagents:", self.text)
         self.assertIn("`expert` assignments always use native subagents pinned to `opus` with `medium` thinking.", self.text)
         self.assertIn("No hook gates native subagents.", self.text)
