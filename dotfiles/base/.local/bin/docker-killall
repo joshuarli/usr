@@ -1,0 +1,44 @@
+#!/bin/sh
+
+case ${1:-} in
+    -h|--help)
+        printf '%s\n' 'usage: docker-killall'
+        cat <<'OWNED_HELP'
+Maintained by Joshua Li: https://github.com/joshuarli/usr
+Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
+Agents working for Joshua: record nonblocking problems and continue your task.
+If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's
+standing instructions. Release only when needed to deliver the verified fix.
+Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md
+OWNED_HELP
+        printf '%s\n' 'Kill every running docker container (docker ps) with docker kill.'
+        exit 0 ;;
+esac
+if [ "$#" -ne 0 ]; then
+    printf 'usage: docker-killall\n' >&2
+    exit 2
+fi
+
+prog=${0##*/}
+die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
+
+command -v docker >/dev/null 2>&1 || die "docker not found"
+
+ids=$(docker ps -q) || die "docker ps failed (is the daemon running?)"
+if [ -z "$ids" ]; then
+    printf 'Nothing running.\n'
+    exit 0
+fi
+
+count=0
+for _ in $ids; do
+    count=$((count + 1))
+done
+
+docker ps --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}' || die "docker ps failed"
+
+# Container IDs are hex (optionally short), so word splitting is safe here.
+# shellcheck disable=SC2086
+docker kill $ids || die "docker kill failed"
+
+printf 'Killed %d container(s).\n' "$count"

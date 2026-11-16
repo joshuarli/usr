@@ -9,6 +9,7 @@ mkdir "$scratch/bin" "$scratch/home" "$scratch/tmp"
 ln -s /bin/cat "$scratch/bin/cat"
 
 for script in \
+    dotfiles/base/.local/bin/docker-killall \
     dotfiles/base/.local/bin/pk \
     dotfiles/base/.local/bin/memtop \
     dotfiles/base/.local/bin/ecount \
