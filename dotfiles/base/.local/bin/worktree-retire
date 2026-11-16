@@ -119,11 +119,14 @@ def retire(path: Path, into: str, discard_ignored: bool, dry_run: bool) -> list[
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="worktree-retire", description=__doc__.splitlines()[0], epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("worktree", type=Path)
+    parser = argparse.ArgumentParser(prog="worktree-retire", description=__doc__.splitlines()[0], epilog="\n".join(__doc__.splitlines()[4:]) + "\n\nExamples:\n  worktree-retire .work/wt/lane --into main --dry-run\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("worktree", type=Path, help="lane worktree under .work/wt to retire")
     parser.add_argument("--into", required=True, help="integration revision the lane must already be in; resolved against the current directory when it belongs to this repository")
-    parser.add_argument("--discard-ignored", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--discard-ignored", action="store_true", help="allow removal of ignored files")
+    parser.add_argument("--dry-run", action="store_true", help="report what would happen without removing anything")
+    if len(sys.argv) == 1:
+        parser.print_help()
+        return 0
     args = parser.parse_args()
     try:
         for line in retire(args.worktree.resolve(), args.into, args.discard_ignored, args.dry_run):

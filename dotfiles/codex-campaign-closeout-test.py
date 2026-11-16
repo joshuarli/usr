@@ -61,6 +61,40 @@ class CloseoutTests(unittest.TestCase):
 
 
 class OwnedHelpTests(unittest.TestCase):
+    def test_help_examples_and_bare_invocation(self):
+        import re
+        import shlex
+        import subprocess
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        tool = root / "dotfiles/base/.local/bin/codex-campaign-closeout.py"
+        results = [subprocess.run([sys.executable, "-I", str(tool), *args], capture_output=True, text=True)
+                   for args in (("-h",), ("--help",), ())]
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, results[0].stdout)
+        help_text = results[0].stdout
+        examples = re.findall(r"^  codex-campaign-closeout.py (.+)$", help_text, re.MULTILINE)
+        self.assertIn("Examples:\n", help_text)
+        self.assertTrue(examples)
+        for example in examples:
+            for word in shlex.split(example):
+                if word.startswith("--") and word != "--":
+                    self.assertIn(word, help_text.split("Examples:")[0])
+
+
+    def test_subcommand_help(self):
+        import subprocess
+        import sys
+        from pathlib import Path
+        tool = Path(__file__).resolve().parents[1] / "dotfiles/base/.local/bin/codex-campaign-closeout.py"
+        for command in ("begin", "allow", "cancel", "hook"):
+            result = subprocess.run([sys.executable, "-I", str(tool), command, "-h"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("See codex-campaign-closeout.py -h", result.stdout)
+        self.assertIn("--path", subprocess.run([sys.executable, "-I", str(tool), "allow", "-h"], capture_output=True, text=True).stdout)
+
     def test_primary_help_footer(self):
         import subprocess
         from pathlib import Path

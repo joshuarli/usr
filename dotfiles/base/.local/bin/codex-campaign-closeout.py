@@ -414,14 +414,25 @@ def run_hook_locked(root, input_error):
 
 
 def arguments():
-    parser = argparse.ArgumentParser(epilog="\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("begin")
-    allowance = commands.add_parser("allow")
-    allowance.add_argument("--path", required=True)
-    allowance.add_argument("--reason", required=True)
-    commands.add_parser("cancel")
-    commands.add_parser("hook")
+    parser = argparse.ArgumentParser(description="Manage campaign closeout state and its stop hook.", formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
+    begin_parser = commands.add_parser("begin", help="start closeout tracking", description="Start closeout tracking for the current repository.", epilog="See codex-campaign-closeout.py -h for all commands.")
+    allowance = commands.add_parser("allow", help="record a retained worktree", description="Allow a registered worktree under .work to remain after closeout.", epilog="See codex-campaign-closeout.py -h for all commands.")
+    allowance.add_argument("--path", required=True, help="path to the retained worktree (required)")
+    allowance.add_argument("--reason", required=True, help="reason for retaining the worktree (required)")
+    cancel_parser = commands.add_parser("cancel", help="cancel closeout tracking", description="Cancel closeout tracking for the current repository.", epilog="See codex-campaign-closeout.py -h for all commands.")
+    hook_parser = commands.add_parser("hook", help="check closeout at agent stop", description="Check closeout state as a stop hook, reading hook input from stdin.", epilog="See codex-campaign-closeout.py -h for all commands.")
+    sections = []
+    for child in (begin_parser, allowance, cancel_parser, hook_parser):
+        formatter = child._get_formatter()
+        formatter.add_usage(child.usage, child._actions, child._mutually_exclusive_groups)
+        formatter.add_text(child.description)
+        formatter.add_arguments([action for action in child._actions if action.dest != "help"])
+        sections.append(formatter.format_help().strip())
+    parser.epilog = "\n\n".join(sections) + "\n\nExamples:\n  codex-campaign-closeout.py begin\n  codex-campaign-closeout.py allow --path .work/wt/lane --reason 'retained for review'\n  codex-campaign-closeout.py cancel\n  codex-campaign-closeout.py hook\n" + "\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"
+    if len(sys.argv) == 1:
+        parser.print_help()
+        raise SystemExit(0)
     return parser.parse_args()
 
 

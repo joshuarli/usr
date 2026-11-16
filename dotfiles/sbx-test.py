@@ -152,7 +152,7 @@ class PolicyTests(LocalFixture):
         with mock.patch.object(SBX, "parse", return_value=self.plan()), \
              mock.patch.object(SBX.shutil, "which", return_value=None), \
              mock.patch.object(SBX.subprocess, "call") as call:
-            self.assertEqual(SBX.main([]), 1)
+            self.assertEqual(SBX.main(["--offline"]), 1)
         call.assert_not_called()
 
     def test_linux_no_home_bind_and_private_namespaces(self):
@@ -421,6 +421,29 @@ def main():
 
 
 class OwnedHelpTests(unittest.TestCase):
+    def test_help_examples_and_bare_invocation(self):
+        import re
+        import shlex
+        import subprocess
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        tool = root / "dotfiles/base/.local/bin/sbx"
+        results = [subprocess.run([sys.executable, "-I", str(tool), *args], capture_output=True, text=True)
+                   for args in (("-h",), ("--help",), ())]
+        for result in results:
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, results[0].stdout)
+        help_text = results[0].stdout
+        examples = re.findall(r"^  sbx (.+)$", help_text, re.MULTILINE)
+        self.assertIn("Examples:\n", help_text)
+        self.assertTrue(examples)
+        for example in examples:
+            for word in shlex.split(example):
+                if word.startswith("--") and word != "--":
+                    self.assertIn(word, help_text.split("Examples:")[0])
+
+
     def test_primary_help_footer(self):
         import subprocess
         from pathlib import Path

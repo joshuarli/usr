@@ -7,11 +7,6 @@ The tree is the command and every descendant ever seen, including children that
 start their own session or are orphaned by their parent. Every interval the
 guard samples each process's cumulative CPU time (/proc on Linux, ps on macOS):
 
-  --cores N   stop the tree when its CPU use averaged over --window seconds
-              exceeds N cores (default: half of this host's cores)
-  --spin S    stop the tree when any one process stays at or above one full
-              core for S seconds (default: off)
-
 Stopping sends SIGTERM to every live process in the tree, then SIGKILL after
 --grace seconds. Descendants still running when the command exits are stopped
 the same way. SIGINT, SIGTERM and SIGHUP to the guard stop the tree.
@@ -194,18 +189,21 @@ def stop(tree: Tree, child: subprocess.Popen[bytes], grace: float) -> None:
 def parser() -> argparse.ArgumentParser:
     lines = __doc__.splitlines()
     result = argparse.ArgumentParser(prog="cpu-guard", description=lines[0], usage=lines[2][7:],
-                                     epilog="\n".join(lines[4:]) + FOOTER,
+                                     epilog="\n".join(lines[4:]) + "\nExamples:\n  cpu-guard --cores 2 -- make test\n" + FOOTER,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    result.add_argument("--cores", type=float, default=max(1, (os.cpu_count() or 2) // 2))
-    result.add_argument("--window", type=float, default=20.0)
-    result.add_argument("--spin", type=float)
-    result.add_argument("--grace", type=float, default=5.0)
-    result.add_argument("--interval", type=float, default=1.0)
-    result.add_argument("command", nargs=argparse.REMAINDER)
+    result.add_argument("--cores", type=float, default=max(1, (os.cpu_count() or 2) // 2), metavar="N", help="stop when average CPU use exceeds N cores (default: half the host cores, at least 1)")
+    result.add_argument("--window", type=float, default=20.0, metavar="S", help="averaging window in seconds (default: 20)")
+    result.add_argument("--spin", type=float, metavar="S", help="stop when one process uses a full core for S seconds (default: off)")
+    result.add_argument("--grace", type=float, default=5.0, metavar="S", help="seconds between SIGTERM and SIGKILL (default: 5)")
+    result.add_argument("--interval", type=float, default=1.0, metavar="S", help="sampling interval in seconds (default: 1)")
+    result.add_argument("command", nargs=argparse.REMAINDER, metavar="COMMAND", help="command and arguments to run after --")
     return result
 
 
 def main(argv: list[str]) -> int:
+    if not argv:
+        parser().print_help()
+        return 0
     args = parser().parse_args(argv)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command or args.cores <= 0 or args.window <= 0 or args.interval <= 0 or args.grace < 0 or (
