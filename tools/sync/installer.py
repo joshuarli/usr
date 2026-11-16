@@ -177,6 +177,7 @@ class Installer:
         self.claims: list[tuple[str, Path]] = []
         self.removed: set[Path] = set()
         self.changed = False
+        self.verbose = self.env.get("SYNC_VERBOSE", "").lower() in ("1", "true", "yes", "on")
         color_setting = self.env.get("DL_COLOR", "auto")
         self.color = color_setting in ("1", "true", "yes", "always") or (
             color_setting == "auto" and "NO_COLOR" not in self.env and sys.stdout.isatty())
@@ -206,10 +207,12 @@ class Installer:
         return shutil.which(name, path=self._path)
 
     def ok(self, message: str) -> None:
-        print(f"\033[32m✓ {message}\033[0m" if self.color else f"✓ {message}")
+        if self.verbose:
+            print(f"\033[32m✓ {message}\033[0m" if self.color else f"✓ {message}")
 
     def current(self, message: str) -> None:
-        print(f"\033[2m· {message}\033[0m" if self.color else f"· {message}")
+        if self.verbose:
+            print(f"\033[2m· {message}\033[0m" if self.color else f"· {message}")
 
     def fetch_msg(self, message: str) -> None:
         print(f"\033[34m↓ {message}\033[0m" if self.color else f"↓ {message}")

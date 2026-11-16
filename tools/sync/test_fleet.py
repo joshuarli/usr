@@ -259,6 +259,20 @@ class ReportTests(unittest.TestCase):
         self.assertTrue(healthy(tally, unhealthy_for("plan")))
         self.assertTrue(healthy({"conflict": 0, "apply": 0, "check": 0, "current": 3}, UNHEALTHY))
 
+    def test_applied_tasks_are_hidden_by_default(self):
+        out = io.StringIO()
+        render("apply", "h", [TaskLine("tool:uv", "applied", "installed"),
+                              TaskLine("tool:cf", "failed", "boom")], False, out)
+        text = out.getvalue()
+        self.assertNotIn("tool:uv", text)
+        self.assertIn("tool:cf", text)
+        self.assertIn("1 applied", text)
+
+    def test_applied_tasks_are_listed_with_all(self):
+        out = io.StringIO()
+        render("apply", "h", [TaskLine("tool:uv", "applied", "installed")], True, out)
+        self.assertIn("tool:uv", out.getvalue())
+
     def test_link_changes_are_listed_under_the_links_task(self):
         out = io.StringIO()
         render("plan", "h", [TaskLine("links", "apply", "LINK: ~/.zshrc; PRUNE: ~/.old"), TaskLine("tool:fd", "current", "installed")], False, out)

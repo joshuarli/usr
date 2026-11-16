@@ -14,6 +14,7 @@ APPLY_STATES = ("failed", "blocked", "applied", "current", "tolerated", "login")
 UNHEALTHY = ("conflict", "failed", "blocked")
 DOCTOR_UNHEALTHY = ("conflict", "apply", "failed", "blocked")
 QUIET = frozenset({"current", "check"})
+HIDDEN = QUIET | {"applied"}
 LABELS = {"current": "current", "check": "checked", "apply": "to apply", "conflict": "conflict",
           "applied": "applied", "failed": "failed", "blocked": "blocked", "tolerated": "tolerated",
           "login": "signed out"}
@@ -62,7 +63,7 @@ def healthy(tally: dict[str, int], unhealthy: tuple[str, ...] = UNHEALTHY) -> bo
 
 
 def task_rows(lines: list[TaskLine], show_all: bool, color: bool, indent: str = "  ") -> list[str]:
-    shown = [line for line in lines if show_all or line.state not in QUIET]
+    shown = [line for line in lines if show_all or line.state not in HIDDEN]
     if not shown:
         return []
     width = max(len(line.name) for line in shown)
