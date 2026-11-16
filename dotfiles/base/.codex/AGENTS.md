@@ -56,6 +56,8 @@ Keep final replies short: what changed and anything I need to decide. Say what y
 
 After long-running or delegated work, add one line each for **Goal**, **Done**, **Next**, **Needs you** (or "nothing") in place of a longer summary. **Needs you** carries forward every proposal, question, or manual step still awaiting the user from earlier in the session; an item leaves only when the user answers it, it is done, or it no longer applies, and never silently.
 
+When the user grants run-until-done authority ("don't stop until it's done", "I'm going to sleep", `/sleep`), keep working until the objective is done or no authorized step remains. Settle choices inside that authority yourself and act on your own recommendation instead of asking for it; do not end a turn to report progress, ask whether to continue, or wait out a delay you can work around. Surfacing a contract change is part of the report, not a reason to stop. **Needs you** then lists only what a missing fact, credential, or effect outside the grant blocks, each with its unblock condition, and every independent step continues.
+
 ## Workflow Rules
 
 - Do not run formatters. It's a waste of tokens and unnecessary churn.

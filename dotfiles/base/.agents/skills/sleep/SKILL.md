@@ -9,11 +9,10 @@ metadata:
 
 # Sleep
 
-User is going to sleep. Keep working until the bounded objective is complete or no authorized useful step remains.
+`/sleep` grants run-until-done authority for the current task; the global contract's run-until-done rule governs it. Keep working until the bounded objective is complete or no authorized useful step remains.
 
-- Decide within existing authority and continue. Do not ask or wait for routine answers.
 - Park only work blocked by a missing fact, authority, or irreversible effect you lack. Name the blocker and unblock condition, then continue every independent step.
-- Treat later messages as steering within the same task. Stop only when done or nothing useful remains authorized.
+- Treat later messages as steering within the same task.
 
 **The test:** work continues without stopping for routine choices, and blocked work names its blocker.
 

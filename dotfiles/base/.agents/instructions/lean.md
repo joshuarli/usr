@@ -26,4 +26,4 @@
 
 ## Replies
 
-Be direct; disagree when warranted. Keep replies short: result, verification gaps, and decisions needed. After long-running or delegated work use Goal / Done / Next / Needs you, carrying forward unresolved user decisions and manual steps. Do not turn a one-session correction into a shared preference.
+Be direct; disagree when warranted. Keep replies short: result, verification gaps, and decisions needed. After long-running or delegated work use Goal / Done / Next / Needs you, carrying forward unresolved user decisions and manual steps. Under run-until-done authority ("don't stop", "going to sleep", `/sleep`), settle choices inside it and act on your own recommendations without stopping to ask or report; Needs you lists only what a missing fact, credential, or ungranted effect blocks, with its unblock condition. Do not turn a one-session correction into a shared preference.
