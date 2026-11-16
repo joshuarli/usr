@@ -13,7 +13,7 @@ import { isTier as isBridgeTier, type Tier } from "./tier-policy.ts"
 import { piInstalled, diagnoseGoModel } from "./optional-pi.ts"
 import { musePreflight, museVersion } from "./muse-subscription.ts"
 import { devinPreflight } from "./devin-provider.ts"
-import { changes, git, outside, readStateDir, stateDir } from "./git.ts"
+import { changes, currentBranch, git, laneHead, outside, readStateDir, stateDir } from "./git.ts"
 import {
   fallbackNotice, fallbackSource, inspectSession, observeExecution, runnerStatus, settledState,
   type Inspection, type InspectionDeps, type Known,
@@ -101,7 +101,9 @@ function prompt(s: Session): string {
     "Native Pi workers may delegate at most one generation to equal-or-weaker typed tiers within the assigned worktree and scope.",
     "A nested child may not delegate again; never launch a new pi-subagent-bridge CLI/MCP session yourself.",
     "Codex and Command Code workers remain leaves: do not spawn subagents.",
-    "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths.",
+    s.tier === "scout" ? "Do not commit, switch branches, merge, push, add dependencies, or edit outside writable paths." :
+      "You may commit your work on the current branch of this worktree (Conventional Commits, explaining why); do not amend or rewrite commits that existed at admission, merge, rebase, switch branches, push, add dependencies, or edit outside writable paths.",
+    "The brief's acceptance proof is the goal: keep working until it is met or a listed stop condition truly applies. Resolve ambiguity from the brief, code, or repository conventions; that ambiguity is not a stop condition. A needed commit, missing scratch directory, slow command, or recoverable tool error is not a blocker. Stopping early without a named stop condition from the brief counts as an incomplete run.",
     "Stop if blocked or if the requirements demand more scope. Do not broaden the task.",
     "A slow or still-running required command is not a blocker: run it detached, poll its log until it exits, and never end your turn while a required command is still running.",
     "Rerun a command once after an environmental failure such as a toolchain crash or interruption before reporting it as a blocker.",
@@ -114,12 +116,12 @@ function untouched(s: Session): boolean {
   return git(s.cwd, "rev-parse", "HEAD") === s.scope.base_revision &&
     changes(s.cwd, s.scope.base_revision).length === 0
 }
-/** Name the drift that blocks a resume or steer: moved HEAD, or the out-of-scope paths. */
-function describeDrift(cwd: string, baseRevision: string, writablePaths: string[]): string {
-  const head = git(cwd, "rev-parse", "HEAD")
+/** Name each condition that blocks a resume or steer. */
+function describeDrift(s: Session): string {
   const details: string[] = []
-  if (head !== baseRevision) details.push("HEAD is " + head.slice(0, 12) + ", expected base " + baseRevision.slice(0, 12))
-  const paths = outside(changes(cwd, baseRevision), writablePaths)
+  const lane = laneHead(s)
+  if (lane.drift) details.push(lane.drift)
+  const paths = outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths)
   if (paths.length) details.push("out-of-scope: " + paths.slice(0, 5).join(", ") + (paths.length > 5 ? " (+" + (paths.length - 5) + " more)" : ""))
   return details.join("; ") || "work drifted from the admitted scope"
 }
@@ -318,15 +320,16 @@ export function makeHybridBridge(api: PiAdapter, command = {
     if (i.worktree.kind === "unreadable") throw new Error(i.worktree.reason)
     const { head, changed_paths, out_of_scope_paths } = i.worktree
     const head_unchanged = head === s.scope.base_revision
+    const { head_on_lane, commits_since_base } = laneHead(s)
     const last_assistant_text = i.observation.final_text?.slice(-5000) ?? null
     const state = i.state === "succeeded" && i.acceptance_claim !== "met" ? "incomplete" : i.state
     return {
       session_id: s.id, backend: backendOf(s), tier: s.tier, model: i.route.model, effort: i.route.effort,
       state, last_assistant_text, error: i.observation.error, usage: i.observation.usage,
       run_deadline_ms: runDeadlineMs(s),
-      changed_paths, out_of_scope_paths, head_unchanged,
+      changed_paths, out_of_scope_paths, head_unchanged, head_on_lane, commits_since_base,
       acceptance_claim: i.acceptance_claim,
-      acceptance_blocked: !head_unchanged || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
+      acceptance_blocked: !head_on_lane || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
       continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
       steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
       fallback_reason: s.fallback_reason ?? null,
@@ -411,7 +414,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
         if (!available) throw new Error(plan.kind === "exclusive" ? "Pinned Antigravity model " + plan.target.model + " unavailable; run agy models and check account access. No fallback." : "Pinned leaf runtime/model unavailable. No fallback.")
         const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
           title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-          task, plan, execution: { kind: "transition", to: target }, attempts: 0 }
+          task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: target }, attempts: 0 }
         const leaseDir = stateDir(dir)
         await settleHolder(leaseDir, dir)
         claimWorktree(leaseDir, dir, s.id)
@@ -433,7 +436,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const first: ProcessTarget = fxTarget ?? codexTarget
       const s: Session = { id: "usrw_" + randomUUID(), cwd: dir, tier: tierInput,
         title: required(title, "title", 100), scope: scopeFor(scopeInput, tierInput, dir),
-        task, plan, execution: { kind: "transition", to: first }, attempts: 0 }
+        task, lane_branch: currentBranch(dir), plan, execution: { kind: "transition", to: first }, attempts: 0 }
       const leaseDir = stateDir(dir)
       await settleHolder(leaseDir, dir)
       claimWorktree(leaseDir, dir, s.id)
@@ -491,9 +494,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
         command.status(s.execution.run).state === "turn_limit"
       if (continuation && (s.continuations ?? 0) >= TURN_LIMIT_CONTINUATIONS)
         throw new Error("Turn-limit continuation limit reached")
-      if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
+      if (!laneHead(s).head_on_lane ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
-        throw new Error("Cannot resume changed HEAD or out-of-scope work: " + describeDrift(s.cwd, s.scope.base_revision, s.scope.writable_paths))
+        throw new Error("Cannot resume changed HEAD or out-of-scope work: " + describeDrift(s))
       if (s.execution.kind === "transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before resuming")
       if (!continuation && s.attempts >= s.scope.attempt_limit) throw new Error("Task attempt limit reached")
@@ -577,9 +580,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if (s.execution.kind === "transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before steering")
       if ((s.steers ?? 0) >= STEER_LIMIT) throw new Error("Steer limit reached for this session")
-      if (git(s.cwd, "rev-parse", "HEAD") !== s.scope.base_revision ||
+      if (!laneHead(s).head_on_lane ||
         outside(changes(s.cwd, s.scope.base_revision), s.scope.writable_paths).length)
-        throw new Error("Cannot steer changed HEAD or out-of-scope work: " + describeDrift(s.cwd, s.scope.base_revision, s.scope.writable_paths))
+        throw new Error("Cannot steer changed HEAD or out-of-scope work: " + describeDrift(s))
       if (s.execution.kind === "pi") {
         const sessionId = s.execution.session_id
         const worker = api(s.execution.selection)

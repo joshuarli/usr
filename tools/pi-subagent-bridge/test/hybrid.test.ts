@@ -669,8 +669,9 @@ test("worker_steer refuses changed HEAD and out-of-scope work exactly like resum
     await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"), /out-of-scope/)
     rmSync(join(f.cwd, "unrelated"))
     git(f.cwd, "commit", "--allow-empty", "-qm", "moved")
+    git(f.cwd, "switch", "-qc", "other")
     await assert.rejects(bridge.steer(f.cwd, task.session_id, "note"),
-      /changed HEAD or out-of-scope work: HEAD is [0-9a-f]{12}, expected base [0-9a-f]{12}/)
+      /current branch differs from admitted branch lane-a/)
     assert.equal(commandCalls(m.calls).length, 1)
   } finally { f.close() }
 })
@@ -1253,5 +1254,103 @@ test("USR-77: a finished session's lease is released when a new worker starts wi
     m.done()
     const next = await bridge.start(f.cwd, "second", "worker", f.scope, "Edit README")
     assert.equal(next.status, "admitted")
+  } finally { f.close() }
+})
+
+
+test("admitted writers can commit in scope and resume or steer", async () => {
+  for (const tier of ["worker", "mechanic", "expert"] as const) {
+    for (const action of ["resume", "steer"] as const) {
+      const f = fixture()
+      try {
+        const m = fake(f.cwd), { command } = steerable(f, m)
+        const runner = action === "resume" ? m.command : command
+        const bridge = makeHybridBridge(piAdapter(m.api), runner, noCodex, undefined,
+          () => ({ kind: "leaf", target: { executor: "command-code", selection: { model: "fixture", effort: "high" } } }))
+        const task = await bridge.start(f.cwd, "lane", tier, f.scope, "Edit README")
+        writeFileSync(join(f.cwd, "README"), "committed\n")
+        git(f.cwd, "add", "README")
+        git(f.cwd, "commit", "-qm", "fix: explain change")
+        appendFileSync(join(f.cwd, "README"), "uncommitted\n")
+        if (action === "resume") {
+          m.done()
+          const status = await bridge.status(f.cwd, task.session_id)
+          assert.equal(status.acceptance_blocked, false, tier)
+          assert.equal(status.head_unchanged, false)
+          assert.equal(status.head_on_lane, true)
+          assert.equal(status.commits_since_base, 1)
+          assert.deepEqual(status.changed_paths, ["README"])
+          await bridge.resume(f.cwd, task.session_id, "continue")
+        } else {
+          await bridge.steer(f.cwd, task.session_id, "continue")
+        }
+      } finally { f.close() }
+    }
+  }
+})
+
+test("lane drift and committed out-of-scope work block status, resume and steer", async () => {
+  for (const scenario of ["merge", "branch", "nonancestor", "rewrite", "outside", "scout", "legacy"] as const) {
+    for (const action of ["resume", "steer"] as const) {
+      const f = fixture()
+      try {
+        const m = fake(f.cwd), { command } = steerable(f, m)
+        const runner = action === "resume" ? m.command : command
+        const bridge = makeHybridBridge(piAdapter(m.api), runner, noCodex, undefined,
+          () => ({ kind: "leaf", target: { executor: "command-code", selection: { model: "fixture", effort: "high" } } }))
+        const tier = scenario === "scout" ? "scout" : "worker"
+        const scope = tier === "scout" ? { ...f.scope, writable_paths: [] } : f.scope
+        const task = await bridge.start(f.cwd, "lane", tier, scope, "work")
+        if (scenario === "legacy") {
+          const path = join(f.root, ".work", "worker-bridge", task.session_id + ".json")
+          const record = JSON.parse(readFileSync(path, "utf8"))
+          delete record.lane_branch
+          writeFileSync(path, JSON.stringify(record))
+        }
+        if (scenario === "merge") {
+          git(f.cwd, "switch", "-qc", "side")
+          git(f.cwd, "commit", "--allow-empty", "-qm", "side")
+          git(f.cwd, "switch", "-q", "lane-a")
+          git(f.cwd, "commit", "--allow-empty", "-qm", "main")
+          git(f.cwd, "merge", "--no-ff", "-qm", "merge", "side")
+        } else if (scenario === "nonancestor") {
+          git(f.cwd, "checkout", "--orphan", "other-root")
+          git(f.cwd, "commit", "--allow-empty", "-qm", "root")
+          git(f.cwd, "branch", "-f", "lane-a", "HEAD")
+          git(f.cwd, "switch", "-q", "lane-a")
+        } else if (scenario === "rewrite") {
+          git(f.cwd, "commit", "--amend", "--allow-empty", "-qm", "rewritten")
+        } else if (scenario === "outside") {
+          writeFileSync(join(f.cwd, "unrelated"), "bad\n")
+          git(f.cwd, "add", "unrelated")
+          git(f.cwd, "commit", "-qm", "outside")
+        } else {
+          git(f.cwd, "commit", "--allow-empty", "-qm", "advance")
+          if (scenario === "branch") git(f.cwd, "switch", "-qc", "other")
+        }
+        const expected = { merge: /merge commit since base/, branch: /current branch differs from admitted branch lane-a/,
+          nonancestor: /base revision is not an ancestor/, rewrite: /base revision is not an ancestor/,
+          outside: /out-of-scope: unrelated/, scout: /scout HEAD changed from base/, legacy: /no admitted branch/ }[scenario]
+        if (action === "resume") m.done()
+        const status = await bridge.status(f.cwd, task.session_id)
+        assert.equal(status.acceptance_blocked, true, scenario)
+        if (scenario !== "outside") assert.equal(status.head_on_lane, false, scenario)
+        await assert.rejects(bridge[action](f.cwd, task.session_id, "continue"), expected)
+      } finally { f.close() }
+    }
+  }
+})
+
+test("provider fallback remains blocked after an in-scope commit", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), bridge = makeHybridBridge(piAdapter(m.api), m.command, noCodex)
+    const task = await bridge.start(f.cwd, "lane", "worker", f.scope, "work")
+    git(f.cwd, "commit", "--allow-empty", "-qm", "advance")
+    m.failCommand("quota exhausted")
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.state, "blocked_partial_work")
+    assert.equal(status.head_on_lane, true)
+    assert.equal(piCreates(m.calls).length, 0)
   } finally { f.close() }
 })

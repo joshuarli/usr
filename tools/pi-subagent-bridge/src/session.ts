@@ -70,6 +70,7 @@ export type Session = {
   id: string; cwd: string; title: string; tier: Tier; scope: Scope; task: string
   plan: AdmittedPlan; execution: Execution; attempts: number
   owner?: SessionOwner
+  lane_branch?: string | null
   fallback_reason?: string; fallback_detail?: string; fallback_blocked?: string
   continuations?: number; steers?: number; cancel_requested?: boolean
 }
@@ -385,6 +386,9 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
   const s: Session = {
     id, cwd, tier: value.tier, title: requiredText(value.title, "title", 100), task: requiredText(value.task, "task", 32000),
     scope: parseScope(withoutRetiredScopeFields(value.scope), value.tier), plan, execution, attempts: counter(value.attempts, "attempts"),
+  }
+  if (value.lane_branch !== undefined) {
+    s.lane_branch = value.lane_branch === null ? null : requiredText(value.lane_branch, "persisted lane branch", 1024)
   }
   for (const key of ["fallback_reason", "fallback_detail", "fallback_blocked"] as const) {
     if (value[key] !== undefined) {
