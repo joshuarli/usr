@@ -28,6 +28,11 @@ export type FxOptions = {
 }
 type Job = { nonce: string; cwd: string; fxHome: string; selection: FxSelection; output: string; errors: string; resume?: string }
 const children = new Map<number, { child: ChildProcess; run: CommandRun }>()
+const RESERVED_ENV_PREFIX = /^(?:FX_|LD_|DYLD_|GIT_)/
+const RESERVED_ENV_NAMES = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5OPT", "RUBYOPT"])
+function invalidEnvName(name: string): boolean {
+  return !/^[A-Z_][A-Z0-9_]*$/.test(name) || RESERVED_ENV_PREFIX.test(name) || RESERVED_ENV_NAMES.has(name)
+}
 const read = (path: string): unknown => {
   if (statSync(path).size > 16_777_216) throw new Error("Oversized FX record")
   return JSON.parse(readFileSync(path, "utf8"))
@@ -83,12 +88,12 @@ export function makeFxAdapter(options: FxOptions) {
   if (!pathEnv.split(":").every(part => isAbsolute(part))) throw new Error("FX PATH entries must be absolute")
   const secretEnvFiles = options.secretEnvFiles ?? {}
   for (const [name, path] of Object.entries(secretEnvFiles)) {
-    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || !isAbsolute(path)) throw new Error("Invalid FX secret env file mapping")
+    if (invalidEnvName(name) || !isAbsolute(path)) throw new Error("Invalid FX secret env file mapping")
   }
   const authFiles = options.authFiles ?? []
   for (const path of authFiles) if (!isAbsolute(path)) throw new Error("FX auth files must be absolute")
   for (const name of Object.keys(options.extraEnv ?? {})) {
-    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || name.startsWith("FX_") || ["HOME", "PATH", "SHELL", "TMPDIR"].includes(name)) throw new Error("Invalid FX extra env name: " + name)
+    if (invalidEnvName(name)) throw new Error("Invalid FX extra env name: " + name)
   }
   const env: NodeJS.ProcessEnv = { HOME: home, PATH: pathEnv, SHELL: "/bin/sh", FX_AUTO_UPGRADE: "0", FX_DISABLE_KEYCHAIN: "1", FX_HERDR: "0", FX_SOUND: "off", FX_MAX_AGENT_STEPS: "20", ...options.extraEnv }
   for (const name of Object.keys(secretEnvFiles)) {

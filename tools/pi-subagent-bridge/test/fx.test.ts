@@ -149,7 +149,7 @@ const fs=require('node:fs'),p=require('node:path');
 if(process.argv.includes('--version')){console.log('0.0.17');process.exit(0)}
 const id='native-fixture',dir=p.join(process.env.FX_HOME,'sessions/v2',id);
 fs.mkdirSync(p.join(process.env.FX_HOME,'sessions/v2/.tmp'),{recursive:true});fs.writeFileSync(p.join(process.env.FX_HOME,'sessions/v2/index.jsonl'),'');fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(p.join(dir,'log.jsonl'),JSON.stringify({v:1,kind:'session_created',id,workspace:process.cwd(),role:'root'})+'\\n');
-fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:process.env.PATH,secret:process.env.FX_TEST_SECRET??null}));
+fs.writeFileSync(p.join(process.env.FX_HOME,'probe.json'),JSON.stringify({path:process.env.PATH,secret:process.env.PILOT_TEST_SECRET??null}));
 console.log(JSON.stringify({exit_code:0,model:'fixture-model',session_id:id,final_output:'PROOF fixture\\nACCEPTANCE: met',usage:{input_tokens:1,output_tokens:1}}));
 `
   writeFileSync(binary, source, { mode: 0o755 })
@@ -164,7 +164,7 @@ test("FX secret env files reach only the child environment and never the job rec
   const f = envProbeFixture(t, scratch => {
     secret = join(scratch.path, "token.txt")
     writeFileSync(secret, "s3cr3t-value\n", { mode: 0o600 })
-    return { secretEnvFiles: { FX_TEST_SECRET: secret } }
+    return { secretEnvFiles: { PILOT_TEST_SECRET: secret } }
   })
   const run = f.fx.start(f.request)
   const jobPath = run.output + ".job.json"
@@ -178,7 +178,7 @@ test("FX secret env files reach only the child environment and never the job rec
 })
 
 test("FX secret env file failure produces a failed run, not a hung admission", async t => {
-  const f = envProbeFixture(t, scratch => ({ secretEnvFiles: { FX_TEST_SECRET: join(scratch.path, "absent.txt") } }))
+  const f = envProbeFixture(t, scratch => ({ secretEnvFiles: { PILOT_TEST_SECRET: join(scratch.path, "absent.txt") } }))
   const run = f.fx.start(f.request)
   const result = await ended(run)
   assert.equal(result.state, "failed")
@@ -193,6 +193,20 @@ test("FX pathEnv provisions the child toolchain PATH", async t => {
   const probe = JSON.parse(readFileSync(join(job.fxHome, "probe.json"), "utf8"))
   assert.equal(probe.path, "/opt/toolchain/bin:/usr/bin:/bin")
   assert.equal(probe.secret, null)
+})
+
+test("FX reserved env names are refused for secrets and extra environment", t => {
+  const scratch = new Scratch()
+  t.after(() => scratch.close())
+  const binary = join(scratch.path, "fake-fx")
+  writeFileSync(binary, "#!/bin/true\n", { mode: 0o755 })
+  const sha = createHash("sha256").update(readFileSync(binary)).digest("hex")
+  const base = { binary, binarySha256: sha, home: scratch.path, provider: "fixture", connection: {}, allowedCommands: [] }
+  for (const name of ["FX_PROVIDER", "FX_PERMISSION_MODE", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "GIT_DIR", "BASH_ENV", "PYTHONPATH", "NODE_OPTIONS", "HOME", "lowercase"]) {
+    assert.throws(() => makeFxAdapter({ ...base, secretEnvFiles: { [name]: "/tmp/x" } }), /Invalid FX secret env/, name)
+    assert.throws(() => makeFxAdapter({ ...base, extraEnv: { [name]: "x" } }), /Invalid FX extra env/, name)
+  }
+  assert.doesNotThrow(() => makeFxAdapter({ ...base, secretEnvFiles: { PILOT_TOKEN: "/tmp/x" }, extraEnv: { CARGO_HOME: "/tmp/cargo" } }))
 })
 
 test("FX auth files seed a fresh profile home and survive resume", async t => {
