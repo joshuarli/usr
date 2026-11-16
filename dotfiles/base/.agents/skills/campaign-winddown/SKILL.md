@@ -17,7 +17,7 @@ This workflow commits locally. Do not use it when the user has forbidden commits
 - **Freeze first.** Set **Status** to `winding down`, commit it, and run `codex-campaign-closeout.py begin` from the integration worktree. Launch nothing. Cancel every loop, cron, or wakeup that would resume the campaign. In Codex, review the `Stop` command in `/hooks` before the guard's first use.
 - **Finish, don't extend.** Message each running lane to commit what it has, report, and stop. Do not wait on a lane past its current attempt; commit its worktree to its branch yourself.
 - **Integrate only green work.** Merge a lane only when its acceptance command and the narrowest affected suite pass on the integrated tree. Everything else stays on its branch, named in **Status** with its cause. Never merge red or unverified work to retire a branch.
-- **Reclaim checkouts, keep data.** Before removing a worktree, check `git -C <path> status --porcelain --ignored=matching` and move logs or artifacts worth keeping under the repo's ignored `.work/`. Follow [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle). Never force-remove.
+- **Reclaim checkouts, preserve durable state.** Before removing a worktree, check `git -C <path> status --porcelain --ignored=matching`. Commit necessary conclusions, reproduction instructions and resume state in the campaign doc outside `.work/`; copy any required sanitized fixtures to tracked repository paths. `.work/` is strictly disposable and may hold only optional, regenerable artifacts. Follow [`orchestrate`'s worktree lifecycle](../orchestrate/SKILL.md#worktree-lifecycle). Never force-remove.
 - **No push.**
 
 ## Reboot audit
@@ -27,7 +27,7 @@ Run each check and fix what fails:
 1. `git worktree prune && git worktree list`: only the main checkout remains, plus any tree named in **Status** with a current consumer and allowed with `codex-campaign-closeout.py allow`.
 2. `git branch --no-merged`: every branch is named in **Status** or is empty and deleted per `orchestrate`'s worktree lifecycle.
 3. No campaign process, cron, or wakeup remains. The doc does not reference `/tmp` or `$TMPDIR`.
-4. The main checkout is clean, and the doc is committed.
+4. The main checkout is clean, and the doc is committed and available there outside `.work/`. Deleting `.work/` would not remove the handoff or anything required to resume. Link this durable path in the final reply, never a scratch-worktree path.
 
 ## The handoff
 

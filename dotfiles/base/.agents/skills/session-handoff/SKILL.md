@@ -19,7 +19,7 @@ Export the current task or one explicitly named local coding-agent session as a 
 
 ## Export
 
-Write the brief to a new `session-handoff-*.md` in `${TMPDIR:-/tmp}` with mode 0600, unless the user specifies an output path. Never overwrite a file or follow an output symlink. Keep it outside Git and don't copy entire transcripts, proprietary files, credentials, tokens, private user data, or irrelevant tool output. Redact sensitive snippets and omit details that aren't necessary to resume.
+Write the private export to a new `session-handoff-*.md` under `~/.local/state/agent-handoffs/` with mode 0600, unless the user specifies another persistent output path. Never use `.work/`, `$TMPDIR` or system temp: handoffs must survive deletion of all scratch directories. Never overwrite a file or follow an output symlink. Keep this private export outside Git and don't copy entire transcripts, proprietary files, credentials, tokens, private user data, or irrelevant tool output. Redact sensitive snippets and omit details that aren't necessary to resume. A project's committed handoff belongs in its tracked docs and must be delivered from its primary checkout outside `.work/`.
 
 Use only these sections, deleting empty ones:
 

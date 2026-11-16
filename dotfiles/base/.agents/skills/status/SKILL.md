@@ -24,7 +24,7 @@ Run the checks; never infer health.
 2. `git log --oneline -5`; compare HEAD to the upstream.
 3. `git worktree list --porcelain`. For each non-primary checkout, run `git cherry <base> <head>` to split integrated work from lanes holding unique commits (`+`). Branches fully merged or patch-equivalent need no action; mark unique-work lanes. State which base you used (origin's default branch, or local `master`/`main`).
 4. `git branch --no-merged <base>`, plus `parked/**` branches — note which hold unique commits.
-5. Campaign and roadmap records when present: `TODO.md`, `docs/ROADMAP.md`, `docs/TODO*.md`, roadmap notes under `docs/`, and campaign/status files under `docs/` or `.work/` (for example `STATUS.md`, `PLAN.md`, `*-closeout.md`). Read the latest result summaries and acceptance matrix needed to explain the material gaps. Record open ticket IDs with their priorities, the roadmap's current milestone, and blockers/deferred items — one line each.
+5. Campaign and roadmap records when present: `TODO.md`, `docs/ROADMAP.md`, `docs/TODO*.md`, roadmap notes under `docs/`, and tracked campaign/status files (for example `STATUS.md`, `PLAN.md`, `*-closeout.md`). `.work/` is disposable scratch, never the canonical handoff or resume record. Read the latest durable result summaries and acceptance matrix needed to explain the material gaps. Record open ticket IDs with their priorities, the roadmap's current milestone, and blockers/deferred items — one line each.
 6. Hazards: dirty or unpinned submodules; stale or zero-byte lock files under `.work/` when it exists; live processes or runs referencing the repo (`ps`, read-only) when a campaign may be active; `.work/` size and `df -h /`.
 7. If a claim cannot be established, write `unknown` — never guess.
 
