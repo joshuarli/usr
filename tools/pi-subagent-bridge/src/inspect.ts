@@ -310,7 +310,7 @@ function compose(s: Session, observation: Observation, blocked?: Known["blocked"
   const settled = blocked ?? settledState(s, observation, clean)
   const claim = acceptanceClaim(observation.final_text?.slice(-5000) ?? null)
   const stop = stopCondition(observation.final_text?.slice(-5000) ?? null, s.scope.stop_on)
-  const invalidStop = settled.state === "succeeded" && claim === "not_met" && !stop.stop_condition_valid
+  const invalidStop = classifyState(settled.state) === "finished" && claim === "not_met" && !stop.stop_condition_valid
   return {
     observed_at: new Date().toISOString(), session: s, observation, state: invalidStop ? "incomplete" : settled.state,
     notice: invalidStop ? "stopped without a listed stop condition" : settled.notice ?? inheritedNotice(s, settled.state), route: routeOf(s), worktree,
