@@ -39,7 +39,7 @@ test("stdio MCP handshake, tool discovery and malformed tool rejection need no O
   assert.equal(replies.find((r) => r.id === 3)?.error?.code, -32602)
 })
 
-test("an MCP server whose source changed under it replies with a restart instruction (USR-78)", async () => {
+test("an MCP server reloads source changes and refuses changed tool schemas", async () => {
   const root = mkdtempSync(join(tmpdir(), "usr-mcp-stale-"))
   const source = join(root, "src")
   mkdirSync(source)
@@ -68,14 +68,20 @@ test("an MCP server whose source changed under it replies with a restart instruc
     const first = await waitFor(2)
     assert.equal(first.result?.isError, true)
     assert.doesNotMatch(first.result?.content?.[0]?.text ?? "", /restart/)
-    // A fast-forward lands under the running server: the source changed after start.
-    const tierPolicy = join(source, "tier-policy.ts")
-    writeFileSync(tierPolicy, readFileSync(tierPolicy, "utf8") + "\n// source changed under the server\n")
+    const bridge = join(source, "bridge.ts")
+    writeFileSync(bridge, readFileSync(bridge, "utf8").replace("not a Git worktree: ", "fresh worktree error: "))
     writeRequest({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "worker_model_check", arguments: { cwd: "/no-worktree", tier: "worker" } } })
     const second = await waitFor(3)
     assert.equal(second.result?.isError, true)
-    assert.match(second.result?.content?.[0]?.text ?? "", /restart/)
+    assert.doesNotMatch(second.result?.content?.[0]?.text ?? "", /restart/)
+    assert.match(second.result?.content?.[0]?.text ?? "", /fresh worktree error/)
     assert.doesNotMatch(second.result?.content?.[0]?.text ?? "", /SyntaxError/)
+    const commands = join(source, "commands.ts")
+    writeFileSync(commands, readFileSync(commands, "utf8").replace('textField("TITLE", "title", 100', 'textField("TITLE", "title", 99'))
+    writeRequest({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "worker_model_check", arguments: { cwd: "/no-worktree", tier: "worker" } } })
+    const third = await waitFor(4)
+    assert.equal(third.result?.isError, true)
+    assert.match(third.result?.content?.[0]?.text ?? "", /source changed under this running MCP server.*worker_start/)
   } finally {
     child.stdin.end()
     await new Promise<void>(resolve => { child.on("close", () => resolve()); child.kill() })

@@ -2,6 +2,9 @@
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+import { fileURLToPath } from "node:url"
 import { COMMANDS, COMMAND_NAMES, decodeCommand, toolSchema, type Command } from "./commands.ts"
 import { isRecord } from "./scope.ts"
 import { snapshotSource, sourceChanged, type SourceSnapshot } from "./source-manifest.ts"
@@ -11,6 +14,12 @@ const PROTOCOL = "2025-06-18"
 const MAX_LINE = 100_000
 
 const tools = COMMAND_NAMES.map(name => ({ name: COMMANDS[name].tool, description: COMMANDS[name].description, inputSchema: toolSchema(name) }))
+const execFileAsync = promisify(execFile)
+const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url))
+async function fresh(args: string[]): Promise<unknown> {
+  const { stdout } = await execFileAsync(process.execPath, ["--experimental-strip-types", cliPath, ...args], { maxBuffer: 2_000_000 })
+  return JSON.parse(stdout)
+}
 
 export type Bridge = ReturnType<typeof import("./hybrid.ts").makeHybridBridge>
 type Message = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: unknown }
@@ -91,20 +100,21 @@ export function serve(load: () => Promise<Bridge> = connect, options?: ServeOpti
     if (method === "ping") { write({ jsonrpc: "2.0", id, result: {} }); return }
     if (method === "tools/list") { write({ jsonrpc: "2.0", id, result: { tools } }); return }
     if (method !== "tools/call") { rpcError(id, -32601, `Method not found: ${method}`); return }
-    if (sourceAtStart) {
-      const changed = sourceChanged(sourceAtStart)
-      if (changed) {
-        write({ jsonrpc: "2.0", id, result: { content: [{ type: "text",
-          text: "pi-subagent-bridge source changed under this running MCP server (" + changed +
-            "); restart the harness's MCP registration or use the pi-subagent-bridge CLI, then retry." }], isError: true } })
-        return
-      }
-    }
     try {
       const params = isRecord(message.params) ? message.params : {}
       const name = COMMAND_NAMES.find(name => COMMANDS[name].tool === params.name)
       if (!name) {
         rpcError(id, -32602, "Unknown tool")
+        return
+      }
+      if (sourceAtStart && sourceChanged(sourceAtStart)) {
+        const current = await fresh(["--bridge-schemas"]) as { name: string; inputSchema: unknown }[]
+        const before = new Map(tools.map(tool => [tool.name, JSON.stringify(tool.inputSchema)]))
+        const after = new Map(current.map(tool => [tool.name, JSON.stringify(tool.inputSchema)]))
+        const changed = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key))
+        if (changed.length) throw new Error("pi-subagent-bridge source changed under this running MCP server (" + changed.join(", ") + "); restart the harness's MCP registration or use the pi-subagent-bridge CLI, then retry.")
+        const result = await fresh(["--bridge-dispatch", JSON.stringify(params)])
+        write({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result) }] } })
         return
       }
       if (eagerOwner) await eagerOwner

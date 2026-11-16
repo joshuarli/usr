@@ -116,6 +116,20 @@ async function main(args: string[]): Promise<void> {
     process.exitCode = 2
     return
   }
+  if (op === "--bridge-schemas") {
+    const { COMMAND_NAMES, COMMANDS, toolSchema } = await import("./commands.ts")
+    process.stdout.write(JSON.stringify(COMMAND_NAMES.map(name => ({ name: COMMANDS[name].tool, inputSchema: toolSchema(name) }))) + "\n")
+    return
+  }
+  if (op === "--bridge-dispatch") {
+    const { COMMAND_NAMES, COMMANDS, decodeCommand } = await import("./commands.ts")
+    const request = JSON.parse(rest[0])
+    const name = COMMAND_NAMES.find(candidate => COMMANDS[candidate].tool === request.name)
+    if (!name) throw new Error("Unknown tool")
+    const { connect, dispatch } = await import("./server.ts")
+    process.stdout.write(JSON.stringify(await dispatch(await connect(), decodeCommand(name, request.arguments))) + "\n")
+    return
+  }
   if (args.length === 1 && (op === "--help" || op === "-h")) return printHelp()
   if (op && rest.length && (rest.at(-1) === "-h" || rest.at(-1) === "--help")) {
     const selected = [op, ...rest.slice(0, -1)].join(" ")
