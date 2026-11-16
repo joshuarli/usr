@@ -31,7 +31,7 @@ Bridge pins, fallbacks, and nesting rules do not apply on this path.
 
 <!-- policy:begin native-fallback -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**Claude Code native subagents:** `expert` assignments always use native subagents pinned to `opus` with `xhigh` effort. If that pinned model is unavailable, the expert lane is blocked; never substitute another model. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. Preserve partial work before relaunch. No hook gates native subagents. Return to the bridge when capacity recovers.
+**Claude Code native subagents:** `expert` assignments always use native subagents pinned to `opus` with `xhigh` effort. If that pinned model is unavailable, the expert lane is blocked; never substitute another model. When no approved bridge backend can run because it is unavailable or exhausted, scout/mechanic/worker use tier-matched native subagents with the same brief, worktree, scope, and independent verification: scout: `haiku`; mechanic: `sonnet`; worker: `sonnet`. Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers.
 <!-- policy:end native-fallback -->
 
 The parent keeps task framing, orchestration, integration, and independent verification. Delegate only when context isolation, cost, parallelism, or independent scrutiny beats the overhead. No worker may broaden its scope.

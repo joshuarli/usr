@@ -72,7 +72,7 @@ function nativeFallback(policy: Policy): string {
   return `**Claude Code native subagents:** ${code("expert")} assignments always use native subagents pinned to ${expertModel} with ${expertThinking} effort. ` +
     "If that pinned model is unavailable, the expert lane is blocked; never substitute another model. " +
     `When no approved bridge backend can run because it is unavailable or exhausted, ${tiers} use tier-matched native subagents with the same brief, worktree, scope, and independent verification: ${mappings}. ` +
-    "Preserve partial work before relaunch. No hook gates native subagents. Return to the bridge when capacity recovers."
+    "Preserve partial work before relaunch. Register native lanes with `scope-check --register` and record their final check with `scope-check --lane`. No hook gates native subagents. Return to the bridge when capacity recovers."
 }
 
 function delegation(policy: Policy, lean: boolean): string {
