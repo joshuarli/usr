@@ -259,3 +259,5 @@ Live account compatibility and network behavior must be tested locally before
 unattended use.
 
 A parent may extend a session by one or two attempts using `worker_resume` fields `extend_attempts` and `extension_reason`, or the corresponding CLI flags. The lifetime extension cap is two; status reports the total.
+
+Steering persists `pending_steer` before signaling and records `last_steer` on completion or failure. A pending steer blocks another; status reconciles an abandoned caller using the recorded execution.

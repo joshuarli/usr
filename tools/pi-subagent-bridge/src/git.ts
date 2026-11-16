@@ -11,7 +11,7 @@ export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10000, env: readOnlyEnv(), stdio: "pipe" }).trim()
 }
 export function changes(cwd: string, base: string): string[] {
-  const options = { encoding: "utf8", env: readOnlyEnv(), stdio: "pipe" } as const
+  const options = { encoding: "utf8", env: readOnlyEnv(), stdio: "pipe", timeout: 5000 } as const
   const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], options)
   const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], options)
   return [...new Set((diff + newFiles).split("\0").filter(Boolean))].sort()

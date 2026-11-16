@@ -112,7 +112,7 @@ export function commandResult(run: CommandRun): { state: string; result: Command
 export function processCommandLine(pid: number): string | null {
   try {
     return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
-      encoding: "utf8", timeout: 5000, maxBuffer: 1 << 16,
+      encoding: "utf8", timeout: 1000, maxBuffer: 1 << 16,
     }).trim() || null
   } catch { return null }
 }
@@ -123,7 +123,7 @@ export function processCwd(pid: number): string | null {
   }
   try {
     const out = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
-      encoding: "utf8", timeout: 5000,
+      encoding: "utf8", timeout: 1000,
     })
     return out.split("\n").find(line => line.startsWith("n"))?.slice(1) ?? null
   } catch { return null }
@@ -163,7 +163,7 @@ export function processStartTime(pid: number): string | null {
   }
   try {
     const value = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8", timeout: 5000,
+      encoding: "utf8", timeout: 1000,
     }).trim()
     return value || null
   } catch { return null }

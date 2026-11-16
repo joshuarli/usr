@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
 import { stateDir } from "../src/git.ts"
+import { inspectStored } from "../src/inspect.ts"
 import { STEER_LIMIT, TURN_LIMIT_CONTINUATIONS } from "../src/session.ts"
 import { startCodex, codexResult, cancelCodex, codexSession } from "../src/codex.ts"
 import type { LaunchRequest } from "../src/launch.ts"
@@ -553,6 +554,33 @@ test("worker_steer interrupts a running Command Code run, proves termination, an
     assert.equal(status.steer_limit, STEER_LIMIT)
     await assert.rejects(bridge.steer(f.cwd, task.session_id, "Third steer"), /Steer limit/)
     assert.equal(commandCalls(m.calls).length, 3)
+  } finally { f.close() }
+})
+
+test("pending steer is visible, refuses another, and reconciles an abandoned caller", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), { command } = steerable(f, m)
+    const bridge = makeHybridBridge(piAdapter(m.api), command, noCodex)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    const file = join(f.root, ".work", "worker-bridge", task.session_id + ".json")
+    const record = JSON.parse(readFileSync(file, "utf8"))
+    record.pending_steer = { note: "focus", requested_at: "2026-01-01T00:00:00Z", phase: "signaling", caller_pid: process.pid, previous_output: record.execution.run.output }
+    writeFileSync(file, JSON.stringify(record))
+    const snapshot = await inspectStored(join(f.root, ".work", "worker-bridge"), task.session_id, { api: piAdapter(m.api), command, codex: noCodex })
+    assert.equal(snapshot.pending_steer?.note, "focus")
+    assert.equal((await bridge.status(f.cwd, task.session_id)).pending_steer?.note, "focus")
+    await assert.rejects(bridge.steer(f.cwd, task.session_id, "again"), /steer.*pending/i)
+    record.pending_steer.caller_pid = 99999999
+    writeFileSync(file, JSON.stringify(record))
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.pending_steer, null)
+    assert.equal(status.last_steer?.outcome, "failed")
+    record.pending_steer.phase = "relaunching"
+    record.execution.run.output = "relaunched"
+    writeFileSync(file, JSON.stringify(record))
+    const completed = await bridge.status(f.cwd, task.session_id)
+    assert.equal(completed.last_steer?.outcome, "completed")
   } finally { f.close() }
 })
 

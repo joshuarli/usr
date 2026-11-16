@@ -59,6 +59,8 @@ export type SessionOwner = {
   readonly owner_id: string
   readonly owner_generation: number
 }
+export type PendingSteer = { note: string; requested_at: string; phase: "signaling" | "relaunching"; caller_pid: number; previous_output: string | null }
+export type SteerOutcome = { note: string; requested_at: string; outcome: "completed" | "failed"; at: string }
 
 const OWNER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -74,6 +76,8 @@ export type Session = {
   fallback_reason?: string; fallback_detail?: string; fallback_blocked?: string
   continuations?: number; steers?: number; cancel_requested?: boolean
   attempt_extensions?: { added: number; reason: string; at: string }[]
+  pending_steer?: PendingSteer
+  last_steer?: SteerOutcome
 }
 
 export function executorOf(s: Session): Executor {
@@ -386,6 +390,20 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
       return { added: entry.added, reason: requiredText(entry.reason, "extension reason", 2000), at: requiredText(entry.at, "extension time") }
     })
     if (s.attempt_extensions.reduce((sum, entry) => sum + entry.added, 0) > 2) throw new Error("Invalid persisted attempt extensions")
+  }
+  if (value.pending_steer !== undefined) {
+    const pending = value.pending_steer
+    if (!isRecord(pending) || (pending.phase !== "signaling" && pending.phase !== "relaunching") ||
+        !Number.isSafeInteger(pending.caller_pid) || (pending.caller_pid as number) <= 0 ||
+        (pending.previous_output !== null && typeof pending.previous_output !== "string")) throw new Error("Invalid persisted pending steer")
+    s.pending_steer = { note: requiredText(pending.note, "steer note", 32000), requested_at: requiredText(pending.requested_at, "steer time"),
+      phase: pending.phase, caller_pid: pending.caller_pid as number, previous_output: pending.previous_output as string | null }
+  }
+  if (value.last_steer !== undefined) {
+    const last = value.last_steer
+    if (!isRecord(last) || (last.outcome !== "completed" && last.outcome !== "failed")) throw new Error("Invalid persisted steer outcome")
+    s.last_steer = { note: requiredText(last.note, "steer note", 32000), requested_at: requiredText(last.requested_at, "steer time"),
+      outcome: last.outcome, at: requiredText(last.at, "steer outcome time") }
   }
   if (value.cancel_requested !== undefined) {
     if (typeof value.cancel_requested !== "boolean") throw new Error("Invalid persisted cancellation state")

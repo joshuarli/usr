@@ -60,6 +60,16 @@ function load(cwd: unknown, id: unknown): Session {
   const raw: unknown = JSON.parse(readFileSync(pathFor(dir, sessionId), "utf8"))
   return decodeSession(raw, dir, sessionId)
 }
+function callerAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH" }
+}
+function finishSteer(s: Session, outcome: "completed" | "failed"): void {
+  if (!s.pending_steer) return
+  const { note, requested_at } = s.pending_steer
+  s.last_steer = { note, requested_at, outcome, at: new Date().toISOString() }
+  delete s.pending_steer
+  save(s)
+}
 
 async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Session) => Promise<T>): Promise<T> {
   const directory = checkedWorktree(cwd)
@@ -69,6 +79,12 @@ async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Ses
     mkdirSync(lock, { mode: 0o700 })
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "EEXIST") {
+      const session = load(directory, sessionID)
+      if (session.pending_steer && !callerAlive(session.pending_steer.caller_pid)) {
+        rmdirSync(lock)
+        return withSessionLock(directory, sessionID, work)
+      }
+      if (session.pending_steer) throw new Error("A steer is already pending for this session")
       throw new Error("Worker session transition in progress or interrupted; inspect and retry safely")
     }
     throw error
@@ -249,6 +265,12 @@ export function makeHybridBridge(api: PiAdapter, command = {
   }
   async function advance(cwd: unknown, id: unknown): Promise<{ session: Session; known?: Known }> {
     return withSessionLock(cwd, id, async (s) => {
+      if (s.pending_steer && !callerAlive(s.pending_steer.caller_pid)) {
+        const pending = s.pending_steer
+        const completed = s.execution.kind === "process" && pending.previous_output !== null && s.execution.run.output !== pending.previous_output
+        if (completed) s.steers = (s.steers ?? 0) + 1
+        finishSteer(s, completed ? "completed" : "failed")
+      }
       const observation = await observeExecution(s, stateDir(s.cwd), inspection)
       const source = fallbackSource(s, observation)
       const clean = source === null || untouched(s)
@@ -327,7 +349,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
       acceptance_blocked: !head_on_lane || out_of_scope_paths.length > 0 || i.acceptance_claim !== "met",
       continuations: s.continuations ?? 0, continuation_limit: TURN_LIMIT_CONTINUATIONS,
       attempt_extensions: (s.attempt_extensions ?? []).reduce((sum, entry) => sum + entry.added, 0),
-      steers: s.steers ?? 0, steer_limit: STEER_LIMIT,
+      steers: s.steers ?? 0, steer_limit: STEER_LIMIT, pending_steer: s.pending_steer ?? null, last_steer: s.last_steer ?? null,
       fallback_reason: s.fallback_reason ?? null,
       fallback_notice: i.notice,
       fallback_detail: s.fallback_detail ?? null,
@@ -466,6 +488,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
       return admission(s)
     },
     async status(cwd: unknown, id: unknown) {
+      const current = load(cwd, id)
+      if (current.pending_steer && callerAlive(current.pending_steer.caller_pid))
+        return statusResponse(await inspectSession(current, readStateDir(current.cwd), inspection))
       const advanced = await advance(cwd, id)
       return statusResponse(await inspectSession(advanced.session, readStateDir(advanced.session.cwd), inspection, advanced.known))
     },
@@ -576,6 +601,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
   async function runSteer(cwd: unknown, id: unknown, note: unknown, admitEffect?: OwnerEffectAdmit) {
     return withSessionLock(cwd, id, async (s) => {
       const steering = required(note, "note", 32000)
+      if (s.pending_steer) throw new Error("A steer is already pending for this session")
       if (s.execution.kind === "transition" || s.fallback_blocked)
         throw new Error("Worker transition interrupted; inspect session before steering")
       if ((s.steers ?? 0) >= STEER_LIMIT) throw new Error("Steer limit reached for this session")
@@ -591,9 +617,14 @@ export function makeHybridBridge(api: PiAdapter, command = {
           throw new Error("Pi worker is not running (state " + observedState + "); use worker_resume for a finished session")
         await admitEffect?.()
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
-        const receipt = await worker.steer(s.cwd, sessionId, steering)
-        s.steers = (s.steers ?? 0) + 1
+        s.pending_steer = { note: steering, requested_at: new Date().toISOString(), phase: "signaling", caller_pid: process.pid, previous_output: null }
         save(s)
+        let receipt: Awaited<ReturnType<typeof worker.steer>>
+        try {
+          receipt = await worker.steer(s.cwd, sessionId, steering)
+          s.steers = (s.steers ?? 0) + 1
+          finishSteer(s, "completed")
+        } catch (error) { finishSteer(s, "failed"); throw error }
         return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: false,
           steers: s.steers, steer_limit: STEER_LIMIT, receipt }
       }
@@ -609,6 +640,9 @@ export function makeHybridBridge(api: PiAdapter, command = {
         throw new Error(execution.executor === "fx" ? "FX native session identity is not bound; steering is unavailable until it is recorded" : "Command Code session identity is not recorded; cannot restart after steering")
       await admitEffect?.()
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
+      s.pending_steer = { note: steering, requested_at: new Date().toISOString(), phase: "signaling", caller_pid: process.pid, previous_output: run.output }
+      save(s)
+      try {
       if (!runner.cancel(run, s.cwd))
         throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
       let state = observe(execution).state
@@ -619,15 +653,18 @@ export function makeHybridBridge(api: PiAdapter, command = {
       }
       if (state === "running")
         throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
-      s.steers = (s.steers ?? 0) + 1
+      s.pending_steer.phase = "relaunching"
       const target: ProcessTarget = processTarget(execution)
       transition(s, target)
       save(s)
       activateProcess(s, target, launch(s, target,
         prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering, sessionId))
       save(s)
+      s.steers = (s.steers ?? 0) + 1
+      finishSteer(s, "completed")
       return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: true,
         steers: s.steers, steer_limit: STEER_LIMIT }
+      } catch (error) { finishSteer(s, "failed"); throw error }
     })
   }
   ownerOpsRegistry.set(bridge, {
