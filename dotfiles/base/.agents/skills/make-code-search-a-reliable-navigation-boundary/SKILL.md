@@ -1,6 +1,6 @@
 ---
 name: make-code-search-a-reliable-navigation-boundary
-description: "Apply when asked to make code easier to find by search: rename, retype, or move so filename and text search reach definitions, callers, tests, and docs in few hops. Skip behavior changes."
+description: "Use for /make-code-search-a-reliable-navigation-boundary: make code easier to find by search: rename, retype, or move so filename and text search reach definitions, callers, tests, and docs in few hops. Skip behavior changes."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"

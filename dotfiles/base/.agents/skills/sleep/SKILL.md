@@ -1,6 +1,6 @@
 ---
 name: sleep
-description: "Use when the user says they are going to sleep. Proceed unattended without stopping: decide within authority and park only owner-blocked work."
+description: "Use for /sleep before the owner goes to sleep: proceed unattended without stopping: decide within authority and park only owner-blocked work."
 disable-model-invocation: true
 metadata:
   opencode/autoinvoke: "false"

@@ -63,3 +63,12 @@ test('links to the same skill are deduplicated', () => fixture((root, skill) => 
   const installed = join(root, 'installed'); mkdirSync(installed); symlinkSync(skill, join(installed, 'alpha')); symlinkSync(skill, join(installed, 'alias'))
   const result = run('list', '--json', '--root', installed); assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).length, 1)
 }))
+
+test('explicit skills cannot describe a situational trigger', () => fixture((root, skill) => {
+  const file = join(skill, 'SKILL.md'), original = readFileSync(file, 'utf8')
+  writeFileSync(file, original.replace('description: "Use it. Skip other work."', 'description: "Use when the user says they are going to sleep."\ndisable-model-invocation: true'))
+  assert.equal(run('generate', '--root', root).status, 0)
+  const bad = run('check', '--root', root); assert.equal(bad.status, 1); assert.match(bad.stderr, /alpha: explicit skill description names a situation/)
+  writeFileSync(file, readFileSync(file, 'utf8').replace('Use when the user says', 'Use for /alpha when the user says'))
+  assert.equal(run('check', '--root', root).status, 0)
+}))

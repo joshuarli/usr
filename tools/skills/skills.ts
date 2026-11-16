@@ -133,6 +133,7 @@ function main(args: string[]): number {
   for (const s of skills) {
     const r = s.record
     if (r.invocation === 'auto' && !r.description.includes('Skip')) error(`${r.id}: auto skill has no Skip clause`)
+    if (r.invocation === 'explicit' && /^(Use|Apply) when\b/.test(r.description)) error(`${r.id}: explicit skill description names a situation the gate never lets it load for; start with "Use for /${r.id}"`)
     for (const id of s.missing) error(`${r.id}: unknown referenced skill: ${id}`)
     for (const m of s.text.matchAll(/`mdtool ([a-z][a-z-]*)/g)) if (!commands.has(m[1])) error(`${r.id}: unknown mdtool command: ${m[1]}`)
     const limit = r.id === 'orchestrate' ? 12000 : 8000
