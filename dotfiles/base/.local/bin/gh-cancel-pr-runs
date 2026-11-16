@@ -3,6 +3,18 @@
 case ${1:-} in
     -h|--help)
         printf '%s\n' 'usage: gh-cancel-pr-runs [--repo OWNER/NAME] [BRANCH]'
+        cat <<'HELP'
+Cancel active CI runs for a pull request.
+
+  -r, --repo OWNER/NAME  repository (default: current working tree)
+  --repo=OWNER/NAME      repository in equals form
+  BRANCH                 optional PR branch (default: current branch)
+  --                     end options
+  -h, --help             show this help
+
+Examples:
+  gh-cancel-pr-runs --repo owner/name feature
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

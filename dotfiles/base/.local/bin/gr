@@ -3,6 +3,16 @@
 case ${1:-} in
     -h|--help)
         printf '%s\n' 'usage: gr [COUNT]'
+        cat <<'HELP'
+Reset the index, or reset HEAD back COUNT commits.
+
+  COUNT  optional commit count; default: reset the index only
+
+  -h, --help  show this help
+
+Examples:
+  gr 1
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

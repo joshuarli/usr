@@ -19,6 +19,11 @@ for option in -h --help; do
         0:*'usage: perf-gate-ready'*) printf 'ok: help %s\n' "$option" ;;
         *) printf 'FAIL: help %s (exit %s: %s)\n' "$option" "$got" "$out"; nfailed=$((nfailed + 1)) ;;
     esac
+    printf '%s\n' "$out" | grep -Fxq 'Examples:' || nfailed=$((nfailed + 1))
+    printf '%s\n' "$out" | grep -Fxq '  perf-gate-ready -1' || nfailed=$((nfailed + 1))
+    printf '%s\n' "$out" | grep -Fxq '  perf-gate-ready -s .' || nfailed=$((nfailed + 1))
+    printf '%s\n' "$out" | grep -Fq -- '-1       check' || nfailed=$((nfailed + 1))
+    printf '%s\n' "$out" | grep -Fq -- '-s       report' || nfailed=$((nfailed + 1))
 done
 
 # proc <name> <MemAvailable kB> <SwapFree kB>: a 32 GiB host with 8 GiB of swap

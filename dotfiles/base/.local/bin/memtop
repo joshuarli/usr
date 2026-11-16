@@ -18,16 +18,29 @@ usage() {
     exit 2
 }
 
-if [ "${1:-}" = --help ]; then
-    printf 'usage: memtop [-n processes]\n'
+help() {
+    cat <<'HELP'
+usage: memtop [-n processes]
+Show memory pressure and the largest processes on macOS or Linux.
+
+  -n processes  number of processes to show (default: 12; minimum: 1)
+  -h, --help    show this help
+
+Examples:
+  memtop -n 20
+HELP
     owned_help
+}
+
+if [ "${1:-}" = --help ]; then
+    help
     exit 0
 fi
 
 while getopts n:h opt; do
     case $opt in
         n) limit=$OPTARG ;;
-        h) printf 'usage: memtop [-n processes]\n'; owned_help; exit 0 ;;
+        h) help; exit 0 ;;
         *) usage ;;
     esac
 done

@@ -277,15 +277,23 @@ done
         self.assertIn(f"sent KILL to {proc.pid}", killed.stdout)
         self.assertEqual(proc.wait(timeout=5), -signal.SIGKILL)
 
-    def test_requires_query(self):
+    def test_bare_prints_help(self):
         result = self.run_pk()
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("usage: pk", result.stderr)
+        help_result = self.run_pk("-h")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, help_result.stdout)
+        self.assertEqual(result.stderr, "")
 
     def test_help(self):
-        result = self.run_pk("--help")
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("Space marks", result.stdout)
+        for flag in ("-h", "--help"):
+            result = self.run_pk(flag)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("Space marks", result.stdout)
+            self.assertIn("\nExamples:\n", result.stdout)
+            for example in ("  pk python", "  pk -p 8080", "  pk -9 python"):
+                self.assertIn(example, result.stdout)
+            for option in ("-p", "-9"):
+                self.assertIn(option + ",", result.stdout)
 
 
 if __name__ == "__main__":

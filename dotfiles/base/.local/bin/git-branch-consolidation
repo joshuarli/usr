@@ -30,6 +30,17 @@ case "${1:-}" in
     ;;
   --help|-h)
     usage 2>&1
+    cat <<'HELP'
+
+  --delete    delete eligible local branches instead of listing them
+  REMOTE      optional remote (default: origin)
+  MAIN        optional target branch (default: REMOTE/HEAD)
+  -h, --help  show this help
+
+Examples:
+  git-branch-consolidation origin main
+  git-branch-consolidation --delete origin main
+HELP
     owned_help
     exit 0
     ;;

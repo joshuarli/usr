@@ -3,6 +3,14 @@
 case ${1:-} in
     -h|--help)
         printf '%s\n' 'usage: ecount'
+        cat <<'HELP'
+Count files by extension in the current directory using fd.
+
+  -h, --help  show this help
+
+Examples:
+  ecount # run in the current environment
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

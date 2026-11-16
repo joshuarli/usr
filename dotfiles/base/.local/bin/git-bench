@@ -3,6 +3,14 @@
 case ${1:-} in
     -h|--help)
         printf '%s\n' 'usage: git-bench'
+        cat <<'HELP'
+Benchmark Git history operations in the current repository; requires hyperfine and at least 100 commits.
+
+  -h, --help  show this help
+
+Examples:
+  git-bench # run in the current environment
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

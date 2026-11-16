@@ -3,6 +3,28 @@
 case ${1:-} in
     -h|--help)
         printf '%s\n' 'usage: perf-gate-ready [-1] | perf-gate-ready -s [PATH]'
+        cat <<'HELP'
+Check host load for a reliable performance measurement, or report resource status.
+
+  -1       check load once (default: up to 3 checks)
+  -s       report memory, swap and disk status
+  PATH     optional filesystem path in status mode (default: .)
+  -h, --help  show this help
+
+Environment:
+  PERF_GATE_MAX_LOAD      maximum load per core (default: 0.7)
+  PERF_GATE_ATTEMPTS      maximum load checks (default: 3)
+  PERF_GATE_WAIT          seconds between checks (default: 1)
+  PERF_GATE_MIN_MEM_PCT   minimum free memory percent (default: 15)
+  PERF_GATE_MAX_SWAP_PCT  maximum used swap percent (default: 50)
+  PERF_GATE_MIN_DISK_GIB  minimum free disk GiB (default: 20)
+  PERF_GATE_LANE_GIB      memory GiB per lane (default: 4)
+  PERF_GATE_PROC          proc directory (default: /proc)
+
+Examples:
+  perf-gate-ready -1
+  perf-gate-ready -s .
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

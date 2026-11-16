@@ -94,6 +94,13 @@ check 3 'absent probes are unknown and open settings' 'could not confirm' yes \
 check 0 'an empty plutil result falls back to the Ghostty bundle id' 'com.mitchellh.ghostty' no \
     TERM_PROGRAM=ghostty GHOSTTY_FDA_PROBE="$granted" GHOSTTY_FDA_TEST_BUNDLE=
 
+for flag in -h --help; do
+    help=$(HOME="$empty_home" TMPDIR="$scratch" sh "$script" "$flag") || nfailed=$((nfailed + 1))
+    printf '%s\n' "$help" | grep -Fxq 'Examples:' || nfailed=$((nfailed + 1))
+    printf '%s\n' "$help" | grep -Fxq '  ghostty-fda-check --no-open' || nfailed=$((nfailed + 1))
+    printf '%s\n' "$help" | grep -Fq -- '--no-open  ' || nfailed=$((nfailed + 1))
+done
+
 extra_args='--help'
 check 0 '--help prints usage' 'usage: ghostty-fda-check' no \
     TERM_PROGRAM=ghostty

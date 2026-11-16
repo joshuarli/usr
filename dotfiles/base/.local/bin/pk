@@ -27,6 +27,26 @@ usage() {
         '  Requires fz with --multi; sh sync tools fz installs it in ~/usr.'
 }
 
+help() {
+    usage
+    cat <<'HELP'
+
+  query...  one or more fuzzy search terms, optional with -p
+  --        end options
+
+Examples:
+  pk python
+  pk -p 8080
+  pk -9 python
+HELP
+    owned_help
+}
+
+if [ "$#" -eq 0 ]; then
+    help
+    exit 0
+fi
+
 port_pids() {
     case $(uname -s) in
         Darwin)
@@ -76,7 +96,7 @@ while [ "$#" -gt 0 ]; do
             fi
             shift 2
             ;;
-        -h|--help) usage; owned_help; exit 0 ;;
+        -h|--help) help; exit 0 ;;
         --) shift; break ;;
         -*) usage >&2; exit 2 ;;
         *) break ;;

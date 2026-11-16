@@ -31,7 +31,26 @@ no_open=${GHOSTTY_FDA_NO_OPEN:-0}
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-open) no_open=1; shift ;;
-        -h|--help) printf 'usage: ghostty-fda-check [--no-open]\n'; owned_help; exit 0 ;;
+        -h|--help)
+            cat <<'HELP'
+usage: ghostty-fda-check [--no-open]
+Report whether Ghostty has Full Disk Access on macOS.
+
+  --no-open  do not open System Settings if access is missing or unknown
+  -h, --help show this help
+
+Environment:
+  GHOSTTY_FDA_NO_OPEN=1      suppress opening System Settings (default: 0)
+  GHOSTTY_APPLICATIONS_DIR   app directory (default: /Applications; also checks ~/Applications)
+  GHOSTTY_FDA_PROBE          optional path to probe instead of built-in paths
+  TERM_PROGRAM               identifies whether the current terminal is Ghostty
+  HOME                       location of fallback app and built-in probes
+  TMPDIR                     temporary error file directory (default: /tmp)
+
+Examples:
+  ghostty-fda-check --no-open
+HELP
+            owned_help; exit 0 ;;
         *) printf 'ghostty-fda-check: unknown argument: %s\n' "$1" >&2; exit 2 ;;
     esac
 done

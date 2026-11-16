@@ -9,6 +9,13 @@ test_root=$(mktemp -d "$work_root/gh-cancel-pr-runs.XXXXXX")
 trap 'rm -rf "$test_root"' 0
 trap 'exit 1' HUP INT TERM
 
+for flag in -h --help; do
+    help=$(HOME="$test_root" TMPDIR="$test_root" sh "$repo_root/dotfiles/base/.local/bin/gh-cancel-pr-runs" "$flag")
+    printf '%s\n' "$help" | grep -Fxq 'Examples:'
+    printf '%s\n' "$help" | grep -Fxq '  gh-cancel-pr-runs --repo owner/name feature'
+    printf '%s\n' "$help" | grep -Fq -- '--repo OWNER/NAME'
+done
+
 mock_bin="$test_root/bin"
 mkdir -p "$mock_bin"
 cat > "$mock_bin/gh" <<'EOF'
