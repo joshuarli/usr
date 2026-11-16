@@ -14,10 +14,10 @@ Classify each session as parent or child: child cwds sit under `.work/wt/` or `.
 
 ## Skill usage
 
-A load is a `Skill` tool call or slash command in Claude, a read of its `SKILL.md` in Codex, or Muse's recorded skill-read event. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. Rate alone decides nothing.
+Count with `python3 -I ~/usr/tools/skills/usage.py loads --days 14` (`--json` for rows) before writing any ad hoc scan. It counts parent sessions only: Claude subagent transcripts double-count, and Codex child sessions sit under `.work/`. In Codex, only a tool call reading a `SKILL.md` is a load; every session's skill listing names every path. Explicit skills arrive as `/name` in Claude and `$name` in Codex, not as `Skill` calls. Muse is not covered yet: its recorded skill-read event is the load. Explicit-only skills are never listed, so their numbers measure use, not firing. A skill is listed in every session whatever the task, so a low rate is expected for a narrow skill. Rate alone decides nothing.
 
 1. **Frame.** Name the skills in question (default: the auto-triggered ones) and the window.
-2. **Count.** Compute loaded over listed for each harness with saved listings. Under about 20 listed sessions is too little for a verdict.
+2. **Count.** Read the tool's counts against the session totals; an auto skill is listed in every parent session. Under about 20 sessions is too little for a verdict.
 3. **Read the loads.** Sample up to 5 per skill. Note date, harness, project, and how it loaded, and classify each as right (the task matched the description), wrong, or forced (a slash command or a brief that named it).
 4. **Read the skips.** Search the session directories with `rg -l` for phrases from the skill's description, and find sessions where the situation occurred, the skill was listed, and it did not load. Sample up to 5. Classify each as a costly miss (the work lacked knowledge or a contract the skill holds, produced a worse result, or spent avoidable effort) or a harmless skip (the work reached a sound result without it). Only costly misses are under-triggering.
 5. **Check outcomes.** For a sample of loads, read what the session did next. A skill that loads and is ignored needs a rewrite, not a better description. A skill that loads and is followed without improving the result or its cost is a fold or demote candidate.

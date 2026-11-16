@@ -6,7 +6,9 @@ Assume every contributor is an agent that sees only the files it opened, copies 
 
 ## Find the classes
 
-Read recent commits and reverts, review comments, the `AGENTS.md` chain, comments that explain workarounds (each is a defect class agents will copy), and recent sessions in the repo for the user's corrections (sources in [sessions](sessions.md)). Group mistakes into classes. A class counts once it has happened twice. Start from the window or a bounded recent sample; go further back only for a class the sample shows.
+Read recent commits and reverts, review comments, the `AGENTS.md` chain, comments that explain workarounds (each is a defect class agents will copy), and recent sessions in the repo for the user's corrections (sources in [sessions](sessions.md)). Group mistakes into classes. A class counts once it has happened twice.
+
+Corrections are not only "no, wrong". Approval nudges (`/yea`, a bare "continue") and stops after the owner granted run-until-done authority are a class of their own and can outnumber explicit corrections; `python3 -I ~/usr/tools/skills/usage.py stalls --json` lists each stop with the reply that preceded it. Start from the window or a bounded recent sample; go further back only for a class the sample shows.
 
 ## Fix each at the highest level that works
 

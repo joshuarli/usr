@@ -186,6 +186,7 @@ REGISTRY: tuple[Check, ...] = (
     Check("skills", (SKILLS,), ("node", "tools/skills/skills.ts", "check"), SKILL_PATHS, needs=("node",)),
     Check("project-skills", (SKILLS,), ("node", "tools/skills/skills.ts", "check", "--root", ".agents/skills"), SKILL_PATHS, needs=("node",)),
     Check("skills-tool", (SKILLS,), ("node", "--test", "tools/skills/skills.test.ts"), ("tools/skills/",), needs=("node",)),
+    Check("skills-usage", (SKILLS,), py("tools/skills/test_usage.py"), ("tools/skills/", "dotfiles/base/.agents/skills/")),
     Check("skills-campaign", (SKILLS,), py("dotfiles/skills-campaign-test.py"), (*SKILL_PATHS, "dotfiles/skills-campaign-test.py", "dotfiles/skill-evals/", "dotfiles/base/.agents/instructions/bootstrap.md")),
     Check("policy-generated", (POLICY,), ("node", "tools/policy/generate.ts", "--check"), ("tools/policy/", "tools/pi-subagent-bridge/src/policy.ts", "tools/pi-subagent-bridge/src/tier-policy.ts", *GENERATED_POLICY), needs=("node",)),
     Check("policy-generator", (POLICY,), ("node", "--test", "tools/policy/generate.test.ts"), ("tools/policy/",), needs=("node",)),
