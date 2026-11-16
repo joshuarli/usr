@@ -289,6 +289,16 @@ def watchman_status(procs: list[dict[str, Any]]) -> str:
 
 
 def main() -> int:
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        print("""Usage: macos-free-memory [--top N] [--apply]
+Report memory pressure and potential process removal candidates.
+  --top N     Number of processes to list in each top table (default: 12).
+  --apply     Send SIGINT to selected high-confidence candidates.
+  -h, --help  Show this help.
+Examples:
+  macos-free-memory --top 20
+  macos-free-memory --apply""")
+        return 0
     top_n = 12
     apply = "--apply" in sys.argv
     if "--top" in sys.argv:

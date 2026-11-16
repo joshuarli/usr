@@ -1,4 +1,16 @@
 #!/bin/sh
+
+if [ "$#" -eq 0 ] || [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then
+    cat <<'HELP'
+Usage: freeport PORT
+Show processes using a port and offer to terminate them.
+  PORT  Required port number from 1 to 65535.
+  -h, --help  Show this help.
+Examples:
+  freeport 8080
+HELP
+    exit 0
+fi
 # freeport - show what is listening on a port (macOS) and offer to kill it.
 #
 # Usage:

@@ -9,6 +9,11 @@ trap 'exit 1' 1 2 3 15
 export POWER_POLICY_SYSFS_ROOT=$work/sys
 sys=$POWER_POLICY_SYSFS_ROOT
 
+help=$("$program" -h)
+printf '%s\n' "$help" | grep -qx 'Examples:' || { printf 'missing Examples section\n' >&2; exit 1; }
+printf '%s\n' "$help" | grep -q '^  power-policy ' || { printf 'missing example\n' >&2; exit 1; }
+printf '%s\n' "$help" | grep -q -- '--help' || { printf 'missing help option\n' >&2; exit 1; }
+
 fail() { printf 'power-policy test: %s\n' "$*" >&2; exit 1; }
 expect() {
     value=$(cat "$1")

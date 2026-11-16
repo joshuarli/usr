@@ -1,4 +1,16 @@
 #!/bin/sh
+
+if [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then
+    cat <<'HELP'
+Usage: mpdl URL
+Download a playlist as audio with yt-dlp.
+  URL  Playlist URL (only the first argument is forwarded).
+  -h, --help  Show this help.
+Examples:
+  mpdl https://example.com/playlist
+HELP
+    exit 0
+fi
 yt_dlp="${0%/*}/yt-dlp"
 [ -x "$yt_dlp" ] || yt_dlp=yt-dlp
 exec "$yt_dlp" --ignore-config --ignore-errors \

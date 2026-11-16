@@ -172,7 +172,9 @@ def print_command(command):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Uninstall Asahi Linux and reclaim its disk space."
+        description="Uninstall Asahi Linux and reclaim its disk space.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n  uninstall-asahi.py --apply\n  uninstall-asahi.py -h",
     )
     parser.add_argument(
         "--apply",

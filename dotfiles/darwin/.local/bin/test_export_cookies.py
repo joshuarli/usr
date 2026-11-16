@@ -4,6 +4,7 @@ import runpy
 import sqlite3
 import stat
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,21 @@ assert SPEC is not None
 export_cookies = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(export_cookies)
+
+
+class HelpTests(unittest.TestCase):
+    def test_help_and_bare_invocation(self):
+        results = [subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+                   for args in ([], ["-h"], ["--help"])]
+        for result in results:
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("\nExamples:\n  export-cookies.py ", result.stdout)
+            self.assertIn("--help", result.stdout)
+            for line in result.stdout.split("Examples:\n", 1)[1].splitlines():
+                for word in line.split()[1:]:
+                    if word.startswith("-"):
+                        self.assertIn(word, result.stdout.split("Examples:\n", 1)[0])
+        self.assertEqual(results[0].stdout, results[1].stdout)
 
 
 class QueryChromeTests(unittest.TestCase):

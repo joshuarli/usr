@@ -75,6 +75,16 @@ def shift_srt(input_file: str, output_file: str, shift_seconds: float):
     print(f"Done. Wrote shifted subtitles to {output_file}")
 
 if __name__ == "__main__":
+    if len(sys.argv) == 1 or sys.argv[1] in ("-h", "--help"):
+        print("""Usage: shift_srt.py INPUT OUTPUT SECONDS
+Shift subtitle timestamps earlier and strip HTML tags.
+  INPUT    Required input SRT file.
+  OUTPUT   Required output SRT file.
+  SECONDS  Required shift in seconds (may be fractional).
+  -h, --help  Show this help.
+Examples:
+  shift_srt.py input.srt output.srt 3.5""")
+        sys.exit(0)
     if len(sys.argv) != 4:
         print("Usage: python shift_srt.py input.srt output.srt 3.5")
         sys.exit(1)

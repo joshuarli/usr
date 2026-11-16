@@ -1,5 +1,21 @@
 #!/bin/sh
 
+if [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then
+    cat <<'HELP'
+Usage: stream
+Select and play a movie from a remote media server.
+  -h, --help  Show this help.
+Environment:
+  STREAM_URL         Server URL (default: http://box:8080).
+  STREAM_SSH_TARGET  SSH host used to start the server (default: box).
+  MPV                Player executable (default: installed mpv).
+  TMPDIR             Directory for temporary files (default: /tmp).
+Examples:
+  stream -h
+HELP
+    exit 0
+fi
+
 # The tailscale serve it starts on the remote stays on until `tailscale serve reset`.
 set -eu
 

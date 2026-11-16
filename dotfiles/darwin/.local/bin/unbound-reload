@@ -4,7 +4,7 @@ set -u
 prog=${0##*/}
 
 usage() {
-	cat >&2 <<EOF
+	cat <<EOF
 usage: $prog [--dry-run] [name ...]
 
 Drop cached DNS answers so a name that was just created resolves now:
@@ -15,8 +15,13 @@ answer upstream (a router or Tailscale MagicDNS) is visible.
 
 Unbound is restarted only when it is already answering on 127.0.0.1; this
 never starts it or changes which resolvers the system uses.
+
+  --dry-run  Print cache-flush and restart commands instead of running them.
+  name       Optional host names to query; may be repeated.
+  -h, --help Show this help.
+Examples:
+  unbound-reload --dry-run example.com
 EOF
-	exit 2
 }
 
 dry=0
@@ -24,8 +29,8 @@ names=""
 for arg in "$@"; do
 	case $arg in
 		--dry-run) dry=1 ;;
-		-h | --help) usage ;;
-		-*) usage ;;
+		-h | --help) usage; exit 0 ;;
+		-*) usage >&2; exit 2 ;;
 		*)
 			case $arg in
 				*[!A-Za-z0-9.-]*) printf '%s: not a host name: %s\n' "$prog" "$arg" >&2; exit 2 ;;

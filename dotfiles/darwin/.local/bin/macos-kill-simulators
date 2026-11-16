@@ -1,4 +1,16 @@
 #!/bin/sh
+
+if [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then
+    cat <<'HELP'
+Usage: macos-kill-simulators [--wipe]
+Shut down and delete all iOS simulators.
+  --wipe      Also remove shared runtime data; requires sudo and runtime downloads.
+  -h, --help  Show this help.
+Examples:
+  macos-kill-simulators --wipe
+HELP
+    exit 0
+fi
 #
 # Kill, unmount, and delete all iOS simulators, optionally wiping the
 # shared runtime data (root-owned) too.

@@ -17,10 +17,29 @@ auto         Detect AC/battery, or use kernel-managed AMD dynamic EPP.
 ac           Balance performance and energy use.
 battery      Prefer energy savings when the hardware supports a hint.
 performance  Prefer performance; enable CPU boost when supported.
+help         Show this reference.
+
+  -h, --help  Show this help. Subcommand help also shows this reference.
+  POWER_POLICY_SYSFS_ROOT  Absolute sysfs root (default: /sys; / is forbidden).
 
 No CPU frequency caps, voltage changes, or blanket USB/PCIe/storage tuning.
+Examples:
+  power-policy help
+  power-policy status
+  power-policy diff auto
+  power-policy apply battery
+  power-policy auto
+  power-policy ac
+  power-policy battery
+  power-policy performance
 HELP
 }
+
+case ${1:-} in
+    -h|--help|help) usage; exit 0 ;;
+    diff|apply) case ${2:-} in -h|--help) usage; exit 0 ;; esac ;;
+    status|auto|ac|battery|performance) case ${2:-} in -h|--help) usage; exit 0 ;; esac ;;
+esac
 
 sys=${POWER_POLICY_SYSFS_ROOT:-/sys}
 case $sys in /*) ;; *) die 'POWER_POLICY_SYSFS_ROOT must be absolute' ;; esac

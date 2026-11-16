@@ -1,5 +1,22 @@
 #!/bin/sh
 
+if [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then
+    cat <<'HELP'
+Usage: fix-tailscale-magicdns
+Configure the macOS resolver for Tailscale MagicDNS.
+  -h, --help  Show this help.
+Environment:
+  TAILSCALE_DOMAIN  Tailnet domain (default: tailcf741.ts.net).
+  TAILSCALE_HOST    Host to test (default: box).
+  TAILSCALE_DNS_IP  Resolver address (default: 100.100.100.100).
+  TAILSCALE_CLI     Tailscale executable (default: discovered on PATH or in Applications).
+  TMPDIR            Directory for temporary files (default: /tmp).
+Examples:
+  fix-tailscale-magicdns -h
+HELP
+    exit 0
+fi
+
 set -eu
 
 tailnet_domain=${TAILSCALE_DOMAIN:-tailcf741.ts.net}

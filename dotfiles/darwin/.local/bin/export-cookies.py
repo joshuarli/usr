@@ -258,6 +258,16 @@ def host_matches(cookie_host, hostname):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 1 or sys.argv[1] in ("-h", "--help"):
+        print("""Usage: export-cookies.py BROWSER HOSTNAME [HOSTNAME ...]
+Export matching browser cookies to a Netscape cookie file.
+  BROWSER   Required: safari or helium.
+  HOSTNAME  One or more hostnames, including subdomains in matches.
+  -h, --help  Show this help.
+Examples:
+  export-cookies.py safari example.com
+  export-cookies.py helium example.com accounts.example.com""")
+        sys.exit(0)
     args = [a.lower() for a in sys.argv[1:]]
     if len(args) < 2 or args[0] not in {"safari", "helium"}:
         print("Usage: export-cookies.py [safari|helium] hostname [hostname ...]", file=sys.stderr)

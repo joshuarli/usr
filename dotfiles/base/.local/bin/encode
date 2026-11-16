@@ -1,5 +1,18 @@
 #!/bin/sh
 
+if [ "$#" -eq 0 ] || [ "${1:-}" = -h ] || [ "${1:-}" = --help ]; then
+    cat <<'HELP'
+Usage: encode PROFILE PATH
+Encode a video file or directory on macOS, retaining smaller results.
+  PROFILE  Required: archive-720p-cq52 or archive-1080p-cq52 (HEVC, AAC stereo).
+  PATH     Required video file or directory; directories are searched recursively.
+  -h, --help  Show this help.
+Examples:
+  encode archive-720p-cq52 movie.mov
+HELP
+    exit 0
+fi
+
 set -e
 
 if [ "$(uname -s)" != Darwin ]; then
