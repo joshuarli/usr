@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawnSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeHybridBridge } from '../../src/hybrid.ts'
@@ -13,10 +13,11 @@ import { ownerJobs, ownerResume } from '../../src/owner-client.ts'
 import { codexAvailable } from '../../src/codex.ts'
 import { CODEX_TIER_MODELS } from '../../src/policy.ts'
 import { workerEnvironment } from '../../src/worker-env.ts'
+import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk, scoutFindingOk } from './pilot.ts'
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url))
 const pin = JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8'))
-const BOUNDS = { max_new_jobs: 6, max_corrections: 2, wall_ms_per_job: 900000, max_model_steps: 20 }
+const BOUNDS = { max_new_jobs: 6, max_continuations: 1, wall_ms_per_job: 900000, max_model_steps: 20 }
 const LIVE_BASE = join(root, '.work/tmp/fx-live')
 const LOGIN_HOME = join(LIVE_BASE, 'fx-profile')
 const FX_BINARY = join(root, '.work/tmp/fx-spike/installed-home/.local/bin/fx')
@@ -187,8 +188,7 @@ const TASKS = [
     scope: { writable_paths: [], acceptance_proof: 'final answer cites python/ledger.py line evidence; worktree unchanged', attempt_limit: 1, stop_on: 'any file modification or shell use' },
     verify: (wt, answer) => {
       cleanTree(wt)
-      assert.match(String(answer ?? ''), /python\/ledger\.py/i, 'scout answer must cite python/ledger.py')
-      assert.match(String(answer ?? ''), /line\s*\d+|:\d+/i, 'scout answer must cite a line number')
+      assert.ok(scoutFindingOk(String(answer ?? '')), 'scout answer must cite the debit defect at python/ledger.py lines 6-7')
     },
   },
   {
@@ -201,10 +201,27 @@ const TASKS = [
     key: 'multi', tier: 'worker',
     prompt: 'Rename the public balance function to settled_balance in all three language ports: python/ledger.py (update python/report.py and python/test_ledger.py callers), ts/ledger.mjs and rust/src/lib.rs consistently. The acceptance checks currently fail; make the Python, Node and Cargo checks all pass.',
     scope: { writable_paths: ['python', 'ts', 'rust'], acceptance_proof: 'python unittest, node ts/check.mjs and cargo test --manifest-path rust/Cargo.toml all exit zero', attempt_limit: 2, stop_on: 'scope expansion or unavailable proof' },
-    verify: allChecks,
-    correction: 'The acceptance checks still fail. Finish the settled_balance rename wherever it is incomplete and fix the remaining defects so python unittest, node ts/check.mjs and cargo test all pass. Stay in the same scope.',
+    verify: (wt) => {
+      allChecks(wt)
+      const files = {
+        python: readFileSync(join(wt, 'python', 'ledger.py'), 'utf8'),
+        ts: readFileSync(join(wt, 'ts', 'ledger.mjs'), 'utf8'),
+        rust: readFileSync(join(wt, 'rust', 'src', 'lib.rs'), 'utf8'),
+        'python-report': readFileSync(join(wt, 'python', 'report.py'), 'utf8'),
+        'python-test': readFileSync(join(wt, 'python', 'test_ledger.py'), 'utf8'),
+        'ts-check': readFileSync(join(wt, 'ts', 'check.mjs'), 'utf8'),
+      }
+      const problem = renameEvidenceOk(files)
+      assert.equal(problem, null, problem ?? undefined)
+    },
   },
 ]
+
+const CONTINUATION_PROMPT = 'Follow-up in the same scope: add the one-line docstring """Net balance across entries.""" as the first statement inside settled_balance in python/ledger.py, then rerun the Python check.'
+function continuationVerify(wt) {
+  pyCheck(wt)
+  assert.match(readFileSync(join(wt, 'python', 'ledger.py'), 'utf8'), /Net balance across entries/, 'continuation docstring missing')
+}
 
 function exportOpenCodeToken() {
   try {
@@ -233,7 +250,22 @@ function profileAuth(profile, runRoot) {
     return true
   }
   if (!refresh()) return { ready: false, setup: 'opencode auth login (OpenCode Go subscription), then rerun' }
-  return { ready: true, secretEnvFiles: { [profile.auth.envName]: tokenPath, LIVE_PROVIDER_SESSION: sessionPath }, refresh, secretDir }
+  const baseUrl = profile.connection?.base_url
+  const probe = async () => {
+    if (!baseUrl) return 'unknown'
+    try {
+      const token = readFileSync(tokenPath, 'utf8').trim()
+      const session = readFileSync(sessionPath, 'utf8').trim()
+      const res = await fetch(baseUrl.replace(/\/$/, '') + '/chat/completions', {
+        method: 'POST',
+        headers: { authorization: 'Bearer ' + token, 'x-opencode-session': session, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'deepseek-v4.1-flash', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+        signal: AbortSignal.timeout(15000),
+      })
+      return classifyProbeResponse(res.status, await res.text())
+    } catch { return 'unknown' }
+  }
+  return { ready: true, secretEnvFiles: { [profile.auth.envName]: tokenPath, LIVE_PROVIDER_SESSION: sessionPath }, refresh, secretDir, probe }
 }
 
 function liveBridge(fx, selections) {
@@ -284,6 +316,16 @@ function descendantRss(rootPid) {
   } catch { return null }
 }
 
+async function waitTerminal(bridge, cwd, id, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const result = await dispatch(bridge, { name: 'status', cwd, session_id: id })
+    if (result.state !== 'running') return result
+    if (Date.now() > deadline) return null
+    await new Promise(r => setTimeout(r, 500))
+  }
+}
+
 async function runBridgeJob(bridge, repo, wtName, task, base) {
   const wt = join(repo, '.work', 'wt', wtName)
   execFileSync('git', ['-C', repo, 'worktree', 'add', '-qb', wtName, wt, base], { encoding: 'utf8', timeout: 10000 })
@@ -297,14 +339,22 @@ async function runBridgeJob(bridge, repo, wtName, task, base) {
   } catch {}
   let peakRss = null
   const poll = setInterval(() => { if (rootPid) { const rss = descendantRss(rootPid); if (rss) peakRss = Math.max(peakRss ?? 0, rss) } }, 250)
-  let result
-  try { result = await waitJob(bridge, wt, admitted.session_id) }
-  finally { clearInterval(poll) }
+  let result, timedOut = false, termination = null
+  try {
+    result = await waitJob(bridge, wt, admitted.session_id)
+  } catch (error) {
+    if (!String(error).includes('wall deadline')) throw error
+    timedOut = true
+    try { await dispatch(bridge, { name: 'cancel', cwd: wt, session_id: admitted.session_id }) } catch {}
+    termination = await waitTerminal(bridge, wt, admitted.session_id, 60000)
+    result = termination ?? { state: 'unknown', last_assistant_text: '' }
+  } finally { clearInterval(poll) }
   const elapsed = performance.now() - started
   let checksPassed = false, checkError = null
-  try { task.verify(wt, result.last_assistant_text); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
+  if (timedOut && !termination) checkError = 'job exceeded wall deadline and termination could not be verified; parent checks skipped'
+  else try { task.verify(wt, result.last_assistant_text); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
   const status = execFileSync('git', ['-C', wt, 'status', '--porcelain'], { encoding: 'utf8' })
-  return { task: task.key, tier: task.tier, backend: admitted.backend, session_id: admitted.session_id, state: result.state, acceptance_claim: result.acceptance_claim ?? null, last_assistant_text: String(result.last_assistant_text ?? '').slice(0, 2000), elapsed_ms: Math.round(elapsed), sampled_peak_tree_rss_kib: peakRss, parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), ...(result.usage ? { usage: result.usage } : {}) }
+  return { task: task.key, tier: task.tier, backend: admitted.backend, session_id: admitted.session_id, state: result.state, timed_out: timedOut || undefined, termination: timedOut ? (termination ? 'verified' : 'unverified') : undefined, acceptance_claim: result.acceptance_claim ?? null, last_assistant_text: String(result.last_assistant_text ?? '').slice(0, 2000), elapsed_ms: Math.round(elapsed), sampled_peak_tree_rss_kib: peakRss, parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), ...(result.usage ? { usage: result.usage } : {}) }
 }
 
 async function runPiCliJob(repo, wtName, task, base) {
@@ -328,6 +378,64 @@ async function runPiCliJob(repo, wtName, task, base) {
   return { task: task.key, tier: task.tier, backend: 'pi-cli', state: code === 0 && !timedOut ? 'succeeded' : 'failed', exit_code: code, timed_out: timedOut, last_assistant_text: stdout.slice(-2000), elapsed_ms: Math.round(elapsed), parent_checks_passed: checksPassed, check_error: checkError, worktree_changes: status.trim().split('\n').filter(Boolean).slice(0, 50), stderr_tail: stderr.slice(-500) }
 }
 
+function runStderrTail(repo, sessionId, bytes = 8192) {
+  try {
+    const session = JSON.parse(readFileSync(join(repo, '.work', 'worker-bridge', sessionId + '.json'), 'utf8'))
+    const path = session.execution?.run?.errors
+    if (!path || !existsSync(path)) return ''
+    const text = readFileSync(path, 'utf8')
+    return text.slice(-bytes)
+  } catch { return '' }
+}
+
+function nativeSessionIds(fxHome) {
+  try {
+    return readdirSync(join(fxHome, 'sessions/v2'), { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name !== '.tmp').map(entry => entry.name)
+  } catch { return [] }
+}
+
+async function runContinuation(bridge, owner, repo, wt, multi) {
+  const record = { attempted: false, nativeSession: false }
+  try {
+    const sessionPath = join(repo, '.work', 'worker-bridge', multi.session_id + '.json')
+    const session = JSON.parse(readFileSync(sessionPath, 'utf8'))
+    const origOutput = session.execution?.run?.output
+    if (!origOutput || !existsSync(origOutput + '.job.json')) { record.reason = 'no-run-record'; return record }
+    const origJob = JSON.parse(readFileSync(origOutput + '.job.json', 'utf8'))
+    const ids = nativeSessionIds(origJob.fxHome)
+    if (ids.length !== 1) { record.reason = 'no-native-session'; return record }
+    const nativeId = ids[0]
+    record.nativeSession = true
+    record.attempted = true
+    const job = (await ownerJobs(repo, owner.ownerId)).find(item => item.job_id === multi.session_id)
+    if (!job) { record.reason = 'owner-job-missing'; record.attempted = false; return record }
+    const target = { job_id: job.job_id, run_id: job.run_id, owner_generation: job.owner_generation }
+    const receipt = await ownerResume(repo, owner.ownerId, { target, command_id: 'live-continuation-1', feedback: CONTINUATION_PROMPT })
+    record.receipt = receipt.receipt
+    if (receipt.receipt !== 'accepted') { record.accepted = false; return record }
+    record.accepted = true
+    const resumed = await waitJob(bridge, wt, multi.session_id)
+    record.state = resumed.state
+    record.last_assistant_text = String(resumed.last_assistant_text ?? '').slice(0, 2000)
+    const logDir = dirname(origOutput)
+    let identity = false
+    for (const name of readdirSync(logDir)) {
+      if (!name.endsWith('.fx.json.job.json')) continue
+      try {
+        const candidate = JSON.parse(readFileSync(join(logDir, name), 'utf8'))
+        if (candidate.resume === nativeId && candidate.fxHome === origJob.fxHome) identity = true
+      } catch {}
+    }
+    record.identity_retained = identity
+    try { continuationVerify(wt); record.parent_checks_passed = true } catch (error) { record.parent_checks_passed = false; record.check_error = String(error).slice(0, 500) }
+    return record
+  } catch (error) {
+    record.error = String(error).slice(0, 500)
+    return record
+  }
+}
+
 export async function livePilot(binary, scratch, requested) {
   const scopeReport = { mode: 'live', scope: BOUNDS, paid_gateway: false, production_routing: false }
   console.log(JSON.stringify(scopeReport))
@@ -340,15 +448,23 @@ export async function livePilot(binary, scratch, requested) {
   for (const name of names) {
     const profile = PROFILES[name]
     const preflight = profileAuth(profile, runRoot)
-    if (preflight.ready) { selected = { name, profile }; auth = preflight; break }
-    unavailable.push({ profile: name, reason: 'authentication unavailable', setup: preflight.setup })
+    if (!preflight.ready) { unavailable.push({ profile: name, reason: 'authentication unavailable', setup: preflight.setup }); continue }
+    if (preflight.probe) {
+      const probe = await preflight.probe()
+      preflight.probe_result = probe
+      if (probe === 'quota' || probe === 'auth') {
+        unavailable.push({ profile: name, reason: probe === 'quota' ? 'provider quota exhausted' : 'provider rejected credentials', probe, setup: preflight.setup })
+        continue
+      }
+    }
+    selected = { name, profile }; auth = preflight; break
   }
   if (!selected) {
-    console.log(JSON.stringify({ status: 'unavailable', jobs_started: 0, profiles: unavailable }))
-    return { status: 'unavailable', exitCode: 75, report: { scope: BOUNDS, unavailable } }
+    console.log(JSON.stringify({ status: 'blocked', jobs_started: 0, profiles: unavailable }))
+    return { status: 'blocked', exitCode: 75, report: { verdict: 'blocked', scope: BOUNDS, unavailable } }
   }
   const { name, profile } = selected
-  const report = { mode: 'live', profile: name, provider: profile.provider, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [], corrections: [] }
+  const report = { mode: 'live', profile: name, provider: profile.provider, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [] }
   let owner = null
   try {
     const home = join(runRoot, 'home'), repo = join(home, 'repo')
@@ -367,47 +483,65 @@ export async function livePilot(binary, scratch, requested) {
     await owner.ensureRepo(repo)
     const jobs = []
     report.jobs = jobs
-    let corrections = 0
+    let providerBlocked = false
     for (const task of TASKS) {
+      if (providerBlocked) break
       auth.refresh?.()
-      jobs.push({ selection: profile.selections[task.tier], ...(await runBridgeJob(bridge, repo, 'fx-' + task.key, task, base)) })
-    }
-    const multi = jobs.find(j => j.task === 'multi')
-    if (multi?.state === 'succeeded' && multi.parent_checks_passed === false && corrections < BOUNDS.max_corrections) {
-      const wt = join(repo, '.work', 'wt', 'fx-multi')
-      const job = (await ownerJobs(repo, owner.ownerId)).find(item => item.job_id === multi.session_id)
-      if (job) {
-        const target = { job_id: job.job_id, run_id: job.run_id, owner_generation: job.owner_generation }
-        const command = { target, command_id: 'live-correction-1', feedback: TASKS[2].correction }
-        const receipt = await ownerResume(repo, owner.ownerId, command)
-        corrections++
-        report.corrections.push({ job_id: multi.session_id, receipt: receipt.receipt })
-        if (receipt.receipt === 'accepted') {
-          const corrected = await waitJob(bridge, wt, multi.session_id)
-          let checksPassed = false, checkError = null
-          try { TASKS[2].verify(wt); checksPassed = true } catch (error) { checkError = String(error).slice(0, 500) }
-          report.corrections.push({ job_id: multi.session_id, state: corrected.state, parent_checks_passed: checksPassed, check_error: checkError })
-        }
+      const jobResult = { selection: profile.selections[task.tier], ...(await runBridgeJob(bridge, repo, 'fx-' + task.key, task, base)) }
+      jobs.push(jobResult)
+      if (jobResult.state !== 'succeeded') {
+        const probe = auth.probe ? await auth.probe() : null
+        jobResult.provider_block = classifyJobBlock({
+          state: jobResult.state, lastText: jobResult.last_assistant_text ?? '', elapsedMs: jobResult.elapsed_ms,
+          wallMs: BOUNDS.wall_ms_per_job, stderrTail: runStderrTail(repo, jobResult.session_id), probe,
+        })
+        if (jobResult.provider_block) providerBlocked = true
       }
     }
+    const multi = jobs.find(j => j.task === 'multi')
+    let continuation = null
+    if (multi) {
+      continuation = providerBlocked
+        ? { attempted: false, nativeSession: false, reason: 'provider-blocked' }
+        : await runContinuation(bridge, owner, repo, join(repo, '.work', 'wt', 'fx-multi'), multi)
+      if (continuation.state !== undefined && continuation.state !== 'succeeded') {
+        const probe = auth.probe ? await auth.probe() : null
+        continuation.provider_block = classifyJobBlock({ state: continuation.state, lastText: continuation.last_assistant_text ?? '', elapsedMs: 0, wallMs: BOUNDS.wall_ms_per_job, stderrTail: '', probe })
+      }
+    }
+    report.continuation = continuation
     if (profile.incumbent === 'bridge-codex' && codexAvailable()) {
       const incumbentBridge = codexBridge(profile.selections)
       for (const task of TASKS) {
         const pin = profile.selections[task.tier]
-        jobs.push({ selection: { model: pin.model, effort: pin.effort, provider: 'codex' }, ...(await runBridgeJob(incumbentBridge, repo, 'inc-' + task.key, task, base)) })
+        jobs.push({ comparison_class: 'bridge-route', selection: { model: pin.model, effort: pin.effort, provider: 'codex' }, ...(await runBridgeJob(incumbentBridge, repo, 'inc-' + task.key, task, base)) })
       }
     } else if (profile.incumbent === 'pi-cli' && spawnSync('which', ['pi'], { encoding: 'utf8', timeout: 5000 }).status === 0) {
-      for (const task of TASKS) jobs.push({ selection: { model: 'deepseek-v4.1-flash', effort: 'high', provider: 'opencode-go' }, ...(await runPiCliJob(repo, 'inc-' + task.key, task, base)) })
+      report.incumbent_note = 'pi-cli exercises the provider route without bridge scope, lease or owner controls; it is provider-diagnostic evidence, not a route-equivalent comparison'
+      for (const task of TASKS) jobs.push({ comparison_class: 'provider-diagnostic', selection: { model: 'deepseek-v4.1-flash', effort: 'high', provider: 'opencode-go' }, ...(await runPiCliJob(repo, 'inc-' + task.key, task, base)) })
     } else {
       report.incumbent = { status: 'unavailable', note: 'incumbent runtime not authenticated on this host' }
     }
     report.incumbent_ran = jobs.some(j => j.backend !== 'fx')
+    const fxJobs = jobs.filter(j => j.backend === 'fx')
+    report.verdict = pilotVerdict({
+      tasks: TASKS.map(t => {
+        const j = fxJobs.find(x => x.task === t.key)
+        return { key: t.key, state: j?.state, checks: j?.parent_checks_passed === true, block: j?.provider_block ?? null }
+      }),
+      continuation: continuation ? {
+        attempted: continuation.attempted === true, accepted: continuation.accepted,
+        identity: continuation.identity_retained, checks: continuation.parent_checks_passed,
+        block: continuation.provider_block ?? null, nativeSession: continuation.nativeSession === true,
+      } : null,
+    })
     const output = join(scratch, 'fx-live.json')
     writeFileSync(output, JSON.stringify(report, null, 2))
-    console.log(JSON.stringify({ status: 'completed', profile: name, report: output, jobs: jobs.map(j => ({ task: j.task, backend: j.backend, state: j.state, parent_checks_passed: j.parent_checks_passed })) }))
-    return { status: 'completed', exitCode: 0, report }
+    console.log(JSON.stringify({ status: 'completed', verdict: report.verdict, profile: name, report: output, jobs: jobs.map(j => ({ task: j.task, backend: j.backend, state: j.state, parent_checks_passed: j.parent_checks_passed })) }))
+    return { status: 'completed', exitCode: report.verdict === 'passed' ? 0 : report.verdict === 'blocked' ? 75 : 1, report }
   } catch (error) {
     report.error = String(error).slice(0, 2000)
+    report.verdict = 'failed'
     writeFileSync(join(scratch, 'fx-live.json'), JSON.stringify(report, null, 2))
     console.log(JSON.stringify({ status: 'failed', profile: name, error: report.error }))
     return { status: 'failed', exitCode: 1, report }

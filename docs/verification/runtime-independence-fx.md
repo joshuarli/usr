@@ -4,7 +4,7 @@
 
 **Limited-go for deterministic local qualification on native macOS ARM64.** The real CLI works through the shared bridge, including scope checks, leases, continuation and owner control. The opt-in live pilot is implemented and was executed against a real provider account; it is parked on reproduced account blockers (no FX Codex login; exhausted OpenCode Go monthly quota that blocks the incumbent identically). Live model usefulness, intended-model quality and native Linux remain unqualified. Production promotion is prohibited.
 
-Accepted source checkpoints are `91642ad`, `6dd9583`, `c6f94ad`, `09815d1`, `d986a7f`, `c19b2f3`, `cdda03b` and `12df815`, against runtime-independence baseline `2025e04`. The owner's existing Codex configuration change is excluded. No remote update, home sync, production route change, Pi removal or Intercom change was performed.
+Accepted source checkpoints are `91642ad`, `6dd9583`, `c6f94ad`, `09815d1`, `d986a7f`, `c19b2f3`, `cdda03b`, `12df815` and `5d541d5`, against runtime-independence baseline `2025e04`. The owner's existing Codex configuration change is excluded. No remote update, home sync, production route change, Pi removal or Intercom change was performed.
 
 ## Release and installation
 
@@ -63,18 +63,28 @@ Private replayable evidence is in `.work/tmp/fx-qualification.json`, `.work/tmp/
 
 ## Live pilot
 
-`spike.mjs --live [profile]` replaces the former unconditional refusal with an opt-in runner (`experiment/fx/live-pilot.mjs`). It provisions a disposable Git repository containing Python, TypeScript and Rust work, selects one exact profile, and drives three bounded tasks (read-only scout, focused bug fix, multi-file rename with same-session correction) through the shared bridge owner controls, plus the matching incumbent backend where installed. Bounds: six new jobs, two corrections, 15-minute wall per job, 20 model steps.
+`spike.mjs --live [profile]` replaces the former unconditional refusal with an opt-in runner (`experiment/fx/live-pilot.mjs` + pure qualification logic in `experiment/fx/pilot.ts`). It provisions a disposable Git repository containing Python, TypeScript and Rust work, selects one exact profile, and drives three bounded tasks (read-only scout, focused bug fix, multi-file rename with mandatory same-session continuation) through the shared bridge owner controls, plus the matching incumbent backend where installed. Bounds: six new jobs, one planned same-session continuation, 15-minute wall per job, 20 model steps.
 
 Two profiles exist. `codex` uses the built-in FX provider with the production Codex tier pins and requires `chatgpt-auth.json` inside a private `FX_HOME`; absence prints an exact `fx login codex` handoff and exits 75 without starting jobs. `opencode-go` configures a custom OpenAI Completions connection against `https://opencode.ai/inference/go/openai/v1` with the approved `deepseek-v4.1-flash`/high pin, bearer auth from `LIVE_PROVIDER_TOKEN` and the required `x-opencode-session` routing header from `LIVE_PROVIDER_SESSION`.
 
-Credential isolation is structural: the supervisor job record serializes only environment variable names and secret-file paths; values live in mode-0600 scratch files injected into the child environment at spawn. Verified on the live run: no token value appears anywhere under the run root, and FX settings reference only the environment variable name. `opencode auth export` supplies the bearer value without printing it; a random session ID is generated per run.
+Account gating is probe-based, not retry-based: before any job, the runner sends one minimal completion to distinguish quota exhaustion (`GoUsageLimitError`, monthly reset) and rejected credentials from transient rate limiting. A quota/auth verdict blocks the whole batch in about half a second instead of burning three 15-minute deadlines; the same probe re-runs after any failed job and halts the remaining tasks. Job-level classification (`classifyJobBlock`) combines probe results, provider error signatures in the supervisor stderr tail, and deadline-stall shape.
 
-Observed live results (report `.work/tmp/fx-live.json`, run root `.work/tmp/fx-live/run-a1hpy6`):
+The verdict is a qualification result, not a completion status: `passed` requires all three FX tasks succeeded with parent checks green **and** the mandatory continuation accepted with native-session identity retained and its own parent check green; `failed` means the candidate or machinery demonstrated a violation; `blocked` means an external prerequisite (auth, quota, missing session) prevented the required evidence. Exit codes are 0/1/75 respectively.
+
+Task verification is parent-owned and discriminating: the scout answer must cite `python/ledger.py` lines 6–7 and the debit cause (citation-shaped text alone fails); the multi-file verifier runs all three language checks **and** asserts `settled_balance` exists in every port and caller with no stale `balance_after`/`balanceAfter` references; the continuation is a planned second turn (docstring follow-up) attempted whenever a native session exists, independent of first-attempt success, with identity proven by matching the resumed job record's `resume`/`fxHome` fields. Bridge jobs that exceed the wall deadline are now cancelled through the owner path and termination is verified before parent checks run; unverifiable termination skips checks and is recorded as `unverified`.
+
+The pi-cli incumbent is labeled `provider-diagnostic`: it exercises the provider route without bridge scope, lease or owner controls, so it qualifies account/model behavior only, not route equivalence. The Codex incumbent runs through the real bridge route (`comparison_class: bridge-route`).
+
+Credential isolation is structural: the supervisor job record serializes only environment variable names and secret-file paths; values live in mode-0600 scratch files injected into the child environment at spawn, and the secrets directory is removed when the pilot exits. Verified on the live run: no token value appears anywhere under the run root, and FX settings reference only the environment variable name. `opencode auth export` supplies the bearer value without printing it; a random session ID is generated per run.
+
+Observed live results (first batch, report `.work/tmp/fx-live.json`, run root `.work/tmp/fx-live/run-a1hpy6`; pre-repair runner):
 
 - Wire path proven to the provider: FX authenticated, satisfied the session-header requirement and received real `429 GoUsageLimitError` responses; earlier direct probes confirmed `MissingSessionID` without the header and quota rejection with it.
 - FX retried the rate limit until each job's 900 s deadline, then produced `reason: "deadline"` receipts, `state: "failed"`, zero worktree changes and correct parent-check outcomes. Sampled whole-tree peak RSS was ~100 MiB per job.
 - The incumbent Pi CLI on the same account/model failed each task in ~1 s with the identical `GoUsageLimitError` ("monthly, resets in 14d 3h"), so the blocker is account quota, not an FX deficiency. No paired quality comparison is possible until quota or a Codex login exists.
 - Behavioral difference recorded: FX's recovery loop treats provider 429 as retryable for the full wall budget, while the Pi CLI surfaces the quota error immediately. Both remain inside their bounded contracts.
+
+Post-repair rerun (`--live opencode-go` and bare `--live`, this session): the quota probe classified the account as exhausted before any job — `status: "blocked"`, `jobs_started: 0`, exit 75 in ~0.5 s, versus ~45 minutes of deadline churn before. `--live codex` still exits 75 with the login handoff. No inference has completed on either profile; the `passed` verdict remains unexercised.
 
 ## Resource results and limits
 

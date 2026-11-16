@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, watch, statSync } f
 import { join, dirname } from "node:path"
 import { Scratch, git, unusedApi } from "./worker-fixtures.ts"
 import { makeFxAdapter, fxResult, type FxSelection } from "../src/fx.ts"
+import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk, scoutFindingOk } from "../experiment/fx/pilot.ts"
 import { makeHybridBridge } from "../src/hybrid.ts"
 import { piAdapter } from "../src/pi-adapter.ts"
 import { decodeSession, encodeSession, type ExecutionPlan } from "../src/session.ts"
@@ -232,4 +233,54 @@ test("FX auth files seed a fresh profile home and survive resume", async t => {
   const nextJob = JSON.parse(readFileSync(next.output + ".job.json", "utf8"))
   assert.equal(nextJob.fxHome, job.fxHome)
   assert.equal(readFileSync(join(nextJob.fxHome, "cred.json"), "utf8"), JSON.stringify({ token: "refreshed" }))
+})
+
+test("FX live pilot verdict distinguishes passed, blocked and failed", () => {
+  const okTask = { state: "succeeded", checks: true }
+  const contOk = { attempted: true, accepted: true, identity: true, checks: true, nativeSession: true }
+  const tasks = ["scout", "fix", "multi"].map(key => ({ key, ...okTask }))
+  assert.equal(pilotVerdict({ tasks, continuation: contOk }), "passed")
+  assert.equal(pilotVerdict({ tasks: tasks.slice(0, 2), continuation: contOk }), "blocked")
+  assert.equal(pilotVerdict({ tasks: [{ key: "scout", state: "succeeded", checks: false }, ...tasks.slice(1)], continuation: contOk }), "failed")
+  assert.equal(pilotVerdict({ tasks: [{ key: "scout", state: "failed", block: "quota" }, ...tasks.slice(1)], continuation: { attempted: false, nativeSession: false } }), "blocked")
+  assert.equal(pilotVerdict({ tasks: [{ key: "scout", state: "failed" }, ...tasks.slice(1)], continuation: contOk }), "failed")
+  assert.equal(pilotVerdict({ tasks, continuation: { attempted: true, accepted: true, identity: false, checks: true, nativeSession: true } }), "failed")
+  assert.equal(pilotVerdict({ tasks, continuation: { attempted: true, accepted: true, identity: true, checks: false, nativeSession: true } }), "failed")
+  assert.equal(pilotVerdict({ tasks, continuation: { attempted: true, accepted: false, nativeSession: true } }), "failed")
+  assert.equal(pilotVerdict({ tasks, continuation: { attempted: false, nativeSession: false, reason: "no-native-session" } }), "blocked")
+  assert.equal(pilotVerdict({ tasks: tasks.map(t => ({ ...t, block: "quota" as const })), continuation: { attempted: false, nativeSession: false } }), "blocked")
+})
+
+test("FX live pilot provider classification separates quota, auth and transient stalls", () => {
+  assert.equal(classifyProbeResponse(429, '{"type":"GoUsageLimitError","message":"usage limit reached (monthly, resets in 14d)"}'), "quota")
+  assert.equal(classifyProbeResponse(429, '{"error":"slow down"}'), "rate-limited")
+  assert.equal(classifyProbeResponse(401, "unauthorized"), "auth")
+  assert.equal(classifyProbeResponse(200, "{}"), "ok")
+  assert.equal(classifyProbeResponse(500, "boom"), "unknown")
+  const base = { state: "failed", lastText: "", elapsedMs: 900_000, wallMs: 900_000, stderrTail: "[notice] Rate limited · retrying" }
+  assert.equal(classifyJobBlock({ ...base, probe: "quota" }), "quota")
+  assert.equal(classifyJobBlock({ ...base, probe: null, stderrTail: "MissingCredentials: run fx login codex" }), "auth")
+  assert.equal(classifyJobBlock({ ...base, probe: "rate-limited" }), "provider-stall")
+  assert.equal(classifyJobBlock({ ...base, probe: null, elapsedMs: 30_000 }), null)
+  assert.equal(classifyJobBlock({ ...base, state: "succeeded", probe: "quota" }), null)
+})
+
+test("FX live pilot task evidence rejects citation-shaped and rename-incomplete results", () => {
+  assert.equal(scoutFindingOk("The bug is python/ledger.py line 7: the debit branch adds instead of subtracting."), true)
+  assert.equal(scoutFindingOk("python/ledger.py:999 — the ledger is correct; there is no debit bug."), false)
+  assert.equal(scoutFindingOk("ts/ledger.mjs line 5 has the debit bug"), false)
+  assert.equal(scoutFindingOk("python/ledger.py line 7 looks wrong"), false)
+  const good = {
+    python: "def settled_balance(entries):\n    balance -= entry['amount']\n",
+    ts: "export function settled_balance(entries) {\n  balance -= entry.amount\n}\n",
+    rust: "pub fn settled_balance(entries: &[(bool, i64)]) -> i64 { 0 }\n",
+    "python-report": "from ledger import summarize\n",
+    "python-test": "from ledger import settled_balance, summarize\n",
+    "ts-check": "import { settled_balance } from './ledger.mjs'\n",
+  }
+  assert.equal(renameEvidenceOk(good), null)
+  assert.match(String(renameEvidenceOk({ ...good, ts: good.ts.replaceAll("settled_balance", "balanceAfter") })), /old name/)
+  assert.match(String(renameEvidenceOk({ ...good, rust: good.rust.replace("settled_balance", "balance_after") })), /old name/)
+  assert.match(String(renameEvidenceOk({ ...good, "python-test": "from ledger import balance_after\n" })), /old name/)
+  assert.match(String(renameEvidenceOk({ ...good, "ts-check": "import { summarize } from './ledger.mjs'\n" })), /lacks settled_balance/)
 })
