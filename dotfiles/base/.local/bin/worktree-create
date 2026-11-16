@@ -2,7 +2,16 @@
 
 case ${1:-} in
     -h|--help)
-        printf '%s\n' 'usage: worktree-create'
+        cat <<'HELP'
+Usage: worktree-create
+
+Claude Code hook: read JSON with name and cwd from stdin and create a worktree.
+Prints the worktree path on stdout; requires git and jaq or jq.
+  -h, --help  Show this help
+
+Examples:
+  worktree-create < hook.json
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

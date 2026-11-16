@@ -25,10 +25,26 @@ usage() {
     exit 2
 }
 
+help_usage() {
+    cat <<'HELP'
+Usage: setup-mold [uninstall]
+
+Install mold 3.0.0 and configure Cargo on glibc Linux.
+  uninstall   Remove the managed installation and Cargo settings
+  -h, --help  Show this help
+
+CARGO_HOME defaults to $HOME/.cargo; TMPDIR defaults to /tmp.
+
+Examples:
+  setup-mold # install mold
+  setup-mold uninstall
+HELP
+}
+
 case "${1:-}" in
     "") ;;
-    uninstall) mode=uninstall; shift; [ "$#" -eq 0 ] || usage ;;
-    -h|--help) printf 'usage: %s [uninstall]\n' "$prog"; owned_help; exit 0 ;;
+    uninstall) mode=uninstall; shift; case "${1:-}" in -h|--help) help_usage; owned_help; exit 0 ;; esac; [ "$#" -eq 0 ] || usage ;;
+    -h|--help) help_usage; owned_help; exit 0 ;;
     *) usage ;;
 esac
 

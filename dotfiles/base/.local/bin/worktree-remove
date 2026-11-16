@@ -2,7 +2,16 @@
 
 case ${1:-} in
     -h|--help)
-        printf '%s\n' 'usage: worktree-remove'
+        cat <<'HELP'
+Usage: worktree-remove
+
+Claude Code hook: read JSON with worktree_path from stdin and remove a clean
+worktree under .work/wt; delete its branch if merged. Requires git and jaq or jq.
+  -h, --help  Show this help
+
+Examples:
+  worktree-remove < hook.json
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

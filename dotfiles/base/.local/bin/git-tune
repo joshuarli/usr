@@ -189,9 +189,15 @@ Other options:
   --no-globals       Keep the run repository-local (the default)
   --dry-run          Print planned commands without changing files or starting daemons
   --yes              Skip the confirmation prompt
-  -C, --directory    Repository to tune (default: current directory)
+  -C, --directory REPO  Repository to tune (default: current directory)
   -h, --help         Show this help message
   --version          Show version
+
+Environment: GIT selects the Git executable; NO_COLOR disables terminal colors.
+
+Examples:
+  git-tune --dry-run
+  git-tune --globals-only --yes
 
 The tuner does not expire reflogs, prune unreachable objects, delete branches,
 prune remotes, or clean worktree and rerere records.

@@ -1,12 +1,17 @@
 #!/bin/sh
 # Tests for worktree-remove: a clean worktree is removed, and one holding uncommitted work is refused and kept.
 
-hook="${PWD}/base/.local/bin/worktree-remove"
+repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd -P)
+hook="$repo_root/dotfiles/base/.local/bin/worktree-remove"
 nfailed=0
 
-mkdir -p "${PWD}/../.work/tmp"
-scratch=$(mktemp -d "${PWD}/../.work/tmp/worktree-remove.XXXXXX") || exit 1
+mkdir -p "$repo_root/.work/tmp"
+scratch=$(mktemp -d "$repo_root/.work/tmp/worktree-remove.XXXXXX") || exit 1
 trap 'rm -rf "$scratch"' 0
+help=$(HOME=$scratch TMPDIR=$scratch sh "$hook" -h) || exit 1
+printf '%s\n' "$help" | grep -qx 'Examples:' || exit 1
+printf '%s\n' "$help" | grep -q '^  worktree-remove ' || exit 1
+printf '%s\n' "$help" | grep -q -- '--help' || exit 1
 repo="$scratch/repo"
 git init -q "$repo"
 git -C "$repo" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init

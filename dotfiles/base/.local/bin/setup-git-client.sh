@@ -19,7 +19,18 @@ Usage: setup-git-client.sh [--host HOST] [--user USER] [--repo NAME]
 
 Run inside an existing local Git repository. Create ~/d/NAME.git on the SSH
 server if needed, then add NAME as a local Git remote. The repo name defaults
-to the local repository directory name. --push also pushes the current branch.
+to the local repository directory name.
+
+Options:
+  --host HOST    SSH host (default: threadripper)
+  --user USER    SSH user (default: josh)
+  --repo NAME    Remote repository name (default: local directory name)
+  --remote NAME  Local remote name (default: origin)
+  --push         Push the current branch (default: do not push)
+  -h, --help     Show this help
+
+Examples:
+  setup-git-client.sh --host server --user josh --repo project --push
 EOF
 }
 
@@ -66,7 +77,14 @@ while [ "$#" -gt 0 ]; do
             exit 0
             ;;
         *)
-            usage >&2
+            cat >&2 <<'EOF'
+Usage: setup-git-client.sh [--host HOST] [--user USER] [--repo NAME]
+                           [--remote NAME] [--push]
+
+Run inside an existing local Git repository. Create ~/d/NAME.git on the SSH
+server if needed, then add NAME as a local Git remote. The repo name defaults
+to the local repository directory name. --push also pushes the current branch.
+EOF
             fail "unknown argument: $1"
             ;;
     esac

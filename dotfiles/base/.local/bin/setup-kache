@@ -57,8 +57,27 @@ purge=0
 
 die() { printf '%s: %s\n' "$prog" "$*" >&2; exit 1; }
 help_usage() {
-    printf 'usage: %s [--version release-<sha>] [--nightly nightly-2026-09-15] [--force]\n' "$prog"
-    printf '       %s uninstall [--purge]\n' "$prog"
+    cat <<'HELP'
+Usage: setup-kache [--version TAG] [--nightly TOOLCHAIN] [--force]
+       setup-kache uninstall [--purge]
+
+Install and configure Kache, or uninstall its managed files.
+  --version TAG       Release tag (default: KACHE_VERSION or newest release)
+  --nightly TOOLCHAIN  Rust toolchain (default: KACHE_NIGHTLY or nightly-2026-09-15)
+  --force             Reinstall even when current
+  -h, --help          Show this help
+
+uninstall: Stop and remove Kache and its managed configuration.
+  --purge             Also clear the cache
+  -h, --help          Show this reference (setup-kache -h)
+
+Environment: CARGO_HOME defaults to $HOME/.cargo; TMPDIR defaults to /tmp.
+KACHE_VERSION and KACHE_NIGHTLY provide install defaults.
+
+Examples:
+  setup-kache --force
+  setup-kache uninstall --purge
+HELP
 }
 usage() {
     printf 'usage: %s [--version release-<sha>] [--nightly nightly-2026-09-15] [--force]\n' "$prog" >&2

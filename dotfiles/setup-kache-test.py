@@ -90,6 +90,19 @@ class SetupKacheRecord(unittest.TestCase):
         }
         self.cargo_bin = self.home / ".cargo/bin"
 
+    def test_help_examples(self):
+        for args in (["-h"], ["uninstall", "-h"]):
+            result = subprocess.run(["sh", str(SCRIPT), *args], env=self.env,
+                                    capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("\nExamples:\n", result.stdout)
+            examples = [line for line in result.stdout.splitlines() if line.startswith("  setup-kache ")]
+            self.assertTrue(examples)
+            for example in examples:
+                for word in example.split()[1:]:
+                    if word.startswith("-"):
+                        self.assertIn(word, result.stdout.split("Examples:")[0])
+
     def setup_kache(self):
         (self.fixture / "requests").unlink(missing_ok=True)
         result = subprocess.run(["sh", str(SCRIPT), "--version", TAG], env=self.env, stdin=subprocess.DEVNULL,

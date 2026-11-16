@@ -1,8 +1,18 @@
 #!/bin/sh
 
-case ${1:-} in
-    -h|--help)
-        printf '%s\n' 'usage: reset-agent-home DIR...'
+case $#:${1:-} in
+    0:|*:-h|*:--help)
+        cat <<'HELP'
+Usage: reset-agent-home DIR...
+
+Remove untracked agent state under each DIR while preserving managed files and root credentials.
+DIR is required and repeatable; each must be inside HOME without symlink components.
+HOME must be an absolute directory.
+  -h, --help  Show this help
+
+Examples:
+  reset-agent-home "$HOME/.claude"
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.
@@ -15,7 +25,6 @@ OWNED_HELP
 esac
 set -eu
 
-[ $# -gt 0 ] || { printf 'usage: reset-agent-home DIR...\n' >&2; exit 2; }
 case $HOME in
     /*) ;;
     *) printf 'reset-agent-home: HOME must be an absolute path\n' >&2; exit 1 ;;

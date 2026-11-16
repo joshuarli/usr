@@ -2,7 +2,18 @@
 
 case ${1:-} in
     -h|--help)
-        printf '%s\n' 'usage: reset-agents [agent]'
+        cat <<'HELP'
+Usage: reset-agents [agent]
+
+Remove untracked state for an agent, preserving managed files and credentials.
+agent: claude, codex, muse, opencode, or all (default: all).
+HOME and absolute XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME select roots;
+XDG defaults are $HOME/.config, $HOME/.local/share, and $HOME/.cache.
+  -h, --help  Show this help
+
+Examples:
+  reset-agents claude
+HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr
 Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.

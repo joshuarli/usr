@@ -10,6 +10,13 @@ mkdir -p "$home"
 trap 'rm -rf "$scratch"' 0
 trap 'exit 1' HUP INT TERM
 
+for command in reset-agents reset-agent-home; do
+    help=$(HOME=$home TMPDIR=$scratch sh "$repo/dotfiles/base/.local/bin/$command" -h)
+    printf '%s\n' "$help" | grep -qx 'Examples:'
+    printf '%s\n' "$help" | grep -q "^  $command "
+    printf '%s\n' "$help" | grep -q -- '--help'
+done
+
 present() {
     if [ ! -e "$1" ] && [ ! -L "$1" ]; then
         printf 'FAIL: expected %s to remain\n' "$1" >&2
