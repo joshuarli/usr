@@ -9,7 +9,7 @@ Count files by extension in the current directory using fd.
   -h, --help  show this help
 
 Examples:
-  ecount # run in the current environment
+  ecount
 HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr

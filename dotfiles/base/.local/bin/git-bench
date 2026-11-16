@@ -9,7 +9,7 @@ Benchmark Git history operations in the current repository; requires hyperfine a
   -h, --help  show this help
 
 Examples:
-  git-bench # run in the current environment
+  git-bench
 HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr

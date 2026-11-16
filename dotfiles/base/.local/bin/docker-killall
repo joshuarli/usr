@@ -9,7 +9,7 @@ Kill every running Docker container with docker kill.
   -h, --help  show this help
 
 Examples:
-  docker-killall # run in the current environment
+  docker-killall
 HELP
 cat <<'OWNED_HELP'
 Maintained by Joshua Li: https://github.com/joshuarli/usr

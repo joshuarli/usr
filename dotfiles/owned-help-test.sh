@@ -34,6 +34,15 @@ do
             printf 'FAIL: %s %s\n' "$script" "$option" >&2
             exit 1
         }
+        name=${script##*/}
+        printf '%s\n' "$output" | awk -v name="$name" '
+            found && ($0 == "  " name || index($0, "  " name " ") == 1) { ok = 1; exit }
+            $0 == "Examples:" { found = 1 }
+            END { exit !ok }
+        ' || {
+            printf 'FAIL: %s %s has no Examples: section with an example\n' "$script" "$option" >&2
+            exit 1
+        }
         printf 'ok: %s %s\n' "$script" "$option"
     done
 done
