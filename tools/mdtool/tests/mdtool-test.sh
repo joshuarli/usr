@@ -56,6 +56,14 @@ for line in examples.splitlines():
                 assert word.split("=", 1)[0] in reference, word
 PYTEST
 
+for command in links anchors refs consumers pointers dups router check commands selftest; do
+    command_help=$(python3 -I "$tool" "$command" -h) || nfailed=$((nfailed + 1))
+    case "$command_help" in
+      *"Full reference: mdtool -h"*) ;;
+      *) printf 'FAIL: %s help reference\n' "$command"; nfailed=$((nfailed + 1)) ;;
+    esac
+done
+
 printf '\n1: embedded behavior tests\n'
 python3 -I "$tool" selftest || nfailed=$((nfailed + 1))
 

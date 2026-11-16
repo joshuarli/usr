@@ -294,6 +294,12 @@ class OwnedHelpTests(unittest.TestCase):
                     self.assertIn(word.split("=", 1)[0], result.stdout.split("\nExamples:\n", 1)[0])
         self.assertTrue(result.stdout.rstrip().endswith("Maintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md"), result.stdout)
 
+    def test_command_help_points_to_reference(self):
+        for name in ("pin", "lint", "fix", "run"):
+            result = subprocess.run([str(PINACT), name, "-h"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("pinact -h", result.stdout)
+
     def test_documented_examples_parse(self):
         import shlex
         sys.path.insert(0, PINACT_MODULE._source_root())
