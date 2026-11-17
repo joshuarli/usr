@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 82
+Next: 83
 
 
 
@@ -56,4 +56,14 @@ Next: 82
 - **Recommendation:** Accept an optional explicit admitting-parent identity at admission, persist it in the versioned session record, and expose it unchanged in read-only snapshots and owner status. Keep absent legacy values unknown. Prove round-trip identity, legacy absence and no guessed lineage with fixture tests. Preserve routing, leases, retries and acceptance in usr.
 - **Fix with:** durable-state
 - **Effort:** M
+
+
+### USR-82 · P3 · todo cannot read backlogs whose tickets carry extra fields
+
+- **Area:** Tooling
+- **Where:** `tools/todo/src/todo.py` (`FIELD`, `NAMES`, `parse`)
+- **Problem:** `todo list`, `todo add` and `todo check` fail on laputa-systems/xsh `TODO.md` with `todo: XSH-1: malformed ticket fields`. Its tickets add `- **Acceptance:**`, `- **Progress:**` and `- **Coordination:**` fields, and some put several fields on one line; `FIELD` matches only the seven schema names, so the reconstructed field block differs from the file. Agents working in that repository must then edit the backlog by hand, which the todo skill forbids, and cannot allocate IDs safely.
+- **Recommendation:** Accept additional `- **Name:** value` fields (preserving their order and text on round-trip) while still requiring the seven schema fields, or report the first unknown field name and line instead of `malformed ticket fields` so the backlog can be normalized. Acceptance: `todo check` from a laputa-systems/xsh checkout at master either passes or names the exact offending field and line.
+- **Fix with:** none
+- **Effort:** S
 
