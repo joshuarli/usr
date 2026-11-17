@@ -113,6 +113,12 @@ export function serve(load: () => Promise<Bridge> = connect, options?: ServeOpti
         const after = new Map(current.map(tool => [tool.name, JSON.stringify(tool.inputSchema)]))
         const changed = [...new Set([...before.keys(), ...after.keys()])].filter(key => before.get(key) !== after.get(key))
         if (changed.length) throw new Error("pi-subagent-bridge source changed under this running MCP server (" + changed.join(", ") + "); restart the harness's MCP registration or use the pi-subagent-bridge CLI, then retry.")
+        if (eagerOwner) await eagerOwner
+        const freshCwd = isRecord(params.arguments) ? params.arguments.cwd : undefined
+        if (ownerManagerPromise && typeof freshCwd === "string" && freshCwd.trim()) {
+          const manager = await ownerManagerPromise
+          await Promise.resolve().then(() => manager.ensureRepo(freshCwd)).catch(() => undefined)
+        }
         const result = await fresh(["--bridge-dispatch", JSON.stringify(params)])
         write({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result) }] } })
         return

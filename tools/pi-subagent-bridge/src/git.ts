@@ -11,10 +11,11 @@ function readOnlyEnv(): NodeJS.ProcessEnv {
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: deadlineTimeout(10000), env: readOnlyEnv(), stdio: "pipe" }).trim()
 }
+const SCOPE_SCAN_TIMEOUT_MS = 60_000
 export function changes(cwd: string, base: string): string[] {
   const options = { encoding: "utf8", env: readOnlyEnv(), stdio: "pipe" } as const
-  const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], { ...options, timeout: deadlineTimeout(5000) })
-  const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], { ...options, timeout: deadlineTimeout(5000) })
+  const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], { ...options, timeout: deadlineTimeout(SCOPE_SCAN_TIMEOUT_MS) })
+  const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], { ...options, timeout: deadlineTimeout(SCOPE_SCAN_TIMEOUT_MS) })
   return [...new Set((diff + newFiles).split("\0").filter(Boolean))].sort()
 }
 function available(program: string): boolean {

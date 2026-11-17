@@ -72,7 +72,7 @@ test("an MCP server reloads source changes and refuses changed tool schemas", as
     writeFileSync(bridge, readFileSync(bridge, "utf8").replace('async modelCheck(cwd: unknown, tierInput: unknown) {', 'async modelCheck(cwd: unknown, tierInput: unknown) { if (cwd === "/fresh") return { fresh: true }'))
     writeRequest({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "worker_model_check", arguments: { cwd: "/fresh", tier: "worker" } } })
     const second = await waitFor(3)
-    assert.notEqual(second.result?.isError, true)
+    assert.notEqual(second.result?.isError, true, second.result?.content?.[0]?.text)
     assert.doesNotMatch(second.result?.content?.[0]?.text ?? "", /restart/)
     assert.deepEqual(JSON.parse(second.result?.content?.[0]?.text), { fresh: true })
     assert.doesNotMatch(second.result?.content?.[0]?.text ?? "", /SyntaxError/)
