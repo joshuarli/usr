@@ -2,9 +2,11 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync, readFileSync, readlinkSync, readSync, statSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 
-import type { LaunchRequest } from "./launch.ts"
+import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { isBannedModel } from "./policy.ts"
 import { workerEnvironment } from "./worker-env.ts"
+import { deadlineTimeout } from "./steer-deadline.ts"
+import { readBoundedLog } from "./bounded-log.ts"
 export { COMMAND_MODEL, COMMAND_EMBER_MODEL, type Effort } from "./policy.ts"
 export type CommandRun = { pid: number; output: string; errors: string; started_at: string; proc_start?: string | null }
 export type CommandResult = {
@@ -23,8 +25,8 @@ export function startCommand(request: LaunchRequest): CommandRun {
   const { directory, logDirectory, prompt: text, resume, selection: { model, effort }, access } = request
   if (isBannedModel(model)) throw new Error("Prohibited Command Code model: " + model)
   const suffix = randomUUID()
-  const output = `${logDirectory}/${suffix}.ndjson`
-  const errors = `${logDirectory}/${suffix}.stderr`
+  const output = request.planned_run?.output ?? `${logDirectory}/${suffix}.ndjson`
+  const errors = request.planned_run?.errors ?? `${logDirectory}/${suffix}.stderr`
   const stdout = openSync(output, "wx", 0o600)
   const stderr = openSync(errors, "wx", 0o600)
   const args = [
@@ -39,7 +41,8 @@ export function startCommand(request: LaunchRequest): CommandRun {
     ...(resume ? ["--resume", resume] : []),
   ]
   try {
-    const child = spawn("cmd", args, {
+    const invocation = plannedCommand("cmd", args, request.planned_run)
+    const child = spawn(invocation.executable, invocation.args, {
       cwd: directory, detached: true,
       env: workerEnvironment(),
       stdio: ["ignore", stdout, stderr],
@@ -55,7 +58,7 @@ export function startCommand(request: LaunchRequest): CommandRun {
     if (pid === undefined) throw new Error("Cannot start Command Code: cmd missing or not executable")
     children.set(pid, child)
     child.unref()
-    return { pid, output, errors, started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    return { pid, output, errors, started_at: request.planned_run?.started_at ?? new Date().toISOString(), proc_start: processStartTime(pid) }
   } finally {
     closeSync(stdout)
     closeSync(stderr)
@@ -99,7 +102,7 @@ export function commandResult(run: CommandRun): { state: string; result: Command
   }
   let stderr: string | null = null
   if (last === null) {
-    try { stderr = readFileSync(run.errors, "utf8").slice(-2000) || null } catch { /* No stderr yet. */ }
+    try { stderr = readBoundedLog(run.errors).slice(-2000) || null } catch { /* No stderr yet. */ }
   }
   if (last) {
     const state = last.subtype === "success" ? "succeeded" : last.subtype === "max_turns" ? "turn_limit" : "failed"
@@ -112,7 +115,7 @@ export function commandResult(run: CommandRun): { state: string; result: Command
 export function processCommandLine(pid: number): string | null {
   try {
     return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
-      encoding: "utf8", timeout: 1000, maxBuffer: 1 << 16,
+      encoding: "utf8", timeout: deadlineTimeout(1000), maxBuffer: 1 << 16,
     }).trim() || null
   } catch { return null }
 }
@@ -123,7 +126,7 @@ export function processCwd(pid: number): string | null {
   }
   try {
     const out = execFileSync("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], {
-      encoding: "utf8", timeout: 1000,
+      encoding: "utf8", timeout: deadlineTimeout(1000),
     })
     return out.split("\n").find(line => line.startsWith("n"))?.slice(1) ?? null
   } catch { return null }
@@ -163,7 +166,7 @@ export function processStartTime(pid: number): string | null {
   }
   try {
     const value = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8", timeout: 1000,
+      encoding: "utf8", timeout: deadlineTimeout(1000),
     }).trim()
     return value || null
   } catch { return null }
@@ -181,7 +184,7 @@ export function commandSession(run: CommandRun): string | null {
   const result = commandResult(run).result
   if (result?.sessionId) return result.sessionId
   try {
-    return /^session:[ \t]*(\S+)[ \t]*$/m.exec(readFileSync(run.errors, "utf8"))?.[1] ?? null
+    return /^session:[ \t]*(\S+)[ \t]*$/m.exec(readBoundedLog(run.errors))?.[1] ?? null
   } catch { return null }
 }
 

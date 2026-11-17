@@ -746,6 +746,8 @@ export class RepoOwnerEndpoint {
           const pre = await inspectSession(s, this.stateDirectory, this.inspection)
           if (!isRunningState(pre.state)) throw new OwnerPrecheckError("not-running", `Worker run is not running (state ${pre.state})`)
           const result = await this.bridgeOps.steerForOwner(s.cwd, s.id, note, admitEffect)
+          if (isRecord(result) && (result.status === "steering" || result.status === "pending"))
+            return { receipt: "pending", command_id: commandId }
           const outerReceipt = isRecord(result) && isRecord(result.receipt) ? result.receipt : null
           const piReceipt = outerReceipt && isRecord(outerReceipt.receipt) ? outerReceipt.receipt : outerReceipt
           if (piReceipt && piReceipt.accepted === false) {

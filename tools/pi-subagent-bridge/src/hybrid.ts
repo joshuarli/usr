@@ -1,10 +1,11 @@
 import { fxResult, type FxAdapter } from "./fx.ts"
 import type { PiAdapter } from "./pi-adapter.ts"
 import { randomUUID } from "node:crypto"
-import { accessSync, constants, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { PreAdmissionError, checkedWorktree } from "./bridge.ts"
-import { cancelCommand, commandResult, commandSession, startCommand, type CommandRun } from "./command.ts"
+import { cancelCommand, commandResult, commandSession, processStartTime, startCommand, type CommandRun } from "./command.ts"
 import { codexAvailable, codexResult, codexSession, cancelCodex, startCodex } from "./codex.ts"
 import { activeWorktreeOwner, claimWorktree, ensureWorktree, releaseWorktree } from "./worktree-lease.ts"
 
@@ -23,9 +24,10 @@ import {
   type ProcessTarget, type ExecutionPlan, type Session, type SessionOwner,
 } from "./session.ts"
 import { PI_RUN_DEADLINE_MS } from "./tier-policy.ts"
-import type { Access } from "./launch.ts"
+import type { Access, PlannedRun } from "./launch.ts"
 import { ROOT_PLANS, type CliExecutor, type CliPin, type PiSelection, type RootPlan } from "./policy.ts"
 import { parseScope, requiredText as required, type Scope } from "./scope.ts"
+import { beforeDeadline, deadlineTimeout, steerCleanup, steerDeadline, SteerDeadlineError } from "./steer-deadline.ts"
 export type RoutedTier = BridgeTier
 export type { Scope } from "./scope.ts"
 const TERMINATION_WAIT_MS = 2000
@@ -65,10 +67,33 @@ function callerAlive(pid: number): boolean {
 }
 function finishSteer(s: Session, outcome: "completed" | "failed"): void {
   if (!s.pending_steer) return
-  const { note, requested_at } = s.pending_steer
+  const pending = s.pending_steer, previous = s.last_steer
+  const { note, requested_at } = pending
   s.last_steer = { note, requested_at, outcome, at: new Date().toISOString() }
   delete s.pending_steer
-  save(s)
+  try { save(s) } catch (error) {
+    s.pending_steer = pending
+    if (previous) s.last_steer = previous
+    else delete s.last_steer
+    throw error
+  }
+}
+function recoveredRun(planned: PlannedRun): CommandRun | null {
+  const readPid = () => { try { return Number(readFileSync(planned.output + ".pid", "utf8").trim()) } catch { return 0 } }
+  let pid = readPid()
+  if (!pid) {
+    try {
+      const processes = execFileSync("ps", ["-eo", "pid=,args="], { encoding: "utf8", timeout: deadlineTimeout(2000), maxBuffer: 4_000_000 })
+      const marker = "bridge-launch " + planned.output + ".pid "
+      const line = processes.split("\n").find(value => value.includes(marker))
+      pid = Number(line?.trim().split(/\s+/, 1)[0] ?? 0) || readPid()
+    } catch { pid = readPid() }
+  }
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null
+  let events = false
+  try { events = statSync(planned.output).size > 0 } catch {}
+  if (!callerAlive(pid) && !events) return null
+  return { ...planned, pid, proc_start: processStartTime(pid) }
 }
 
 async function withSessionLock<T>(cwd: unknown, id: unknown, work: (session: Session) => Promise<T>): Promise<T> {
@@ -186,8 +211,8 @@ export function makeHybridBridge(api: PiAdapter, command = {
   function accessFor(s: Session): Access {
     return s.tier === "scout" ? { kind: "read-only" } : { kind: "write" }
   }
-  function launch(s: Session, target: ProcessTarget, text: string, resume?: string): CommandRun {
-    const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume }
+  function launch(s: Session, target: ProcessTarget, text: string, resume?: string, planned_run?: PlannedRun): CommandRun {
+    const request = { directory: s.cwd, logDirectory: stateDir(s.cwd), prompt: text, selection: target.selection, resume, ...(planned_run ? { planned_run } : {}) }
     switch (target.executor) {
       case "fx": { if (!fx) throw new Error("FX adapter unavailable"); return fx.start({ ...request, selection: target.selection, access: accessFor(s) }) }
       case "codex": return codex.start({ ...request, access: accessFor(s) })
@@ -263,11 +288,14 @@ export function makeHybridBridge(api: PiAdapter, command = {
     if (holder === null) return
     try { await advance(dir, holder) } catch { /* claimWorktree reports the holder */ }
   }
-  async function advance(cwd: unknown, id: unknown): Promise<{ session: Session; known?: Known }> {
+  async function advance(cwd: unknown, id: unknown, reconcileDetached = false): Promise<{ session: Session; known?: Known }> {
     return withSessionLock(cwd, id, async (s) => {
-      if (s.pending_steer && !callerAlive(s.pending_steer.caller_pid)) {
+      if (s.pending_steer && (!callerAlive(s.pending_steer.caller_pid) || (reconcileDetached && s.pending_steer.phase === "relaunching"))) {
         const pending = s.pending_steer
-        const completed = s.execution.kind === "process" && pending.previous_output !== null && s.execution.run.output !== pending.previous_output
+        const recovered = pending.planned_run && s.execution.kind === "process" && s.execution.run.output === pending.previous_output
+          ? recoveredRun(pending.planned_run) : null
+        if (recovered && s.execution.kind === "process") activateProcess(s, processTarget(s.execution), recovered)
+        const completed = recovered !== null || (s.execution.kind === "process" && pending.previous_output !== null && s.execution.run.output !== pending.previous_output)
         if (completed) s.steers = (s.steers ?? 0) + 1
         finishSteer(s, completed ? "completed" : "failed")
       }
@@ -489,9 +517,10 @@ export function makeHybridBridge(api: PiAdapter, command = {
     },
     async status(cwd: unknown, id: unknown) {
       const current = load(cwd, id)
-      if (current.pending_steer && callerAlive(current.pending_steer.caller_pid))
-        return statusResponse(await inspectSession(current, readStateDir(current.cwd), inspection))
-      const advanced = await advance(cwd, id)
+      const alive = current.pending_steer && callerAlive(current.pending_steer.caller_pid)
+      const detached = alive && current.pending_steer?.phase === "relaunching" && !existsSync(pathFor(current.cwd, current.id) + ".lock")
+      if (alive && !detached) return statusResponse(await inspectSession(current, readStateDir(current.cwd), inspection))
+      const advanced = await advance(cwd, id, !!detached)
       return statusResponse(await inspectSession(advanced.session, readStateDir(advanced.session.cwd), inspection, advanced.known))
     },
     async resume(cwd: unknown, id: unknown, feedback: unknown, extension?: { extend_attempts: number; extension_reason: string }) {
@@ -599,7 +628,7 @@ export function makeHybridBridge(api: PiAdapter, command = {
     })
   }
   async function runSteer(cwd: unknown, id: unknown, note: unknown, admitEffect?: OwnerEffectAdmit) {
-    return withSessionLock(cwd, id, async (s) => {
+    return steerDeadline(() => withSessionLock(cwd, id, async (s) => {
       const steering = required(note, "note", 32000)
       if (s.pending_steer) throw new Error("A steer is already pending for this session")
       if (s.execution.kind === "transition" || s.fallback_blocked)
@@ -611,22 +640,26 @@ export function makeHybridBridge(api: PiAdapter, command = {
       if (s.execution.kind === "pi") {
         const sessionId = s.execution.session_id
         const worker = api(s.execution.selection)
-        const observed = await worker.status(s.cwd, sessionId)
+        const observed = await beforeDeadline(worker.status(s.cwd, sessionId))
         const observedState = typeof observed.state === "string" ? observed.state : "unknown"
         if (observedState !== "running" && observedState !== "queued")
           throw new Error("Pi worker is not running (state " + observedState + "); use worker_resume for a finished session")
-        await admitEffect?.()
+        await beforeDeadline(admitEffect?.())
         ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
         s.pending_steer = { note: steering, requested_at: new Date().toISOString(), phase: "signaling", caller_pid: process.pid, previous_output: null }
         save(s)
         let receipt: Awaited<ReturnType<typeof worker.steer>>
         try {
-          receipt = await worker.steer(s.cwd, sessionId, steering)
+          receipt = await beforeDeadline(worker.steer(s.cwd, sessionId, steering))
           if (receipt.receipt.accepted === false) return { session_id: s.id, backend: backendOf(s), status: "pending", interrupted: false,
             steers: s.steers ?? 0, steer_limit: STEER_LIMIT, receipt }
           s.steers = (s.steers ?? 0) + 1
           finishSteer(s, "completed")
-        } catch (error) { finishSteer(s, "failed"); throw error }
+        } catch (error) {
+          if (error instanceof SteerDeadlineError) return { session_id: s.id, backend: backendOf(s), status: "pending", interrupted: false,
+            steers: s.steers ?? 0, steer_limit: STEER_LIMIT }
+          finishSteer(s, "failed"); throw error
+        }
         return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: false,
           steers: s.steers, steer_limit: STEER_LIMIT, receipt }
       }
@@ -640,34 +673,53 @@ export function makeHybridBridge(api: PiAdapter, command = {
       const sessionId = execution.executor === "fx" ? fx?.session(run, execution.selection) : backend === "command-code" ? commandSession(run) : codex.session(run)
       if (!sessionId)
         throw new Error(execution.executor === "fx" ? "FX native session identity is not bound; steering is unavailable until it is recorded" : "Command Code session identity is not recorded; cannot restart after steering")
-      await admitEffect?.()
+      await beforeDeadline(admitEffect?.())
       ensureWorktree(stateDir(s.cwd), s.cwd, s.id)
       s.pending_steer = { note: steering, requested_at: new Date().toISOString(), phase: "signaling", caller_pid: process.pid, previous_output: run.output }
       save(s)
+      let plannedSaved = false, counted = false, planned: PlannedRun | undefined
       try {
       if (!runner.cancel(run, s.cwd))
         throw new Error("Command Code run is not owned by this bridge process; refusing to signal an unverified PID")
       let state = observe(execution).state
       const deadline = Date.now() + TERMINATION_WAIT_MS
       while (state === "running" && Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
+        await beforeDeadline(new Promise((resolve) => setTimeout(resolve, Math.min(100, deadlineTimeout(100)))))
         state = observe(execution).state
       }
       if (state === "running")
         throw new Error("Command Code process did not terminate after interruption; inspect it before retrying")
       s.pending_steer.phase = "relaunching"
       const target: ProcessTarget = processTarget(execution)
-      transition(s, target)
+      const output = join(stateDir(s.cwd), randomUUID() + (target.executor === "fx" ? ".fx.json" : ".ndjson"))
+      planned = { output, errors: output + ".stderr", started_at: new Date().toISOString() }
+      s.pending_steer.planned_run = planned
       save(s)
+      plannedSaved = true
       activateProcess(s, target, launch(s, target,
-        prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering, sessionId))
+        prompt(s) + "\nPARENT STEERING (same scope and write boundaries): " + steering, sessionId, planned))
       save(s)
       s.steers = (s.steers ?? 0) + 1
+      counted = true
       finishSteer(s, "completed")
       return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: true,
         steers: s.steers, steer_limit: STEER_LIMIT }
-      } catch (error) { finishSteer(s, "failed"); throw error }
-    })
+      } catch (error) {
+        if (plannedSaved && s.pending_steer?.phase === "relaunching" && (error instanceof SteerDeadlineError || (error as NodeJS.ErrnoException).code === "ETIMEDOUT"))
+          return { session_id: s.id, backend: backendOf(s), status: "steering", interrupted: true,
+            steers: s.steers ?? 0, steer_limit: STEER_LIMIT }
+        const replacement = plannedSaved && planned ?
+          (s.execution.kind === "process" && s.execution.run.output === planned.output ? s.execution.run : recoveredRun(planned)) : null
+        if (replacement && s.execution.kind === "process") {
+          activateProcess(s, processTarget(s.execution), replacement)
+          if (!counted) s.steers = (s.steers ?? 0) + 1
+          steerCleanup(() => finishSteer(s, "completed"))
+          return { session_id: s.id, backend: backendOf(s), status: "steered", interrupted: true,
+            steers: s.steers, steer_limit: STEER_LIMIT }
+        }
+        steerCleanup(() => finishSteer(s, "failed")); throw error
+      }
+    }))
   }
   ownerOpsRegistry.set(bridge, {
     inspection,

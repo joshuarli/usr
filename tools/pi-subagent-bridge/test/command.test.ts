@@ -57,6 +57,25 @@ test("Command Code headless pins DeepSeek 4.1 Flash and resumes the same session
   }
 })
 
+test("a planned Command Code launch writes its identity before executor output", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "cmd-planned-")))
+  const bin = join(root, "bin"), logs = join(root, "logs"), previous = process.env.PATH
+  mkdirSync(bin); mkdirSync(logs)
+  try {
+    writeFileSync(join(bin, "cmd"), '#!/bin/sh\nprintf \'{"type":"event"}\\n\'\n', { mode: 0o755 })
+    process.env.PATH = bin + ":" + previous
+    const planned = { output: join(logs, "planned.ndjson"), errors: join(logs, "planned.stderr"), started_at: "2026-01-01T00:00:00Z" }
+    const run = startCommand(request(root, logs, { planned_run: planned }))
+    for (let i = 0; i < 100; i++) {
+      try { if (readFileSync(planned.output, "utf8")) break } catch {}
+      await delay(10)
+    }
+    assert.equal(Number(readFileSync(planned.output + ".pid", "utf8")), run.pid)
+    assert.match(readFileSync(planned.output, "utf8"), /"type":"event"/)
+    assert.equal(run.started_at, planned.started_at)
+  } finally { process.env.PATH = previous; rmSync(root, { recursive: true, force: true }) }
+})
+
 test("Command Code refuses a forbidden family", () => {
   for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
     assert.throws(() => startCommand(request("/absent", "/absent", { selection: { model, effort: "high" } })), /Prohibited Command Code model/)

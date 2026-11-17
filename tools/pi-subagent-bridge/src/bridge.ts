@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { realpathSync } from "node:fs"
 import { dirname, relative, resolve, sep } from "node:path"
 import { GO_TIER_MODELS } from "./tier-policy.ts"
+import { deadlineTimeout } from "./steer-deadline.ts"
 
 export type ModelRef = { id: string; providerID: string; variant?: string }
 export type SessionArgs = { sessionID: string; cwd?: string }
@@ -52,7 +53,7 @@ function requiredText(value: unknown, label: string, max = MAX_BRIEF): string {
 }
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8", timeout: 10_000, maxBuffer: 1_000_000, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    encoding: "utf8", timeout: deadlineTimeout(10_000), maxBuffer: 1_000_000, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
   }).trim()
 }
 
@@ -63,7 +64,7 @@ export function checkedWorktree(directory: unknown, requireClean = false): strin
   try {
     cwd = realpathSync(input)
     top = realpathSync(git(cwd, "rev-parse", "--show-toplevel"))
-  } catch { throw new Error("not a Git worktree: " + input) }
+  } catch { deadlineTimeout(10_000); throw new Error("not a Git worktree: " + input) }
   if (cwd !== top) throw new Error("cwd must be the worktree root, not a subdirectory")
   const commonDir = realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"))
   const gitDir = realpathSync(git(cwd, "rev-parse", "--path-format=absolute", "--git-dir"))

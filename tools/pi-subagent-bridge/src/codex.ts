@@ -3,7 +3,7 @@ import { spawnSync, spawn, type ChildProcess } from "node:child_process"
 import { appendFileSync, closeSync, openSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { workerAlive, processStartTime, verifiedSignal, type CommandResult, type CommandRun } from "./command.ts"
-import type { LaunchRequest } from "./launch.ts"
+import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { fileURLToPath } from "node:url"
 import { isBannedModel } from "./policy.ts"
 import { workerEnvironment } from "./worker-env.ts"
@@ -21,7 +21,7 @@ export function startCodex(request: LaunchRequest): CommandRun {
   const { directory, logDirectory, prompt: text, resume, selection: { model, effort }, access } = request
   if (isBannedModel(model)) throw new Error("Prohibited Codex model: " + model)
   const readOnly = access.kind === "read-only"
-  const suffix = randomUUID(), output = `${logDirectory}/${suffix}.codex.ndjson`, errors = `${logDirectory}/${suffix}.codex.stderr`
+  const suffix = randomUUID(), output = request.planned_run?.output ?? `${logDirectory}/${suffix}.codex.ndjson`, errors = request.planned_run?.errors ?? `${logDirectory}/${suffix}.codex.stderr`
   const stdout = openSync(output, "wx", 0o600), stderr = openSync(errors, "wx", 0o600)
   const args = ["exec", "--json", "--ignore-user-config", "--disable", "multi_agent", "-c", 'model_provider="openai"',
     "-c", `model_reasoning_effort="${effort}"`, "-c", 'approval_policy="never"',
@@ -35,7 +35,8 @@ export function startCodex(request: LaunchRequest): CommandRun {
   delete env.OPENAI_API_KEY
   delete env.CODEX_API_KEY
   try {
-    const child = spawn("codex", args, { cwd: directory, env, detached: true, stdio: ["ignore", stdout, stderr] })
+    const invocation = plannedCommand("codex", args, request.planned_run)
+    const child = spawn(invocation.executable, invocation.args, { cwd: directory, env, detached: true, stdio: ["ignore", stdout, stderr] })
     const pid = child.pid
     child.on("error", (error) => {
       if (pid !== undefined) children.delete(pid)
@@ -45,7 +46,7 @@ export function startCodex(request: LaunchRequest): CommandRun {
     if (pid === undefined) throw new Error("Cannot start Codex")
     children.set(pid, child)
     child.unref()
-    return { pid, output, errors, started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    return { pid, output, errors, started_at: request.planned_run?.started_at ?? new Date().toISOString(), proc_start: processStartTime(pid) }
   } finally { closeSync(stdout); closeSync(stderr) }
 }
 type Event = { type?: string; thread_id?: string; item?: { type?: string; text?: string }; error?: unknown; usage?: unknown }

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { accessSync, constants, mkdirSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { deadlineTimeout } from "./steer-deadline.ts"
 
 function readOnlyEnv(): NodeJS.ProcessEnv {
   return { ...process.env, GIT_OPTIONAL_LOCKS: "0" }
@@ -8,12 +9,12 @@ function readOnlyEnv(): NodeJS.ProcessEnv {
 
 /** Git reads must not refresh the index, so inspection never writes to the repository. */
 export function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 10000, env: readOnlyEnv(), stdio: "pipe" }).trim()
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: deadlineTimeout(10000), env: readOnlyEnv(), stdio: "pipe" }).trim()
 }
 export function changes(cwd: string, base: string): string[] {
-  const options = { encoding: "utf8", env: readOnlyEnv(), stdio: "pipe", timeout: 5000 } as const
-  const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], options)
-  const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], options)
+  const options = { encoding: "utf8", env: readOnlyEnv(), stdio: "pipe" } as const
+  const diff = execFileSync("git", ["-C", cwd, "diff", "--no-renames", "--name-only", "-z", base, "--"], { ...options, timeout: deadlineTimeout(5000) })
+  const newFiles = execFileSync("git", ["-C", cwd, "ls-files", "--others", "--exclude-standard", "-z"], { ...options, timeout: deadlineTimeout(5000) })
   return [...new Set((diff + newFiles).split("\0").filter(Boolean))].sort()
 }
 function available(program: string): boolean {
@@ -25,7 +26,7 @@ function inspectionCommand(args: string[]): string {
   const nice = available("nice"), ionice = nice && process.platform === "linux" && available("ionice")
   const program = nice ? "nice" : "git"
   const prefix = nice ? ["-n", "19", ...(ionice ? ["ionice", "-c3"] : []), "git"] : []
-  return execFileSync(program, [...prefix, ...args], { encoding: "utf8", timeout: 10000, env: readOnlyEnv(), stdio: "pipe" })
+  return execFileSync(program, [...prefix, ...args], { encoding: "utf8", timeout: deadlineTimeout(10000), env: readOnlyEnv(), stdio: "pipe" })
 }
 export function inspectionGit(cwd: string, ...args: string[]): string {
   return inspectionCommand(["-C", cwd, ...args]).trim()
@@ -47,7 +48,7 @@ export function readStateDir(cwd: string): string {
 export function stateDir(cwd: string): string {
   const dir = readStateDir(cwd)
   execFileSync("git", ["-C", dirname(dirname(dir)), "check-ignore", "-q", ".work/worker-bridge/state"],
-    { stdio: "ignore", timeout: 10000 })
+    { stdio: "ignore", timeout: deadlineTimeout(10000) })
   mkdirSync(dir, { recursive: true, mode: 0o700 })
   return dir
 }

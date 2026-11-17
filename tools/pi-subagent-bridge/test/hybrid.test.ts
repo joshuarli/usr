@@ -1,8 +1,8 @@
 import { piAdapter } from "../src/pi-adapter.ts"
 import test from "node:test"
 import assert from "node:assert/strict"
-import { execFileSync, spawn } from "node:child_process"
-import { appendFileSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs"
+import { execFileSync, spawn, spawnSync } from "node:child_process"
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, realpathSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeHybridBridge, type Scope } from "../src/hybrid.ts"
@@ -581,6 +581,143 @@ test("pending steer is visible, refuses another, and reconciles an abandoned cal
     writeFileSync(file, JSON.stringify(record))
     const completed = await bridge.status(f.cwd, task.session_id)
     assert.equal(completed.last_steer?.outcome, "completed")
+  } finally { f.close() }
+})
+
+test("steer recovery adopts planned replacement events and preserves the original when no launch occurred", async () => {
+  for (const launched of [true, false]) {
+    const f = fixture()
+    try {
+      const m = fake(f.cwd), { command } = steerable(f, m)
+      const bridge = makeHybridBridge(piAdapter(m.api), command, noCodex)
+      const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+      const directory = join(f.root, ".work", "worker-bridge"), file = join(directory, task.session_id + ".json")
+      const record = JSON.parse(readFileSync(file, "utf8")), original = record.execution.run
+      const planned = { output: join(directory, "planned.ndjson"), errors: join(directory, "planned.stderr"), started_at: new Date().toISOString() }
+      record.pending_steer = { note: "focus", requested_at: new Date().toISOString(), phase: "relaunching", caller_pid: 99999999, previous_output: original.output, planned_run: planned }
+      writeFileSync(file, JSON.stringify(record))
+      if (launched) {
+        writeFileSync(planned.output + ".pid", String(process.pid))
+        writeFileSync(planned.output, '{"type":"event"}\n')
+      }
+      const result = await bridge.status(f.cwd, task.session_id)
+      assert.equal(result.last_steer?.outcome, launched ? "completed" : "failed")
+      const saved = JSON.parse(readFileSync(file, "utf8"))
+      assert.equal(saved.execution.run.output, launched ? planned.output : original.output)
+    } finally { f.close() }
+  }
+})
+
+test("steer recovers when its caller exits immediately after spawning the replacement", async () => {
+  const f = fixture()
+  let replacement: number | undefined
+  try {
+    const m = fake(f.cwd), { command } = steerable(f, m)
+    const bridge = makeHybridBridge(piAdapter(m.api), command, noCodex)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    const hybrid = new URL("../src/hybrid.ts", import.meta.url).href
+    const adapter = new URL("../src/pi-adapter.ts", import.meta.url).href
+    const replacementCode = 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({type:"event"})+"\\n");setInterval(()=>{},1000)'
+    const script = `
+      import { spawn } from "node:child_process";
+      import { writeFileSync } from "node:fs";
+      import { makeHybridBridge } from ${JSON.stringify(hybrid)};
+      import { piAdapter } from ${JSON.stringify(adapter)};
+      let stopped = false;
+      const command = {
+        available: () => true,
+        status: () => ({ state: stopped ? "interrupted" : "running", result: null, stderr: null }),
+        cancel: () => { stopped = true; return true },
+        start: ({ planned_run }) => {
+          const code = ${JSON.stringify(replacementCode)};
+          const wrapper = '/bin/sleep 3; printf "%s\\n" "$$" > "$1"; shift; exec "$@"';
+          const child = spawn('/bin/sh', ['-c', wrapper, 'bridge-launch', planned_run.output + '.pid', process.execPath, '-e', code, planned_run.output], { detached: true, stdio: 'ignore' });
+          child.unref();
+          writeFileSync(process.argv[3], String(child.pid));
+          process.exit(87);
+        },
+      };
+      const codex = { ...command, available: () => false, session: () => null };
+      await makeHybridBridge(piAdapter({}), command, codex).steer(process.argv[1], process.argv[2], "focus");
+    `
+    const pidFile = join(f.root, ".work", "replacement-pid")
+    const caller = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, f.cwd, task.session_id, pidFile], { encoding: "utf8", timeout: 10000 })
+    assert.equal(caller.status, 87, caller.stderr)
+    replacement = Number(readFileSync(pidFile, "utf8"))
+    const file = join(f.root, ".work", "worker-bridge", task.session_id + ".json")
+    const status = await bridge.status(f.cwd, task.session_id)
+    assert.equal(status.last_steer?.outcome, "completed")
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).execution.run.pid, replacement)
+  } finally {
+    if (replacement) { try { process.kill(-replacement, "SIGTERM") } catch {} }
+    f.close()
+  }
+})
+
+test("a slow git phase cannot hold steer beyond its overall deadline", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), { command } = steerable(f, m)
+    const bridge = makeHybridBridge(piAdapter(m.api), command, noCodex)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    const gitPath = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim()
+    const bin = join(f.root, ".work", "slow-bin")
+    mkdirSync(bin)
+    const fakeGit = join(bin, "git")
+    writeFileSync(fakeGit, '#!/bin/sh\n/bin/sleep 1\nexec ' + JSON.stringify(gitPath) + ' "$@"\n')
+    chmodSync(fakeGit, 0o755)
+    const hybrid = new URL("../src/hybrid.ts", import.meta.url).href
+    const adapter = new URL("../src/pi-adapter.ts", import.meta.url).href
+    const script = `import { makeHybridBridge } from ${JSON.stringify(hybrid)};
+      import { piAdapter } from ${JSON.stringify(adapter)};
+      const c = { available: () => true, status: () => ({state:"running", result:null, stderr:null}), cancel: () => true, start: () => { throw Error("unexpected launch") } };
+      const x = { ...c, available: () => false, session: () => null };
+      try { await makeHybridBridge(piAdapter({}), c, x).steer(process.argv[1], process.argv[2], "focus") }
+      catch (error) { process.stderr.write(String(error)); }
+    `
+    const start = Date.now()
+    const child = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script, f.cwd, task.session_id], {
+      encoding: "utf8", timeout: 15000, env: { ...process.env, PATH: bin + ":" + process.env.PATH },
+    })
+    assert.equal(child.status, 0, child.stderr || String(child.error))
+    assert.match(child.stderr, /deadline|timed out|ETIMEDOUT|SIGTERM/i)
+    assert.ok(Date.now() - start < 15000)
+  } finally { f.close() }
+})
+
+test("steer persists each phase under its session lock before the next effect", async () => {
+  const f = fixture()
+  try {
+    const m = fake(f.cwd), { command: original } = steerable(f, m), phases: { name: string; at: number }[] = []
+    let file = ""
+    const command = { ...original,
+      status: () => { phases.push({ name: "probe", at: Date.now() }); return original.status() },
+      cancel: () => {
+        phases.push({ name: "interrupt", at: Date.now() })
+        assert.ok(existsSync(file + ".lock"))
+        assert.equal(JSON.parse(readFileSync(file, "utf8")).pending_steer.phase, "signaling")
+        return original.cancel()
+      },
+      start: (request: LaunchRequest) => {
+        if (request.planned_run) {
+          phases.push({ name: "launch", at: Date.now() })
+          const pending = JSON.parse(readFileSync(file, "utf8")).pending_steer
+          assert.equal(pending.phase, "relaunching")
+          assert.deepEqual(pending.planned_run, request.planned_run)
+        }
+        return original.start(request)
+      },
+    }
+    const bridge = makeHybridBridge(piAdapter(m.api), command, noCodex)
+    const task = await bridge.start(f.cwd, "one", "worker", f.scope, "Edit README")
+    file = join(f.root, ".work", "worker-bridge", task.session_id + ".json")
+    const started = Date.now()
+    assert.equal((await bridge.steer(f.cwd, task.session_id, "focus")).status, "steered")
+    phases.push({ name: "saved", at: Date.now() })
+    assert.deepEqual(phases.map(p => p.name), ["probe", "interrupt", "probe", "launch", "saved"])
+    assert.ok(phases.every((phase, index) => phase.at >= (index ? phases[index - 1].at : started)))
+    assert.ok(phases.at(-1)!.at - started < 15000)
+    assert.equal(JSON.parse(readFileSync(file, "utf8")).last_steer.outcome, "completed")
   } finally { f.close() }
 })
 

@@ -1,5 +1,6 @@
 import type { FxSelection } from "./fx.ts"
 import type { CommandRun, Effort } from "./command.ts"
+import type { PlannedRun } from "./launch.ts"
 import {
   isBannedModel, type CliExecutor, type CliPin, type Executor, type FallbackPlan, type PiDestinations, type PiSelection,
   type RootPlan,
@@ -59,7 +60,7 @@ export type SessionOwner = {
   readonly owner_id: string
   readonly owner_generation: number
 }
-export type PendingSteer = { note: string; requested_at: string; phase: "signaling" | "relaunching"; caller_pid: number; previous_output: string | null }
+export type PendingSteer = { note: string; requested_at: string; phase: "signaling" | "relaunching"; caller_pid: number; previous_output: string | null; planned_run?: PlannedRun }
 export type SteerOutcome = { note: string; requested_at: string; outcome: "completed" | "failed"; at: string }
 
 const OWNER_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -398,6 +399,11 @@ export function decodeSession(value: unknown, cwd: string, id: string): Session 
         (pending.previous_output !== null && typeof pending.previous_output !== "string")) throw new Error("Invalid persisted pending steer")
     s.pending_steer = { note: requiredText(pending.note, "steer note", 32000), requested_at: requiredText(pending.requested_at, "steer time"),
       phase: pending.phase, caller_pid: pending.caller_pid as number, previous_output: pending.previous_output as string | null }
+    if (pending.planned_run !== undefined) {
+      if (!isRecord(pending.planned_run)) throw new Error("Invalid planned steer run")
+      s.pending_steer.planned_run = { output: requiredText(pending.planned_run.output, "planned output", 4096),
+        errors: requiredText(pending.planned_run.errors, "planned errors", 4096), started_at: requiredText(pending.planned_run.started_at, "planned start") }
+    }
   }
   if (value.last_steer !== undefined) {
     const last = value.last_steer

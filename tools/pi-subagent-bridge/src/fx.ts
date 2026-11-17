@@ -4,9 +4,10 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync, open
 import { join, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
 import { processStartTime, processIdentity, workerAlive, type CommandRun, type CommandResult } from "./command.ts"
-import type { LaunchRequest } from "./launch.ts"
+import { plannedCommand, type LaunchRequest } from "./launch.ts"
 import { isRecord } from "./scope.ts"
 import { isBannedModel, type CliPin } from "./policy.ts"
+import { deadlineTimeout } from "./steer-deadline.ts"
 
 export const FX_CAPABILITIES = { steering: "interrupt-resume", resume: "bound native session and worktree", nativeNesting: "denied", readOnly: "tool permission prevention", hostContainment: false } as const
 
@@ -102,13 +103,13 @@ export function makeFxAdapter(options: FxOptions) {
   }
   function available(selection: FxSelection): boolean {
     if (isBannedModel(selection.model) || selection.provider !== options.provider || selection.runtimeVersion !== "0.0.17") return false
-    try { return createHash("sha256").update(readFileSync(options.binary)).digest("hex") === options.binarySha256 && execFileSync(options.binary, ["--version"], { env, encoding: "utf8", timeout: 5000 }).trim() === selection.runtimeVersion } catch { return false }
+    try { return createHash("sha256").update(readFileSync(options.binary)).digest("hex") === options.binarySha256 && execFileSync(options.binary, ["--version"], { env, encoding: "utf8", timeout: deadlineTimeout(5000) }).trim() === selection.runtimeVersion } catch { return false }
   }
   function start(request: FxLaunch): CommandRun {
     if (!available(request.selection)) throw new Error("Pinned FX binary/provider unavailable")
     const cwd = realpathSync(request.directory), underHome = relative(home, cwd)
     if (!underHome || underHome.startsWith("..") || isAbsolute(underHome)) throw new Error("FX qualification worktree must be beneath its private HOME")
-    const nonce = randomUUID(), output = join(request.logDirectory, nonce + ".fx.json"), errors = output + ".stderr"
+    const nonce = randomUUID(), output = request.planned_run?.output ?? join(request.logDirectory, nonce + ".fx.json"), errors = request.planned_run?.errors ?? output + ".stderr"
     let fxHome = join(request.logDirectory, nonce + ".fx-home"), resume: string | undefined
     if (request.resume) {
       if (!request.resume.startsWith("fx:0.0.17:")) throw new Error("Unsupported FX resume token")
@@ -134,11 +135,12 @@ export function makeFxAdapter(options: FxOptions) {
     const args = ["ask", "--json", "--provider", request.selection.provider, "--model", request.selection.model, "--effort", request.selection.effort, "--config", "max_agent_steps=20", ...(resume ? ["--resume", resume] : []), "--", request.prompt]
     const jobPath = output + ".job.json"
     writeFileSync(jobPath, JSON.stringify({ ...job, executable: options.binary, args, env: { ...env, FX_HOME: fxHome, TMPDIR: request.logDirectory }, env_files: secretEnvFiles, wallMs, exhaustion: { dir: join(fxHome, "sessions/v2"), retry_after_seconds: Math.max(1, Math.floor(wallMs / 1000)) } }), { mode: 0o600 })
-    const child = spawn(process.execPath, [fileURLToPath(new URL("./process-supervisor.ts", import.meta.url)), jobPath], { detached: true, stdio: "ignore", env: { ...env, PATH: process.env.PATH }, cwd })
+    const invocation = plannedCommand(process.execPath, [fileURLToPath(new URL("./process-supervisor.ts", import.meta.url)), jobPath], request.planned_run)
+    const child = spawn(invocation.executable, invocation.args, { detached: true, stdio: "ignore", env: { ...env, PATH: process.env.PATH }, cwd })
     child.once("error", error => writeFileSync(errors, error.message))
     if (!child.pid) throw new Error("FX supervisor admission uncertain")
     const pid = child.pid
-    const run: CommandRun = { pid, output, errors, started_at: new Date().toISOString(), proc_start: processStartTime(pid) }
+    const run: CommandRun = { pid, output, errors, started_at: request.planned_run?.started_at ?? new Date().toISOString(), proc_start: processStartTime(pid) }
     const ownership = { child, run: { ...run } }
     children.set(pid, ownership)
     child.once("close", () => { if (children.get(pid) === ownership) children.delete(pid) })
