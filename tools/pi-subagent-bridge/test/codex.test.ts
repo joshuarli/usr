@@ -43,7 +43,7 @@ test("Codex captures the thread and completed turn and resumes with the same mod
 })
 
 test("Codex refuses a forbidden family and a read-only run is unsandboxed but has no execution tools", async () => {
-  for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
+  for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high", "openai/gpt-6.2-astra-xhigh"]) {
     assert.throws(() => startCodex(request("/absent", { selection: { model, effort: "high" } })), /Prohibited Codex model/)
   }
   const root = mkdtempSync(join(tmpdir(), "codex-readonly-")), bin = join(root, "bin"), args = join(root, "args")

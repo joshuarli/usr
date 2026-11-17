@@ -5,11 +5,19 @@ Load one user contract, not a normal contract plus model-specific corrections. N
 | Harness and reported model | Contract |
 | --- | --- |
 | Claude Code, exactly `claude-opus-5-5` | [Lean](../dotfiles/base/.agents/instructions/lean.md) |
-| Codex, exactly `gpt-6.1-sol` | The same lean contract |
+| Codex, exactly `gpt-6.2-sol` | The same lean contract |
 | Other or missing model IDs | [Normal](../dotfiles/base/.codex/AGENTS.md), unchanged |
 | Other harnesses | Their existing normal-contract adapters, unchanged |
 
 The lean version keeps owner preferences and boundaries rather than general coaching. It no longer requires loading `do` merely because a task is substantive. Requested workflows and useful task-specific skills still apply; `orchestrate` still governs every delegation. Performance, structured-data and renaming procedures are read only when relevant. The shared skill catalog and its invocation metadata have not changed, so this reduces the user contract, not all context a harness may load.
+
+## Sol 6.2 model baseline
+
+Reviewed November 17, 2026 against the [Sol 6.2 model card](https://developers.openai.com/api/docs/models/gpt-6.2-sol) and [Codex model documentation](https://learn.chatgpt.com/docs/models). The Codex default is `gpt-6.2-sol` at `medium` effort and `default` service tier. Scout, mechanic, worker, native expert, fallback, and memory assignments retain their existing roles and effort settings. Astra remains prohibited by the shared [model policy](../tools/pi-subagent-bridge/src/policy.ts), including its 6, 6.1, and 6.2 families and effort variants. The bridge rejects prohibited launches and persisted sessions; harness-native lanes follow the shared instruction contract.
+
+Codex supplies the model's native instructions and capability metadata. Its default Sol 6.2 context is 500,000 tokens; the API card separately lists 1,050,000 total, 922,000 maximum input, and 128,000 maximum output tokens. Keep context and compaction settings unset so the native Codex catalog owns them. The API requires Responses for tool calling and rejects `none` reasoning; the existing `medium` setting remains supported.
+
+The [GPT-6.2 migration guidance](https://developers.openai.com/api/docs/guides/latest-model#whats-new) also calls for preserving conversation prefixes to retain reasoning and cache reuse. The selector continues to load a contract at session or subagent startup, without per-turn rewriting or replacing Codex's built-in instructions. Start a fresh Sol 6.2 conversation when migrating, as described below.
 
 ## Loading
 
@@ -25,7 +33,7 @@ If the hook is disabled, untrusted, unsupported, or fails, the bootstrap directs
 
 After pulling, review `sh sync plan`, then run `sh sync`. This installs the new selector, profile files, and Codex override through existing link ownership, and removes previously owned overlay paths. An unmanaged pre-existing `AGENTS.override.md` is a conflict to resolve, not something to overwrite. No host sync is performed by the tests.
 
-Review/trust the changed `SessionStart` and `SubagentStart` commands in Codex's `/hooks`, then start a fresh conversation on the intended model. Claude needs a fresh session after the settings change. Your default Codex Terra session continues to select the normal contract; selecting Sol does not require changing the default.
+Review/trust the changed `SessionStart` and `SubagentStart` commands in Codex's `/hooks`, then start a fresh conversation on the intended model. Claude needs a fresh session after the settings change. The default Codex Sol 6.2 session selects the lean contract; Terra and Luna children continue to select the normal contract.
 
 **Change profiles by starting a fresh conversation without inherited history.** In-session model changes do not replace the selected contract. Startup/resume/clear/compaction/fork events can reload according to the reported model, but hooks cannot erase earlier messages or summaries. Resuming, forking, switching models, or spawning a child with inherited context is therefore not proof that the old contract is absent. A hidden provider fallback is also not observable here. Do not use this mechanism as a security boundary.
 

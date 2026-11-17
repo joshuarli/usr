@@ -38,14 +38,20 @@ test("the plans are the pins the bridge admits, and the exported routes derive f
 })
 
 test("prohibited model families include every effort variant but not unrelated names", () => {
-  for (const model of ["gemini-4-argon", "gemini-4-argon-low", "gemini-4-carbon-xhigh", "google/gemini-4-carbon-high"]) {
+  for (const model of [
+    "gemini-4-argon", "gemini-4-argon-low", "gemini-4-carbon-xhigh", "google/gemini-4-carbon-high",
+    "gpt-6-astra", "gpt-6.1-astra-high", "openai/gpt-6.2-astra-xhigh",
+  ]) {
     assert.equal(isBannedModel(model), true, model)
   }
   assert.equal(isBannedModel("gemini-4-carbonite"), false)
+  assert.equal(isBannedModel("openai/gpt-6.2-sol-xhigh"), false)
   for (const tier of BRIDGE_TIERS) {
     for (const route of routesOf(ROOT_PLANS[tier])) assert.equal(isBannedModel(route.model), false, tier + " " + route.model)
   }
-  assert.deepEqual(BANNED_MODELS, ["gemini-4-argon", "gemini-4-carbon"])
+  assert.deepEqual(BANNED_MODELS, [
+    "gemini-4-argon", "gemini-4-carbon", "gpt-6-astra", "gpt-6.1-astra", "gpt-6.2-astra",
+  ])
 })
 
 test("projection contains each native model once without widening read-only tools", () => {

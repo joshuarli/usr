@@ -7,7 +7,7 @@ description: "Route coding subagents through the Pi SDK bridge (OpenCode and Dev
 
 <!-- policy:begin routing-intro -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-**All scout/mechanic/worker coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
+**All scout/mechanic/worker coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` are prohibited, including every effort variant.
 <!-- policy:end routing-intro -->
 
 <!-- policy:begin opencode -->

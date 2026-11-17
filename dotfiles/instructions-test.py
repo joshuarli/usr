@@ -20,7 +20,7 @@ LEAN = BASE / ".agents/instructions/lean.md"
 BOOTSTRAP = BASE / ".agents/instructions/bootstrap.md"
 WORK = ROOT / ".work/tmp"
 EVENTS = {"claude": ("SessionStart",), "codex": ("SessionStart", "SubagentStart")}
-MODELS = {"claude": "claude-opus-5-5", "codex": "gpt-6.1-sol"}
+MODELS = {"claude": "claude-opus-5-5", "codex": "gpt-6.2-sol"}
 
 
 def run_hook(harness: str, payload: object, script: Path = HOOK) -> subprocess.CompletedProcess[str]:
@@ -51,7 +51,7 @@ class InstructionTests(unittest.TestCase):
     def test_all_other_or_missing_model_ids_select_the_complete_normal_contract(self):
         models = (None, "", "opus", "sol", "gpt-6.1-terra", "gpt-6-luna", "muse-9.9",
                   "claude-sonnet-5-5", "claude-opus-5-50", "claude-opus-5-5-future",
-                  "gpt-6.1-sol-future", "openrouter/gpt-6.1-sol", "../../private", [], {}, 55)
+                  "gpt-6.1-sol", "gpt-6.2-sol-future", "openrouter/gpt-6.2-sol", "../../private", [], {}, 55)
         for harness, target in MODELS.items():
             for event in EVENTS[harness]:
                 for model in (*models, *[value for value in MODELS.values() if value != target]):
@@ -160,7 +160,8 @@ class InstructionTests(unittest.TestCase):
                             self.assertFalse(handler.get("async", False))
                             if harness == "codex":
                                 self.assertEqual(handler["additionalContextLimit"], 0)
-                            for model, contract in ((MODELS[harness], LEAN), ("unknown", NORMAL)):
+                            configured_model = config["model"] if harness == "codex" else MODELS[harness]
+                            for model, contract in ((configured_model, LEAN), ("unknown", NORMAL)):
                                 result = subprocess.run(
                                     ["sh", "-c", command],
                                     input=json.dumps({"hook_event_name": event, "model": model}),

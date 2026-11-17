@@ -4,7 +4,7 @@ One shared delegation bridge for every coding harness except OpenCode and Devin.
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
+Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` are prohibited, including every effort variant.
 
 | Tier | Primary | Fallback (in order) |
 | --- | --- | --- |

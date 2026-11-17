@@ -12,7 +12,7 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 
 ## Instructions and skills
 
-[`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) remains the normal shared contract. Other harness adapters still point to it. Claude's `CLAUDE.md` and Codex's higher-precedence `AGENTS.override.md` instead load a small bootstrap; startup hooks select the normal contract or the lean contract for Opus 5.5 in Claude and Sol 6.1 in Codex. The contracts are alternatives, not layers. See [instruction profiles](model-profiles.md) for activation, fallback, and fresh-session boundaries.
+[`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) remains the normal shared contract. Other harness adapters still point to it. Claude's `CLAUDE.md` and Codex's higher-precedence `AGENTS.override.md` instead load a small bootstrap; startup hooks select the normal contract or the lean contract for Opus 5.5 in Claude and Sol 6.2 in Codex. The contracts are alternatives, not layers. See [instruction profiles](model-profiles.md) for activation, fallback, and fresh-session boundaries.
 
 | Harness | Global instructions | Shared skills |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
-Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` are prohibited, including every effort variant.
+Bridge tiers: `scout`, `mechanic`, `worker`. Native-only tier: `expert`, which always runs as a harness-native subagent and never through the bridge. There is no `god` tier. The model families `gemini-4-argon` and `gemini-4-carbon` and `gpt-6-astra` and `gpt-6.1-astra` and `gpt-6.2-astra` are prohibited, including every effort variant.
 <!-- policy:end routing-summary -->
 
 After updating `usr`, review `sh sync plan`, then use `sh sync` and `sh sync doctor` to apply and inspect home configuration.

@@ -133,6 +133,7 @@ test("incomplete or prohibited legacy records are refused for manual reconciliat
     [lower({ backend: "pi", command_run: undefined, pi_id: "ses_fixture", primary_model: GO, command_model: undefined, command_effort: undefined }), /Missing admitted Command Code pin; manual reconciliation required/],
     [lower({ pi_candidates: [{ ...GO, id: "gemini-4-argon-high" }] }), /Prohibited persisted model; manual reconciliation required/],
     [lower({ command_model: "google/gemini-4-carbon-high" }), /Prohibited persisted model; manual reconciliation required/],
+    [lower({ codex_model: "openai/gpt-6.2-astra-xhigh" }), /Prohibited persisted model; manual reconciliation required/],
   ]
   for (const [malformed, message] of refused) assert.throws(() => decode(malformed), message)
 })
@@ -156,6 +157,13 @@ function current(overrides: Record<string, unknown> = {}): Record<string, unknow
 test("v2 records are checked against their admitted plan", () => {
   const plan = { kind: "fallback", codex: CODEX, command: COMMAND, pi: [MUSE, GO] }
   assert.equal(decode(current()).plan.kind, "fallback")
+  const sol = { model: "gpt-6.2-sol", effort: "xhigh" }
+  const admitted = decode(current({ plan: { ...plan, codex: sol } })).plan
+  assert.deepEqual(admitted, { ...plan, codex: sol })
+  assert.throws(
+    () => decode(current({ plan: { ...plan, codex: { ...CODEX, model: "openai/gpt-6.2-astra-xhigh" } } })),
+    /Prohibited persisted model; manual reconciliation required/,
+  )
   for (const malformed of [
     { plan: { kind: "fallback", codex: CODEX, command: COMMAND, pi: [] } },
     { plan: { ...plan, pi: [{ providerID: "opencode-go", id: "deepseek-v4.1-flash" }] } },

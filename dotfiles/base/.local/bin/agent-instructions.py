@@ -27,7 +27,7 @@ def select_profile(harness: Harness, payload: dict[str, object]) -> Profile | No
         return None
     model = payload.get("model")
     if (harness is Harness.CLAUDE and model == "claude-opus-5-5") or (
-        harness is Harness.CODEX and model == "gpt-6.1-sol"
+        harness is Harness.CODEX and model == "gpt-6.2-sol"
     ):
         return Profile.LEAN
     return Profile.NORMAL

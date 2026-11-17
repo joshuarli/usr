@@ -3,7 +3,7 @@
 <!-- Generated from tools/policy/subagent-visualization.ts; run make subagent-visualization. -->
 <!-- Hand-edit the generator, not this file. Policy inputs come from `tools/pi-subagent-bridge/src/policy.ts` via the typed `POLICY` export. -->
 
-Decision graph for delegating a coding subagent. Tiers: `scout` (read-only: no `bash`, `edit` or `write`), `mechanic`, `worker`, `expert`. There is no `god` tier, and the `gemini-4-argon` / `gemini-4-carbon` families are prohibited everywhere, including every effort variant.
+Decision graph for delegating a coding subagent. Tiers: `scout` (read-only: no `bash`, `edit` or `write`), `mechanic`, `worker`, `expert`. There is no `god` tier, and the `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families are prohibited everywhere, including every effort variant.
 
 ```mermaid
 flowchart TD
@@ -14,7 +14,7 @@ flowchart TD
   harness -->|Devin top-level| dv_exp["Devin native run_subagent<br/>subagent_general or subagent_explore<br/>no per-tier pin"]
   harness -->|Codex| cx_exp["Codex native subagent<br/>session-config model, no per-tier pin"]
   harness -->|Pi| pi_exp["Pi native expert profile<br/>opencode-go/deepseek-v4.1-flash, max"]
-  harness -->|Claude Code| cc_exp["Claude Code native subagent<br/>opus, medium thinking"]
+  harness -->|Claude Code| cc_exp["Claude Code native subagent<br/>opus, xhigh effort"]
   harness -->|any other harness| other["No defined lane in this contract<br/>report to the owner before delegating"]
 
   tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode or Devin session?"}
@@ -38,7 +38,7 @@ Expert is native everywhere; the bridge is reserved for `scout`/`mechanic`/`work
 
 | Assignment | OpenCode (top-level) | Devin (top-level) | Codex | Pi | Claude Code |
 | --- | --- | --- | --- | --- | --- |
-| expert | native `expert` agent (`opencode/inkling-2-small-free#max`) | `run_subagent`, unpinned | native subagent, unpinned | native `expert` profile (`opencode-go/deepseek-v4.1-flash`, `max`) | native subagent (`opus`, `medium` thinking) |
+| expert | native `expert` agent (`opencode/inkling-2-small-free#max`) | `run_subagent`, unpinned | native subagent, unpinned | native `expert` profile (`opencode-go/deepseek-v4.1-flash`, `max`) | native subagent (`opus`, `xhigh` effort) |
 | quota exhaustion (scout/mechanic/worker) | never uses the bridge | never uses the bridge | not defined; report rather than substitute | not defined; report rather than substitute | native subagents: `scout` `haiku` · `mechanic` `sonnet` · `worker` `sonnet`, same brief, worktree and scope |
 
 Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; the admitted routes are:
@@ -59,7 +59,7 @@ Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; 
 - Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Codex → Command Code → ordered Pi), only before edits, only along admitted routes.
 - An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.
 - Codex and Command Code workers are leaves. Pi workers may fan out one nested generation to equal-or-weaker approved tiers; the typed ceiling is enforced per child, depth is 2, and `options: { agentScope: "user" }` is required for nested calls.
-- Ban on delegation of `gemini-4-argon*` and `gemini-4-carbon*` models in every harness, including every effort variant.
+- Ban on delegation of `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families in every harness, including every effort variant.
 - The parent owns scope, worktrees, verification and integration in every harness. Agent output is a claim until the parent checks the diff and the acceptance proof.
 
 See [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md) for the routing contract and [the bridge reference](../tools/pi-subagent-bridge/README.md) for admission, fallback and state semantics.

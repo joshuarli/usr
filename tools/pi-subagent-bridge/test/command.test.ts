@@ -77,7 +77,7 @@ test("a planned Command Code launch writes its identity before executor output",
 })
 
 test("Command Code refuses a forbidden family", () => {
-  for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high"]) {
+  for (const model of ["gemini-4-argon-high", "google/gemini-4-carbon-high", "openai/gpt-6.2-astra-xhigh"]) {
     assert.throws(() => startCommand(request("/absent", "/absent", { selection: { model, effort: "high" } })), /Prohibited Command Code model/)
   }
 })
