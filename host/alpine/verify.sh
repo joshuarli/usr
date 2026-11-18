@@ -127,6 +127,15 @@ check 'Docker enabled' in_runlevel docker default
 check 'Docker started' rc-service docker status
 check "$user in docker group" sh -c "id -Gn '$user' | tr ' ' '\\n' | grep -qx docker"
 check 'Docker CLI connects to engine as user' su -s /bin/sh "$user" -c 'docker info --format "{{.ServerVersion}}"'
+if [ "$(apk --print-arch)" = x86_64 ] && grep -qw constant_tsc /proc/cpuinfo && grep -qw nonstop_tsc /proc/cpuinfo; then
+	if [ -f /etc/default/grub ]; then
+		check 'GRUB defaults keep the TSC clocksource' sh tsc-opts.sh check /etc/default/grub GRUB_CMDLINE_LINUX_DEFAULT
+	else
+		check 'extlinux defaults keep the TSC clocksource' sh tsc-opts.sh check /etc/update-extlinux.conf default_kernel_opts
+	fi
+	check 'running kernel booted with tsc=nowatchdog or tsc=reliable' grep -Eq '(^| )tsc=([^ ]*,)?(nowatchdog|reliable)' /proc/cmdline
+	check 'kernel clocksource is tsc' grep -qx tsc /sys/devices/system/clocksource/clocksource0/current_clocksource
+fi
 check 'interactive login hook matches config/profile.sh, root 0644' managed config/profile.sh /etc/profile.d/home-session.sh 644
 
 if [ "$mode" = desktop ]; then

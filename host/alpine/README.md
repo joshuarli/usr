@@ -116,6 +116,9 @@ explanation if a check fails. The server install then:
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by
   default through `/etc/clang<major>/clang.cfg` and `clang++.cfg`, so no gcc or
   binutils is needed (there is no `cc`; use `CC=clang`),
+- on x86_64 CPUs with a stable TSC (`constant_tsc` and `nonstop_tsc`), adds
+  `tsc=nowatchdog` to the kernel options and regenerates the boot config (see
+  [Clocksource](#clocksource)),
 - links the enclosing checkout's dotfiles and installs the server tool profile
   as the user. It does not run the rest of `sync tools` or `host/setup-linux`; install
   other tools later with `sh sync tools TOOL`, and makes interactive logins start ish.
@@ -205,6 +208,22 @@ starts the desktop.
 | XF86AudioLowerVolume, XF86AudioRaiseVolume | volume down, up |
 | Super+Escape | quit dwl |
 
+### Clocksource
+
+Under heavy load the kernel's clocksource watchdog can wrongly decide the TSC
+is unstable and switch to HPET. The switch lasts until reboot, and every clock
+read becomes a system call. On one Ryzen host a read went from about 50 ns to
+7.4 µs, and a Tokio service spent most of its CPU in `clock_gettime`.
+
+On x86_64 CPUs that report `constant_tsc` and `nonstop_tsc`, provisioning
+adds `tsc=nowatchdog` to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`
+(then runs `grub-mkconfig -o /boot/grub/grub.cfg`) or to `default_kernel_opts`
+in `/etc/update-extlinux.conf` (then runs `update-extlinux`). It keeps every
+other option. Existing `tsc=nowatchdog` or `tsc=reliable` is left alone. The
+preflight refuses `notsc`, a non-TSC `clocksource=`, or another `tsc=` value.
+Reboot to apply it; a host already on HPET stays there until then, and
+`verify.sh` fails until the running kernel uses TSC.
+
 ## 3. Verify
 
 ```sh
@@ -245,7 +264,7 @@ provision.
 
 ## Not managed
 
-Disks, partitions, filesystems, encryption, bootloader, kernel, initramfs, EFI,
+Disks, partitions, filesystems, encryption, bootloader (apart from the TSC kernel option), kernel, initramfs, EFI,
 Secure Boot, networking, DNS, passwords, root account, SSH server configuration,
 authorized keys and SSH keys other than the generated GitHub key, audio routing
 and mixer state, power management and lid handling. `setup.sh`

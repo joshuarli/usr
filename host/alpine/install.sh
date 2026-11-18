@@ -7,6 +7,7 @@ usr_url=https://github.com/joshuarli/usr
 doas_policy=/etc/doas.d/30-home-nopass.conf
 conf=
 doas_tmp=
+tsc_tmp=
 
 die() { printf 'home: %s\n' "$*" >&2; exit 1; }
 say() { printf 'home: %s\n' "$*"; }
@@ -14,6 +15,7 @@ say() { printf 'home: %s\n' "$*"; }
 cleanup() {
 	[ -z "$conf" ] || rm -f "$conf" || say "could not remove temporary file $conf"
 	[ -z "$doas_tmp" ] || rm -f "$doas_tmp" || say "could not remove temporary file $doas_tmp"
+	[ -z "$tsc_tmp" ] || rm -f "$tsc_tmp" || say "could not remove temporary file $tsc_tmp"
 }
 
 trap cleanup EXIT
@@ -171,6 +173,49 @@ setup_rustup() {
 	say "initialized rustup for $user"
 }
 
+stable_tsc_cpu() {
+	grep -qw constant_tsc /proc/cpuinfo && grep -qw nonstop_tsc /proc/cpuinfo
+}
+
+check_tsc_boot() {
+	tsc_cfg=
+	[ "$arch" = x86_64 ] && stable_tsc_cpu || return 0
+	if [ -f /etc/default/grub ]; then
+		tsc_cfg=/etc/default/grub tsc_key=GRUB_CMDLINE_LINUX_DEFAULT tsc_boot=/boot/grub/grub.cfg
+		command -v grub-mkconfig >/dev/null || die 'grub-mkconfig is missing; it regenerates /boot/grub/grub.cfg with tsc=nowatchdog'
+	elif [ -f /etc/update-extlinux.conf ]; then
+		tsc_cfg=/etc/update-extlinux.conf tsc_key=default_kernel_opts tsc_boot=/boot/extlinux.conf
+		command -v update-extlinux >/dev/null || die 'update-extlinux is missing; it regenerates /boot/extlinux.conf with tsc=nowatchdog'
+	else
+		die 'no /etc/default/grub or /etc/update-extlinux.conf; this CPU has a stable TSC, so add tsc=nowatchdog to the kernel command line by hand'
+	fi
+	[ -f "$tsc_boot" ] || die "$tsc_boot is missing; $tsc_cfg does not configure the installed bootloader"
+	sh tsc-opts.sh check "$tsc_cfg" "$tsc_key" || [ $? -eq 1 ] ||
+		die "$tsc_cfg keeps the kernel off TSC; fix $tsc_key, then rerun"
+}
+
+setup_tsc_boot() {
+	[ -n "$tsc_cfg" ] || return 0
+	if ! sh tsc-opts.sh check "$tsc_cfg" "$tsc_key" 2>/dev/null; then
+		tsc_tmp=$(mktemp)
+		sh tsc-opts.sh apply "$tsc_cfg" "$tsc_key" > "$tsc_tmp" || die "could not add tsc=nowatchdog to $tsc_cfg"
+		cat "$tsc_tmp" > "$tsc_cfg"
+		rm -f "$tsc_tmp"
+		tsc_tmp=
+		say "added tsc=nowatchdog to $tsc_key in $tsc_cfg"
+	fi
+	if ! grep -Eq 'tsc=([^[:space:]]*,)?(nowatchdog|reliable)' "$tsc_boot"; then
+		case $tsc_cfg in
+			/etc/default/grub) grub-mkconfig -o "$tsc_boot" >/dev/null 2>&1 ;;
+			*) update-extlinux >/dev/null 2>&1 ;;
+		esac || die "could not regenerate $tsc_boot"
+		grep -Eq 'tsc=([^[:space:]]*,)?(nowatchdog|reliable)' "$tsc_boot" || die "$tsc_boot still lacks tsc=nowatchdog after regeneration"
+		say "regenerated $tsc_boot"
+	fi
+	[ "$(cat /sys/devices/system/clocksource/clocksource0/current_clocksource)" = tsc ] ||
+		say "the kernel clocksource is $(cat /sys/devices/system/clocksource/clocksource0/current_clocksource), not tsc; reboot to use the TSC"
+}
+
 setup_docker() {
 	getent group docker >/dev/null 2>&1 || addgroup -S docker
 	id -Gn "$user" | tr ' ' '\n' | grep -qx docker || {
@@ -237,11 +282,12 @@ printf '%s\n' "$repos" | grep -q '/edge/community/*$' ||
 	die 'enable the edge community repository in /etc/apk/repositories'
 check_doas_policy
 check_github_key
+check_tsc_boot
 if [ "$mode" = server ]; then
 	[ -s tools-server.txt ] || die 'tools-server.txt is missing or empty; the server tool profile cannot be selected'
 fi
 
-for script in install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh services/home-runtime; do
+for script in install.sh verify.sh tsc-opts.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh services/home-runtime; do
 	sh -n "$script" || die "$script has a syntax error"
 done
 
@@ -311,6 +357,7 @@ setup_rustup
 install_doas_policy
 setup_github_key
 setup_docker
+setup_tsc_boot
 
 [ "$(clang_major)" -ge 23 ] || die "clang $(clang -dumpversion) is older than 23; check the edge repositories"
 install_managed config/clang.cfg "/etc/clang$(clang_major)/clang.cfg" 0644
