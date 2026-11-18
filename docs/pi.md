@@ -1,6 +1,6 @@
 # Pi
 
-Every coding harness except OpenCode and Devin delegates `scout`/`mechanic`/`worker` assignments through `pi-subagent-bridge`; `expert` assignments are harness-native everywhere. The bridge invokes the versioned Pi SDK delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native execution, completion events and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability).
+Every coding harness except top-level Command Code, OpenCode and Devin delegates `scout`/`mechanic`/`worker` assignments through `pi-subagent-bridge`; Command Code parent sessions use their pinned native `usr-*` agents (while remaining available as bridge leaf executors for other parents); `expert` assignments are harness-native everywhere. The bridge invokes the versioned Pi SDK delegation RPC directly, without `pi -p` or an LLM-driven subagent decision. It owns cross-harness worktree leases and provider selection; pi-subagents owns native execution, completion events and retained-session continuation. See the [bridge reference](../tools/pi-subagent-bridge/README.md#safety-and-durability).
 
 <!-- policy:begin routing-summary -->
 <!-- Generated from tools/pi-subagent-bridge/src/policy.ts; run make generate. -->
