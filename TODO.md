@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 83
+Next: 84
 
 
 
@@ -16,6 +16,16 @@ Next: 83
 
 
 
+
+
+### USR-83 · P2 · running sessions on two hosts cannot reach each other over intercom
+
+- **Area:** Delegation
+- **Where:** launcher `intercom-tailnet` (docs/intercom-tailnet.md), pi-build `broker/tailnet-admin.js`, the Claude/Codex intercom MCP adapters (`claude-intercom-mcp`), `intercom_list` scope handling
+- **Problem:** On 2026-11-17 a Claude Code session on the Mac had to coordinate with a Claude Code session on threadripper (the one in ~/repos/laputa-systems/xsh) before using that host for a Chromium build. `intercom_list` showed only same-machine sessions. Neither host runs a hub. Neither session was enrolled or launched under `intercom-tailnet run`, so neither can be reached without restarting it. On threadripper over SSH, `intercom-tailnet doctor` fails with `Node.js is missing`, because Node lives under ~/.local/share/nodejs and is not on a non-login PATH. Cross-host use needs four manual steps before any message flows: start a hub, enroll each session, transfer each credential, and relaunch the session through the launcher. In practice agents cannot coordinate across hosts and fall back to asking the owner to relay.
+- **Recommendation:** Keep the trust model: enrolled, tailnet-only, credential per host. Remove the per-session ceremony. (1) Run the hub on one always-on host under its existing supervisor, from one documented command. (2) Enroll once per host, not per session, storing the credential at a fixed private path. (3) Have the normal claude/codex/pi launchers join the hub automatically whenever that host credential exists, so every ordinary session is reachable without relaunching through `intercom-tailnet run`. (4) Give `intercom_list` a fleet scope that shows remote sessions by host. (5) Make `intercom-tailnet` find the pinned Node the same way the other usr tools do, so `doctor` works over non-login SSH. Acceptance: two ordinary sessions started normally on the Mac and on threadripper can `intercom_list` each other and exchange `intercom_ask`.
+- **Fix with:** none
+- **Effort:** M
 
 
 ### USR-73 · P3 · The refactor-web-ui skill has only been applied to agentctl
