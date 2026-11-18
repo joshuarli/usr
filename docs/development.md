@@ -24,6 +24,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | `tools/pi-subagent-bridge` | `node --experimental-strip-types --test tools/pi-subagent-bridge/test/worker-env.test.ts` and `(export TMPDIR="$PWD/.work/tmp"; cd tools/pi-subagent-bridge && npm test)`; run `./dev-install.sh` once first |
 | Pi profile and extensions | `python3 -I dotfiles/pi-test.py` and `python3 -I tools/sync/test_pi_extensions.py` |
 | `sync` Pi auth wiring | `python3 -I tools/sync/test_pi_auth.py` |
+| Alpine provisioner (`host/alpine`) | `python3 -I host/alpine/tests/test_tuning.py` and `TMPDIR="$PWD/.work/tmp" python3 -I host/alpine/tests/test_provision.py`; run `sh host/alpine/tests/vm.sh` for behavior changes |
 | `cpu-guard` | `python3 -I dotfiles/cpu-guard-test.py` |
 | Private tool installer | `python3 -I tools/sync/test_installer.py`, `python3 -I tools/sync/test_ffmpeg_runtime.py`, `sh tools/sync/bootstrap-test.sh`, `sh -n tools/sync/bootstrap.sh`, and `shellcheck -s sh tools/sync/bootstrap.sh` |
 | `sync uninstall` | `python3 -I tools/sync/test_uninstall.py` |
@@ -35,7 +36,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | DeepSeek launcher | `sh dotfiles/dsh-launcher-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/dsh dotfiles/dsh-launcher-test.sh` |
 | Claude API launcher | `sh dotfiles/claude-api-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/claude-api dotfiles/claude-api-test.sh` |
 | `ghostty-fda-check` | `sh dotfiles/ghostty-fda-test.sh` and `shellcheck -s sh dotfiles/base/.local/bin/ghostty-fda-check dotfiles/ghostty-fda-test.sh` |
-| a skill or agent definition | `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, `node --test tools/skills/skills.test.ts`, and `python3 -I dotfiles/skills-campaign-test.py`; `node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration |
+| a skill or agent definition | `node tools/skills/skills.ts check`, `node tools/skills/skills.ts check --root .agents/skills`, `node --test tools/skills/skills.test.ts`, `python3 -I tools/skills/test_usage.py`, and `python3 -I dotfiles/skills-campaign-test.py`; `node tools/skills/skills.ts generate` refreshes invocation adapters; use the focused check for other agent configuration |
 | model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check` and `node --test tools/policy/generate.test.ts`; use `make generate` to refresh projections |
 | `orchestrate` skill | `python3 -I dotfiles/orchestrate-test.py` |
 | instruction profiles and their harness adapters | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/instructions-test.py` |
@@ -54,7 +55,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 
 `sh sync check` and `./lint` cover several repository areas. Use them for changes that cross areas; they do not replace checks omitted from `sync`.
 
-The [Alpine VM journey](../host/alpine/tests/vm.sh) requires `qemu-system-aarch64`, `qemu-img`, and AArch64 UEFI firmware on the test host. It provisions the committed HEAD in a disposable VM and requires a clean checkout.
+The [Alpine VM journey](../host/alpine/tests/vm.sh) requires `qemu-system-<arch>`, `qemu-img`, `nc` with `-U`, and UEFI firmware for the VM architecture, which defaults to the host's (`VM_ARCH=x86_64` or `aarch64`). It provisions the committed HEAD in a disposable VM and requires a clean checkout.
 
 ## Agent setup changes
 

@@ -106,8 +106,16 @@ Provisioning defaults to user `josh` (`USER_NAME`); override with
 for the bootstrap, or
 `doas env USER_NAME=other sh usr/host/alpine/install.sh` by hand, if needed.
 
-`install.sh` checks the system before changing anything and stops with an
-explanation if a check fails. The server install then:
+`install.sh` installs Alpine's `python3` if it is missing and hands off to
+`provision.py`, which builds a task graph for the chosen mode and runs it with
+the same dependency executor as `sync` (`tools/sync/dag.py`). Each task probes
+its current state, applies only when the probe shows a change, and then checks
+its postcondition. All probes run before the first change; any conflict stops
+the run with an explanation and nothing changed. A failed task blocks the tasks
+that depend on it. Preview a rerun without changing anything with
+`doas python3 -I usr/host/alpine/provision.py plan server` (or `desktop`).
+
+The server install:
 
 - installs the packages in `packages.txt` (and `packages-x86_64.txt` on x86_64),
   including `make`, `rustup`, `dash`, `shellcheck`, and `file`,
@@ -116,9 +124,9 @@ explanation if a check fails. The server install then:
 - makes `clang` and `clang++` link with lld, compiler-rt and LLVM libunwind by
   default through `/etc/clang<major>/clang.cfg` and `clang++.cfg`, so no gcc or
   binutils is needed (there is no `cc`; use `CC=clang`),
-- on x86_64 CPUs with a stable TSC (`constant_tsc` and `nonstop_tsc`), adds
-  `tsc=nowatchdog` to the kernel options and regenerates the boot config (see
-  [Clocksource](#clocksource)),
+- applies the [performance settings](#performance): the TSC kernel option and
+  CPU microcode on x86_64, a boot-time CPU policy, and kernel network and
+  memory settings,
 - links the enclosing checkout's dotfiles and installs the server tool profile
   as the user. It does not run the rest of `sync tools` or `host/setup-linux`; install
   other tools later with `sh sync tools TOOL`, and makes interactive logins start ish.
@@ -208,21 +216,47 @@ starts the desktop.
 | XF86AudioLowerVolume, XF86AudioRaiseVolume | volume down, up |
 | Super+Escape | quit dwl |
 
-### Clocksource
+## Performance
 
-Under heavy load the kernel's clocksource watchdog can wrongly decide the TSC
-is unstable and switch to HPET. The switch lasts until reboot, and every clock
-read becomes a system call. On one Ryzen host a read went from about 50 ns to
-7.4 µs, and a Tokio service spent most of its CPU in `clock_gettime`.
+Each setting below is applied by its own task and checked by `verify.sh`.
+Settings that live in the boot configuration take effect at the next reboot;
+`install.sh` says when one is pending, and `verify.sh` fails until then.
 
-On x86_64 CPUs that report `constant_tsc` and `nonstop_tsc`, provisioning
-adds `tsc=nowatchdog` to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`
-(then runs `grub-mkconfig -o /boot/grub/grub.cfg`) or to `default_kernel_opts`
-in `/etc/update-extlinux.conf` (then runs `update-extlinux`). It keeps every
-other option. Existing `tsc=nowatchdog` or `tsc=reliable` is left alone. The
-preflight refuses `notsc`, a non-TSC `clocksource=`, or another `tsc=` value.
-Reboot to apply it; a host already on HPET stays there until then, and
-`verify.sh` fails until the running kernel uses TSC.
+- **TSC clocksource** (x86_64 CPUs with `constant_tsc` and `nonstop_tsc`).
+  Under heavy load the kernel's clocksource watchdog can wrongly decide the
+  TSC is unstable and switch to HPET until reboot. Every clock read then
+  becomes a system call: on one Ryzen host a read went from about 50 ns to
+  7.4 µs, and a Tokio service spent six cores in `clock_gettime`. Provisioning
+  adds `tsc=nowatchdog` to `GRUB_CMDLINE_LINUX_DEFAULT` in `/etc/default/grub`
+  or `default_kernel_opts` in `/etc/update-extlinux.conf`, keeps every other
+  option, and regenerates the boot menu. Existing `tsc=nowatchdog` or
+  `tsc=reliable` is kept. It refuses `notsc`, a non-TSC `clocksource=`, or
+  another `tsc=` value. On bare metal `verify.sh` requires the `tsc`
+  clocksource; in a VM it accepts the hypervisor clock.
+- **CPU microcode** (x86_64). `amd-ucode` and `intel-ucode` are both installed;
+  the kernel loads the one for its CPU. The GRUB menu is regenerated when it
+  does not load every installed microcode image.
+- **CPU frequency policy.** A root-owned copy of
+  [`power-policy`](../../docs/power-policy.md) at `/usr/local/sbin/power-policy`
+  runs at boot from `/etc/local.d/home-power-policy.start` through the OpenRC
+  `local` service. Servers use `performance`: the `performance` governor, or
+  the performance EPP hint, with boost enabled. Desktops use `auto`, which
+  keeps adaptive scaling on battery. Hosts without cpufreq, such as most VMs,
+  skip it.
+- **Kernel settings** in `/etc/sysctl.d/90-home.conf`, loaded by the `sysctl`
+  boot service:
+  - `net.ipv4.tcp_congestion_control = bbr` with `net.core.default_qdisc = fq`
+    for throughput over lossy or long paths. `tcp_bbr` is listed in
+    `/etc/modules`.
+  - `net.core.rmem_max` and `wmem_max` at 7.5 MB, the UDP buffer size
+    cloudflared's QUIC transport and Tailscale ask for.
+  - `vm.swappiness = 10`, so the kernel reclaims page cache before swapping
+    out application memory.
+
+Not changed: CPU vulnerability mitigations (`mitigations=off` trades security
+for speed), transparent huge pages (the kernel default stays), filesystem mount
+options such as `noatime`, the NVMe I/O scheduler (already `none`), and the
+Docker daemon.
 
 ## 3. Verify
 
@@ -247,7 +281,8 @@ a `seat` member, so `doas delgroup "$USER" seat` disables it.
 Pull or edit the `usr` checkout and run `doas env INSTALL_MODE=desktop sh usr/host/alpine/install.sh`
 again, or answer `desktop` at the prompt. Use `INSTALL_MODE=server` to reapply
 only the headless base.
-Unchanged files are left alone, dwl is rebuilt only when `build/dwl.sh` or
+Tasks whose probes show no change are skipped, so unchanged files are left
+alone, dwl is rebuilt only when `build/dwl.sh` or
 `config/dwl.h` changes, ghostty-custom and helium are updated only when a newer
 matching prerelease appears, and each tool in the installed profile is
 installed only if missing (update it with `usr`'s own `sync tools`). `sh sync tools TOOL` adds
@@ -264,10 +299,12 @@ provision.
 
 ## Not managed
 
-Disks, partitions, filesystems, encryption, bootloader (apart from the TSC kernel option), kernel, initramfs, EFI,
+Disks, partitions, filesystems, encryption, bootloader (apart from the TSC
+kernel option and regenerating its menu), kernel, initramfs, EFI,
 Secure Boot, networking, DNS, passwords, root account, SSH server configuration,
 authorized keys and SSH keys other than the generated GitHub key, audio routing
-and mixer state, power management and lid handling. `setup.sh`
+and mixer state, power management (apart from the boot CPU policy) and lid
+handling. `setup.sh`
 switches a stable install to edge and replaces `linux-lts` with `linux-stable`;
 the provisioner itself does not manage repositories or the kernel. The desktop
 layer installs `alsa-utils` and a `volume` helper for the media keys, but it

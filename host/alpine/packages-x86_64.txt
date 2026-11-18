@@ -1,3 +1,4 @@
 intel-ucode
 linux-firmware-intel
 linux-firmware-i915
+amd-ucode

@@ -1,10 +1,15 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-iso=alpine-virt-3.24.3-aarch64.iso
-mirror=https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64
+case ${VM_ARCH:-$(uname -m)} in
+	arm64 | aarch64) arch=aarch64 ;;
+	x86_64 | amd64) arch=x86_64 ;;
+	*) echo "vm: VM_ARCH must be aarch64 or x86_64" >&2; exit 1 ;;
+esac
+iso=alpine-virt-3.24.3-$arch.iso
+mirror=https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/$arch
 edge=https://dl-cdn.alpinelinux.org/alpine/edge
-work=$PWD/.work/vm
+work=$PWD/.work/vm-$arch
 rootpw=homevmroot
 userpw=homevmuser
 console=$work/console.log
@@ -105,24 +110,28 @@ poweroff() {
 }
 
 [ -z "$(git status --porcelain)" ] || { echo 'vm: commit changes first; the VM provisions HEAD' >&2; exit 1; }
-command -v qemu-system-aarch64 >/dev/null || { echo 'vm: qemu-system-aarch64 is required' >&2; exit 1; }
+command -v "qemu-system-$arch" >/dev/null || { echo "vm: qemu-system-$arch is required" >&2; exit 1; }
 firmware=
-for candidate in "$(dirname "$(command -v qemu-system-aarch64)")/../share/qemu/edk2-aarch64-code.fd" \
-	/usr/share/qemu/edk2-aarch64-code.fd /usr/share/AAVMF/AAVMF_CODE.fd; do
+for candidate in "$(dirname "$(command -v "qemu-system-$arch")")/../share/qemu/edk2-$arch-code.fd" \
+	"/usr/share/qemu/edk2-$arch-code.fd" /usr/share/AAVMF/AAVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd; do
 	[ -f "$candidate" ] && { firmware=$candidate; break; }
 done
-[ -n "$firmware" ] || { echo 'vm: no aarch64 UEFI firmware found' >&2; exit 1; }
-case $(uname -s)-$(uname -m) in
-	Darwin-arm64) accel='-accel hvf -cpu host' ;;
-	Linux-aarch64) accel='-accel kvm -cpu host' ;;
-	*) accel='-accel tcg -cpu max' ;;
+[ -n "$firmware" ] || { echo "vm: no $arch UEFI firmware found" >&2; exit 1; }
+# x86_64 passes invariant TSC through so the guest exercises the TSC boot option.
+case $(uname -s)-$(uname -m)-$arch in
+	Darwin-arm64-aarch64) accel='-accel hvf -cpu host' machine=virt ;;
+	Linux-aarch64-aarch64) accel='-accel kvm -cpu host' machine=virt ;;
+	Linux-x86_64-x86_64) accel='-accel kvm -cpu host,+invtsc' machine=q35 ;;
+	*-aarch64) accel='-accel tcg -cpu max' machine=virt ;;
+	*) accel='-accel tcg -cpu max,+invtsc' machine=q35 ;;
 esac
+if command -v shasum >/dev/null; then sha256='shasum -a 256'; else sha256='sha256sum'; fi
 
 mkdir -p "$work/share"
 if [ ! -f "$work/$iso" ]; then
 	curl -fsS -o "$work/$iso.part" "$mirror/$iso"
 	curl -fsS -o "$work/$iso.sha256" "$mirror/$iso.sha256"
-	(cd "$work" && sed "s/$iso\$/$iso.part/" "$iso.sha256" | shasum -a 256 -c -s -) || { echo "vm: $iso checksum mismatch" >&2; exit 1; }
+	(cd "$work" && sed "s/$iso\$/$iso.part/" "$iso.sha256" | $sha256 -c -s -) || { echo "vm: $iso checksum mismatch" >&2; exit 1; }
 	mv "$work/$iso.part" "$work/$iso"
 fi
 
@@ -130,10 +139,14 @@ rm -f "$work"/share/* "$work/qemu.log" "$work/monitor.sock" "$work/disk.qcow2" "
 git bundle create -q "$work/share/usr.bundle" HEAD
 cp tests/answers "$work/share/answers"
 qemu-img create -q -f qcow2 "$work/disk.qcow2" 8G
-dd if=/dev/zero of="$work/vars.fd" bs=1048576 count=64 2>/dev/null
+if [ "$arch" = x86_64 ]; then
+	cp "$(dirname "$firmware")/edk2-i386-vars.fd" "$work/vars.fd" || { echo 'vm: no edk2-i386-vars.fd next to the x86_64 firmware' >&2; exit 1; }
+else
+	dd if=/dev/zero of="$work/vars.fd" bs=1048576 count=64 2>/dev/null
+fi
 trap stop_vm EXIT INT TERM
 
-qemu="qemu-system-aarch64 -M virt $accel -m 2048 -smp 2
+qemu="qemu-system-$arch -M $machine $accel -m 4096 -smp 4
 -drive if=pflash,format=raw,readonly=on,file=$firmware -drive if=pflash,format=raw,file=$work/vars.fd
 -drive file=$work/disk.qcow2,if=virtio -drive file=fat:ro:$work/share,format=raw,if=virtio,readonly=on
 -nic user,model=virtio-net-pci -device virtio-gpu-pci -device qemu-xhci -device usb-kbd -display none
@@ -165,7 +178,7 @@ say 'provisioning'
 boot
 login
 must 'mkdir -p /media/share && mount -t vfat -o ro /dev/vdb1 /media/share'
-must 'apk add -q git' 600
+must 'apk add -q git python3' 600
 must "su josh -c 'cd ~ && git clone -q /media/share/usr.bundle usr && git -C usr remote set-url origin https://github.com/joshuarli/usr'"
 must 'cp /etc/apk/world /root/world.before'
 
@@ -175,7 +188,7 @@ must "grep -q 'josh has no usable password' /root/nopass.log && cmp /etc/apk/wor
 must "echo 'josh:$userpw' | chpasswd"
 
 must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/server.log 2>&1 || { cat /root/server.log; false; }' 1800
-must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server' 120
+[ "$arch" = x86_64 ] || must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server' 120
 must 'apk info -e tailscale'
 must 'rc-update show default | grep -qw tailscale'
 must 'rc-service tailscale status'
@@ -186,7 +199,38 @@ must 'grep -q "provisioned server for josh" /root/server.log'
 must '! apk info -e seatd && ! apk info -e wlroots0.20 && ! command -v dwl && ! command -v ghostty-custom'
 must 'test ! -e /usr/local/bin/home-session && test ! -e /etc/init.d/home-runtime && cmp /home/josh/usr/host/alpine/config/profile.sh /etc/profile.d/home-session.sh'
 must 'cp /etc/apk/world /root/world.server'
+must '! find /home/josh/usr -user root | grep .'
+must "find /etc/sysctl.d/90-home.conf /etc/modules /etc/default/grub /boot /etc/profile.d/home-session.sh /etc/doas.d /etc/clang*/ -type f 2>/dev/null | sort | xargs sha256sum > /root/server.sums"
+must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/server-rerun.log 2>&1 || { cat /root/server-rerun.log; false; }' 600
+must "! grep -E '^home: (added|regenerated|generated)' /root/server-rerun.log && sha256sum -c -s /root/server.sums && cmp /etc/apk/world /root/world.server"
+must "python3 -I -B /home/josh/usr/host/alpine/provision.py plan server > /root/plan-server.log; cat /root/plan-server.log; ! grep -E '^  (apply|conflict) ' /root/plan-server.log | grep -v -E ' (apk-index|tailscale) '" 300
+must 'cmp /home/josh/usr/host/alpine/config/sysctl.conf /etc/sysctl.d/90-home.conf'
+# shellcheck disable=SC2016
+must 'test "$(cat /proc/sys/net/ipv4/tcp_congestion_control)" = bbr && test "$(cat /proc/sys/vm/swappiness)" = 10 && test "$(cat /proc/sys/net/core/rmem_max)" = 7500000'
+must 'grep -qx tcp_bbr /etc/modules && rc-update show boot | grep -qw sysctl'
+if [ "$arch" = x86_64 ]; then
+	must 'grep -q "tsc=nowatchdog" /etc/default/grub && grep -q "tsc=nowatchdog" /boot/grub/grub.cfg'
+	must 'apk info -e amd-ucode && apk info -e intel-ucode && grep -q amd-ucode.img /boot/grub/grub.cfg && grep -q intel-ucode.img /boot/grub/grub.cfg'
+	[ "$(run 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server > /root/preboot.log 2>&1')" != 0 ] ||
+		fail 'verify accepted a kernel booted without tsc=nowatchdog'
+	must "grep -q 'booted without tsc=nowatchdog' /root/preboot.log"
+	must "cp /etc/default/grub /root/grub.good && sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=\"/GRUB_CMDLINE_LINUX_DEFAULT=\"clocksource=hpet /' /etc/default/grub"
+	[ "$(run 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/clock.log 2>&1')" != 0 ] ||
+		fail 'install accepted a non-TSC clocksource option'
+	must "grep -q 'clocksource=hpet selects another clocksource' /root/clock.log && cmp /etc/apk/world /root/world.server"
+	must 'cp /root/grub.good /etc/default/grub'
+	say 'rebooting into the server boot configuration'
+	poweroff
+	boot
+	login
+	must 'grep -qw tsc=nowatchdog /proc/cmdline'
+	# shellcheck disable=SC2016
+	must 'test "$(cat /proc/sys/net/ipv4/tcp_congestion_control)" = bbr && test "$(cat /proc/sys/net/core/default_qdisc)" = fq'
+	must 'INSTALL_MODE=server USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh server' 120
+	must 'mkdir -p /media/share && mount -t vfat -o ro /dev/vdb1 /media/share'
+fi
 
+must "grep -q '^tty0::respawn' /etc/inittab || echo 'tty0::respawn:/sbin/getty 38400 tty0' >> /etc/inittab"
 [ "$(run 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/tty0.log 2>&1')" != 0 ] ||
 	fail 'install accepted a tty0 getty that shares tty1'
 must "grep -q 'getty on tty0 shares the tty1 console' /root/tty0.log && cmp /etc/apk/world /root/world.server"
@@ -206,7 +250,8 @@ must 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.
 must 'USER_NAME=josh sh /home/josh/usr/host/alpine/verify.sh' 120
 must "stat -c '%n %Y %a' $managed > /root/mtimes && cp /etc/apk/world /root/world.first"
 must 'INSTALL_MODE=desktop USER_NAME=josh sh /home/josh/usr/host/alpine/install.sh > /root/rerun.log 2>&1 || { cat /root/rerun.log; false; }' 600
-must "! grep -E '^home: (installed|added|cloned|removed)' /root/rerun.log && grep -q 'dwl is current' /root/rerun.log && grep -q 'ghostty-custom is current' /root/rerun.log"
+must "! grep -E '^home: (added|regenerated|generated)' /root/rerun.log"
+must "python3 -I -B /home/josh/usr/host/alpine/provision.py plan desktop > /root/plan.log; cat /root/plan.log; ! grep -E '^  (apply|conflict) ' /root/plan.log | grep -v -E ' (apk-index|tailscale) '" 300
 must "stat -c '%n %Y %a' $managed | cmp - /root/mtimes && cmp /etc/apk/world /root/world.first"
 must 'sha256sum -c -s /root/baseline'
 poweroff

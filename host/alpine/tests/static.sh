@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 [ -s tools-server.txt ] || { echo 'static: tools-server.txt is missing or empty' >&2; exit 1; }
-scripts='install.sh verify.sh pubkey-same.sh tsc-opts.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh tests/static.sh tests/profile-test.sh tests/pubkey-same-test.sh tests/tsc-opts-test.sh tests/vm.sh'
+scripts='install.sh verify.sh build/dwl.sh build/ghostty.sh build/helium.sh config/volume config/home-session config/profile.sh tests/static.sh tests/profile-test.sh tests/vm.sh config/power-policy.start'
 services=services/home-runtime
 
 for script in $scripts $services; do
@@ -10,8 +10,8 @@ for script in $scripts $services; do
 	! command -v dash >/dev/null || dash -n "$script"
 done
 sh tests/profile-test.sh
-sh tests/pubkey-same-test.sh
-sh tests/tsc-opts-test.sh
+python3 -I tests/test_tuning.py
+python3 -I tests/test_provision.py
 if command -v shellcheck >/dev/null; then
 	shellcheck -s sh -S warning $scripts
 	shellcheck -s sh -S warning -e SC2034 $services

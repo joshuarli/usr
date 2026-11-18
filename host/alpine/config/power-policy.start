@@ -1,0 +1,7 @@
+#!/bin/sh
+# Installed by home as /etc/local.d/home-power-policy.start; see README.md#performance.
+case $(cat /etc/home/install-mode 2>/dev/null) in
+	desktop) mode=auto ;;
+	*) mode=performance ;;
+esac
+exec /usr/local/sbin/power-policy "$mode" >/dev/null
