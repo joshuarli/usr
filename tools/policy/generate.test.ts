@@ -191,6 +191,7 @@ type MutablePolicy = {
     maxSubagentDepth: number; modelAllowlist: string[]
   }
   opencode: { model: string; efforts: Record<string, string> }
+  commandNative: Record<string, { name: string; model: string; effort?: string }>
   nativeFallback: { tiers: string[]; claudeModels: Record<string, string>; claudeEffort: Record<string, string> }
   antigravityDirect: { models: string[] }
   bannedModels: string[]
@@ -223,6 +224,16 @@ const dimensions: Dimension[] = [
   { name: "pi worker order", mutate: p => { p.rootRoutes.worker.push(...p.rootRoutes.worker.splice(2, 1)) } },
   { name: "pi worker list length", mutate: p => { p.rootRoutes.worker.splice(2, 1) } },
 
+  { name: "command native scout model", mutate: p => { p.commandNative.scout.model = FIXTURE_MODEL } },
+  { name: "command native mechanic model", mutate: p => { p.commandNative.mechanic.model = FIXTURE_MODEL } },
+  { name: "command native mechanic effort", mutate: p => { p.commandNative.mechanic.effort = "low" } },
+  { name: "command native worker model", mutate: p => { p.commandNative.worker.model = FIXTURE_MODEL } },
+  { name: "command native worker effort", mutate: p => { p.commandNative.worker.effort = "medium" } },
+  { name: "command native expert model", mutate: p => { p.commandNative.expert.model = FIXTURE_MODEL } },
+  { name: "command native expert effort", mutate: p => { p.commandNative.expert.effort = "medium" } },
+  { name: "command native HY4 pilot model", mutate: p => { p.commandNative.pilot.model = FIXTURE_MODEL } },
+  { name: "command native HY4 pilot effort", mutate: p => { p.commandNative.pilot.effort = "high" } },
+  { name: "command native banned model", mutate: p => { p.commandNative.worker.model = "gemini-4-argon-high" }, rejects: /Prohibited model in active policy/ },
   { name: "opencode model", mutate: p => { p.opencode.model = "opencode/fixture-free" } },
   { name: "opencode scout effort", mutate: p => { p.opencode.efforts.scout = "high" } },
   { name: "opencode mechanic effort", mutate: p => { p.opencode.efforts.mechanic = "high" } },

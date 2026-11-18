@@ -37,7 +37,7 @@ class OrchestrateTests(unittest.TestCase):
         self.assertIn("Verify it with `agy models`", contract)
 
     def test_orchestrate_defers_exact_pins_to_model_check(self):
-        self.assertIn("Call `worker_model_check` for the tier you are about to assign", self.text)
+        self.assertIn("On the bridge path, call `worker_model_check` for the tier you are about to assign", self.text)
         self.assertNotIn("| Tier | Primary | Fallback (in order) |", self.text)
 
     def test_no_old_mcp_registration(self):
@@ -91,6 +91,25 @@ class OrchestrateTests(unittest.TestCase):
         for path in ("dotfiles/base/.codex/AGENTS.md", "dotfiles/base/.agents/instructions/lean.md"):
             content = (ROOT / path).read_text()
             self.assertIn("OpenCode", content)
+
+    def test_command_code_native_agents_are_pinned(self):
+        self.assertIn("Command Code exception:", self.text)
+        self.assertIn("never invoke `pi-subagent-bridge` from that parent", self.text)
+        config = POLICY["commandNative"]
+        self.assertEqual(set(config), {"scout", "mechanic", "worker", "expert", "pilot"})
+        for tier, pin in config.items():
+            content = (ROOT / "dotfiles/base/.commandcode/agents" / (pin["name"] + ".md")).read_text()
+            self.assertIn("model: " + pin["model"], content)
+            if "effort" in pin:
+                self.assertIn("reasoningEffort: " + pin["effort"], content)
+            self.assertIn("# policy:begin native-agent", content)
+        scout = (ROOT / "dotfiles/base/.commandcode/agents" / (config["scout"]["name"] + ".md")).read_text()
+        self.assertIn("tools: read_file, read_directory, grep, glob", scout)
+        self.assertNotIn("shell_command", scout)
+        self.assertNotIn("edit_file", scout)
+        self.assertEqual(config["worker"]["model"], "deepseek/deepseek-v4.1-flash")
+        self.assertEqual(config["pilot"]["effort"], "medium")
+        self.assertEqual(config["expert"]["effort"], "high")
 
     def test_global_rule(self):
         contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()

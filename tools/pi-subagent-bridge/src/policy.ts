@@ -38,6 +38,15 @@ export const CODEX_TIER_MODELS = {
   worker: { model: codexModels.coding, effort: "high" },
 } as const satisfies Record<BridgeTier, CliPin>
 
+/** Native Command Code parent agents; HY4 medium is an explicit comparison lane. */
+export const COMMAND_NATIVE = {
+  scout: { name: "usr-scout", model: "thinkingmachines/inkling-2-small:free" },
+  mechanic: { name: "usr-mechanic", model: "tencent/hy4-flash", effort: "high" },
+  worker: { name: "usr-worker", model: "deepseek/deepseek-v4.1-flash", effort: "high" },
+  expert: { name: "usr-expert", model: "tencent/hy4", effort: "high" },
+  pilot: { name: "usr-worker-hy4", model: "tencent/hy4", effort: "medium" },
+} as const
+
 export const COMMAND_MODEL = "deepseek/deepseek-v4.1-flash"
 export const COMMAND_EMBER_MODEL = "meta/muse-ember"
 export const COMMAND_TIER_MODELS = {
@@ -112,6 +121,7 @@ export const POLICY = {
     modelAllowlist: PI_MODEL_ALLOWLIST,
   },
   opencode: OPENCODE_NATIVE,
+  commandNative: COMMAND_NATIVE,
   nativeFallback: NATIVE_FALLBACK,
   antigravityDirect: ANTIGRAVITY_DIRECT,
   bannedModels: BANNED_MODELS,

@@ -21,7 +21,7 @@ const PROFILE = "dotfiles/base/.pi/agent"
 const LABELS = { codex: "Codex", "command-code": "Command Code", pi: "Pi" } as const
 
 function code(value: string): string {
-  if (!/^[a-zA-Z0-9_./#-]+$/.test(value)) throw new Error(`Invalid policy identifier: ${value}`)
+  if (!/^[a-zA-Z0-9_./#:-]+$/.test(value)) throw new Error(`Invalid policy identifier: ${value}`)
   return "`" + value + "`"
 }
 
@@ -64,6 +64,18 @@ function devin(): string {
     "Bridge pins, fallbacks, and nesting rules do not apply."
 }
 
+function commandCode(policy: Policy): string {
+  const rows = Object.entries(policy.commandNative).map(([tier, pin]) =>
+    `| ${tier === "pilot" ? "worker pilot (explicit only)" : tier} | ${code(pin.name)} | ${code(pin.model)} | ${"effort" in pin && pin.effort ? code(pin.effort) : "model default"} |`)
+  return "**Command Code exception:** A top-level Command Code session delegates through native `agent` subagents only; never invoke `pi-subagent-bridge` from that parent. " +
+    "Use the named agents below, never the unpinned built-in General/Explore for tiered work. The pilot requires an explicit comparison task; it is not the default worker.\n\n" +
+    ["| Tier | Native agent | Model | Effort |", "| --- | --- | --- | --- |", ...rows].join("\n") +
+    "\n\nNative agents have separate contexts and cannot spawn another agent. They do not provide bridge admission or Git worktree containment: the parent owns isolation, scope, review, tests and integration. " +
+    "Agent frontmatter pins are not hard enforcement: a per-call model override takes precedence, and unsupported effort silently reverts to model default. " +
+    "Check `cmd --list-models` and the `/model` effort picker on each host before trusting a lane; block it rather than silently substituting. " +
+    "Collect detached results with `agent_output` and run `scope-check --lane` on native writer lanes."
+}
+
 function nativeFallback(policy: Policy): string {
   const tiers = policy.nativeFallback.tiers.join("/")
   const mappings = policy.nativeFallback.tiers.map(tier => `${tier}: ${code(policy.nativeFallback.claudeModels[tier])}`).join("; ")
@@ -76,10 +88,11 @@ function nativeFallback(policy: Policy): string {
 }
 
 function delegation(policy: Policy, lean: boolean): string {
-  const head = lean ? "- Before delegation, read `orchestrate` and use `pi-subagent-bridge` for scout/mechanic/worker." :
-    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim; follow `orchestrate`. Expert assignments use harness-native subagents (OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
+  const head = lean ? "- Before delegation, read `orchestrate`; use native `usr-*` agents for top-level Command Code and `pi-subagent-bridge` for other scout/mechanic/worker parents except OpenCode and Devin." :
+    "- All scout/mechanic/worker coding subagents, in every harness and skill, MUST launch through `pi-subagent-bridge` MCP tools or its CLI shim except top-level Command Code, OpenCode and Devin parents; follow `orchestrate`. Expert assignments use harness-native subagents (including Command Code `usr-expert`, OpenCode's `expert` agent, Devin's `run_subagent`, Codex's native subagents, Pi's native `expert` profile, Claude Code's " + code(policy.nativeFallback.claudeModels.expert) + " at " + code(policy.nativeFallback.claudeEffort.expert) + " effort); the bridge has no expert tier."
   return head + " A top-level OpenCode session delegates only through OpenCode native subagents; free top-level models require free tier models. " +
     "A top-level Devin session delegates only through Devin native subagents. " +
+    "A top-level Command Code session delegates only through native pinned `usr-*` subagents (HY4-medium worker is opt-in). " +
     `No ${code("god")} tier exists. ` +
     `Never route to ${policy.bannedModels.map(code).join(" or ")}. ` +
     `Only ${policy.nativeFallback.tiers.join("/")} may use tier-matched native subagents after bridge quota/backend exhaustion, ` +
@@ -190,6 +203,14 @@ function validatePolicy(policy: Policy): void {
     if (profile.allowed.some(name => !profileNames.has(name))) throw new Error(`Unknown descendant in ${profile.name}`)
   for (const value of policy.antigravityDirect.models) validateModel(value)
   validateModel(policy.opencode.model)
+  if (new Set(Object.values(policy.commandNative).map(pin => pin.name)).size !== Object.keys(policy.commandNative).length)
+    throw new Error("Duplicate Command Code native agent name")
+  for (const tier of ["scout", "mechanic", "worker", "expert", "pilot"] as const) {
+    const pin = policy.commandNative[tier]
+    code(pin.name)
+    validateModel(pin.model)
+    if ("effort" in pin && pin.effort) code(pin.effort)
+  }
   for (const value of Object.values(policy.nativeFallback.claudeModels)) code(value)
   for (const value of Object.values(policy.nativeFallback.claudeEffort)) code(value)
 }
@@ -265,9 +286,10 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   const table = routingTable(policy)
   const direct = directModels(policy)
   document("dotfiles/base/.agents/skills/orchestrate/SKILL.md", {
-    "routing-intro": "**All scout/mechanic/worker coding subagents from any harness use `pi-subagent-bridge`**, subject to the OpenCode, Devin and native exceptions below. " + summary(policy),
+    "routing-intro": "**All scout/mechanic/worker coding subagents use `pi-subagent-bridge` by default**, except top-level OpenCode, Devin and Command Code native parents described below. " + summary(policy),
     "opencode": openCode(policy),
     "devin": devin(),
+    "command-code": commandCode(policy),
     "native-fallback": nativeFallback(policy),
   })
   document("dotfiles/base/.codex/AGENTS.md", { delegation: delegation(policy, false), "direct-models": "- " + direct })
@@ -279,6 +301,12 @@ export function renderOutputs(root: string, policy: Policy = POLICY): Output[] {
   })
   document("docs/pi.md", { "routing-summary": summary(policy) })
   document("docs/agent-setup.md", { "routing-summary": summary(policy) })
+  for (const pin of Object.values(policy.commandNative)) {
+    const path = `dotfiles/base/.commandcode/agents/${pin.name}.md`
+    const previous = read(path)
+    const fields = [`model: ${pin.model}`, ...("effort" in pin && pin.effort ? [`reasoningEffort: ${pin.effort}`] : [])]
+    emit(path, replaceBlocks(previous, { "native-agent": fields.join("\n") }, true), previous)
+  }
   for (const profile of profiles(policy)) {
     const path = `${PROFILE}/agents/${profile.name}.md`
     const previous = read(path)

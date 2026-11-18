@@ -11,15 +11,17 @@ flowchart TD
 
   tier -->|expert| harness{"Harness of the parent session?"}
   harness -->|OpenCode top-level| oc_exp["OpenCode native expert agent<br/>opencode/inkling-2-small-free<br/>effort max"]
+  harness -->|Command Code| cmd_exp["Command Code native expert<br/>usr-expert<br/>tencent/hy4, high"]
   harness -->|Devin top-level| dv_exp["Devin native run_subagent<br/>subagent_general or subagent_explore<br/>no per-tier pin"]
   harness -->|Codex| cx_exp["Codex native subagent<br/>session-config model, no per-tier pin"]
   harness -->|Pi| pi_exp["Pi native expert profile<br/>opencode-go/deepseek-v4.1-flash, max"]
   harness -->|Claude Code| cc_exp["Claude Code native subagent<br/>opus, xhigh effort"]
   harness -->|any other harness| other["No defined lane in this contract<br/>report to the owner before delegating"]
 
-  tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode or Devin session?"}
+  tier -->|scout / mechanic / worker| cwd{"Top-level OpenCode, Devin or Command Code session?"}
   cwd -->|OpenCode| oc["OpenCode native tier agent<br/>scout low · mechanic medium · worker high<br/>opencode/inkling-2-small-free"]
   cwd -->|Devin| dv["Devin native run_subagent<br/>subagent_explore (read-only) · subagent_general (changes)"]
+  cwd -->|Command Code| cmd["Command Code native usr-* agents<br/>scout Inkling 2 Small Free · mechanic HY4 Flash<br/>worker DeepSeek V4.1 Flash · expert HY4<br/>HY4-medium worker only explicit pilot"]
   cwd -->|otherwise| bridge["pi-subagent-bridge<br/>worker_model_check → worker_start"]
 
   bridge --> plan["Admitted ordered plan per tier<br/>codex → command-code → ordered Pi fallback"]
@@ -36,10 +38,10 @@ flowchart TD
 
 Expert is native everywhere; the bridge is reserved for `scout`/`mechanic`/`worker` in harnesses without a top-level native exception.
 
-| Assignment | OpenCode (top-level) | Devin (top-level) | Codex | Pi | Claude Code |
-| --- | --- | --- | --- | --- | --- |
-| expert | native `expert` agent (`opencode/inkling-2-small-free#max`) | `run_subagent`, unpinned | native subagent, unpinned | native `expert` profile (`opencode-go/deepseek-v4.1-flash`, `max`) | native subagent (`opus`, `xhigh` effort) |
-| quota exhaustion (scout/mechanic/worker) | never uses the bridge | never uses the bridge | not defined; report rather than substitute | not defined; report rather than substitute | native subagents: `scout` `haiku` · `mechanic` `sonnet` · `worker` `sonnet`, same brief, worktree and scope |
+| Assignment | OpenCode (top-level) | Devin (top-level) | Command Code (top-level) | Codex | Pi | Claude Code |
+| --- | --- | --- | --- | --- | --- | --- |
+| expert | native `expert` agent (`opencode/inkling-2-small-free#max`) | `run_subagent`, unpinned | `usr-expert` (`tencent/hy4`, `high`) | native subagent, unpinned | native `expert` profile (`opencode-go/deepseek-v4.1-flash`, `max`) | native subagent (`opus`, `xhigh` effort) |
+| quota exhaustion (scout/mechanic/worker) | never uses the bridge | never uses the bridge | never uses the bridge; do not silently switch native models | not defined; report rather than substitute | not defined; report rather than substitute | native subagents: `scout` `haiku` · `mechanic` `sonnet` · `worker` `sonnet`, same brief, worktree and scope |
 
 Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; the admitted routes are:
 
@@ -55,8 +57,9 @@ Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; 
 
 - The bridge admits `scout`, `mechanic`, `worker` only. `worker_model_check`, `worker_start`, resume, steer and the MCP schemas reject `expert`.
 - Expert is harness-native everywhere; nothing routes to the bridge. Expert is terminal by lane: use it for exceptional architectural decisions and adversarial review, never as a size-based upgrade.
-- Top-level OpenCode and Devin sessions never use the bridge, at any tier or as a fallback. When the OpenCode top-level model is free, every tier runs a free model (the configured tier agents use `opencode/inkling-2-small-free` regardless of the top-level model).
-- Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Codex → Command Code → ordered Pi), only before edits, only along admitted routes.
+- Top-level OpenCode, Devin and Command Code sessions never use the bridge, at any tier or as a fallback. Command Code uses native `usr-*` agents; HY4-medium worker is an explicit pilot, not a default. When the OpenCode top-level model is free, every tier runs a free model (its configured tier agents use `opencode/inkling-2-small-free`).
+- Claude Code, Codex and Pi sessions use the bridge for `scout`/`mechanic`/`worker`; the bridge owns provider fallback (Codex → Command Code leaf → ordered Pi), only before edits, only along admitted routes.
+- Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.
 - An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.
 - Codex and Command Code workers are leaves. Pi workers may fan out one nested generation to equal-or-weaker approved tiers; the typed ceiling is enforced per child, depth is 2, and `options: { agentScope: "user" }` is required for nested calls.
 - Ban on delegation of `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families in every harness, including every effort variant.

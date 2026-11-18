@@ -210,6 +210,32 @@
       "expert": "max"
     }
   },
+  "commandNative": {
+    "scout": {
+      "name": "usr-scout",
+      "model": "thinkingmachines/inkling-2-small:free"
+    },
+    "mechanic": {
+      "name": "usr-mechanic",
+      "model": "tencent/hy4-flash",
+      "effort": "high"
+    },
+    "worker": {
+      "name": "usr-worker",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "effort": "high"
+    },
+    "expert": {
+      "name": "usr-expert",
+      "model": "tencent/hy4",
+      "effort": "high"
+    },
+    "pilot": {
+      "name": "usr-worker-hy4",
+      "model": "tencent/hy4",
+      "effort": "medium"
+    }
+  },
   "nativeFallback": {
     "tiers": [
       "scout",

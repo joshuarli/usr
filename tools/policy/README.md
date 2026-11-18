@@ -26,7 +26,8 @@ make subagent-visualization
 ```
 
 `generate` renders checked-in policy tables, bounded instruction blocks, native
-Pi profile fields, Pi subagent settings and OpenCode tier model fields.
+Pi profile fields, Pi subagent settings, OpenCode tier models and Command Code
+native agent model/effort pins.
 `policy.generated.json` is the same deterministic export for Python consumers.
 `policy` prints that JSON without reading credentials or probing providers.
 Live availability belongs to `worker_model_check`.
@@ -75,7 +76,8 @@ hand-written list names every remaining policy dimension (Codex and
 Command Code pins per lower tier, the Pi fallback list, OpenCode, native
 fallback, direct Antigravity models, banned families and each native Pi field);
 each entry must change a rendered projection other than the JSON export or be
-rejected. Add a line there when a dimension is added. The native-fallback
+rejected. Command Code top-level parents use native `usr-*` agents; Command CLI
+rows in bridge `rootRoutes` remain leaf fallback executors for other parents. Add a line there when a dimension is added. The native-fallback
 reasons, the OpenCode bridge and free-parent rules and the direct-model
 availability check have fixed meaning and are stated in the renderer prose, not
 exported. Independent
