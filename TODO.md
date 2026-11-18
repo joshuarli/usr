@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 84
+Next: 85
 
 
 
@@ -74,6 +74,16 @@ Next: 84
 - **Where:** `tools/todo/src/todo.py` (`FIELD`, `NAMES`, `parse`)
 - **Problem:** `todo list`, `todo add` and `todo check` fail on laputa-systems/xsh `TODO.md` with `todo: XSH-1: malformed ticket fields`. Its tickets add `- **Acceptance:**`, `- **Progress:**` and `- **Coordination:**` fields, and some put several fields on one line; `FIELD` matches only the seven schema names, so the reconstructed field block differs from the file. Agents working in that repository must then edit the backlog by hand, which the todo skill forbids, and cannot allocate IDs safely.
 - **Recommendation:** Accept additional `- **Name:** value` fields (preserving their order and text on round-trip) while still requiring the seven schema fields, or report the first unknown field name and line instead of `malformed ticket fields` so the backlog can be normalized. Acceptance: `todo check` from a laputa-systems/xsh checkout at master either passes or names the exact offending field and line.
+- **Fix with:** none
+- **Effort:** S
+
+
+### USR-84 · P3 · bridge MCP worker_start rejects a scope that the client sends as a JSON string
+
+- **Area:** Delegation
+- **Where:** tools/pi-subagent-bridge/src/cli.ts --bridge-dispatch (worker_start argument validation)
+- **Problem:** From Claude Code, worker_start with a well-formed scope object failed with `pi-subagent-bridge: Error: scope must be an object`; the dispatch log shows the scope arrived as a JSON-encoded string. The same scope sent as an object through `cli.ts --bridge-dispatch` was admitted. Every Claude Code delegation through MCP hits this, forcing a hand-built CLI dispatch.
+- **Recommendation:** In worker_start (and other tools with object parameters), accept a string argument that parses to an object of the declared schema, then validate as today; add a test that dispatches the stringified form.
 - **Fix with:** none
 - **Effort:** S
 
