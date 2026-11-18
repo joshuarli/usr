@@ -148,7 +148,13 @@ test("retired roles cannot silently survive in native profiles or harness config
     writeFileSync(openCodePath, JSON.stringify(openCode, null, 2) + "\n")
     const outputs = renderOutputs(f.root, policy)
     assert.ok(!outputs.some(output => output.path.endsWith("agents/mechanic.md")))
-    for (const output of outputs) assert.ok(!output.content.includes("| mechanic |"), output.path)
+    for (const output of outputs) {
+      if (output.path === "dotfiles/base/.agents/skills/orchestrate/SKILL.md") {
+        assert.ok(output.content.includes("| mechanic | `usr-mechanic` |"))
+        continue
+      }
+      assert.ok(!output.content.includes("| mechanic |"), output.path)
+    }
     writeOutputs(f.root, outputs)
     assert.deepEqual(writeOutputs(f.root, renderOutputs(f.root, policy)), [])
   } finally { f.close() }
