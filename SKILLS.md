@@ -65,6 +65,7 @@ Use `ultrareview` to find the work, `ultratriage` to decide it, and `burn-down-t
 | Skill | Mode | Use it to |
 | --- | --- | --- |
 | `pi-update` | Explicit | Update Pi, the SDK and Pi extensions in `pi-build`, publish a verified release, then bump the `usr` pin after proving offline setup. |
+| `opencode-resync` | Explicit | Repoint OpenCode's native model after a free model is retired: pick a replacement covering all tier efforts, regenerate policy, and verify. |
 
 ## Verification
 
