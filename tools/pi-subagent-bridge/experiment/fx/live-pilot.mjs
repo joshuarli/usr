@@ -17,6 +17,7 @@ import { classifyJobBlock, classifyProbeResponse, pilotVerdict, renameEvidenceOk
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url))
 const pin = JSON.parse(readFileSync(new URL('./pin.json', import.meta.url), 'utf8'))
+const LIVE_TRANSPORT = 'acp'
 const BOUNDS = { max_new_jobs: 6, max_continuations: 1, wall_ms_per_job: 900000, max_model_steps: 20 }
 const LIVE_BASE = join(root, '.work/tmp/fx-live')
 const LOGIN_HOME = join(LIVE_BASE, 'fx-profile')
@@ -464,14 +465,14 @@ export async function livePilot(binary, scratch, requested) {
     return { status: 'blocked', exitCode: 75, report: { verdict: 'blocked', scope: BOUNDS, unavailable } }
   }
   const { name, profile } = selected
-  const report = { mode: 'live', profile: name, provider: profile.provider, probe_result: selected.probe_result ?? null, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [] }
+  const report = { mode: 'live', transport: LIVE_TRANSPORT, profile: name, provider: profile.provider, probe_result: selected.probe_result ?? null, selections: profile.selections, runtime: pin.version, scope: BOUNDS, production_routing: false, paid_gateway: false, root: runRoot, jobs: [] }
   let owner = null
   try {
     const home = join(runRoot, 'home'), repo = join(home, 'repo')
     mkdirSync(home, { recursive: true })
     const base = provisionRepo(repo)
     const fx = makeFxAdapter({
-      transport: 'cli', binary, binarySha256: pin.binary_sha256, home, provider: profile.provider, connection: profile.connection,
+      transport: LIVE_TRANSPORT, binary, binarySha256: pin.binary_sha256, home, provider: profile.provider, connection: profile.connection,
       allowedCommands: ['python3', 'python3 *', 'node', 'node *', 'cargo', 'cargo *', 'git status*', 'git diff*', 'git log*', 'git show*'],
       wallMs: BOUNDS.wall_ms_per_job, pathEnv: toolchainPath(),
       secretEnvFiles: auth.secretEnvFiles ?? {},

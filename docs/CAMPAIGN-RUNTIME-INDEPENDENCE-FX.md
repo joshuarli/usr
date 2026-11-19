@@ -29,7 +29,8 @@
   - **Mitigation:** both web built-ins are hidden through `tool_placement`. The ACP supervisor stops a run on any `web_fetch`/`web_search` call, and the CLI transport rejects a result that used one. The fetch may already have happened.
   - **Consequence:** read-only FX tiers have a detected public-URL egress channel, not a prevented one. Reproduction: settings `{"permission": {"*": "deny"}}`, then a provider response calling `web_fetch` with `{"url": "https://example.com/"}`.
 - **Phase 3 grant shape (probed):** client-supplied ACP MCP servers expose tools as `mcp_<server>_<tool>`. A per-tool `permission` allow offers and runs only that tool. An ungranted tool from the same server is refused before it reaches the server.
-- **Next implementation slice:** Phase 2 live DeepSeek through ACP, with an account-access check first. Phases 3 and 4 can proceed deterministically in parallel.
+- **Phase 2 parked, November 19, 2026:** the one-time account recheck sent a single 1-token `deepseek-v4.1-flash` request to OpenCode Go. It returned HTTP 429 `GoUsageLimitError`: the monthly limit was reached, resetting in about 10 days. Only paid Extra Usage would continue, and binding decision 9 forbids buying access. No pilot jobs were admitted, so no fallback quota was spent. The live pilot now runs over ACP (`LIVE_TRANSPORT` in `experiment/fx/live-pilot.mjs`). Retry `npm run spike:fx -- --live opencode-go` after the reset. The Codex profile still lacks an FX-owned login. Its handoff is `FX_HOME=<usr>/.work/tmp/fx-live/fx-profile <usr>/.work/tmp/fx-spike/installed-home/.local/bin/fx login codex`, and it can prove lifecycle but not this gate.
+- **Next implementation slice:** Phase 4 controlled children and Phase 3 research tools, both deterministic. Phase 2 waits for the quota reset.
 - **Current boundary:** FX remains experimental. Production routes, public names, ordinary schema-2 writes, experimental schema-3 readers/writes, installer defaults and provider entitlements are unchanged.
 
 This is the authoritative remaining execution plan. The dated audit holds the comparison, pinned references and diagnostic evidence; earlier verification documents hold historical results.
@@ -190,7 +191,7 @@ Extend existing behavior tests. Separate source support, fake-process proof, rea
 | --- | --- |
 | Supported contracts | Audit used Node 24; rerun affected fixtures on Node 26 with development tools. Reproduce the no-Pi owner case where Unix sockets are permitted. |
 | ACP execution | Resolved on macOS ARM64: `-32603` comes from the `--provider` override; select the provider through private settings. Linux ACP still needs native execution proof. |
-| Live account/model | Historical Go quota and absent FX-owned Codex login blocked inference. Recheck the selected authorized account once; use the printed login handoff if needed, never unrelated client credentials. |
+| Live account/model | Rechecked November 19, 2026: Go returned 429 `GoUsageLimitError` (monthly, about 10 days to reset); no FX-owned Codex login. Retry after the reset; use the printed login handoff, never unrelated client credentials. |
 | Native platforms | Retain historical macOS CLI evidence; new ACP and each Linux musl architecture need native execution/install proof. |
 | External consumers | Agentctl/Intercom peers were not exercised in this audit. Preserve local receipt/environment-scrubbing fixtures; integration needs the relevant checkout/authorized host. |
 | Provider retirement | Go Spark, Muse and Devin equivalents remain unqualified. DeepSeek/Codex success cannot clear them. |
