@@ -2,6 +2,8 @@
 
 ## Status
 
+**Owner decision, November 19, 2026: Pi stays.** FX is kept off the active path: production `ROOT_PLANS` route only to Codex, Command Code and Pi, which `test/policy.test.ts` pins, and `server.ts` builds the bridge without an FX adapter. The FX adapter, ACP supervisor, children controller and experiments stay in the tree, so the work can resume as FX develops. Remaining work is tracked in `TODO.md` as USR-87 through USR-93. The owner does not use FX's paid inference or FX as a top-level harness.
+
 **Decision, November 19, 2026:** qualify FX's pinned native ACP interface inside the existing bridge as the next step toward replacing Pi headless workers. The current FX experiment does **not** satisfy worker parity. Keep Pi available until each required route and lifecycle contract has a qualified replacement.
 
 - **Completed foundation:** runtime independence, optional Pi loading, core-only installation, shared state/owner/lease machinery, and the isolated `fx ask --json` experiment. Preserve the [runtime-independence evidence](verification/runtime-independence.md) and [original CLI spike evidence](verification/runtime-independence-fx.md); do not restart those campaigns.
