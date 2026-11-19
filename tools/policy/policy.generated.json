@@ -300,6 +300,7 @@
     ]
   },
   "bannedModels": [
+    "gemini-3.8",
     "gemini-4-argon",
     "gemini-4-carbon",
     "gpt-6-astra",

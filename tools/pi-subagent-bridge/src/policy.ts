@@ -98,7 +98,7 @@ export const NATIVE_FALLBACK = {
 } as const
 /** Family prefixes are prohibited, including all effort-suffixed variants. */
 export const BANNED_MODELS = [
-  "gemini-4-argon", "gemini-4-carbon", "gpt-6-astra", "gpt-6.1-astra", "gpt-6.2-astra",
+  "gemini-3.8", "gemini-4-argon", "gemini-4-carbon", "gpt-6-astra", "gpt-6.1-astra", "gpt-6.2-astra",
 ] as const
 export function isBannedModel(model: string, families: readonly string[] = BANNED_MODELS): boolean {
   const id = model.slice(model.lastIndexOf("/") + 1)

@@ -39,7 +39,7 @@ test("the plans are the pins the bridge admits, and the exported routes derive f
 
 test("prohibited model families include every effort variant but not unrelated names", () => {
   for (const model of [
-    "gemini-4-argon", "gemini-4-argon-low", "gemini-4-carbon-xhigh", "google/gemini-4-carbon-high",
+    "gemini-3.8-flash", "google/gemini-3.8-pro", "gemini-4-argon", "gemini-4-argon-low", "gemini-4-carbon-xhigh", "google/gemini-4-carbon-high",
     "gpt-6-astra", "gpt-6.1-astra-high", "openai/gpt-6.2-astra-xhigh",
   ]) {
     assert.equal(isBannedModel(model), true, model)
@@ -50,7 +50,7 @@ test("prohibited model families include every effort variant but not unrelated n
     for (const route of routesOf(ROOT_PLANS[tier])) assert.equal(isBannedModel(route.model), false, tier + " " + route.model)
   }
   assert.deepEqual(BANNED_MODELS, [
-    "gemini-4-argon", "gemini-4-carbon", "gpt-6-astra", "gpt-6.1-astra", "gpt-6.2-astra",
+    "gemini-3.8", "gemini-4-argon", "gemini-4-carbon", "gpt-6-astra", "gpt-6.1-astra", "gpt-6.2-astra",
   ])
 })
 

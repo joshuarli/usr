@@ -3,7 +3,7 @@
 <!-- Generated from tools/policy/subagent-visualization.ts; run make subagent-visualization. -->
 <!-- Hand-edit the generator, not this file. Policy inputs come from `tools/pi-subagent-bridge/src/policy.ts` via the typed `POLICY` export. -->
 
-Decision graph for delegating a coding subagent. Tiers: `scout` (read-only: no `bash`, `edit` or `write`), `mechanic`, `worker`, `expert`. There is no `god` tier, and the `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families are prohibited everywhere, including every effort variant.
+Decision graph for delegating a coding subagent. Tiers: `scout` (read-only: no `bash`, `edit` or `write`), `mechanic`, `worker`, `expert`. There is no `god` tier, and the `gemini-3.8` / `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families are prohibited everywhere, including every effort variant.
 
 ```mermaid
 flowchart TD
@@ -65,7 +65,7 @@ Codex, Pi and Claude Code route `scout`/`mechanic`/`worker` through the bridge; 
 - Command Code native children cannot spawn another subagent. Native frontmatter pins and parent scoping are instructions, not bridge-enforced admission; model overrides and unsupported effort can bypass intended settings.
 - An admitted session keeps its recorded model and route. A task failure, rejected acceptance check or scope change is not a provider failure and never authorizes a replacement worker.
 - Codex and Command Code workers are leaves. Pi workers may fan out one nested generation to equal-or-weaker approved tiers; the typed ceiling is enforced per child, depth is 2, and `options: { agentScope: "user" }` is required for nested calls.
-- Ban on delegation of `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families in every harness, including every effort variant.
+- Ban on delegation of `gemini-3.8` / `gemini-4-argon` / `gemini-4-carbon` / `gpt-6-astra` / `gpt-6.1-astra` / `gpt-6.2-astra` families in every harness, including every effort variant.
 - The parent owns scope, worktrees, verification and integration in every harness. Agent output is a claim until the parent checks the diff and the acceptance proof.
 
 See [orchestrate](../dotfiles/base/.agents/skills/orchestrate/SKILL.md) for the routing contract and [the bridge reference](../tools/pi-subagent-bridge/README.md) for admission, fallback and state semantics.
