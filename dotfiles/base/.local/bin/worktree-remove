@@ -6,7 +6,9 @@ case ${1:-} in
 Usage: worktree-remove
 
 Claude Code hook: read JSON with worktree_path from stdin and remove a clean
-worktree under .work/wt; delete its branch if merged. Requires git and jaq or jq.
+worktree under .work/wt; delete its hook-created branch if merged into its
+upstream or the primary HEAD when it has no upstream. Requires git, Python 3
+and the sibling worktree-retire tool.
   -h, --help  Show this help
 
 Examples:
@@ -22,49 +24,5 @@ Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/inst
 OWNED_HELP
         exit 0 ;;
 esac
-# WorktreeRemove hook for Claude Code: remove a worktree made by worktree-create
-# and delete its branch if that branch is merged. Claude never deletes a
-# hook-created worktree's branch itself. An unmerged branch is kept, because it
-# may hold the only copy of the work.
-set -eu
 
-jsonq() {
-    if command -v jaq >/dev/null 2>&1 && jaq --version >/dev/null 2>&1; then
-        jaq "$@"
-    elif command -v jq >/dev/null 2>&1 && jq --version >/dev/null 2>&1; then
-        jq "$@"
-    else
-        printf '%s\n' 'worktree-remove: jaq or jq is required' >&2
-        exit 1
-    fi
-}
-
-path=$(jsonq -r .worktree_path)
-
-case "$path" in
-    */.work/wt/?*) ;;
-    *) printf '%s\n' "worktree-remove: refusing path outside .work/wt: $path" >&2; exit 1 ;;
-esac
-
-common=$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)
-branch=$(git -C "$path" symbolic-ref --quiet --short HEAD || true)
-
-if [ -n "$(git -C "$path" status --porcelain --untracked-files=all)" ]; then
-    printf '%s\n' "worktree-remove: kept $path, which has uncommitted or untracked files" >&2
-    exit 1
-fi
-
-ignored=$(git -C "$path" status --porcelain --ignored=matching --untracked-files=all)
-case "$ignored" in
-    *"!! "*)
-        printf '%s\n' "worktree-remove: kept $path, which contains ignored files; review them before retirement" >&2
-        exit 1 ;;
-esac
-
-git --git-dir="$common" worktree remove "$path"
-
-case "$branch" in
-    worktree-*)
-        git --git-dir="$common" branch -d "$branch" >&2 \
-            || printf '%s\n' "worktree-remove: kept unmerged branch $branch" >&2 ;;
-esac
+exec "$(dirname "$0")/worktree-retire" --from-hook

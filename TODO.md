@@ -1,5 +1,5 @@
 Prefix: USR
-Next: 86
+Next: 87
 
 
 
@@ -86,4 +86,14 @@ Next: 86
 - **Recommendation:** In worker_start (and other tools with object parameters), accept a string argument that parses to an object of the declared schema, then validate as today; add a test that dispatches the stringified form.
 - **Fix with:** none
 - **Effort:** S
+
+
+### USR-86 · P3 · Qualify optional copy-on-write worktree and cache seeding
+
+- **Area:** Delegation
+- **Where:** docs/worktree-cow.md; dotfiles/base/.local/bin/worktree-create; dotfiles/base/.local/bin/worktree-retire
+- **Problem:** Native worktrees duplicate working files and per-lane build artifacts. Current CoW wrappers can save disk but add metadata, template or mount lifecycle risks; no usr-native APFS or Linux-musl measurements establish their value.
+- **Recommendation:** Run the bounded comparison in docs/worktree-cow.md: native Git, allowlisted quiescent cache reflinks and one add-only adapter on APFS plus native Linux Btrfs/XFS, with ext4 fallback. Measure post-build physical disk delta and responsiveness; require correct Git isolation and no silent full cache copies. Keep usr as the sole lifecycle owner and adopt only demonstrated improvements.
+- **Fix with:** none
+- **Effort:** M
 

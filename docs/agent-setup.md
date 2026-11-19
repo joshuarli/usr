@@ -12,7 +12,9 @@ Do not send repository source, credentials, full transcripts, sensitive internal
 
 ## Instructions and skills
 
-[`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) remains the normal shared contract. Other harness adapters still point to it. Claude's `CLAUDE.md` and Codex's higher-precedence `AGENTS.override.md` instead load a small bootstrap; startup hooks select the normal contract or the lean contract for Opus 5.5 in Claude and Sol 6.2 in Codex. The contracts are alternatives, not layers. See [instruction profiles](model-profiles.md) for activation, fallback, and fresh-session boundaries.
+Proactive cleanup uses [disk-pressure events](agent-disk-pressure.md) and runs only below 10% available system space. Codex/Claude hooks and the Pi run-entry extension stay silent on healthy disks. Other harnesses use the shared one-shot fallback in their working contract; there is no model polling loop.
+
+[`dotfiles/base/.codex/AGENTS.md`](../dotfiles/base/.codex/AGENTS.md) remains the normal shared contract. Other harness adapters point to it; Antigravity has an equivalent regular-file policy projection. Claude's `CLAUDE.md` and Codex's higher-precedence `AGENTS.override.md` instead load a small bootstrap; startup hooks select the normal contract or the lean contract for Opus 5.5 in Claude and Sol 6.2 in Codex. The contracts are alternatives, not layers. See [instruction profiles](model-profiles.md) for activation, fallback, and fresh-session boundaries.
 
 | Harness | Global instructions | Shared skills |
 | --- | --- | --- |

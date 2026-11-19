@@ -33,6 +33,7 @@ class OrchestrateTests(unittest.TestCase):
         contract = (ROOT / "dotfiles/base/.codex/AGENTS.md").read_text()
         for model in POLICY["antigravityDirect"]["models"]:
             self.assertIn(model, contract)
+            self.assertNotIn(model, {route["model"] for routes in POLICY["rootRoutes"].values() for route in routes})
         self.assertIn("Verify `agy models` and actual child runtime models", contract)
         block = self.text.split("<!-- policy:begin antigravity -->", 1)[1].split("<!-- policy:end antigravity -->", 1)[0]
         for pin in POLICY["antigravityDirect"]["tiers"].values():

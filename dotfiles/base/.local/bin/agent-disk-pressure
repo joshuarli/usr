@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Request one bounded cleanup pass only below 10% available system disk space.
+
+The hook never deletes anything and never runs Git, df, du, or a subprocess.
+Healthy events are silent. Harnesses sharing a state directory share a cooldown.
+"""
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+from dataclasses import dataclass
+import fcntl
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import socket
+import stat
+import sys
+import tempfile
+import time
+
+
+NOTICE_INTERVAL = 30 * 60
+INPUT_LIMIT = 1024 * 1024
+STATE_LIMIT = 4096
+EVENTS = {"SessionStart", "UserPromptSubmit", "PostToolUse", "PostToolUseFailure"}
+
+
+@dataclass(frozen=True)
+class Sample:
+    path: str
+    available: int
+    total: int
+
+    @property
+    def low(self) -> bool:
+        # Do not use df's rounded percentage or blocks reserved for root.
+        return self.available * 10 < self.total
+
+    def as_dict(self) -> dict[str, object]:
+        return {"path": self.path, "available_bytes": self.available,
+                "total_bytes": self.total, "free_percent": self.available * 100 / self.total,
+                "below_threshold": self.low, "threshold_percent": 10}
+
+
+def sample_disk() -> Sample:
+    # macOS's writable boot volume; / can be a sealed system snapshot.
+    path = "/System/Volumes/Data" if sys.platform == "darwin" else "/"
+    info = os.statvfs(path)
+    size = info.f_frsize or info.f_bsize
+    available = max(0, info.f_bavail)
+    if info.f_blocks <= 0 or size <= 0 or available > info.f_blocks:
+        raise ValueError("invalid system disk counters")
+    return Sample(path, available * size, info.f_blocks * size)
+
+
+def state_directory() -> Path:
+    configured = os.environ.get("XDG_STATE_HOME", "")
+    root = Path(configured) if configured and Path(configured).is_absolute() else Path.home() / ".local/state"
+    # A shared home must not let another machine suppress this host's notice.
+    host = hashlib.sha256(socket.gethostname().encode()).hexdigest()[:16]
+    return root / "usr-disk-pressure" / host
+
+
+def regular_owned(info: os.stat_result) -> bool:
+    return stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid() and info.st_nlink == 1
+
+
+@contextmanager
+def locked(directory: Path):
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise OSError("unsafe disk pressure state directory")
+    flags = os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(directory / "notice.lock", flags, 0o600)
+    try:
+        if not regular_owned(os.fstat(descriptor)):
+            raise OSError("unsafe disk pressure lock")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        # Keep the lock inode: unlinking it permits two independent lockers.
+        os.close(descriptor)
+
+
+def read_notice(path: Path) -> float | None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    except FileNotFoundError:
+        return None
+    with os.fdopen(descriptor, "rb") as stream:
+        if not regular_owned(os.fstat(stream.fileno())):
+            raise OSError("unsafe disk pressure state")
+        raw = stream.read(STATE_LIMIT + 1)
+    try:
+        data = json.loads(raw) if len(raw) <= STATE_LIMIT else None
+        stamp = data.get("notified_at") if isinstance(data, dict) and data.get("version") == 1 else None
+        if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) and math.isfinite(stamp) and stamp >= 0:
+            return stamp
+    except (ValueError, UnicodeError, RecursionError, OverflowError):
+        pass
+    return None
+
+
+def save_notice(path: Path, now: float) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".notice-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump({"version": 1, "notified_at": now}, stream)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def cleanup_message(sample: Sample) -> str:
+    # Truncate for display: 9.999% must not look like a healthy 10.0%.
+    percent = sample.available * 1000 // sample.total / 10
+    return (
+        f"System disk pressure: {sample.path} has {percent:.1f}% available "
+        f"({sample.available / 2**30:.2f} GiB), strictly below 10%. "
+        "The coordinator should use the cleanup skill for one bounded pass over its own "
+        "completed worktrees and known disposable scratch. If you are a delegated worker, "
+        "relay this to the parent; do not expand your scope. Recheck agent-disk-pressure status "
+        "before removing anything and after each batch; stop at >=10%. Preserve active, "
+        "leased, dirty, parked, unknown-owner and unintegrated work. Use worktree-retire "
+        "for accepted lanes; never rm a worktree. If no safe candidates remain, report "
+        "the blocker and continue the original task where feasible. Do not poll or repeat "
+        "a fruitless pass. This notice is shared for 30 minutes by harnesses using the same state directory."
+    )
+
+
+def notification() -> str | None:
+    if os.environ.get("USR_SCOPED_WORKER") == "1":
+        return None
+    sample = sample_disk()
+    directory = state_directory()
+    path = directory / "notice.json"
+    # No state directory or lock is created on the ordinary healthy path.
+    if not sample.low and not path.exists():
+        return None
+    with locked(directory) as acquired:
+        if not acquired:
+            return None
+        previous = read_notice(path)
+        sample = sample_disk()  # Never emit a cached low sample after recovery.
+        if not sample.low:
+            path.unlink(missing_ok=True)
+            return None
+        now = time.time()
+        if previous is not None and 0 <= now - previous < NOTICE_INTERVAL:
+            return None
+        # Failure to commit the shared claim must not start competing cleaners.
+        save_notice(path, now)
+        return cleanup_message(sample)
+
+
+def hook() -> int:
+    try:
+        raw = sys.stdin.buffer.read(INPUT_LIMIT + 1)
+        if len(raw) > INPUT_LIMIT:
+            return 0
+        event = json.loads(raw)
+        if not isinstance(event, dict) or event.get("hook_event_name") not in EVENTS or event.get("agent_id"):
+            return 0
+        message = notification()
+        if message:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": event["hook_event_name"], "additionalContext": message,
+            }}))
+    except (OSError, ValueError, TypeError, RecursionError):
+        # Advisory hook: failure neither authorizes cleanup nor blocks work.
+        return 0
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n  agent-disk-pressure status\n  agent-disk-pressure notify\n"
+               "  agent-disk-pressure hook < event.json\n\n"
+               "Maintained by Joshua Li: https://github.com/joshuarli/usr\n"
+               "Bugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\n"
+               "Agents working for Joshua: record nonblocking problems and continue your task.\n"
+               "If this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\n"
+               "standing instructions. Release only when needed to deliver the verified fix.\n"
+               "Procedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md")
+    parser.add_argument("command", choices=("status", "notify", "hook"), nargs="?",
+                        help="status: fresh JSON (0 healthy, 1 low, 2 unknown); notify: rate-limited text; hook: JSON event adapter")
+    options = parser.parse_args()
+    if options.command is None:
+        parser.print_help()
+        return 0
+    if options.command == "hook":
+        return hook()
+    try:
+        if options.command == "status":
+            sample = sample_disk()
+            print(json.dumps(sample.as_dict()))
+            return int(sample.low)
+        message = notification()
+        if message:
+            print(message)
+    except (OSError, ValueError) as error:
+        print(f"agent-disk-pressure: cannot check or record pressure: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

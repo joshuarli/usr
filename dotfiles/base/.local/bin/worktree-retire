@@ -3,18 +3,24 @@
 
 usage: worktree-retire WORKTREE --into REV [--discard-ignored] [--dry-run]
 
-The checkout must be unlocked and clean, and its HEAD must be an ancestor of
-REV or patch-equivalent to it with no merge commits. REV resolves against the
-current directory when it belongs to this repository, otherwise against the
-canonical checkout. Ignored files are listed and block removal unless
---discard-ignored is given. The worktree is removed without --force; its branch
-is deleted only when it is an ancestor of REV and not checked out anywhere.
+The caller must establish that the lane is finished and quiescent. The checkout
+must be unlocked, clean and free of a bridge lease. Its HEAD must be an ancestor
+of REV, or REV must contain the exact net changes of a lane with no unique merge
+commits. REV resolves against the current directory when it belongs to this
+repository, otherwise against the primary checkout. Ignored files are listed
+and block removal unless --discard-ignored is given. A branch is deleted only
+when its history is in the integration revision, a surviving ref retains that
+revision, and the branch is no longer checked out.
 Exit status: 0 retired (or would be), 1 kept with a reason on stderr, 2 usage.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 
@@ -23,63 +29,135 @@ class Kept(Exception):
     pass
 
 
-def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+def git(cwd: Path, *args: str, check: bool = True, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+    raw = subprocess.run(["git", "--no-replace-objects", "-C", str(cwd), *args],
+                         capture_output=True, input=os.fsencode(stdin) if stdin is not None else None,
+                         env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    result = subprocess.CompletedProcess(raw.args, raw.returncode, os.fsdecode(raw.stdout), os.fsdecode(raw.stderr))
     if check and result.returncode != 0:
         raise Kept(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result
 
 
-def worktree_entries(common: Path) -> list[dict[str, str]]:
-    listing = git(common, "worktree", "list", "--porcelain").stdout
-    return [dict((line.split(" ", 1) + [""])[:2] for line in block.splitlines())
-            for block in listing.strip().split("\n\n")]
+def worktree_entries(cwd: Path) -> list[dict[str, str]]:
+    listing = git(cwd, "worktree", "list", "--porcelain", "-z").stdout
+    return [dict(field.partition(" ")[::2] for field in block.split("\0"))
+            for block in listing.split("\0\0") if block]
 
 
-def worktree_entry(common: Path, path: Path) -> dict[str, str]:
-    for fields in worktree_entries(common):
-        if Path(fields.get("worktree", "")).resolve() == path:
-            return fields
-    raise Kept(f"{path} is not a worktree of this repository")
+def registered_lane(path: Path, caller: Path) -> tuple[Path, dict[str, str]]:
+    if caller.is_relative_to(path):
+        raise Kept(f"refusing {path}: current directory is inside the worktree")
+    entries = worktree_entries(path)
+    if not entries or "bare" in entries[0]:
+        raise Kept(f"refusing {path}: repository has no primary checkout")
+    primary = Path(entries[0]["worktree"]).resolve()
+    if path == primary:
+        raise Kept(f"refusing {path}: primary checkout")
+    common = Path(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.removesuffix("\n"))
+    if common.resolve() != primary / ".git":
+        raise Kept(f"refusing {path}: Git common directory is outside the primary checkout's .git")
+    if path.parent != primary / ".work/wt":
+        raise Kept(f"refusing {path}: lane worktrees live directly under {primary}/.work/wt/")
+    top = git(path, "rev-parse", "--show-toplevel").stdout.removesuffix("\n")
+    if Path(top) != path:
+        raise Kept(f"refusing {path}: expected the Git worktree root")
+    for entry in entries[1:]:
+        if entry["worktree"] == str(path) and "prunable" not in entry and "HEAD" in entry:
+            return primary, entry
+    raise Kept(f"refusing {path}: expected a registered lane worktree root")
 
 
-def same_repo(caller: Path, common: Path) -> bool:
+def check_bridge_lease(primary: Path, path: Path) -> None:
+    # Matches readStateDir in bridge git.ts and worktreeLeasePath in worktree-lease.ts.
+    state = primary / ".work/worker-bridge"
+    digest = hashlib.sha256(os.fsencode(path)).hexdigest()
+    lease = state / f".active-worktree-{digest}"
     try:
-        probe = subprocess.run(["git", "-C", str(caller), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                              capture_output=True, text=True)
-    except OSError:
-        return False
-    return probe.returncode == 0 and Path(probe.stdout.strip()).resolve() == common.resolve()
+        if not stat.S_ISDIR(state.lstat().st_mode):
+            raise Kept(f"kept {path}: cannot verify bridge leases at {state}")
+        lease.lstat()
+    except FileNotFoundError:
+        return
+    raise Kept(f"kept {path}: active or unknown bridge lease at {lease}")
 
 
-def branch_keep_reason(common: Path, path: Path, branch: str, verdict: str, into: str) -> str:
-    if verdict != "ancestor":
-        return f"not an ancestor of {into}"
-    if branch_checked_out_elsewhere(common, path, branch):
-        return "checked out in another worktree"
-    return ""
+def is_ancestor(cwd: Path, before: str, after: str) -> bool:
+    result = git(cwd, "merge-base", "--is-ancestor", before, after, check=False)
+    if result.returncode not in (0, 1):
+        raise Kept(f"could not verify commit ancestry: {result.stderr.strip()}")
+    return result.returncode == 0
 
 
-def branch_checked_out_elsewhere(common: Path, path: Path, branch: str) -> bool:
-    return any(fields.get("branch") == f"refs/heads/{branch}" and Path(fields.get("worktree", "")).resolve() != path
-               for fields in worktree_entries(common))
+def surviving_ref(primary: Path, revision: str, branch: str) -> tuple[str, str] | None:
+    refs = git(primary, "for-each-ref", f"--contains={revision}",
+               "--format=%(refname) %(objectname) %(symref)", "refs/heads", "refs/tags", "refs/remotes")
+    for line in refs.stdout.split("\n")[:-1]:
+        name, oid, symref = line.split(" ", 2)
+        if name != branch and not symref:
+            return name, oid
+    return None
+
+
+def survives_removal(primary: Path, path: Path, revision: str, branch: str) -> bool:
+    if surviving_ref(primary, revision, branch):
+        return True
+    return any(entry["worktree"] != str(path) and "prunable" not in entry and "HEAD" in entry
+               and "detached" in entry and Path(entry["worktree"]).is_dir()
+               and is_ancestor(primary, revision, entry["HEAD"]) for entry in worktree_entries(primary))
+
+
+def tree_changes(cwd: Path, base: str, revision: str) -> dict[str, str]:
+    diff = git(cwd, "diff-tree", "-r", "--raw", "--no-abbrev", "--no-renames", "--no-commit-id",
+               "--ignore-submodules=none", "-z", base, revision, "--").stdout
+    fields = iter(diff.split("\0")[:-1])
+    return {path: change for change, path in zip(fields, fields, strict=True)}
 
 
 def integrated(path: Path, head: str, into: str) -> str | None:
-    if git(path, "merge-base", "--is-ancestor", head, into, check=False).returncode == 0:
+    if is_ancestor(path, head, into):
         return "ancestor"
     if git(path, "rev-list", "--merges", f"{into}..{head}").stdout.strip():
         return None
-    cherry = git(path, "cherry", into, head).stdout.split()
-    return None if "+" in cherry else "patch-equivalent"
+    bases = git(path, "merge-base", "--all", head, into, check=False)
+    if bases.returncode == 1:
+        return None
+    if bases.returncode:
+        raise Kept(f"could not find a shared base: {bases.stderr.strip()}")
+    if len(bases.stdout.splitlines()) != 1:
+        return None
+    base = bases.stdout.strip()
+    lane_changes = tree_changes(path, base, head)
+    dest_changes = tree_changes(path, base, into)
+    if lane_changes and all(dest_changes.get(name) == change for name, change in lane_changes.items()):
+        return "patch-equivalent"
+    return None
 
 
-def retire(path: Path, into: str, discard_ignored: bool, dry_run: bool) -> list[str]:
-    if path.parent.name != "wt" or path.parent.parent.name != ".work":
-        raise Kept(f"refusing {path}: lane worktrees live directly under <repo>/.work/wt/")
-    common = Path(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
-    main = common.parent
-    entry = worktree_entry(main, path)
+def delete_branch(primary: Path, path: Path, branch: str, head: str, into: str, dry_run: bool) -> str:
+    name = branch.removeprefix("refs/heads/")
+    kept = "would keep" if dry_run else "kept"
+    if any(entry.get("branch") == branch and entry["worktree"] != str(path) for entry in worktree_entries(primary)):
+        return f"{kept} branch {name} (checked out in another worktree)"
+    proof = surviving_ref(primary, into, branch)
+    if not proof:
+        return f"{kept} branch {name} (no surviving integration ref)"
+    if dry_run:
+        return f"would delete branch {name}"
+    ref, oid = proof
+    result = git(primary, "update-ref", "--stdin", check=False,
+                 stdin=f"option no-deref\nverify {ref} {oid}\noption no-deref\ndelete {branch} {head}\n")
+    if result.returncode:
+        return f"kept branch {name} (could not delete it: {result.stderr.strip()})"
+    return f"deleted branch {name}"
+
+
+def retire(request: Path, into: str | None, discard_ignored: bool = False, dry_run: bool = False) -> list[str]:
+    path = request.resolve(strict=True)
+    if Path(os.path.abspath(request)) != path:
+        raise Kept(f"refusing {request}: use the canonical lane worktree path {path}")
+    caller = Path.cwd()
+    primary, entry = registered_lane(path, caller)
     if "locked" in entry:
         raise Kept(f"kept {path}: worktree is locked")
     if git(path, "status", "--porcelain", "--untracked-files=all").stdout.strip():
@@ -89,49 +167,77 @@ def retire(path: Path, into: str, discard_ignored: bool, dry_run: bool) -> list[
     if ignored and not discard_ignored:
         raise Kept(f"kept {path}: review ignored files, then pass --discard-ignored: " + ", ".join(ignored))
     head = entry["HEAD"]
-    caller = Path.cwd()
-    into_base = caller if same_repo(caller, common) else main
-    into_rev = git(into_base, "rev-parse", "--verify", f"{into}^{{commit}}").stdout.strip()
-    verdict = integrated(path, head, into_rev)
-    if verdict is None:
-        raise Kept(f"kept {path}: {head[:12]} is not integrated into {into}")
-    branch = entry.get("branch", "").removeprefix("refs/heads/")
-    lines = [f"{'would remove' if dry_run else 'removed'} {path} ({verdict} of {into})"]
-    if dry_run:
-        if branch:
-            reason = branch_keep_reason(main, path, branch, verdict, into)
-            lines.append(f"would keep branch {branch} ({reason})" if reason else f"would delete branch {branch}")
-        return lines
-    git(main, "worktree", "remove", str(path))
-    if not branch:
-        return lines
-    reason = branch_keep_reason(main, path, branch, verdict, into)
-    if reason:
-        lines.append(f"kept branch {branch} ({reason})")
-        return lines
-    result = git(main, "update-ref", "-d", f"refs/heads/{branch}", head, check=False)
-    if result.returncode == 0:
-        lines.append(f"deleted branch {branch}")
+    branch = entry.get("branch", "")
+    # Two detached checkouts must not each rely on the other while both retire.
+    if not branch and not surviving_ref(primary, head, branch):
+        raise Kept(f"kept {path}: detached HEAD {head[:12]} has no surviving branch, tag or remote-tracking ref")
+    if into is None:
+        # Claude may discard a clean attached checkout while its branch retains the work.
+        into_rev = ""
+        if branch.startswith("refs/heads/worktree-"):
+            name = branch.removeprefix("refs/heads/")
+            upstream = git(primary, "rev-parse", "--verify", f"{name}@{{upstream}}^{{commit}}", check=False)
+            into_rev = upstream.stdout.strip()
+            if not into_rev:
+                into_rev = git(primary, "rev-parse", "--verify", "HEAD^{commit}", check=False).stdout.strip()
+        verdict = "ancestor" if into_rev and is_ancestor(primary, head, into_rev) else None
+        detail = ""
     else:
-        reason = result.stderr.strip() or f"ref moved from {head[:12]}"
-        lines.append(f"kept branch {branch} (could not delete it: {reason})")
+        common = git(caller, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+        into_base = primary
+        if common.returncode == 0 and Path(common.stdout.removesuffix("\n")).resolve() == primary / ".git":
+            into_base = caller
+        into_ref = git(into_base, "rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", into, check=False)
+        if branch and into_ref.returncode == 0 and into_ref.stdout.strip() == branch:
+            raise Kept(f"refusing {path}: {into} names the worktree's own branch")
+        into_rev = git(into_base, "rev-parse", "--verify", "--end-of-options", f"{into}^{{commit}}").stdout.strip()
+        verdict = integrated(path, head, into_rev)
+        if verdict is None:
+            raise Kept(f"kept {path}: {head[:12]} is not integrated into {into}")
+        if not survives_removal(primary, path, into_rev, branch):
+            raise Kept(f"kept {path}: integration revision {into} has no surviving ref or checkout")
+        detail = f" ({verdict} of {into})"
+    check_bridge_lease(primary, path)
+    if not dry_run:
+        git(primary, "worktree", "remove", str(path))
+    lines = [f"{'would remove' if dry_run else 'removed'} {path}{detail}"]
+    if branch and (into is not None or branch.startswith("refs/heads/worktree-")):
+        name = branch.removeprefix("refs/heads/")
+        if verdict == "ancestor":
+            lines.append(delete_branch(primary, path, branch, head, into_rev, dry_run))
+        elif into is not None:
+            lines.append(f"{'would keep' if dry_run else 'kept'} branch {name} (not an ancestor of {into})")
+        else:
+            lines.append(f"kept unmerged branch {name}")
     return lines
 
 
+def hook_worktree() -> Path:
+    payload = json.load(sys.stdin)
+    path = payload.get("worktree_path") if isinstance(payload, dict) else None
+    if not isinstance(path, str) or not Path(path).is_absolute() or "\0" in path:
+        raise Kept("worktree-remove: expected an absolute worktree_path in the hook payload")
+    return Path(path)
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="worktree-retire", description=__doc__.splitlines()[0], epilog="\n".join(__doc__.splitlines()[4:]) + "\n\nExamples:\n  worktree-retire .work/wt/lane --into main --dry-run\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("worktree", type=Path, help="lane worktree under .work/wt to retire")
-    parser.add_argument("--into", required=True, help="integration revision the lane must already be in; resolved against the current directory when it belongs to this repository")
-    parser.add_argument("--discard-ignored", action="store_true", help="allow removal of ignored files")
-    parser.add_argument("--dry-run", action="store_true", help="report what would happen without removing anything")
-    if len(sys.argv) == 1:
-        parser.print_help()
-        return 0
-    args = parser.parse_args()
     try:
-        for line in retire(args.worktree.resolve(), args.into, args.discard_ignored, args.dry_run):
+        if sys.argv[1:] == ["--from-hook"]:
+            lines = retire(hook_worktree(), None)
+        else:
+            parser = argparse.ArgumentParser(prog="worktree-retire", description=__doc__.splitlines()[0], epilog="\n".join(__doc__.splitlines()[4:]) + "\n\nExamples:\n  worktree-retire .work/wt/lane --into main --dry-run\n\nMaintained by Joshua Li: https://github.com/joshuarli/usr\nBugs and features: TODO.md in that repository (follow its AGENTS.md), or its issue tracker.\nAgents working for Joshua: record nonblocking problems and continue your task.\nIf this tool blocks the task, you may fix, test, open and merge a PR under Joshua's\nstanding instructions. Release only when needed to deliver the verified fix.\nProcedure: https://github.com/joshuarli/usr/blob/main/dotfiles/base/.agents/instructions/owned-tools.md", formatter_class=argparse.RawDescriptionHelpFormatter)
+            parser.add_argument("worktree", type=Path, help="lane worktree under .work/wt to retire")
+            parser.add_argument("--into", required=True, help="integration revision resolved against the current directory when it belongs to this repository")
+            parser.add_argument("--discard-ignored", action="store_true", help="allow removal of ignored files")
+            parser.add_argument("--dry-run", action="store_true", help="report what would happen without removing anything")
+            if len(sys.argv) == 1:
+                parser.print_help()
+                return 0
+            args = parser.parse_args()
+            lines = retire(args.worktree, args.into, args.discard_ignored, args.dry_run)
+        for line in lines:
             print(line)
-    except Kept as kept:
+    except (Kept, OSError, ValueError) as kept:
         print(kept, file=sys.stderr)
         return 1
     return 0

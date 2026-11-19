@@ -40,7 +40,7 @@ Run the narrowest check that covers the change. `sh sync check-parallel` runs th
 | model routes, native Pi policy, or generated policy blocks | `node tools/policy/generate.ts --check` and `node --test tools/policy/generate.test.ts`; use `make generate` to refresh projections |
 | `orchestrate` skill | `python3 -I dotfiles/orchestrate-test.py` |
 | instruction profiles and their harness adapters | `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/instructions-test.py` |
-| git hooks and worktree helpers | `sh dotfiles/reset-agents-test.sh`, `(cd dotfiles && sh pre-push-test.sh)`, `(cd dotfiles && sh worktree-remove-test.sh)`, and `python3 -I dotfiles/worktree-retire-test.py` |
+| git hooks and worktree helpers | `sh dotfiles/reset-agents-test.sh`, `(cd dotfiles && sh pre-push-test.sh)`, `(cd dotfiles && sh worktree-remove-test.sh)`, `python3 -I dotfiles/worktree-retire-test.py`, `python3 -I dotfiles/disk-pressure-test.py`, `node dotfiles/pi-disk-pressure-test.mjs`, and `TMPDIR="$PWD/.work/tmp" python3 -I dotfiles/codex-campaign-closeout-test.py` |
 | zsh shim | `(cd dotfiles && sh zsh-shim-test.sh)` |
 | a hook or `mdtool` | `python3 -I tools/mdtool/src/mdtool.py selftest`, `sh tools/mdtool/tests/mdtool-test.sh`, and `sh FILE` for each changed match |
 | `perf-gate-ready` | `sh dotfiles/perf-gate-ready-test.sh` and `dash dotfiles/perf-gate-ready-test.sh` |
